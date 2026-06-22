@@ -98,9 +98,10 @@ const Row = ({
           aria-label={`comment on line ${row.newNo}`}
           title="comment on this line"
           onClick={() => onCommentLine(row.newNo as number)}
-          className="mr-2 flex w-4 shrink-0 items-center justify-center self-stretch text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/row:opacity-100"
+          className="mr-2 flex shrink-0 items-center gap-1 self-center rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-all hover:border-primary hover:text-foreground group-hover/row:opacity-100"
         >
-          <MessageSquarePlus className="size-3" />
+          <MessageSquarePlus className="size-3.5" />
+          comment
         </button>
       )}
     </div>
@@ -202,19 +203,19 @@ const FileSection = ({
                     onSelectLine={onSelectLine}
                     onCommentLine={onCommentLine}
                   />
-                  {/* single-line composer, directly under the targeted row */}
+                  {/* single-line composer, full width directly under the row,
+                      opened immediately by the line's comment button */}
                   {lineComposer !== null && row.newNo === lineComposer && (
-                    <div className="flex bg-muted/20 py-1 pl-4 pr-2">
-                      <span className="mr-2 shrink-0 self-center text-[11px] text-muted-foreground">
-                        line {lineComposer}
-                      </span>
-                      <span className="flex-1">
-                        <NoteComposer
-                          onSave={(note) =>
-                            onComment({ kind: "file_line", value: `${file}:${lineComposer}` }, note)
-                          }
-                        />
-                      </span>
+                    <div className="bg-muted/20 px-3 py-1.5">
+                      <p className="mb-1 text-[11px] text-muted-foreground">line {lineComposer}</p>
+                      <NoteComposer
+                        defaultOpen
+                        onCancel={() => setLineComposer(null)}
+                        onSave={(note) => {
+                          onComment({ kind: "file_line", value: `${file}:${lineComposer}` }, note);
+                          setLineComposer(null);
+                        }}
+                      />
                     </div>
                   )}
                 </div>

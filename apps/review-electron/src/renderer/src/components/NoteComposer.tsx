@@ -6,6 +6,12 @@ type Props = {
   onSave: (note: string) => void;
   /** The collapsed trigger text (e.g. "note for the agent", "comment on this hunk"). */
   label?: string;
+  /** Start expanded (for surfaces opened by an explicit action, e.g. a line's
+   * comment button), so the reviewer types straight away with no second click. */
+  defaultOpen?: boolean;
+  /** Called when the composer is cancelled, so a caller that conjured it on demand
+   * (a per-line composer) can remove it rather than collapse to a trigger. */
+  onCancel?: () => void;
 };
 
 /**
@@ -20,8 +26,13 @@ type Props = {
  * collapses. Empty/whitespace never sends. The caller owns the
  * {@link import("../../../model/agent").FeedTarget}; this only collects the text.
  */
-export const NoteComposer = ({ onSave, label = "note for the agent" }: Props) => {
-  const [adding, setAdding] = useState(false);
+export const NoteComposer = ({
+  onSave,
+  label = "note for the agent",
+  defaultOpen = false,
+  onCancel,
+}: Props) => {
+  const [adding, setAdding] = useState(defaultOpen);
   const [note, setNote] = useState("");
 
   const send = (): void => {
@@ -34,6 +45,7 @@ export const NoteComposer = ({ onSave, label = "note for the agent" }: Props) =>
   const cancel = (): void => {
     setNote("");
     setAdding(false);
+    onCancel?.();
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
