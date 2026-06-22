@@ -94,6 +94,9 @@ export const LiveApp = () => {
           value={url}
           data-testid="live-url"
           onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") go();
+          }}
           className="h-7 font-mono text-xs"
         />
         <Button

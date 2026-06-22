@@ -364,3 +364,7 @@ layout; current build is the centered state with the clean message.)
   Collapsed set is persisted to localStorage (fre:collapsed-stages), keyed by
   module dir, so it survives reloads. Added stage-toggle testid + a 15-collapsed
   QA capture. vitest 52, format/lint/tsc/build/e2e (6) green.
+- Round 27 (URL bars submit on Enter): the live and screenshot URL inputs only
+  acted on a button click; typing a URL and pressing Enter did nothing, which a URL
+  bar should never do. Added onKeyDown Enter -> go() (live) / capture() (screenshot).
+  vitest 52, format/lint/tsc/build/e2e (6) green.

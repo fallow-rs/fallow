@@ -38,6 +38,9 @@ export const AnnotateCanvas = () => {
           value={url}
           data-testid="shot-url"
           onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void capture();
+          }}
           className="h-7 font-mono text-xs"
         />
         <Button
