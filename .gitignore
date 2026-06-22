@@ -106,3 +106,7 @@ plans/
 
 decisions
 decisions/
+
+# Runtime scratch the review app writes (human notes feed, captured framing).
+# App-subtree .gitignore already ignores it; this keeps a root `git add -A` safe.
+.fallow-review/
