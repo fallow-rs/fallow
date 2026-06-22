@@ -40,6 +40,13 @@ const Code = ({ text }: { text: string }) => (
   </code>
 );
 
+/** Stable per-row key for the single-line composer: the new-side line when the
+ * row exists in the new file, else the old-side line (a deleted line). New and
+ * old line numbers are each unique within a file, and the `n`/`o` prefix keeps
+ * the two namespaces from colliding. `null` only for an unanchorable row. */
+const rowCommentKey = (row: DiffRow): string | null =>
+  row.newNo !== null ? `n${row.newNo}` : row.oldNo !== null ? `o${row.oldNo}` : null;
+
 const Row = ({
   row,
   showOld,
@@ -53,12 +60,13 @@ const Row = ({
   selected: boolean;
   /** Click/shift-click the new-line gutter to set or extend the range anchor. */
   onSelectLine: (newNo: number, shift: boolean) => void;
-  /** Open a single-line composer under this row (only for rows with a newNo). */
-  onCommentLine: (newNo: number) => void;
+  /** Open a single-line composer under this row, keyed by `rowCommentKey`. */
+  onCommentLine: (key: string) => void;
 }) => {
-  // Only context/added lines carry a new-file line number: those are the rows a
-  // reviewer can comment on or range-select. Deleted-only rows have no newNo.
-  const commentable = row.newNo !== null;
+  // Any line with a new OR old number is commentable: added/context anchor to the
+  // new-file line, a deleted line anchors to its old-file line.
+  const commentKey = rowCommentKey(row);
+  const commentable = commentKey !== null;
   return (
     <div
       className={cn(
@@ -95,9 +103,11 @@ const Row = ({
       {commentable && (
         <button
           type="button"
-          aria-label={`comment on line ${row.newNo}`}
+          aria-label={`comment on line ${row.newNo ?? row.oldNo}`}
           title="comment on this line"
-          onClick={() => onCommentLine(row.newNo as number)}
+          onClick={() => {
+            if (commentKey) onCommentLine(commentKey);
+          }}
           className="mr-2 flex shrink-0 cursor-pointer items-center gap-1 self-center rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-all hover:border-primary hover:text-foreground group-hover/row:opacity-100"
         >
           <MessageSquarePlus className="size-3.5" />
@@ -139,7 +149,7 @@ const FileSection = ({
   // The single new-file line whose inline composer is open (null = none). Distinct
   // from `range`: the per-line "+" opens a composer directly; the range selection
   // opens a separate "comment on lines X-Y" composer.
-  const [lineComposer, setLineComposer] = useState<number | null>(null);
+  const [lineComposer, setLineComposer] = useState<string | null>(null);
 
   const file = section.file;
 
@@ -154,9 +164,9 @@ const FileSection = ({
     );
   };
 
-  const onCommentLine = (newNo: number): void => {
+  const onCommentLine = (key: string): void => {
     setRange(null);
-    setLineComposer(newNo);
+    setLineComposer(key);
   };
 
   const clearRange = (): void => setRange(null);
@@ -204,15 +214,22 @@ const FileSection = ({
                     onCommentLine={onCommentLine}
                   />
                   {/* single-line composer, full width directly under the row,
-                      opened immediately by the line's comment button */}
-                  {lineComposer !== null && row.newNo === lineComposer && (
+                      opened immediately by the line's comment button. Works on a
+                      deleted line too: it anchors to the old-file line. */}
+                  {lineComposer !== null && rowCommentKey(row) === lineComposer && (
                     <div className="bg-muted/20 px-3 py-1.5">
-                      <p className="mb-1 text-[11px] text-muted-foreground">line {lineComposer}</p>
+                      <p className="mb-1 text-[11px] text-muted-foreground">
+                        line {row.newNo ?? row.oldNo}
+                        {row.newNo === null ? " (deleted)" : ""}
+                      </p>
                       <NoteComposer
                         defaultOpen
                         onCancel={() => setLineComposer(null)}
                         onSave={(note) => {
-                          onComment({ kind: "file_line", value: `${file}:${lineComposer}` }, note);
+                          onComment(
+                            { kind: "file_line", value: `${file}:${row.newNo ?? row.oldNo}` },
+                            note,
+                          );
                           setLineComposer(null);
                         }}
                       />
