@@ -192,19 +192,6 @@ const FileSection = ({
                 {hunk.header && (
                   <span className="truncate text-muted-foreground/80">{hunk.header}</span>
                 )}
-                {span && (
-                  <span className="ml-auto shrink-0">
-                    <NoteComposer
-                      label="comment on this hunk"
-                      onSave={(note) =>
-                        onComment(
-                          { kind: "file_line", value: `${file}:${span.start}-${span.end}` },
-                          note,
-                        )
-                      }
-                    />
-                  </span>
-                )}
               </div>
               {hunk.rows.map((row, j) => (
                 <div key={j}>
@@ -232,6 +219,20 @@ const FileSection = ({
                   )}
                 </div>
               ))}
+              {/* hunk composer: full width, below the hunk's rows */}
+              {span && (
+                <div className="border-t border-border/40 bg-muted/10 px-3 py-1.5">
+                  <NoteComposer
+                    label="comment on this hunk"
+                    onSave={(note) =>
+                      onComment(
+                        { kind: "file_line", value: `${file}:${span.start}-${span.end}` },
+                        note,
+                      )
+                    }
+                  />
+                </div>
+              )}
             </div>
           );
         })

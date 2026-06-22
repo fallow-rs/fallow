@@ -71,7 +71,7 @@ export const NoteComposer = ({ onSave, label = "note for the agent" }: Props) =>
         className="w-full resize-y rounded-md border border-input bg-background px-2 py-1.5 text-xs leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
       />
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-muted-foreground/70">⌘↵ send · esc cancel</span>
+        <span className="text-[10px] text-muted-foreground/70">⌘↵ to send</span>
         <div className="flex items-center gap-2">
           <button
             type="button"
