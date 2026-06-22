@@ -337,3 +337,9 @@ layout; current build is the centered state with the clean message.)
   nothing; pulled the metrics inside the file-open button so filename + metrics are
   one wide target. Kept a real focusable button (no role=button-on-div a11y
   smell). vitest 52, format/lint/tsc/build/e2e (6) green.
+- Round 23 (active-indicator redo, user-reported tell): the round-22 active row
+  used bg-accent + an inset 2px primary left bar on a rounded-md row, which reads
+  as a template/AI tell (a straight bar fighting the rounded corner). Dropped the
+  bar entirely; the selected row is now just a clean filled rounded fill (bg-accent,
+  the shadcn Command/Select convention) plus a subtly brightened file icon. No
+  layout shift, no gimmick. format/lint/tsc/build/e2e (6) green.

@@ -57,8 +57,8 @@ export const FileRow = ({
   return (
     <li
       className={cn(
-        "group rounded-md px-2 py-1",
-        active ? "bg-accent shadow-[inset_2px_0_0_0_var(--primary)]" : "hover:bg-accent/40",
+        "group rounded-md px-2 py-1 transition-colors",
+        active ? "bg-accent" : "hover:bg-accent/40",
         !active && signal.deprioritized && "opacity-55",
         !active && viewed && "opacity-40",
       )}
@@ -77,7 +77,12 @@ export const FileRow = ({
           onClick={() => onOpenDiff(file.path)}
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
-          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+          <FileText
+            className={cn(
+              "size-3.5 shrink-0",
+              active ? "text-foreground" : "text-muted-foreground",
+            )}
+          />
           <span className="flex min-w-0 flex-1 items-baseline font-mono text-xs">
             {dir && <span className="truncate text-muted-foreground">{dir}</span>}
             <span className="shrink-0 text-foreground">{base}</span>
