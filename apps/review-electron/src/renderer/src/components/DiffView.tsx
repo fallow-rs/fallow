@@ -91,9 +91,11 @@ export const DiffView = ({ file, base }: Props) => {
       )}
       {hunks?.map((hunk, i) => (
         <div key={i}>
-          <div className="flex items-center gap-2 bg-muted/40 px-3 py-1 text-[11px] text-muted-foreground">
-            <span className="text-fallow-blue/80">@@</span>
-            {hunk.header && <span className="truncate">{hunk.header}</span>}
+          <div className="flex items-center gap-2 bg-muted/40 px-3 py-1 font-mono text-[11px] text-muted-foreground">
+            <span className="shrink-0 text-fallow-blue/70 tabular-nums">@@ {hunk.range} @@</span>
+            {hunk.header && (
+              <span className="truncate text-muted-foreground/80">{hunk.header}</span>
+            )}
           </div>
           {hunk.rows.map((row, j) => (
             <div

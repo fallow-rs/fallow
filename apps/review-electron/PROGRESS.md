@@ -352,3 +352,9 @@ layout; current build is the centered state with the clean message.)
   Whole row (incl. padding) now opens + shows the hand; the "opens a file diff" e2e
   still passes (Playwright hits the button through the transparent overlay).
   vitest 52, format/lint/tsc/build/e2e (6) green.
+- Round 25 (diff hunk header): the hunk header rendered a bare lone "@@" (the
+  range was parsed away and this all-additions file has no function context), which
+  read as unfinished. Capture the "-a,b +c,d" range in the parser (new DiffHunk
+  .range) and render a real "@@ -0,0 +1,76 @@" header (blue markers, tabular-nums)
+  + the context when present. New diff test asserts the range. vitest 52,
+  format/lint/tsc/build/e2e (6) green.

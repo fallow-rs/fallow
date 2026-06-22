@@ -17,6 +17,7 @@ describe("parseUnifiedDiff", () => {
     const hunks = parseUnifiedDiff(patch);
     expect(hunks).toHaveLength(1);
     expect(hunks[0]?.header).toBe("fn header");
+    expect(hunks[0]?.range).toBe("-1,3 +1,4");
     const rows = hunks[0]?.rows ?? [];
     expect(rows[0]).toEqual({ kind: "context", oldNo: 1, newNo: 1, text: "const a = 1;" });
     expect(rows[1]).toEqual({ kind: "del", oldNo: 2, newNo: null, text: "const b = 2;" });

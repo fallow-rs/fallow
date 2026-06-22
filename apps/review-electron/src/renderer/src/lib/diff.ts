@@ -6,7 +6,7 @@ export type DiffRow = {
   newNo: number | null;
   text: string;
 };
-export type DiffHunk = { header: string; rows: DiffRow[] };
+export type DiffHunk = { header: string; range: string; rows: DiffRow[] };
 
 const HUNK_RE = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/;
 
@@ -21,7 +21,10 @@ export const parseUnifiedDiff = (patch: string): DiffHunk[] => {
     if (m) {
       oldNo = Number(m[1]);
       newNo = Number(m[2]);
-      current = { header: (m[3] ?? "").trim(), rows: [] };
+      // The "-a,b +c,d" portion between the @@ markers (for a real hunk header).
+      const rangeEnd = line.indexOf(" @@", 3);
+      const range = rangeEnd > 0 ? line.slice(3, rangeEnd) : "";
+      current = { header: (m[3] ?? "").trim(), range, rows: [] };
       hunks.push(current);
       continue;
     }
