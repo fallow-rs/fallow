@@ -15,12 +15,14 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import type { WalkthroughDocument } from "../../model/walkthrough";
+import type { TradeOffEnvelope } from "../../model/tradeoff";
 import type { InlineFraming, ValidationEnvelope } from "../../model/agent";
 import type { InspectorCard as InspectorCardData } from "../../main/inspect";
 import { acceptedReconstructedFraming, groupBySignalId } from "./lib/agentFraming";
 import { ReviewFocus } from "./components/ReviewFocus";
 import { ClearedPanel } from "./components/ClearedPanel";
 import { DecisionList } from "./components/DecisionList";
+import { TradeOffList } from "./components/TradeOffList";
 import { StageList } from "./components/StageList";
 import { InspectorCard } from "./components/InspectorCard";
 import { AgentPanel } from "./components/AgentPanel";
@@ -51,6 +53,32 @@ const readSidebarWidth = (): number => {
   return stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : SIDEBAR_DEFAULT;
 };
 
+/**
+ * Right-pane state for when no review has loaded yet. Deliberately NOT the
+ * DiffView "no changes to review" success-empty-state: showing that next to a
+ * failed/idle left column reads as a contradiction (review failed, yet "no
+ * changes"). Stays muted and neutral; the left column owns the red error + retry.
+ */
+const DiffPlaceholder = ({ loading, error }: { loading: boolean; error: string | null }) => {
+  if (loading) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+        <Loader2 className="size-6 animate-spin opacity-70" />
+        <p className="text-sm">preparing the diff…</p>
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+      <FileDiff className="size-6 opacity-40" />
+      <p className="text-sm">{error ? "no diff to show" : "load a review to see the diff"}</p>
+      <p className="text-[11px] opacity-80">
+        {error ? "the review didn't load" : "every changed file's diff shows here"}
+      </p>
+    </div>
+  );
+};
+
 export const App = () => {
   const [doc, setDoc] = useState<WalkthroughDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +97,11 @@ export const App = () => {
   // validated in the main process. Empty when no captured source exists; we never
   // fabricate it, so the UI then shows only reconstructed (or nothing).
   const [capturedFraming, setCapturedFraming] = useState<InlineFraming[]>([]);
+  // Model-inferred trade-offs, fed from their OWN channel (NOT the AgentPanel
+  // result): the non-deterministic companion to `doc.decisions`. null = the
+  // elicitation was not run (the persisted file is absent); an envelope with
+  // `abstained: true` is the distinct "looked, found nothing" state.
+  const [tradeoffs, setTradeoffs] = useState<TradeOffEnvelope | null>(null);
 
   useEffect(() => {
     window.fallow.onInspectSelection(setCard);
@@ -80,6 +113,15 @@ export const App = () => {
       .getCapturedFraming()
       .then(setCapturedFraming)
       .catch(() => setCapturedFraming([]));
+  }, []);
+
+  // Fetch model-inferred trade-offs once on load from their OWN channel; null
+  // stays null (the "not run" state) when the persisted file is absent or errors.
+  useEffect(() => {
+    void window.fallow
+      .getTradeoffs()
+      .then(setTradeoffs)
+      .catch(() => setTradeoffs(null));
   }, []);
 
   // Group ALL inline framing by signal_id for per-decision rendering: captured
@@ -178,7 +220,7 @@ export const App = () => {
         <div className="min-h-0 flex-1 space-y-5 overflow-auto p-4">
           {card && <InspectorCard card={card} />}
           {doc && <ReviewFocus focus={doc.focus} noteCount={noteCount} />}
-          <AgentPanel onResult={setAgentValidation} />
+          {doc && <AgentPanel onResult={setAgentValidation} />}
           {doc ? (
             <>
               <ClearedPanel cleared={doc.cleared} />
@@ -187,6 +229,7 @@ export const App = () => {
                 onOpenDiff={onOpenDiff}
                 framingBySignal={framingBySignal}
               />
+              <TradeOffList tradeoffs={tradeoffs} onOpenDiff={onOpenDiff} />
               <StageList
                 stages={doc.stages}
                 isViewed={isViewed}
@@ -257,7 +300,11 @@ export const App = () => {
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
           {rightMode === "diff" ? (
-            <DiffView file={diffFile} base={doc?.focus.baseRef ?? ""} />
+            doc ? (
+              <DiffView file={diffFile} base={doc.focus.baseRef} />
+            ) : (
+              <DiffPlaceholder loading={loading} error={error} />
+            )
           ) : rightMode === "live" ? (
             <LiveApp />
           ) : (

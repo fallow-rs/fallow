@@ -1,12 +1,25 @@
 import { spawn } from "node:child_process";
 import { runGuide, validateWalkthrough } from "./review";
-import { buildAgentPrompt, extractAgentJson, resolveBackend } from "./backends";
+import {
+  buildAgentPrompt,
+  buildTradeOffPrompt,
+  extractAgentJson,
+  extractTradeOffJson,
+  resolveBackend,
+} from "./backends";
 import { describeExecError } from "./errors";
 import { readFeedItems } from "./feed";
+import { writePersistedTradeoffs } from "./tradeoffs";
+import { toTradeOffEnvelope } from "../model/adapter";
 import type { FeedItem } from "../model/agent";
+import type { TradeOffEnvelope } from "../model/tradeoff";
 
 export type AgentRunResult =
   | { ok: true; validation: unknown; notesIncluded: number }
+  | { ok: false; error: string };
+
+export type TradeOffRunResult =
+  | { ok: true; tradeoffs: TradeOffEnvelope }
   | { ok: false; error: string };
 
 /**
@@ -61,6 +74,34 @@ export const runAgentReview = async (root: string, backendId: string): Promise<A
       validation: await validateWalkthrough(judgment, root),
       notesIncluded: notes.length,
     };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+};
+
+/**
+ * The trade-off elicitation run: same spawn pattern as {@link runAgentReview}, but
+ * with NO post-validation step. fallow cannot validate these broader anchors the
+ * way it validates a structural `signal_id`, so the discipline is the prompt's
+ * (anchor-to-diff, fence everything `deterministic:false`), not graph-grade. The
+ * adapter still drops anchorless items and pins `deterministic:false` defensively.
+ * On success the raw envelope is persisted so the renderer can read it at
+ * cold-start via `getTradeoffs()`.
+ */
+export const runTradeoffElicitation = async (
+  root: string,
+  backendId: string,
+): Promise<TradeOffRunResult> => {
+  const backend = resolveBackend(backendId);
+  if (!backend) return { ok: false, error: `unknown backend: ${backendId}` };
+  try {
+    const guide = await runGuide(root);
+    const prompt = buildTradeOffPrompt(guide.digest, guide.graphSnapshotHash);
+    const stdout = await spawnAgent(backend.command, backend.args, prompt, root);
+    const raw = extractTradeOffJson(stdout);
+    if (!raw) return { ok: false, error: "agent did not return a valid trade-off envelope" };
+    await writePersistedTradeoffs(root, raw);
+    return { ok: true, tradeoffs: toTradeOffEnvelope(raw) };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

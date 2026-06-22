@@ -1,0 +1,136 @@
+import { ChevronDown, ChevronRight, Scale } from "lucide-react";
+import { useState } from "react";
+import type { Severity, TradeOff, TradeOffEnvelope } from "../../../model/tradeoff";
+
+/** Tone for a severity badge: only `high` gets the amber accent; the rest stay muted. */
+const severityTone = (s: Severity): string =>
+  s === "high" ? "text-fallow-amber" : "text-muted-foreground";
+
+const ANCHOR_CROSS_CUTTING = "cross-cutting";
+
+/**
+ * The MODEL-INFERRED trade-off surface, rendered ALONGSIDE (and visually distinct
+ * from) the deterministic decision surface. The whole list is fenced as
+ * non-graph-fact (border + muted ground + a distinct `Scale` glyph) so the two
+ * surfaces are never confused: decisions are proved from the graph, trade-offs are
+ * a model reading the diff. Every item is `deterministic: false` by construction.
+ *
+ * Three reachable states, never a silent null on a real run:
+ *   - `tradeoffs === null`  -> the elicitation was NOT run (neutral "not run").
+ *   - `abstained === true`  -> it ran and found nothing consequential (quiet state).
+ *   - otherwise             -> the capped, anchor-sorted list.
+ */
+export const TradeOffList = ({
+  tradeoffs,
+  onOpenDiff,
+}: {
+  tradeoffs: TradeOffEnvelope | null;
+  onOpenDiff: (path: string) => void;
+}) => {
+  // Not run: neutral, no list, no abstain language (it never looked).
+  if (tradeoffs === null) {
+    return (
+      <section className="space-y-2">
+        <Header />
+        <p className="rounded-md border border-dashed border-border bg-muted/10 p-2 text-xs text-muted-foreground">
+          trade-off elicitation not run
+        </p>
+      </section>
+    );
+  }
+  // Abstained: it ran and honestly found nothing rising to a real decision.
+  if (tradeoffs.abstained || tradeoffs.tradeoffs.length === 0) {
+    return (
+      <section className="space-y-2">
+        <Header />
+        <p className="rounded-md border border-dashed border-border bg-muted/10 p-2 text-xs text-muted-foreground">
+          looked, found nothing consequential
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section className="space-y-2">
+      <Header count={tradeoffs.tradeoffs.length} />
+      {/* Fence the WHOLE list as model-inferred (border + muted ground), the same
+          treatment FramingBlock uses, so a trade-off is never read as a graph fact. */}
+      <ul className="space-y-1.5 rounded-md border border-border/60 bg-muted/10 p-1.5">
+        {tradeoffs.tradeoffs.map((t) => (
+          <TradeOffRow key={t.id} tradeoff={t} onOpenDiff={onOpenDiff} />
+        ))}
+      </ul>
+    </section>
+  );
+};
+
+/** Section header. The `Scale` glyph differentiates this surface from decisions. */
+const Header = ({ count }: { count?: number }) => (
+  <h3 className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+    <Scale className="size-3" />
+    trade-offs{count === undefined ? "" : ` (${count})`}
+  </h3>
+);
+
+/** A small consequence/confidence badge; never an authority signal, just a band. */
+const Badge = ({ label, value }: { label: string; value: Severity }) => (
+  <span className={`text-[11px] ${severityTone(value)}`}>
+    {label} {value}
+  </span>
+);
+
+const TradeOffRow = ({
+  tradeoff: t,
+  onOpenDiff,
+}: {
+  tradeoff: TradeOff;
+  onOpenDiff: (path: string) => void;
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  // The cross-cutting slot has no single changed line to deep-link to.
+  const linkable = t.anchor !== ANCHOR_CROSS_CUTTING && t.anchor.length > 0;
+  const [anchorFile, anchorLine] = t.anchor.split(":");
+  return (
+    <li className="rounded-md border border-border bg-muted/20 p-2 text-xs">
+      <div className="flex gap-2">
+        <Scale className="size-3.5 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1 space-y-1">
+          {/* (1) observed , a neutral fact read from the diff */}
+          {t.observed && <p className="text-muted-foreground">{t.observed}</p>}
+          {/* (2) trade-off , the model's inference (gain and cost) */}
+          {t.tradeoff && <p className="text-muted-foreground">{t.tradeoff}</p>}
+          {/* (3) question LAST , the open call the human owns (inverse of DecisionRow) */}
+          <p className="text-foreground">{t.question || t.id}</p>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+            <Badge label="consequence" value={t.consequence} />
+            <Badge label="confidence" value={t.confidence} />
+          </div>
+          {expanded && (
+            <div className="space-y-1 border-t border-border/60 pt-1 text-[11px] text-muted-foreground">
+              {t.lens && <p>lens: {t.lens}</p>}
+              {linkable ? (
+                <button
+                  type="button"
+                  className="text-left text-fallow-amber hover:underline"
+                  onClick={() => onOpenDiff(anchorFile ?? t.anchor)}
+                >
+                  {anchorFile}
+                  {anchorLine ? `:${anchorLine}` : ""}
+                </button>
+              ) : (
+                <p>{t.anchor}</p>
+              )}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          aria-label={expanded ? "collapse trade-off detail" : "expand trade-off detail"}
+          className="shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={() => setExpanded((e) => !e)}
+        >
+          {expanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+        </button>
+      </div>
+    </li>
+  );
+};

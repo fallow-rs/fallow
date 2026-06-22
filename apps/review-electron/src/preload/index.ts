@@ -6,7 +6,8 @@ import type { SaveAnnotation } from "../main/shots";
 import type { InspectorCard } from "../main/inspect";
 import type { FileDiff } from "../main/diff";
 import type { AgentBackend } from "../main/backends";
-import type { AgentRunResult } from "../main/agentRun";
+import type { AgentRunResult, TradeOffRunResult } from "../main/agentRun";
+import type { TradeOffEnvelope } from "../model/tradeoff";
 import type { AppConfig } from "../main/config";
 
 const api = {
@@ -15,6 +16,8 @@ const api = {
   getGuide: (root?: string): Promise<Guide> => ipcRenderer.invoke("review:guide", root),
   appendFeed: (item: FeedItem): Promise<void> => ipcRenderer.invoke("feed:append", item),
   getCapturedFraming: (): Promise<InlineFraming[]> => ipcRenderer.invoke("framing:captured"),
+  getTradeoffs: (): Promise<TradeOffEnvelope | null> => ipcRenderer.invoke("tradeoffs:get"),
+  runTradeoffs: (id: string): Promise<TradeOffRunResult> => ipcRenderer.invoke("tradeoffs:run", id),
   validate: (hash: string, items: FeedItem[]): Promise<unknown> =>
     ipcRenderer.invoke("review:validate", hash, items),
   capture: (url: string): Promise<Capture> => ipcRenderer.invoke("shot:capture", url),

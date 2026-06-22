@@ -11,7 +11,8 @@ import { captureUrl } from "./capture";
 import { saveAnnotatedShot, type SaveAnnotation } from "./shots";
 import { getFileDiff, getAllDiffs } from "./diff";
 import { BACKENDS } from "./backends";
-import { runAgentReview } from "./agentRun";
+import { runAgentReview, runTradeoffElicitation } from "./agentRun";
+import { readPersistedTradeoffs } from "./tradeoffs";
 import { startInspectServer } from "./inspectServer";
 import type { FeedItem } from "../model/agent";
 import type { WalkthroughDocument } from "../model/walkthrough";
@@ -74,6 +75,8 @@ ipcMain.handle("diff:get", (_event, base: string, file: string) =>
 ipcMain.handle("diff:all", (_event, base: string) => getAllDiffs(process.cwd(), base));
 ipcMain.handle("agent:backends", () => BACKENDS);
 ipcMain.handle("agent:run", (_event, id: string) => runAgentReview(process.cwd(), id));
+ipcMain.handle("tradeoffs:get", () => readPersistedTradeoffs(process.cwd()));
+ipcMain.handle("tradeoffs:run", (_event, id: string) => runTradeoffElicitation(process.cwd(), id));
 ipcMain.handle("config:get", () => appConfig);
 
 /**

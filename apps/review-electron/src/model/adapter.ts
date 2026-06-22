@@ -8,6 +8,7 @@ import {
   type WalkthroughFile,
   type WalkthroughStage,
 } from "./walkthrough";
+import type { Severity, TradeOff, TradeOffEnvelope } from "./tradeoff";
 
 /** Minimal structural view of `fallow review --format json` (kind: audit-brief). */
 type RawScore = {
@@ -197,4 +198,60 @@ export const toWalkthroughDocument = (brief: AuditBrief): WalkthroughDocument =>
     weakening: brief.weakening ?? [],
     graphSnapshotHash: brief.graph_snapshot_hash ?? null,
   };
+};
+
+/**
+ * Coerce a model-reported severity to a {@link Severity}. Lowercase-normalize
+ * first, then map `low|medium|high`. DEFAULTS to `"low"` on anything else (a
+ * `"High"`/`"critical"`/garbage value must NOT drop the whole item); severity is
+ * never the anti-hallucination key, the anchor is.
+ */
+const asSeverity = (v: unknown): Severity => {
+  const s = String(v).toLowerCase();
+  if (s === "medium") return "medium";
+  if (s === "high") return "high";
+  return "low";
+};
+
+/**
+ * Normalize the raw trade-off envelope into a {@link TradeOffEnvelope}. TOTAL:
+ * never returns null. A non-object `raw` is a PARSE FAILURE, not an abstain, so it
+ * yields `{ graphSnapshotHash: "", abstained: false, tradeoffs: [] }` (never a fake
+ * `abstained: true`). The only case-conversion is `graph_snapshot_hash` ->
+ * `graphSnapshotHash`; every other key is the model's single-word wire key.
+ *
+ * Anti-hallucination: an item is DROPPED only when its `anchor` is empty (the
+ * mirror of the decisions `signal_id` filter), never for a bad severity.
+ * `deterministic` is pinned to `false` regardless of the model's self-report.
+ * `tradeoffs` are sorted by `anchor` then `lens` for structural diffability, and
+ * forced empty when `abstained === true`.
+ */
+export const toTradeOffEnvelope = (raw: unknown): TradeOffEnvelope => {
+  if (typeof raw !== "object" || raw === null) {
+    return { graphSnapshotHash: "", abstained: false, tradeoffs: [] };
+  }
+  const x = raw as Record<string, unknown>;
+  const abstained = x["abstained"] === true;
+  const items = Array.isArray(x["tradeoffs"]) ? (x["tradeoffs"] as unknown[]) : [];
+  const tradeoffs: TradeOff[] = abstained
+    ? []
+    : items
+        .filter((d): d is Record<string, unknown> => typeof d === "object" && d !== null)
+        .map(
+          (d): TradeOff => ({
+            id: asString(d["id"]),
+            anchor: asString(d["anchor"]),
+            lens: asString(d["lens"]),
+            observed: asString(d["observed"]),
+            tradeoff: asString(d["tradeoff"]),
+            question: asString(d["question"]),
+            consequence: asSeverity(d["consequence"]),
+            confidence: asSeverity(d["confidence"]),
+            captured: d["captured"] === true,
+            deterministic: false,
+          }),
+        )
+        .filter((t) => t.anchor.length > 0)
+        .toSorted((a, b) => a.anchor.localeCompare(b.anchor) || a.lens.localeCompare(b.lens));
+  return { graphSnapshotHash: asString(x["graph_snapshot_hash"]), abstained, tradeoffs };
 };
