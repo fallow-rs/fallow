@@ -426,6 +426,14 @@ pub(crate) struct PendingComponentArrow {
     pub(crate) kind: fallow_types::extract::ComponentFunctionKind,
     /// Whether the binding is exported.
     pub(crate) is_exported: bool,
+    /// For a `forwardRef<Ref, Props>((props, ref) => ...)` wrapper, the bare
+    /// single-name SECOND generic type argument (`Props`). The inner render
+    /// function's `props` param carries no annotation in this shape, so the props
+    /// type lives on the wrapper call's type arguments instead. Resolved against
+    /// `react_object_type_props` in finalize, exactly like an inline
+    /// `(props: Props)` annotation. `None` for every non-generic / unresolvable
+    /// shape (the inner param's own annotation, if any, still wins).
+    pub(crate) props_type_name: Option<String>,
 }
 
 /// A React component whose first param is a bare identifier carrying a

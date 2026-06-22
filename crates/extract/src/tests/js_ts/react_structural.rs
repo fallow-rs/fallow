@@ -1492,3 +1492,239 @@ fn computed_member_access_on_props_abstains() {
         "computed member access on props must abstain",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Feature A v2: forwardRef / memo prop harvest shape-parity matrix.
+// The inner render function's body is what is scanned for usage; the props
+// local (or the destructured locals) targets the INNER arrow, not the outer
+// wrapper call. Each case is a harvest/credit pairing whose miss would
+// false-positive the already-trusted `unused-component-prop` React arm.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn forwardref_inline_destructure_used_and_unused() {
+    // `forwardRef(({ a, b }, ref) => ... a ...)` -> inline-destructure harvest on
+    // the inner function's FIRST param; `ref` (second param) is ignored.
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         export const Input = forwardRef(({ size, label }, ref) => <input ref={ref}>{size}</input>);",
+    );
+    assert!(
+        typed_prop(&info, "size").used_in_script,
+        "destructured `size` read in the inner body must be credited",
+    );
+    assert!(
+        !typed_prop(&info, "label").used_in_script,
+        "destructured `label` read nowhere must be unused",
+    );
+    assert!(!info.component_functions[0].has_unharvestable_props);
+}
+
+#[test]
+fn forwardref_inline_destructure_renamed_local() {
+    // `forwardRef(({ size: s }, ref) => ... s ...)` -> the prop name is `size`,
+    // the local is `s`; usage on the renamed local credits the prop.
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         export const Input = forwardRef(({ size: s }, ref) => <input ref={ref}>{s}</input>);",
+    );
+    let prop = typed_prop(&info, "size");
+    assert_eq!(prop.local, "s");
+    assert!(prop.used_in_script, "renamed local read must credit `size`");
+}
+
+#[test]
+fn forwardref_inline_destructure_default_valued() {
+    // `forwardRef(({ size = 4 }, ref) => ... size ...)` -> default-read counts.
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         export const Input = forwardRef(({ size = 4 }, ref) => <input ref={ref} width={size} />);",
+    );
+    assert!(
+        typed_prop(&info, "size").used_in_script,
+        "default-valued destructure read must credit `size`",
+    );
+}
+
+#[test]
+fn forwardref_inline_destructure_rest_abstains() {
+    // `forwardRef(({ size, ...rest }, ref) => ...)` -> the existing rest guard.
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         export const Input = forwardRef(({ size, ...rest }, ref) => <input ref={ref} {...rest}>{size}</input>);",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "rest after named in a forwardRef inner param must abstain",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn forwardref_bare_typed_param_same_file_used_and_unused() {
+    // `forwardRef((props: Props, ref) => props.x)` with same-file `Props` ->
+    // bare-typed path (props.x crediting) on the inner body.
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         interface Props { size: number; label: string }\n\
+         export const Input = forwardRef((props: Props, ref) => <input ref={ref}>{props.size}</input>);",
+    );
+    assert!(typed_prop(&info, "size").used_in_script);
+    assert!(!typed_prop(&info, "label").used_in_script);
+    assert!(!info.component_functions[0].has_unharvestable_props);
+}
+
+#[test]
+fn forwardref_generic_type_arg_same_file_used_and_unused() {
+    // `forwardRef<Ref, Props>((props, ref) => props.x)` where `Props` is the
+    // SECOND generic type arg resolving to a same-file interface. The inner
+    // `props` param has no annotation; the type comes from the wrapper generic.
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         interface Props { size: number; label: string }\n\
+         export const Input = forwardRef<HTMLInputElement, Props>((props, ref) => <input ref={ref}>{props.size}</input>);",
+    );
+    assert!(
+        typed_prop(&info, "size").used_in_script,
+        "props.size read in the inner body must credit `size`",
+    );
+    assert!(
+        !typed_prop(&info, "label").used_in_script,
+        "unread `label` from the generic type arg must be harvested unused",
+    );
+    assert!(!info.component_functions[0].has_unharvestable_props);
+}
+
+#[test]
+fn forwardref_generic_type_arg_type_alias_same_file() {
+    // The generic second arg also resolves a `type X = { ... }` object alias.
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         type Props = { size: number; label: string };\n\
+         export const Input = forwardRef<HTMLInputElement, Props>((props, ref) => <input ref={ref}>{props.size}</input>);",
+    );
+    assert!(typed_prop(&info, "size").used_in_script);
+    assert!(!typed_prop(&info, "label").used_in_script);
+}
+
+#[test]
+fn forwardref_generic_inner_annotation_wins_over_generic() {
+    // When the inner param IS annotated, that annotation wins over the wrapper
+    // generic (the author annotated deliberately).
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         interface A { a: number }\n\
+         interface B { b: number }\n\
+         export const Input = forwardRef<HTMLInputElement, A>((props: B, ref) => <input ref={ref}>{props.b}</input>);",
+    );
+    // `b` (from B, the inner annotation) is harvested; `a` (from A) is not.
+    assert!(typed_prop(&info, "b").used_in_script);
+    assert!(
+        info.react_props.iter().all(|p| p.name != "a"),
+        "the wrapper generic `A` must not back the harvest when the inner param is annotated",
+    );
+}
+
+#[test]
+fn forwardref_generic_imported_type_arg_abstains() {
+    // `forwardRef<Ref, Props>` where `Props` is IMPORTED -> abstain (same-file
+    // only; Priority 2 is deferred).
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         import { Props } from './types';\n\
+         export const Input = forwardRef<HTMLInputElement, Props>((props, ref) => <input ref={ref}>{props.size}</input>);",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "an imported props generic arg must abstain in v2",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn forwardref_generic_single_type_arg_abstains() {
+    // `forwardRef<Ref>(...)` has only the ref type, no props type arg -> the
+    // bare inner `props` param abstains (no own annotation, no wrapper type).
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         export const Input = forwardRef<HTMLInputElement>((props, ref) => <input ref={ref}>{props.size}</input>);",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "a single ref-only generic arg leaves the bare props param unharvestable",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn forwardref_generic_inline_object_type_arg_abstains() {
+    // `forwardRef<Ref, { a: number }>` with an inline object-literal type arg ->
+    // abstain (only a bare named type resolves to a same-file declaration).
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         export const Input = forwardRef<HTMLInputElement, { size: number }>((props, ref) => <input ref={ref}>{props.size}</input>);",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "an inline object-literal generic type arg must abstain",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn memo_bare_typed_param_same_file() {
+    // `memo((props: Props) => props.x)` with same-file `Props` -> bare-typed path.
+    let info = parse_tsx(
+        "import { memo } from 'react';\n\
+         interface Props { size: number; label: string }\n\
+         export const Card = memo((props: Props) => <div>{props.size}</div>);",
+    );
+    assert!(typed_prop(&info, "size").used_in_script);
+    assert!(!typed_prop(&info, "label").used_in_script);
+    assert!(!info.component_functions[0].has_unharvestable_props);
+}
+
+#[test]
+fn memo_inline_destructure_used_and_unused() {
+    // `memo(({ a, b }) => ... a ...)` -> inline-destructure harvest.
+    let info = parse_tsx(
+        "import { memo } from 'react';\n\
+         export const Card = memo(({ size, label }) => <div>{size}</div>);",
+    );
+    assert!(typed_prop(&info, "size").used_in_script);
+    assert!(!typed_prop(&info, "label").used_in_script);
+}
+
+#[test]
+fn forwardref_whole_object_props_use_in_inner_body_abstains() {
+    // A whole-object props use (`<X {...props}/>`) inside a forwardRef inner body
+    // makes the prop set opaque -> abstain, even with a same-file generic type.
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         interface Props { size: number }\n\
+         export const Input = forwardRef<HTMLInputElement, Props>((props, ref) => <Child {...props} ref={ref} />);",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "spreading props into a child in the inner body must abstain (whole-object use)",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn forwardref_genuinely_unused_generic_prop_is_harvested_unused() {
+    // The new TP this unlocks: a forwardRef generic prop read NOWHERE is
+    // harvested with used_in_script=false (and is non-exported so the detector
+    // could flag it; here the binding IS exported, but the harvest itself is the
+    // unit under test).
+    let info = parse_tsx(
+        "import { forwardRef } from 'react';\n\
+         interface Props { size: number }\n\
+         const Input = forwardRef<HTMLInputElement, Props>((props, ref) => <input ref={ref} />);",
+    );
+    assert!(
+        !typed_prop(&info, "size").used_in_script,
+        "a generic-typed prop read nowhere must be harvested unused",
+    );
+    assert!(!info.component_functions[0].has_unharvestable_props);
+}

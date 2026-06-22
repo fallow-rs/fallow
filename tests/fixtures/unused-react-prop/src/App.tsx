@@ -5,6 +5,7 @@ import { Spread } from "./Spread";
 import { Nested } from "./Nested";
 import { Used } from "./Used";
 import { Typed } from "./Typed";
+import { ForwardRefGeneric } from "./ForwardRefGeneric";
 
 // `App` is exported (public contract): its props abstain. It also renders every
 // child so each child module is reachable.
@@ -17,5 +18,6 @@ export const App = () => (
     <Nested user={{ name: "a" }} />
     <Used shown="s" />
     <Typed heading="h" />
+    <ForwardRefGeneric heading="h" />
   </div>
 );

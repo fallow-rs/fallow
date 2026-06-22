@@ -47,13 +47,14 @@ impl ModuleInfoExtractor {
                 continue;
             };
             let is_exported = self.is_exported_binding(name);
-            if let Some((func_span, kind)) = classify_component_init(init) {
+            if let Some((func_span, kind, props_type_name)) = classify_component_init(init) {
                 self.pending_component_arrows.insert(
                     func_span,
                     PendingComponentArrow {
                         name: name.to_string(),
                         kind,
                         is_exported,
+                        props_type_name,
                     },
                 );
             }
@@ -73,13 +74,19 @@ impl ModuleInfoExtractor {
         // function id.
         if let Some(pending) = self.pending_component_arrows.remove(&func.span) {
             let component = pending.name.clone();
+            let wrapper_props_type = pending.props_type_name.clone();
             self.begin_component(
                 pending.name,
                 func.span.start,
                 pending.kind,
                 pending.is_exported,
             );
-            self.harvest_function_props(&component, &func.params, func.body.as_deref());
+            self.harvest_function_props(
+                &component,
+                &func.params,
+                func.body.as_deref(),
+                wrapper_props_type.as_deref(),
+            );
             return true;
         }
         let Some(id) = func.id.as_ref() else {
@@ -96,7 +103,7 @@ impl ModuleInfoExtractor {
             ComponentFunctionKind::FnDecl,
             is_exported,
         );
-        self.harvest_function_props(name, &func.params, func.body.as_deref());
+        self.harvest_function_props(name, &func.params, func.body.as_deref(), None);
         true
     }
 
@@ -112,13 +119,19 @@ impl ModuleInfoExtractor {
             return false;
         };
         let component = pending.name.clone();
+        let wrapper_props_type = pending.props_type_name.clone();
         self.begin_component(
             pending.name,
             expr.span.start,
             pending.kind,
             pending.is_exported,
         );
-        self.harvest_arrow_props(&component, &expr.params, &expr.body);
+        self.harvest_arrow_props(
+            &component,
+            &expr.params,
+            &expr.body,
+            wrapper_props_type.as_deref(),
+        );
         true
     }
 
@@ -254,12 +267,14 @@ impl ModuleInfoExtractor {
         component: &str,
         params: &FormalParameters<'_>,
         body: Option<&FunctionBody<'_>>,
+        wrapper_props_type: Option<&str>,
     ) {
         self.harvest_props_from_params(
             component,
             params.items.first(),
             params.rest.is_some(),
             body,
+            wrapper_props_type,
         );
     }
 
@@ -272,30 +287,36 @@ impl ModuleInfoExtractor {
         component: &str,
         params: &FormalParameters<'_>,
         body: &FunctionBody<'_>,
+        wrapper_props_type: Option<&str>,
     ) {
         self.harvest_props_from_params(
             component,
             params.items.first(),
             params.rest.is_some(),
             Some(body),
+            wrapper_props_type,
         );
     }
 
     /// Harvest props from the first (props) parameter. v1 covers two shapes: the
     /// inline-destructured literal form (`{ a, b }`), and a bare-identifier param
     /// carrying a SAME-FILE object-type annotation (`(props: Props) => props.x`,
-    /// resolved in finalize because the interface/type may hoist). A bare
-    /// identifier WITHOUT a resolvable type, a rest/spread, or any other shape
-    /// marks the just-pushed component's props unharvestable (abstain, ADR-001).
-    /// Each harvested prop's `used_in_script` is set from a focused
-    /// resolved-reference pass over the component `body`, so the detector flags
-    /// only props read NOWHERE in their component.
+    /// resolved in finalize because the interface/type may hoist). v2 adds the
+    /// `forwardRef<Ref, Props>((props, ref) => ...)` shape, where the inner
+    /// `props` param has no annotation of its own and the props type lives on the
+    /// wrapper call's SECOND generic argument (`wrapper_props_type`). A bare
+    /// identifier WITHOUT a resolvable type (own or wrapper-supplied), a
+    /// rest/spread, or any other shape marks the just-pushed component's props
+    /// unharvestable (abstain, ADR-001). Each harvested prop's `used_in_script` is
+    /// set from a focused resolved-reference pass over the component `body`, so
+    /// the detector flags only props read NOWHERE in their component.
     fn harvest_props_from_params(
         &mut self,
         component: &str,
         first: Option<&FormalParameter<'_>>,
         has_rest_param: bool,
         body: Option<&FunctionBody<'_>>,
+        wrapper_props_type: Option<&str>,
     ) {
         let pattern = first.map(|p| &p.pattern);
         self.mark_current_component_passthrough(pattern, body);
@@ -309,12 +330,20 @@ impl ModuleInfoExtractor {
             return;
         };
         let pattern = &param.pattern;
-        // Bare-identifier typed param (`(props: Props) =>`): try the typed-interface
-        // path before falling back to abstain. A bare identifier WITHOUT a
-        // resolvable same-file object type still abstains (handled in the
-        // attempt's `else`).
+        // Bare-identifier typed param (`(props: Props) =>`, or a generic
+        // `forwardRef<Ref, Props>((props, ref) => ...)` whose props type is on the
+        // wrapper): try the typed-interface path before falling back to abstain. A
+        // bare identifier WITHOUT a resolvable same-file object type (own
+        // annotation or wrapper-supplied) still abstains (handled in the attempt's
+        // `else`).
         if let BindingPattern::BindingIdentifier(id) = pattern {
-            if self.try_capture_typed_react_props(component, id.name.as_str(), param, body) {
+            if self.try_capture_typed_react_props(
+                component,
+                id.name.as_str(),
+                param,
+                body,
+                wrapper_props_type,
+            ) {
                 return;
             }
             self.mark_current_component_unharvestable();
@@ -349,13 +378,18 @@ impl ModuleInfoExtractor {
     }
 
     /// Try to capture a bare-identifier typed props param (`(props: Props) =>`)
-    /// for the typed-interface harvest. Returns `true` when the annotation is a
-    /// bare single-name `TSTypeReference` (the only shape resolvable to a
-    /// same-file `interface`/`type` object literal in v1); the actual prop-name
-    /// set is resolved in finalize because the backing type may be declared after
-    /// the component (type hoisting). Returns `false` for an absent annotation or
-    /// any unresolvable shape (`React.PropsWithChildren<...>`, intersection,
-    /// generic-with-args, qualified `NS.Props`, union), so the caller abstains.
+    /// for the typed-interface harvest. The props type name comes from the
+    /// param's own annotation when present, otherwise from `wrapper_props_type`
+    /// (the second generic arg of a `forwardRef<Ref, Props>(...)` wrapper, whose
+    /// inner `props` param carries no annotation). Returns `true` when a bare
+    /// single-name type is resolved (the only shape resolvable to a same-file
+    /// `interface`/`type` object literal); the actual prop-name set is resolved in
+    /// finalize because the backing type may be declared after the component (type
+    /// hoisting). Returns `false` when there is no type at all, or the own
+    /// annotation is an unresolvable shape (`React.PropsWithChildren<...>`,
+    /// intersection, generic-with-args, qualified `NS.Props`, union), so the
+    /// caller abstains. The own annotation always wins: a `forwardRef<Ref, A>`
+    /// whose inner param is annotated `(props: B)` uses `B`.
     ///
     /// The `props.<name>` member-access usage is computed HERE, against the body
     /// in hand, and recorded on the pending entry. Whole-object use of the props
@@ -367,12 +401,22 @@ impl ModuleInfoExtractor {
         props_local: &str,
         param: &FormalParameter<'_>,
         body: Option<&FunctionBody<'_>>,
+        wrapper_props_type: Option<&str>,
     ) -> bool {
-        let Some(annotation) = param.type_annotation.as_deref() else {
-            return false;
-        };
-        let Some(type_name) = bare_props_type_name(&annotation.type_annotation) else {
-            return false;
+        // The inner param's own annotation wins; only when it is absent do we fall
+        // back to the wrapper's generic second type argument.
+        let type_name = match param.type_annotation.as_deref() {
+            Some(annotation) => match bare_props_type_name(&annotation.type_annotation) {
+                Some(name) => name,
+                // An own annotation of an unresolvable shape abstains outright; we
+                // do NOT silently substitute the wrapper type, since the author
+                // annotated the param deliberately.
+                None => return false,
+            },
+            None => match wrapper_props_type {
+                Some(name) => name.to_string(),
+                None => return false,
+            },
         };
         let usage = resolve_typed_props_body_usage(body, props_local);
         self.pending_typed_react_props.push(PendingTypedReactProps {
@@ -755,17 +799,21 @@ fn is_component_name(name: &str) -> bool {
 }
 
 /// Classify a variable initializer as a React component definition, returning
-/// the inner function/arrow span (the key the body visit looks up) and the
-/// component kind. Returns `None` when the init is not a component shape.
+/// the inner function/arrow span (the key the body visit looks up), the
+/// component kind, and an optional props-type name supplied by a generic wrapper
+/// (`forwardRef<Ref, Props>`). Returns `None` when the init is not a component
+/// shape. The third tuple element is `None` for every non-generic shape; a
+/// direct arrow / function expression carries its props type on its own param,
+/// not here.
 fn classify_component_init(
     init: &Expression<'_>,
-) -> Option<(oxc_span::Span, ComponentFunctionKind)> {
+) -> Option<(oxc_span::Span, ComponentFunctionKind, Option<String>)> {
     match init {
         Expression::ArrowFunctionExpression(arrow) if arrow_returns_jsx(arrow) => {
-            Some((arrow.span, ComponentFunctionKind::Arrow))
+            Some((arrow.span, ComponentFunctionKind::Arrow, None))
         }
         Expression::FunctionExpression(func) if function_body_returns_jsx(func.body.as_deref()) => {
-            Some((func.span, ComponentFunctionKind::Arrow))
+            Some((func.span, ComponentFunctionKind::Arrow, None))
         }
         Expression::CallExpression(call) => classify_wrapper_call(call),
         Expression::ParenthesizedExpression(paren) => classify_component_init(&paren.expression),
@@ -777,27 +825,55 @@ fn classify_component_init(
 
 /// Classify a `forwardRef(...)` / `memo(...)` / `React.forwardRef(...)` /
 /// `React.memo(...)` wrapper whose first argument is an arrow / function
-/// expression. The inner function's span is the stack-push key.
+/// expression. The inner function's span is the stack-push key. For a
+/// `forwardRef<Ref, Props>(...)` whose SECOND generic argument is a bare
+/// same-file-resolvable type name, that name is returned as the wrapper-supplied
+/// props type (the inner `props` param carries no annotation in this shape).
 fn classify_wrapper_call(
     call: &CallExpression<'_>,
-) -> Option<(oxc_span::Span, ComponentFunctionKind)> {
+) -> Option<(oxc_span::Span, ComponentFunctionKind, Option<String>)> {
     let wrapper = wrapper_callee_name(&call.callee)?;
     let kind = match wrapper {
         "forwardRef" => ComponentFunctionKind::ForwardRefWrapper,
         "memo" => ComponentFunctionKind::MemoWrapper,
         _ => return None,
     };
+    // `forwardRef<Ref, Props>(...)`: the props type is the SECOND type arg. `memo`
+    // is excluded: `memo<Props>(...)` takes ONE type arg, but a memo component's
+    // props come from the inner param annotation in practice, and crediting the
+    // sole memo generic arg would be a different (untested) shape.
+    let props_type_name = if kind == ComponentFunctionKind::ForwardRefWrapper {
+        forward_ref_second_type_arg(call.type_arguments.as_deref())
+    } else {
+        None
+    };
     let first = call.arguments.first()?.as_expression()?;
     match first {
-        Expression::ArrowFunctionExpression(arrow) => Some((arrow.span, kind)),
-        Expression::FunctionExpression(func) => Some((func.span, kind)),
+        Expression::ArrowFunctionExpression(arrow) => Some((arrow.span, kind, props_type_name)),
+        Expression::FunctionExpression(func) => Some((func.span, kind, props_type_name)),
         Expression::ParenthesizedExpression(paren) => match &paren.expression {
-            Expression::ArrowFunctionExpression(arrow) => Some((arrow.span, kind)),
-            Expression::FunctionExpression(func) => Some((func.span, kind)),
+            Expression::ArrowFunctionExpression(arrow) => Some((arrow.span, kind, props_type_name)),
+            Expression::FunctionExpression(func) => Some((func.span, kind, props_type_name)),
             _ => None,
         },
         _ => None,
     }
+}
+
+/// The bare single-name SECOND type argument of a `forwardRef<Ref, Props>(...)`
+/// call (`Props`), or `None` when there are fewer than two type arguments or the
+/// second is not a bare same-file-resolvable type reference (a generic-with-args,
+/// qualified name, intersection, union, or inline literal all abstain via
+/// `bare_props_type_name`). The FIRST type arg is the ref element type and is
+/// ignored.
+fn forward_ref_second_type_arg(
+    type_arguments: Option<&TSTypeParameterInstantiation<'_>>,
+) -> Option<String> {
+    let params = &type_arguments?.params;
+    // Need both the ref type (index 0) AND the props type (index 1). A single
+    // type arg (`forwardRef<Ref>`) carries no props type.
+    let props_ty = params.get(1)?;
+    bare_props_type_name(props_ty)
 }
 
 /// Extract the trailing identifier of a wrapper callee: `forwardRef` from a bare

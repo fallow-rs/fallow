@@ -78,11 +78,21 @@ fn flags_unused_react_prop_and_abstains_on_every_ladder_case() {
         "a typed prop read via props.size must not be flagged: {flagged:?}"
     );
 
-    // The ONLY findings are the two true positives (zero false positives).
+    // Feature A v2: a NON-exported `forwardRef<Ref, Props>` whose props type is
+    // the SECOND generic argument resolving to a SAME-FILE `interface` harvests
+    // its member names. `genericDead` (read nowhere via `props.genericDead`) is
+    // the new true positive the generic-forwardRef harvest unlocks; `props.size`
+    // is credited as used so only the dead member flags.
+    assert!(
+        flagged.contains(&("GenericInner", "genericDead")),
+        "a generic-forwardRef same-file-typed prop read nowhere should be flagged: {flagged:?}"
+    );
+
+    // The ONLY findings are the three true positives (zero false positives).
     assert_eq!(
         flagged.len(),
-        2,
-        "exactly two React prop findings expected (zero FP): {flagged:?}"
+        3,
+        "exactly three React prop findings expected (zero FP): {flagged:?}"
     );
 }
 
