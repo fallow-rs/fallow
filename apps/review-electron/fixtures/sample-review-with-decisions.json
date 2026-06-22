@@ -1,0 +1,113 @@
+{
+  "schema_version": 4,
+  "kind": "audit-brief",
+  "verdict": "review",
+  "changed_files_count": 6,
+  "base_ref": "0000000000000000000000000000000000000000",
+  "base_description": "merge-base with origin/main",
+  "triage": {
+    "files": 6,
+    "risk_class": "medium",
+    "review_effort": "focused"
+  },
+  "summary": {
+    "dead_code_issues": 2,
+    "duplication_clone_groups": 1,
+    "complexity_findings": 0
+  },
+  "decisions": {
+    "emitted_signal_ids": [
+      "boundary:src/services/api/client.ts->src/infra/db.ts",
+      "public-api:src/services/api/index.ts#createClient"
+    ],
+    "decisions": [
+      {
+        "signal_id": "boundary:src/services/api/client.ts->src/infra/db.ts",
+        "category": "coupling-boundary",
+        "question": "is the api layer meant to reach straight into the infra db module here?",
+        "tradeoff": "couples the api layer to infra; 4 in-repo modules already import this anchor, so the boundary hardens with each one.",
+        "internal_consumer_count": 4,
+        "anchor_file": "src/services/api/client.ts",
+        "anchor_line": 42,
+        "expert": ["api-team", "infra-team"],
+        "bus_factor_one": false
+      },
+      {
+        "signal_id": "public-api:src/services/api/index.ts#createClient",
+        "category": "public-api-contract",
+        "question": "should createClient become part of the package's public contract?",
+        "tradeoff": "adds a new public export; 0 in-repo modules consume it yet, so the cost lands later on every external caller it gains.",
+        "internal_consumer_count": 0,
+        "anchor_file": "src/services/api/index.ts",
+        "anchor_line": 7,
+        "expert": ["api-team"],
+        "bus_factor_one": true
+      }
+    ]
+  },
+  "partition": {
+    "order": ["src/services/api", "src/infra"],
+    "units": [
+      {
+        "module_dir": "src/services/api",
+        "files": ["src/services/api/client.ts", "src/services/api/index.ts"]
+      },
+      {
+        "module_dir": "src/infra",
+        "files": ["src/infra/db.ts"]
+      }
+    ]
+  },
+  "focus": {
+    "review_here": [
+      {
+        "file": "src/services/api/client.ts",
+        "label": "review-here",
+        "reason": "high fan-in (4 importers), fan-out 2",
+        "score": {
+          "fan_io": 6,
+          "security_taint": 0,
+          "risk_zone": 1,
+          "change_shape": 1,
+          "total": 8
+        }
+      },
+      {
+        "file": "src/services/api/index.ts",
+        "label": "review-here",
+        "reason": "new public export, fan-out 1",
+        "score": {
+          "fan_io": 1,
+          "security_taint": 0,
+          "risk_zone": 0,
+          "change_shape": 1,
+          "total": 2
+        }
+      }
+    ],
+    "deprioritized": [
+      {
+        "file": "src/infra/db.ts",
+        "label": "not-prioritized",
+        "reason": "low fan-in (1 importer), fan-out 0",
+        "score": {
+          "fan_io": 1,
+          "security_taint": 0,
+          "risk_zone": 0,
+          "change_shape": 0,
+          "total": 1
+        }
+      }
+    ]
+  },
+  "impact_closure": {
+    "affected_not_shown": [],
+    "coordination_gap": []
+  },
+  "weakening": [],
+  "graph_snapshot_hash": "sha256:decisionfixture000000000000000000000000000000000000000000000001",
+  "_meta": {
+    "fixture": "hand-authored decision-producing brief for the adapter render-model proof",
+    "note": "forward-compatible with the not-yet-synced Phase 1 Rust fields (internal_consumer_count, tradeoff)"
+  }
+}
