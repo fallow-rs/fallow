@@ -320,3 +320,9 @@ layout; current build is the centered state with the clean message.)
   (oxlint clean). The down-N column is now monotonic and the biggest hubs lead in
   amber. New adapter test asserts fan-in beats the capped total. vitest 52,
   format/lint/tsc/build/e2e (6) green.
+- Round 21 (theme-matched scrollbars, MED; user-reported): Chromium's chunky light
+  default scrollbars clashed with the dark app on the sidebar and diff. Styled
+  ::-webkit-scrollbar in global.css: a thin (10px, ~6px visible) rounded thumb at
+  color-mix(muted-foreground 22%) floating via a transparent border +
+  background-clip:padding-box, brightening to 42% on hover, over a transparent
+  track. The bars now recede into the zinc-dark theme. format/lint/tsc/build/e2e green.
