@@ -358,3 +358,9 @@ layout; current build is the centered state with the clean message.)
   .range) and render a real "@@ -0,0 +1,76 @@" header (blue markers, tabular-nums)
   + the context when present. New diff test asserts the range. vitest 52,
   format/lint/tsc/build/e2e (6) green.
+- Round 26 (collapsible stage groups, user-reported): the stage headers were
+  static. Made each header a toggle button with a rotating ChevronRight (right =
+  collapsed, down = expanded), hiding the group's file list when collapsed.
+  Collapsed set is persisted to localStorage (fre:collapsed-stages), keyed by
+  module dir, so it survives reloads. Added stage-toggle testid + a 15-collapsed
+  QA capture. vitest 52, format/lint/tsc/build/e2e (6) green.

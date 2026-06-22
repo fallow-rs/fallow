@@ -53,6 +53,14 @@ test("capture screens for design QA", async () => {
   });
 
   await safe(async () => {
+    // Collapse the second stage group to QA the collapsed state.
+    await win.getByTestId("stage-toggle").nth(1).click({ timeout: 10_000 });
+    await win.waitForTimeout(150);
+    await win.screenshot({ path: `${shots}/15-collapsed.png` });
+    await win.getByTestId("stage-toggle").nth(1).click({ timeout: 10_000 });
+  });
+
+  await safe(async () => {
     // Simulate the in-page picker posting a selection to the localhost bridge.
     await fetch("http://127.0.0.1:7787/fallow-select", {
       method: "POST",
