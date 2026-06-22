@@ -1,5 +1,6 @@
 import { NotebookPen } from "lucide-react";
 import type { ReviewContext as ReviewContextData, ReviewContextItem } from "../../../model/reviewContext";
+import { shortAnchor } from "@/lib/anchor";
 
 /**
  * The AUTHOR-AGENT review brief: the CAPTURE artifact, rendered prominently at the
@@ -76,17 +77,18 @@ const ReviewContextParagraph = ({
   const linkable = item.anchor.length > 0;
   const [anchorFile] = item.anchor.split(":");
   return (
-    <p>
+    <p className="break-words">
       {item.note}
       {linkable && (
         <>
           {" "}
           <button
             type="button"
-            className="font-mono text-[12px] text-primary/80 hover:underline"
+            title={item.anchor}
+            className="break-all font-mono text-[12px] text-primary/80 hover:underline"
             onClick={() => onOpenDiff(anchorFile ?? item.anchor)}
           >
-            ({item.anchor})
+            ({shortAnchor(item.anchor)})
           </button>
         </>
       )}

@@ -1,5 +1,6 @@
 import { Scale } from "lucide-react";
 import type { Severity, TradeOff, TradeOffEnvelope } from "../../../model/tradeoff";
+import { shortAnchor } from "@/lib/anchor";
 
 /** Tone for a severity badge: only `high` gets the amber accent; the rest stay muted. */
 const severityTone = (s: Severity): string =>
@@ -87,7 +88,7 @@ const TradeOffRow = ({
   // The cross-cutting slot has no single changed line to deep-link to.
   const linkable = t.anchor !== ANCHOR_CROSS_CUTTING && t.anchor.length > 0;
   const [anchorFile, anchorLine] = t.anchor.split(":");
-  const anchorLabel = `${anchorFile ?? t.anchor}${anchorLine ? `:${anchorLine}` : ""}`;
+  const anchorLabel = `${shortAnchor(anchorFile ?? t.anchor)}${anchorLine ? `:${anchorLine}` : ""}`;
   return (
     <li className="rounded-md border border-border bg-muted/20 p-2 text-xs">
       <div className="flex gap-2">
@@ -99,7 +100,8 @@ const TradeOffRow = ({
             {linkable ? (
               <button
                 type="button"
-                className="font-mono hover:text-foreground hover:underline"
+                title={t.anchor}
+                className="break-all font-mono hover:text-foreground hover:underline"
                 onClick={() => onOpenDiff(anchorFile ?? t.anchor)}
               >
                 {anchorLabel}
