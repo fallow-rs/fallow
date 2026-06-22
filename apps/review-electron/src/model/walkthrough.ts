@@ -61,3 +61,16 @@ export type WalkthroughDocument = {
   weakening: ReadonlyArray<Record<string, unknown>>;
   graphSnapshotHash: string | null;
 };
+
+const IMPORTERS = /(\d+)\s+importers?/;
+const FAN_OUT = /fan-out\s+(\d+)/;
+
+/**
+ * Parse the literal fan-in (importer count) and fan-out from a focus `reason`
+ * such as "high fan-in (17 importers), fan-out 2". Fan-in is the blast-radius
+ * signal the UI both displays and sorts by, so the two stay in lockstep.
+ */
+export const parseFanInOut = (reason: string): { fanIn: number; fanOut: number } => ({
+  fanIn: Number(IMPORTERS.exec(reason)?.[1] ?? 0),
+  fanOut: Number(FAN_OUT.exec(reason)?.[1] ?? 0),
+});

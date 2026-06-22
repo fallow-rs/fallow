@@ -48,6 +48,26 @@ describe("toWalkthroughDocument", () => {
     expect(doc.stages.map((s) => s.order)).toEqual([0, 1]);
   });
 
+  it("ranks by displayed fan-in (importers), not the capped attention total", () => {
+    const brief: AuditBrief = {
+      partition: { order: ["m"], units: [{ module_dir: "m", files: ["m/hub.ts", "m/scored.ts"] }] },
+      focus: {
+        review_here: [
+          { file: "m/hub.ts", reason: "high fan-in (17 importers)", score: { total: 10 } },
+          {
+            file: "m/scored.ts",
+            reason: "high fan-in (5 importers), fan-out 7",
+            score: { total: 12 },
+          },
+        ],
+      },
+    };
+    const doc = toWalkthroughDocument(brief);
+    // 17 importers outranks the file with a higher (but capped) attention total,
+    // so the visible ↓N column stays monotonic.
+    expect(doc.stages[0]?.files.map((f) => f.path)).toEqual(["m/hub.ts", "m/scored.ts"]);
+  });
+
   it("drops decisions without a signal_id (anti-hallucination)", () => {
     const brief: AuditBrief = {
       decisions: {

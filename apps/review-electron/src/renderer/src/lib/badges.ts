@@ -1,4 +1,4 @@
-import type { WalkthroughFile } from "../../../model/walkthrough";
+import { parseFanInOut, type WalkthroughFile } from "../../../model/walkthrough";
 
 /** Visual weight for the fan-in metric: a hub (many importers) draws the eye. */
 export type SignalTone = "hub" | "elevated" | "muted";
@@ -18,8 +18,6 @@ export type FileSignal = {
   fanInTone: SignalTone;
 };
 
-const IMPORTERS = /(\d+)\s+importers?/;
-const FAN_OUT = /fan-out\s+(\d+)/;
 const HUB = 6;
 const ELEVATED = 2;
 
@@ -29,12 +27,10 @@ export const fanInTone = (fanIn: number): SignalTone =>
 
 /** Deterministic per-file signal derived purely from the Fallow focus entry. */
 export const deriveFileSignal = (file: WalkthroughFile): FileSignal => {
-  const importers = IMPORTERS.exec(file.reason);
-  const fanOut = FAN_OUT.exec(file.reason);
-  const fanIn = importers ? Number(importers[1]) : 0;
+  const { fanIn, fanOut } = parseFanInOut(file.reason);
   return {
     fanIn,
-    fanOut: fanOut ? Number(fanOut[1]) : 0,
+    fanOut,
     security: file.score.securityTaint > 0,
     riskZone: file.score.riskZone > 0,
     deprioritized: file.deprioritized,

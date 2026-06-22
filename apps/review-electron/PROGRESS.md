@@ -308,3 +308,15 @@ layout; current build is the centered state with the clean message.)
   impact ranking the engine already computes. Now src/main leads with
   inspect.ts/backends.ts on top. New adapter test locks it in. vitest 51,
   format/lint/tsc/build/e2e (6) green.
+- Round 20 (fix the ordering inversion round 19 introduced, MED/HIGH): sorting by
+  the engine's attention total (a capped fan_io, e.g. 10) while the row DISPLAYS
+  raw importers (e.g. 17) produced a non-monotonic down-N column: walkthrough.ts
+  (17 importers) ranked below inspect.ts (5), and 3-importer files sat below
+  2-importer ones within a group. Fixed the sort key to match the displayed
+  signal: security taint > risk zone > fan-in (importers) > attention, applied to
+  files-within-stage and to stage order (stage = max rank of its files). Extracted
+  parseFanInOut into the model so the adapter (sort) and badges (display) share one
+  parser; hoisted rankOf / compareRankDesc / byRankDesc / maxRank to module scope
+  (oxlint clean). The down-N column is now monotonic and the biggest hubs lead in
+  amber. New adapter test asserts fan-in beats the capped total. vitest 52,
+  format/lint/tsc/build/e2e (6) green.

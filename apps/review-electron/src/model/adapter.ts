@@ -1,11 +1,12 @@
-import type {
-  AttentionScore,
-  ClearedItem,
-  Decision,
-  ReviewFocus,
-  WalkthroughDocument,
-  WalkthroughFile,
-  WalkthroughStage,
+import {
+  parseFanInOut,
+  type AttentionScore,
+  type ClearedItem,
+  type Decision,
+  type ReviewFocus,
+  type WalkthroughDocument,
+  type WalkthroughFile,
+  type WalkthroughStage,
 } from "./walkthrough";
 
 /** Minimal structural view of `fallow review --format json` (kind: audit-brief). */
@@ -87,6 +88,33 @@ const buildFocus = (brief: AuditBrief): ReviewFocus => {
 };
 
 /**
+ * Review-priority rank for one file, highest-impact first: security taint, then
+ * risk zone, then fan-in (the importer count the row displays), then the engine's
+ * attention score as a finer tiebreak. Sorting on the displayed fan-in rather
+ * than the capped attention score keeps the visible ↓N column monotonic.
+ */
+type Rank = [number, number, number, number];
+const rankOf = (f: WalkthroughFile): Rank => [
+  f.score.securityTaint,
+  f.score.riskZone,
+  parseFanInOut(f.reason).fanIn,
+  f.attention,
+];
+const compareRankDesc = (a: Rank, b: Rank): number => {
+  for (let i = 0; i < a.length; i += 1) {
+    if (b[i] !== a[i]) return (b[i] ?? 0) - (a[i] ?? 0);
+  }
+  return 0;
+};
+const byRankDesc = (a: WalkthroughFile, b: WalkthroughFile): number =>
+  compareRankDesc(rankOf(a), rankOf(b));
+const maxRank = (files: WalkthroughFile[]): Rank =>
+  files.reduce<Rank>(
+    (m, f) => m.map((v, i) => Math.max(v, rankOf(f)[i] ?? 0)) as Rank,
+    [0, 0, 0, 0],
+  );
+
+/**
  * Normalize a raw audit-brief into a {@link WalkthroughDocument}. Pure: takes
  * parsed JSON, returns the render model. Anti-hallucination: decisions without a
  * Fallow `signal_id` are dropped.
@@ -121,26 +149,22 @@ export const toWalkthroughDocument = (brief: AuditBrief): WalkthroughDocument =>
     const i = order.indexOf(dir);
     return i === -1 ? Number.MAX_SAFE_INTEGER : i;
   };
-  // Highest-blast-radius work first: order stages (and files within a stage) by
-  // Fallow's attention score, descending, so the modules and files that most
-  // need review lead. The engine ranks by impact in `direction.units`; the
-  // module-grouped `partition` it also returns does not, so we re-apply it here.
-  // Ties fall back to the engine's original walkthrough sequence for stability.
+  // Highest-blast-radius work first: stages and the files within them are ordered
+  // by {@link byRankDesc} (security, risk, displayed fan-in, attention). Ties fall
+  // back to the engine's original walkthrough sequence for stability.
   const stages: WalkthroughStage[] = (brief.partition?.units ?? [])
     .map((unit, originalIdx) => {
       const files = (unit.files ?? [])
         .map((path, fileIdx) => ({ file: fileFor(path), fileIdx }))
-        .toSorted((a, b) => b.file.attention - a.file.attention || a.fileIdx - b.fileIdx)
+        .toSorted((a, b) => byRankDesc(a.file, b.file) || a.fileIdx - b.fileIdx)
         .map(({ file }) => file);
-      const maxAttention = files.reduce((m, f) => Math.max(m, f.attention), 0);
-      return { moduleDir: unit.module_dir, files, maxAttention, originalIdx };
+      return { moduleDir: unit.module_dir, files, peak: maxRank(files), originalIdx };
     })
-    .toSorted(
-      (a, b) =>
-        b.maxAttention - a.maxAttention ||
-        orderIndex(a.moduleDir) - orderIndex(b.moduleDir) ||
-        a.originalIdx - b.originalIdx,
-    )
+    .toSorted((a, b) => {
+      const byPeak = compareRankDesc(a.peak, b.peak);
+      if (byPeak !== 0) return byPeak;
+      return orderIndex(a.moduleDir) - orderIndex(b.moduleDir) || a.originalIdx - b.originalIdx;
+    })
     .map(({ moduleDir, files }, i): WalkthroughStage => ({ moduleDir, order: i, files }));
 
   const decisions: Decision[] = (brief.decisions?.decisions ?? [])
