@@ -1,33 +1,30 @@
 import { useState, type KeyboardEvent } from "react";
 import { MessageSquarePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 type Props = {
   onSave: (note: string) => void;
-  placeholder?: string;
+  /** The collapsed trigger text (e.g. "note for the agent", "comment on this hunk"). */
   label?: string;
 };
 
 /**
  * The shared "note for the agent" affordance: a subtle collapsed trigger that
- * expands to an `Input` + `save` button, mirroring FileRow's note UI. Reused under
- * every comment surface (decisions, trade-offs, diff lines) so a reviewer can
- * route a targeted note back to the agent from anywhere the target is anchored.
+ * expands to a roomy multi-line composer + a `send` button. Reused under every
+ * comment surface (decisions, trade-offs, diff lines/ranges/hunks) so a reviewer
+ * can route a targeted note back to the agent from anywhere the target is
+ * anchored. The CALLER renders any scope label ("line 42", "lines 37-42") next to
+ * this; the placeholder is always the plain "note for the agent".
  *
- * `Enter` saves, `Escape` cancels; saving trims, emits, clears, and collapses.
- * Empty/whitespace never saves. The caller owns the {@link import("../../../model/agent").FeedTarget};
- * this component only collects the note text.
+ * Cmd/Ctrl+Enter sends, Escape cancels; sending trims, emits, clears, and
+ * collapses. Empty/whitespace never sends. The caller owns the
+ * {@link import("../../../model/agent").FeedTarget}; this only collects the text.
  */
-export const NoteComposer = ({
-  onSave,
-  placeholder = "note for the agent",
-  label = "note for the agent",
-}: Props) => {
+export const NoteComposer = ({ onSave, label = "note for the agent" }: Props) => {
   const [adding, setAdding] = useState(false);
   const [note, setNote] = useState("");
 
-  const save = (): void => {
+  const send = (): void => {
     const trimmed = note.trim();
     if (trimmed) onSave(trimmed);
     setNote("");
@@ -39,10 +36,10 @@ export const NoteComposer = ({
     setAdding(false);
   };
 
-  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === "Enter") {
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      save();
+      send();
     } else if (e.key === "Escape") {
       e.preventDefault();
       cancel();
@@ -63,18 +60,31 @@ export const NoteComposer = ({
   }
 
   return (
-    <div className="flex gap-1">
-      <Input
+    <div className="w-full space-y-1.5 rounded-md border border-border bg-background/60 p-2">
+      <textarea
         autoFocus
+        rows={3}
         value={note}
         onChange={(e) => setNote(e.target.value)}
         onKeyDown={onKeyDown}
-        placeholder={placeholder}
-        className="h-7 text-xs"
+        placeholder="note for the agent"
+        className="w-full resize-y rounded-md border border-input bg-background px-2 py-1.5 text-xs leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
       />
-      <Button size="sm" className="h-7 text-xs lowercase" onClick={save}>
-        save
-      </Button>
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-muted-foreground/70">⌘↵ send · esc cancel</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={cancel}
+            className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            cancel
+          </button>
+          <Button size="sm" className="h-7 text-xs lowercase" onClick={send}>
+            send
+          </Button>
+        </div>
+      </div>
     </div>
   );
 };

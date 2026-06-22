@@ -196,7 +196,6 @@ const FileSection = ({
                   <span className="ml-auto shrink-0">
                     <NoteComposer
                       label="comment on this hunk"
-                      placeholder={`note on lines ${span.start}-${span.end}`}
                       onSave={(note) =>
                         onComment(
                           { kind: "file_line", value: `${file}:${span.start}-${span.end}` },
@@ -246,7 +245,6 @@ const FileSection = ({
           <span className="flex-1">
             <NoteComposer
               label={`comment on lines ${range.start}-${range.end}`}
-              placeholder={`note on lines ${range.start}-${range.end}`}
               onSave={(note) => {
                 onComment(
                   { kind: "file_line", value: `${file}:${range.start}-${range.end}` },
