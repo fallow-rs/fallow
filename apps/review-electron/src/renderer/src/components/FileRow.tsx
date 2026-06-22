@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 type Props = {
   file: WalkthroughFile;
   viewed: boolean;
+  /** This file is the one currently shown in the diff pane. */
+  active: boolean;
   /** Stage directory, stripped from the displayed path (it titles the group). */
   baseDir?: string;
   onToggleViewed: (path: string) => void;
@@ -26,6 +28,7 @@ const FAN_IN_TONE: Record<SignalTone, string> = {
 export const FileRow = ({
   file,
   viewed,
+  active,
   baseDir,
   onToggleViewed,
   onAddNote,
@@ -54,9 +57,10 @@ export const FileRow = ({
   return (
     <li
       className={cn(
-        "group rounded-md px-2 py-1 hover:bg-accent/40",
-        signal.deprioritized && "opacity-55",
-        viewed && "opacity-40",
+        "group rounded-md px-2 py-1",
+        active ? "bg-accent shadow-[inset_2px_0_0_0_var(--primary)]" : "hover:bg-accent/40",
+        !active && signal.deprioritized && "opacity-55",
+        !active && viewed && "opacity-40",
       )}
     >
       <div className="flex items-center gap-2">
@@ -65,39 +69,40 @@ export const FileRow = ({
           onCheckedChange={() => onToggleViewed(file.path)}
           aria-label={`mark ${base} reviewed`}
         />
+        {/* Filename and the signal metrics share one wide click target. */}
         <button
           type="button"
           data-testid="file-open"
           title={title}
           onClick={() => onOpenDiff(file.path)}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           <FileText className="size-3.5 shrink-0 text-muted-foreground" />
           <span className="flex min-w-0 flex-1 items-baseline font-mono text-xs">
             {dir && <span className="truncate text-muted-foreground">{dir}</span>}
             <span className="shrink-0 text-foreground">{base}</span>
           </span>
+          <span className="flex shrink-0 items-center gap-1.5">
+            {signal.security && (
+              <ShieldAlert className="size-3.5 text-fallow-red" aria-label="security taint" />
+            )}
+            {signal.riskZone && (
+              <TriangleAlert className="size-3.5 text-fallow-amber" aria-label="risk zone" />
+            )}
+            {signal.fanIn >= 2 && (
+              <span
+                title={`${signal.fanIn} importers depend on this`}
+                className={cn(
+                  "inline-flex items-center gap-0.5 font-mono text-[10px] tabular-nums",
+                  FAN_IN_TONE[signal.fanInTone],
+                )}
+              >
+                <ArrowDownToLine className="size-3" />
+                {signal.fanIn}
+              </span>
+            )}
+          </span>
         </button>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {signal.security && (
-            <ShieldAlert className="size-3.5 text-fallow-red" aria-label="security taint" />
-          )}
-          {signal.riskZone && (
-            <TriangleAlert className="size-3.5 text-fallow-amber" aria-label="risk zone" />
-          )}
-          {signal.fanIn >= 2 && (
-            <span
-              title={`${signal.fanIn} importers depend on this`}
-              className={cn(
-                "inline-flex items-center gap-0.5 font-mono text-[10px] tabular-nums",
-                FAN_IN_TONE[signal.fanInTone],
-              )}
-            >
-              <ArrowDownToLine className="size-3" />
-              {signal.fanIn}
-            </span>
-          )}
-        </div>
         <Button
           variant="ghost"
           size="icon"

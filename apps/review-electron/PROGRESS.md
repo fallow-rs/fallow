@@ -326,3 +326,14 @@ layout; current build is the centered state with the clean message.)
   color-mix(muted-foreground 22%) floating via a transparent border +
   background-clip:padding-box, brightening to 42% on hover, over a transparent
   track. The bars now recede into the zinc-dark theme. format/lint/tsc/build/e2e green.
+- Round 22 (file-list interaction, 3 user-reported items): (1) Active-file
+  indicator: App passes diffFile as activePath through StageList to FileRow; the
+  open file's row gets bg-accent + an inset primary left bar and skips the
+  viewed/deprioritized dimming. (2) Resizable split: the layout grid is now
+  gridTemplateColumns `${sidebarWidth}px 1fr` with a draggable separator on the
+  aside's right edge (mousedown -> window mousemove/up, clamp 320-760, persisted to
+  localStorage, double-click resets). (3) Click bug: only the filename button
+  opened the diff, so clicks on the fan-in metric or the hover note-button area did
+  nothing; pulled the metrics inside the file-open button so filename + metrics are
+  one wide target. Kept a real focusable button (no role=button-on-div a11y
+  smell). vitest 52, format/lint/tsc/build/e2e (6) green.

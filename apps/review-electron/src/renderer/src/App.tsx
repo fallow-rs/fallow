@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   FileDiff,
   MonitorPlay,
@@ -32,6 +32,17 @@ const MODES: { id: RightMode; label: string; icon: typeof FileDiff }[] = [
   { id: "shot", label: "screenshot", icon: Camera },
 ];
 
+const SIDEBAR_MIN = 320;
+const SIDEBAR_MAX = 760;
+const SIDEBAR_DEFAULT = 420;
+const SIDEBAR_KEY = "fre:sidebar-width";
+
+/** Restore the persisted sidebar width, clamped to the allowed range. */
+const readSidebarWidth = (): number => {
+  const stored = Number(window.localStorage.getItem(SIDEBAR_KEY));
+  return stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : SIDEBAR_DEFAULT;
+};
+
 export const App = () => {
   const [doc, setDoc] = useState<WalkthroughDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -41,10 +52,36 @@ export const App = () => {
   const [card, setCard] = useState<InspectorCardData | null>(null);
   const [rightMode, setRightMode] = useState<RightMode>("live");
   const [diffFile, setDiffFile] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
 
   useEffect(() => {
     window.fallow.onInspectSelection(setCard);
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_KEY, String(sidebarWidth));
+  }, [sidebarWidth]);
+
+  // Drag the divider between the file list and the right pane to resize.
+  const startResize = (e: ReactMouseEvent): void => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    const onMove = (ev: MouseEvent): void =>
+      setSidebarWidth(
+        Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, startWidth + ev.clientX - startX)),
+      );
+    const onUp = (): void => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
 
   const load = async (): Promise<void> => {
     setError(null);
@@ -80,8 +117,20 @@ export const App = () => {
   }, []);
 
   return (
-    <div className="grid h-screen grid-cols-[420px_1fr] overflow-hidden bg-background font-sans text-foreground">
-      <aside className="flex min-h-0 flex-col border-r border-border bg-card">
+    <div
+      className="grid h-screen overflow-hidden bg-background font-sans text-foreground"
+      style={{ gridTemplateColumns: `${sidebarWidth}px 1fr` }}
+    >
+      <aside className="relative flex min-h-0 flex-col border-r border-border bg-card">
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="resize the file list"
+          title="drag to resize · double-click to reset"
+          onMouseDown={startResize}
+          onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT)}
+          className="absolute inset-y-0 right-0 z-30 w-1.5 translate-x-1/2 cursor-col-resize transition-colors hover:bg-primary/40"
+        />
         <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
           <div className="flex items-center gap-2">
             <Telescope className="size-4 text-primary" />
@@ -104,6 +153,7 @@ export const App = () => {
               <StageList
                 stages={doc.stages}
                 isViewed={isViewed}
+                activePath={diffFile}
                 onToggleViewed={onToggleViewed}
                 onAddNote={onAddNote}
                 onOpenDiff={onOpenDiff}

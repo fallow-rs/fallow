@@ -4,12 +4,20 @@ import { FileRow } from "./FileRow";
 type Props = {
   stages: WalkthroughStage[];
   isViewed: (path: string) => boolean;
+  activePath: string | null;
   onToggleViewed: (path: string) => void;
   onAddNote: (path: string, note: string) => void;
   onOpenDiff: (path: string) => void;
 };
 
-export const StageList = ({ stages, isViewed, onToggleViewed, onAddNote, onOpenDiff }: Props) => (
+export const StageList = ({
+  stages,
+  isViewed,
+  activePath,
+  onToggleViewed,
+  onAddNote,
+  onOpenDiff,
+}: Props) => (
   <section className="space-y-3">
     <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
       files to review
@@ -33,6 +41,7 @@ export const StageList = ({ stages, isViewed, onToggleViewed, onAddNote, onOpenD
               key={f.path}
               file={f}
               viewed={isViewed(f.path)}
+              active={f.path === activePath}
               baseDir={stage.moduleDir}
               onToggleViewed={onToggleViewed}
               onAddNote={onAddNote}
