@@ -56,29 +56,33 @@ const createWindow = (): BrowserWindow => {
   return win;
 };
 
+// The repo under review. Defaults to the launch cwd; `FALLOW_REVIEW_ROOT` points
+// the app at any checkout (e.g. a PR worktree) without a cwd dance.
+const reviewRoot = (): string => process.env.FALLOW_REVIEW_ROOT?.trim() || process.cwd();
+
 ipcMain.handle("review:get", async (_event, root: string | undefined) => {
-  latestDoc = await runReview(root);
+  latestDoc = await runReview(root ?? reviewRoot());
   return latestDoc;
 });
-ipcMain.handle("review:guide", (_event, root: string | undefined) => runGuide(root));
-ipcMain.handle("feed:append", (_event, item: FeedItem) => appendFeedItem(process.cwd(), item));
-ipcMain.handle("framing:captured", () => readCapturedFraming(process.cwd()));
+ipcMain.handle("review:guide", (_event, root: string | undefined) => runGuide(root ?? reviewRoot()));
+ipcMain.handle("feed:append", (_event, item: FeedItem) => appendFeedItem(reviewRoot(), item));
+ipcMain.handle("framing:captured", () => readCapturedFraming(reviewRoot()));
 ipcMain.handle("review:validate", (_event, hash: string, items: FeedItem[]) =>
   validateWalkthrough(buildAgentWalkthrough(hash, items)),
 );
-ipcMain.handle("shot:capture", (_event, url: string) => captureUrl(process.cwd(), url, Date.now()));
+ipcMain.handle("shot:capture", (_event, url: string) => captureUrl(reviewRoot(), url, Date.now()));
 ipcMain.handle("shot:save", (_event, payload: SaveAnnotation) =>
-  saveAnnotatedShot(process.cwd(), payload, Date.now()),
+  saveAnnotatedShot(reviewRoot(), payload, Date.now()),
 );
 ipcMain.handle("diff:get", (_event, base: string, file: string) =>
-  getFileDiff(process.cwd(), base, file),
+  getFileDiff(reviewRoot(), base, file),
 );
-ipcMain.handle("diff:all", (_event, base: string) => getAllDiffs(process.cwd(), base));
+ipcMain.handle("diff:all", (_event, base: string) => getAllDiffs(reviewRoot(), base));
 ipcMain.handle("agent:backends", () => BACKENDS);
-ipcMain.handle("agent:run", (_event, id: string) => runAgentReview(process.cwd(), id));
-ipcMain.handle("tradeoffs:get", () => readPersistedTradeoffs(process.cwd()));
-ipcMain.handle("reviewContext:get", () => readReviewContext(process.cwd()));
-ipcMain.handle("tradeoffs:run", (_event, id: string) => runTradeoffElicitation(process.cwd(), id));
+ipcMain.handle("agent:run", (_event, id: string) => runAgentReview(reviewRoot(), id));
+ipcMain.handle("tradeoffs:get", () => readPersistedTradeoffs(reviewRoot()));
+ipcMain.handle("reviewContext:get", () => readReviewContext(reviewRoot()));
+ipcMain.handle("tradeoffs:run", (_event, id: string) => runTradeoffElicitation(reviewRoot(), id));
 ipcMain.handle("config:get", () => appConfig);
 
 /**
@@ -139,7 +143,7 @@ if (!app.requestSingleInstanceLock()) {
     startInspectServer(
       () => latestDoc,
       (card) => mainWindow?.webContents.send("inspect:selection", card),
-      process.cwd(),
+      reviewRoot(),
       appConfig.inspectPort,
     );
 
