@@ -216,6 +216,9 @@ fn resolve_git_sha(args: &UploadStaticFindingsArgs, root: &Path) -> Result<Strin
 }
 
 fn enforce_clean_worktree(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadError> {
+    if args.dry_run {
+        return Ok(());
+    }
     if !dirty_worktree(root) {
         return Ok(());
     }
@@ -890,6 +893,16 @@ mod tests {
         let repo = create_dirty_git_repo();
         let args = UploadStaticFindingsArgs {
             allow_dirty: true,
+            ..UploadStaticFindingsArgs::default()
+        };
+        assert!(enforce_clean_worktree(&args, repo.path()).is_ok());
+    }
+
+    #[test]
+    fn dry_run_skips_dirty_worktree_validation() {
+        let repo = create_dirty_git_repo();
+        let args = UploadStaticFindingsArgs {
+            dry_run: true,
             ..UploadStaticFindingsArgs::default()
         };
         assert!(enforce_clean_worktree(&args, repo.path()).is_ok());

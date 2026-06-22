@@ -226,6 +226,9 @@ fn resolve_git_sha(args: &UploadInventoryArgs, root: &Path) -> Result<String, Up
 }
 
 fn enforce_clean_worktree(args: &UploadInventoryArgs, root: &Path) -> Result<(), UploadError> {
+    if args.dry_run {
+        return Ok(());
+    }
     if !dirty_worktree(root) {
         return Ok(());
     }
@@ -1164,6 +1167,16 @@ mod tests {
         let err = enforce_clean_worktree(&args, repo.path())
             .expect_err("explicit git sha must not bypass dirty-tree validation");
         assert!(matches!(err, UploadError::Validation(_)));
+    }
+
+    #[test]
+    fn dry_run_skips_dirty_worktree_validation() {
+        let repo = create_dirty_git_repo();
+        let args = UploadInventoryArgs {
+            dry_run: true,
+            ..UploadInventoryArgs::default()
+        };
+        assert!(enforce_clean_worktree(&args, repo.path()).is_ok());
     }
 
     #[test]

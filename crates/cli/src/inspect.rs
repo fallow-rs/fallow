@@ -140,41 +140,91 @@ fn build_inspect_evidence(
     trace_export: Option<Value>,
 ) -> InspectEvidence {
     let target_file = target.file.as_str();
+    let optional_threads = parallel_child_threads(opts.threads);
+    let (dead_code, duplication, complexity, security, impact_closure) =
+        std::thread::scope(|scope| {
+            let dead_code = scope.spawn(|| {
+                optional_section(
+                    opts,
+                    dead_code_args(target_file),
+                    InspectEvidenceScope::File,
+                    optional_threads,
+                    |value| value,
+                )
+            });
+            let duplication = scope.spawn(|| {
+                optional_section(
+                    opts,
+                    dupes_args(),
+                    InspectEvidenceScope::ProjectFilteredToFile,
+                    optional_threads,
+                    |value| filter_path_array(&value, target_file, "clone_groups"),
+                )
+            });
+            let complexity = scope.spawn(|| {
+                optional_section(
+                    opts,
+                    health_args(),
+                    InspectEvidenceScope::ProjectFilteredToFile,
+                    optional_threads,
+                    |value| filter_path_array(&value, target_file, "findings"),
+                )
+            });
+            let security = scope.spawn(|| {
+                optional_section(
+                    opts,
+                    security_args(target_file),
+                    InspectEvidenceScope::File,
+                    optional_threads,
+                    |value| value,
+                )
+            });
+            let impact_closure = scope.spawn(|| {
+                optional_section(
+                    opts,
+                    impact_closure_args(target_file),
+                    InspectEvidenceScope::ProjectFilteredToFile,
+                    optional_threads,
+                    |value| value,
+                )
+            });
+
+            (
+                join_inspect_section(dead_code, InspectEvidenceScope::File),
+                join_inspect_section(duplication, InspectEvidenceScope::ProjectFilteredToFile),
+                join_inspect_section(complexity, InspectEvidenceScope::ProjectFilteredToFile),
+                join_inspect_section(security, InspectEvidenceScope::File),
+                join_inspect_section(impact_closure, InspectEvidenceScope::ProjectFilteredToFile),
+            )
+        });
+
     InspectEvidence {
         trace_file: InspectEvidenceSection::ok(InspectEvidenceScope::File, trace_file.clone()),
         trace_export: trace_export
             .map(|value| InspectEvidenceSection::ok(InspectEvidenceScope::Symbol, value)),
-        dead_code: optional_section(
-            opts,
-            dead_code_args(target_file),
-            InspectEvidenceScope::File,
-            |value| value,
-        ),
-        duplication: optional_section(
-            opts,
-            dupes_args(),
-            InspectEvidenceScope::ProjectFilteredToFile,
-            |value| filter_path_array(&value, target_file, "clone_groups"),
-        ),
-        complexity: optional_section(
-            opts,
-            health_args(),
-            InspectEvidenceScope::ProjectFilteredToFile,
-            |value| filter_path_array(&value, target_file, "findings"),
-        ),
-        security: optional_section(
-            opts,
-            security_args(target_file),
-            InspectEvidenceScope::File,
-            |value| value,
-        ),
-        impact_closure: optional_section(
-            opts,
-            impact_closure_args(target_file),
-            InspectEvidenceScope::ProjectFilteredToFile,
-            |value| value,
-        ),
-        symbol_chain: build_symbol_chain_section(opts, target),
+        dead_code,
+        duplication,
+        complexity,
+        security,
+        impact_closure,
+        symbol_chain: build_symbol_chain_section(opts, target, optional_threads),
+    }
+}
+
+const fn parallel_child_threads(parent_threads: usize) -> usize {
+    let threads = parent_threads / 4;
+    if threads == 0 { 1 } else { threads }
+}
+
+fn join_inspect_section(
+    handle: std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>,
+    scope: InspectEvidenceScope,
+) -> InspectEvidenceSection {
+    match handle.join() {
+        Ok(section) => section,
+        Err(_) => {
+            InspectEvidenceSection::error(scope, "inspect evidence worker panicked".to_string())
+        }
     }
 }
 
@@ -185,6 +235,7 @@ fn build_inspect_evidence(
 fn build_symbol_chain_section(
     opts: &InspectOptions<'_>,
     target: &NormalizedTarget,
+    threads: usize,
 ) -> Option<InspectEvidenceSection> {
     if !opts.symbol_chain {
         return None;
@@ -194,6 +245,7 @@ fn build_symbol_chain_section(
         opts,
         symbol_chain_args(&target.file, export_name),
         InspectEvidenceScope::Symbol,
+        threads,
         |value| value,
     ))
 }
@@ -326,19 +378,20 @@ fn evidence_detail(section: &InspectEvidenceSection) -> Option<String> {
 }
 
 fn run_required_json(opts: &InspectOptions<'_>, args: Vec<String>) -> Result<Value, String> {
-    run_child_json(opts, args).and_then(|output| output.value)
+    run_child_json(opts, args, opts.threads).and_then(|output| output.value)
 }
 
 fn optional_section<F>(
     opts: &InspectOptions<'_>,
     args: Vec<String>,
     scope: InspectEvidenceScope,
+    threads: usize,
     filter: F,
 ) -> InspectEvidenceSection
 where
     F: FnOnce(Value) -> Value,
 {
-    match run_child_json(opts, args) {
+    match run_child_json(opts, args, threads) {
         Ok(output) => match output.value {
             Ok(value) => InspectEvidenceSection::ok(scope, filter(value)),
             Err(message) => InspectEvidenceSection::error(scope, message),
@@ -351,11 +404,15 @@ struct ChildJson {
     value: Result<Value, String>,
 }
 
-fn run_child_json(opts: &InspectOptions<'_>, args: Vec<String>) -> Result<ChildJson, String> {
+fn run_child_json(
+    opts: &InspectOptions<'_>,
+    args: Vec<String>,
+    threads: usize,
+) -> Result<ChildJson, String> {
     let binary = std::env::current_exe()
         .map_err(|err| format!("failed to locate current fallow binary: {err}"))?;
     let mut command = Command::new(binary);
-    command.args(build_child_args(opts, args));
+    command.args(build_child_args(opts, args, threads));
     let output = command
         .output()
         .map_err(|err| format!("failed to run child analysis: {err}"))?;
@@ -377,7 +434,11 @@ fn run_child_json(opts: &InspectOptions<'_>, args: Vec<String>) -> Result<ChildJ
     })
 }
 
-fn build_child_args(opts: &InspectOptions<'_>, command_args: Vec<String>) -> Vec<String> {
+fn build_child_args(
+    opts: &InspectOptions<'_>,
+    command_args: Vec<String>,
+    threads: usize,
+) -> Vec<String> {
     let command_name = command_args.first().map(String::as_str);
     let mut args = vec![
         "--root".to_string(),
@@ -398,7 +459,7 @@ fn build_child_args(opts: &InspectOptions<'_>, command_args: Vec<String>) -> Vec
     if let Some(max_file_size) = opts.max_file_size {
         args.extend(["--max-file-size".to_string(), max_file_size.to_string()]);
     }
-    args.extend(["--threads".to_string(), opts.threads.to_string()]);
+    args.extend(["--threads".to_string(), threads.to_string()]);
     if opts.production && command_name != Some("security") {
         args.push("--production".to_string());
     }
@@ -665,7 +726,7 @@ mod tests {
             },
         );
 
-        let args = build_child_args(&opts, dead_code_args("src/api.ts"));
+        let args = build_child_args(&opts, dead_code_args("src/api.ts"), opts.threads);
 
         assert!(
             args.windows(2)
@@ -689,7 +750,7 @@ mod tests {
             },
         );
 
-        let args = build_child_args(&opts, security_args("src/api.ts"));
+        let args = build_child_args(&opts, security_args("src/api.ts"), opts.threads);
 
         assert!(!args.contains(&"--no-production".to_string()));
         assert!(!args.contains(&"--production".to_string()));
@@ -701,5 +762,12 @@ mod tests {
         let stderr = "warning before JSON\n";
 
         assert_eq!(child_error_message(2, stdout, stderr), "config failed");
+    }
+
+    #[test]
+    fn parallel_child_threads_caps_optional_evidence_workers() {
+        assert_eq!(parallel_child_threads(1), 1);
+        assert_eq!(parallel_child_threads(4), 1);
+        assert_eq!(parallel_child_threads(8), 2);
     }
 }

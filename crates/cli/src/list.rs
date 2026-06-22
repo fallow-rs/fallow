@@ -85,16 +85,17 @@ fn collect_list_data(
 ) -> Result<ListData, ExitCode> {
     let show_all = should_show_all(opts);
 
-    let plugin_result = collect_plugin_result(opts, config, show_all)?;
-
+    let need_plugin_result = opts.plugins || opts.entry_points || show_all;
     let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
-    let discovered = if need_files {
+    let discovered = if need_files || need_plugin_result {
         Some(fallow_core::discover::discover_files_with_plugin_scopes(
             config,
         ))
     } else {
         None
     };
+
+    let plugin_result = collect_plugin_result(opts, config, show_all, discovered.as_deref())?;
 
     let entry_points = collect_list_entry_points(
         opts,
@@ -220,11 +221,19 @@ fn collect_plugin_result(
     opts: &ListOptions<'_>,
     config: &fallow_config::ResolvedConfig,
     show_all: bool,
+    discovered: Option<&[fallow_core::discover::DiscoveredFile]>,
 ) -> Result<Option<fallow_core::plugins::AggregatedPluginResult>, ExitCode> {
     if !(opts.plugins || opts.entry_points || show_all) {
         return Ok(None);
     }
-    let disc = fallow_core::discover::discover_files_with_plugin_scopes(config);
+    let fallback_discovered;
+    let disc = match discovered {
+        Some(discovered) => discovered,
+        None => {
+            fallback_discovered = fallow_core::discover::discover_files_with_plugin_scopes(config);
+            &fallback_discovered
+        }
+    };
     let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
     let registry = fallow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
     let mut result = run_package_plugins(
