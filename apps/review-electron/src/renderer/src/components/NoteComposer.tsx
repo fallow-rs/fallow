@@ -63,7 +63,7 @@ export const NoteComposer = ({
       <button
         type="button"
         onClick={() => setAdding(true)}
-        className="inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
       >
         <MessageSquarePlus className="size-3" />
         {label}
@@ -88,7 +88,7 @@ export const NoteComposer = ({
           <button
             type="button"
             onClick={cancel}
-            className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            className="cursor-pointer text-[11px] text-muted-foreground transition-colors hover:text-foreground"
           >
             cancel
           </button>

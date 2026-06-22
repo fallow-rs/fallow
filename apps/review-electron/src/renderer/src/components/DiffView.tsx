@@ -98,7 +98,7 @@ const Row = ({
           aria-label={`comment on line ${row.newNo}`}
           title="comment on this line"
           onClick={() => onCommentLine(row.newNo as number)}
-          className="mr-2 flex shrink-0 items-center gap-1 self-center rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-all hover:border-primary hover:text-foreground group-hover/row:opacity-100"
+          className="mr-2 flex shrink-0 cursor-pointer items-center gap-1 self-center rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground opacity-0 transition-all hover:border-primary hover:text-foreground group-hover/row:opacity-100"
         >
           <MessageSquarePlus className="size-3.5" />
           comment
