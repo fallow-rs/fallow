@@ -145,6 +145,18 @@ pub struct Decision {
     /// Whether the anchor file's only qualified owner is one person (bus-factor-1).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bus_factor_one: bool,
+    /// Honest per-decision count: in-repo modules OUTSIDE the diff that already
+    /// depend on this decision's anchor. This is the DISPLAY number (taste
+    /// ownership: the human reads reversibility from the count itself), distinct
+    /// from `blast` (the project-wide proxy used only for ranking). Never a door
+    /// label. Internal-only by construction, so it cannot see a published library's
+    /// external consumers; the public-API trade-off clause names that risk in prose.
+    pub internal_consumer_count: u64,
+    /// The named structural sacrifice this change makes, stated as a fact, never a
+    /// recommendation (e.g. "Couples `app` to `infra`; 4 in-repo modules already
+    /// depend on this anchor."). A sibling fact to `question`; it never tells the
+    /// human what to choose.
+    pub tradeoff: String,
 }
 
 /// A note for the decisions collapsed below the cap.
@@ -252,6 +264,11 @@ pub struct DecisionInputs<'a> {
     /// the diff's rename pairs. `None` when the file was not renamed. Lets each
     /// decision carry a `previous_signal_id` so review memory survives a `git mv`.
     pub rename_old_path: &'a dyn Fn(&str) -> Option<String>,
+    /// Honest per-anchor in-repo out-of-diff consumer count, precomputed from the
+    /// retained graph's reverse-deps before it was dropped. `0` for an anchor with
+    /// no recorded importers (a genuinely new file). The display number; distinct
+    /// from `affected_not_shown` (the project-wide ranking proxy).
+    pub internal_consumers: &'a dyn Fn(&str) -> u64,
     /// The decision cap (default 4, clamped to [3, 5] by the caller).
     pub cap: usize,
 }
@@ -343,6 +360,39 @@ fn coordination_question(changed_file: &str, symbols: &[String], consumers: u64)
     )
 }
 
+/// Pluralize "module" against a count.
+fn modules_word(n: u64) -> &'static str {
+    if n == 1 { "module" } else { "modules" }
+}
+
+/// The named structural sacrifice for a coupling/boundary decision, as a FACT.
+/// `consumers` is the honest in-repo out-of-diff count for the anchor.
+fn boundary_tradeoff(from_zone: &str, to_zone: &str, consumers: u64) -> String {
+    format!(
+        "Couples `{from_zone}` to `{to_zone}`; {consumers} in-repo {} already depend on this anchor.",
+        modules_word(consumers)
+    )
+}
+
+/// The named structural sacrifice for the public-API-surface decision, as a FACT.
+/// The internal count is internal-only, so the clause also names the external
+/// contract risk in prose (it cannot count a published library's downstream).
+fn public_api_tradeoff(count: usize, consumers: u64) -> String {
+    format!(
+        "Adds {count} maintained contract{}; {consumers} in-repo {} already consume this surface, and any external consumers become a contract you cannot remove without a breaking change.",
+        if count == 1 { "" } else { "s" },
+        modules_word(consumers)
+    )
+}
+
+/// The named structural sacrifice for a coordination-gap decision, as a FACT.
+fn coordination_tradeoff(consumers: u64) -> String {
+    format!(
+        "{consumers} {} outside the diff consume this contract; changing its shape requires coordinating them.",
+        modules_word(consumers)
+    )
+}
+
 /// The per-decision fields for [`build_decision`], distinct from the shared
 /// run context carried in [`DecisionInputs`].
 struct DecisionSpec {
@@ -352,6 +402,10 @@ struct DecisionSpec {
     anchor_file: String,
     anchor_line: u32,
     blast: u64,
+    /// Honest per-decision in-repo out-of-diff consumer count (display number).
+    internal_consumer_count: u64,
+    /// The named-sacrifice clause, stated as a fact.
+    tradeoff: String,
 }
 
 /// Build one decision, resolving its routed expert and suppression state.
@@ -363,6 +417,8 @@ fn build_decision(spec: DecisionSpec, inputs: &DecisionInputs<'_>) -> Decision {
         anchor_file,
         anchor_line,
         blast,
+        internal_consumer_count,
+        tradeoff,
     } = spec;
     let signal_id = derive_signal_id(category, &candidate_key);
     // Rename-durable review memory: if any path embedded in the candidate key was
@@ -384,6 +440,8 @@ fn build_decision(spec: DecisionSpec, inputs: &DecisionInputs<'_>) -> Decision {
         consequence,
         expert,
         bus_factor_one,
+        internal_consumer_count,
+        tradeoff,
     }
 }
 
@@ -440,14 +498,17 @@ fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
                 )
             },
         );
+        let internal_consumer_count = (inputs.internal_consumers)(&anchor_file);
         decisions.push(build_decision(
             DecisionSpec {
                 category: DecisionCategory::CouplingBoundary,
                 candidate_key: key.clone(),
                 question: boundary_question(&from_zone, &to_zone),
+                tradeoff: boundary_tradeoff(&from_zone, &to_zone, internal_consumer_count),
                 anchor_file,
                 anchor_line,
                 blast: inputs.affected_not_shown,
+                internal_consumer_count,
             },
             inputs,
         ));
@@ -465,14 +526,20 @@ fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
             .and_then(|k| k.split("::").next())
             .map(str::to_string)
             .unwrap_or_default();
+        let internal_consumer_count = (inputs.internal_consumers)(&anchor_file);
         decisions.push(build_decision(
             DecisionSpec {
                 category: DecisionCategory::PublicApiContract,
                 candidate_key: key,
                 question: public_api_question(inputs.deltas.public_api_added.len()),
+                tradeoff: public_api_tradeoff(
+                    inputs.deltas.public_api_added.len(),
+                    internal_consumer_count,
+                ),
                 anchor_file,
                 anchor_line: inputs.public_api_anchor_line,
                 blast: inputs.affected_not_shown,
+                internal_consumer_count,
             },
             inputs,
         ));
@@ -491,9 +558,13 @@ fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
                     &gap.consumed_symbols,
                     gap.consumer_count,
                 ),
+                tradeoff: coordination_tradeoff(gap.consumer_count),
                 anchor_file: gap.changed_file.clone(),
                 anchor_line: gap.line,
                 blast: gap.consumer_count,
+                // The coordination arm already carries the honest per-decision
+                // count; no precomputed-map lookup needed.
+                internal_consumer_count: gap.consumer_count,
             },
             inputs,
         ));
@@ -719,6 +790,10 @@ mod tests {
         None
     }
 
+    fn no_consumers(_: &str) -> u64 {
+        0
+    }
+
     fn inputs<'a>(
         deltas: &'a ReviewDeltas,
         boundary_anchors: &'a [BoundaryAnchor],
@@ -736,6 +811,7 @@ mod tests {
             routing,
             head_source,
             rename_old_path: &no_source,
+            internal_consumers: &no_consumers,
             cap,
         }
     }
@@ -974,6 +1050,48 @@ mod tests {
     }
 
     #[test]
+    fn public_api_decision_carries_honest_consumer_count_and_tradeoff() {
+        // A public-API delta whose anchor has 7 in-repo out-of-diff consumers must
+        // surface that honest number on the decision AND name it as a fact in the
+        // trade-off clause, distinct from the project-wide ranking proxy (`blast`).
+        let d = deltas(&[], &["src/ui/index.ts::Widget"]);
+        let routing = empty_routing();
+        let seven = |_: &str| 7u64;
+        let surface = extract_decision_surface(&DecisionInputs {
+            deltas: &d,
+            boundary_anchors: &[],
+            coordination: &[],
+            public_api_anchor_line: 0,
+            // The project-wide proxy must NOT become the display number.
+            affected_not_shown: 99,
+            routing: &routing,
+            head_source: &no_source,
+            rename_old_path: &no_source,
+            internal_consumers: &seven,
+            cap: 4,
+        });
+        let dec = surface
+            .decisions
+            .iter()
+            .find(|dec| dec.category == DecisionCategory::PublicApiContract)
+            .expect("a public-API decision");
+        assert_eq!(dec.internal_consumer_count, 7, "honest per-anchor count");
+        assert_ne!(
+            dec.internal_consumer_count, dec.blast,
+            "display number must stay distinct from the ranking proxy"
+        );
+        assert!(
+            dec.tradeoff.contains("7 in-repo"),
+            "trade-off clause states the count as a fact: {}",
+            dec.tradeoff
+        );
+        assert!(
+            dec.question.ends_with('?'),
+            "the decision stays a question (taste ownership)"
+        );
+    }
+
+    #[test]
     fn coordination_gap_becomes_a_public_api_contract_decision() {
         let d = deltas(&[], &[]);
         let coordination = vec![CoordinationAnchor {
@@ -1023,6 +1141,7 @@ mod tests {
             routing: &routing,
             head_source: &no_source,
             rename_old_path: &rename,
+            internal_consumers: &no_consumers,
             cap: 4,
         });
         assert_eq!(surface.decisions.len(), 1);

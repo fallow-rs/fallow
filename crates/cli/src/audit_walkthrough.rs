@@ -756,6 +756,7 @@ mod tests {
             routing: &routing,
             head_source: &no_source,
             rename_old_path: &no_source,
+            internal_consumers: &|_: &str| 0u64,
             cap: 4,
         });
         let real_id = derive_signal_id(DecisionCategory::CouplingBoundary, "ui->-db");

@@ -354,6 +354,11 @@ pub struct CheckResult {
     /// retained graph on the brief path BEFORE the graph is dropped; `None`
     /// otherwise. Internal (CheckResult is not serialized).
     pub export_lines: Option<rustc_hash::FxHashMap<String, Vec<(String, u32)>>>,
+    /// Per-anchor `rel_path -> count of in-repo modules OUTSIDE the diff that
+    /// directly import it`, for the decision surface's honest per-decision consumer
+    /// number. Computed from the retained graph's reverse-deps on the brief path
+    /// BEFORE the graph is dropped; `None` otherwise. Internal (not serialized).
+    pub internal_consumers: Option<rustc_hash::FxHashMap<String, u64>>,
 }
 
 struct CheckAnalysisData {
@@ -677,6 +682,7 @@ fn complete_check_execution(
         partition_order: None,
         focus_facts: None,
         export_lines: None,
+        internal_consumers: None,
     }
 }
 

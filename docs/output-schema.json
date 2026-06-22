@@ -16234,6 +16234,14 @@
         "bus_factor_one": {
           "type": "boolean",
           "description": "Whether the anchor file's only qualified owner is one person (bus-factor-1)."
+        },
+        "internal_consumer_count": {
+          "type": "integer",
+          "description": "Honest per-decision count: in-repo modules OUTSIDE the diff that already\ndepend on this decision's anchor. This is the DISPLAY number (taste\nownership: the human reads reversibility from the count itself), distinct\nfrom `blast` (the project-wide proxy used only for ranking). Never a door\nlabel. Internal-only by construction, so it cannot see a published library's\nexternal consumers; the public-API trade-off clause names that risk in prose."
+        },
+        "tradeoff": {
+          "type": "string",
+          "description": "The named structural sacrifice this change makes, stated as a fact, never a\nrecommendation (e.g. \"Couples `app` to `infra`; 4 in-repo modules already\ndepend on this anchor.\"). A sibling fact to `question`; it never tells the\nhuman what to choose."
         }
       },
       "required": [
@@ -16245,7 +16253,9 @@
         "signal_key",
         "blast",
         "consequence",
-        "expert"
+        "expert",
+        "internal_consumer_count",
+        "tradeoff"
       ],
       "description": "One consequential structural decision, framed as a judgment question for a\nhuman with taste, anchored to a fallow-emitted signal."
     },
@@ -16454,6 +16464,14 @@
           "type": "boolean",
           "description": "Whether the anchor file's only qualified owner is one person (bus-factor-1)."
         },
+        "internal_consumer_count": {
+          "type": "integer",
+          "description": "Honest per-decision count: in-repo modules OUTSIDE the diff that already\ndepend on this decision's anchor. This is the DISPLAY number (taste\nownership: the human reads reversibility from the count itself), distinct\nfrom `blast` (the project-wide proxy used only for ranking). Never a door\nlabel. Internal-only by construction, so it cannot see a published library's\nexternal consumers; the public-API trade-off clause names that risk in prose."
+        },
+        "tradeoff": {
+          "type": "string",
+          "description": "The named structural sacrifice this change makes, stated as a fact, never a\nrecommendation (e.g. \"Couples `app` to `infra`; 4 in-repo modules already\ndepend on this anchor.\"). A sibling fact to `question`; it never tells the\nhuman what to choose."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -16472,6 +16490,8 @@
         "blast",
         "consequence",
         "expert",
+        "internal_consumer_count",
+        "tradeoff",
         "actions"
       ],
       "description": "One decision plus its structured `actions[]`, for the separable envelope."

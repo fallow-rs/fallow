@@ -8876,6 +8876,22 @@ expert: string[]
  * Whether the anchor file's only qualified owner is one person (bus-factor-1).
  */
 bus_factor_one?: boolean
+/**
+ * Honest per-decision count: in-repo modules OUTSIDE the diff that already
+ * depend on this decision's anchor. This is the DISPLAY number (taste
+ * ownership: the human reads reversibility from the count itself), distinct
+ * from `blast` (the project-wide proxy used only for ranking). Never a door
+ * label. Internal-only by construction, so it cannot see a published library's
+ * external consumers; the public-API trade-off clause names that risk in prose.
+ */
+internal_consumer_count: number
+/**
+ * The named structural sacrifice this change makes, stated as a fact, never a
+ * recommendation (e.g. "Couples `app` to `infra`; 4 in-repo modules already
+ * depend on this anchor."). A sibling fact to `question`; it never tells the
+ * human what to choose.
+ */
+tradeoff: string
 }
 /**
  * A note for the decisions collapsed below the cap.

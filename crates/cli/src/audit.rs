@@ -1373,6 +1373,8 @@ fn run_audit_head_analyses(
         check.partition_order = compute_brief_partition_order(opts.root, check, changed_files);
         check.focus_facts = compute_brief_focus_facts(opts.root, check, changed_files);
         check.export_lines = compute_brief_export_lines(opts.root, check, changed_files);
+        check.internal_consumers =
+            compute_brief_internal_consumers(opts.root, check, changed_files);
     }
     let shared_parse = if share_dead_code_parse_with_health {
         check.as_mut().and_then(|r| r.shared_parse.take())
@@ -1511,6 +1513,55 @@ fn compute_brief_export_lines(
             })
             .collect();
         map.insert(keys::relative_key_path(&module.path, root), exports);
+    }
+    Some(map)
+}
+
+/// Precompute the per-anchor honest consumer count for the decision surface:
+/// `rel_path -> count of distinct in-repo modules OUTSIDE the diff that directly
+/// import the anchor file`, from the retained graph's reverse-deps BEFORE health
+/// drops the graph (mirroring [`compute_brief_export_lines`]). This is the honest
+/// per-decision DISPLAY number ("N in-repo modules already depend on this"),
+/// distinct from the project-wide `affected_not_shown` ranking proxy. Importers
+/// that are themselves part of the diff are excluded (they are the change, not a
+/// pre-existing dependent). `None` when the graph is not retained.
+fn compute_brief_internal_consumers(
+    root: &std::path::Path,
+    check: &CheckResult,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Option<FxHashMap<String, u64>> {
+    let graph = check
+        .shared_parse
+        .as_ref()
+        .and_then(|sp| sp.analysis_output.as_ref())
+        .and_then(|out| out.graph.as_ref())?;
+
+    let changed_norm: FxHashSet<String> = changed_files
+        .iter()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .collect();
+    let id_to_norm: FxHashMap<fallow_types::discover::FileId, String> = graph
+        .modules
+        .iter()
+        .map(|m| (m.file_id, m.path.to_string_lossy().replace('\\', "/")))
+        .collect();
+
+    let mut map: FxHashMap<String, u64> = FxHashMap::default();
+    for module in &graph.modules {
+        let abs = module.path.to_string_lossy().replace('\\', "/");
+        if !changed_norm.contains(&abs) {
+            continue;
+        }
+        let count = graph
+            .importers_of(module.file_id)
+            .iter()
+            .filter(|imp| {
+                id_to_norm
+                    .get(imp)
+                    .is_none_or(|p| !changed_norm.contains(p))
+            })
+            .count() as u64;
+        map.insert(keys::relative_key_path(&module.path, root), count);
     }
     Some(map)
 }
@@ -1926,6 +1977,16 @@ fn compute_decision_surface(
             .map(str::to_string)
     };
 
+    // Honest per-anchor consumer count, looked up from the map precomputed before
+    // the graph drop. `0` for an anchor with no recorded importers (a new file).
+    let internal_consumers_map = check.internal_consumers.as_ref();
+    let internal_consumers = |rel: &str| -> u64 {
+        internal_consumers_map
+            .and_then(|map| map.get(rel))
+            .copied()
+            .unwrap_or(0)
+    };
+
     extract_decision_surface(&DecisionInputs {
         deltas,
         boundary_anchors: &boundary_anchors,
@@ -1935,6 +1996,7 @@ fn compute_decision_surface(
         routing,
         head_source: &head_source,
         rename_old_path: &rename_old_path,
+        internal_consumers: &internal_consumers,
         cap: opts.max_decisions,
     })
 }
