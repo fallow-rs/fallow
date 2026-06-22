@@ -12,11 +12,26 @@ const STATUS_TONE: Record<Status["kind"], string> = {
   error: "text-fallow-red",
 };
 
+/** The `fallow review --walkthrough-file` validation envelope (subset we render). */
+type AcceptedJudgment = {
+  signal_id: string;
+  agent_framing: string;
+  concern?: string;
+  deterministic: boolean;
+};
+type ValidationEnvelope = {
+  stale?: boolean;
+  accepted?: AcceptedJudgment[];
+  rejected?: { signal_id: string; reason: string }[];
+};
+type AgentReport = { notesIncluded: number; validation: ValidationEnvelope };
+
 /** Pick a coding-agent backend (codiff-style) and run a grounded agent review. */
 export const AgentPanel = () => {
   const [backends, setBackends] = useState<AgentBackend[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [status, setStatus] = useState<Status | null>(null);
+  const [report, setReport] = useState<AgentReport | null>(null);
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
@@ -29,13 +44,18 @@ export const AgentPanel = () => {
   const run = async (): Promise<void> => {
     setRunning(true);
     setStatus({ kind: "running", text: "running agent…" });
+    setReport(null);
     try {
       const result = await window.fallow.runAgent(selected);
-      setStatus(
-        result.ok
-          ? { kind: "ok", text: "judgments validated against the graph" }
-          : { kind: "error", text: result.error },
-      );
+      if (result.ok) {
+        setStatus({ kind: "ok", text: "judgments validated against the graph" });
+        setReport({
+          notesIncluded: result.notesIncluded,
+          validation: (result.validation ?? {}) as ValidationEnvelope,
+        });
+      } else {
+        setStatus({ kind: "error", text: result.error });
+      }
     } finally {
       setRunning(false);
     }
@@ -86,6 +106,38 @@ export const AgentPanel = () => {
           )}
           <span className="min-w-0 break-words">{status.text}</span>
         </p>
+      )}
+      {report && (
+        <div className="space-y-1.5 text-[11px]">
+          {report.notesIncluded > 0 && (
+            <p className="text-muted-foreground">
+              {report.notesIncluded} human note{report.notesIncluded === 1 ? "" : "s"} sent to the
+              agent as context
+            </p>
+          )}
+          {report.validation.stale && (
+            <p className="text-fallow-amber">
+              the tree moved since the guide was fetched; re-run to refresh
+            </p>
+          )}
+          {(report.validation.accepted ?? []).map((j) => (
+            <div
+              key={j.signal_id}
+              className="space-y-0.5 rounded-md border border-border/60 bg-muted/10 p-1.5"
+            >
+              <p className="text-muted-foreground">agent framing (unverified, confirm with author):</p>
+              <p className="text-foreground">{j.agent_framing}</p>
+              {j.concern && <p className="text-muted-foreground">concern: {j.concern}</p>}
+            </div>
+          ))}
+          {(report.validation.rejected ?? []).length > 0 && (
+            <p className="text-fallow-red">
+              {(report.validation.rejected ?? []).length} judgment
+              {(report.validation.rejected ?? []).length === 1 ? "" : "s"} rejected (unanchored or
+              stale)
+            </p>
+          )}
+        </div>
       )}
     </section>
   );
