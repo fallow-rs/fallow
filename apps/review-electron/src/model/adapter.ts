@@ -61,6 +61,9 @@ const toScore = (s: RawScore | undefined): AttentionScore => ({
   total: s?.total ?? 0,
 });
 
+const asString = (v: unknown): string => (typeof v === "string" ? v : "");
+const asNumber = (v: unknown): number => (typeof v === "number" ? v : 0);
+
 const buildCleared = (brief: AuditBrief): ClearedItem[] => {
   const out: ClearedItem[] = [];
   const dead = brief.summary?.dead_code_issues ?? 0;
@@ -171,7 +174,14 @@ export const toWalkthroughDocument = (brief: AuditBrief): WalkthroughDocument =>
     .filter((d) => typeof d["signal_id"] === "string" && (d["signal_id"] as string).length > 0)
     .map((d) => ({
       signalId: d["signal_id"] as string,
-      question: typeof d["question"] === "string" ? (d["question"] as string) : "",
+      category: asString(d["category"]),
+      question: asString(d["question"]),
+      tradeoff: asString(d["tradeoff"]),
+      internalConsumerCount: asNumber(d["internal_consumer_count"]),
+      anchorFile: asString(d["anchor_file"]),
+      anchorLine: asNumber(d["anchor_line"]),
+      expert: Array.isArray(d["expert"]) ? (d["expert"] as unknown[]).filter((e): e is string => typeof e === "string") : [],
+      busFactorOne: d["bus_factor_one"] === true,
       raw: d,
     }));
 

@@ -30,7 +30,29 @@ export type WalkthroughStage = {
 /** A consequential structural decision, anchored to a Fallow `signal_id`. */
 export type Decision = {
   signalId: string;
+  /** One of the SOLID-3 categories (coupling-boundary, public-api-contract, dependency). */
+  category: string;
+  /** The decision framed as a judgment question for the human (taste ownership). */
   question: string;
+  /**
+   * The named structural sacrifice stated as a fact (never a recommendation),
+   * e.g. "Couples app to infra; 4 in-repo modules already depend on this anchor."
+   */
+  tradeoff: string;
+  /**
+   * Honest per-decision count: in-repo modules OUTSIDE the diff that already
+   * depend on this anchor. The DISPLAY number the human reads reversibility from.
+   * Distinct from the ranking proxy (never shown).
+   */
+  internalConsumerCount: number;
+  /** Root-relative anchor file (for the diff deep-link). */
+  anchorFile: string;
+  /** 1-based anchor line (0 = file head). */
+  anchorLine: number;
+  /** Routed expert(s) to ask, from ownership routing. Empty when unavailable. */
+  expert: string[];
+  /** Whether the anchor file's only qualified owner is one person. */
+  busFactorOne: boolean;
   raw: Record<string, unknown>;
 };
 

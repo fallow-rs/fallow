@@ -83,6 +83,36 @@ describe("toWalkthroughDocument", () => {
     expect(doc.decisions[0]?.signalId).toBe("sig-1");
   });
 
+  it("carries the enriched decision fields (honest count + trade-off), not just question", () => {
+    const brief: AuditBrief = {
+      decisions: {
+        decisions: [
+          {
+            signal_id: "sig:abc",
+            category: "public-api-contract",
+            question: "Intended surface, or should it stay internal?",
+            tradeoff: "Adds 1 maintained contract; 4 in-repo modules already consume this surface.",
+            internal_consumer_count: 4,
+            anchor_file: "src/ui/index.ts",
+            anchor_line: 12,
+            expert: ["alice"],
+            bus_factor_one: true,
+            blast: 99,
+          },
+        ],
+      },
+    };
+    const [d] = toWalkthroughDocument(brief).decisions;
+    expect(d?.category).toBe("public-api-contract");
+    expect(d?.tradeoff).toContain("4 in-repo");
+    // The honest display number, not the project-wide ranking proxy (`blast`).
+    expect(d?.internalConsumerCount).toBe(4);
+    expect(d?.anchorFile).toBe("src/ui/index.ts");
+    expect(d?.anchorLine).toBe(12);
+    expect(d?.expert).toEqual(["alice"]);
+    expect(d?.busFactorOne).toBe(true);
+  });
+
   it("builds the cleared panel from summary counts", () => {
     const doc = toWalkthroughDocument(loadFixture());
     expect(doc.cleared.find((c) => c.kind === "dead-code")?.count).toBe(23);

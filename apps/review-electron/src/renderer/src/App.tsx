@@ -149,7 +149,7 @@ export const App = () => {
           {doc ? (
             <>
               <ClearedPanel cleared={doc.cleared} />
-              <DecisionList decisions={doc.decisions} />
+              <DecisionList decisions={doc.decisions} onOpenDiff={onOpenDiff} />
               <StageList
                 stages={doc.stages}
                 isViewed={isViewed}
