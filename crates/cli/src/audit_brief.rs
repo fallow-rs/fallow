@@ -935,12 +935,18 @@ fn print_decision_surface_human(surface: &crate::audit_decision_surface::Decisio
     }
     eprintln!("Decisions to make ({}):", surface.decisions.len());
     for (i, decision) in surface.decisions.iter().enumerate() {
+        // Taste ownership: the question first (never an answer), then the honest
+        // graph fact, then the named trade-off. The human reads reversibility from
+        // the count; the tool never labels the door or recommends a choice.
         eprintln!(
             "  {}. [{}] {}",
             i + 1,
             decision.category.tag(),
             decision.question
         );
+        if !decision.tradeoff.is_empty() {
+            eprintln!("     trade-off: {}", decision.tradeoff);
+        }
         if !decision.expert.is_empty() {
             let bus = if decision.bus_factor_one {
                 " (bus-factor 1)"
