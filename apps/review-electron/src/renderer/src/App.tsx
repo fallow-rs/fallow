@@ -167,7 +167,7 @@ export const App = () => {
     document.body.style.userSelect = "none";
   };
 
-  const load = async (): Promise<void> => {
+  const load = useCallback(async (): Promise<void> => {
     setError(null);
     setLoading(true);
     try {
@@ -177,7 +177,13 @@ export const App = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Auto-load the review once when the app opens; the header button stays as a
+  // manual refresh. No click required to see the decisions/focus/diff.
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const isViewed = useCallback(
     (path: string) => viewedTick >= 0 && readViewed(window.localStorage, path),
@@ -220,9 +226,13 @@ export const App = () => {
             <Telescope className="size-4 text-primary" />
             <h1 className="text-sm font-semibold lowercase">fallow review</h1>
           </div>
-          <Button size="sm" disabled={loading} onClick={() => void load()}>
-            {loading && <Loader2 className="size-3.5 animate-spin" />}
-            {loading ? "reviewing" : "load review"}
+          <Button size="sm" variant="secondary" disabled={loading} onClick={() => void load()}>
+            {loading ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="size-3.5" />
+            )}
+            {loading ? "reviewing" : "refresh"}
           </Button>
         </header>
 
