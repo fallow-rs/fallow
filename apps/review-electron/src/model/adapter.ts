@@ -180,7 +180,9 @@ export const toWalkthroughDocument = (brief: AuditBrief): WalkthroughDocument =>
       internalConsumerCount: asNumber(d["internal_consumer_count"]),
       anchorFile: asString(d["anchor_file"]),
       anchorLine: asNumber(d["anchor_line"]),
-      expert: Array.isArray(d["expert"]) ? (d["expert"] as unknown[]).filter((e): e is string => typeof e === "string") : [],
+      expert: Array.isArray(d["expert"])
+        ? (d["expert"] as unknown[]).filter((e): e is string => typeof e === "string")
+        : [],
       busFactorOne: d["bus_factor_one"] === true,
       raw: d,
     }));

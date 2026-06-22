@@ -125,7 +125,9 @@ export const AgentPanel = () => {
               key={j.signal_id}
               className="space-y-0.5 rounded-md border border-border/60 bg-muted/10 p-1.5"
             >
-              <p className="text-muted-foreground">agent framing (unverified, confirm with author):</p>
+              <p className="text-muted-foreground">
+                agent framing (unverified, confirm with author):
+              </p>
               <p className="text-foreground">{j.agent_framing}</p>
               {j.concern && <p className="text-muted-foreground">concern: {j.concern}</p>}
             </div>
