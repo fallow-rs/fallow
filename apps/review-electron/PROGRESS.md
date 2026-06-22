@@ -297,3 +297,14 @@ layout; current build is the centered state with the clean message.)
   surfaces (13-review-error, 14-shot-error) now screenshot-verified.
   format/lint/tsc/build/vitest (51) /e2e (6) green. Walkthrough + screenshot empty
   re-reviewed: no HIGH/MED.
+- Round 19 (impact-first file ordering, HIGH; user-reported): the sidebar rendered
+  files in the engine's module-grouped `partition.order`, which put low-impact
+  config/e2e/fixtures at the TOP and buried the real hubs (src/main, src/model)
+  lower. Root cause: the engine returns TWO orderings, and the app used the wrong
+  one. `direction.units` IS ranked by impact (inspect.ts budget 12, backends 11,
+  ...), but `partition` (module grouping) is not, and the adapter sorted stages by
+  partition.order. Fixed the adapter to order stages by max attention desc (tie =
+  engine sequence) and files within a stage by attention desc, re-applying the
+  impact ranking the engine already computes. Now src/main leads with
+  inspect.ts/backends.ts on top. New adapter test locks it in. vitest 51,
+  format/lint/tsc/build/e2e (6) green.

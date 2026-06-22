@@ -121,16 +121,27 @@ export const toWalkthroughDocument = (brief: AuditBrief): WalkthroughDocument =>
     const i = order.indexOf(dir);
     return i === -1 ? Number.MAX_SAFE_INTEGER : i;
   };
+  // Highest-blast-radius work first: order stages (and files within a stage) by
+  // Fallow's attention score, descending, so the modules and files that most
+  // need review lead. The engine ranks by impact in `direction.units`; the
+  // module-grouped `partition` it also returns does not, so we re-apply it here.
+  // Ties fall back to the engine's original walkthrough sequence for stability.
   const stages: WalkthroughStage[] = (brief.partition?.units ?? [])
-    .map((unit) => ({ unit, idx: orderIndex(unit.module_dir) }))
-    .toSorted((a, b) => a.idx - b.idx)
-    .map(
-      ({ unit }, i): WalkthroughStage => ({
-        moduleDir: unit.module_dir,
-        order: i,
-        files: (unit.files ?? []).map(fileFor),
-      }),
-    );
+    .map((unit, originalIdx) => {
+      const files = (unit.files ?? [])
+        .map((path, fileIdx) => ({ file: fileFor(path), fileIdx }))
+        .toSorted((a, b) => b.file.attention - a.file.attention || a.fileIdx - b.fileIdx)
+        .map(({ file }) => file);
+      const maxAttention = files.reduce((m, f) => Math.max(m, f.attention), 0);
+      return { moduleDir: unit.module_dir, files, maxAttention, originalIdx };
+    })
+    .toSorted(
+      (a, b) =>
+        b.maxAttention - a.maxAttention ||
+        orderIndex(a.moduleDir) - orderIndex(b.moduleDir) ||
+        a.originalIdx - b.originalIdx,
+    )
+    .map(({ moduleDir, files }, i): WalkthroughStage => ({ moduleDir, order: i, files }));
 
   const decisions: Decision[] = (brief.decisions?.decisions ?? [])
     .filter((d) => typeof d["signal_id"] === "string" && (d["signal_id"] as string).length > 0)

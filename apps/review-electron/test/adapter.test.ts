@@ -19,10 +19,33 @@ describe("toWalkthroughDocument", () => {
     expect(doc.stages.flatMap((s) => s.files).length).toBeGreaterThan(0);
   });
 
-  it("orders stages by partition.order", () => {
-    const doc = toWalkthroughDocument(loadFixture());
-    const orders = doc.stages.map((s) => s.order);
-    expect(orders).toEqual(orders.toSorted((a, b) => a - b));
+  it("orders stages and files by attention, impact-first", () => {
+    const brief: AuditBrief = {
+      partition: {
+        // Engine module sequence lists the low-impact module first.
+        order: ["low", "high"],
+        units: [
+          { module_dir: "low", files: ["low/a.ts", "low/b.ts"] },
+          { module_dir: "high", files: ["high/x.ts", "high/y.ts"] },
+        ],
+      },
+      focus: {
+        review_here: [
+          { file: "low/a.ts", score: { total: 1 } },
+          { file: "low/b.ts", score: { total: 2 } },
+          { file: "high/x.ts", score: { total: 9 } },
+          { file: "high/y.ts", score: { total: 3 } },
+        ],
+      },
+    };
+    const doc = toWalkthroughDocument(brief);
+    // The high-impact module leads despite being second in partition.order.
+    expect(doc.stages.map((s) => s.moduleDir)).toEqual(["high", "low"]);
+    // Files within a stage are sorted by attention, descending.
+    expect(doc.stages[0]?.files.map((f) => f.path)).toEqual(["high/x.ts", "high/y.ts"]);
+    expect(doc.stages[1]?.files.map((f) => f.path)).toEqual(["low/b.ts", "low/a.ts"]);
+    // The display `order` stays a clean 0..n sequence.
+    expect(doc.stages.map((s) => s.order)).toEqual([0, 1]);
   });
 
   it("drops decisions without a signal_id (anti-hallucination)", () => {
