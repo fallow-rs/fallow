@@ -26,7 +26,7 @@ export const DecisionList = ({
           decisions
         </h3>
         <p className="rounded-md border border-dashed border-border bg-muted/10 p-2 text-xs text-muted-foreground">
-          No consequential structural decisions in this change.
+          no consequential structural decisions in this change
         </p>
       </section>
     );
