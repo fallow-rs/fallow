@@ -19,7 +19,7 @@ use fallow_types::extract::{
     RenderEdge,
 };
 
-use super::{ModuleInfoExtractor, PendingComponentArrow};
+use super::{ModuleInfoExtractor, PendingComponentArrow, PendingTypedReactProps};
 
 impl ModuleInfoExtractor {
     /// Pre-scan a variable declaration for named arrow / function-expression
@@ -257,7 +257,7 @@ impl ModuleInfoExtractor {
     ) {
         self.harvest_props_from_params(
             component,
-            params.items.first().map(|p| &p.pattern),
+            params.items.first(),
             params.rest.is_some(),
             body,
         );
@@ -275,35 +275,51 @@ impl ModuleInfoExtractor {
     ) {
         self.harvest_props_from_params(
             component,
-            params.items.first().map(|p| &p.pattern),
+            params.items.first(),
             params.rest.is_some(),
             Some(body),
         );
     }
 
-    /// Harvest props from the first (props) parameter. v1 covers the
-    /// inline-destructured literal form (`{ a, b }`); a bare identifier,
-    /// rest/spread, or absent destructure marks the just-pushed component's props
-    /// unharvestable (abstain, ADR-001). Each harvested prop's `used_in_script`
-    /// is set from a focused resolved-reference pass over the component `body`,
-    /// so the detector flags only props read NOWHERE in their component.
+    /// Harvest props from the first (props) parameter. v1 covers two shapes: the
+    /// inline-destructured literal form (`{ a, b }`), and a bare-identifier param
+    /// carrying a SAME-FILE object-type annotation (`(props: Props) => props.x`,
+    /// resolved in finalize because the interface/type may hoist). A bare
+    /// identifier WITHOUT a resolvable type, a rest/spread, or any other shape
+    /// marks the just-pushed component's props unharvestable (abstain, ADR-001).
+    /// Each harvested prop's `used_in_script` is set from a focused
+    /// resolved-reference pass over the component `body`, so the detector flags
+    /// only props read NOWHERE in their component.
     fn harvest_props_from_params(
         &mut self,
         component: &str,
-        first: Option<&BindingPattern<'_>>,
+        first: Option<&FormalParameter<'_>>,
         has_rest_param: bool,
         body: Option<&FunctionBody<'_>>,
     ) {
-        self.mark_current_component_passthrough(first, body);
+        let pattern = first.map(|p| &p.pattern);
+        self.mark_current_component_passthrough(pattern, body);
 
         if has_rest_param {
             self.mark_current_component_unharvestable();
             return;
         }
-        let Some(pattern) = first else {
+        let Some(param) = first else {
             // Zero-parameter component: no props to harvest, nothing to abstain.
             return;
         };
+        let pattern = &param.pattern;
+        // Bare-identifier typed param (`(props: Props) =>`): try the typed-interface
+        // path before falling back to abstain. A bare identifier WITHOUT a
+        // resolvable same-file object type still abstains (handled in the
+        // attempt's `else`).
+        if let BindingPattern::BindingIdentifier(id) = pattern {
+            if self.try_capture_typed_react_props(component, id.name.as_str(), param, body) {
+                return;
+            }
+            self.mark_current_component_unharvestable();
+            return;
+        }
         let Some(harvested) = harvest_destructured_props(pattern) else {
             self.mark_current_component_unharvestable();
             return;
@@ -330,6 +346,43 @@ impl ModuleInfoExtractor {
         if let Some(component) = self.component_functions.last_mut() {
             component.has_unharvestable_props = true;
         }
+    }
+
+    /// Try to capture a bare-identifier typed props param (`(props: Props) =>`)
+    /// for the typed-interface harvest. Returns `true` when the annotation is a
+    /// bare single-name `TSTypeReference` (the only shape resolvable to a
+    /// same-file `interface`/`type` object literal in v1); the actual prop-name
+    /// set is resolved in finalize because the backing type may be declared after
+    /// the component (type hoisting). Returns `false` for an absent annotation or
+    /// any unresolvable shape (`React.PropsWithChildren<...>`, intersection,
+    /// generic-with-args, qualified `NS.Props`, union), so the caller abstains.
+    ///
+    /// The `props.<name>` member-access usage is computed HERE, against the body
+    /// in hand, and recorded on the pending entry. Whole-object use of the props
+    /// binding (passed to a call/hook, spread, returned, assigned) is detected in
+    /// the same pass and forces abstain at finalize (the prop set is then opaque).
+    fn try_capture_typed_react_props(
+        &mut self,
+        component: &str,
+        props_local: &str,
+        param: &FormalParameter<'_>,
+        body: Option<&FunctionBody<'_>>,
+    ) -> bool {
+        let Some(annotation) = param.type_annotation.as_deref() else {
+            return false;
+        };
+        let Some(type_name) = bare_props_type_name(&annotation.type_annotation) else {
+            return false;
+        };
+        let usage = resolve_typed_props_body_usage(body, props_local);
+        self.pending_typed_react_props.push(PendingTypedReactProps {
+            component: component.to_string(),
+            props_local: props_local.to_string(),
+            type_name,
+            member_uses: usage.member_uses,
+            has_whole_object_use: usage.has_whole_object_use,
+        });
+        true
     }
 
     /// Mark the current component as a pure props passthrough when the props
@@ -369,6 +422,67 @@ impl ModuleInfoExtractor {
                 component: component.to_string(),
                 used_outside_forward,
             });
+        }
+    }
+
+    /// Finalize the deferred typed-interface React prop harvest. Runs in the
+    /// shared finalize phase (after the full walk) so a backing `interface`/`type`
+    /// declared AFTER the component (TypeScript hoists type declarations) is in
+    /// `react_object_type_props`. For each pending bare-identifier typed props
+    /// param: if the type resolves to a same-file plain object type AND the props
+    /// binding is not consumed as a whole object, harvest one `ComponentProp` per
+    /// member (crediting `props.<name>` member-access usage); otherwise the
+    /// component abstains (`has_unharvestable_props`) over guessing (ADR-001).
+    pub(crate) fn resolve_typed_react_props(&mut self) {
+        if self.pending_typed_react_props.is_empty() {
+            return;
+        }
+        let pending = std::mem::take(&mut self.pending_typed_react_props);
+        for entry in pending {
+            let resolvable = !entry.has_whole_object_use
+                && self.react_object_type_props.contains_key(&entry.type_name);
+            if !resolvable {
+                // Imported / unresolvable-shape type, or a whole-object props use:
+                // the prop set is opaque, abstain on the whole component.
+                self.mark_named_component_unharvestable(&entry.component);
+                continue;
+            }
+            // Clone the member list out of the map to avoid borrowing `self` while
+            // pushing onto `self.react_props`.
+            let members = self.react_object_type_props[&entry.type_name].clone();
+            for (name, span_start) in members {
+                let used_in_script = entry.member_uses.contains(&name);
+                self.react_props.push(ComponentProp {
+                    name,
+                    // The harvested prop is read through `props.<name>`, not a
+                    // destructured local; record the props binding as the local so
+                    // the finding anchors on the right component. The detector
+                    // keys usage off `used_in_script` (already computed), not the
+                    // local, so this is purely descriptive.
+                    local: entry.props_local.clone(),
+                    span_start,
+                    used_in_script,
+                    used_in_template: false,
+                    component: entry.component.clone(),
+                    // A typed-interface prop read via `props.<name>` is always a
+                    // substantive consumption (it is not a child-JSX attribute
+                    // forward local), so `used_outside_forward` mirrors
+                    // `used_in_script`. This arm does not feed prop-drilling.
+                    used_outside_forward: used_in_script,
+                });
+            }
+        }
+    }
+
+    /// Mark a component (by name) unharvestable. Used by the finalize-time typed
+    /// props resolution, where the component is no longer the top of the stack.
+    fn mark_named_component_unharvestable(&mut self, component: &str) {
+        if let Some(found) = self
+            .component_functions
+            .iter_mut()
+            .find(|c| c.name == component)
+        {
+            found.has_unharvestable_props = true;
         }
     }
 
@@ -501,6 +615,136 @@ impl<'a> oxc_ast_visit::Visit<'a> for BodyIdentVisitor<'_, '_> {
             oxc_ast_visit::walk::walk_jsx_attribute_value(self, value);
             self.attr_value_depth -= 1;
         }
+    }
+}
+
+/// The bare single-identifier name of a props type annotation, or `None` for any
+/// shape fallow cannot resolve to a same-file object-type declaration in v1: a
+/// generic-with-args (`Props<T>`), a qualified name (`NS.Props`,
+/// `React.PropsWithChildren`), an intersection (`A & B`), a union, an inline
+/// object literal (handled by the destructure path, not here), or a mapped /
+/// index-signature type. A nullable union (`Props | undefined`) reduces to the
+/// single non-null branch name via `extract_type_reference_name`, but a generic
+/// type reference carrying type ARGUMENTS is rejected so `Props<T>` abstains.
+fn bare_props_type_name(ty: &TSType<'_>) -> Option<String> {
+    match ty {
+        TSType::TSTypeReference(type_ref) => {
+            // A bare single identifier with NO type arguments. `Props<T>`,
+            // `Partial<Props>`, `React.PropsWithChildren<P>`, and `NS.Props`
+            // (qualified) all abstain.
+            if type_ref.type_arguments.is_some() {
+                return None;
+            }
+            match &type_ref.type_name {
+                TSTypeName::IdentifierReference(ident) => Some(ident.name.to_string()),
+                // Qualified (`NS.Props`) and `this`-typed annotations are not a
+                // bare same-file declaration name: abstain.
+                TSTypeName::QualifiedName(_) | TSTypeName::ThisExpression(_) => None,
+            }
+        }
+        TSType::TSParenthesizedType(paren) => bare_props_type_name(&paren.type_annotation),
+        _ => None,
+    }
+}
+
+/// Per-component typed-props body usage: which declared prop NAMES are read via
+/// `<props_local>.<name>` member access or a `const { name } = props` destructure
+/// (`member_uses`), and whether the props binding is consumed as a whole object
+/// (`has_whole_object_use`) anywhere it is NOT a static-member object root or a
+/// destructure-from-props init. Whole-object use forces the component to abstain
+/// (the prop set is then opaque, the zero-FP direction).
+struct TypedPropsUsage {
+    member_uses: FxHashSet<String>,
+    has_whole_object_use: bool,
+}
+
+/// Compute the typed-props body usage for a bare-identifier props param. Walks
+/// the component `body`, crediting each `props.<name>` static-member read and
+/// each `const { ... } = props` destructure key as a member use, and flagging a
+/// whole-object use when the props binding is referenced in any OTHER position
+/// (a call/hook argument, a `{...props}` spread, a `return props`, an assignment,
+/// a computed `props[expr]` access). Pure syntactic (ADR-001), over-crediting in
+/// the `member_uses` direction (a name read anywhere suppresses, never creates a
+/// finding) and over-abstaining in the `has_whole_object_use` direction.
+fn resolve_typed_props_body_usage(
+    body: Option<&FunctionBody<'_>>,
+    props_local: &str,
+) -> TypedPropsUsage {
+    let mut usage = TypedPropsUsage {
+        member_uses: FxHashSet::default(),
+        has_whole_object_use: false,
+    };
+    let Some(body) = body else {
+        return usage;
+    };
+    let mut visitor = TypedPropsVisitor {
+        props_local,
+        member_uses: &mut usage.member_uses,
+        total_refs: 0,
+        accounted_refs: 0,
+    };
+    for stmt in &body.statements {
+        oxc_ast_visit::Visit::visit_statement(&mut visitor, stmt);
+    }
+    // Any `props` reference not accounted for as a static-member object root or a
+    // destructure-from-props init is a whole-object consumption (the prop set is
+    // then opaque).
+    usage.has_whole_object_use = visitor.total_refs > visitor.accounted_refs;
+    usage
+}
+
+/// Walks a component body to credit `<props_local>.<name>` member reads and
+/// `const { ... } = <props_local>` destructure keys, while counting total vs
+/// accounted-for `props_local` identifier references so the caller can decide
+/// whole-object use. `visit_identifier_reference` counts EVERY reference;
+/// `visit_static_member_expression` and `visit_variable_declarator` account the
+/// references they consume cleanly and record the member names.
+struct TypedPropsVisitor<'a, 'b> {
+    props_local: &'a str,
+    member_uses: &'b mut FxHashSet<String>,
+    total_refs: u32,
+    accounted_refs: u32,
+}
+
+impl<'a> oxc_ast_visit::Visit<'a> for TypedPropsVisitor<'_, '_> {
+    fn visit_identifier_reference(&mut self, ident: &IdentifierReference<'a>) {
+        if ident.name.as_str() == self.props_local {
+            self.total_refs += 1;
+        }
+    }
+
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        // `props.<name>`: credit the member name and account the `props` object
+        // reference as a clean read, then recurse into the object so a deeper
+        // `props.a.b` still counts its single `props` ref once (accounted here).
+        if let Expression::Identifier(object) = &member.object
+            && object.name.as_str() == self.props_local
+        {
+            self.member_uses.insert(member.property.name.to_string());
+            self.accounted_refs += 1;
+        }
+        oxc_ast_visit::walk::walk_static_member_expression(self, member);
+    }
+
+    fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        // `const { a, b } = props` / `const { a: alias } = props`: credit each
+        // destructured KEY (the prop name, not the alias) and account the `props`
+        // init reference. A rest element (`{ a, ...rest } = props`) makes the set
+        // opaque, so it is NOT accounted and the trailing `props` ref counts as a
+        // whole-object use.
+        if let (BindingPattern::ObjectPattern(pattern), Some(Expression::Identifier(init))) =
+            (&decl.id, &decl.init)
+            && init.name.as_str() == self.props_local
+            && pattern.rest.is_none()
+        {
+            for prop in &pattern.properties {
+                if let Some(key) = prop.key.static_name() {
+                    self.member_uses.insert(key.to_string());
+                }
+            }
+            self.accounted_refs += 1;
+        }
+        oxc_ast_visit::walk::walk_variable_declarator(self, decl);
     }
 }
 

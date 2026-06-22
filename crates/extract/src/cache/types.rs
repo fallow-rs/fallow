@@ -567,7 +567,14 @@ use crate::MemberKind;
 /// Bumped to 185 on merging the agentic-review branch into main: the LLM-call
 /// sink array recursion and the Astro/Lit parity wave land together, so warm
 /// caches from either side (183 or 184) must invalidate.
-pub(super) const CACHE_VERSION: u32 = 185;
+///
+/// Bumped to 186 for the React typed-interface / `props.x` prop harvest: a
+/// component whose first param is a bare identifier typed by a same-file
+/// `interface`/`type` object literal (`(props: Props) => props.x`) now harvests
+/// the interface member names into `react_props` and credits `props.<name>`
+/// member-access usage, where warm caches from 185 recorded the component as
+/// `has_unharvestable_props` with no props.
+pub(super) const CACHE_VERSION: u32 = 186;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -1267,3 +1267,228 @@ fn host_element_child_in_passthrough_is_not_pure() {
         "spread onto a host element must not be pure passthrough",
     );
 }
+
+// ---------------------------------------------------------------------------
+// Feature A: typed-interface + `props.x` harvest shape-parity matrix.
+// Each case is a harvest/credit pairing whose miss would false-positive the
+// already-trusted `unused-component-prop` React arm.
+// ---------------------------------------------------------------------------
+
+fn typed_prop<'a>(
+    info: &'a crate::ModuleInfo,
+    name: &str,
+) -> &'a fallow_types::extract::ComponentProp {
+    info.react_props
+        .iter()
+        .find(|p| p.name == name)
+        .unwrap_or_else(|| {
+            panic!(
+                "expected harvested prop `{name}`, got {:?}",
+                info.react_props
+            )
+        })
+}
+
+#[test]
+fn matrix_a_member_access_credits_prop() {
+    // (a) `(props: Props) => <div>{props.size}</div>` -> `size` used.
+    let info = parse_tsx(
+        "interface Props { size: string }\nexport const App = (props: Props) => <div>{props.size}</div>;",
+    );
+    let prop = typed_prop(&info, "size");
+    assert!(
+        prop.used_in_script,
+        "props.size member access must credit `size` as used",
+    );
+    assert!(!info.component_functions[0].has_unharvestable_props);
+}
+
+#[test]
+fn matrix_b_renamed_destructure_after_credits_prop() {
+    // (b) `const { size: s } = props; s` -> `size` used (the destructure key).
+    let info = parse_tsx(
+        "interface Props { size: string }\nexport const App = (props: Props) => { const { size: s } = props; return <div>{s}</div>; };",
+    );
+    let prop = typed_prop(&info, "size");
+    assert!(
+        prop.used_in_script,
+        "const {{ size: s }} = props destructure must credit `size`",
+    );
+}
+
+#[test]
+fn matrix_c_default_valued_inline_destructure_credits_prop() {
+    // (c) `({ size = 4 }: Props) =>` -> `size` used (the default-read counts).
+    // This goes through the existing inline-destructure path; the type
+    // annotation is incidental.
+    let info = parse_tsx(
+        "interface Props { size: number }\nexport const App = ({ size = 4 }: Props) => <div style={{ width: size }} />;",
+    );
+    let prop = typed_prop(&info, "size");
+    assert_eq!(prop.local, "size");
+    assert!(
+        prop.used_in_script,
+        "default-valued destructure must credit `size`"
+    );
+}
+
+#[test]
+fn matrix_d_rest_after_named_typed_destructure_abstains() {
+    // (d) `({ size, ...rest }: Props)` -> abstain (the existing rest guard).
+    let info = parse_tsx(
+        "interface Props { size: number }\nexport const App = ({ size, ...rest }: Props) => <div {...rest}>{size}</div>;",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "rest after named must abstain",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn matrix_e_props_spread_into_child_abstains() {
+    // (e) `<X {...props}/>` -> whole-object use -> abstain.
+    let info = parse_tsx(
+        "interface Props { size: number }\nexport const App = (props: Props) => <Child {...props} />;",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "spreading props into a child is a whole-object use; must abstain",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn matrix_e_props_passed_to_hook_abstains() {
+    // (e') `useFoo(props)` -> whole-object use -> abstain.
+    let info = parse_tsx(
+        "interface Props { size: number }\nexport const App = (props: Props) => { const v = useFoo(props); return <div>{v}</div>; };",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "passing props to a hook is a whole-object use; must abstain",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn matrix_f_genuinely_unused_typed_prop_is_harvested_unused() {
+    // (f) `(props: Props) => <div/>` with `Props { size }` and no `props.size`
+    // -> `size` harvested, used_in_script=false (the new TP this unlocks).
+    let info = parse_tsx(
+        "interface Props { size: number }\nexport const App = (props: Props) => <div />;",
+    );
+    let prop = typed_prop(&info, "size");
+    assert!(
+        !prop.used_in_script,
+        "a typed prop read nowhere must be harvested with used_in_script=false",
+    );
+    assert!(!info.component_functions[0].has_unharvestable_props);
+}
+
+#[test]
+fn matrix_g_imported_interface_abstains() {
+    // (g) `import { Props } from './types'; (props: Props) =>` -> abstain
+    // (same-file-only v1; the type is not in `react_object_type_props`).
+    let info = parse_tsx(
+        "import { Props } from './types';\nexport const App = (props: Props) => <div>{props.size}</div>;",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "an imported props interface must abstain in v1",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn type_alias_object_literal_backs_typed_props() {
+    // `type Props = { a; b }` object literal resolves the same as an interface.
+    let info = parse_tsx(
+        "type Props = { a: string; b: number };\nexport const App = (props: Props) => <div>{props.a}</div>;",
+    );
+    assert!(typed_prop(&info, "a").used_in_script);
+    assert!(!typed_prop(&info, "b").used_in_script);
+}
+
+#[test]
+fn typed_interface_hoists_after_component() {
+    // The backing interface declared AFTER the component must still resolve
+    // (finalize phase), because TypeScript hoists type declarations.
+    let info = parse_tsx(
+        "export const App = (props: Props) => <div>{props.size}</div>;\ninterface Props { size: string }",
+    );
+    assert!(typed_prop(&info, "size").used_in_script);
+    assert!(!info.component_functions[0].has_unharvestable_props);
+}
+
+#[test]
+fn interface_extends_abstains() {
+    // `interface Props extends Base` cannot expand the parent members; abstain.
+    let info = parse_tsx(
+        "interface Base { x: number }\ninterface Props extends Base { size: string }\nexport const App = (props: Props) => <div>{props.size}</div>;",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "interface extends must abstain (cannot expand parent members)",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn generic_props_type_abstains() {
+    // `Props<T>` generic-with-args cannot be substituted; abstain.
+    let info = parse_tsx(
+        "interface Props<T> { value: T }\nexport const App = (props: Props<string>) => <div>{props.value}</div>;",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "a generic props type reference with args must abstain",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn props_with_children_wrapper_abstains() {
+    // `React.PropsWithChildren<P>` is a qualified-name generic wrapper; abstain.
+    let info = parse_tsx(
+        "interface Own { size: number }\nexport const App = (props: React.PropsWithChildren<Own>) => <div>{props.size}</div>;",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "a React.PropsWithChildren wrapper must abstain",
+    );
+    assert!(info.react_props.is_empty());
+}
+
+#[test]
+fn function_declaration_typed_props_are_harvested() {
+    // The typed-props path also fires for `function Foo(props: Props)`.
+    let info = parse_tsx(
+        "interface Props { size: number }\nexport function App(props: Props) { return <div>{props.size}</div>; }",
+    );
+    assert!(typed_prop(&info, "size").used_in_script);
+}
+
+#[test]
+fn props_returned_whole_object_abstains() {
+    // Returning the props binding itself is a whole-object use; abstain.
+    let info = parse_tsx(
+        "interface Props { size: number }\nexport const App = (props: Props) => { doSomething(props); return <div>{props.size}</div>; };",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "passing props to a function call must abstain (whole-object use)",
+    );
+}
+
+#[test]
+fn computed_member_access_on_props_abstains() {
+    // `props[key]` is opaque (the member name is unknowable); abstain.
+    let info = parse_tsx(
+        "interface Props { size: number }\nexport const App = (props: Props) => <div>{props[key]}</div>;",
+    );
+    assert!(
+        info.component_functions[0].has_unharvestable_props,
+        "computed member access on props must abstain",
+    );
+}

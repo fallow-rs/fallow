@@ -344,6 +344,23 @@ pub(crate) struct ModuleInfoExtractor {
     /// `visit_function` to push the component stack with the binding name. Working
     /// state only (not persisted, not merged across SFC blocks).
     pub(crate) pending_component_arrows: FxHashMap<Span, PendingComponentArrow>,
+    /// Same-file object-type declarations eligible to back a React component's
+    /// bare-identifier typed props param (`(props: Props) => ...`). Maps the
+    /// type/interface name to its `(prop_name, span_start)` members, populated
+    /// ONLY for a plain object shape: an `interface X { ... }` with no `extends`
+    /// and no type parameters, or a `type X = { ... }` whose annotation is a bare
+    /// object type literal with no type parameters. An `extends` / intersection /
+    /// generic / mapped / imported type never enters this map, so a pending typed
+    /// props harvest that misses it abstains (ADR-001, zero-FP). Working state,
+    /// not persisted.
+    pub(crate) react_object_type_props: FxHashMap<String, Vec<(String, u32)>>,
+    /// React components whose first param is a bare identifier with a
+    /// same-file-resolvable object-type annotation, deferred to finalize because
+    /// the backing interface/type may hoist (be declared after the component).
+    /// The `props.<name>` member-access usage is computed at capture time (the
+    /// body is in hand then); the prop-name SET is resolved in finalize against
+    /// `react_object_type_props`. Working state, not persisted.
+    pub(crate) pending_typed_react_props: Vec<PendingTypedReactProps>,
     /// Angular component/directive inputs harvested from Angular-decorated
     /// classes (`@Input()` decorators and signal `input()` / `model()`
     /// initializers). Accumulated across every Angular class in the module and
@@ -409,6 +426,30 @@ pub(crate) struct PendingComponentArrow {
     pub(crate) kind: fallow_types::extract::ComponentFunctionKind,
     /// Whether the binding is exported.
     pub(crate) is_exported: bool,
+}
+
+/// A React component whose first param is a bare identifier carrying a
+/// same-file object-type annotation (`(props: Props) => ...`). Captured during
+/// the body walk so `props.<name>` member-access usage is recorded against the
+/// props local while the body is in hand; the prop-name set is resolved in
+/// finalize because the backing interface/type may be declared after the
+/// component (TypeScript hoists type declarations).
+#[derive(Debug, Clone)]
+pub(crate) struct PendingTypedReactProps {
+    /// The enclosing component name (`ComponentProp.component`).
+    pub(crate) component: String,
+    /// The bare-identifier props parameter local (e.g. `props`).
+    pub(crate) props_local: String,
+    /// The annotation type name to resolve against `react_object_type_props`.
+    pub(crate) type_name: String,
+    /// Prop names read via `<props_local>.<name>` member access (or via a
+    /// `const { name } = props` destructure local) anywhere in the body. A name
+    /// in this set is credited `used_in_script = true`.
+    pub(crate) member_uses: FxHashSet<String>,
+    /// `true` when the props binding is consumed as a whole object (passed to a
+    /// call/hook, spread, returned, or assigned). The prop set is then opaque, so
+    /// the whole component abstains (`has_unharvestable_props`).
+    pub(crate) has_whole_object_use: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1084,6 +1125,7 @@ impl ModuleInfoExtractor {
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
+        self.resolve_typed_react_props();
         self.collect_namespace_object_aliases()
     }
 

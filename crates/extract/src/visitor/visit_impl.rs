@@ -2922,6 +2922,14 @@ impl ModuleInfoExtractor {
                 self.interface_property_types
                     .insert(alias.id.name.to_string(), properties);
             }
+            // React props harvest (Feature A): a `type X = { a; b }` whose
+            // annotation is a plain object literal with NO type parameters can
+            // back a `(props: X) => props.a` component. A generic alias
+            // (`type X<T> = ...`) is left out (fallow cannot substitute T), so
+            // such a typed param abstains.
+            if alias.type_parameters.is_none() {
+                self.record_react_object_type_props(&alias.id.name, &type_lit.members);
+            }
         }
     }
 
@@ -2934,6 +2942,38 @@ impl ModuleInfoExtractor {
         if !properties.is_empty() {
             self.interface_property_types
                 .insert(iface.id.name.to_string(), properties);
+        }
+        // React props harvest (Feature A): a plain `interface X { a; b }` with no
+        // `extends` heritage and no type parameters can back a
+        // `(props: X) => props.a` component. An `interface X extends Y` or a
+        // generic `interface X<T>` is excluded (fallow cannot expand the parent
+        // members / substitute T), so such a typed param abstains.
+        if iface.extends.is_empty() && iface.type_parameters.is_none() {
+            self.record_react_object_type_props(&iface.id.name, &iface.body.body);
+        }
+    }
+
+    /// Record the `(prop_name, span_start)` members of a plain object-type
+    /// declaration so a React component typed by it (`(props: X) => ...`) can
+    /// harvest the names in finalize. Only static identifier / string keys with a
+    /// property signature contribute; an index signature, method signature, call
+    /// signature, computed key, or spread is NOT a named prop and is skipped (its
+    /// presence does not abstain the others, mirroring the destructure harvest's
+    /// per-property tolerance).
+    fn record_react_object_type_props(&mut self, type_name: &str, members: &[TSSignature<'_>]) {
+        let mut props: Vec<(String, u32)> = Vec::new();
+        for member in members {
+            let TSSignature::TSPropertySignature(prop) = member else {
+                continue;
+            };
+            let Some(property_name) = prop.key.static_name() else {
+                continue;
+            };
+            props.push((property_name.to_string(), prop.span.start));
+        }
+        if !props.is_empty() {
+            self.react_object_type_props
+                .insert(type_name.to_string(), props);
         }
     }
 

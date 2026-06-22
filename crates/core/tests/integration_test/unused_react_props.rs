@@ -63,11 +63,26 @@ fn flags_unused_react_prop_and_abstains_on_every_ladder_case() {
         "a prop read in a JSX expression must not be flagged: {flagged:?}"
     );
 
-    // The ONLY finding is the single true positive (zero false positives).
+    // Feature A: a NON-exported component typed by a SAME-FILE `interface` object
+    // literal harvests its member names. `typedDead` (read nowhere via
+    // `props.typedDead`) is the new true positive the typed-interface harvest
+    // unlocks, attributed to the right component.
+    assert!(
+        flagged.contains(&("TypedInner", "typedDead")),
+        "a typed-interface prop read nowhere should be flagged: {flagged:?}"
+    );
+
+    // Feature A: `props.size` member access credits `size` (not flagged).
+    assert!(
+        !flagged.iter().any(|(_, prop)| *prop == "size"),
+        "a typed prop read via props.size must not be flagged: {flagged:?}"
+    );
+
+    // The ONLY findings are the two true positives (zero false positives).
     assert_eq!(
         flagged.len(),
-        1,
-        "exactly one React prop finding expected (zero FP): {flagged:?}"
+        2,
+        "exactly two React prop findings expected (zero FP): {flagged:?}"
     );
 }
 
