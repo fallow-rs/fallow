@@ -41,7 +41,10 @@ describe("readReviewContext", () => {
     expect(ctx?.summary).toBe("refactored getUser");
     expect(ctx?.author).toBe("claude-code");
     expect(ctx?.items).toHaveLength(2);
-    expect(ctx?.items[0]).toEqual({ anchor: "src/users.ts:1", note: "unbounded cache, no invalidation" });
+    expect(ctx?.items[0]).toEqual({
+      anchor: "src/users.ts:1",
+      note: "unbounded cache, no invalidation",
+    });
     expect(ctx?.items[1]?.anchor).toBe("");
   });
 

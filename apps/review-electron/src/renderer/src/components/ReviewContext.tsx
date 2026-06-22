@@ -1,5 +1,8 @@
 import { NotebookPen } from "lucide-react";
-import type { ReviewContext as ReviewContextData, ReviewContextItem } from "../../../model/reviewContext";
+import type {
+  ReviewContext as ReviewContextData,
+  ReviewContextItem,
+} from "../../../model/reviewContext";
 import { shortAnchor } from "@/lib/anchor";
 
 /**
@@ -50,11 +53,7 @@ export const ReviewContext = ({
       <div className="space-y-2 text-sm leading-relaxed text-foreground">
         {context.summary && <p>{context.summary}</p>}
         {context.items.map((item, i) => (
-          <ReviewContextParagraph
-            key={`${item.anchor}:${i}`}
-            item={item}
-            onOpenDiff={onOpenDiff}
-          />
+          <ReviewContextParagraph key={`${item.anchor}:${i}`} item={item} onOpenDiff={onOpenDiff} />
         ))}
       </div>
 

@@ -64,7 +64,9 @@ ipcMain.handle("review:get", async (_event, root: string | undefined) => {
   latestDoc = await runReview(root ?? reviewRoot());
   return latestDoc;
 });
-ipcMain.handle("review:guide", (_event, root: string | undefined) => runGuide(root ?? reviewRoot()));
+ipcMain.handle("review:guide", (_event, root: string | undefined) =>
+  runGuide(root ?? reviewRoot()),
+);
 ipcMain.handle("feed:append", (_event, item: FeedItem) => appendFeedItem(reviewRoot(), item));
 ipcMain.handle("framing:captured", () => readCapturedFraming(reviewRoot()));
 ipcMain.handle("review:validate", (_event, hash: string, items: FeedItem[]) =>
