@@ -15,7 +15,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import type { WalkthroughDocument } from "../../model/walkthrough";
-import type { ValidationEnvelope } from "../../model/agent";
+import type { InlineFraming, ValidationEnvelope } from "../../model/agent";
 import type { InspectorCard as InspectorCardData } from "../../main/inspect";
 import { acceptedReconstructedFraming, groupBySignalId } from "./lib/agentFraming";
 import { ReviewFocus } from "./components/ReviewFocus";
@@ -65,16 +65,31 @@ export const App = () => {
   // AgentPanel (run controls + summary) and DecisionList (inline framing) read
   // the same result. null = no run yet / cleared.
   const [agentValidation, setAgentValidation] = useState<ValidationEnvelope | null>(null);
+  // Author-captured framing (fact-ish, write-time), already origin-tagged + graph
+  // validated in the main process. Empty when no captured source exists; we never
+  // fabricate it, so the UI then shows only reconstructed (or nothing).
+  const [capturedFraming, setCapturedFraming] = useState<InlineFraming[]>([]);
 
   useEffect(() => {
     window.fallow.onInspectSelection(setCard);
   }, []);
 
-  // Group all inline framing by signal_id for per-decision rendering. Today this
-  // is reconstructed (agent-run) framing only; captured framing merges in later.
+  // Fetch author-captured framing once on load; honest empty when absent.
+  useEffect(() => {
+    void window.fallow
+      .getCapturedFraming()
+      .then(setCapturedFraming)
+      .catch(() => setCapturedFraming([]));
+  }, []);
+
+  // Group ALL inline framing by signal_id for per-decision rendering: captured
+  // (write-time, fact-ish) first, then reconstructed (agent-run, confirm with
+  // author). Origin is tagged at each source, never inferred here, so the two are
+  // never conflated. DecisionList fences both and labels them distinctly.
   const framingBySignal = useMemo(
-    () => groupBySignalId(acceptedReconstructedFraming(agentValidation)),
-    [agentValidation],
+    () =>
+      groupBySignalId([...capturedFraming, ...acceptedReconstructedFraming(agentValidation)]),
+    [capturedFraming, agentValidation],
   );
 
   useEffect(() => {

@@ -5,6 +5,7 @@ import { electronApp, optimizer } from "@electron-toolkit/utils";
 import { loadConfig, configPath } from "./config";
 import { runReview, runGuide, validateWalkthrough } from "./review";
 import { appendFeedItem } from "./feed";
+import { readCapturedFraming } from "./capturedFraming";
 import { buildAgentWalkthrough } from "./agentWalkthrough";
 import { captureUrl } from "./capture";
 import { saveAnnotatedShot, type SaveAnnotation } from "./shots";
@@ -59,6 +60,7 @@ ipcMain.handle("review:get", async (_event, root: string | undefined) => {
 });
 ipcMain.handle("review:guide", (_event, root: string | undefined) => runGuide(root));
 ipcMain.handle("feed:append", (_event, item: FeedItem) => appendFeedItem(process.cwd(), item));
+ipcMain.handle("framing:captured", () => readCapturedFraming(process.cwd()));
 ipcMain.handle("review:validate", (_event, hash: string, items: FeedItem[]) =>
   validateWalkthrough(buildAgentWalkthrough(hash, items)),
 );

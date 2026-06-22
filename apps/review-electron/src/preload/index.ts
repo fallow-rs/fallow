@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { WalkthroughDocument } from "../model/walkthrough";
-import type { FeedItem, Guide } from "../model/agent";
+import type { FeedItem, Guide, InlineFraming } from "../model/agent";
 import type { Capture } from "../main/capture";
 import type { SaveAnnotation } from "../main/shots";
 import type { InspectorCard } from "../main/inspect";
@@ -14,6 +14,7 @@ const api = {
     ipcRenderer.invoke("review:get", root),
   getGuide: (root?: string): Promise<Guide> => ipcRenderer.invoke("review:guide", root),
   appendFeed: (item: FeedItem): Promise<void> => ipcRenderer.invoke("feed:append", item),
+  getCapturedFraming: (): Promise<InlineFraming[]> => ipcRenderer.invoke("framing:captured"),
   validate: (hash: string, items: FeedItem[]): Promise<unknown> =>
     ipcRenderer.invoke("review:validate", hash, items),
   capture: (url: string): Promise<Capture> => ipcRenderer.invoke("shot:capture", url),
