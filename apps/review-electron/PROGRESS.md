@@ -397,3 +397,23 @@ layout; current build is the centered state with the clean message.)
   issues; only remaining nit (live/screenshot "go" refresh icon) is LOW. No code
   changes this pass. One more clean pass confirms the stop condition. (Note: each
   user feature request resets this count, which is expected and fine.)
+- Round 31 (review-error coherence): the review-failed state contradicted itself.
+  The left column showed "review failed" + the binary error + retry, while the
+  right diff pane simultaneously rendered DiffView's "no changes to review / this
+  review has no file changes" success-empty-state (DiffView ran with a null doc and
+  empty base). The AgentPanel also rendered above the error, leaving a detached
+  error floating mid-column with a dead gap. Fix: a DiffPlaceholder for the no-doc
+  right pane (muted, neutral: "no diff to show / the review didn't load" on error,
+  "preparing the diff…" while loading, "load a review to see the diff" when idle),
+  so the right pane never claims success next to a failure; and gated AgentPanel
+  behind {doc && ...} (an agent review is meaningless without a loaded review), so
+  the error becomes the clean dominant state. Side benefit: the loading state is now
+  coherent (both panes show a spinner). Verified via shots.e2e -g "review error".
+  The change shipped folded into the parallel trade-off commit (ae8210bac9a, same
+  App.tsx). format/lint/tsc/build/e2e green.
+- CLEAN PASS 1/2 (post review-error fix + trade-off feature): harsh full-screen
+  recapture of every surface (walkthrough, all-files + single-file diff w/ syntax
+  highlighting, decisions + new trade-offs surface, screenshot/annotate, live +
+  error, inspector, focus, loading, cleared, collapsed, review-error). No HIGH/MED
+  visual issues. Round 31 fixed a HIGH issue so the prior count reset; this is the
+  first clean pass after it. One more clean pass confirms the stop condition.
