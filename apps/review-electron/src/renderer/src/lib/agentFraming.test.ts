@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ValidationEnvelope } from "../../../model/agent";
-import {
-  acceptedReconstructedFraming,
-  groupBySignalId,
-  toInlineFraming,
-} from "./agentFraming";
+import { acceptedReconstructedFraming, groupBySignalId, toInlineFraming } from "./agentFraming";
 
 describe("toInlineFraming", () => {
   it("tags origin from the source and pins deterministic false", () => {

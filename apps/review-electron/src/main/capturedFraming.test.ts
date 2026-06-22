@@ -24,7 +24,11 @@ describe("readCapturedLines", () => {
       [
         JSON.stringify({ signal_id: "sig:a", framing: "is this coupling intended?" }),
         "not json at all",
-        JSON.stringify({ signal_id: "sig:b", framing: "new public export", concern: "leaks infra" }),
+        JSON.stringify({
+          signal_id: "sig:b",
+          framing: "new public export",
+          concern: "leaks infra",
+        }),
         "",
       ].join("\n"),
     );

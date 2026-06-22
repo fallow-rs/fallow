@@ -87,8 +87,7 @@ export const App = () => {
   // author). Origin is tagged at each source, never inferred here, so the two are
   // never conflated. DecisionList fences both and labels them distinctly.
   const framingBySignal = useMemo(
-    () =>
-      groupBySignalId([...capturedFraming, ...acceptedReconstructedFraming(agentValidation)]),
+    () => groupBySignalId([...capturedFraming, ...acceptedReconstructedFraming(agentValidation)]),
     [capturedFraming, agentValidation],
   );
 

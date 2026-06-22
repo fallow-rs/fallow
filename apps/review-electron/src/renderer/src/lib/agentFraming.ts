@@ -42,8 +42,7 @@ export const toInlineFraming = (
  */
 export const acceptedReconstructedFraming = (
   envelope: ValidationEnvelope | null | undefined,
-): InlineFraming[] =>
-  (envelope?.accepted ?? []).map((j) => toInlineFraming(j, "reconstructed"));
+): InlineFraming[] => (envelope?.accepted ?? []).map((j) => toInlineFraming(j, "reconstructed"));
 
 /**
  * Group inline framing by `signalId` for per-decision rendering. Insertion order

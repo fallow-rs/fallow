@@ -142,7 +142,8 @@ const RunSummary = ({ report }: { report: AgentReport }) => {
       )}
       {rejected.length > 0 && (
         <p className="text-fallow-red">
-          {rejected.length} judgment{rejected.length === 1 ? "" : "s"} rejected (unanchored or stale)
+          {rejected.length} judgment{rejected.length === 1 ? "" : "s"} rejected (unanchored or
+          stale)
         </p>
       )}
     </div>
