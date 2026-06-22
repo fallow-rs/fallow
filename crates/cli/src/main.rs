@@ -2987,13 +2987,16 @@ fn record_run_epilogue(
     parent_run: Option<&str>,
 ) -> ExitCode {
     let cache_notice_printed = cache_notice::maybe_print_created_notice();
+    let effective_failure_reason = failure_reason
+        .or_else(telemetry::noted_failure_reason)
+        .or_else(|| fallback_failure_reason_for(&run, exit_code));
     telemetry::record_workflow(&telemetry::WorkflowRecord {
         workflow: run.workflow,
         output: run.output,
         quiet: run.quiet,
         elapsed: run.start.elapsed(),
         exit_code,
-        failure_reason,
+        failure_reason: effective_failure_reason,
         parent_run,
         context: run.context,
     });
@@ -3002,6 +3005,39 @@ fn record_run_epilogue(
         update_check::maybe_nudge(run.output, run.quiet, note_printed || cache_notice_printed);
     }
     exit_code
+}
+
+fn fallback_failure_reason_for(
+    run: &TelemetryRun,
+    exit_code: ExitCode,
+) -> Option<telemetry::FailureReason> {
+    if matches!(exit_code, ExitCode::SUCCESS) || exit_code == ExitCode::from(1) {
+        return None;
+    }
+    if exit_code == ExitCode::from(api::NETWORK_EXIT_CODE) {
+        return Some(telemetry::FailureReason::Network);
+    }
+    if exit_code == ExitCode::from(12) {
+        return Some(telemetry::FailureReason::Auth);
+    }
+    if matches!(
+        run.context.analysis_mode,
+        telemetry::AnalysisMode::ProductionCoverage
+    ) && exit_code == ExitCode::from(3)
+    {
+        return Some(telemetry::FailureReason::Auth);
+    }
+    if matches!(
+        run.context.analysis_mode,
+        telemetry::AnalysisMode::Static
+            | telemetry::AnalysisMode::Security
+            | telemetry::AnalysisMode::Fix
+            | telemetry::AnalysisMode::RuntimeCoverage
+            | telemetry::AnalysisMode::ProductionCoverage
+    ) {
+        return Some(telemetry::FailureReason::Analysis);
+    }
+    Some(telemetry::FailureReason::Unknown)
 }
 
 fn start_telemetry_run(cli: &Cli, fmt: &FormatConfig) -> TelemetryRun {
@@ -6126,6 +6162,52 @@ mod tests {
     fn emit_error_returns_given_exit_code() {
         let code = emit_error("test error", 2, fallow_config::OutputFormat::Human);
         assert_eq!(code, ExitCode::from(2));
+    }
+
+    fn telemetry_run_for_mode(mode: telemetry::AnalysisMode) -> TelemetryRun {
+        TelemetryRun {
+            workflow: telemetry::Workflow::Health,
+            output: fallow_config::OutputFormat::Json,
+            quiet: true,
+            start: std::time::Instant::now(),
+            context: telemetry::WorkflowContext {
+                run_scope: telemetry::RunScope::FullProject,
+                config_shape: telemetry::ConfigShape::Default,
+                output_destination: telemetry::OutputDestination::Stdout,
+                analysis_mode: mode,
+            },
+        }
+    }
+
+    #[test]
+    fn fallback_failure_reason_skips_success_and_findings() {
+        let run = telemetry_run_for_mode(telemetry::AnalysisMode::Static);
+
+        assert_eq!(fallback_failure_reason_for(&run, ExitCode::SUCCESS), None);
+        assert_eq!(fallback_failure_reason_for(&run, ExitCode::from(1)), None);
+    }
+
+    #[test]
+    fn fallback_failure_reason_classifies_network_auth_and_analysis() {
+        let static_run = telemetry_run_for_mode(telemetry::AnalysisMode::Static);
+        let cloud_run = telemetry_run_for_mode(telemetry::AnalysisMode::ProductionCoverage);
+
+        assert_eq!(
+            fallback_failure_reason_for(&static_run, ExitCode::from(api::NETWORK_EXIT_CODE)),
+            Some(telemetry::FailureReason::Network),
+        );
+        assert_eq!(
+            fallback_failure_reason_for(&static_run, ExitCode::from(12)),
+            Some(telemetry::FailureReason::Auth),
+        );
+        assert_eq!(
+            fallback_failure_reason_for(&cloud_run, ExitCode::from(3)),
+            Some(telemetry::FailureReason::Auth),
+        );
+        assert_eq!(
+            fallback_failure_reason_for(&static_run, ExitCode::from(2)),
+            Some(telemetry::FailureReason::Analysis),
+        );
     }
 
     #[test]

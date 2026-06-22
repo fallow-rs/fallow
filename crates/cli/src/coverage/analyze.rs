@@ -319,6 +319,20 @@ fn take_last_two_segments(path: &str) -> Option<String> {
 }
 
 fn emit_cloud_error(err: &CloudError, output: OutputFormat) -> ExitCode {
+    match err {
+        CloudError::Auth(_) | CloudError::TierRequired(_) => {
+            crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Auth);
+        }
+        CloudError::Network(_) | CloudError::Server(_) => {
+            crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Network);
+        }
+        CloudError::Validation(_) => {
+            crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Validation);
+        }
+        CloudError::NotFound(_) => {
+            crate::telemetry::note_failure_reason(crate::telemetry::FailureReason::Config);
+        }
+    }
     emit_error(err.message(), err.exit_code(), output)
 }
 

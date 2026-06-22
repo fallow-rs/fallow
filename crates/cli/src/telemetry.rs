@@ -364,6 +364,11 @@ fn failure_reason() -> Option<FailureReason> {
     failure_reason_from_state(FAILURE_REASON.load(Ordering::Relaxed))
 }
 
+/// Return the failure reason recorded by lower-level code, if any.
+pub fn noted_failure_reason() -> Option<FailureReason> {
+    failure_reason()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum ResultCountBucket {
     #[serde(rename = "0")]

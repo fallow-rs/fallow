@@ -213,6 +213,7 @@ fn inspect_event_output(
         .env_remove("FALLOW_AGENT_SOURCE")
         .env_remove("FALLOW_INTEGRATION_SURFACE")
         .env_remove("FALLOW_MCP_TOOL")
+        .env_remove("FALLOW_API_KEY")
         .env("FALLOW_TELEMETRY", "inspect")
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join(".config"))
@@ -783,10 +784,41 @@ fn health_coverage_flag_reports_runtime_coverage_mode_without_path() {
     );
     assert_eq!(event["workflow"].as_str(), Some("health"));
     assert_eq!(event["analysis_mode"].as_str(), Some("runtime_coverage"));
+    assert_eq!(event["failure_reason"].as_str(), Some("analysis"));
     assert!(
         !event.to_string().contains("missing-coverage.json"),
         "telemetry event must not include raw coverage paths"
     );
+}
+
+#[test]
+fn cloud_runtime_missing_api_key_sets_auth_failure_reason() {
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "coverage",
+            "analyze",
+            "--cloud",
+            "--repo",
+            "owner/repo",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 3,
+        "missing API key should fail before network: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("runtime_coverage_setup"));
+    assert_eq!(event["analysis_mode"].as_str(), Some("production_coverage"));
+    assert_eq!(event["failure_reason"].as_str(), Some("auth"));
 }
 
 #[test]
