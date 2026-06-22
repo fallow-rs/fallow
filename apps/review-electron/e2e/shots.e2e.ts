@@ -1,4 +1,5 @@
 import { test, _electron as electron, type ElectronApplication } from "@playwright/test";
+import { chmodSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const appDir = resolve(__dirname, "..");
@@ -158,6 +159,27 @@ test("capture the review error state", async () => {
     await win.getByRole("button", { name: "Load review" }).click();
     await win.getByTestId("review-error").waitFor({ timeout: 30_000 });
     await win.screenshot({ path: `${shots}/13-review-error.png` });
+  });
+  await app.close();
+});
+
+// Fixture-backed: point FALLOW_BIN at a stub that emits the with-decisions
+// brief, so the (otherwise all-additions) review renders the decision surface.
+test("capture the decision surface", async () => {
+  const fixture = resolve(appDir, "fixtures", "sample-review-with-decisions.json");
+  const stub = "/tmp/fre-fallow-stub.sh";
+  writeFileSync(stub, `#!/bin/sh\ncat ${JSON.stringify(fixture)}\n`);
+  chmodSync(stub, 0o755);
+  const app: ElectronApplication = await electron.launch({
+    args: [resolve(appDir, "out", "main", "index.js")],
+    cwd: worktreeRoot,
+    env: { ...process.env, FALLOW_BIN: stub } as Record<string, string>,
+  });
+  const win = await app.firstWindow();
+  await safe(async () => {
+    await win.getByRole("button", { name: "Load review" }).click();
+    await win.getByTestId("review-loaded").waitFor({ timeout: 60_000 });
+    await win.screenshot({ path: `${shots}/17-decisions.png` });
   });
   await app.close();
 });
