@@ -391,3 +391,9 @@ layout; current build is the centered state with the clean message.)
   it has any old line numbers (context/deletions); new files now show a single
   line-number column at the left (GitHub's new-file layout), modified files keep
   both. format/lint/tsc/build/vitest (54) /e2e (6) green.
+- CLEAN PASS 1/2 (post feature work): harsh full-screen review of all captured
+  states (walkthrough/all-files diff, single-file diff, screenshot/annotate, live
+  + error, inspector, focus, loading, cleared, collapsed). No HIGH/MED visual
+  issues; only remaining nit (live/screenshot "go" refresh icon) is LOW. No code
+  changes this pass. One more clean pass confirms the stop condition. (Note: each
+  user feature request resets this count, which is expected and fine.)
