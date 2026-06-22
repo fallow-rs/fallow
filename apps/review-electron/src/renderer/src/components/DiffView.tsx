@@ -34,7 +34,7 @@ const Code = ({ text }: { text: string }) => (
   </code>
 );
 
-const Row = ({ row }: { row: DiffRow }) => (
+const Row = ({ row, showOld }: { row: DiffRow; showOld: boolean }) => (
   <div
     className={cn(
       "flex border-l-2 border-transparent hover:bg-muted/30",
@@ -42,7 +42,7 @@ const Row = ({ row }: { row: DiffRow }) => (
       row.kind === "del" && "border-fallow-red/70 bg-fallow-red/10",
     )}
   >
-    <span className={gutter}>{row.oldNo ?? ""}</span>
+    {showOld && <span className={gutter}>{row.oldNo ?? ""}</span>}
     <span className={gutter}>{row.newNo ?? ""}</span>
     <span
       className={cn(
@@ -61,6 +61,9 @@ const Row = ({ row }: { row: DiffRow }) => (
 /** One file's diff: a sticky path/stats header followed by its hunks. */
 const FileSection = ({ section }: { section: FileDiffSection }) => {
   const stats = diffStats(section.hunks);
+  // New files are all-additions: drop the always-empty old-line gutter so the
+  // line numbers sit at the left, like GitHub. Modified files keep both columns.
+  const showOld = section.hunks.some((h) => h.rows.some((r) => r.oldNo !== null));
   return (
     <div>
       <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-muted px-3 py-1.5">
@@ -84,7 +87,7 @@ const FileSection = ({ section }: { section: FileDiffSection }) => {
               )}
             </div>
             {hunk.rows.map((row, j) => (
-              <Row key={j} row={row} />
+              <Row key={j} row={row} showOld={showOld} />
             ))}
           </div>
         ))

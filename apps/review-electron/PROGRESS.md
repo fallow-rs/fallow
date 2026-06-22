@@ -385,3 +385,9 @@ layout; current build is the centered state with the clean message.)
   so it reads as a section title and clearly separates files (and sits above the
   bg-muted/40 hunk headers in hierarchy). Single-file header matches. Added a
   diff-scroll testid + 16-diff-all boundary capture. format/lint/tsc/build/e2e (6) green.
+- Round 30 (drop the empty old-line gutter for new files): all-additions files
+  (most of this review) rendered an always-blank old-line gutter, a ~48px dead
+  column left of the line numbers. Render the old gutter per file section only when
+  it has any old line numbers (context/deletions); new files now show a single
+  line-number column at the left (GitHub's new-file layout), modified files keep
+  both. format/lint/tsc/build/vitest (54) /e2e (6) green.
