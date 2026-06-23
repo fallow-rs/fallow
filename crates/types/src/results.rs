@@ -127,6 +127,24 @@ pub struct ReactHookSummary {
     pub custom: u16,
 }
 
+/// A prop-drilling trace for a prop at the ROOT of a forwarding chain.
+/// DESCRIPTIVE ambient editor context (the LSP per-prop hover): the prop is
+/// forwarded unchanged through `depth` components before a component
+/// substantively consumes it. Reuses the `prop-drilling` chain machinery's
+/// abstain ladder (spread / `cloneElement` / dynamic / provider-in-subtree drop
+/// the whole chain), so the trace is honest. NOT a finding (the opt-in
+/// `prop-drilling` rule owns the finding); this rides the `#[serde(skip)]`
+/// `ReactComponentIntel` carrier.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactPropDrill {
+    /// The chain depth = number of components the prop is forwarded THROUGH
+    /// (source + intermediates + consumer), matching `PropDrillingChain.depth`.
+    pub depth: u32,
+    /// The ordered component names from source to consumer (`hops[0]` owns the
+    /// prop, the last consumes it).
+    pub hops: Vec<String>,
+}
+
 /// Per-prop usage intelligence for one React component prop. DESCRIPTIVE editor
 /// context (the LSP per-prop hover): whether the prop is read in the component
 /// body and how many render sites pass it. NOT a finding (the
@@ -149,6 +167,11 @@ pub struct ReactPropIntel {
     /// Count of render sites (test/spec/story/fixture files excluded) whose
     /// passed-attribute set contains this prop name.
     pub passed_from_sites: u32,
+    /// A prop-drilling trace, present only when this prop is the ROOT of a
+    /// forwarding chain that reaches a consumer through `>= N` pass-through
+    /// components. `None` for an ordinary prop. Test/spec/story/fixture source
+    /// components never carry a drill trace.
+    pub drill: Option<ReactPropDrill>,
 }
 
 /// Per-component render + prop + hook intelligence for one React component.

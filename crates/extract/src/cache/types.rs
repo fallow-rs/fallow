@@ -583,7 +583,11 @@ use crate::MemberKind;
 /// `has_unharvestable_props` now harvests its `react_props` and credits
 /// `props.<name>` usage. The cached `ComponentProp` / `ComponentFunction` wire
 /// shape is unchanged; only which components populate it changes.
-pub(super) const CACHE_VERSION: u32 = 187;
+///
+/// Bumped to 188: `HookUse` now carries the enclosing `component` name, so the
+/// descriptive per-component hook summary stays exact in multi-component files.
+/// A warm cache from 187 lacks the attribution field on persisted `hook_uses`.
+pub(super) const CACHE_VERSION: u32 = 188;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -20,7 +20,7 @@
 //!
 //! [`compute_render_fan_in`]: super::render_fan_in::compute_render_fan_in
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -29,10 +29,17 @@ use fallow_types::extract::{HookUseKind, ModuleInfo};
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
-use crate::results::{ReactComponentIntel, ReactHookSummary, ReactPropIntel};
+use crate::results::{ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel};
 
+use super::prop_drilling::find_prop_drilling_chains;
 use super::react_resolve::{ChildResolver, CompKey};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
+
+/// A descriptive prop-drilling trace keyed by `(source_path, source_component,
+/// source_prop_name)`. Built UNCONDITIONALLY for React projects (independent of
+/// the opt-in `prop-drilling` rule, whose finding emission is unchanged), so the
+/// hover can surface forwarding depth as ambient context.
+type DrillMap = FxHashMap<(PathBuf, String, String), ReactPropDrill>;
 
 /// Compute the per-component React intelligence for every reachable React
 /// component. Returns an empty vec unless the project declares `react` /
@@ -61,6 +68,20 @@ pub fn compute_react_component_intel(
     // plus the per-prop pass-count map keyed by `(child_key, prop_name)`.
     let render = aggregate_render_edges(graph, &modules_by_id, &resolver, root);
 
+    // Descriptive prop-drilling traces, computed UNCONDITIONALLY (the opt-in
+    // `prop-drilling` rule's finding emission is a separate, unchanged path). The
+    // chain's abstain ladder applies, so the trace is honest; test/spec/story
+    // source components are dropped here so descriptive accuracy matches the rest
+    // of the intel.
+    let drills = build_drill_map(
+        graph,
+        modules,
+        resolved_modules,
+        declared_deps,
+        root,
+        line_offsets_by_file,
+    );
+
     let mut intel = Vec::new();
     for node in &graph.modules {
         if !node.is_reachable() || !is_react_file(&node.path) {
@@ -77,6 +98,7 @@ pub fn compute_react_component_intel(
             node.path.as_path(),
             module,
             &render,
+            &drills,
             line_offsets_by_file,
             &mut intel,
         );
@@ -163,11 +185,16 @@ fn aggregate_render_edges(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "all lookup tables are needed to assemble one component's intel"
+)]
 fn collect_module_intel(
     file_id: FileId,
     path: &Path,
     module: &ModuleInfo,
     render: &RenderAggregate,
+    drills: &DrillMap,
     line_offsets_by_file: &LineOffsetsMap<'_>,
     intel: &mut Vec<ReactComponentIntel>,
 ) {
@@ -189,6 +216,8 @@ fn collect_module_intel(
             component.name.as_str(),
             module,
             render,
+            drills,
+            path,
             file_id,
             line_offsets_by_file,
         );
@@ -218,11 +247,17 @@ fn collect_module_intel(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "all lookup tables are needed to assemble each prop's intel"
+)]
 fn collect_component_props(
     key: &CompKey,
     component_name: &str,
     module: &ModuleInfo,
     render: &RenderAggregate,
+    drills: &DrillMap,
+    path: &Path,
     file_id: FileId,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<ReactPropIntel> {
@@ -238,6 +273,15 @@ fn collect_component_props(
                 .unwrap_or(0);
             let (anchor_line, anchor_col) =
                 byte_offset_to_line_col(line_offsets_by_file, file_id, prop.span_start);
+            // A drill trace is keyed by the chain SOURCE: this component's path +
+            // name + the prop's declared name.
+            let drill = drills
+                .get(&(
+                    path.to_path_buf(),
+                    component_name.to_string(),
+                    prop.name.clone(),
+                ))
+                .cloned();
             ReactPropIntel {
                 name: prop.name.clone(),
                 anchor_line,
@@ -245,30 +289,72 @@ fn collect_component_props(
                 // React arm: `used_in_script` is the set-in-body signal.
                 used_in_body: prop.used_in_script,
                 passed_from_sites,
+                drill,
             }
         })
         .collect()
 }
 
-/// Count `hook_uses` belonging to `component_name` into a per-kind summary.
-/// Hook uses carry no enclosing-component name in the IR, so a file with one
-/// component attributes every hook to it; a file with several components shares
-/// the file's hook uses across them. This is descriptive context, not a gated
-/// finding, so the over-attribution in the multi-component-per-file case is
-/// acceptable (it never produces a false positive, there being no positive).
-fn summarize_hooks(component_name: &str, module: &ModuleInfo) -> ReactHookSummary {
-    // When the file declares exactly one component, every hook is its. When it
-    // declares several, the hook IR has no per-component attribution, so the
-    // summary is left empty rather than attributing a hook to the wrong
-    // component (undercount, the honest direction).
-    let single_component = module.component_functions.len() == 1
-        && module.component_functions[0].name == component_name;
-    if !single_component {
-        return ReactHookSummary::default();
-    }
+/// Build the descriptive prop-drilling trace map. Computes the chains with the
+/// shared [`find_prop_drilling_chains`] primitive (the SAME computation the
+/// opt-in rule uses, but here independent of the rule and of its finding
+/// emission), then keys each chain by its source `(path, component, prop)` so a
+/// prop at the root of a forwarding chain carries a trace. Chains whose source
+/// hop lives in a test / spec / story / fixture file are dropped (descriptive
+/// honesty, matching the render-aggregation exclusion).
+fn build_drill_map(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    resolved_modules: &[ResolvedModule],
+    declared_deps: &FxHashSet<String>,
+    root: &Path,
+    line_offsets_by_file: &LineOffsetsMap<'_>,
+) -> DrillMap {
+    let scan = find_prop_drilling_chains(
+        graph,
+        modules,
+        resolved_modules,
+        declared_deps,
+        line_offsets_by_file,
+    );
 
+    let mut map: DrillMap = FxHashMap::default();
+    for chain in scan.chains {
+        let Some(source) = chain.hops.first() else {
+            continue;
+        };
+        if is_project_test_path(source.file.as_path(), root) {
+            continue;
+        }
+        let key = (
+            source.file.clone(),
+            source.component.clone(),
+            chain.prop.clone(),
+        );
+        let hops = chain.hops.iter().map(|h| h.component.clone()).collect();
+        map.insert(
+            key,
+            ReactPropDrill {
+                depth: chain.depth,
+                hops,
+            },
+        );
+    }
+    map
+}
+
+/// Count `hook_uses` belonging to `component_name` into a per-kind summary.
+/// Each `HookUse` carries its enclosing component (the visitor records the top
+/// of the component stack at the call site), so the summary is EXACT even when a
+/// file declares several components: a hook is counted for `component_name` only
+/// when its `component` field matches. A hook recorded outside any component
+/// (empty `component`) is never attributed.
+fn summarize_hooks(component_name: &str, module: &ModuleInfo) -> ReactHookSummary {
     let mut summary = ReactHookSummary::default();
     for hook in &module.hook_uses {
+        if hook.component != component_name {
+            continue;
+        }
         match hook.kind {
             HookUseKind::UseState => summary.state = summary.state.saturating_add(1),
             HookUseKind::UseEffect => summary.effect = summary.effect.saturating_add(1),

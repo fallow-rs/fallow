@@ -302,6 +302,7 @@ mod tests {
                 anchor_col: 2,
                 used_in_body: true,
                 passed_from_sites: 3,
+                drill: None,
             }],
         }
     }

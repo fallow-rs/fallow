@@ -911,10 +911,23 @@ fn check_react_prop_intel(
             } else {
                 format!("{} call sites", prop.passed_from_sites)
             };
-            let value = format!(
+            let mut value = format!(
                 "**fallow**: prop {}: {read} · passed from {sites}",
                 format_inline_code(&prop.name),
             );
+            // When the prop is the root of a forwarding chain, append the ambient
+            // drill trace: `forwarded N levels: A > B > C`. The hop names are user
+            // identifiers, so route each through `format_inline_code`.
+            if let Some(drill) = &prop.drill {
+                let levels = if drill.depth == 1 { "level" } else { "levels" };
+                let chain = drill
+                    .hops
+                    .iter()
+                    .map(|h| format_inline_code(h))
+                    .collect::<Vec<_>>()
+                    .join(" > ");
+                let _ = write!(value, "\n\nforwarded {} {levels}: {chain}", drill.depth);
+            }
 
             return Some(Hover {
                 contents: HoverContents::Markup(MarkupContent {
@@ -1207,10 +1220,10 @@ mod tests {
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
-        ExportUsage, ReactComponentIntel, ReactHookSummary, ReactPropIntel, ReferenceLocation,
-        SecuritySeverity, UnresolvedImport, UnresolvedImportFinding, UnusedClassMemberFinding,
-        UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding, UnusedFile, UnusedFileFinding,
-        UnusedMember, UnusedStoreMemberFinding, UnusedTypeFinding,
+        ExportUsage, ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel,
+        ReferenceLocation, SecuritySeverity, UnresolvedImport, UnresolvedImportFinding,
+        UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
+        UnusedFile, UnusedFileFinding, UnusedMember, UnusedStoreMemberFinding, UnusedTypeFinding,
     };
 
     /// Extract the markdown text from a Hover's contents.
@@ -3220,6 +3233,7 @@ mod tests {
                     anchor_col: 2,
                     used_in_body: true,
                     passed_from_sites: 3,
+                    drill: None,
                 },
                 ReactPropIntel {
                     name: "subtitle".to_string(),
@@ -3227,6 +3241,7 @@ mod tests {
                     anchor_col: 2,
                     used_in_body: false,
                     passed_from_sites: 0,
+                    drill: None,
                 },
             ],
         }
@@ -3300,6 +3315,74 @@ mod tests {
             "singular call site: {value}"
         );
         assert!(!value.contains("1 call sites"), "no plural-s: {value}");
+    }
+
+    #[test]
+    fn hover_on_react_prop_with_drill_renders_trace() {
+        let root = test_root();
+        let path = root.join("src/Card.tsx");
+        let mut results = AnalysisResults::default();
+        let mut intel = card_intel(path.clone());
+        // Attach a drill trace to the `title` prop: forwarded 3 levels through
+        // Page > Layout > Sidebar > Profile.
+        intel.props[0].drill = Some(ReactPropDrill {
+            depth: 3,
+            hops: vec![
+                "Page".to_string(),
+                "Layout".to_string(),
+                "Sidebar".to_string(),
+                "Profile".to_string(),
+            ],
+        });
+        results.react_component_intel.push(intel);
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7,
+            character: 3,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        // The base read/passed line is preserved.
+        assert!(value.contains("read in body"), "base read state: {value}");
+        assert!(
+            value.contains("passed from 3 call sites"),
+            "base pass count: {value}"
+        );
+        // The drill trace renders the depth and the ordered chain.
+        assert!(
+            value.contains("forwarded 3 levels"),
+            "drill depth line: {value}"
+        );
+        assert!(value.contains("Page"), "chain head: {value}");
+        assert!(value.contains("Profile"), "chain tail: {value}");
+        assert!(value.contains(" > "), "chain separator: {value}");
+    }
+
+    #[test]
+    fn hover_on_react_prop_single_level_drill_is_singular() {
+        let root = test_root();
+        let path = root.join("src/Card.tsx");
+        let mut results = AnalysisResults::default();
+        let mut intel = card_intel(path.clone());
+        intel.props[0].drill = Some(ReactPropDrill {
+            depth: 1,
+            hops: vec!["Page".to_string()],
+        });
+        results.react_component_intel.push(intel);
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7,
+            character: 3,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(
+            value.contains("forwarded 1 level:"),
+            "singular level: {value}"
+        );
+        assert!(!value.contains("1 levels"), "no plural-s: {value}");
     }
 
     #[test]

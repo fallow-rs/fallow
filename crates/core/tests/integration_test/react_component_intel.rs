@@ -89,6 +89,91 @@ fn summarizes_render_props_and_hooks() {
     );
 }
 
+/// Per-component hook attribution in a MULTI-component file. `ComponentA` and
+/// `ComponentB` live in one file; A calls useState + useEffect, B calls useMemo.
+/// The hook summary must attribute each hook to its enclosing component exactly,
+/// not leave both empty (the old single-component-per-file heuristic) and not
+/// cross-attribute.
+#[test]
+fn attributes_hooks_per_component_in_multi_component_file() {
+    let root = fixture_path("react-multi-component-hooks");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let a = intel_for(&results, "ComponentA").expect("ComponentA is in the intel set");
+    assert_eq!(a.hooks.state, 1, "ComponentA owns the one useState");
+    assert_eq!(a.hooks.effect, 1, "ComponentA owns the one useEffect");
+    assert_eq!(a.hooks.memo, 0, "ComponentA does not call useMemo");
+    assert_eq!(a.hooks.callback, 0);
+    assert_eq!(a.hooks.custom, 0);
+
+    let b = intel_for(&results, "ComponentB").expect("ComponentB is in the intel set");
+    assert_eq!(b.hooks.memo, 1, "ComponentB owns the one useMemo");
+    assert_eq!(b.hooks.state, 0, "ComponentB does not call useState");
+    assert_eq!(b.hooks.effect, 0, "ComponentB does not call useEffect");
+    assert_eq!(b.hooks.callback, 0);
+    assert_eq!(b.hooks.custom, 0);
+}
+
+/// Descriptive prop-drilling trace: in `Page > Layout > Sidebar > Profile`, the
+/// `user` prop is forwarded unchanged from `Page` through two pass-throughs to
+/// `Profile` which consumes it. The `user` ReactPropIntel at the chain SOURCE
+/// (`Page`) must carry a `drill` trace listing the hops in order. This is
+/// computed UNCONDITIONALLY (the `prop-drilling` rule is off in the default
+/// config used here), proving the descriptive trace is independent of the rule.
+#[test]
+fn carries_prop_drilling_trace_on_chain_source() {
+    let root = fixture_path("prop-drilling");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    // The rule is off by default, so no prop-drilling FINDINGS are emitted: the
+    // descriptive trace must still be present.
+    assert!(
+        results.prop_drilling_chains.is_empty(),
+        "prop-drilling rule is off, so no findings are emitted"
+    );
+
+    let page = intel_for(&results, "Page").expect("Page is in the intel set");
+    let user = page
+        .props
+        .iter()
+        .find(|p| p.name == "user")
+        .expect("Page declares the user prop");
+    let drill = user
+        .drill
+        .as_ref()
+        .expect("the source-of-chain prop carries a drill trace");
+    assert!(
+        drill.depth >= 3,
+        "the chain forwards through at least 3 components, got {}",
+        drill.depth
+    );
+    assert_eq!(
+        drill.hops,
+        vec![
+            "Page".to_string(),
+            "Layout".to_string(),
+            "Sidebar".to_string(),
+            "Profile".to_string(),
+        ],
+        "the trace lists the hops source-to-consumer"
+    );
+
+    // The consumer end (Profile) is NOT a chain source, so its `user` prop
+    // carries no drill trace.
+    let profile = intel_for(&results, "Profile").expect("Profile is in the intel set");
+    let profile_user = profile
+        .props
+        .iter()
+        .find(|p| p.name == "user")
+        .expect("Profile declares the user prop");
+    assert!(
+        profile_user.drill.is_none(),
+        "the chain consumer is not a source, so it carries no drill trace"
+    );
+}
+
 /// A non-React project (no react/react-dom/next/preact dep) computes no intel.
 #[test]
 fn no_intel_on_non_react_project() {

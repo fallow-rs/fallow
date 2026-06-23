@@ -185,6 +185,7 @@ mod tests {
             kind,
             dep_array_arity,
             span_start,
+            component: String::new(),
         }
     }
 

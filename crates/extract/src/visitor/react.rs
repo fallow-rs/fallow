@@ -226,10 +226,16 @@ impl ModuleInfoExtractor {
             return;
         };
         let dep_array_arity = hook_dep_array_arity(kind, &call.arguments);
+        // Tag with the enclosing component (top of the stack). The early gate
+        // above guarantees a non-empty stack, so this attributes every recorded
+        // hook to its component, letting the per-component summary stay exact even
+        // when a file declares several components.
+        let component = self.component_stack.last().cloned().unwrap_or_default();
         self.hook_uses.push(HookUse {
             kind,
             dep_array_arity,
             span_start: call.span.start,
+            component,
         });
     }
 

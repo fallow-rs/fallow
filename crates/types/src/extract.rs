@@ -1670,6 +1670,13 @@ pub struct HookUse {
     pub dep_array_arity: Option<u32>,
     /// Start byte offset of the hook call (anchors findings).
     pub span_start: u32,
+    /// The enclosing component name (the top of the visitor's component stack
+    /// when the hook call was recorded). Lets the descriptive per-component hook
+    /// summary attribute hooks exactly even when a file declares several
+    /// components. A hook recorded outside any component carries an empty string
+    /// (the visitor only records hooks inside a component, so this is the
+    /// rare top-level / unattributed case).
+    pub component: String,
 }
 
 /// A render edge: one component rendering another (a capitalized or
@@ -2963,10 +2970,12 @@ mod tests {
             kind: HookUseKind::UseEffect,
             dep_array_arity: Some(2),
             span_start: 30,
+            component: "Widget".to_string(),
         };
         assert_eq!(h.kind, HookUseKind::UseEffect);
         assert_eq!(h.dep_array_arity, Some(2));
         assert_eq!(h.span_start, 30);
+        assert_eq!(h.component, "Widget");
     }
 
     #[test]
@@ -2975,6 +2984,7 @@ mod tests {
             kind: HookUseKind::UseCallback,
             dep_array_arity: None,
             span_start: 0,
+            component: String::new(),
         };
         assert!(h.dep_array_arity.is_none());
     }
