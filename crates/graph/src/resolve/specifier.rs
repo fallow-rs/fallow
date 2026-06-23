@@ -292,15 +292,15 @@ fn referenced_tsconfig_paths(base_dir: &Path, json: &Value) -> Vec<PathBuf> {
 
 fn resolve_tsconfig_reference_path(base_dir: &Path, reference: &str) -> PathBuf {
     let path = base_dir.join(reference);
-    if path.is_dir() {
-        return path.join("tsconfig.json");
-    }
     if path
         .extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext == "json" || ext == "jsonc")
     {
         return path;
+    }
+    if path.is_dir() {
+        return path.join("tsconfig.json");
     }
     let mut with_json = OsString::from(path.as_os_str());
     with_json.push(".json");
