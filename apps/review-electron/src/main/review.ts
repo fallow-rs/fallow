@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +10,26 @@ import type { AgentWalkthrough, Guide } from "../model/agent";
 import { describeExecError } from "./errors";
 
 const run = promisify(execFile);
-const fallowBin = (): string => process.env["FALLOW_BIN"] ?? "fallow";
+
+/**
+ * Resolve the fallow binary. Precedence:
+ *   1. `FALLOW_BIN` (also carries the JSONC config's `fallowBin`, set in main).
+ *   2. The workspace build, when running from source inside the fallow monorepo:
+ *      this app lives at `apps/review-electron`, so the repo root (with
+ *      `target/{release,debug}/fallow`) is two levels up from the launch cwd.
+ *      This lets `pnpm dev` dogfood the repo's own build with no manual env.
+ *   3. `fallow` on PATH (a packaged app or an external install).
+ */
+const fallowBin = (): string => {
+  const fromEnv = process.env["FALLOW_BIN"]?.trim();
+  if (fromEnv) return fromEnv;
+  const repoRoot = join(process.cwd(), "..", "..");
+  for (const variant of ["release", "debug"]) {
+    const candidate = join(repoRoot, "target", variant, "fallow");
+    if (existsSync(candidate)) return candidate;
+  }
+  return "fallow";
+};
 const at = (root?: string): string => root ?? process.cwd();
 const MAX_BUFFER = 64 * 1024 * 1024;
 
