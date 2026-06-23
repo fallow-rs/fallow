@@ -3,15 +3,13 @@ import { watch } from "node:fs";
 import { app, BrowserWindow, ipcMain, session, type WebContents } from "electron";
 import { electronApp, optimizer } from "@electron-toolkit/utils";
 import { loadConfig, configPath } from "./config";
-import { runReview, runGuide, validateWalkthrough } from "./review";
+import { runReview, runGuide } from "./review";
 import { appendFeedItem } from "./feed";
 import { readCapturedFraming } from "./capturedFraming";
-import { buildAgentWalkthrough } from "./agentWalkthrough";
 import { captureUrl } from "./capture";
 import { saveAnnotatedShot, type SaveAnnotation } from "./shots";
 import { getFileDiff, getAllDiffs } from "./diff";
-import { BACKENDS } from "./backends";
-import { runAgentReview, runTradeoffElicitation } from "./agentRun";
+import { runTradeoffElicitation } from "./agentRun";
 import { readPersistedTradeoffs } from "./tradeoffs";
 import { readReviewContext } from "./reviewContext";
 import { startInspectServer } from "./inspectServer";
@@ -69,9 +67,6 @@ ipcMain.handle("review:guide", (_event, root: string | undefined) =>
 );
 ipcMain.handle("feed:append", (_event, item: FeedItem) => appendFeedItem(reviewRoot(), item));
 ipcMain.handle("framing:captured", () => readCapturedFraming(reviewRoot()));
-ipcMain.handle("review:validate", (_event, hash: string, items: FeedItem[]) =>
-  validateWalkthrough(buildAgentWalkthrough(hash, items)),
-);
 ipcMain.handle("shot:capture", (_event, url: string) => captureUrl(reviewRoot(), url, Date.now()));
 ipcMain.handle("shot:save", (_event, payload: SaveAnnotation) =>
   saveAnnotatedShot(reviewRoot(), payload, Date.now()),
@@ -80,8 +75,6 @@ ipcMain.handle("diff:get", (_event, base: string, file: string) =>
   getFileDiff(reviewRoot(), base, file),
 );
 ipcMain.handle("diff:all", (_event, base: string) => getAllDiffs(reviewRoot(), base));
-ipcMain.handle("agent:backends", () => BACKENDS);
-ipcMain.handle("agent:run", (_event, id: string) => runAgentReview(reviewRoot(), id));
 ipcMain.handle("tradeoffs:get", () => readPersistedTradeoffs(reviewRoot()));
 ipcMain.handle("reviewContext:get", () => readReviewContext(reviewRoot()));
 ipcMain.handle("tradeoffs:run", (_event, id: string) => runTradeoffElicitation(reviewRoot(), id));
