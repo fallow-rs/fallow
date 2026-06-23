@@ -552,15 +552,15 @@ fn resolve_package_tsconfig_extends(base_dir: &Path, extends: &str) -> Option<Pa
 }
 
 fn resolve_tsconfig_extends_candidate(path: PathBuf) -> PathBuf {
-    if path.is_dir() {
-        return path.join("tsconfig.json");
-    }
     if path
         .extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext == "json" || ext == "jsonc")
     {
         return path;
+    }
+    if path.is_dir() {
+        return path.join("tsconfig.json");
     }
     let mut with_json = OsString::from(path.as_os_str());
     with_json.push(".json");
