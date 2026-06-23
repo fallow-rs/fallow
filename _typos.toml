@@ -43,3 +43,8 @@ vulnerabilit = "vulnerabilit"
 # `sais` is the SA-IS algorithm (Suffix Array by Induced Sorting) used for
 # clone-detection suffix array construction, not a misspelling of "says".
 sais = "sais"
+# The review app namespaces its persisted UI state and QA env under the
+# `fre` (fallow review) prefix: "fre:sidebar-width", "fre:collapsed-stages",
+# FRE_SHOTS_DIR, "/tmp/fre-qa". Intentional, not a misspelling of "free".
+fre = "fre"
+FRE = "FRE"
