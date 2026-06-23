@@ -97,7 +97,7 @@ pub fn collect_template_usage_with_bound_targets(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 

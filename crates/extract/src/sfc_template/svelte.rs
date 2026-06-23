@@ -822,7 +822,7 @@ fn current_locals(scopes: &[SvelteScopeFrame]) -> Vec<String> {
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::{collect_template_usage, collect_template_usage_with_bound_targets};
     use rustc_hash::{FxHashMap, FxHashSet};

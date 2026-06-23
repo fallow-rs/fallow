@@ -12,7 +12,7 @@ use crate::graph::types::{ExportSymbol, ModuleNode, ReferenceKind, SymbolReferen
 use crate::graph::{Edge, ImportedName};
 use crate::resolve::ResolvedModule;
 
-/// Handle `export * from './source'` — propagate named imports through to the source module.
+/// Handle `export * from './source'`: propagate named imports through to the source module.
 ///
 /// Star re-exports don't create named `ExportSymbol` entries on the barrel. Instead we look
 /// at which named imports other modules make from the barrel and propagate each to the
@@ -631,7 +631,7 @@ fn import_binding_has_value_usage(source_mod: Option<&&ResolvedModule>, local_na
         })
 }
 
-/// Entry point barrel with `export *` — mark all non-default source exports as used.
+/// Entry point barrel with `export *`: mark all non-default source exports as used.
 fn propagate_entry_point_star(
     modules: &mut [ModuleNode],
     barrel_id: FileId,

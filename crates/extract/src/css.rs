@@ -836,7 +836,7 @@ fn css_module_info(
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 

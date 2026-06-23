@@ -329,7 +329,7 @@ fn after_is_boundary(source: &str, index: usize) -> bool {
     index >= source.len() || source.as_bytes()[index].is_ascii_whitespace()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::compute_svelte_template_complexity;
 

@@ -515,7 +515,7 @@ fn saturate_u16_u32(value: u32) -> u16 {
     u16::try_from(value).unwrap_or(u16::MAX)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 

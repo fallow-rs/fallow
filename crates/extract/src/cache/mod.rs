@@ -8,7 +8,7 @@ mod conversion;
 mod store;
 mod types;
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests;
 
 pub use conversion::{

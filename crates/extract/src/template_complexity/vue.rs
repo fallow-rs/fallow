@@ -262,7 +262,7 @@ fn is_void_tag(tag_name: &str) -> bool {
         .any(|void| void.eq_ignore_ascii_case(tag_name))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::compute_vue_template_complexity;
 

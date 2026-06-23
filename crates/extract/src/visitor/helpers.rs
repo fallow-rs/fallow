@@ -1399,7 +1399,7 @@ pub(super) fn is_builtin_constructor(name: &str) -> bool {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
 
