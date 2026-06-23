@@ -2353,6 +2353,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore = "filesystem metadata is blocked by Miri isolation")]
     #[test]
     fn resolve_tsconfig_reference_path_extensionless_nonexistent_falls_back_to_tsconfig_json() {
         let base = Path::new("/project");
