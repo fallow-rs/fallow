@@ -45,12 +45,35 @@ export const runGuide = async (root?: string): Promise<Guide> => {
   const g = parseFallowJson<{
     graph_snapshot_hash?: string;
     digest?: { decisions?: { emitted_signal_ids?: string[] } };
+    change_anchors?: Array<{
+      change_anchor?: string;
+      file?: string;
+      start_line?: number;
+      line_count?: number;
+      previous_change_anchor?: string;
+    }>;
     direction?: { order?: string[] };
     agent_schema?: { judgment_shape?: string };
   }>(stdout);
   return {
     graphSnapshotHash: g.graph_snapshot_hash ?? "",
     emittedSignalIds: g.digest?.decisions?.emitted_signal_ids ?? [],
+    changeAnchors: (g.change_anchors ?? []).flatMap((a) =>
+      typeof a.change_anchor === "string" &&
+      typeof a.file === "string" &&
+      typeof a.start_line === "number" &&
+      typeof a.line_count === "number"
+        ? [
+            {
+              changeAnchor: a.change_anchor,
+              file: a.file,
+              startLine: a.start_line,
+              lineCount: a.line_count,
+              previousChangeAnchor: a.previous_change_anchor,
+            },
+          ]
+        : [],
+    ),
     order: g.direction?.order ?? [],
     digest: g.digest ?? null,
     schemaShape: g.agent_schema?.judgment_shape ?? "",

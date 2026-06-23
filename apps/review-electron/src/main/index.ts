@@ -11,6 +11,7 @@ import { saveAnnotatedShot, type SaveAnnotation } from "./shots";
 import { getFileDiff, getAllDiffs } from "./diff";
 import { runTradeoffElicitation } from "./agentRun";
 import { readPersistedTradeoffs } from "./tradeoffs";
+import { validateTradeoffs } from "./tradeoffValidation";
 import { readReviewContext } from "./reviewContext";
 import { startInspectServer } from "./inspectServer";
 import type { FeedItem } from "../model/agent";
@@ -76,6 +77,7 @@ ipcMain.handle("diff:get", (_event, base: string, file: string) =>
 );
 ipcMain.handle("diff:all", (_event, base: string) => getAllDiffs(reviewRoot(), base));
 ipcMain.handle("tradeoffs:get", () => readPersistedTradeoffs(reviewRoot()));
+ipcMain.handle("tradeoffs:validate", () => validateTradeoffs(reviewRoot()));
 ipcMain.handle("reviewContext:get", () => readReviewContext(reviewRoot()));
 ipcMain.handle("tradeoffs:run", (_event, id: string) => runTradeoffElicitation(reviewRoot(), id));
 ipcMain.handle("config:get", () => appConfig);

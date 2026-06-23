@@ -1,6 +1,10 @@
-import { Scale } from "lucide-react";
+import { Scale, ShieldCheck, ShieldAlert } from "lucide-react";
 import type { Severity, TradeOff, TradeOffEnvelope } from "../../../model/tradeoff";
 import type { FeedTarget } from "../../../model/agent";
+import type {
+  TradeOffAnchorStatus,
+  TradeOffValidation,
+} from "../../../main/tradeoffValidation";
 import { shortAnchor } from "@/lib/anchor";
 import { NoteComposer } from "./NoteComposer";
 
@@ -9,6 +13,31 @@ const severityTone = (s: Severity): string =>
   s === "high" ? "text-fallow-amber" : "text-muted-foreground";
 
 const ANCHOR_CROSS_CUTTING = "cross-cutting";
+
+/** Render the fallow-validation status of a trade-off's anchor. `anchored` is the
+ * only graph-confirmed state; the rest stay muted (the prose is always inference). */
+const AnchorStatus = ({ status }: { status: TradeOffAnchorStatus | undefined }) => {
+  if (status === "anchored") {
+    return (
+      <span className="flex items-center gap-1 text-[11px] text-fallow-green" title="fallow confirmed this region changed">
+        <ShieldCheck className="size-3" />
+        anchored in fallow
+      </span>
+    );
+  }
+  if (status === "unanchored") {
+    return (
+      <span className="flex items-center gap-1 text-[11px] text-fallow-amber" title="the anchor is not a changed region in the current diff">
+        <ShieldAlert className="size-3" />
+        anchor not in diff
+      </span>
+    );
+  }
+  if (status === "not-anchorable") {
+    return <span className="text-[11px] text-muted-foreground/70">model-inferred (cross-cutting)</span>;
+  }
+  return null;
+};
 
 /**
  * The MODEL-INFERRED trade-off surface, rendered ALONGSIDE (and visually distinct
@@ -24,10 +53,12 @@ const ANCHOR_CROSS_CUTTING = "cross-cutting";
  */
 export const TradeOffList = ({
   tradeoffs,
+  validation,
   onOpenDiff,
   onComment,
 }: {
   tradeoffs: TradeOffEnvelope | null;
+  validation: TradeOffValidation | null;
   onOpenDiff: (path: string) => void;
   onComment: (target: FeedTarget, note: string) => void;
 }) => {
@@ -56,11 +87,24 @@ export const TradeOffList = ({
   return (
     <section className="space-y-2">
       <Header count={tradeoffs.tradeoffs.length} />
+      {/* Stale: fallow refused the anchors because the tree moved since elicitation. */}
+      {validation?.stale && (
+        <p className="flex items-center gap-1.5 rounded-md border border-fallow-amber/40 bg-fallow-amber/10 p-2 text-[11px] text-fallow-amber">
+          <ShieldAlert className="size-3.5 shrink-0" />
+          the tree moved since these were elicited; re-run the trade-off elicitation
+        </p>
+      )}
       {/* Fence the WHOLE list as model-inferred (border + muted ground), the same
           treatment FramingBlock uses, so a trade-off is never read as a graph fact. */}
       <ul className="space-y-1.5 rounded-md border border-border/60 bg-muted/10 p-1.5">
         {tradeoffs.tradeoffs.map((t) => (
-          <TradeOffRow key={t.id} tradeoff={t} onOpenDiff={onOpenDiff} onComment={onComment} />
+          <TradeOffRow
+            key={t.id}
+            tradeoff={t}
+            status={validation?.statusById[t.id]}
+            onOpenDiff={onOpenDiff}
+            onComment={onComment}
+          />
         ))}
       </ul>
     </section>
@@ -84,10 +128,12 @@ const Badge = ({ label, value }: { label: string; value: Severity }) => (
 
 const TradeOffRow = ({
   tradeoff: t,
+  status,
   onOpenDiff,
   onComment,
 }: {
   tradeoff: TradeOff;
+  status: TradeOffAnchorStatus | undefined;
   onOpenDiff: (path: string) => void;
   onComment: (target: FeedTarget, note: string) => void;
 }) => {
@@ -126,6 +172,7 @@ const TradeOffRow = ({
           <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
             <Badge label="consequence" value={t.consequence} />
             <Badge label="confidence" value={t.confidence} />
+            <AnchorStatus status={status} />
           </div>
           {/* a note back to the agent about THIS trade-off, identified by its
               anchor (file:line) or the literal "cross-cutting" via its own kind */}

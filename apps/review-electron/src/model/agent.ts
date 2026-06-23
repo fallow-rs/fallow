@@ -17,18 +17,32 @@ export type FeedItem = {
   at: string;
 };
 
+/** One per-hunk change anchor fallow emits in the walkthrough guide: a stable,
+ * content-addressed id for a changed region. The app maps a trade-off's
+ * `file:line` to one of these to cite it for fallow-side validation. */
+export type ChangeAnchor = {
+  changeAnchor: string;
+  file: string;
+  startLine: number;
+  lineCount: number;
+  previousChangeAnchor?: string;
+};
+
 /** Result of `fallow review --walkthrough-guide`: the E5 agent-contract digest. */
 export type Guide = {
   graphSnapshotHash: string;
   emittedSignalIds: string[];
+  changeAnchors: ChangeAnchor[];
   order: string[];
   digest: unknown;
   schemaShape: string;
 };
 
-/** One judgment in the agent-walkthrough payload fallow post-validates. */
+/** One judgment in the agent-walkthrough payload fallow post-validates. An anchor
+ * is a `signal_id` (a graph finding) OR a `change_anchor` (a changed region). */
 export type Judgment = {
   signal_id: string;
+  change_anchor?: string;
   framing: string;
   concern?: string;
 };
@@ -39,9 +53,13 @@ export type AgentWalkthrough = {
   judgments: Judgment[];
 };
 
-/** One accepted judgment in the fallow validation envelope (graph-anchored). */
+/** One accepted judgment in the fallow validation envelope (graph-anchored).
+ * `anchor_kind` is `"signal"` (graph finding) or `"change"` (changed region);
+ * `change_anchor` carries the cited `chg:` id when `anchor_kind === "change"`. */
 export type AcceptedJudgment = {
   signal_id: string;
+  change_anchor?: string;
+  anchor_kind?: string;
   agent_framing: string;
   concern?: string;
   deterministic: boolean;
@@ -51,7 +69,7 @@ export type AcceptedJudgment = {
 export type ValidationEnvelope = {
   stale?: boolean;
   accepted?: AcceptedJudgment[];
-  rejected?: { signal_id: string; reason: string }[];
+  rejected?: { signal_id: string; change_anchor?: string; reason: string }[];
   accepted_count?: number;
   rejected_count?: number;
 };

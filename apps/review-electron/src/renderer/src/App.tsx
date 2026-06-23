@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { WalkthroughDocument } from "../../model/walkthrough";
 import type { TradeOffEnvelope } from "../../model/tradeoff";
+import type { TradeOffValidation } from "../../main/tradeoffValidation";
 import type { ReviewContext as ReviewContextData } from "../../model/reviewContext";
 import type { FeedTarget, InlineFraming } from "../../model/agent";
 import type { InspectorCard as InspectorCardData } from "../../main/inspect";
@@ -99,6 +100,9 @@ export const App = () => {
   // run (the persisted file is absent); an envelope with `abstained: true` is the
   // distinct "looked, found nothing" state.
   const [tradeoffs, setTradeoffs] = useState<TradeOffEnvelope | null>(null);
+  // Per-trade-off fallow validation (anchored / unanchored / stale), from the
+  // walkthrough-file round-trip. null = not run / no trade-offs.
+  const [tradeoffValidation, setTradeoffValidation] = useState<TradeOffValidation | null>(null);
   // Author-agent review brief (the CAPTURE artifact): what the agent that did the
   // work recorded at write-time about what to review. null = the author recorded no
   // brief (the persisted file is absent), in which case the surface renders nothing.
@@ -123,6 +127,16 @@ export const App = () => {
       .getTradeoffs()
       .then(setTradeoffs)
       .catch(() => setTradeoffs(null));
+  }, []);
+
+  // Close the loop: validate the trade-off anchors against the LIVE graph through
+  // fallow's walkthrough-file machinery (anchored / unanchored / stale), so the
+  // broader surface is fallow-grade, not just agent-self-checked. null = not run.
+  useEffect(() => {
+    void window.fallow
+      .validateTradeoffs()
+      .then(setTradeoffValidation)
+      .catch(() => setTradeoffValidation(null));
   }, []);
 
   // Fetch the author-agent review brief once on load; null stays null (render
@@ -251,7 +265,12 @@ export const App = () => {
                 onComment={onComment}
                 framingBySignal={framingBySignal}
               />
-              <TradeOffList tradeoffs={tradeoffs} onOpenDiff={onOpenDiff} onComment={onComment} />
+              <TradeOffList
+                tradeoffs={tradeoffs}
+                validation={tradeoffValidation}
+                onOpenDiff={onOpenDiff}
+                onComment={onComment}
+              />
               <StageList
                 stages={doc.stages}
                 isViewed={isViewed}
