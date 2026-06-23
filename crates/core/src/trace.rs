@@ -265,10 +265,11 @@ pub fn trace_export(
         .iter()
         .find(|m| path_matches(&m.path, root, file_path))?;
 
-    let export = module.exports.iter().find(|e| {
-        let name_str = e.name.to_string();
-        name_str == export_name || (export_name == "default" && name_str == "default")
-    })?;
+    let export = module
+        .exports
+        .iter()
+        .filter(|e| export_name_matches(e, export_name))
+        .max_by_key(|e| (!e.references.is_empty(), !e.is_type_only))?;
 
     let direct_references: Vec<ExportReference> = export
         .references
@@ -295,6 +296,11 @@ pub fn trace_export(
         re_export_chains,
         reason,
     })
+}
+
+fn export_name_matches(export: &crate::graph::ExportSymbol, export_name: &str) -> bool {
+    let name_str = export.name.to_string();
+    name_str == export_name || (export_name == "default" && name_str == "default")
 }
 
 /// Map a module's exports to [`TracedExport`] entries with relativized references.

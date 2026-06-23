@@ -10,6 +10,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::discover::FileId;
 
+use crate::resolve::ResolvedModule;
+
 use super::ModuleGraph;
 
 use propagate::{
@@ -57,6 +59,14 @@ struct ReExportTuple {
     is_type_only: bool,
 }
 
+struct ReExportContext<'a> {
+    entry_star_targets: &'a FxHashSet<FileId>,
+    edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
+    module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
+    existing_refs: &'a mut FxHashSet<FileId>,
+    synthetic_stubs: &'a mut FxHashSet<(FileId, String, bool)>,
+}
+
 impl ModuleGraph {
     /// Resolve re-export chains: when module A re-exports from B,
     /// any reference to A's re-exported symbol should also count as a reference
@@ -66,7 +76,10 @@ impl ModuleGraph {
     /// the upfront Tarjan SCC pass. The caller stores this on the
     /// `ModuleGraph` so the `re-export-cycle` finding type can surface them
     /// to users instead of relying on `RUST_LOG=warn` (see issue #515).
-    pub(super) fn resolve_re_export_chains(&mut self) -> Vec<GraphReExportCycle> {
+    pub(super) fn resolve_re_export_chains(
+        &mut self,
+        module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+    ) -> Vec<GraphReExportCycle> {
         let re_export_info = self.collect_re_export_tuples();
 
         if re_export_info.is_empty() {
@@ -78,7 +91,12 @@ impl ModuleGraph {
         let entry_star_targets = self.collect_entry_star_targets();
         let edges_by_target = self.build_edges_by_target();
 
-        self.run_re_export_fixpoint(&re_export_info, &entry_star_targets, &edges_by_target);
+        self.run_re_export_fixpoint(
+            &re_export_info,
+            &entry_star_targets,
+            &edges_by_target,
+            module_by_id,
+        );
 
         cycles
     }
@@ -148,25 +166,28 @@ impl ModuleGraph {
         re_export_info: &[ReExportTuple],
         entry_star_targets: &FxHashSet<FileId>,
         edges_by_target: &FxHashMap<FileId, Vec<usize>>,
+        module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     ) {
         let safety_cap = re_export_info.len().saturating_add(1);
         let mut changed = true;
         let mut iteration: usize = 0;
         let mut existing_refs: FxHashSet<FileId> = FxHashSet::default();
-        let mut synthetic_stubs: FxHashSet<(FileId, String)> = FxHashSet::default();
+        let mut synthetic_stubs: FxHashSet<(FileId, String, bool)> = FxHashSet::default();
 
         while changed && iteration < safety_cap {
             changed = false;
             iteration += 1;
 
+            let mut context = ReExportContext {
+                entry_star_targets,
+                edges_by_target,
+                module_by_id,
+                existing_refs: &mut existing_refs,
+                synthetic_stubs: &mut synthetic_stubs,
+            };
+
             for entry in re_export_info {
-                changed |= self.propagate_re_export_entry(
-                    entry,
-                    entry_star_targets,
-                    edges_by_target,
-                    &mut existing_refs,
-                    &mut synthetic_stubs,
-                );
+                changed |= self.propagate_re_export_entry(entry, &mut context);
             }
         }
 
@@ -186,10 +207,7 @@ impl ModuleGraph {
     fn propagate_re_export_entry(
         &mut self,
         entry: &ReExportTuple,
-        entry_star_targets: &FxHashSet<FileId>,
-        edges_by_target: &FxHashMap<FileId, Vec<usize>>,
-        existing_refs: &mut FxHashSet<FileId>,
-        synthetic_stubs: &mut FxHashSet<(FileId, String)>,
+        context: &mut ReExportContext<'_>,
     ) -> bool {
         let barrel_idx = entry.barrel.0 as usize;
         let source_idx = entry.source.0 as usize;
@@ -202,14 +220,15 @@ impl ModuleGraph {
             propagate_star_re_export(StarReExportPropagation {
                 modules: &mut self.modules,
                 edges: &self.edges,
-                edges_by_target,
+                edges_by_target: context.edges_by_target,
+                module_by_id: context.module_by_id,
                 barrel_id: entry.barrel,
                 barrel_idx,
                 source_id: entry.source,
                 source_idx,
-                entry_star_targets,
+                entry_star_targets: context.entry_star_targets,
                 triggering_is_type_only: entry.is_type_only,
-                synthetic_stubs,
+                synthetic_stubs: context.synthetic_stubs,
             })
         } else {
             propagate_named_re_export(NamedReExportPropagation {
@@ -219,7 +238,7 @@ impl ModuleGraph {
                 source_idx,
                 imported_name: &entry.imported_name,
                 exported_name: &entry.exported_name,
-                existing_refs,
+                existing_refs: context.existing_refs,
             })
         }
     }

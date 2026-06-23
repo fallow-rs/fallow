@@ -1,0 +1,9 @@
+{
+  "type": "module",
+  "scripts": {
+    "start": "node src/consumer.ts"
+  },
+  "dependencies": {
+    "typescript": "latest"
+  }
+}

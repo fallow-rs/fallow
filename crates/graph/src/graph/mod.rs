@@ -238,7 +238,7 @@ impl ModuleGraph {
             total_capacity,
         );
 
-        graph.re_export_cycles = graph.resolve_re_export_chains();
+        graph.re_export_cycles = graph.resolve_re_export_chains(&module_by_id);
 
         graph
     }

@@ -62,6 +62,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discontinuity in baselined health trends for projects with `.astro` files: a previously
   unscored `.astro` frontmatter/template now contributes to the complexity aggregate.
 
+### Fixed
+
+- **Merged namespace values imported through star barrels are no longer falsely reported as unused.**
+  A value export that shares its name with an `export declare namespace` and is consumed through
+  `export *` now receives the same named-import credit as a direct import. The type-only namespace
+  side stays governed by type usage, so unrelated unused type findings and sibling value exports
+  remain reportable. Thanks [@TeoVezza95](https://github.com/TeoVezza95) for the report.
+  (Closes [#1373](https://github.com/fallow-rs/fallow/issues/1373))
+
 ## [2.101.0] - 2026-06-21
 
 ### Changed
