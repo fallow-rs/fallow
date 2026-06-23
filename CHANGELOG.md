@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **React component intelligence in the editor.** The LSP now surfaces ambient React/Preact
+  context with no new rule, finding, severity, or gating. A code lens above each component
+  summarizes it (`rendered 12x (8 parents), 5 props, 9 hooks (4 state, 3 effect, 1 memo, 1
+  callback)`), and a per-prop hover shows `read in body, passed from 3 call sites` (or `not read
+  in body` for a prop the component ignores); a forwarded prop adds `forwarded 4 levels: Page >
+  Layout > Sidebar > Profile`. Descriptive editor-only context: `fallow` / `audit` / `--format
+  json` output is unchanged (the data is an in-process LSP carrier computed only on the editor
+  path). Render counts exclude test/spec/story files and headline distinct parents, not in-file
+  repetition.
+
 - **Astro framework-health detection.** `.astro` components now participate in the same
   health suite as Vue/Svelte/Angular/React. The frontmatter is semantic-analyzed (imports
   used only as `<Header/>` tags or `{expr}` markup are credited; a genuinely-dead
@@ -35,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `unused-class-member` rules (no new rules).
 
 ### Changed
+
+- **Deeper React prop coverage for `unused-component-prop`.** The React arm now harvests props
+  from same-file typed interfaces (`(props: Props) => props.x`) and generic `forwardRef<Ref,
+  Props>` components, not only inline destructure, so a prop a non-exported component declares
+  but never reads is caught on more component shapes. Imported prop interfaces, `extends` /
+  generic / intersection types, and any whole-object props use still abstain, so exported
+  public-API components and library surfaces are never flagged (validated zero false positives
+  on a real-project corpus).
 
 - **`fallow health` now scores `.astro` complexity.** Astro frontmatter functions are scored
   like a Vue/Svelte `<script>`, and a synthetic `<template>` entry scores the markup
