@@ -2438,6 +2438,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore = "filesystem metadata is blocked by Miri isolation")]
     #[test]
     fn resolve_tsconfig_extends_candidate_extensionless_nonexistent_returns_original_path() {
         let path = PathBuf::from("/project/tsconfig.base");
