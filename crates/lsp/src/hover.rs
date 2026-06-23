@@ -72,6 +72,17 @@ pub fn build_hover(
         return Some(hover);
     }
 
+    // Descriptive React component intelligence (per-prop usage hover, plus a
+    // component-anchor summary hover). Placed AFTER every component-finding
+    // hover so a real finding (e.g. an unused prop) wins when both match.
+    if let Some(hover) = check_react_prop_intel(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_react_component_intel(results, file_path, position) {
+        return Some(hover);
+    }
+
     if let Some(hover) = check_unresolved_import(results, file_path, position) {
         return Some(hover);
     }
@@ -862,6 +873,185 @@ fn check_unused_load_data_key(
     None
 }
 
+/// Check if the position is on a React component prop anchor and surface the
+/// DESCRIPTIVE per-prop usage hover: whether the prop is read in the component
+/// body and how many call sites pass it. Ambient editor context, never a
+/// finding. The cursor must fall within the prop-name span (line + `[col, col +
+/// name.len())`), matching the React `unused-component-prop` anchor convention.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "prop name lengths are bounded by source size"
+)]
+fn check_react_prop_intel(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for intel in &results.react_component_intel {
+        if intel.path != file_path {
+            continue;
+        }
+        for prop in &intel.props {
+            let prop_line = prop.anchor_line.saturating_sub(1);
+            if prop_line != position.line {
+                continue;
+            }
+            let end_col = prop.anchor_col + prop.name.len() as u32;
+            if position.character < prop.anchor_col || position.character >= end_col {
+                continue;
+            }
+
+            let read = if prop.used_in_body {
+                "read in body"
+            } else {
+                "not read in body"
+            };
+            let sites = if prop.passed_from_sites == 1 {
+                "1 call site".to_string()
+            } else {
+                format!("{} call sites", prop.passed_from_sites)
+            };
+            let value = format!(
+                "**fallow**: prop {}: {read} · passed from {sites}",
+                format_inline_code(&prop.name),
+            );
+
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value,
+                }),
+                range: Some(Range {
+                    start: Position {
+                        line: prop_line,
+                        character: prop.anchor_col,
+                    },
+                    end: Position {
+                        line: prop_line,
+                        character: end_col,
+                    },
+                }),
+            });
+        }
+    }
+
+    None
+}
+
+/// Check if the position is on a React component definition anchor and surface
+/// the DESCRIPTIVE component summary hover (the same render/prop/hook breakdown
+/// as the code lens). Ambient editor context, never a finding. The cursor must
+/// fall within the component-name span on the anchor line.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "component name lengths are bounded by source size"
+)]
+fn check_react_component_intel(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    for intel in &results.react_component_intel {
+        if intel.path != file_path {
+            continue;
+        }
+        let component_line = intel.anchor_line.saturating_sub(1);
+        if component_line != position.line {
+            continue;
+        }
+        let end_col = intel.anchor_col + intel.component_name.len() as u32;
+        if position.character < intel.anchor_col || position.character >= end_col {
+            continue;
+        }
+
+        let value = format!(
+            "**fallow**: component {}: {}",
+            format_inline_code(&intel.component_name),
+            react_component_summary(intel),
+        );
+
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(Range {
+                start: Position {
+                    line: component_line,
+                    character: intel.anchor_col,
+                },
+                end: Position {
+                    line: component_line,
+                    character: end_col,
+                },
+            }),
+        });
+    }
+
+    None
+}
+
+/// Build the component summary line for the hover, matching the code-lens
+/// title format: `rendered 12x (8 parents) · 5 props · 9 hooks (4 state, ...)`.
+/// Zero segments are omitted; singular/plural is honored.
+fn react_component_summary(intel: &fallow_core::results::ReactComponentIntel) -> String {
+    let mut segments: Vec<String> = Vec::new();
+    if intel.render_sites > 0 {
+        let parents = intel_pluralize(intel.distinct_parents, "parent");
+        segments.push(format!("rendered {}x ({parents})", intel.render_sites));
+    }
+    if intel.prop_count > 0 {
+        segments.push(intel_pluralize(u32::from(intel.prop_count), "prop"));
+    }
+    if let Some(hooks) = intel_hook_segment(&intel.hooks) {
+        segments.push(hooks);
+    }
+    if segments.is_empty() {
+        return "rendered nowhere, no props, no hooks".to_string();
+    }
+    segments.join(" · ")
+}
+
+/// `N hooks (a state, b effect, ...)` or `None` when the component uses no
+/// hooks (kind sub-counts omitted when zero).
+fn intel_hook_segment(hooks: &fallow_core::results::ReactHookSummary) -> Option<String> {
+    let total = u32::from(hooks.state)
+        + u32::from(hooks.effect)
+        + u32::from(hooks.memo)
+        + u32::from(hooks.callback)
+        + u32::from(hooks.custom);
+    if total == 0 {
+        return None;
+    }
+    let mut breakdown: Vec<String> = Vec::new();
+    for (count, label) in [
+        (hooks.state, "state"),
+        (hooks.effect, "effect"),
+        (hooks.memo, "memo"),
+        (hooks.callback, "callback"),
+        (hooks.custom, "custom"),
+    ] {
+        if count > 0 {
+            breakdown.push(format!("{count} {label}"));
+        }
+    }
+    let head = intel_pluralize(total, "hook");
+    if breakdown.is_empty() {
+        Some(head)
+    } else {
+        Some(format!("{head} ({})", breakdown.join(", ")))
+    }
+}
+
+/// `count + " " + noun`, appending `s` when count is not 1.
+fn intel_pluralize(count: u32, noun: &str) -> String {
+    if count == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
+}
+
 /// Check if the position is on an unresolved import.
 #[expect(
     clippy::cast_possible_truncation,
@@ -1017,10 +1207,10 @@ mod tests {
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
-        ExportUsage, ReferenceLocation, SecuritySeverity, UnresolvedImport,
-        UnresolvedImportFinding, UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport,
-        UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedMember, UnusedStoreMemberFinding,
-        UnusedTypeFinding,
+        ExportUsage, ReactComponentIntel, ReactHookSummary, ReactPropIntel, ReferenceLocation,
+        SecuritySeverity, UnresolvedImport, UnresolvedImportFinding, UnusedClassMemberFinding,
+        UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding, UnusedFile, UnusedFileFinding,
+        UnusedMember, UnusedStoreMemberFinding, UnusedTypeFinding,
     };
 
     /// Extract the markdown text from a Hover's contents.
@@ -3007,5 +3197,175 @@ mod tests {
             character: 12,
         };
         assert!(build_hover(&results, &duplication, &path_b, pos).is_none());
+    }
+
+    fn card_intel(path: PathBuf) -> ReactComponentIntel {
+        ReactComponentIntel {
+            path,
+            component_name: "Card".to_string(),
+            anchor_line: 7,
+            anchor_col: 13,
+            render_sites: 12,
+            distinct_parents: 8,
+            prop_count: 2,
+            hooks: ReactHookSummary {
+                state: 1,
+                effect: 1,
+                ..ReactHookSummary::default()
+            },
+            props: vec![
+                ReactPropIntel {
+                    name: "title".to_string(),
+                    anchor_line: 8,
+                    anchor_col: 2,
+                    used_in_body: true,
+                    passed_from_sites: 3,
+                },
+                ReactPropIntel {
+                    name: "subtitle".to_string(),
+                    anchor_line: 9,
+                    anchor_col: 2,
+                    used_in_body: false,
+                    passed_from_sites: 0,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn hover_on_react_prop_read_and_passed() {
+        let root = test_root();
+        let path = root.join("src/Card.tsx");
+        let mut results = AnalysisResults::default();
+        results.react_component_intel.push(card_intel(path.clone()));
+        let duplication = DuplicationReport::default();
+        // On the `title` prop anchor (1-based line 8 -> 0-based 7, col 2-7).
+        let pos = Position {
+            line: 7,
+            character: 3,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("title"), "names the prop: {value}");
+        assert!(value.contains("read in body"), "read state: {value}");
+        assert!(
+            value.contains("passed from 3 call sites"),
+            "pass count: {value}"
+        );
+    }
+
+    #[test]
+    fn hover_on_react_prop_unread_and_zero_passes() {
+        let root = test_root();
+        let path = root.join("src/Card.tsx");
+        let mut results = AnalysisResults::default();
+        results.react_component_intel.push(card_intel(path.clone()));
+        let duplication = DuplicationReport::default();
+        // On the `subtitle` prop anchor (1-based line 9 -> 0-based 8).
+        let pos = Position {
+            line: 8,
+            character: 4,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("subtitle"), "names the prop: {value}");
+        assert!(value.contains("not read in body"), "read state: {value}");
+        // Singular "0 call sites".
+        assert!(
+            value.contains("passed from 0 call sites"),
+            "pass count: {value}"
+        );
+    }
+
+    #[test]
+    fn hover_on_react_prop_single_call_site_is_singular() {
+        let root = test_root();
+        let path = root.join("src/Card.tsx");
+        let mut results = AnalysisResults::default();
+        let mut intel = card_intel(path.clone());
+        intel.props[0].passed_from_sites = 1;
+        results.react_component_intel.push(intel);
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 7,
+            character: 3,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(
+            value.contains("passed from 1 call site"),
+            "singular call site: {value}"
+        );
+        assert!(!value.contains("1 call sites"), "no plural-s: {value}");
+    }
+
+    #[test]
+    fn hover_on_react_component_anchor_shows_summary() {
+        let root = test_root();
+        let path = root.join("src/Card.tsx");
+        let mut results = AnalysisResults::default();
+        results.react_component_intel.push(card_intel(path.clone()));
+        let duplication = DuplicationReport::default();
+        // On the component name anchor (1-based line 7 -> 0-based 6, col 13).
+        let pos = Position {
+            line: 6,
+            character: 15,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        assert!(value.contains("Card"), "names the component: {value}");
+        assert!(
+            value.contains("rendered 12x (8 parents)"),
+            "render: {value}"
+        );
+        assert!(value.contains("2 props"), "prop count: {value}");
+        assert!(
+            value.contains("2 hooks (1 state, 1 effect)"),
+            "hooks: {value}"
+        );
+    }
+
+    #[test]
+    fn hover_react_prop_finding_wins_over_intel() {
+        // A real unused-component-prop finding and the descriptive intel anchor
+        // the same prop position; the finding hover must win (it is checked
+        // first in build_hover).
+        let root = test_root();
+        let path = root.join("src/Card.tsx");
+        let mut results = AnalysisResults::default();
+        results.unused_component_props.push(
+            fallow_core::results::UnusedComponentPropFinding::with_actions(
+                fallow_core::results::UnusedComponentProp {
+                    path: path.clone(),
+                    component_name: "Card".to_string(),
+                    prop_name: "subtitle".to_string(),
+                    line: 9,
+                    col: 2,
+                },
+            ),
+        );
+        results.react_component_intel.push(card_intel(path.clone()));
+        let duplication = DuplicationReport::default();
+        // On the `subtitle` anchor (1-based line 9 -> 0-based 8, col 2).
+        let pos = Position {
+            line: 8,
+            character: 3,
+        };
+
+        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let value = markup_value(&hover);
+        // The finding's wording, not the intel's "not read in body / passed".
+        assert!(
+            value.contains("referenced nowhere in this component"),
+            "finding hover wins: {value}"
+        );
+        assert!(
+            !value.contains("passed from"),
+            "intel hover did not fire: {value}"
+        );
     }
 }

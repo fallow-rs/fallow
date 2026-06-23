@@ -13,6 +13,7 @@ mod policy;
 mod predicates;
 mod prop_drilling;
 mod re_export_cycles;
+mod react_intel;
 mod react_resolve;
 mod render_fan_in;
 mod route_collision;
@@ -87,6 +88,7 @@ use misplaced_directive::find_misplaced_directives;
 use mixed_barrel::find_mixed_client_server_barrels;
 use prop_drilling::find_prop_drilling_chains;
 use re_export_cycles::find_re_export_cycles;
+use react_intel::compute_react_component_intel;
 use render_fan_in::compute_render_fan_in;
 use route_collision::find_route_collisions;
 use thin_wrapper::find_thin_wrappers;
@@ -1062,6 +1064,7 @@ fn populate_react_health_findings(input: &mut FrameworkSpecificFindingsInput<'_>
     populate_prop_drilling_findings(input);
     populate_thin_wrapper_findings(input);
     populate_render_fan_in(input);
+    populate_react_component_intel(input);
     populate_duplicate_prop_shape_findings(input);
 }
 
@@ -1090,6 +1093,24 @@ fn populate_render_fan_in(input: &mut FrameworkSpecificFindingsInput<'_>) {
         input.resolved_modules,
         input.declared_deps,
         &input.config.root,
+    );
+}
+
+/// Populate the descriptive per-component React intelligence carrier (render
+/// sites, props, hooks). Like [`populate_render_fan_in`] this is NOT rule-gated:
+/// it is a descriptive ambient-editor signal computed whenever React is declared
+/// (the dep gate lives inside [`compute_react_component_intel`]). The field is
+/// `#[serde(skip)]` on [`AnalysisResults`], so it never serializes under bare
+/// `fallow` / `audit`; it is read in-process by the LSP code-lens / hover layer
+/// only.
+fn populate_react_component_intel(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    input.results.react_component_intel = compute_react_component_intel(
+        input.graph,
+        input.modules,
+        input.resolved_modules,
+        input.declared_deps,
+        &input.config.root,
+        input.line_offsets_by_file,
     );
 }
 

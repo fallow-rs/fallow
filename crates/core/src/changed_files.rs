@@ -484,6 +484,9 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         // component-graph analogue of module fan-in), not an issue collection;
         // it is not changed-files filtered.
         render_fan_in: _render_fan_in,
+        // Per-component React intel is a descriptive ambient-editor carrier, not
+        // an issue collection; it is not changed-files filtered.
+        react_component_intel: _react_component_intel,
     } = results;
 }
 

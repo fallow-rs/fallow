@@ -43,8 +43,111 @@ pub fn build_code_lenses(
 ) -> Vec<CodeLens> {
     let mut lenses = export_usage_code_lenses(results, file_path, document_uri);
     lenses.extend(complexity_code_lenses(complexity, file_path));
+    lenses.extend(react_component_code_lenses(results, file_path));
 
     lenses
+}
+
+/// Build the DESCRIPTIVE per-component React summary lenses for a file: one lens
+/// above each component with its render-site / distinct-parent / prop / hook
+/// breakdown. Ambient editor context, never a finding. Zero segments are
+/// omitted cleanly (a component rendered nowhere with no props and no hooks
+/// still gets a lens, but the segments it lacks are dropped).
+fn react_component_code_lenses(results: &AnalysisResults, file_path: &Path) -> Vec<CodeLens> {
+    results
+        .react_component_intel
+        .iter()
+        .filter(|intel| intel.path == file_path)
+        .map(react_component_code_lens)
+        .collect()
+}
+
+fn react_component_code_lens(intel: &fallow_core::results::ReactComponentIntel) -> CodeLens {
+    let position = Position {
+        line: intel.anchor_line.saturating_sub(1),
+        character: intel.anchor_col,
+    };
+    CodeLens {
+        range: Range {
+            start: position,
+            end: position,
+        },
+        command: Some(Command {
+            title: react_component_lens_title(intel),
+            command: "fallow.noop".to_string(),
+            arguments: None,
+        }),
+        data: None,
+    }
+}
+
+/// Compose the component summary title from the non-zero segments:
+/// `rendered 12x (8 parents) · 5 props · 9 hooks (4 state, 3 effect, ...)`.
+/// A segment whose count is zero is omitted (no `· 0 props`); singular/plural is
+/// honored (`1 prop`, `1 parent`). A component with no render sites, no props,
+/// and no hooks falls back to a bare `component` label so the lens is never
+/// empty.
+fn react_component_lens_title(intel: &fallow_core::results::ReactComponentIntel) -> String {
+    let mut segments: Vec<String> = Vec::new();
+
+    if intel.render_sites > 0 {
+        let parents = pluralize(intel.distinct_parents, "parent");
+        segments.push(format!("rendered {}x ({parents})", intel.render_sites));
+    }
+    if intel.prop_count > 0 {
+        segments.push(pluralize(u32::from(intel.prop_count), "prop"));
+    }
+
+    if let Some(hooks) = react_hook_segment(&intel.hooks) {
+        segments.push(hooks);
+    }
+
+    if segments.is_empty() {
+        return "component".to_string();
+    }
+    segments.join(" · ")
+}
+
+/// Build the `N hooks (a state, b effect, ...)` segment, or `None` when the
+/// component uses no hooks. Each kind sub-count is omitted when zero.
+fn react_hook_segment(hooks: &fallow_core::results::ReactHookSummary) -> Option<String> {
+    let total = u32::from(hooks.state)
+        + u32::from(hooks.effect)
+        + u32::from(hooks.memo)
+        + u32::from(hooks.callback)
+        + u32::from(hooks.custom);
+    if total == 0 {
+        return None;
+    }
+
+    let mut breakdown: Vec<String> = Vec::new();
+    for (count, label) in [
+        (hooks.state, "state"),
+        (hooks.effect, "effect"),
+        (hooks.memo, "memo"),
+        (hooks.callback, "callback"),
+        (hooks.custom, "custom"),
+    ] {
+        if count > 0 {
+            breakdown.push(format!("{count} {label}"));
+        }
+    }
+
+    let head = pluralize(total, "hook");
+    if breakdown.is_empty() {
+        Some(head)
+    } else {
+        Some(format!("{head} ({})", breakdown.join(", ")))
+    }
+}
+
+/// `count + " " + noun`, appending `s` when the count is not 1.
+fn pluralize(count: u32, noun: &str) -> String {
+    if count == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
 }
 
 fn export_usage_code_lenses(
@@ -173,7 +276,35 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{ExportUsage, ReferenceLocation};
+    use fallow_core::results::{
+        ExportUsage, ReactComponentIntel, ReactHookSummary, ReactPropIntel, ReferenceLocation,
+    };
+
+    fn react_intel(path: PathBuf) -> ReactComponentIntel {
+        ReactComponentIntel {
+            path,
+            component_name: "Card".to_string(),
+            anchor_line: 7,
+            anchor_col: 13,
+            render_sites: 12,
+            distinct_parents: 8,
+            prop_count: 5,
+            hooks: ReactHookSummary {
+                state: 4,
+                effect: 3,
+                memo: 1,
+                callback: 1,
+                custom: 0,
+            },
+            props: vec![ReactPropIntel {
+                name: "title".to_string(),
+                anchor_line: 7,
+                anchor_col: 2,
+                used_in_body: true,
+                passed_from_sites: 3,
+            }],
+        }
+    }
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -593,6 +724,90 @@ mod tests {
         let uri = Uri::from_file_path(&utils_path).unwrap();
         let lenses = build_code_lenses(&results, &complexity, &utils_path, &uri);
 
+        assert!(lenses.is_empty());
+    }
+
+    #[test]
+    fn react_component_lens_full_summary() {
+        let root = test_root();
+        let path = root.join("src/Card.tsx");
+        let mut results = AnalysisResults::default();
+        results
+            .react_component_intel
+            .push(react_intel(path.clone()));
+
+        let uri = Uri::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &path, &uri);
+        assert_eq!(lenses.len(), 1);
+
+        let cmd = lenses[0].command.as_ref().unwrap();
+        assert_eq!(
+            cmd.title,
+            "rendered 12x (8 parents) · 5 props · 9 hooks (4 state, 3 effect, 1 memo, 1 callback)"
+        );
+        // Anchored at the component definition (1-based line 7 -> 0-based 6).
+        assert_eq!(lenses[0].range.start.line, 6);
+        assert_eq!(lenses[0].range.start.character, 13);
+        assert_eq!(cmd.command, "fallow.noop");
+    }
+
+    #[test]
+    fn react_component_lens_omits_zero_segments_and_singularizes() {
+        let root = test_root();
+        let path = root.join("src/Solo.tsx");
+        let mut results = AnalysisResults::default();
+        let mut intel = react_intel(path.clone());
+        intel.component_name = "Solo".to_string();
+        intel.render_sites = 1;
+        intel.distinct_parents = 1;
+        intel.prop_count = 1;
+        intel.hooks = ReactHookSummary {
+            state: 1,
+            ..ReactHookSummary::default()
+        };
+        results.react_component_intel.push(intel);
+
+        let uri = Uri::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &path, &uri);
+        let cmd = lenses[0].command.as_ref().unwrap();
+        // Singular "1 parent" / "1 prop" / "1 hook", no zero memo/effect/etc.
+        assert_eq!(
+            cmd.title,
+            "rendered 1x (1 parent) · 1 prop · 1 hook (1 state)"
+        );
+    }
+
+    #[test]
+    fn react_component_lens_omits_render_and_prop_when_zero() {
+        let root = test_root();
+        let path = root.join("src/Bare.tsx");
+        let mut results = AnalysisResults::default();
+        let mut intel = react_intel(path.clone());
+        intel.component_name = "Bare".to_string();
+        intel.render_sites = 0;
+        intel.distinct_parents = 0;
+        intel.prop_count = 0;
+        intel.props = vec![];
+        intel.hooks = ReactHookSummary::default();
+        results.react_component_intel.push(intel);
+
+        let uri = Uri::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &path, &uri);
+        let cmd = lenses[0].command.as_ref().unwrap();
+        // No segments -> the bare "component" fallback (never "rendered 0x").
+        assert_eq!(cmd.title, "component");
+    }
+
+    #[test]
+    fn react_component_lens_ignores_unrelated_file() {
+        let root = test_root();
+        let path = root.join("src/Card.tsx");
+        let other = root.join("src/Other.tsx");
+        let mut results = AnalysisResults::default();
+        results.react_component_intel.push(react_intel(other));
+
+        let uri = Uri::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses(&results, &[], &path, &uri);
         assert!(lenses.is_empty());
     }
 }

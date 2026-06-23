@@ -2929,6 +2929,17 @@ export function choose(value: number): string {
                 high_pct: Some(0.0),
                 max_distinct_parents: Some(3),
             }),
+            react_component_intel: vec![fallow_core::results::ReactComponentIntel {
+                path: "/Button.tsx".into(),
+                component_name: "Button".to_string(),
+                anchor_line: 1,
+                anchor_col: 0,
+                render_sites: 6,
+                distinct_parents: 3,
+                prop_count: 1,
+                hooks: fallow_core::results::ReactHookSummary::default(),
+                props: Vec::new(),
+            }],
         }
     }
 
@@ -2982,6 +2993,7 @@ export function choose(value: number): string {
                 .and_then(|m| m.max_distinct_parents),
             Some(3)
         );
+        assert_eq!(target.react_component_intel.len(), 1);
     }
 
     #[test]

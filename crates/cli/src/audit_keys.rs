@@ -511,6 +511,9 @@ impl DeadCodeKeyCollector<'_> {
             // Render fan-in is a whole-project descriptive metric, not an issue
             // collection; no attribution key needed.
             render_fan_in: _render_fan_in,
+            // Per-component React intel is a descriptive ambient-editor carrier,
+            // not an issue collection; no attribution key needed.
+            react_component_intel: _react_component_intel,
         } = results;
 
         self.add_core_findings(
@@ -1238,6 +1241,9 @@ fn classify_introduced_dead_code_fields(results: &fallow_core::results::Analysis
         // Render fan-in is a whole-project descriptive metric, not an issue
         // collection; no key needed.
         render_fan_in: _render_fan_in,
+        // Per-component React intel is a descriptive ambient-editor carrier, not
+        // an issue collection; no key needed.
+        react_component_intel: _react_component_intel,
     } = results;
 }
 

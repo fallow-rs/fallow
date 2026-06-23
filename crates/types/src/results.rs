@@ -109,6 +109,85 @@ pub struct RenderFanInComponent {
     pub distinct_parents: u32,
 }
 
+/// Per-kind hook counts for a React component, summarized from `hook_uses`.
+/// DESCRIPTIVE editor context (the LSP code-lens hook breakdown), never a
+/// finding, severity, or `total_issues` input. `custom` collects every
+/// `use*`-named call that is not one of the four built-ins.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReactHookSummary {
+    /// `useState(...)` call count.
+    pub state: u16,
+    /// `useEffect(...)` call count.
+    pub effect: u16,
+    /// `useMemo(...)` call count.
+    pub memo: u16,
+    /// `useCallback(...)` call count.
+    pub callback: u16,
+    /// Count of any other `use*`-named call (a custom hook).
+    pub custom: u16,
+}
+
+/// Per-prop usage intelligence for one React component prop. DESCRIPTIVE editor
+/// context (the LSP per-prop hover): whether the prop is read in the component
+/// body and how many render sites pass it. NOT a finding (the
+/// `unused-component-prop` React arm owns the deadness rule); this is ambient
+/// signal. `anchor_line` / `anchor_col` follow the same convention the React
+/// `unused-component-prop` findings use (1-based line, byte-derived col from
+/// `byte_offset_to_line_col`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactPropIntel {
+    /// The declared prop name.
+    pub name: String,
+    /// 1-based line of the prop declaration (anchors the hover).
+    pub anchor_line: u32,
+    /// Column of the prop declaration (byte-derived, matching the React
+    /// `unused-component-prop` finding convention).
+    pub anchor_col: u32,
+    /// Whether the prop is referenced in the component body (`used_in_script`
+    /// for the React arm: a resolved reference to the destructured local).
+    pub used_in_body: bool,
+    /// Count of render sites (test/spec/story/fixture files excluded) whose
+    /// passed-attribute set contains this prop name.
+    pub passed_from_sites: u32,
+}
+
+/// Per-component render + prop + hook intelligence for one React component.
+/// DESCRIPTIVE ambient editor context surfaced by the LSP (a component summary
+/// code lens plus per-prop hovers), NOT a finding, IssueKind, severity, or
+/// `total_issues` input. Carried in-process on the `#[serde(skip)]`
+/// `AnalysisResults::react_component_intel` field (like
+/// [`RenderFanInMetric`]); never serialized, so bare `fallow` / `audit` and the
+/// JSON / schema surface are untouched.
+///
+/// Counts are HONEST: test/spec/story/fixture render sites are excluded from
+/// `render_sites`, `distinct_parents`, and per-prop `passed_from_sites`, and
+/// `distinct_parents` (not the repeat-inflated `render_sites`) is the headline,
+/// mirroring the render-fan-in metric's discipline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReactComponentIntel {
+    /// Absolute path of the file declaring the component.
+    pub path: PathBuf,
+    /// The component name.
+    pub component_name: String,
+    /// 1-based line of the component definition (anchors the code lens).
+    pub anchor_line: u32,
+    /// Column of the component definition (byte-derived).
+    pub anchor_col: u32,
+    /// Total JSX render SITES that resolve to this component (each capitalized /
+    /// member JSX tag is one site). SECONDARY context: a single parent rendering
+    /// the child five times is five sites but one distinct parent.
+    pub render_sites: u32,
+    /// Distinct `(parent_file, parent_component)` keys rendering this component.
+    /// The HEADLINE blast-radius count (never the repeat-inflated site count).
+    pub distinct_parents: u32,
+    /// Number of declared props on this component.
+    pub prop_count: u16,
+    /// Per-kind hook counts.
+    pub hooks: ReactHookSummary,
+    /// Per-prop usage intelligence (one entry per declared prop).
+    pub props: Vec<ReactPropIntel>,
+}
+
 /// Complete analysis results.
 ///
 /// # Examples
@@ -457,6 +536,15 @@ pub struct AnalysisResults {
     /// [`RenderFanInMetric`].
     #[serde(skip)]
     pub render_fan_in: Option<RenderFanInMetric>,
+    /// Per-component React render/prop/hook intelligence. DESCRIPTIVE ambient
+    /// editor context (LSP code lens + per-prop hover), NOT an issue type: it is
+    /// never in `total_issues`. Empty on non-React projects (the dep gate fails
+    /// and `component_functions` is empty). Skipped during serialization
+    /// (in-process LSP carrier, like [`Self::render_fan_in`]); bare `fallow` /
+    /// `audit` never serialize it and the JSON / schema surface is unchanged.
+    /// See [`ReactComponentIntel`].
+    #[serde(skip)]
+    pub react_component_intel: Vec<ReactComponentIntel>,
 }
 
 struct AnalysisResultsCoreMergeParts {
@@ -527,6 +615,7 @@ struct AnalysisResultsMetadataMergeParts {
     export_usages: Vec<ExportUsage>,
     entry_point_summary: Option<EntryPointSummary>,
     render_fan_in: Option<RenderFanInMetric>,
+    react_component_intel: Vec<ReactComponentIntel>,
 }
 
 /// Exhaustively destructure `other` into the five grouped merge-part structs.
@@ -604,6 +693,7 @@ fn split_merge_parts(
         export_usages,
         entry_point_summary,
         render_fan_in,
+        react_component_intel,
     } = other;
 
     (
@@ -671,6 +761,7 @@ fn split_merge_parts(
             export_usages,
             entry_point_summary,
             render_fan_in,
+            react_component_intel,
         },
     )
 }
@@ -874,6 +965,8 @@ impl AnalysisResults {
         if self.render_fan_in.is_none() {
             self.render_fan_in = parts.render_fan_in;
         }
+        self.react_component_intel
+            .extend(parts.react_component_intel);
     }
 
     /// Sort all result arrays for deterministic output ordering.

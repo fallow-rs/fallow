@@ -406,6 +406,9 @@ mod severity_gate {
             // analogue of module fan-in); surfaced via health vital signs, not a
             // per-finding LSP diagnostic.
             render_fan_in: _,
+            // Per-component React render/prop/hook intelligence; surfaced as
+            // ambient code-lens + hover context, not a per-finding diagnostic.
+            react_component_intel: _,
             // Project-wide abstain flag for the `unused-load-data-key` detector;
             // an observability bool, not a per-finding diagnostic.
             unused_load_data_keys_global_abstain: _,
