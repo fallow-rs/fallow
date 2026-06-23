@@ -1,0 +1,9 @@
+{
+  "name": "@mono/app",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@mono/services": "1.0.0"
+  }
+}

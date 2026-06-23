@@ -1,0 +1,5 @@
+{
+  "name": "issue-844-typed-instance-monorepo-alias",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"]
+}
