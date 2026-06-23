@@ -47,7 +47,7 @@ const MODES: { id: RightMode; label: string; icon: typeof FileDiff }[] = [
 const SIDEBAR_MIN = 320;
 const SIDEBAR_MAX = 760;
 const SIDEBAR_DEFAULT = 420;
-const SIDEBAR_KEY = "fre:sidebar-width";
+const SIDEBAR_KEY = "fallow-review:sidebar-width";
 
 /** Restore the persisted sidebar width, clamped to the allowed range. */
 const readSidebarWidth = (): number => {

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 const appDir = resolve(__dirname, "..");
 const worktreeRoot = resolve(appDir, "..", "..");
-const shots = process.env["FRE_SHOTS_DIR"] ?? "/tmp/fre-qa";
+const shots = process.env["FALLOW_REVIEW_SHOTS_DIR"] ?? "/tmp/fallow-review-qa";
 
 const safe = async (fn: () => Promise<void>): Promise<void> => {
   try {
@@ -167,7 +167,7 @@ test("capture the review error state", async () => {
 // brief, so the (otherwise all-additions) review renders the decision surface.
 test("capture the decision surface", async () => {
   const fixture = resolve(appDir, "fixtures", "sample-review-with-decisions.json");
-  const stub = "/tmp/fre-fallow-stub.sh";
+  const stub = "/tmp/fallow-review-stub.sh";
   writeFileSync(stub, `#!/bin/sh\ncat ${JSON.stringify(fixture)}\n`);
   chmodSync(stub, 0o755);
   const app: ElectronApplication = await electron.launch({

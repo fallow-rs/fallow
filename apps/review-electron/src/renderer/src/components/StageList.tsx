@@ -13,7 +13,7 @@ type Props = {
   onOpenDiff: (path: string) => void;
 };
 
-const COLLAPSED_KEY = "fre:collapsed-stages";
+const COLLAPSED_KEY = "fallow-review:collapsed-stages";
 
 /** Restore which stage groups were collapsed (keyed by module dir). */
 const readCollapsed = (): Set<string> => {
