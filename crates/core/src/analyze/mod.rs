@@ -780,6 +780,7 @@ pub fn find_dead_code_full(
         public_api_entry_points: &run_context.public_api_entry_points,
         suppressions: &run_context.suppressions,
         line_offsets_by_file: &run_context.line_offsets_by_file,
+        collect_usages,
         results: &mut results,
     });
 
@@ -898,6 +899,9 @@ struct PostDetectionInput<'a, 'm> {
     public_api_entry_points: &'a FxHashSet<FileId>,
     suppressions: &'a SuppressionContext<'m>,
     line_offsets_by_file: &'a LineOffsetsMap<'m>,
+    /// Whether the editor/LSP usages path is active; gates in-process-only
+    /// intel (`react_component_intel`) off the bare `fallow` / `audit` hot path.
+    collect_usages: bool,
     results: &'a mut AnalysisResults,
 }
 
@@ -967,6 +971,7 @@ fn populate_package_and_framework_findings(input: &mut PostDetectionInput<'_, '_
         public_api_entry_points: input.public_api_entry_points,
         suppressions: input.suppressions,
         line_offsets_by_file: input.line_offsets_by_file,
+        collect_usages: input.collect_usages,
         results: input.results,
     });
 }
@@ -1005,6 +1010,9 @@ struct FrameworkSpecificFindingsInput<'a> {
     public_api_entry_points: &'a FxHashSet<FileId>,
     suppressions: &'a SuppressionContext<'a>,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    /// Mirror of `PostDetectionInput::collect_usages`; gates the LSP-only
+    /// `react_component_intel` computation.
+    collect_usages: bool,
     results: &'a mut AnalysisResults,
 }
 
@@ -1102,8 +1110,13 @@ fn populate_render_fan_in(input: &mut FrameworkSpecificFindingsInput<'_>) {
 /// (the dep gate lives inside [`compute_react_component_intel`]). The field is
 /// `#[serde(skip)]` on [`AnalysisResults`], so it never serializes under bare
 /// `fallow` / `audit`; it is read in-process by the LSP code-lens / hover layer
-/// only.
+/// only. Gated on `collect_usages` (the editor/LSP path) so bare `fallow` /
+/// `audit` (the CI hot path) never pay for the render aggregation + prop-drilling
+/// chain traversal that nothing on those paths reads.
 fn populate_react_component_intel(input: &mut FrameworkSpecificFindingsInput<'_>) {
+    if !input.collect_usages {
+        return;
+    }
     input.results.react_component_intel = compute_react_component_intel(
         input.graph,
         input.modules,

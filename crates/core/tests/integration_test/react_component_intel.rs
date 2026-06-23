@@ -25,7 +25,10 @@ fn intel_for<'a>(
 fn summarizes_render_props_and_hooks() {
     let root = fixture_path("react-component-intel");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    // react_component_intel is computed only on the editor/LSP `collect_usages`
+    // path (gated off bare `fallow` / `audit`), so exercise it via the same
+    // analyze entry the LSP uses.
+    let results = fallow_core::analyze_with_usages(&config).expect("analysis should succeed");
 
     let card = intel_for(&results, "Card").expect("Card is in the intel set");
 
@@ -98,7 +101,10 @@ fn summarizes_render_props_and_hooks() {
 fn attributes_hooks_per_component_in_multi_component_file() {
     let root = fixture_path("react-multi-component-hooks");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    // react_component_intel is computed only on the editor/LSP `collect_usages`
+    // path (gated off bare `fallow` / `audit`), so exercise it via the same
+    // analyze entry the LSP uses.
+    let results = fallow_core::analyze_with_usages(&config).expect("analysis should succeed");
 
     let a = intel_for(&results, "ComponentA").expect("ComponentA is in the intel set");
     assert_eq!(a.hooks.state, 1, "ComponentA owns the one useState");
@@ -125,7 +131,10 @@ fn attributes_hooks_per_component_in_multi_component_file() {
 fn carries_prop_drilling_trace_on_chain_source() {
     let root = fixture_path("prop-drilling");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    // react_component_intel is computed only on the editor/LSP `collect_usages`
+    // path (gated off bare `fallow` / `audit`), so exercise it via the same
+    // analyze entry the LSP uses.
+    let results = fallow_core::analyze_with_usages(&config).expect("analysis should succeed");
 
     // The rule is off by default, so no prop-drilling FINDINGS are emitted: the
     // descriptive trace must still be present.
@@ -180,7 +189,10 @@ fn no_intel_on_non_react_project() {
     // `complexity-project` is a plain TS project with no React dep.
     let root = fixture_path("complexity-project");
     let config = create_config(root);
-    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    // react_component_intel is computed only on the editor/LSP `collect_usages`
+    // path (gated off bare `fallow` / `audit`), so exercise it via the same
+    // analyze entry the LSP uses.
+    let results = fallow_core::analyze_with_usages(&config).expect("analysis should succeed");
     assert!(
         results.react_component_intel.is_empty(),
         "no React intel on a non-React project"
