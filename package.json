@@ -15,6 +15,6 @@
     "@commitlint/cli": "21.0.2",
     "@commitlint/config-conventional": "21.0.2",
     "oxfmt": "0.54.0",
-    "oxlint": "1.69.0"
+    "oxlint": "1.70.0"
   }
 }
