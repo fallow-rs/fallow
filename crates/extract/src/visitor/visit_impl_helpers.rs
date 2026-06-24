@@ -915,10 +915,14 @@ pub(super) fn extract_arrow_return_call<'a, 'b>(
     extract_function_body_final_return_call(&arrow.body)
 }
 
+pub(super) struct PlaywrightFixtureMemberUse {
+    pub(super) fixture_name: String,
+    pub(super) member: String,
+}
+
 pub(super) fn collect_playwright_fixture_member_uses(
-    test_name: &str,
     arguments: &[Argument<'_>],
-) -> Vec<MemberAccess> {
+) -> Vec<PlaywrightFixtureMemberUse> {
     let Some(callback) = arguments.iter().find_map(|arg| match arg {
         Argument::ArrowFunctionExpression(arrow) => {
             Some((arrow.params.items.first()?, arrow.body.as_ref()))
@@ -944,13 +948,8 @@ pub(super) fn collect_playwright_fixture_member_uses(
     collector
         .accesses
         .into_iter()
-        .map(|access| MemberAccess {
-            object: format!(
-                "{}{}:{}",
-                crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL,
-                test_name,
-                access.object
-            ),
+        .map(|access| PlaywrightFixtureMemberUse {
+            fixture_name: access.object,
             member: access.member,
         })
         .collect()
