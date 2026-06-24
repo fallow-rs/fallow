@@ -17,7 +17,7 @@ use ls_types::{
     CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Uri,
 };
 
-use fallow_core::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
+use fallow_engine::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
 
 /// Documentation page for the security candidate surface. The dead-code
 /// `DOCS_BASE` in `super` points at the dead-code explanation; security has its
@@ -141,7 +141,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{
+    use fallow_engine::results::{
         SecurityFinding, SecurityFindingKind, SecurityReachability, SecuritySeverity,
         TaintConfidence,
     };
@@ -157,7 +157,7 @@ mod tests {
     fn tainted_sink(path: PathBuf) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_core::results::SecurityCandidate::default(),
+            candidate: fallow_engine::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
@@ -189,7 +189,7 @@ mod tests {
     fn client_server_leak(path: PathBuf) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_core::results::SecurityCandidate::default(),
+            candidate: fallow_engine::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::ClientServerLeak,

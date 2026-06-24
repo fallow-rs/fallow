@@ -5,7 +5,7 @@ use ls_types::{
     Position, Range, Uri,
 };
 
-use fallow_core::results::AnalysisResults;
+use fallow_engine::results::AnalysisResults;
 
 use super::{FIRST_LINE_RANGE, doc_link};
 
@@ -45,7 +45,7 @@ fn cycle_fingerprint(files: &[std::path::PathBuf]) -> String {
 /// the first file, with the other members listed as related info at line 0.
 fn push_legacy_circular_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    cycle: &fallow_core::results::CircularDependency,
+    cycle: &fallow_engine::results::CircularDependency,
     names: &[String],
 ) {
     let Some(first_file) = cycle.files.first() else {
@@ -124,7 +124,7 @@ pub fn push_circular_dep_diagnostics(
 /// `edges` anchors, anchored at the import edge pointing to the next file.
 fn push_circular_cycle_edge_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    cycle: &fallow_core::results::CircularDependency,
+    cycle: &fallow_engine::results::CircularDependency,
 ) {
     // Names are derived from the EDGES (not `files`) so all the rotated
     // message and related-info index math below stays in bounds even if a
@@ -193,7 +193,7 @@ fn push_circular_cycle_edge_diagnostics(
 /// Build the related-information hops for the edge at index `i`, pointing at
 /// every OTHER hop's real location.
 fn circular_cycle_related_info(
-    cycle: &fallow_core::results::CircularDependency,
+    cycle: &fallow_engine::results::CircularDependency,
     names: &[String],
     i: usize,
     n: usize,
@@ -240,14 +240,14 @@ pub fn push_re_export_cycle_diagnostics(
 
 /// Format the shared `re-export-cycle` message: kind, file count, the chain,
 /// and the kind-appropriate fix hint.
-fn re_export_cycle_message(cycle: &fallow_core::results::ReExportCycle) -> String {
+fn re_export_cycle_message(cycle: &fallow_engine::results::ReExportCycle) -> String {
     let chain: Vec<String> = cycle.files.iter().map(|f| cycle_file_name(f)).collect();
     let (kind_label, fix_hint) = match cycle.kind {
-        fallow_core::results::ReExportCycleKind::SelfLoop => (
+        fallow_engine::results::ReExportCycleKind::SelfLoop => (
             "Self-loop",
             "Remove the `export * from './'` (or equivalent) inside this file.",
         ),
-        fallow_core::results::ReExportCycleKind::MultiNode => (
+        fallow_engine::results::ReExportCycleKind::MultiNode => (
             "Cycle",
             "Remove one `export * from` statement on any one member to break the cycle.",
         ),
@@ -266,7 +266,7 @@ fn re_export_cycle_message(cycle: &fallow_core::results::ReExportCycle) -> Strin
 /// the other members linked as related info.
 fn push_re_export_member_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    cycle: &fallow_core::results::ReExportCycle,
+    cycle: &fallow_engine::results::ReExportCycle,
     member_path: &std::path::Path,
     idx: usize,
     message: &str,
@@ -445,7 +445,7 @@ pub fn push_policy_violation_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
 ) {
-    use fallow_core::results::PolicyViolationSeverity;
+    use fallow_engine::results::PolicyViolationSeverity;
 
     for v in &results.policy_violations {
         let Some(uri) = Uri::from_file_path(&v.violation.path) else {
@@ -730,8 +730,8 @@ pub fn push_dynamic_segment_name_conflict_diagnostics(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_core::results::{
+    use fallow_engine::duplicates::{DuplicationReport, DuplicationStats};
+    use fallow_engine::results::{
         AnalysisResults, BoundaryViolation, BoundaryViolationFinding, CircularDependency,
         CircularDependencyEdge, CircularDependencyFinding,
     };
@@ -1023,7 +1023,7 @@ mod tests {
 
     #[test]
     fn re_export_cycle_multi_node_emits_one_diagnostic_per_member() {
-        use fallow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
+        use fallow_engine::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
 
         let root = test_root();
         let file_a = root.join("src/api/index.ts");
@@ -1082,7 +1082,7 @@ mod tests {
 
     #[test]
     fn re_export_cycle_self_loop_emits_self_loop_message_and_no_related_info() {
-        use fallow_core::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
+        use fallow_engine::results::{ReExportCycle, ReExportCycleFinding, ReExportCycleKind};
 
         let root = test_root();
         let file = root.join("src/utils/index.ts");
@@ -1159,8 +1159,8 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         results.boundary_call_violations.push(
-            fallow_core::results::BoundaryCallViolationFinding::with_actions(
-                fallow_core::results::BoundaryCallViolation {
+            fallow_engine::results::BoundaryCallViolationFinding::with_actions(
+                fallow_engine::results::BoundaryCallViolation {
                     path: file.clone(),
                     line: 5,
                     col: 2,
@@ -1200,21 +1200,21 @@ mod tests {
         let file = root.join("src/app.ts");
 
         let mut results = AnalysisResults::default();
-        results
-            .policy_violations
-            .push(fallow_core::results::PolicyViolationFinding::with_actions(
-                fallow_core::results::PolicyViolation {
+        results.policy_violations.push(
+            fallow_engine::results::PolicyViolationFinding::with_actions(
+                fallow_engine::results::PolicyViolation {
                     path: file.clone(),
                     line: 7,
                     col: 2,
                     pack: "team-policy".to_string(),
                     rule_id: "no-moment".to_string(),
-                    kind: fallow_core::results::PolicyRuleKind::BannedImport,
+                    kind: fallow_engine::results::PolicyRuleKind::BannedImport,
                     matched: "moment".to_string(),
-                    severity: fallow_core::results::PolicyViolationSeverity::Error,
+                    severity: fallow_engine::results::PolicyViolationSeverity::Error,
                     message: Some("Use date-fns.".to_string()),
                 },
-            ));
+            ),
+        );
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);
@@ -1244,8 +1244,8 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         results.invalid_client_exports.push(
-            fallow_core::results::InvalidClientExportFinding::with_actions(
-                fallow_core::results::InvalidClientExport {
+            fallow_engine::results::InvalidClientExportFinding::with_actions(
+                fallow_engine::results::InvalidClientExport {
                     path: file.clone(),
                     export_name: "metadata".to_string(),
                     directive: "use client".to_string(),
@@ -1284,8 +1284,8 @@ mod tests {
         let mut results = AnalysisResults::default();
         results
             .route_collisions
-            .push(fallow_core::results::RouteCollisionFinding::with_actions(
-                fallow_core::results::RouteCollision {
+            .push(fallow_engine::results::RouteCollisionFinding::with_actions(
+                fallow_engine::results::RouteCollision {
                     path: file.clone(),
                     url: "/about".to_string(),
                     conflicting_paths: vec![root.join("app/(b)/about/page.tsx")],
@@ -1321,8 +1321,8 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         results.dynamic_segment_name_conflicts.push(
-            fallow_core::results::DynamicSegmentNameConflictFinding::with_actions(
-                fallow_core::results::DynamicSegmentNameConflict {
+            fallow_engine::results::DynamicSegmentNameConflictFinding::with_actions(
+                fallow_engine::results::DynamicSegmentNameConflict {
                     path: file.clone(),
                     position: "/blog".to_string(),
                     conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
@@ -1361,8 +1361,8 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         results.mixed_client_server_barrels.push(
-            fallow_core::results::MixedClientServerBarrelFinding::with_actions(
-                fallow_core::results::MixedClientServerBarrel {
+            fallow_engine::results::MixedClientServerBarrelFinding::with_actions(
+                fallow_engine::results::MixedClientServerBarrel {
                     path: file.clone(),
                     client_origin: "./Button".to_string(),
                     server_origin: "./fetchUser".to_string(),
@@ -1402,8 +1402,8 @@ mod tests {
 
         let mut results = AnalysisResults::default();
         results.misplaced_directives.push(
-            fallow_core::results::MisplacedDirectiveFinding::with_actions(
-                fallow_core::results::MisplacedDirective {
+            fallow_engine::results::MisplacedDirectiveFinding::with_actions(
+                fallow_engine::results::MisplacedDirective {
                     path: file.clone(),
                     directive: "use client".to_string(),
                     line: 3,

@@ -3,8 +3,8 @@ use std::path::Path;
 
 use ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{AnalysisResults, SecurityFindingKind};
+use fallow_engine::duplicates::DuplicationReport;
+use fallow_engine::results::{AnalysisResults, SecurityFindingKind};
 
 use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;
@@ -148,7 +148,7 @@ fn check_security(
 
 /// Build the confidence-first triage markdown body for a security candidate.
 fn security_hover_markdown(
-    finding: &fallow_core::results::SecurityFinding,
+    finding: &fallow_engine::results::SecurityFinding,
     file_path: &Path,
 ) -> String {
     let label = security_label(finding);
@@ -203,7 +203,7 @@ fn security_hover_markdown(
 }
 
 /// Kind-appropriate "Next:" guidance line for a security candidate.
-fn security_next_step(finding: &fallow_core::results::SecurityFinding) -> &'static str {
+fn security_next_step(finding: &fallow_engine::results::SecurityFinding) -> &'static str {
     match finding.kind {
         SecurityFindingKind::ClientServerLeak => {
             "Next: check whether the import is type-only, server-only, or behind a build-time \
@@ -257,12 +257,12 @@ fn check_unused_export(
     for (exports, kind_label) in [
         (
             Box::new(unused_exports_iter)
-                as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &fallow_engine::results::UnusedExport>>,
             "Export",
         ),
         (
             Box::new(unused_types_iter)
-                as Box<dyn Iterator<Item = &fallow_core::results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &fallow_engine::results::UnusedExport>>,
             "Type export",
         ),
     ] {
@@ -356,7 +356,7 @@ fn check_used_export(
 
 /// Build the reference-count markdown body for a used export, listing up to
 /// ten reference locations and a "... and N more" overflow line.
-fn used_export_hover_markdown(usage: &fallow_core::results::ExportUsage) -> String {
+fn used_export_hover_markdown(usage: &fallow_engine::results::ExportUsage) -> String {
     let ref_word = if usage.reference_count == 1 {
         "file"
     } else {
@@ -411,15 +411,15 @@ fn check_unused_member(
     let store_iter = results.unused_store_members.iter().map(|f| &f.member);
     for (members, kind_label) in [
         (
-            Box::new(enum_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            Box::new(enum_iter) as Box<dyn Iterator<Item = &fallow_engine::results::UnusedMember>>,
             "Enum member",
         ),
         (
-            Box::new(class_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            Box::new(class_iter) as Box<dyn Iterator<Item = &fallow_engine::results::UnusedMember>>,
             "Class member",
         ),
         (
-            Box::new(store_iter) as Box<dyn Iterator<Item = &fallow_core::results::UnusedMember>>,
+            Box::new(store_iter) as Box<dyn Iterator<Item = &fallow_engine::results::UnusedMember>>,
             "Store member",
         ),
     ] {
@@ -1007,7 +1007,7 @@ fn check_react_component_intel(
 /// Build the component summary line for the hover, matching the code-lens
 /// title format: `rendered 12x (8 parents) · 5 props · 9 hooks (4 state, ...)`.
 /// Zero segments are omitted; singular/plural is honored.
-fn react_component_summary(intel: &fallow_core::results::ReactComponentIntel) -> String {
+fn react_component_summary(intel: &fallow_engine::results::ReactComponentIntel) -> String {
     let mut segments: Vec<String> = Vec::new();
     if intel.render_sites > 0 {
         let parents = intel_pluralize(intel.distinct_parents, "parent");
@@ -1027,7 +1027,7 @@ fn react_component_summary(intel: &fallow_core::results::ReactComponentIntel) ->
 
 /// `N hooks (a state, b effect, ...)` or `None` when the component uses no
 /// hooks (kind sub-counts omitted when zero).
-fn intel_hook_segment(hooks: &fallow_core::results::ReactHookSummary) -> Option<String> {
+fn intel_hook_segment(hooks: &fallow_engine::results::ReactHookSummary) -> Option<String> {
     let total = u32::from(hooks.state)
         + u32::from(hooks.effect)
         + u32::from(hooks.memo)
@@ -1163,8 +1163,8 @@ fn check_duplication(
 /// Build the markdown body for a duplication hover: the block size plus up to
 /// ten other instance locations and a "... and N more" overflow line.
 fn duplication_hover_markdown(
-    group: &fallow_core::duplicates::CloneGroup,
-    instance: &fallow_core::duplicates::CloneInstance,
+    group: &fallow_engine::duplicates::CloneGroup,
+    instance: &fallow_engine::duplicates::CloneInstance,
 ) -> String {
     let other_count = group.instances.len() - 1;
     let instance_word = if other_count == 1 {
@@ -1217,9 +1217,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::{
+    use fallow_engine::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use fallow_engine::extract::MemberKind;
+    use fallow_engine::results::{
         ExportUsage, ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel,
         ReferenceLocation, SecuritySeverity, UnresolvedImport, UnresolvedImportFinding,
         UnusedClassMemberFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
@@ -2206,13 +2206,13 @@ mod tests {
         assert!(build_hover(&results, &duplication, &path_b, pos).is_none());
     }
 
-    fn tainted_sink_finding(path: PathBuf) -> fallow_core::results::SecurityFinding {
-        fallow_core::results::SecurityFinding {
+    fn tainted_sink_finding(path: PathBuf) -> fallow_engine::results::SecurityFinding {
+        fallow_engine::results::SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_core::results::SecurityCandidate::default(),
+            candidate: fallow_engine::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
-            kind: fallow_core::results::SecurityFindingKind::TaintedSink,
+            kind: fallow_engine::results::SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),
             path,
@@ -2225,7 +2225,7 @@ mod tests {
             trace: vec![],
             actions: vec![],
             dead_code: None,
-            reachability: Some(fallow_core::results::SecurityReachability {
+            reachability: Some(fallow_engine::results::SecurityReachability {
                 reachable_from_entry: true,
                 reachable_from_untrusted_source: false,
                 taint_confidence: None,
@@ -2326,8 +2326,8 @@ mod tests {
         let path = root.join("src/components/MyCard.vue");
         let mut results = AnalysisResults::default();
         results.unrendered_components.push(
-            fallow_core::results::UnrenderedComponentFinding::with_actions(
-                fallow_core::results::UnrenderedComponent {
+            fallow_engine::results::UnrenderedComponentFinding::with_actions(
+                fallow_engine::results::UnrenderedComponent {
                     path: path.clone(),
                     component_name: "MyCard".to_string(),
                     framework: "vue".to_string(),
@@ -2359,8 +2359,8 @@ mod tests {
         let path = root.join("src/components/MyCard.vue");
         let mut results = AnalysisResults::default();
         results.unrendered_components.push(
-            fallow_core::results::UnrenderedComponentFinding::with_actions(
-                fallow_core::results::UnrenderedComponent {
+            fallow_engine::results::UnrenderedComponentFinding::with_actions(
+                fallow_engine::results::UnrenderedComponent {
                     path: path.clone(),
                     component_name: "MyCard".to_string(),
                     framework: "vue".to_string(),
@@ -2384,8 +2384,8 @@ mod tests {
         let path = root.join("src/components/MyCard.vue");
         let mut results = AnalysisResults::default();
         results.unrendered_components.push(
-            fallow_core::results::UnrenderedComponentFinding::with_actions(
-                fallow_core::results::UnrenderedComponent {
+            fallow_engine::results::UnrenderedComponentFinding::with_actions(
+                fallow_engine::results::UnrenderedComponent {
                     path: path.clone(),
                     component_name: "MyCard".to_string(),
                     framework: "vue".to_string(),
@@ -2417,8 +2417,8 @@ mod tests {
         let path = root.join("src/components/Button.vue");
         let mut results = AnalysisResults::default();
         results.unused_component_props.push(
-            fallow_core::results::UnusedComponentPropFinding::with_actions(
-                fallow_core::results::UnusedComponentProp {
+            fallow_engine::results::UnusedComponentPropFinding::with_actions(
+                fallow_engine::results::UnusedComponentProp {
                     path: path.clone(),
                     component_name: "Button".to_string(),
                     prop_name: "variant".to_string(),
@@ -2449,8 +2449,8 @@ mod tests {
         let path = root.join("src/components/Button.vue");
         let mut results = AnalysisResults::default();
         results.unused_component_props.push(
-            fallow_core::results::UnusedComponentPropFinding::with_actions(
-                fallow_core::results::UnusedComponentProp {
+            fallow_engine::results::UnusedComponentPropFinding::with_actions(
+                fallow_engine::results::UnusedComponentProp {
                     path: path.clone(),
                     component_name: "Button".to_string(),
                     prop_name: "variant".to_string(),
@@ -2481,8 +2481,8 @@ mod tests {
         let path = root.join("src/components/Form.vue");
         let mut results = AnalysisResults::default();
         results.unused_component_emits.push(
-            fallow_core::results::UnusedComponentEmitFinding::with_actions(
-                fallow_core::results::UnusedComponentEmit {
+            fallow_engine::results::UnusedComponentEmitFinding::with_actions(
+                fallow_engine::results::UnusedComponentEmit {
                     path: path.clone(),
                     component_name: "Form".to_string(),
                     emit_name: "submit".to_string(),
@@ -2513,8 +2513,8 @@ mod tests {
         let path = root.join("src/components/Form.vue");
         let mut results = AnalysisResults::default();
         results.unused_component_emits.push(
-            fallow_core::results::UnusedComponentEmitFinding::with_actions(
-                fallow_core::results::UnusedComponentEmit {
+            fallow_engine::results::UnusedComponentEmitFinding::with_actions(
+                fallow_engine::results::UnusedComponentEmit {
                     path: path.clone(),
                     component_name: "Form".to_string(),
                     emit_name: "submit".to_string(),
@@ -2545,8 +2545,8 @@ mod tests {
         let path = root.join("src/app/card/card.component.ts");
         let mut results = AnalysisResults::default();
         results.unused_component_inputs.push(
-            fallow_core::results::UnusedComponentInputFinding::with_actions(
-                fallow_core::results::UnusedComponentInput {
+            fallow_engine::results::UnusedComponentInputFinding::with_actions(
+                fallow_engine::results::UnusedComponentInput {
                     path: path.clone(),
                     component_name: "CardComponent".to_string(),
                     input_name: "title".to_string(),
@@ -2577,8 +2577,8 @@ mod tests {
         let path = root.join("src/app/card/card.component.ts");
         let mut results = AnalysisResults::default();
         results.unused_component_inputs.push(
-            fallow_core::results::UnusedComponentInputFinding::with_actions(
-                fallow_core::results::UnusedComponentInput {
+            fallow_engine::results::UnusedComponentInputFinding::with_actions(
+                fallow_engine::results::UnusedComponentInput {
                     path: path.clone(),
                     component_name: "CardComponent".to_string(),
                     input_name: "title".to_string(),
@@ -2609,8 +2609,8 @@ mod tests {
         let path = root.join("src/app/counter/counter.component.ts");
         let mut results = AnalysisResults::default();
         results.unused_component_outputs.push(
-            fallow_core::results::UnusedComponentOutputFinding::with_actions(
-                fallow_core::results::UnusedComponentOutput {
+            fallow_engine::results::UnusedComponentOutputFinding::with_actions(
+                fallow_engine::results::UnusedComponentOutput {
                     path: path.clone(),
                     component_name: "CounterComponent".to_string(),
                     output_name: "changed".to_string(),
@@ -2641,8 +2641,8 @@ mod tests {
         let path = root.join("src/app/counter/counter.component.ts");
         let mut results = AnalysisResults::default();
         results.unused_component_outputs.push(
-            fallow_core::results::UnusedComponentOutputFinding::with_actions(
-                fallow_core::results::UnusedComponentOutput {
+            fallow_engine::results::UnusedComponentOutputFinding::with_actions(
+                fallow_engine::results::UnusedComponentOutput {
                     path: path.clone(),
                     component_name: "CounterComponent".to_string(),
                     output_name: "changed".to_string(),
@@ -2673,8 +2673,8 @@ mod tests {
         let path = root.join("src/lib/Notification.svelte");
         let mut results = AnalysisResults::default();
         results.unused_svelte_events.push(
-            fallow_core::results::UnusedSvelteEventFinding::with_actions(
-                fallow_core::results::UnusedSvelteEvent {
+            fallow_engine::results::UnusedSvelteEventFinding::with_actions(
+                fallow_engine::results::UnusedSvelteEvent {
                     path: path.clone(),
                     component_name: "Notification".to_string(),
                     event_name: "close".to_string(),
@@ -2705,8 +2705,8 @@ mod tests {
         let path = root.join("src/lib/Notification.svelte");
         let mut results = AnalysisResults::default();
         results.unused_svelte_events.push(
-            fallow_core::results::UnusedSvelteEventFinding::with_actions(
-                fallow_core::results::UnusedSvelteEvent {
+            fallow_engine::results::UnusedSvelteEventFinding::with_actions(
+                fallow_engine::results::UnusedSvelteEvent {
                     path: path.clone(),
                     component_name: "Notification".to_string(),
                     event_name: "close".to_string(),
@@ -2737,8 +2737,8 @@ mod tests {
         let path = root.join("src/app/actions.ts");
         let mut results = AnalysisResults::default();
         results.unused_server_actions.push(
-            fallow_core::results::UnusedServerActionFinding::with_actions(
-                fallow_core::results::UnusedServerAction {
+            fallow_engine::results::UnusedServerActionFinding::with_actions(
+                fallow_engine::results::UnusedServerAction {
                     path: path.clone(),
                     action_name: "deleteUser".to_string(),
                     line: 8,
@@ -2769,8 +2769,8 @@ mod tests {
         let path = root.join("src/app/actions.ts");
         let mut results = AnalysisResults::default();
         results.unused_server_actions.push(
-            fallow_core::results::UnusedServerActionFinding::with_actions(
-                fallow_core::results::UnusedServerAction {
+            fallow_engine::results::UnusedServerActionFinding::with_actions(
+                fallow_engine::results::UnusedServerAction {
                     path: path.clone(),
                     action_name: "deleteUser".to_string(),
                     line: 8,
@@ -2800,8 +2800,8 @@ mod tests {
         let path = root.join("src/routes/blog/+page.server.ts");
         let mut results = AnalysisResults::default();
         results.unused_load_data_keys.push(
-            fallow_core::results::UnusedLoadDataKeyFinding::with_actions(
-                fallow_core::results::UnusedLoadDataKey {
+            fallow_engine::results::UnusedLoadDataKeyFinding::with_actions(
+                fallow_engine::results::UnusedLoadDataKey {
                     path: path.clone(),
                     key_name: "posts".to_string(),
                     line: 12,
@@ -2833,8 +2833,8 @@ mod tests {
         let path = root.join("src/routes/blog/+page.server.ts");
         let mut results = AnalysisResults::default();
         results.unused_load_data_keys.push(
-            fallow_core::results::UnusedLoadDataKeyFinding::with_actions(
-                fallow_core::results::UnusedLoadDataKey {
+            fallow_engine::results::UnusedLoadDataKeyFinding::with_actions(
+                fallow_engine::results::UnusedLoadDataKey {
                     path: path.clone(),
                     key_name: "posts".to_string(),
                     line: 12,
@@ -2857,8 +2857,8 @@ mod tests {
         let path = root.join("src/routes/blog/+page.server.ts");
         let mut results = AnalysisResults::default();
         results.unused_load_data_keys.push(
-            fallow_core::results::UnusedLoadDataKeyFinding::with_actions(
-                fallow_core::results::UnusedLoadDataKey {
+            fallow_engine::results::UnusedLoadDataKeyFinding::with_actions(
+                fallow_engine::results::UnusedLoadDataKey {
                     path: path.clone(),
                     key_name: "posts".to_string(),
                     line: 12,
@@ -2883,12 +2883,12 @@ mod tests {
     fn hover_on_client_server_leak_security_candidate() {
         let root = test_root();
         let path = root.join("src/client/Secrets.tsx");
-        let finding = fallow_core::results::SecurityFinding {
+        let finding = fallow_engine::results::SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_core::results::SecurityCandidate::default(),
+            candidate: fallow_engine::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
-            kind: fallow_core::results::SecurityFindingKind::ClientServerLeak,
+            kind: fallow_engine::results::SecurityFindingKind::ClientServerLeak,
             category: None,
             cwe: None,
             path: path.clone(),
@@ -2897,7 +2897,7 @@ mod tests {
             evidence: "process.env.SECRET_KEY imported into client bundle".to_string(),
             source_backed: false,
             source_read: None,
-            severity: fallow_core::results::SecuritySeverity::High,
+            severity: fallow_engine::results::SecuritySeverity::High,
             trace: vec![],
             actions: vec![],
             dead_code: None,
@@ -2926,8 +2926,8 @@ mod tests {
         let root = test_root();
         let path = root.join("src/utils/xss.ts");
         let mut finding = tainted_sink_finding(path.clone());
-        finding.dead_code = Some(fallow_core::results::SecurityDeadCodeContext {
-            kind: fallow_core::results::SecurityDeadCodeKind::UnusedExport,
+        finding.dead_code = Some(fallow_engine::results::SecurityDeadCodeContext {
+            kind: fallow_engine::results::SecurityDeadCodeKind::UnusedExport,
             export_name: Some("renderHtml".to_string()),
             line: Some(8),
             guidance: "Verify the dead-code finding and delete the code if safe before hardening."
@@ -3008,8 +3008,8 @@ mod tests {
                 path: path.clone(),
             }));
         results.unrendered_components.push(
-            fallow_core::results::UnrenderedComponentFinding::with_actions(
-                fallow_core::results::UnrenderedComponent {
+            fallow_engine::results::UnrenderedComponentFinding::with_actions(
+                fallow_engine::results::UnrenderedComponent {
                     path: path.clone(),
                     component_name: "Dead".to_string(),
                     framework: "vue".to_string(),
@@ -3421,8 +3421,8 @@ mod tests {
         let path = root.join("src/Card.tsx");
         let mut results = AnalysisResults::default();
         results.unused_component_props.push(
-            fallow_core::results::UnusedComponentPropFinding::with_actions(
-                fallow_core::results::UnusedComponentProp {
+            fallow_engine::results::UnusedComponentPropFinding::with_actions(
+                fallow_engine::results::UnusedComponentProp {
                     path: path.clone(),
                     component_name: "Card".to_string(),
                     prop_name: "subtitle".to_string(),

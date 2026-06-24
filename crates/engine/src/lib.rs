@@ -19,6 +19,26 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{DuplicatesConfig, ResolvedConfig};
 
+/// Duplication result types exposed through the engine boundary.
+pub mod duplicates {
+    pub use fallow_core::duplicates::*;
+}
+
+/// Extracted semantic types exposed through the engine boundary.
+pub mod extract {
+    pub use fallow_types::extract::*;
+}
+
+/// Analysis result types exposed through the engine boundary.
+pub mod results {
+    pub use fallow_core::results::*;
+}
+
+/// Suppression helpers exposed for editor and embedding surfaces.
+pub mod suppress {
+    pub use fallow_core::suppress::{IssueKind, is_suppressed};
+}
+
 pub use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringSuggestion,
