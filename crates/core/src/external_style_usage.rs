@@ -306,7 +306,9 @@ impl<'a> ExternalStylePackageScanner<'a> {
                     self.absorb_style_child(&child, packages);
                 }
             }
-            ResolveResult::InternalModule(_) | ResolveResult::InternalPackageModule { .. } => {}
+            ResolveResult::InternalModule(_)
+            | ResolveResult::SyntheticAutoImport(_)
+            | ResolveResult::InternalPackageModule { .. } => {}
         }
     }
 

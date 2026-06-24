@@ -13,6 +13,8 @@ use fallow_types::discover::FileId;
 pub enum ResolveResult {
     /// Resolved to a file within the project.
     InternalModule(FileId),
+    /// Resolved to a project file through a framework convention auto-import.
+    SyntheticAutoImport(FileId),
     /// Resolved to a workspace or self package source file while preserving
     /// dependency usage for package accounting.
     InternalPackageModule {
@@ -34,11 +36,17 @@ impl ResolveResult {
     #[must_use]
     pub const fn internal_file_id(&self) -> Option<FileId> {
         match self {
-            Self::InternalModule(file_id) | Self::InternalPackageModule { file_id, .. } => {
-                Some(*file_id)
-            }
+            Self::InternalModule(file_id)
+            | Self::SyntheticAutoImport(file_id)
+            | Self::InternalPackageModule { file_id, .. } => Some(*file_id),
             Self::ExternalFile(_) | Self::NpmPackage(_) | Self::Unresolvable(_) => None,
         }
+    }
+
+    /// Return whether this edge was synthesized from framework auto-import conventions.
+    #[must_use]
+    pub const fn is_synthetic_auto_import(&self) -> bool {
+        matches!(self, Self::SyntheticAutoImport(_))
     }
 
     /// Return the package name that should receive dependency usage credit.
@@ -48,7 +56,10 @@ impl ResolveResult {
             Self::InternalPackageModule { package_name, .. } | Self::NpmPackage(package_name) => {
                 Some(package_name)
             }
-            Self::InternalModule(_) | Self::ExternalFile(_) | Self::Unresolvable(_) => None,
+            Self::InternalModule(_)
+            | Self::SyntheticAutoImport(_)
+            | Self::ExternalFile(_)
+            | Self::Unresolvable(_) => None,
         }
     }
 }
