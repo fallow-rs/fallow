@@ -178,17 +178,8 @@ fn keep_boundary_violations(results: &mut AnalysisResults) {
 
 fn validate_dead_code_runtime_options(
     options: &DeadCodeOptions,
-    resolved: &ResolvedAnalysisOptions,
+    _resolved: &ResolvedAnalysisOptions,
 ) -> ProgrammaticResult<()> {
-    if resolved.diff.is_some() {
-        return Err(ProgrammaticError::new(
-            "`diff_file` is not supported by the API dead-code runtime yet",
-            2,
-        )
-        .with_code("FALLOW_UNSUPPORTED_DEAD_CODE_DIFF_FILE")
-        .with_context("analysis.diffFile")
-        .with_help("Use `changed_since` or `files` for scoped API dead-code runs"));
-    }
     if options.analysis.explain {
         return Err(ProgrammaticError::new(
             "`explain` is not supported by the API dead-code runtime yet",
@@ -258,8 +249,174 @@ fn apply_dead_code_scope(
     if let Some(changed_files) = changed_files_for_run(resolved)? {
         fallow_engine::dead_code::filter_by_changed_files(results, &changed_files);
     }
+    if let Some(diff) = resolved.diff.as_ref() {
+        filter_dead_code_by_diff(results, diff, session.root());
+    }
     apply_dead_code_file_filter(options, session.root(), results);
     Ok(())
+}
+
+fn filter_dead_code_by_diff(results: &mut AnalysisResults, diff: &DiffIndex, root: &Path) {
+    let touches_file = |path: &Path| -> bool {
+        relative_to_diff_path(path, root).is_none_or(|rel| diff.touches_file(&rel))
+    };
+    let line_in_diff = |path: &Path, line: u32| -> bool {
+        relative_to_diff_path(path, root).is_none_or(|rel| {
+            diff.added_lines
+                .get(&rel)
+                .is_some_and(|lines| lines.contains(&u64::from(line)))
+        })
+    };
+
+    filter_dead_code_source_findings(results, &touches_file, &line_in_diff);
+    filter_dead_code_security_findings(results, &touches_file, &line_in_diff);
+    filter_dead_code_dependency_findings(results, &line_in_diff);
+    filter_dead_code_graph_findings(results, &touches_file, &line_in_diff);
+    filter_dead_code_framework_findings(results, &line_in_diff);
+}
+
+fn filter_dead_code_source_findings(
+    results: &mut AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
+    results
+        .unused_files
+        .retain(|finding| touches_file(&finding.file.path));
+    results
+        .unused_exports
+        .retain(|finding| line_in_diff(&finding.export.path, finding.export.line));
+    results
+        .unused_types
+        .retain(|finding| line_in_diff(&finding.export.path, finding.export.line));
+    results
+        .private_type_leaks
+        .retain(|finding| line_in_diff(&finding.leak.path, finding.leak.line));
+    results
+        .unused_enum_members
+        .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
+    results
+        .unused_class_members
+        .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
+    results
+        .unused_store_members
+        .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
+    results
+        .unprovided_injects
+        .retain(|finding| line_in_diff(&finding.inject.path, finding.inject.line));
+    results
+        .unrendered_components
+        .retain(|finding| line_in_diff(&finding.component.path, finding.component.line));
+    results
+        .unused_component_props
+        .retain(|finding| line_in_diff(&finding.prop.path, finding.prop.line));
+    results
+        .unused_component_emits
+        .retain(|finding| line_in_diff(&finding.emit.path, finding.emit.line));
+    results
+        .unused_component_inputs
+        .retain(|finding| line_in_diff(&finding.input.path, finding.input.line));
+    results
+        .unused_component_outputs
+        .retain(|finding| line_in_diff(&finding.output.path, finding.output.line));
+    results
+        .unused_svelte_events
+        .retain(|finding| line_in_diff(&finding.event.path, finding.event.line));
+    results
+        .unused_server_actions
+        .retain(|finding| line_in_diff(&finding.action.path, finding.action.line));
+    results
+        .unused_load_data_keys
+        .retain(|finding| line_in_diff(&finding.key.path, finding.key.line));
+    results
+        .unresolved_imports
+        .retain(|finding| line_in_diff(&finding.import.path, finding.import.line));
+}
+
+fn filter_dead_code_security_findings(
+    results: &mut AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
+    results.security_findings.retain(|finding| {
+        line_in_diff(&finding.path, finding.line)
+            || finding.trace.iter().any(|hop| {
+                line_in_diff(&hop.path, hop.line)
+                    || (matches!(hop.role, fallow_engine::results::TraceHopRole::SecretSource)
+                        && touches_file(&hop.path))
+            })
+            || finding.reachability.as_ref().is_some_and(|reachability| {
+                reachability
+                    .untrusted_source_trace
+                    .iter()
+                    .any(|hop| line_in_diff(&hop.path, hop.line))
+            })
+    });
+    results
+        .security_unresolved_callee_diagnostics
+        .retain(|finding| line_in_diff(&finding.path, finding.line));
+}
+
+fn filter_dead_code_dependency_findings(
+    results: &mut AnalysisResults,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
+    for finding in &mut results.unlisted_dependencies {
+        finding
+            .dep
+            .imported_from
+            .retain(|source| line_in_diff(&source.path, source.line));
+    }
+    results
+        .unlisted_dependencies
+        .retain(|finding| !finding.dep.imported_from.is_empty());
+}
+
+fn filter_dead_code_graph_findings(
+    results: &mut AnalysisResults,
+    touches_file: &dyn Fn(&Path) -> bool,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
+    results.duplicate_exports.retain(|finding| {
+        finding
+            .export
+            .locations
+            .iter()
+            .any(|location| line_in_diff(&location.path, location.line))
+    });
+    results
+        .circular_dependencies
+        .retain(|cycle| cycle.cycle.files.iter().any(|path| touches_file(path)));
+    results
+        .re_export_cycles
+        .retain(|cycle| cycle.cycle.files.iter().any(|path| touches_file(path)));
+    results
+        .boundary_violations
+        .retain(|finding| line_in_diff(&finding.violation.from_path, finding.violation.line));
+    results
+        .stale_suppressions
+        .retain(|finding| line_in_diff(&finding.path, finding.line));
+}
+
+fn filter_dead_code_framework_findings(
+    results: &mut AnalysisResults,
+    line_in_diff: &dyn Fn(&Path, u32) -> bool,
+) {
+    results
+        .invalid_client_exports
+        .retain(|finding| line_in_diff(&finding.export.path, finding.export.line));
+    results
+        .mixed_client_server_barrels
+        .retain(|finding| line_in_diff(&finding.barrel.path, finding.barrel.line));
+    results
+        .misplaced_directives
+        .retain(|finding| line_in_diff(&finding.directive_site.path, finding.directive_site.line));
+    results
+        .route_collisions
+        .retain(|finding| line_in_diff(&finding.collision.path, finding.collision.line));
+    results
+        .dynamic_segment_name_conflicts
+        .retain(|finding| line_in_diff(&finding.conflict.path, finding.conflict.line));
 }
 
 fn apply_dead_code_file_filter(
@@ -1029,6 +1186,10 @@ impl DiffIndex {
             .get(path)
             .is_some_and(|lines| (start..=end).any(|line| lines.contains(&line)))
     }
+
+    fn touches_file(&self, path: &str) -> bool {
+        self.added_lines.contains_key(path)
+    }
 }
 
 fn filter_by_diff(report: &mut DuplicationReport, diff_index: &DiffIndex, root: &Path) {
@@ -1299,6 +1460,32 @@ mod tests {
     }
 
     #[test]
+    fn detect_dead_code_diff_file_filters_source_findings() {
+        let project = dead_code_project();
+        let root = project.path();
+        std::fs::write(
+            root.join("a.diff"),
+            "diff --git a/src/a.ts b/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n+export const deadA = 1;\n",
+        )
+        .expect("diff");
+
+        let json = detect_dead_code(&DeadCodeOptions {
+            analysis: AnalysisOptions {
+                diff_file: Some(PathBuf::from("a.diff")),
+                ..analysis_at(root)
+            },
+            filters: DeadCodeFilters {
+                unused_exports: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+
+        assert_eq!(unused_export_names(&json), vec!["deadA"]);
+    }
+
+    #[test]
     fn detect_circular_dependencies_keeps_dead_code_envelope_but_filters_other_findings() {
         let project = dead_code_project();
         let root = project.path();
@@ -1330,32 +1517,6 @@ mod tests {
         assert_eq!(json["total_issues"], 0);
         assert!(json["boundary_violations"].as_array().is_some());
         assert!(json["unused_exports"].as_array().is_none_or(Vec::is_empty));
-    }
-
-    #[test]
-    fn detect_dead_code_rejects_diff_file_until_diff_contract_moves() {
-        let project = dead_code_project();
-        let root = project.path();
-        std::fs::write(
-            root.join("scope.diff"),
-            "diff --git a/src/a.ts b/src/a.ts\n",
-        )
-        .expect("diff");
-
-        let err = detect_dead_code(&DeadCodeOptions {
-            analysis: AnalysisOptions {
-                diff_file: Some(PathBuf::from("scope.diff")),
-                ..analysis_at(root)
-            },
-            ..DeadCodeOptions::default()
-        })
-        .expect_err("diff file is not supported yet");
-
-        assert_eq!(
-            err.code.as_deref(),
-            Some("FALLOW_UNSUPPORTED_DEAD_CODE_DIFF_FILE")
-        );
-        assert_eq!(err.context.as_deref(), Some("analysis.diffFile"));
     }
 
     #[test]
