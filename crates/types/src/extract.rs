@@ -26,6 +26,12 @@ pub struct ModuleInfo {
     pub package_path_references: Vec<String>,
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Vec<MemberAccess>,
+    /// Typed semantic facts produced by extraction for cross-layer analysis.
+    ///
+    /// This carries facts that used to be encoded through sentinel strings in
+    /// `member_accesses`. During migration, extractors may emit both the typed
+    /// fact and the legacy sentinel access.
+    pub semantic_facts: Vec<SemanticFact>,
     /// Identifiers used in whole-object access patterns.
     pub whole_object_uses: Vec<String>,
     /// Whether this module uses CommonJS exports.
@@ -1338,6 +1344,24 @@ pub struct MemberAccess {
     pub member: String,
 }
 
+/// A typed extraction fact for cross-layer analysis.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SemanticFact {
+    /// A class member referenced from an Angular template, host binding, or
+    /// component metadata entry.
+    AngularTemplateMemberAccess(AngularTemplateMemberAccessFact),
+}
+
+/// A member name referenced from an Angular template surface.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AngularTemplateMemberAccessFact {
+    /// Referenced class member name.
+    pub member: String,
+}
+
 /// A statically flattenable callee path invoked in a module (e.g. `execSync`,
 /// `child_process.exec`, `console.log`). One entry per unique `callee_path`
 /// per module; the span anchors the first occurrence. Consumed by the
@@ -1811,9 +1835,11 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<SemanticFact>() == 24);
+#[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1304);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1328);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -1975,6 +2001,7 @@ mod tests {
                 object: "Status".to_string(),
                 member: "Active".to_string(),
             }],
+            semantic_facts: Vec::new(),
             whole_object_uses: vec!["Status".to_string()],
             has_cjs_exports: true,
             has_angular_component_template_url: true,
@@ -3229,6 +3256,7 @@ mod tests {
             require_calls: Vec::new(),
             package_path_references: Vec::new(),
             member_accesses: Vec::new(),
+            semantic_facts: Vec::new(),
             whole_object_uses: Vec::new(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,

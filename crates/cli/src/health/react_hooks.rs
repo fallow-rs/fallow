@@ -207,6 +207,7 @@ mod tests {
             require_calls: vec![],
             package_path_references: vec![],
             member_accesses: vec![],
+            semantic_facts: Vec::new(),
             whole_object_uses: vec![],
             has_cjs_exports: false,
             has_angular_component_template_url: false,

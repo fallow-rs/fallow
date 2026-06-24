@@ -93,6 +93,7 @@ fn cache_store_insert_and_get() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -175,6 +176,11 @@ fn cache_store_hash_mismatch_returns_none() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: vec![SemanticFact::AngularTemplateMemberAccess(
+            AngularTemplateMemberAccessFact {
+                member: "title".to_string(),
+            },
+        )],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -265,6 +271,7 @@ fn cache_store_overwrite_entry() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -338,6 +345,7 @@ fn cache_store_overwrite_entry() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -431,6 +439,7 @@ fn module_to_cached_roundtrip_named_export() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -543,6 +552,7 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -640,6 +650,7 @@ fn module_to_cached_roundtrip_default_export() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -763,6 +774,7 @@ fn module_to_cached_roundtrip_imports() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -866,6 +878,7 @@ fn module_to_cached_roundtrip_re_exports() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -971,6 +984,11 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             object: "Status".to_string(),
             member: "Active".to_string(),
         }],
+        semantic_facts: vec![SemanticFact::AngularTemplateMemberAccess(
+            AngularTemplateMemberAccessFact {
+                member: "title".to_string(),
+            },
+        )],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: true,
@@ -1050,6 +1068,14 @@ fn module_to_cached_roundtrip_dynamic_imports() {
     assert_eq!(restored.member_accesses.len(), 1);
     assert_eq!(restored.member_accesses[0].object, "Status");
     assert_eq!(restored.member_accesses[0].member, "Active");
+    assert_eq!(
+        restored.semantic_facts,
+        vec![SemanticFact::AngularTemplateMemberAccess(
+            AngularTemplateMemberAccessFact {
+                member: "title".to_string(),
+            }
+        )]
+    );
     assert!(restored.has_cjs_exports);
 }
 
@@ -1106,6 +1132,7 @@ fn module_to_cached_roundtrip_members() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -1216,6 +1243,7 @@ fn cache_save_and_load_roundtrip() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -1309,6 +1337,7 @@ fn cache_version_mismatch_returns_none() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -1406,6 +1435,7 @@ fn module_to_cached_roundtrip_type_only_import() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -1494,6 +1524,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -1590,6 +1621,7 @@ fn retain_paths_removes_stale_entries() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -1692,6 +1724,7 @@ fn retain_paths_with_empty_files_clears_cache() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -1775,6 +1808,7 @@ fn get_by_metadata_returns_entry_on_match() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -1858,6 +1892,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -1943,6 +1978,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -2028,6 +2064,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -2122,6 +2159,7 @@ fn module_to_cached_stores_mtime_and_size() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -2204,6 +2242,7 @@ fn module_to_cached_roundtrip_line_offsets() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -2274,6 +2313,10 @@ fn module_to_cached_roundtrip_line_offsets() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "exhaustive ModuleInfo round-trip fixture literal"
+)]
 fn module_to_cached_roundtrip_suppressions_with_kinds() {
     use crate::suppress::{IssueKind, Suppression};
 
@@ -2286,6 +2329,7 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -2393,6 +2437,7 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -2507,6 +2552,7 @@ fn module_to_cached_roundtrip_visibility() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -2599,6 +2645,7 @@ fn module_to_cached_roundtrip_visibility_internal() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -2691,6 +2738,7 @@ fn module_to_cached_roundtrip_visibility_beta() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -2783,6 +2831,7 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -2865,6 +2914,7 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![
             crate::DynamicImportPattern {
@@ -2967,6 +3017,7 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec!["Status".to_string()],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -3066,6 +3117,7 @@ fn module_to_cached_roundtrip_complexity() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -3190,6 +3242,7 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         }],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -3284,6 +3337,7 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -3377,6 +3431,7 @@ fn module_to_cached_roundtrip_source_span() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -3478,6 +3533,7 @@ fn module_to_cached_roundtrip_member_decorators() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -3568,6 +3624,7 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![payload],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,

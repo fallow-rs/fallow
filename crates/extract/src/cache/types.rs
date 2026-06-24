@@ -587,7 +587,10 @@ use crate::MemberKind;
 /// Bumped to 188: `HookUse` now carries the enclosing `component` name, so the
 /// descriptive per-component hook summary stays exact in multi-component files.
 /// A warm cache from 187 lacks the attribution field on persisted `hook_uses`.
-pub(super) const CACHE_VERSION: u32 = 188;
+///
+/// Bumped to 189: `ModuleInfo`/`CachedModule` now carry typed semantic facts for
+/// Angular template member accesses alongside the legacy sentinel entries.
+pub(super) const CACHE_VERSION: u32 = 189;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -641,7 +644,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1304);
+assert_cached_type_size!(CachedModule, 1328);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -655,6 +658,7 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
+assert_cached_type_size!(fallow_types::extract::SemanticFact, 24);
 assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
 assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
 assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
@@ -696,6 +700,8 @@ pub struct CachedModule {
     pub package_path_references: Vec<String>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<crate::MemberAccess>,
+    /// Typed semantic facts produced by extraction for cross-layer analysis.
+    pub semantic_facts: Vec<fallow_types::extract::SemanticFact>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
     pub whole_object_uses: Vec<String>,
     /// Dynamic import patterns with partial static resolution.

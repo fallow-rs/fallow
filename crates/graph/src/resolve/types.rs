@@ -145,6 +145,8 @@ pub struct ResolvedModule {
     pub resolved_dynamic_patterns: Vec<(fallow_types::extract::DynamicImportPattern, Vec<FileId>)>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<fallow_types::extract::MemberAccess>,
+    /// Typed semantic facts produced by extraction for cross-layer analysis.
+    pub semantic_facts: Vec<fallow_types::extract::SemanticFact>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
     pub whole_object_uses: Vec<String>,
     /// Whether this module uses `CommonJS` exports.
@@ -175,6 +177,7 @@ impl Default for ResolvedModule {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
+            semantic_facts: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
             has_angular_component_template_url: false,

@@ -7,8 +7,8 @@ use crate::tests::parse_ts as parse;
 use crate::{ImportedName, MemberKind};
 use fallow_types::discover::FileId;
 use fallow_types::extract::{
-    DiFramework, DiRole, SecurityControlKind, SecurityUrlShape, SinkArgKind, SinkLiteralValue,
-    SinkShape, SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
+    DiFramework, DiRole, SecurityControlKind, SecurityUrlShape, SemanticFact, SinkArgKind,
+    SinkLiteralValue, SinkShape, SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
 };
 use helpers::regex_pattern_to_suffix;
 
@@ -44,6 +44,16 @@ fn store_member_accesses(info: &crate::ModuleInfo) -> Vec<(String, String)> {
         .collect();
     accesses.sort();
     accesses
+}
+
+fn angular_template_fact_members(info: &crate::ModuleInfo) -> Vec<&str> {
+    info.semantic_facts
+        .iter()
+        .map(|fact| {
+            let SemanticFact::AngularTemplateMemberAccess(access) = fact;
+            access.member.as_str()
+        })
+        .collect()
 }
 
 #[test]
@@ -5905,6 +5915,9 @@ fn angular_inline_template_emits_sentinel_member_accesses() {
         .collect();
     assert!(sentinel_refs.contains(&"message"));
     assert!(sentinel_refs.contains(&"onClick"));
+    let fact_refs = angular_template_fact_members(&info);
+    assert!(fact_refs.contains(&"message"));
+    assert!(fact_refs.contains(&"onClick"));
 }
 
 #[test]
@@ -6051,6 +6064,11 @@ fn angular_host_bindings_emit_sentinel_accesses() {
     assert!(host_refs.contains(&"isActive"));
     assert!(host_refs.contains(&"onHostClick"));
     assert!(host_refs.contains(&"customColor"));
+    let fact_refs = angular_template_fact_members(&info);
+    assert!(fact_refs.contains(&"hostClass"));
+    assert!(fact_refs.contains(&"isActive"));
+    assert!(fact_refs.contains(&"onHostClick"));
+    assert!(fact_refs.contains(&"customColor"));
 }
 
 #[test]

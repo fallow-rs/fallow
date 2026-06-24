@@ -18,12 +18,13 @@
 //!   negligible shape treated as a call);
 //! - a `member_access` with `object == "this" && member == bar` (the output read
 //!   as a value, e.g. forwarded to a function that may emit it). Over-credit;
-//! - an inline-template sentinel ref (`object == ANGULAR_TPL_SENTINEL &&
-//!   member == bar`), which credits a template-handler emit such as
+//! - a typed Angular template member fact for `bar`, with legacy
+//!   `ANGULAR_TPL_SENTINEL` member accesses accepted as a fallback during the
+//!   migration, which credits a template-handler emit such as
 //!   `(click)="bar.emit(...)"` (Angular templates emit outputs directly off the
 //!   bare name, with no `this.` prefix);
-//! - the same sentinel ref in the linked external `templateUrl` `.html` module,
-//!   reached via the `SideEffect` import edge.
+//! - the same template member evidence in the linked external `templateUrl`
+//!   `.html` module, reached via the `SideEffect` import edge.
 //!
 //! Whole-component ABSTAIN (skip ALL outputs for the component) when the
 //! component class declares an `extends` heritage clause: a base class in another
@@ -34,7 +35,6 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_extract::ANGULAR_TPL_SENTINEL;
 use fallow_types::extract::ModuleInfo;
 
 use crate::discover::FileId;
@@ -155,17 +155,9 @@ fn template_emitted_outputs<'a>(
     external_templates: &[&'a ModuleInfo],
 ) -> FxHashSet<&'a str> {
     let mut emitted: FxHashSet<&str> = FxHashSet::default();
-    for access in &component.member_accesses {
-        if access.object == ANGULAR_TPL_SENTINEL {
-            emitted.insert(access.member.as_str());
-        }
-    }
+    super::unused_component_input::insert_angular_template_members(component, &mut emitted);
     for template in external_templates {
-        for access in &template.member_accesses {
-            if access.object == ANGULAR_TPL_SENTINEL {
-                emitted.insert(access.member.as_str());
-            }
-        }
+        super::unused_component_input::insert_angular_template_members(template, &mut emitted);
     }
     emitted
 }
@@ -191,11 +183,7 @@ fn external_template_modules<'a>(
         let Some(target_module) = modules_by_id.get(&target) else {
             continue;
         };
-        if target_module
-            .member_accesses
-            .iter()
-            .any(|a| a.object == ANGULAR_TPL_SENTINEL)
-        {
+        if super::unused_component_input::has_angular_template_members(target_module) {
             out.push(*target_module);
         }
     }
@@ -223,8 +211,13 @@ fn component_name_for(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::extract::{AngularOutputMember, ClassHeritageInfo, MemberAccess};
+    use fallow_types::extract::{
+        AngularOutputMember, AngularTemplateMemberAccessFact, ClassHeritageInfo, MemberAccess,
+        SemanticFact,
+    };
     use rustc_hash::FxHashSet;
+
+    use fallow_extract::ANGULAR_TPL_SENTINEL;
 
     use super::*;
     use crate::analyze::test_support::empty_module;
@@ -241,6 +234,12 @@ mod tests {
             object: object.to_string(),
             member: member.to_string(),
         }
+    }
+
+    fn tpl_fact(member: &str) -> SemanticFact {
+        SemanticFact::AngularTemplateMemberAccess(AngularTemplateMemberAccessFact {
+            member: member.to_string(),
+        })
     }
 
     #[test]
@@ -285,6 +284,20 @@ mod tests {
         assert!(
             !output_is_emitted(&component, "changed"),
             "the template sentinel is not a `this.changed.emit` script call"
+        );
+    }
+
+    #[test]
+    fn typed_template_fact_credits_output() {
+        let component = ModuleInfo {
+            angular_outputs: vec![output("changed", 10)],
+            semantic_facts: vec![tpl_fact("changed")],
+            ..empty_module()
+        };
+        let emitted = template_emitted_outputs(&component, &[]);
+        assert!(
+            emitted.contains("changed"),
+            "a typed Angular template fact credits the output"
         );
     }
 

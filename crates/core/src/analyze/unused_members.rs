@@ -16,6 +16,7 @@ use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
+use fallow_types::extract::SemanticFact;
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
@@ -574,12 +575,7 @@ fn build_angular_template_refs(
     resolved_modules
         .iter()
         .filter_map(|module| {
-            let refs: Vec<&str> = module
-                .member_accesses
-                .iter()
-                .filter(|access| access.object == ANGULAR_TPL_SENTINEL)
-                .map(|access| access.member.as_str())
-                .collect();
+            let refs = angular_template_member_refs(module);
             if refs.is_empty() {
                 None
             } else {
@@ -595,11 +591,7 @@ fn build_angular_template_chain_accesses(
     resolved_modules
         .iter()
         .filter_map(|module| {
-            if !module
-                .member_accesses
-                .iter()
-                .any(|access| access.object == ANGULAR_TPL_SENTINEL)
-            {
+            if !has_angular_template_member_refs(module) {
                 return None;
             }
             let chains: Vec<(&str, &str)> = module
@@ -622,6 +614,35 @@ fn build_angular_template_chain_accesses(
             }
         })
         .collect()
+}
+
+fn angular_template_member_refs(module: &ResolvedModule) -> Vec<&str> {
+    module
+        .semantic_facts
+        .iter()
+        .map(|fact| {
+            let SemanticFact::AngularTemplateMemberAccess(access) = fact;
+            access.member.as_str()
+        })
+        .chain(
+            module
+                .member_accesses
+                .iter()
+                .filter(|access| access.object == ANGULAR_TPL_SENTINEL)
+                .map(|access| access.member.as_str()),
+        )
+        .collect()
+}
+
+fn has_angular_template_member_refs(module: &ResolvedModule) -> bool {
+    module
+        .semantic_facts
+        .iter()
+        .any(|fact| matches!(fact, SemanticFact::AngularTemplateMemberAccess(_)))
+        || module
+            .member_accesses
+            .iter()
+            .any(|access| access.object == ANGULAR_TPL_SENTINEL)
 }
 
 struct AngularTemplateRefContext<'a, 'b> {
@@ -2650,6 +2671,7 @@ mod tests {
             require_calls: vec![],
             package_path_references: vec![],
             member_accesses: vec![],
+            semantic_facts: Vec::new(),
             whole_object_uses: vec![],
             has_cjs_exports: false,
             has_angular_component_template_url: false,
