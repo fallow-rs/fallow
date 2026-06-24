@@ -20,9 +20,6 @@ pub const CHECK_DOCS: &str = "https://docs.fallow.tools/cli/dead-code";
 /// Docs URL for the health command.
 pub const HEALTH_DOCS: &str = "https://docs.fallow.tools/cli/health";
 
-/// Docs URL for the dupes command.
-pub const DUPES_DOCS: &str = "https://docs.fallow.tools/cli/dupes";
-
 /// Docs URL for the runtime coverage setup command's agent-readable JSON.
 pub const COVERAGE_SETUP_DOCS: &str = "https://docs.fallow.tools/cli/coverage#agent-readable-json";
 
@@ -1614,49 +1611,10 @@ fn health_runtime_production_metrics() -> Value {
 /// Build the `_meta` object for `fallow dupes --format json --explain`.
 #[must_use]
 pub fn dupes_meta() -> Value {
-    json!({
-        "docs": DUPES_DOCS,
-        "field_definitions": {
-            "actions[]": ACTIONS_FIELD_DEFINITION,
-            "actions[].auto_fixable": ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION
-        },
-        "metrics": {
-            "duplication_percentage": {
-                "name": "Duplication Percentage",
-                "description": "Fraction of total source tokens that appear in at least one clone group. Computed over the full analyzed file set.",
-                "range": "[0, 100]",
-                "interpretation": "lower is better"
-            },
-            "token_count": {
-                "name": "Token Count",
-                "description": "Number of normalized source tokens in the clone group. Tokens are language-aware (keywords, identifiers, operators, punctuation). Higher token count = larger duplicate.",
-                "range": "[1, \u{221e})",
-                "interpretation": "larger clones have higher refactoring value"
-            },
-            "line_count": {
-                "name": "Line Count",
-                "description": "Number of source lines spanned by the clone instance. Approximation of clone size for human readability.",
-                "range": "[1, \u{221e})",
-                "interpretation": "larger clones are more impactful to deduplicate"
-            },
-            "clone_groups": {
-                "name": "Clone Groups",
-                "description": "A set of code fragments with identical or near-identical normalized token sequences. Each group has 2+ instances across different locations.",
-                "interpretation": "each group is a single refactoring opportunity"
-            },
-            "clone_groups_below_min_occurrences": {
-                "name": "Clone Groups Below minOccurrences",
-                "description": "Number of clone groups detected but hidden by the `duplicates.minOccurrences` filter. Always 0 (or absent) when the filter is at its default of 2. Pre-filter group count = `clone_groups + clone_groups_below_min_occurrences`.",
-                "range": "[0, \u{221e})",
-                "interpretation": "high values suggest noisy pair-only duplication; lower `minOccurrences` to inspect"
-            },
-            "clone_families": {
-                "name": "Clone Families",
-                "description": "Groups of clone groups that share the same set of files. Indicates systematic duplication patterns (e.g., mirrored directory structures).",
-                "interpretation": "families suggest extract-module refactoring opportunities"
-            }
-        }
-    })
+    match serde_json::to_value(fallow_output::dupes_meta()) {
+        Ok(value) => value,
+        Err(_) => json!({}),
+    }
 }
 
 /// Build the `_meta` object for `fallow security --format json --explain`.
@@ -2359,8 +2317,8 @@ mod tests {
 
     #[test]
     fn dupes_docs_url_valid() {
-        assert!(DUPES_DOCS.starts_with("https://"));
-        assert!(DUPES_DOCS.contains("dupes"));
+        assert!(fallow_output::DUPES_DOCS.starts_with("https://"));
+        assert!(fallow_output::DUPES_DOCS.contains("dupes"));
     }
 
     #[test]
@@ -2378,7 +2336,7 @@ mod tests {
     #[test]
     fn dupes_meta_docs_url_matches_constant() {
         let meta = dupes_meta();
-        assert_eq!(meta["docs"].as_str().unwrap(), DUPES_DOCS);
+        assert_eq!(meta["docs"].as_str().unwrap(), fallow_output::DUPES_DOCS);
     }
 
     #[test]

@@ -621,17 +621,13 @@ pub fn build_duplication_json(
         grouped_by: None,
         total_issues: None,
         groups: None,
-        meta: None,
+        meta: explain.then(fallow_output::dupes_meta),
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
         next_steps,
     };
     let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
-
-    if explain {
-        insert_meta(&mut output, explain::dupes_meta());
-    }
 
     Ok(output)
 }
@@ -674,7 +670,7 @@ pub fn build_grouped_duplication_json(
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         total_issues: Some(report.clone_groups.len()),
         groups: None,
-        meta: None,
+        meta: explain.then(fallow_output::dupes_meta),
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
         next_steps,
     };
@@ -693,10 +689,6 @@ pub fn build_grouped_duplication_json(
 
     if let serde_json::Value::Object(ref mut map) = output {
         map.insert("groups".to_string(), serde_json::Value::Array(group_values));
-    }
-
-    if explain {
-        insert_meta(&mut output, explain::dupes_meta());
     }
 
     Ok(output)

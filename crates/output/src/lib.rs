@@ -17,6 +17,7 @@ mod codeclimate;
 mod dupes;
 mod format;
 mod issue_contract;
+mod report_contract;
 
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
@@ -41,3 +42,4 @@ pub use issue_contract::{
     CODECLIMATE_RESULT_CODES, IssueOutputContract, TsAliasMeta, check_meta, dead_code_docs_url,
     issue_output_contract_by_code, issue_output_contracts, rule_docs_url,
 };
+pub use report_contract::{DUPES_DOCS, dupes_meta};
