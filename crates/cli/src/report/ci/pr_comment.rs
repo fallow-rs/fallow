@@ -1,11 +1,10 @@
 use crate::report::sink::outln;
+use fallow_output::{CodeClimateIssue, CodeClimateSeverity};
 use std::fmt::Write as _;
 use std::process::ExitCode;
 use std::sync::OnceLock;
 
 use serde_json::Value;
-
-use crate::output_envelope::{CodeClimateIssue, CodeClimateSeverity};
 
 /// Workspace name, set once by `main()` when the binary is invoked with
 /// `--workspace <name>`. Read by `sticky_marker_id` to auto-suffix the
@@ -472,6 +471,7 @@ pub fn escape_md(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_output::{CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation};
 
     #[test]
     fn extracts_issues_from_codeclimate() {
@@ -501,15 +501,15 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, (severity, _))| CodeClimateIssue {
-                kind: crate::output_envelope::CodeClimateIssueKind::Issue,
+                kind: CodeClimateIssueKind::Issue,
                 check_name: format!("fallow/rule-{index}"),
                 description: format!("Finding {index}"),
                 categories: vec!["Complexity".to_owned()],
                 severity: *severity,
                 fingerprint: format!("fp-{index}"),
-                location: crate::output_envelope::CodeClimateLocation {
+                location: CodeClimateLocation {
                     path: format!("src/{index}.ts"),
-                    lines: crate::output_envelope::CodeClimateLines {
+                    lines: CodeClimateLines {
                         begin: u32::try_from(index + 1).expect("small fixture index"),
                     },
                 },

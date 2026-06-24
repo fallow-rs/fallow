@@ -1002,6 +1002,7 @@ dependencies = [
  "fallow-core",
  "fallow-cov-protocol",
  "fallow-license",
+ "fallow-output",
  "fallow-types",
  "fallow-v8-coverage",
  "globset",
@@ -1043,6 +1044,7 @@ name = "fallow-config"
 version = "2.102.0"
 dependencies = [
  "dunce",
+ "fallow-output",
  "fallow-types",
  "glob",
  "globset",
@@ -1210,6 +1212,16 @@ dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
+ "serde_json",
+]
+
+[[package]]
+name = "fallow-output"
+version = "2.102.0"
+dependencies = [
+ "fallow-types",
+ "schemars",
+ "serde",
  "serde_json",
 ]
 
