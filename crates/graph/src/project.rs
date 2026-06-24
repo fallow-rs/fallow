@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 
 use fallow_config::WorkspaceInfo;
 
-use fallow_types::discover::{DiscoveredFile, FileId};
+use fallow_types::discover::{DiscoveredFile, FileId, StableFileKey};
 
 /// Centralized project state owning the file registry and workspace metadata.
 ///
@@ -61,6 +61,22 @@ impl ProjectState {
     #[must_use]
     pub fn id_for_path(&self, path: &Path) -> Option<FileId> {
         self.path_to_id.get(path).copied()
+    }
+
+    /// Stable file key for a `FileId`, root-relative where possible.
+    #[must_use]
+    pub fn stable_key_for_file(&self, root: &Path, id: FileId) -> Option<StableFileKey> {
+        let file = self.file_by_id(id)?;
+        Some(StableFileKey::from_root_relative(root, &file.path))
+    }
+
+    /// Look up the current in-memory `FileId` for a stable root-relative key.
+    #[must_use]
+    pub fn id_for_stable_key(&self, root: &Path, key: &StableFileKey) -> Option<FileId> {
+        self.files
+            .iter()
+            .find(|file| StableFileKey::from_root_relative(root, &file.path) == *key)
+            .map(|file| file.id)
     }
 
     /// Find which workspace a file belongs to, if any.
@@ -123,6 +139,47 @@ mod tests {
             Some(FileId(1))
         );
         assert_eq!(state.id_for_path(Path::new("/project/missing.ts")), None);
+    }
+
+    #[test]
+    fn stable_key_for_file_is_root_relative() {
+        let files = vec![make_file(0, "/project/src/a.ts")];
+        let state = ProjectState::new(files, vec![]);
+
+        let key = state
+            .stable_key_for_file(Path::new("/project"), FileId(0))
+            .unwrap();
+
+        assert_eq!(key.as_str(), "src/a.ts");
+        assert_eq!(
+            state.id_for_stable_key(Path::new("/project"), &key),
+            Some(FileId(0))
+        );
+    }
+
+    #[test]
+    fn stable_key_survives_file_id_shift() {
+        let before = ProjectState::new(
+            vec![
+                make_file(0, "/project/src/a.ts"),
+                make_file(1, "/project/src/c.ts"),
+            ],
+            vec![],
+        );
+        let after = ProjectState::new(
+            vec![
+                make_file(0, "/project/src/a.ts"),
+                make_file(1, "/project/src/b.ts"),
+                make_file(2, "/project/src/c.ts"),
+            ],
+            vec![],
+        );
+        let root = Path::new("/project");
+        let key = before.stable_key_for_file(root, FileId(1)).unwrap();
+
+        assert_eq!(key.as_str(), "src/c.ts");
+        assert_eq!(before.id_for_stable_key(root, &key), Some(FileId(1)));
+        assert_eq!(after.id_for_stable_key(root, &key), Some(FileId(2)));
     }
 
     #[test]

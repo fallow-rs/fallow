@@ -1,6 +1,6 @@
 //! File discovery types: discovered files, file IDs, and entry points.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A discovered source file on disk.
 ///
@@ -51,6 +51,40 @@ pub struct FileId(pub u32);
 const _: () = assert!(std::mem::size_of::<FileId>() == 4);
 #[cfg(all(target_pointer_width = "64", unix))]
 const _: () = assert!(std::mem::size_of::<DiscoveredFile>() == 40);
+
+/// Persistable file identity for cache entries that need to survive `FileId`
+/// churn across runs.
+///
+/// `FileId` remains a dense in-memory index. This key is path-derived, root
+/// relative where possible, and uses `/` separators so graph-cache metadata can
+/// compare file identity without relying on platform path display quirks.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StableFileKey(String);
+
+impl StableFileKey {
+    /// Build a stable key from an absolute path and the analysis root.
+    #[must_use]
+    pub fn from_root_relative(root: &Path, path: &Path) -> Self {
+        let relative = path.strip_prefix(root).unwrap_or(path);
+        Self(normalize_path(relative))
+    }
+
+    /// Build a stable key from an already-root-relative path.
+    #[must_use]
+    pub fn from_relative(path: &Path) -> Self {
+        Self(normalize_path(path))
+    }
+
+    /// Stable string used in persisted cache manifests.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+fn normalize_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
 
 /// An entry point into the module graph.
 #[derive(Debug, Clone)]
@@ -107,6 +141,36 @@ pub enum EntryPointSource {
     InfrastructureConfig,
     /// Declared in `dynamicallyLoaded` config as a runtime-loaded file.
     DynamicallyLoaded,
+}
+
+#[cfg(test)]
+mod stable_file_key_tests {
+    use super::*;
+
+    #[test]
+    fn stable_file_key_strips_root_prefix() {
+        let key = StableFileKey::from_root_relative(
+            Path::new("/project"),
+            Path::new("/project/src/index.ts"),
+        );
+
+        assert_eq!(key.as_str(), "src/index.ts");
+    }
+
+    #[test]
+    fn stable_file_key_keeps_path_when_outside_root() {
+        let key =
+            StableFileKey::from_root_relative(Path::new("/project"), Path::new("/other/file.ts"));
+
+        assert_eq!(key.as_str(), "/other/file.ts");
+    }
+
+    #[test]
+    fn stable_file_key_normalizes_windows_separators() {
+        let key = StableFileKey::from_relative(Path::new(r"src\feature\file.ts"));
+
+        assert_eq!(key.as_str(), "src/feature/file.ts");
+    }
 }
 
 #[cfg(test)]
