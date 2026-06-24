@@ -59,6 +59,23 @@ fn angular_template_fact_members(info: &crate::ModuleInfo) -> Vec<&str> {
         .collect()
 }
 
+fn has_playwright_fixture_use_fact(
+    info: &crate::ModuleInfo,
+    test_name: &str,
+    fixture_name: &str,
+    member: &str,
+) -> bool {
+    info.semantic_facts.iter().any(|fact| {
+        matches!(
+            fact,
+            SemanticFact::PlaywrightFixtureUse(access)
+                if access.test_name == test_name
+                    && access.fixture_name == fixture_name
+                    && access.member == member
+        )
+    })
+}
+
 #[test]
 fn pinia_option_store_harvests_state_getters_actions_keys() {
     let info = parse(
@@ -2720,43 +2737,20 @@ fn playwright_test_callback_records_fixture_member_uses() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:adminPage", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-                && a.member == "assertGreeting"
-        }),
-        "adminPage.assertGreeting should be recorded as a Playwright fixture use, found: {:?}",
-        info.member_accesses
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)),
+        "Playwright fixture uses should not emit legacy sentinels, found: {:?}",
+        info.member_accesses,
     );
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:userPage", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-                && a.member == "assertGreeting"
-        }),
-        "aliased userPage.assertGreeting should be recorded as a Playwright fixture use, found: {:?}",
-        info.member_accesses
-    );
-    let fixture_use_facts: Vec<_> = info
-        .semantic_facts
-        .iter()
-        .filter_map(|fact| {
-            if let SemanticFact::PlaywrightFixtureUse(access) = fact {
-                Some(access)
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert!(
-        fixture_use_facts.iter().any(|fact| fact.test_name == "test"
-            && fact.fixture_name == "adminPage"
-            && fact.member == "assertGreeting"),
+        has_playwright_fixture_use_fact(&info, "test", "adminPage", "assertGreeting"),
         "adminPage.assertGreeting should emit a typed Playwright fixture use, found: {:?}",
         info.semantic_facts
     );
     assert!(
-        fixture_use_facts.iter().any(|fact| fact.test_name == "test"
-            && fact.fixture_name == "userPage"
-            && fact.member == "assertGreeting"),
+        has_playwright_fixture_use_fact(&info, "test", "userPage", "assertGreeting"),
         "aliased userPage.assertGreeting should emit a typed Playwright fixture use, found: {:?}",
         info.semantic_facts
     );
@@ -2801,14 +2795,7 @@ fn playwright_test_callback_records_branch_selected_fixture_alias_uses() {
     );
 
     let has_use = |fixture_name: &str, member_name: &str| {
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}test:{fixture_name}",
-                    crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL
-                )
-                && a.member == member_name
-        })
+        has_playwright_fixture_use_fact(&info, "test", fixture_name, member_name)
     };
 
     assert!(
@@ -2868,12 +2855,8 @@ fn playwright_test_callback_fixture_aliases_are_ordered_and_scoped() {
         ",
     );
 
-    let has_use = |member_name: &str| {
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:readerA", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-                && a.member == member_name
-        })
-    };
+    let has_use =
+        |member_name: &str| has_playwright_fixture_use_fact(&info, "test", "readerA", member_name);
 
     assert!(
         has_use("afterAssign"),
@@ -3041,28 +3024,14 @@ fn playwright_nested_fixture_destructure_records_dotted_path_uses() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}test:pages.adminPage",
-                    crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL
-                )
-                && a.member == "assertGreeting"
-        }),
-        "nested-destructured adminPage.assertGreeting should record use against pages.adminPage, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_use_fact(&info, "test", "pages.adminPage", "assertGreeting"),
+        "nested-destructured adminPage.assertGreeting should emit typed use against pages.adminPage, found: {:?}",
+        info.semantic_facts
     );
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}test:pages.userPage",
-                    crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL
-                )
-                && a.member == "assertGreeting"
-        }),
-        "nested-destructured renamed user.assertGreeting should record use against pages.userPage, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_use_fact(&info, "test", "pages.userPage", "assertGreeting"),
+        "nested-destructured renamed user.assertGreeting should emit typed use against pages.userPage, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -3080,24 +3049,14 @@ fn playwright_nested_fixture_chained_access_records_dotted_path_uses() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}test:pages.adminPage",
-                    crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL
-                )
-                && a.member == "assertGreeting"
-        }),
-        "chained pages.adminPage.assertGreeting should record use against pages.adminPage, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_use_fact(&info, "test", "pages.adminPage", "assertGreeting"),
+        "chained pages.adminPage.assertGreeting should emit typed use against pages.adminPage, found: {:?}",
+        info.semantic_facts
     );
     assert!(
-        !info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:pages", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-                && a.member == "adminPage"
-        }),
-        "chained access must not emit a spurious (pages, adminPage) intermediate use, found: {:?}",
-        info.member_accesses
+        !has_playwright_fixture_use_fact(&info, "test", "pages", "adminPage"),
+        "chained access must not emit a spurious typed (pages, adminPage) intermediate use, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -3260,16 +3219,9 @@ fn playwright_helper_records_use_sentinels_for_curried_call() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}appTest:appUi.step.login",
-                    crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL
-                )
-                && a.member == "openLogin"
-        }),
-        "curried `appTest()(...)` call should emit a use sentinel keyed by the helper name, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_use_fact(&info, "appTest", "appUi.step.login", "openLogin"),
+        "curried `appTest()(...)` call should emit a typed use keyed by the helper name, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -8165,13 +8117,10 @@ fn playwright_fixture_destructure_with_default_value_records_binding() {
     // The fixture key is `adminPage`; even though the destructure has a
     // default (`= null`), the binding must still be recognised.
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:adminPage", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-                && a.member == "assertGreeting"
-        }),
-        "fixture with default value in destructure should still emit a use sentinel; \
+        has_playwright_fixture_use_fact(&info, "test", "adminPage", "assertGreeting"),
+        "fixture with default value in destructure should still emit a typed use fact; \
          got {:#?}",
-        info.member_accesses
+        info.semantic_facts
     );
 }
 
@@ -8191,12 +8140,9 @@ fn playwright_test_skip_variant_records_fixture_uses() {
         ",
     );
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:adminPage", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-                && a.member == "checkTitle"
-        }),
-        "test.skip(...) callback should still emit fixture use sentinels; got {:#?}",
-        info.member_accesses
+        has_playwright_fixture_use_fact(&info, "test", "adminPage", "checkTitle"),
+        "test.skip(...) callback should still emit typed fixture use facts; got {:#?}",
+        info.semantic_facts
     );
 }
 
@@ -8286,21 +8232,15 @@ fn playwright_ts_as_assignment_in_callback_records_alias_correctly() {
     // Both readerA and readerB are fixture locals. The TS `as` cast wraps the
     // assignment target; both branches of the if/else feed into currentReader.
     // At minimum the doWork member must be emitted against both fixtures.
-    let has_reader_a = info.member_accesses.iter().any(|a| {
-        a.object == format!("{}test:readerA", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-            && a.member == "doWork"
-    });
-    let has_reader_b = info.member_accesses.iter().any(|a| {
-        a.object == format!("{}test:readerB", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-            && a.member == "doWork"
-    });
+    let has_reader_a = has_playwright_fixture_use_fact(&info, "test", "readerA", "doWork");
+    let has_reader_b = has_playwright_fixture_use_fact(&info, "test", "readerB", "doWork");
     // Either or both must be present -- the key assertion is that the code
     // path exercises the TS-expression assignment target path without panic.
     assert!(
         has_reader_a || has_reader_b,
         "at least one of readerA/readerB.doWork should be recorded via TS-as assignment; \
          got {:#?}",
-        info.member_accesses
+        info.semantic_facts
     );
 }
 
@@ -8380,12 +8320,9 @@ fn playwright_switch_without_default_propagates_alias() {
     // The switch has no default, so the before-alias (readerA) is always
     // possible. `doWork` must appear for at least readerA.
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:readerA", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-                && a.member == "doWork"
-        }),
+        has_playwright_fixture_use_fact(&info, "test", "readerA", "doWork"),
         "switch without default must propagate readerA alias to doWork; got {:#?}",
-        info.member_accesses
+        info.semantic_facts
     );
 }
 
@@ -8412,12 +8349,9 @@ fn playwright_fixture_reassigned_to_sibling_fixture_credits_sibling() {
     );
     // After reassignment `r` points at readerB; doWork must appear for readerB.
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:readerB", crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
-                && a.member == "doWork"
-        }),
+        has_playwright_fixture_use_fact(&info, "test", "readerB", "doWork"),
         "after reassigning r to readerB, doWork must be credited to readerB; \
          got {:#?}",
-        info.member_accesses
+        info.semantic_facts
     );
 }
