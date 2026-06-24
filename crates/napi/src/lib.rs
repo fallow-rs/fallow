@@ -497,13 +497,32 @@ impl<'task> ScopedTask<'task> for ProgrammaticTask {
     }
 }
 
+fn detect_dead_code_with_api_fallback(
+    options: &api::DeadCodeOptions,
+) -> Result<serde_json::Value, api::ProgrammaticError> {
+    match api::detect_dead_code(options) {
+        Ok(output) => Ok(output),
+        Err(error) if is_dead_code_api_fallback_error(&error) => {
+            programmatic::detect_dead_code(options)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn is_dead_code_api_fallback_error(error: &api::ProgrammaticError) -> bool {
+    matches!(
+        error.code.as_deref(),
+        Some("FALLOW_UNSUPPORTED_DEAD_CODE_DIFF_FILE" | "FALLOW_UNSUPPORTED_DEAD_CODE_EXPLAIN")
+    )
+}
+
 #[napi(js_name = "detectDeadCode")]
 pub fn detect_dead_code(
     options: Option<DeadCodeOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        programmatic::detect_dead_code(&options)
+        detect_dead_code_with_api_fallback(&options)
     })))
 }
 
@@ -687,6 +706,44 @@ mod tests {
 
         assert_eq!(options.analysis.production_override, Some(false));
     }
+
+    #[test]
+    fn dead_code_fallback_preserves_legacy_explain_meta() {
+        let project = tiny_dead_code_project();
+        let root = project.path();
+
+        let json = detect_dead_code_with_api_fallback(&api::DeadCodeOptions {
+            analysis: api::AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                explain: true,
+                ..api::AnalysisOptions::default()
+            },
+            filters: api::DeadCodeFilters {
+                unused_exports: true,
+                ..api::DeadCodeFilters::default()
+            },
+            ..api::DeadCodeOptions::default()
+        })
+        .expect("legacy fallback succeeds");
+
+        assert!(json["_meta"].is_object());
+        assert_eq!(unused_export_names(&json), vec!["dead"]);
+    }
+
+    #[test]
+    fn dead_code_api_fallback_is_limited_to_known_contract_gaps() {
+        let diff_error = api::ProgrammaticError::new("unsupported", 2)
+            .with_code("FALLOW_UNSUPPORTED_DEAD_CODE_DIFF_FILE");
+        let explain_error = api::ProgrammaticError::new("unsupported", 2)
+            .with_code("FALLOW_UNSUPPORTED_DEAD_CODE_EXPLAIN");
+        let config_error =
+            api::ProgrammaticError::new("bad config", 2).with_code("FALLOW_CONFIG_LOAD_FAILED");
+
+        assert!(is_dead_code_api_fallback_error(&diff_error));
+        assert!(is_dead_code_api_fallback_error(&explain_error));
+        assert!(!is_dead_code_api_fallback_error(&config_error));
+    }
+
     #[test]
     fn detect_duplication_accepts_normalized_mode() {
         let task = detect_duplication(Some(DuplicationOptions {
@@ -959,5 +1016,37 @@ mod tests {
             .as_ref()
             .expect("programmatic error should be retained for reject");
         assert_eq!(stored.code.as_deref(), Some("FALLOW_TEST_FAILURE"));
+    }
+
+    fn tiny_dead_code_project() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"napi-dead-code","main":"src/index.ts"}"#,
+        )
+        .expect("package");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "import './feature';\nexport const entry = 1;\nconsole.log(entry);\n",
+        )
+        .expect("entry");
+        std::fs::write(root.join("src/feature.ts"), "export const dead = 1;\n").expect("feature");
+        project
+    }
+
+    fn unused_export_names(json: &serde_json::Value) -> Vec<&str> {
+        json["unused_exports"]
+            .as_array()
+            .expect("unused exports array")
+            .iter()
+            .map(|item| {
+                item["name"]
+                    .as_str()
+                    .or_else(|| item["export_name"].as_str())
+                    .expect("unused export name")
+            })
+            .collect()
     }
 }
