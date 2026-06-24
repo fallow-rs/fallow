@@ -497,54 +497,13 @@ impl<'task> ScopedTask<'task> for ProgrammaticTask {
     }
 }
 
-fn detect_dead_code_with_api_fallback(
-    options: &api::DeadCodeOptions,
-) -> Result<serde_json::Value, api::ProgrammaticError> {
-    match api::detect_dead_code(options) {
-        Ok(output) => Ok(output),
-        Err(error) if is_dead_code_api_fallback_error(&error) => {
-            programmatic::detect_dead_code(options)
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn detect_circular_dependencies_with_api_fallback(
-    options: &api::DeadCodeOptions,
-) -> Result<serde_json::Value, api::ProgrammaticError> {
-    match api::detect_circular_dependencies(options) {
-        Ok(output) => Ok(output),
-        Err(error) if is_dead_code_api_fallback_error(&error) => {
-            programmatic::detect_circular_dependencies(options)
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn detect_boundary_violations_with_api_fallback(
-    options: &api::DeadCodeOptions,
-) -> Result<serde_json::Value, api::ProgrammaticError> {
-    match api::detect_boundary_violations(options) {
-        Ok(output) => Ok(output),
-        Err(error) if is_dead_code_api_fallback_error(&error) => {
-            programmatic::detect_boundary_violations(options)
-        }
-        Err(error) => Err(error),
-    }
-}
-
-fn is_dead_code_api_fallback_error(error: &api::ProgrammaticError) -> bool {
-    let _ = error;
-    false
-}
-
 #[napi(js_name = "detectDeadCode")]
 pub fn detect_dead_code(
     options: Option<DeadCodeOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        detect_dead_code_with_api_fallback(&options)
+        api::detect_dead_code(&options)
     })))
 }
 
@@ -554,7 +513,7 @@ pub fn detect_circular_dependencies(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        detect_circular_dependencies_with_api_fallback(&options)
+        api::detect_circular_dependencies(&options)
     })))
 }
 
@@ -564,7 +523,7 @@ pub fn detect_boundary_violations(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        detect_boundary_violations_with_api_fallback(&options)
+        api::detect_boundary_violations(&options)
     })))
 }
 
@@ -734,7 +693,7 @@ mod tests {
         let project = tiny_dead_code_project();
         let root = project.path();
 
-        let json = detect_dead_code_with_api_fallback(&api::DeadCodeOptions {
+        let json = api::detect_dead_code(&api::DeadCodeOptions {
             analysis: api::AnalysisOptions {
                 root: Some(root.to_path_buf()),
                 explain: true,
@@ -762,7 +721,7 @@ mod tests {
         )
         .expect("diff");
 
-        let json = detect_dead_code_with_api_fallback(&api::DeadCodeOptions {
+        let json = api::detect_dead_code(&api::DeadCodeOptions {
             analysis: api::AnalysisOptions {
                 root: Some(root.to_path_buf()),
                 diff_file: Some(Path::new("feature.diff").to_path_buf()),
@@ -792,10 +751,8 @@ mod tests {
             ..api::DeadCodeOptions::default()
         };
 
-        let circular =
-            detect_circular_dependencies_with_api_fallback(&options).expect("circular helper");
-        let boundary =
-            detect_boundary_violations_with_api_fallback(&options).expect("boundary helper");
+        let circular = api::detect_circular_dependencies(&options).expect("circular helper");
+        let boundary = api::detect_boundary_violations(&options).expect("boundary helper");
 
         assert_eq!(circular["kind"], "dead_code");
         assert_eq!(circular["total_issues"], 0);
@@ -811,20 +768,6 @@ mod tests {
                 .as_array()
                 .is_none_or(Vec::is_empty)
         );
-    }
-
-    #[test]
-    fn dead_code_api_fallback_has_no_known_contract_gaps() {
-        let diff_error = api::ProgrammaticError::new("unsupported", 2)
-            .with_code("FALLOW_UNSUPPORTED_DEAD_CODE_DIFF_FILE");
-        let explain_error = api::ProgrammaticError::new("unsupported", 2)
-            .with_code("FALLOW_UNSUPPORTED_DEAD_CODE_EXPLAIN");
-        let config_error =
-            api::ProgrammaticError::new("bad config", 2).with_code("FALLOW_CONFIG_LOAD_FAILED");
-
-        assert!(!is_dead_code_api_fallback_error(&diff_error));
-        assert!(!is_dead_code_api_fallback_error(&explain_error));
-        assert!(!is_dead_code_api_fallback_error(&config_error));
     }
 
     #[test]
