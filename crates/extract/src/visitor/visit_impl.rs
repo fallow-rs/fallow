@@ -855,7 +855,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Emit a fluent-chain sentinel `MemberAccess` for chained calls.
+    /// Emit typed fluent-chain facts for chained calls.
     fn try_record_fluent_chain_access(&mut self, expr: &CallExpression<'_>) {
         let Expression::StaticMemberExpression(member) = &expr.callee else {
             return;
@@ -875,23 +875,12 @@ impl ModuleInfoExtractor {
             };
             if let Expression::Identifier(root_id) = &inner_member.object {
                 chain_prefix_reversed.reverse();
-                let chain_prefix = chain_prefix_reversed.join(",");
                 self.record_fluent_chain_member_fact(
                     root_id.name.to_string(),
                     inner_member.property.name.to_string(),
                     chain_prefix_reversed,
                     this_method.to_string(),
                 );
-                self.member_accesses.push(MemberAccess {
-                    object: format!(
-                        "{}{}:{}:{}",
-                        crate::FLUENT_CHAIN_SENTINEL,
-                        root_id.name,
-                        inner_member.property.name,
-                        chain_prefix,
-                    ),
-                    member: this_method.to_string(),
-                });
                 return;
             }
             if let Expression::NewExpression(new_expr) = &inner_member.object
