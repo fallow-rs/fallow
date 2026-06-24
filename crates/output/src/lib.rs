@@ -43,6 +43,7 @@ pub use issue_contract::{
     issue_output_contract_by_code, issue_output_contracts, rule_docs_url,
 };
 pub use report_contract::{
-    DUPES_DOCS, HEALTH_DOCS, SECURITY_DOCS, SecurityRuleMeta, dupes_meta, health_meta,
+    COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SECURITY_DOCS,
+    SecurityRuleMeta, coverage_analyze_meta, coverage_setup_meta, dupes_meta, health_meta,
     security_meta,
 };

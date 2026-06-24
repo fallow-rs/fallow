@@ -15,12 +15,6 @@ const DOCS_BASE: &str = "https://docs.fallow.tools";
 /// Docs URL for the dead-code (check) command.
 pub const CHECK_DOCS: &str = "https://docs.fallow.tools/cli/dead-code";
 
-/// Docs URL for the runtime coverage setup command's agent-readable JSON.
-pub const COVERAGE_SETUP_DOCS: &str = "https://docs.fallow.tools/cli/coverage#agent-readable-json";
-
-/// Docs URL for `fallow coverage analyze --format json --explain`.
-pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.fallow.tools/cli/coverage#analyze";
-
 /// `_meta` description for the per-finding `actions[]` array shared across
 /// `check`, `health`, and `dupes` JSON output.
 const ACTIONS_FIELD_DEFINITION: &str = "Per-finding fix and suppression suggestions. Each entry carries a `type` discriminant (kebab-case) plus a per-action `auto_fixable` bool. Consumers dispatch on `type` to choose the remediation and filter on `auto_fixable` of each individual entry.";
@@ -1351,83 +1345,13 @@ pub fn security_meta() -> fallow_types::envelope::Meta {
 /// Build the `_meta` object for `fallow coverage setup --json --explain`.
 #[must_use]
 pub fn coverage_setup_meta() -> Value {
-    json!({
-        "docs_url": COVERAGE_SETUP_DOCS,
-        "field_definitions": {
-            "schema_version": "Coverage setup JSON contract version. Stays at \"1\" for additive opt-in fields such as _meta.",
-            "framework_detected": "Primary detected runtime framework for compatibility with single-app consumers. In workspaces this mirrors the first emitted runtime member; unknown means no runtime member was detected.",
-            "package_manager": "Detected package manager used for install and run commands, or null when no package manager signal was found.",
-            "runtime_targets": "Union of runtime targets across emitted members.",
-            "members[]": "Per-runtime-workspace setup recipes. Pure aggregator roots and build-only libraries are omitted.",
-            "members[].name": "Workspace package name from package.json, or the root directory name when package.json has no name.",
-            "members[].path": "Workspace path relative to the command root. The root package is represented as \".\".",
-            "members[].framework_detected": "Runtime framework detected for that member.",
-            "members[].package_manager": "Package manager detected for that member, or inherited from the workspace root when no member-specific signal exists.",
-            "members[].runtime_targets": "Runtime targets produced by that member.",
-            "members[].files_to_edit": "Files in that member that should receive runtime beacon setup code.",
-            "members[].snippets": "Copy-paste setup snippets for that member, with paths relative to the command root.",
-            "members[].dockerfile_snippet": "Environment snippet for file-system capture in that member's containerized Node runtime, or null when not applicable.",
-            "members[].warnings": "Actionable setup caveats discovered for that member.",
-            "config_written": "Always null for --json because JSON setup is side-effect-free and never writes configuration.",
-            "files_to_edit": "Compatibility copy of the primary member's files, with workspace prefixes when the primary member is not the root.",
-            "snippets": "Compatibility copy of the primary member's snippets, with workspace prefixes when the primary member is not the root.",
-            "dockerfile_snippet": "Environment snippet for file-system capture in containerized Node runtimes, or null when not applicable.",
-            "commands": "Package-manager commands needed to install the runtime beacon and sidecar packages.",
-            "next_steps": "Ordered setup workflow after applying the emitted snippets.",
-            "warnings": "Actionable setup caveats discovered while building the recipe."
-        },
-        "enums": {
-            "framework_detected": ["nextjs", "nestjs", "nuxt", "sveltekit", "astro", "remix", "vite", "plain_node", "unknown"],
-            "runtime_targets": ["node", "browser"],
-            "package_manager": ["npm", "pnpm", "yarn", "bun", null]
-        },
-        "warnings": {
-            "No runtime workspace members were detected": "The root appears to be a workspace, but no runtime-bearing package was found. The payload emits install commands only.",
-            "No local coverage artifact was detected yet": "Run the application with runtime coverage collection enabled, then re-run setup or health with the produced capture path.",
-            "Package manager was not detected": "No packageManager field or known lockfile was found. Commands fall back to npm.",
-            "Framework was not detected": "No known framework dependency or runtime script was found. Treat the recipe as a generic Node setup and adjust the entry path as needed."
-        }
-    })
+    fallow_output::coverage_setup_meta()
 }
 
 /// Build the `_meta` object for `fallow coverage analyze --format json --explain`.
 #[must_use]
 pub fn coverage_analyze_meta() -> Value {
-    json!({
-        "docs_url": COVERAGE_ANALYZE_DOCS,
-        "field_definitions": {
-            "schema_version": "Standalone coverage analyze envelope version. \"1\" for the current shape.",
-            "version": "fallow CLI version that produced this output.",
-            "elapsed_ms": "Wall-clock milliseconds spent producing the report.",
-            "runtime_coverage": "Same RuntimeCoverageReport block emitted by `fallow health --runtime-coverage`.",
-            "runtime_coverage.summary.data_source": "Which evidence source produced the report. local = on-disk artifact via --runtime-coverage <path>; cloud = explicit pull via --cloud / --runtime-coverage-cloud / FALLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
-            "runtime_coverage.summary.last_received_at": "ISO-8601 timestamp of the newest runtime payload included in the report. Null for local artifacts that do not carry receipt metadata.",
-            "runtime_coverage.summary.capture_quality": "Capture-window telemetry derived from the runtime evidence. lazy_parse_warning trips when more than 30% of tracked functions are V8-untracked, which usually indicates a short observation window.",
-            "runtime_coverage.findings[].id": "Per-finding SUPPRESSION key (fallow:prod:<hash>). Hashes file + function + the current line, so it changes when the function moves. Use it to suppress one finding at its current location.",
-            "runtime_coverage.findings[].stable_id": "Cross-surface JOIN key (fallow:fn:<hash>) from fallow_cov_protocol::function_identity_id, hashing file + name + start_line. The same function shares ONE value across findings, hot paths, blast-radius, and importance entries (the per-finding id uses a per-surface salt and differs), and across V8/Istanbul/oxc producers (columns are excluded from the hash). Like id, it changes when the function's file, name, or start line changes: it is a cross-surface/cross-producer join key, NOT a line-move-immune one. Omitted from the JSON entirely (not emitted as null) when the producing surface or an un-migrated cloud supplied no FunctionIdentity. New baselines key on this when present to align with the cross-surface join key; the grace-window reader accepts the legacy id too.",
-            "runtime_coverage._matching": "Function-identity fallback order when joining runtime evidence to local static analysis: (1) exact stable_id match (fallow:fn:<hash>) when both sides carry one; (2) exact (path, name, start_line); (3) fuzzy nearest candidate within a line tolerance. Baseline suppression accepts BOTH the stable_id and the legacy fallow:prod: id during the grace window, so baselines written before this version keep suppressing.",
-            "runtime_coverage.findings[].evidence.static_status": "used = the function is reachable in the AST module graph; unused = it is dead by static analysis.",
-            "runtime_coverage.findings[].evidence.test_coverage": "covered = the local test suite hits the function; not_covered otherwise.",
-            "runtime_coverage.findings[].evidence.v8_tracking": "tracked = V8 observed the function during the capture window; untracked otherwise.",
-            "runtime_coverage.findings[].actions[].type": "Suggested follow-up identifier. delete-cold-code is emitted on safe_to_delete; review-runtime on review_required.",
-            "runtime_coverage.blast_radius[]": "First-class blast-radius entries with stable fallow:blast IDs, static caller count, traffic-weighted caller reach, optional cloud deploy touch count, and low/medium/high risk band.",
-            "runtime_coverage.importance[]": "First-class production-importance entries with stable fallow:importance IDs, invocations, cyclomatic complexity, owner count, 0-100 importance score, and templated reason.",
-            "runtime_coverage.warnings[].code": "Stable warning identifier. cloud_functions_unmatched flags entries dropped because no AST/static counterpart was found locally."
-        },
-        "enums": {
-            "data_source": ["local", "cloud"],
-            "report_verdict": ["clean", "hot-path-touched", "cold-code-detected", "license-expired-grace", "unknown"],
-            "finding_verdict": ["safe_to_delete", "review_required", "coverage_unavailable", "low_traffic", "active", "unknown"],
-            "static_status": ["used", "unused"],
-            "test_coverage": ["covered", "not_covered"],
-            "v8_tracking": ["tracked", "untracked"],
-            "action_type": ["delete-cold-code", "review-runtime"]
-        },
-        "warnings": {
-            "no_runtime_data": "Cloud returned an empty runtime window. Either the period is too narrow or no traces have been ingested yet.",
-            "cloud_functions_unmatched": "One or more cloud-side functions could not be matched against the local AST/static index and were dropped from findings. Common causes: stale runtime data after a rename/move, file path mismatch between deploy and repo, or analysis run on the wrong commit."
-        }
-    })
+    fallow_output::coverage_analyze_meta()
 }
 
 #[cfg(test)]
@@ -1623,7 +1547,7 @@ mod tests {
     #[test]
     fn coverage_setup_meta_has_docs_fields_enums_and_warnings() {
         let meta = coverage_setup_meta();
-        assert_eq!(meta["docs_url"], COVERAGE_SETUP_DOCS);
+        assert_eq!(meta["docs_url"], fallow_output::COVERAGE_SETUP_DOCS);
         assert!(
             meta["field_definitions"]
                 .as_object()
@@ -1671,7 +1595,7 @@ mod tests {
     #[test]
     fn coverage_analyze_meta_documents_data_source_and_action_vocabulary() {
         let meta = coverage_analyze_meta();
-        assert_eq!(meta["docs_url"], COVERAGE_ANALYZE_DOCS);
+        assert_eq!(meta["docs_url"], fallow_output::COVERAGE_ANALYZE_DOCS);
         let fields = meta["field_definitions"].as_object().unwrap();
         assert!(fields.contains_key("runtime_coverage.summary.data_source"));
         assert!(fields.contains_key("runtime_coverage.summary.last_received_at"));
