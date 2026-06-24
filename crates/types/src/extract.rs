@@ -832,7 +832,7 @@ pub fn compute_line_offsets(source: &str) -> Vec<u32> {
         if byte == b'\n' {
             debug_assert!(
                 u32::try_from(i + 1).is_ok(),
-                "source file exceeds u32::MAX bytes — line offsets would overflow"
+                "source file exceeds u32::MAX bytes: line offsets would overflow"
             );
             offsets.push((i + 1) as u32);
         }
@@ -1360,6 +1360,8 @@ pub enum SemanticFact {
     FluentChainNewMemberAccess(FluentChainNewMemberAccessFact),
     /// A member access on a Playwright fixture object inside a test callback.
     PlaywrightFixtureUse(PlaywrightFixtureUseFact),
+    /// A Playwright fixture definition declared by a typed `test.extend<T>()`.
+    PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact),
 }
 
 /// A member name referenced from an Angular template surface.
@@ -1418,6 +1420,18 @@ pub struct PlaywrightFixtureUseFact {
     pub fixture_name: String,
     /// Member accessed on the fixture target.
     pub member: String,
+}
+
+/// A Playwright fixture definition declared by a typed `test.extend<T>()`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlaywrightFixtureDefinitionFact {
+    /// Local test function or wrapper receiving the fixture definition.
+    pub test_name: String,
+    /// Fixture name or dotted fixture path declared by the fixture type.
+    pub fixture_name: String,
+    /// Local type symbol used as the fixture target.
+    pub type_name: String,
 }
 
 /// A statically flattenable callee path invoked in a module (e.g. `execSync`,

@@ -2410,20 +2410,22 @@ impl ModuleInfoExtractor {
         }
         bindings.sort_unstable();
         bindings.dedup();
-        self.member_accesses
-            .extend(
-                bindings
-                    .into_iter()
-                    .map(|(fixture_name, type_name)| MemberAccess {
-                        object: format!(
-                            "{}{}:{}",
-                            crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-                            test_name,
-                            fixture_name
-                        ),
-                        member: type_name,
-                    }),
+        for (fixture_name, type_name) in bindings {
+            self.record_playwright_fixture_definition_fact(
+                test_name.to_string(),
+                fixture_name.clone(),
+                type_name.clone(),
             );
+            self.member_accesses.push(MemberAccess {
+                object: format!(
+                    "{}{}:{}",
+                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+                    test_name,
+                    fixture_name
+                ),
+                member: type_name,
+            });
+        }
     }
 
     fn record_playwright_fixture_alias(&mut self, test_name: &str, base_name: &str) {

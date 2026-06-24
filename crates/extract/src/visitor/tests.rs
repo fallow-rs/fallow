@@ -2519,6 +2519,35 @@ fn playwright_extend_type_alias_records_fixture_definitions() {
         "typed Playwright fixture userPage should be recorded, found: {:?}",
         info.member_accesses
     );
+    let fixture_definition_facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            if let SemanticFact::PlaywrightFixtureDefinition(access) = fact {
+                Some(access)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        fixture_definition_facts
+            .iter()
+            .any(|fact| fact.test_name == "test"
+                && fact.fixture_name == "adminPage"
+                && fact.type_name == "AdminPage"),
+        "typed Playwright fixture adminPage should emit a fixture definition fact, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        fixture_definition_facts
+            .iter()
+            .any(|fact| fact.test_name == "test"
+                && fact.fixture_name == "userPage"
+                && fact.type_name == "UserPage"),
+        "typed Playwright fixture userPage should emit a fixture definition fact, found: {:?}",
+        info.semantic_facts
+    );
 }
 
 #[test]
