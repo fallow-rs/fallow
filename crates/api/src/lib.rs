@@ -9,6 +9,9 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+pub mod dupes_output;
+pub use dupes_output::{CloneFamilyFinding, CloneGroupFinding, DupesReportPayload};
+
 pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "root",
     "config",

@@ -982,6 +982,10 @@ dependencies = [
 name = "fallow-api"
 version = "2.102.0"
 dependencies = [
+ "fallow-engine",
+ "fallow-output",
+ "fallow-types",
+ "schemars",
  "serde",
 ]
 
