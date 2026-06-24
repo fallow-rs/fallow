@@ -4186,7 +4186,6 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     access.member.clone(),
                 );
             }
-            self.member_accesses.extend(fixture_uses);
         }
 
         if let Some((tag, class_name)) = extract_custom_elements_define(expr) {
