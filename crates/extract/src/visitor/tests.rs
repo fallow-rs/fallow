@@ -107,6 +107,23 @@ fn has_playwright_fixture_alias_fact(
     })
 }
 
+fn has_playwright_fixture_type_fact(
+    info: &crate::ModuleInfo,
+    alias_name: &str,
+    fixture_name: &str,
+    type_name: &str,
+) -> bool {
+    info.semantic_facts.iter().any(|fact| {
+        matches!(
+            fact,
+            SemanticFact::PlaywrightFixtureType(access)
+                if access.alias_name == alias_name
+                    && access.fixture_name == fixture_name
+                    && access.type_name == type_name
+        )
+    })
+}
+
 #[test]
 fn pinia_option_store_harvests_state_getters_actions_keys() {
     let info = parse(
@@ -2930,27 +2947,19 @@ fn playwright_fixture_type_alias_records_nested_type_bindings() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}AppFixture:assert.messageChecks",
-                    crate::PLAYWRIGHT_FIXTURE_TYPE_SENTINEL
-                )
-                && a.member == "MessageChecks"
-        }),
-        "Playwright fixture type alias should record nested type bindings, found: {:?}",
+        !info.member_accesses.iter().any(|a| a
+            .object
+            .starts_with(crate::PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)),
+        "Playwright fixture type aliases should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
     assert!(
-        info.semantic_facts.iter().any(|fact| {
-            matches!(
-                fact,
-                SemanticFact::PlaywrightFixtureType(access)
-                    if access.alias_name == "AppFixture"
-                        && access.fixture_name == "assert.messageChecks"
-                        && access.type_name == "MessageChecks"
-            )
-        }),
+        has_playwright_fixture_type_fact(
+            &info,
+            "AppFixture",
+            "assert.messageChecks",
+            "MessageChecks"
+        ),
         "Playwright fixture type alias should emit a typed fixture type fact, found: {:?}",
         info.semantic_facts
     );

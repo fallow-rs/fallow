@@ -636,7 +636,11 @@ use crate::MemberKind;
 /// Bumped to 203: Playwright fixture-alias member accesses are now persisted
 /// only as typed semantic facts, while legacy sentinels remain decode-only for
 /// older caches.
-pub(super) const CACHE_VERSION: u32 = 203;
+///
+/// Bumped to 204: Playwright fixture-type member accesses are now persisted
+/// only as typed semantic facts, while legacy sentinels remain decode-only for
+/// older caches.
+pub(super) const CACHE_VERSION: u32 = 204;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
