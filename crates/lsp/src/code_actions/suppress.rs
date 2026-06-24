@@ -21,7 +21,7 @@ use std::path::Path;
 use ls_types::*;
 use rustc_hash::FxHashSet;
 
-use fallow_core::results::{AnalysisResults, SecurityFindingKind};
+use fallow_engine::results::{AnalysisResults, SecurityFindingKind};
 
 use crate::diagnostics::security::{security_diagnostic, security_label, security_token};
 
@@ -140,7 +140,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_core::results::{SecurityFinding, SecurityFindingKind, SecuritySeverity};
+    use fallow_engine::results::{SecurityFinding, SecurityFindingKind, SecuritySeverity};
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -153,7 +153,7 @@ mod tests {
     fn sink(path: PathBuf, line: u32) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_core::results::SecurityCandidate::default(),
+            candidate: fallow_engine::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
@@ -177,7 +177,7 @@ mod tests {
     fn leak(path: PathBuf, line: u32) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_core::results::SecurityCandidate::default(),
+            candidate: fallow_engine::results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
             kind: SecurityFindingKind::ClientServerLeak,

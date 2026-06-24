@@ -5,8 +5,8 @@ use ls_types::{
     Location, NumberOrString, Position, Range, Uri,
 };
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use fallow_engine::duplicates::DuplicationReport;
+use fallow_engine::results::AnalysisResults;
 
 use super::doc_link;
 
@@ -94,8 +94,8 @@ pub fn push_duplication_diagnostics(
 )]
 fn push_duplication_instance_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    group: &fallow_core::duplicates::CloneGroup,
-    instance: &fallow_core::duplicates::CloneInstance,
+    group: &fallow_engine::duplicates::CloneGroup,
+    instance: &fallow_engine::duplicates::CloneInstance,
 ) {
     let Some(inst_uri) = Uri::from_file_path(&instance.file) else {
         return;
@@ -145,8 +145,8 @@ fn push_duplication_instance_diagnostic(
     reason = "line/col numbers are bounded by source size"
 )]
 fn duplication_related_info(
-    group: &fallow_core::duplicates::CloneGroup,
-    instance: &fallow_core::duplicates::CloneInstance,
+    group: &fallow_engine::duplicates::CloneGroup,
+    instance: &fallow_engine::duplicates::CloneInstance,
 ) -> Vec<DiagnosticRelatedInformation> {
     group
         .instances
@@ -215,8 +215,10 @@ pub fn push_stale_suppression_diagnostics(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
-    use fallow_core::results::{
+    use fallow_engine::duplicates::{
+        CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
+    };
+    use fallow_engine::results::{
         AnalysisResults, DuplicateExport, DuplicateExportFinding, DuplicateLocation, UnusedExport,
         UnusedExportFinding, UnusedTypeFinding,
     };
@@ -476,16 +478,16 @@ mod tests {
             }));
         results
             .unused_files
-            .push(fallow_core::results::UnusedFileFinding::with_actions(
-                fallow_core::results::UnusedFile { path: path.clone() },
+            .push(fallow_engine::results::UnusedFileFinding::with_actions(
+                fallow_engine::results::UnusedFile { path: path.clone() },
             ));
         results.unused_enum_members.push(
-            fallow_core::results::UnusedEnumMemberFinding::with_actions(
-                fallow_core::results::UnusedMember {
+            fallow_engine::results::UnusedEnumMemberFinding::with_actions(
+                fallow_engine::results::UnusedMember {
                     path: path.clone(),
                     parent_name: "E".to_string(),
                     member_name: "A".to_string(),
-                    kind: fallow_core::extract::MemberKind::EnumMember,
+                    kind: fallow_engine::extract::MemberKind::EnumMember,
                     line: 3,
                     col: 0,
                 },
