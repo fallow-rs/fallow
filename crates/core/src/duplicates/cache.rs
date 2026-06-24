@@ -1,10 +1,10 @@
 //! Persistent token cache for duplication analysis.
 
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use bitcode::{Decode, Encode};
 use fallow_config::ResolvedNormalization;
+use fallow_types::source_fingerprint::SourceFingerprint;
 use fallow_types::suppress::{PolicyRuleSuppression, SuppressionTarget};
 use oxc_span::Span;
 use rustc_hash::FxHashMap;
@@ -133,10 +133,20 @@ impl TokenCache {
         metadata: &std::fs::Metadata,
         mode: TokenCacheMode,
     ) -> Option<TokenCacheEntry> {
+        self.get_by_fingerprint(path, SourceFingerprint::from_metadata(metadata), mode)
+    }
+
+    fn get_by_fingerprint(
+        &self,
+        path: &Path,
+        fingerprint: SourceFingerprint,
+        mode: TokenCacheMode,
+    ) -> Option<TokenCacheEntry> {
+        if !fingerprint.has_known_mtime() {
+            return None;
+        }
         let entry = self.store.entries.get(&cache_key(path))?;
-        let (mtime_ns, file_size) = metadata_key(metadata);
-        if entry.mtime_ns != mtime_ns
-            || entry.file_size != file_size
+        if SourceFingerprint::new(entry.mtime_ns, entry.file_size) != fingerprint
             || entry.normalization_hash != mode.hash
         {
             return None;
@@ -151,12 +161,11 @@ impl TokenCache {
         mode: TokenCacheMode,
         payload: &TokenPayload<'_>,
     ) {
-        let (mtime_ns, file_size) = metadata_key(metadata);
+        let fingerprint = SourceFingerprint::from_metadata(metadata);
         self.store.entries.insert(
             cache_key(path),
             CachedTokenFile::from_tokens(
-                mtime_ns,
-                file_size,
+                fingerprint,
                 mode.hash,
                 payload.hashed_tokens,
                 payload.file_tokens,
@@ -220,16 +229,15 @@ impl CacheStore {
 
 impl CachedTokenFile {
     fn from_tokens(
-        mtime_ns: u64,
-        file_size: u64,
+        fingerprint: SourceFingerprint,
         normalization_hash: u64,
         hashed_tokens: &[HashedToken],
         file_tokens: &FileTokens,
         suppressions: &[Suppression],
     ) -> Self {
         Self {
-            mtime_ns,
-            file_size,
+            mtime_ns: fingerprint.mtime_ns,
+            file_size: fingerprint.file_size,
             normalization_hash,
             hashed_tokens: hashed_tokens
                 .iter()
@@ -352,19 +360,6 @@ fn cached_suppression(suppression: &Suppression) -> CachedSuppression {
 
 fn cache_key(path: &Path) -> String {
     path.to_string_lossy().into_owned()
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "filesystem mtimes used for cache invalidation fit in u64 nanoseconds for supported dates"
-)]
-fn metadata_key(metadata: &std::fs::Metadata) -> (u64, u64) {
-    let mtime_ns = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
-        .map_or(0, |duration| duration.as_nanos() as u64);
-    (mtime_ns, metadata.len())
 }
 
 #[cfg(test)]
@@ -530,8 +525,7 @@ mod tests {
         store.entries.insert(
             cache_key(&file),
             CachedTokenFile::from_tokens(
-                metadata_key(&metadata).0,
-                metadata.len(),
+                SourceFingerprint::from_metadata(&metadata),
                 mode().hash,
                 &entry.hashed_tokens,
                 &entry.file_tokens,
@@ -542,5 +536,50 @@ mod tests {
 
         let loaded = TokenCache::load(dir.path());
         assert!(loaded.get(&file, &metadata, mode()).is_none());
+    }
+
+    #[test]
+    fn token_cache_misses_when_cached_mtime_changes() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("src.ts");
+        std::fs::write(&file, "const value = 1;\n").expect("write source");
+        let metadata = std::fs::metadata(&file).expect("metadata");
+
+        let mut cache = TokenCache::load(dir.path());
+        let entry = entry("const value = 1;\n");
+        insert_entry(&mut cache, &file, &metadata, mode(), &entry);
+        let cached = cache
+            .store
+            .entries
+            .get_mut(&cache_key(&file))
+            .expect("cached token entry");
+        cached.mtime_ns = cached.mtime_ns.saturating_add(1);
+
+        assert!(cache.get(&file, &metadata, mode()).is_none());
+    }
+
+    #[test]
+    fn token_cache_misses_when_mtime_is_unknown() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("src.ts");
+        std::fs::write(&file, "const value = 1;\n").expect("write source");
+        let metadata = std::fs::metadata(&file).expect("metadata");
+
+        let mut cache = TokenCache::load(dir.path());
+        let entry = entry("const value = 1;\n");
+        insert_entry(&mut cache, &file, &metadata, mode(), &entry);
+        let cached = cache
+            .store
+            .entries
+            .get_mut(&cache_key(&file))
+            .expect("cached token entry");
+        cached.mtime_ns = 0;
+
+        let unknown_mtime = SourceFingerprint::new(0, metadata.len());
+        assert!(
+            cache
+                .get_by_fingerprint(&file, unknown_mtime, mode())
+                .is_none()
+        );
     }
 }

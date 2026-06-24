@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::FxHashMap;
 
 use bitcode::{Decode, Encode};
@@ -180,12 +181,12 @@ impl CacheStore {
     pub fn get_by_metadata(
         &self,
         path: &Path,
-        mtime_secs: u64,
-        file_size: u64,
+        fingerprint: SourceFingerprint,
     ) -> Option<&CachedModule> {
         let key = path.to_string_lossy();
         let entry = self.entries.get(key.as_ref())?;
-        if entry.mtime_secs == mtime_secs && entry.file_size == file_size && mtime_secs > 0 {
+        let cached = SourceFingerprint::new(entry.mtime_secs, entry.file_size);
+        if cached == fingerprint && fingerprint.has_known_mtime() {
             Some(entry)
         } else {
             None

@@ -7,6 +7,7 @@ use oxc_span::Span;
 use crate::*;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
+use fallow_types::source_fingerprint::SourceFingerprint;
 
 use super::*;
 
@@ -1837,7 +1838,7 @@ fn get_by_metadata_returns_entry_on_match() {
     };
     store.insert(Path::new("test.ts"), module);
 
-    let result = store.get_by_metadata(Path::new("test.ts"), 1000, 500);
+    let result = store.get_by_metadata(Path::new("test.ts"), SourceFingerprint::new(1000, 500));
     assert!(result.is_some());
     assert_eq!(result.unwrap().content_hash, 42);
 }
@@ -1922,7 +1923,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
 
     assert!(
         store
-            .get_by_metadata(Path::new("test.ts"), 2000, 500)
+            .get_by_metadata(Path::new("test.ts"), SourceFingerprint::new(2000, 500))
             .is_none()
     );
 }
@@ -2007,7 +2008,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
 
     assert!(
         store
-            .get_by_metadata(Path::new("test.ts"), 1000, 999)
+            .get_by_metadata(Path::new("test.ts"), SourceFingerprint::new(1000, 999))
             .is_none()
     );
 }
@@ -2092,7 +2093,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
 
     assert!(
         store
-            .get_by_metadata(Path::new("test.ts"), 0, 500)
+            .get_by_metadata(Path::new("test.ts"), SourceFingerprint::new(0, 500))
             .is_none()
     );
 }
@@ -2102,7 +2103,10 @@ fn get_by_metadata_returns_none_for_missing_file() {
     let store = CacheStore::new();
     assert!(
         store
-            .get_by_metadata(Path::new("nonexistent.ts"), 1000, 500)
+            .get_by_metadata(
+                Path::new("nonexistent.ts"),
+                SourceFingerprint::new(1000, 500)
+            )
             .is_none()
     );
 }

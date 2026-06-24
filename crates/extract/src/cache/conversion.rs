@@ -550,7 +550,8 @@ pub fn cached_to_module_opts(
 ///
 /// `mtime_secs` and `file_size` come from `std::fs::metadata()` at parse time
 /// and enable fast cache validation on subsequent runs (skip file read when
-/// mtime+size match).
+/// mtime+size match). Despite the legacy field name, callers now pass the
+/// shared source-fingerprint mtime value.
 #[must_use]
 pub fn module_to_cached(
     module: &crate::ModuleInfo,
