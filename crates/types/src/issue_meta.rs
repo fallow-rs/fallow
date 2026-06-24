@@ -284,7 +284,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     IssueKindMeta {
         kind: Some(IssueKind::BoundaryViolation),
         code: "boundary-violation",
-        aliases: &["boundary-call-violation", "boundary-call-violations"],
+        aliases: &[],
         label: "Boundary Violations",
         config_key: Some("boundary-violation"),
         filter_flag: Some("--boundary-violations"),
@@ -292,6 +292,32 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         suppress_token: Some("boundary-violation"),
         suppress_file_level: false,
         lsp: true,
+        docs_category: "architecture",
+    },
+    IssueKindMeta {
+        kind: None,
+        code: "boundary-coverage",
+        aliases: &["boundary-coverage-violations"],
+        label: "Boundary Coverage",
+        config_key: Some("boundary-violation"),
+        filter_flag: Some("--boundary-violations"),
+        mcp_issue_type: None,
+        suppress_token: Some("boundary-violation"),
+        suppress_file_level: true,
+        lsp: false,
+        docs_category: "architecture",
+    },
+    IssueKindMeta {
+        kind: Some(IssueKind::BoundaryViolation),
+        code: "boundary-call-violation",
+        aliases: &["boundary-call-violations"],
+        label: "Boundary Call Violations",
+        config_key: Some("boundary-violation"),
+        filter_flag: Some("--boundary-violations"),
+        mcp_issue_type: None,
+        suppress_token: Some("boundary-call-violation"),
+        suppress_file_level: false,
+        lsp: false,
         docs_category: "architecture",
     },
     IssueKindMeta {
@@ -673,6 +699,242 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     },
 ];
 
+/// Shared contract facts for serialized `AnalysisResults` arrays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct IssueResultMeta {
+    /// Canonical issue code that owns this result array.
+    pub code: &'static str,
+    /// Serialized `AnalysisResults` array key that carries this issue row.
+    pub result_key: &'static str,
+    /// Whether `result_key` contributes to `AnalysisResults::total_issues()`.
+    pub counts_in_total: bool,
+}
+
+/// All shared issue-to-result metadata rows.
+pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
+    IssueResultMeta {
+        code: "unused-file",
+        result_key: "unused_files",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-export",
+        result_key: "unused_exports",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-type",
+        result_key: "unused_types",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "private-type-leak",
+        result_key: "private_type_leaks",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-dependency",
+        result_key: "unused_dependencies",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-dev-dependency",
+        result_key: "unused_dev_dependencies",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-optional-dependency",
+        result_key: "unused_optional_dependencies",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-enum-member",
+        result_key: "unused_enum_members",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-class-member",
+        result_key: "unused_class_members",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-store-member",
+        result_key: "unused_store_members",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unresolved-import",
+        result_key: "unresolved_imports",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unlisted-dependency",
+        result_key: "unlisted_dependencies",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "duplicate-export",
+        result_key: "duplicate_exports",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "type-only-dependency",
+        result_key: "type_only_dependencies",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "test-only-dependency",
+        result_key: "test_only_dependencies",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "circular-dependency",
+        result_key: "circular_dependencies",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "re-export-cycle",
+        result_key: "re_export_cycles",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "boundary-violation",
+        result_key: "boundary_violations",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "boundary-coverage",
+        result_key: "boundary_coverage_violations",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "boundary-call-violation",
+        result_key: "boundary_call_violations",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "policy-violation",
+        result_key: "policy_violations",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "invalid-client-export",
+        result_key: "invalid_client_exports",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "mixed-client-server-barrel",
+        result_key: "mixed_client_server_barrels",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "misplaced-directive",
+        result_key: "misplaced_directives",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unprovided-inject",
+        result_key: "unprovided_injects",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unrendered-component",
+        result_key: "unrendered_components",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-component-prop",
+        result_key: "unused_component_props",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-component-emit",
+        result_key: "unused_component_emits",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-component-input",
+        result_key: "unused_component_inputs",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-component-output",
+        result_key: "unused_component_outputs",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-svelte-event",
+        result_key: "unused_svelte_events",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-server-action",
+        result_key: "unused_server_actions",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-load-data-key",
+        result_key: "unused_load_data_keys",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "route-collision",
+        result_key: "route_collisions",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "dynamic-segment-name-conflict",
+        result_key: "dynamic_segment_name_conflicts",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "stale-suppression",
+        result_key: "stale_suppressions",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-catalog-entry",
+        result_key: "unused_catalog_entries",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "empty-catalog-group",
+        result_key: "empty_catalog_groups",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unresolved-catalog-reference",
+        result_key: "unresolved_catalog_references",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-dependency-override",
+        result_key: "unused_dependency_overrides",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "misconfigured-dependency-override",
+        result_key: "misconfigured_dependency_overrides",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "prop-drilling",
+        result_key: "prop_drilling_chains",
+        counts_in_total: false,
+    },
+    IssueResultMeta {
+        code: "thin-wrapper",
+        result_key: "thin_wrappers",
+        counts_in_total: false,
+    },
+    IssueResultMeta {
+        code: "duplicate-prop-shape",
+        result_key: "duplicate_prop_shapes",
+        counts_in_total: false,
+    },
+];
+
 /// Canonical names and aliases accepted by `IssueKind::parse`.
 pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
     "unused-file",
@@ -850,14 +1112,32 @@ pub fn issue_meta_by_kind(kind: IssueKind) -> Option<&'static IssueKindMeta> {
     ISSUE_KIND_META.iter().find(|meta| meta.kind == Some(kind))
 }
 
+/// Lookup serialized result metadata by canonical issue code.
+#[must_use]
+pub fn issue_result_meta_by_code(code: &str) -> Option<&'static IssueResultMeta> {
+    ISSUE_RESULT_META.iter().find(|meta| meta.code == code)
+}
+
 /// Rows exposed by the LSP issue-type capability.
 pub fn diagnostic_issue_metas() -> impl Iterator<Item = &'static IssueKindMeta> {
     ISSUE_KIND_META.iter().filter(|meta| meta.lsp)
 }
 
+/// Rows that map to a serialized `AnalysisResults` array.
+pub fn result_issue_metas() -> impl Iterator<Item = &'static IssueResultMeta> {
+    ISSUE_RESULT_META.iter()
+}
+
+/// Rows whose serialized `AnalysisResults` array contributes to `total_issues`.
+pub fn counted_result_issue_metas() -> impl Iterator<Item = &'static IssueResultMeta> {
+    result_issue_metas().filter(|meta| meta.counts_in_total)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+
+    use crate::results::TOTAL_ISSUE_RESULT_KEYS;
 
     use super::*;
 
@@ -902,5 +1182,67 @@ mod tests {
             .filter_map(|meta| meta.mcp_pair())
             .collect();
         assert_eq!(from_constants, from_meta);
+    }
+
+    #[test]
+    fn lsp_exposes_only_actual_diagnostic_codes() {
+        let codes: BTreeSet<&str> = diagnostic_issue_metas().map(|meta| meta.code).collect();
+        assert!(codes.contains("boundary-violation"));
+        assert!(!codes.contains("boundary-coverage"));
+        assert!(!codes.contains("boundary-call-violation"));
+    }
+
+    #[test]
+    fn issue_codes_are_unique() {
+        let mut seen = BTreeSet::new();
+        for meta in ISSUE_KIND_META {
+            assert!(seen.insert(meta.code), "duplicate issue code {}", meta.code);
+        }
+    }
+
+    #[test]
+    fn result_meta_codes_have_issue_metadata() {
+        for meta in ISSUE_RESULT_META {
+            assert!(
+                issue_meta_by_code(meta.code).is_some(),
+                "result metadata code {} has no issue metadata row",
+                meta.code
+            );
+        }
+    }
+
+    #[test]
+    fn result_keys_are_unique() {
+        let mut seen = BTreeSet::new();
+        for meta in ISSUE_RESULT_META {
+            assert!(
+                seen.insert(meta.result_key),
+                "duplicate result key {}",
+                meta.result_key
+            );
+        }
+    }
+
+    #[test]
+    fn counted_result_keys_match_total_issue_fields() {
+        let from_total: BTreeSet<&str> = TOTAL_ISSUE_RESULT_KEYS.iter().copied().collect();
+        let from_meta: BTreeSet<&str> = counted_result_issue_metas()
+            .map(|meta| meta.result_key)
+            .collect();
+        assert_eq!(from_total, from_meta);
+    }
+
+    #[test]
+    fn advisory_result_keys_are_explicitly_excluded_from_total() {
+        let expected = BTreeSet::from([
+            "duplicate_prop_shapes",
+            "prop_drilling_chains",
+            "thin_wrappers",
+        ]);
+        let from_meta: BTreeSet<&str> = result_issue_metas()
+            .filter(|meta| !meta.counts_in_total)
+            .map(|meta| meta.result_key)
+            .collect();
+        assert_eq!(expected, from_meta);
     }
 }

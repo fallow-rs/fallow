@@ -1305,9 +1305,9 @@ fallow schema
 
 Top-level blocks:
 
-- `manifest_version`: manifest shape discriminator (currently `"1"`).
+- `manifest_version`: manifest shape discriminator (currently `"1"`). Additive nullable fields on existing rows do not bump this value.
 - `commands` + `global_flags`: every CLI command and flag, derived live from the CLI definition.
-- `issue_types`: one row per reportable issue type across ALL analyses (dead-code, health, dupes, flags, security). Each row carries `id` (the bare rule id; several rows share one suppression token, e.g. all complexity rules suppress via `complexity`), `rule_id` (SARIF id), `command`, `category`, `filter_flag` (null when none), `fixable`, `suppressible`, `suppress_comment` (copy-pasteable, null when not suppressible), `note`, `license` (`free` | `freemium`), and `docs_url`. Nullable fields are always present (null, never absent).
+- `issue_types`: one row per reportable issue type across ALL analyses (dead-code, health, dupes, flags, security). Each row carries `id` (the bare rule id; several rows share one suppression token, e.g. all complexity rules suppress via `complexity`), `rule_id` (SARIF id), `command`, `category`, `filter_flag` (null when none), `result_key` (the `AnalysisResults` array for dead-code rows, null when none), `counts_in_total`, `fixable`, `suppressible`, `suppress_comment` (copy-pasteable, null when not suppressible), `note`, `license` (`free` | `freemium`), and `docs_url`. Nullable fields are always present (null, never absent).
 - `mcp_tools`: all MCP server tools with `kind` grouping (analysis/trace/fix/introspection/runtime-coverage/composition), one-line description, `key_params` (curated subset; live MCP `list_tools` schemas are authoritative), `license` + `license_note` (the 5 runtime-coverage tools are `freemium`: a single local capture is free, continuous monitoring is paid), and `read_only`.
 - `plugins`: built-in framework plugin count + names, derived live from the registry.
 - `environment_variables`: every user-facing `FALLOW_*` variable (internal plumbing excluded).

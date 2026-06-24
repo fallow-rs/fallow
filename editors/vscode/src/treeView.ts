@@ -591,20 +591,27 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       );
     }
 
-    if (this.result.boundary_violations) {
-      addCategory(
-        "boundary-violation",
-        this.result.boundary_violations.map(
-          (v) =>
-            new IssueItem(
-              `${v.from_zone} -> ${v.to_zone}`,
-              v.from_path,
-              v.line,
-              v.col,
-              "boundary-violation",
-            ),
-        ),
-      );
+    const boundaryItems = [
+      ...(this.result.boundary_violations?.map(
+        (v) =>
+          new IssueItem(
+            `${v.from_zone} -> ${v.to_zone}`,
+            v.from_path,
+            v.line,
+            v.col,
+            "boundary-violation",
+          ),
+      ) ?? []),
+      ...(this.result.boundary_coverage_violations?.map(
+        (v) =>
+          new IssueItem("Unmatched boundary zone", v.path, v.line, v.col, "boundary-violation"),
+      ) ?? []),
+      ...(this.result.boundary_call_violations?.map(
+        (v) => new IssueItem(`${v.zone}: ${v.callee}`, v.path, v.line, v.col, "boundary-violation"),
+      ) ?? []),
+    ];
+    if (boundaryItems.length > 0) {
+      addCategory("boundary-violation", boundaryItems);
     }
 
     if (this.result.policy_violations) {

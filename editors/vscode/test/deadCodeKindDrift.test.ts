@@ -54,6 +54,7 @@ const NON_DEAD_CODE_CODES = new Set<string>(["code-duplication"]);
 interface KindWiring {
   readonly field: keyof CheckOutput;
   readonly category: IssueCategory;
+  readonly diagnosticCode?: string;
   readonly finding: unknown;
 }
 
@@ -251,6 +252,18 @@ const DEAD_CODE_WIRING = {
       actions: [],
     },
   },
+  "boundary-coverage": {
+    field: "boundary_coverage_violations",
+    category: "boundary-violation",
+    diagnosticCode: "boundary-violation",
+    finding: { ...loc, actions: [] },
+  },
+  "boundary-call-violation": {
+    field: "boundary_call_violations",
+    category: "boundary-violation",
+    diagnosticCode: "boundary-violation",
+    finding: { ...loc, zone: "ui", callee: "cp.exec", pattern: "child_process.*", actions: [] },
+  },
   "policy-violation": {
     field: "policy_violations",
     category: "policy-violations",
@@ -342,7 +355,8 @@ describe("dead-code IssueKind drift guard", () => {
   const cases = Object.keys(DEAD_CODE_WIRING) as MappedCode[];
 
   it.each(cases)("%s is counted, rendered as a category, and labeled", (code) => {
-    const { field, category, finding } = DEAD_CODE_WIRING[code];
+    const wiring: KindWiring = DEAD_CODE_WIRING[code];
+    const { field, category, diagnosticCode, finding } = wiring;
     const check = checkWith(field, finding);
 
     // (a) countCheckIssues counts it.
@@ -364,7 +378,7 @@ describe("dead-code IssueKind drift guard", () => {
 
     // The tree's category label must agree with the LSP's canonical label for
     // the code, so the sidebar and the squiggle catalog never disagree.
-    expect(label).toBe(canonicalLabel(code));
+    expect(label).toBe(canonicalLabel(diagnosticCode ?? code));
     provider.dispose();
   });
 });

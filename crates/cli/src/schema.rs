@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use clap::CommandFactory;
-use fallow_types::issue_meta::issue_meta_by_code;
+use fallow_types::issue_meta::{issue_meta_by_code, issue_result_meta_by_code};
 use fallow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
 
 use crate::Cli;
@@ -110,6 +110,8 @@ fn task_matrix_schema() -> serde_json::Value {
 #[derive(Default)]
 struct IssueTypeMeta {
     filter_flag: Option<&'static str>,
+    result_key: Option<&'static str>,
+    counts_in_total: bool,
     fixable: bool,
     /// `(suppression token, file_level)` when comment-suppressible. The
     /// token MUST round-trip through `IssueKind::parse`; a test below
@@ -127,6 +129,10 @@ impl IssueTypeMeta {
             if let Some(token) = shared.suppress_token {
                 meta.suppress = Some((token, shared.suppress_file_level));
             }
+        }
+        if let Some(result) = issue_result_meta_by_code(bare_id) {
+            meta.result_key = Some(result.result_key);
+            meta.counts_in_total = result.counts_in_total;
         }
         meta
     }
@@ -169,6 +175,8 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
         "category": rule.category,
         "description": rule.short,
         "filter_flag": meta.filter_flag,
+        "result_key": meta.result_key,
+        "counts_in_total": meta.counts_in_total,
         "fixable": meta.fixable,
         "suppressible": meta.suppress.is_some(),
         "suppress_comment": suppress_comment,
@@ -750,6 +758,7 @@ fn build_arg_schema(arg: &clap::Arg) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
+    use fallow_types::results::TOTAL_ISSUE_RESULT_KEYS;
     use fallow_types::suppress::{DEAD_CODE_FILTER_FLAGS, IssueKind, KNOWN_ISSUE_KIND_NAMES};
     use rustc_hash::FxHashSet;
 
@@ -1002,12 +1011,14 @@ mod tests {
             let obj = row.as_object().unwrap();
             for key in [
                 "filter_flag",
+                "result_key",
                 "suppress_comment",
                 "note",
                 "license_note",
                 "rule_id",
                 "command",
                 "category",
+                "counts_in_total",
                 "fixable",
                 "suppressible",
                 "license",
@@ -1020,6 +1031,58 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn dead_code_result_keys_match_total_issue_contract() {
+        let schema = schema();
+        let rows = schema["issue_types"].as_array().unwrap();
+
+        let expected: FxHashSet<&str> = TOTAL_ISSUE_RESULT_KEYS.iter().copied().collect();
+        let mut counted = FxHashSet::default();
+        let mut advisory = FxHashSet::default();
+
+        for row in rows {
+            if row["command"].as_str() != Some("dead-code") {
+                assert!(
+                    row["result_key"].is_null(),
+                    "non dead-code row {} must not expose a dead-code result_key",
+                    row["id"]
+                );
+                assert_eq!(
+                    row["counts_in_total"].as_bool(),
+                    Some(false),
+                    "non dead-code row {} must not count in total_issues",
+                    row["id"]
+                );
+                continue;
+            }
+
+            let counts = row["counts_in_total"].as_bool().unwrap();
+            if let Some(result_key) = row["result_key"].as_str() {
+                if counts {
+                    counted.insert(result_key);
+                } else {
+                    advisory.insert(result_key);
+                }
+            } else {
+                assert!(
+                    !counts,
+                    "dead-code row {} counts in total_issues but has no result_key",
+                    row["id"]
+                );
+            }
+        }
+
+        assert_eq!(expected, counted);
+        assert_eq!(
+            FxHashSet::from_iter([
+                "duplicate_prop_shapes",
+                "prop_drilling_chains",
+                "thin_wrappers",
+            ]),
+            advisory
+        );
     }
 
     /// Filter flags in the manifest must exist on the live clap command,

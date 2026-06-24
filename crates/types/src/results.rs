@@ -789,6 +789,71 @@ fn split_merge_parts(
     )
 }
 
+macro_rules! counted_analysis_result_fields {
+    ($callback:ident $(, $arg:expr)? ) => {
+        $callback! {
+            $($arg,)?
+            unused_files => "unused_files",
+            unused_exports => "unused_exports",
+            unused_types => "unused_types",
+            private_type_leaks => "private_type_leaks",
+            unused_dependencies => "unused_dependencies",
+            unused_dev_dependencies => "unused_dev_dependencies",
+            unused_optional_dependencies => "unused_optional_dependencies",
+            unused_enum_members => "unused_enum_members",
+            unused_class_members => "unused_class_members",
+            unused_store_members => "unused_store_members",
+            unresolved_imports => "unresolved_imports",
+            unlisted_dependencies => "unlisted_dependencies",
+            duplicate_exports => "duplicate_exports",
+            type_only_dependencies => "type_only_dependencies",
+            test_only_dependencies => "test_only_dependencies",
+            circular_dependencies => "circular_dependencies",
+            re_export_cycles => "re_export_cycles",
+            boundary_violations => "boundary_violations",
+            boundary_coverage_violations => "boundary_coverage_violations",
+            boundary_call_violations => "boundary_call_violations",
+            policy_violations => "policy_violations",
+            stale_suppressions => "stale_suppressions",
+            unused_catalog_entries => "unused_catalog_entries",
+            empty_catalog_groups => "empty_catalog_groups",
+            unresolved_catalog_references => "unresolved_catalog_references",
+            unused_dependency_overrides => "unused_dependency_overrides",
+            misconfigured_dependency_overrides => "misconfigured_dependency_overrides",
+            invalid_client_exports => "invalid_client_exports",
+            mixed_client_server_barrels => "mixed_client_server_barrels",
+            misplaced_directives => "misplaced_directives",
+            unprovided_injects => "unprovided_injects",
+            unrendered_components => "unrendered_components",
+            route_collisions => "route_collisions",
+            dynamic_segment_name_conflicts => "dynamic_segment_name_conflicts",
+            unused_component_props => "unused_component_props",
+            unused_component_emits => "unused_component_emits",
+            unused_component_inputs => "unused_component_inputs",
+            unused_component_outputs => "unused_component_outputs",
+            unused_svelte_events => "unused_svelte_events",
+            unused_server_actions => "unused_server_actions",
+            unused_load_data_keys => "unused_load_data_keys",
+        }
+    };
+}
+
+macro_rules! counted_result_key_slice {
+    ($($field:ident => $key:literal,)+) => {
+        &[$($key),+]
+    };
+}
+
+macro_rules! counted_result_field_sum {
+    ($results:expr, $($field:ident => $key:literal,)+) => {
+        0 $(+ ($results).$field.len())+
+    };
+}
+
+/// Serialized `AnalysisResults` arrays that contribute to [`AnalysisResults::total_issues`].
+pub const TOTAL_ISSUE_RESULT_KEYS: &[&str] =
+    counted_analysis_result_fields!(counted_result_key_slice);
+
 impl AnalysisResults {
     /// Total number of issues found.
     ///
@@ -822,47 +887,7 @@ impl AnalysisResults {
     /// ```
     #[must_use]
     pub const fn total_issues(&self) -> usize {
-        self.unused_files.len()
-            + self.unused_exports.len()
-            + self.unused_types.len()
-            + self.private_type_leaks.len()
-            + self.unused_dependencies.len()
-            + self.unused_dev_dependencies.len()
-            + self.unused_optional_dependencies.len()
-            + self.unused_enum_members.len()
-            + self.unused_class_members.len()
-            + self.unused_store_members.len()
-            + self.unresolved_imports.len()
-            + self.unlisted_dependencies.len()
-            + self.duplicate_exports.len()
-            + self.type_only_dependencies.len()
-            + self.test_only_dependencies.len()
-            + self.circular_dependencies.len()
-            + self.re_export_cycles.len()
-            + self.boundary_violations.len()
-            + self.boundary_coverage_violations.len()
-            + self.boundary_call_violations.len()
-            + self.policy_violations.len()
-            + self.stale_suppressions.len()
-            + self.unused_catalog_entries.len()
-            + self.empty_catalog_groups.len()
-            + self.unresolved_catalog_references.len()
-            + self.unused_dependency_overrides.len()
-            + self.misconfigured_dependency_overrides.len()
-            + self.invalid_client_exports.len()
-            + self.mixed_client_server_barrels.len()
-            + self.misplaced_directives.len()
-            + self.unprovided_injects.len()
-            + self.unrendered_components.len()
-            + self.route_collisions.len()
-            + self.dynamic_segment_name_conflicts.len()
-            + self.unused_component_props.len()
-            + self.unused_component_emits.len()
-            + self.unused_component_inputs.len()
-            + self.unused_component_outputs.len()
-            + self.unused_svelte_events.len()
-            + self.unused_server_actions.len()
-            + self.unused_load_data_keys.len()
+        counted_analysis_result_fields!(counted_result_field_sum, self)
     }
 
     /// Whether any issues were found.
