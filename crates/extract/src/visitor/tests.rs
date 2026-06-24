@@ -2058,10 +2058,11 @@ fn exported_instance_binding_is_recorded() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}box", crate::INSTANCE_EXPORT_SENTINEL) && a.member == "Box"
-        }),
-        "exported instance binding should be recorded, found: {:?}",
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(crate::INSTANCE_EXPORT_SENTINEL)),
+        "exported instance binding should not emit legacy sentinel access, found: {:?}",
         info.member_accesses
     );
     assert!(

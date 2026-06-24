@@ -940,11 +940,7 @@ impl ModuleInfoExtractor {
                 continue;
             };
             let export_name = export.name.to_string();
-            self.record_instance_export_binding_fact(export_name.clone(), target_name.clone());
-            self.member_accesses.push(MemberAccess {
-                object: format!("{}{}", crate::INSTANCE_EXPORT_SENTINEL, export_name),
-                member: target_name,
-            });
+            self.record_instance_export_binding_fact(export_name, target_name);
         }
     }
 
