@@ -105,6 +105,95 @@ pub struct DeadCodeAnalysisOutput {
     pub files: Option<Vec<DiscoveredFile>>,
 }
 
+/// Reusable engine session for one resolved project.
+///
+/// The session owns the resolved config and discovered file set so future
+/// consumers can share graph-sensitive inputs without each surface recreating
+/// its own partial orchestration.
+#[derive(Debug)]
+pub struct AnalysisSession {
+    config: ResolvedConfig,
+    config_path: Option<PathBuf>,
+    files: Vec<DiscoveredFile>,
+}
+
+impl AnalysisSession {
+    /// Load config and discover files for a project root.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when config loading fails.
+    pub fn load(root: &Path, config_path: Option<&Path>) -> EngineResult<Self> {
+        let project_config = config_for_project(root, config_path)?;
+        Ok(Self::from_config(project_config))
+    }
+
+    /// Build a session from a previously resolved config.
+    #[must_use]
+    pub fn from_config(project_config: ProjectConfig) -> Self {
+        let files = discover_files_with_plugin_scopes(&project_config.config);
+        Self {
+            config: project_config.config,
+            config_path: project_config.path,
+            files,
+        }
+    }
+
+    /// Resolved project root.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.config.root
+    }
+
+    /// Resolved project config.
+    #[must_use]
+    pub fn config(&self) -> &ResolvedConfig {
+        &self.config
+    }
+
+    /// Config file path when one was loaded.
+    #[must_use]
+    pub fn config_path(&self) -> Option<&Path> {
+        self.config_path.as_deref()
+    }
+
+    /// Discovered files for this session.
+    #[must_use]
+    pub fn files(&self) -> &[DiscoveredFile] {
+        &self.files
+    }
+
+    /// Run dead-code analysis for this session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parsing or analysis fails.
+    pub fn analyze_dead_code(&self) -> EngineResult<DeadCodeAnalysis> {
+        analyze_with_usages(&self.config)
+    }
+
+    /// Run dead-code analysis with retained complexity artifacts.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parsing or analysis fails.
+    pub fn analyze_dead_code_with_complexity(&self) -> EngineResult<DeadCodeAnalysisOutput> {
+        analyze_with_usages_and_complexity(&self.config)
+    }
+
+    /// Run duplication detection using the session's discovered files.
+    #[must_use]
+    pub fn find_duplicates(&self) -> DuplicationReport {
+        find_duplicates(&self.config.root, &self.files, &self.config.duplicates)
+    }
+
+    /// Run duplication detection using custom duplicate options.
+    #[must_use]
+    pub fn find_duplicates_with(&self, config: &DuplicatesConfig) -> DuplicationReport {
+        find_duplicates(&self.config.root, &self.files, config)
+    }
+}
+
 /// Resolve the analysis config for a project.
 ///
 /// # Errors
@@ -201,5 +290,23 @@ mod tests {
 
         assert_eq!(err.message(), "config failed");
         assert_eq!(err.to_string(), "config failed");
+    }
+
+    #[test]
+    fn analysis_session_loads_config_and_discovered_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(src.join("index.ts"), "export const value = 1;\n").expect("source file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+
+        assert_eq!(session.root(), temp.path());
+        assert!(session.config_path().is_none());
+        assert!(session.files().iter().any(|file| {
+            file.path
+                .strip_prefix(temp.path())
+                .is_ok_and(|path| path == Path::new("src/index.ts"))
+        }));
     }
 }
