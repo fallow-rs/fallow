@@ -13,11 +13,11 @@
 //! directly from Rust and is set by the audit pass only when the clone group
 //! was introduced relative to the merge-base.
 //!
-//! Lives in `fallow-cli` rather than `fallow-types` because `CloneFamily`,
-//! `CloneGroup`, and `MirroredDirectory` are defined in `fallow-core`
-//! (`crates/core/src/duplicates/types.rs`) and `AttributedCloneGroup` is
-//! defined in the CLI itself (`crates/cli/src/report/dupes_grouping.rs`);
-//! `fallow-types` is the lower-level crate that neither of those reach.
+//! The core-independent action DTOs live in `fallow-output`. The wrappers
+//! remain here because `CloneFamily`, `CloneGroup`, and `MirroredDirectory`
+//! are defined in `fallow-core` (`crates/core/src/duplicates/types.rs`) and
+//! `AttributedCloneGroup` is defined in the CLI itself
+//! (`crates/cli/src/report/dupes_grouping.rs`).
 
 use std::path::PathBuf;
 
@@ -25,92 +25,14 @@ use fallow_core::duplicates::{
     CloneFamily, CloneFingerprintSet, CloneGroup, DuplicationReport, DuplicationStats,
     MirroredDirectory, RefactoringSuggestion,
 };
+use fallow_output::{
+    CloneFamilyAction, CloneGroupAction, clone_family_actions, clone_group_actions,
+};
 use fallow_types::envelope::AuditIntroduced;
 use fallow_types::serde_path;
 use serde::Serialize;
 
 use crate::report::dupes_grouping::AttributedCloneGroup;
-
-/// Per-action wire shape attached to each [`CloneGroupFinding`] and
-/// [`AttributedCloneGroupFinding`]. Mirrors the action types previously
-/// emitted by `inject_dupes_actions::build_clone_group_actions` in
-/// `crates/cli/src/report/json.rs`: `extract-shared` plus `suppress-line`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct CloneGroupAction {
-    /// Action type identifier.
-    #[serde(rename = "type")]
-    pub kind: CloneGroupActionType,
-    /// Whether `fallow fix` can auto-apply this action. Both variants are
-    /// manual today; the field is non-singleton so a future auto-applier
-    /// does not need a schema change.
-    pub auto_fixable: bool,
-    /// Human-readable description of the action.
-    pub description: String,
-    /// The inline comment to insert (e.g.,
-    /// `// fallow-ignore-next-line code-duplication`). Present on
-    /// `suppress-line`; absent on `extract-shared`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub comment: Option<String>,
-}
-
-/// Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
-/// emitted by the legacy `build_clone_group_actions` walker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum CloneGroupActionType {
-    /// Extract the duplicated code into a shared function.
-    ExtractShared,
-    /// Suppress the finding with an inline `// fallow-ignore-next-line
-    /// code-duplication` comment above the duplicated code.
-    SuppressLine,
-}
-
-/// Per-action wire shape attached to each [`CloneFamilyFinding`]. Mirrors
-/// the action types previously emitted by
-/// `build_clone_family_actions`: `extract-shared`, one `apply-suggestion`
-/// per [`RefactoringSuggestion`] on the family, and a trailing
-/// `suppress-line`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct CloneFamilyAction {
-    /// Action type identifier.
-    #[serde(rename = "type")]
-    pub kind: CloneFamilyActionType,
-    /// Whether `fallow fix` can auto-apply this action. All three variants
-    /// are manual today.
-    pub auto_fixable: bool,
-    /// Human-readable description of the action.
-    pub description: String,
-    /// Additional context. Present on `extract-shared` (explaining that
-    /// the family's clone groups share the same files); absent otherwise.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
-    /// The inline comment to insert (e.g.,
-    /// `// fallow-ignore-next-line code-duplication`). Present on
-    /// `suppress-line` only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub comment: Option<String>,
-}
-
-/// Discriminant for [`CloneFamilyAction::kind`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum CloneFamilyActionType {
-    /// Extract the duplicated code blocks into a shared module.
-    ExtractShared,
-    /// Apply one of the family's [`RefactoringSuggestion`]s. One action
-    /// per suggestion entry on the bare family.
-    ApplySuggestion,
-    /// Suppress with an inline `// fallow-ignore-next-line code-duplication`
-    /// comment above the duplicated code.
-    SuppressLine,
-}
-
-const SUPPRESS_COMMENT: &str = "// fallow-ignore-next-line code-duplication";
-const SUPPRESS_DESCRIPTION: &str = "Suppress with an inline comment above the duplicated code";
 
 /// Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
 /// group via `#[serde(flatten)]` and carries a typed `actions` array plus
@@ -165,23 +87,7 @@ impl CloneGroupFinding {
         let suggested_name = fallow_core::duplicates::deepdive::dominant_identifier(&group);
         let line_count = group.line_count;
         let instance_count = group.instances.len();
-        let actions = vec![
-            CloneGroupAction {
-                kind: CloneGroupActionType::ExtractShared,
-                auto_fixable: false,
-                description: format!(
-                    "Extract duplicated code ({line_count} lines, {instance_count} instance{}) into a shared function",
-                    if instance_count == 1 { "" } else { "s" },
-                ),
-                comment: None,
-            },
-            CloneGroupAction {
-                kind: CloneGroupActionType::SuppressLine,
-                auto_fixable: false,
-                description: SUPPRESS_DESCRIPTION.to_string(),
-                comment: Some(SUPPRESS_COMMENT.to_string()),
-            },
-        ];
+        let actions = clone_group_actions(line_count, instance_count);
         Self {
             fingerprint,
             suggested_name,
@@ -272,37 +178,13 @@ fn build_clone_family_actions(
     suggestions: &[RefactoringSuggestion],
 ) -> Vec<CloneFamilyAction> {
     let group_count = groups.len();
-    let mut actions = Vec::with_capacity(2 + suggestions.len());
-    actions.push(CloneFamilyAction {
-        kind: CloneFamilyActionType::ExtractShared,
-        auto_fixable: false,
-        description: format!(
-            "Extract {group_count} duplicated code block{} ({total_duplicated_lines} lines) into a shared module",
-            if group_count == 1 { "" } else { "s" },
-        ),
-        note: Some(
-            "These clone groups share the same files, indicating a structural relationship; refactor together"
-                .to_string(),
-        ),
-        comment: None,
-    });
-    for suggestion in suggestions {
-        actions.push(CloneFamilyAction {
-            kind: CloneFamilyActionType::ApplySuggestion,
-            auto_fixable: false,
-            description: suggestion.description.clone(),
-            note: None,
-            comment: None,
-        });
-    }
-    actions.push(CloneFamilyAction {
-        kind: CloneFamilyActionType::SuppressLine,
-        auto_fixable: false,
-        description: SUPPRESS_DESCRIPTION.to_string(),
-        note: None,
-        comment: Some(SUPPRESS_COMMENT.to_string()),
-    });
-    actions
+    clone_family_actions(
+        group_count,
+        total_duplicated_lines,
+        suggestions
+            .iter()
+            .map(|suggestion| suggestion.description.as_str()),
+    )
 }
 
 /// Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket
@@ -347,23 +229,7 @@ impl AttributedCloneGroupFinding {
     pub fn with_fingerprint(group: AttributedCloneGroup, fingerprint: String) -> Self {
         let line_count = group.line_count;
         let instance_count = group.instances.len();
-        let actions = vec![
-            CloneGroupAction {
-                kind: CloneGroupActionType::ExtractShared,
-                auto_fixable: false,
-                description: format!(
-                    "Extract duplicated code ({line_count} lines, {instance_count} instance{}) into a shared function",
-                    if instance_count == 1 { "" } else { "s" },
-                ),
-                comment: None,
-            },
-            CloneGroupAction {
-                kind: CloneGroupActionType::SuppressLine,
-                auto_fixable: false,
-                description: SUPPRESS_DESCRIPTION.to_string(),
-                comment: Some(SUPPRESS_COMMENT.to_string()),
-            },
-        ];
+        let actions = clone_group_actions(line_count, instance_count);
         Self {
             group,
             fingerprint,
@@ -437,6 +303,7 @@ mod tests {
     use fallow_core::duplicates::{
         CloneInstance, DuplicationStats, RefactoringKind, RefactoringSuggestion,
     };
+    use fallow_output::{CloneFamilyActionType, CloneGroupActionType};
 
     use super::*;
 

@@ -52,8 +52,7 @@ use fallow_cli::impact::{
     ImpactTrendDirection, ResolutionEvent, TrendSummary,
 };
 use fallow_cli::output_dupes::{
-    AttributedCloneGroupFinding, CloneFamilyAction, CloneFamilyActionType, CloneFamilyFinding,
-    CloneGroupAction, CloneGroupActionType, CloneGroupFinding, DupesReportPayload,
+    AttributedCloneGroupFinding, CloneFamilyFinding, CloneGroupFinding, DupesReportPayload,
 };
 use fallow_cli::output_envelope::{
     AuditCommand, AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
@@ -88,6 +87,7 @@ use fallow_core::duplicates::{
     RefactoringKind, RefactoringSuggestion,
 };
 use fallow_output::{
+    CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
     CodeClimateOutput, CodeClimateSeverity,
 };
