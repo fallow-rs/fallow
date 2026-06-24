@@ -1174,22 +1174,19 @@ fn instance_method_with_new_this_return_not_flagged() {
 }
 
 #[test]
-fn static_factory_binding_emits_sentinel_member_access() {
+fn static_factory_binding_emits_typed_member_fact() {
     let info = parse_source(
         r"import { MyClass } from './my-class';
         const myInstance = MyClass.getInstance();
         myInstance.getData();",
     );
-    let sentinel_access = info
-        .member_accesses
-        .iter()
-        .find(|a| a.object.starts_with(crate::FACTORY_CALL_SENTINEL))
-        .expect("sentinel-prefixed access should be emitted for the factory call result");
-    assert_eq!(sentinel_access.member, "getData");
     assert!(
-        sentinel_access.object.ends_with("MyClass:getInstance"),
-        "sentinel should encode the call shape, got: {}",
-        sentinel_access.object
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(crate::FACTORY_CALL_SENTINEL)),
+        "factory call result should not emit a legacy sentinel access: {:?}",
+        info.member_accesses
     );
     let fact = info
         .semantic_facts

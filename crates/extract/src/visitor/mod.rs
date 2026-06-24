@@ -1129,6 +1129,7 @@ impl ModuleInfoExtractor {
                     callee_method.to_string(),
                     access.member.clone(),
                 ));
+                continue;
             }
             additional_accesses.push(MemberAccess {
                 object,
@@ -1139,6 +1140,7 @@ impl ModuleInfoExtractor {
             .whole_object_uses
             .iter()
             .filter_map(|name| self.resolve_bound_object_name(name))
+            .filter(|target| !target.starts_with(crate::FACTORY_CALL_SENTINEL))
             .collect();
         self.member_accesses.extend(additional_accesses);
         for (callee_object, callee_method, member) in additional_facts {
