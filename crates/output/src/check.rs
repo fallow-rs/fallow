@@ -8,6 +8,9 @@ use fallow_types::output::NextStep;
 use fallow_types::results::AnalysisResults;
 use serde::Serialize;
 
+/// Current schema version for the dead-code/check JSON envelope.
+pub const CHECK_SCHEMA_VERSION: u32 = 7;
+
 /// Serialized workspace-discovery diagnostic surfaced on check output.
 ///
 /// The runtime diagnostic type currently lives in `fallow-config`, which is

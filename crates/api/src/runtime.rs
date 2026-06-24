@@ -3,16 +3,20 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use fallow_config::{DetectionMode, DuplicatesConfig, OutputFormat, WorkspaceInfo};
+use fallow_config::{
+    DetectionMode, DuplicatesConfig, OutputFormat, ProductionAnalysis, WorkspaceInfo,
+};
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
-use fallow_engine::{AnalysisSession, ProjectConfig};
+use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
+use fallow_output::{CHECK_SCHEMA_VERSION, CheckOutputInput, build_check_output};
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use globset::Glob;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
 
 use crate::{
-    AnalysisOptions, DupesReportPayload, DuplicationMode, DuplicationOptions, ProgrammaticError,
+    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, DupesReportPayload, DuplicationMode,
+    DuplicationOptions, ProgrammaticError,
 };
 
 const SCHEMA_VERSION: u32 = 1;
@@ -57,6 +61,334 @@ struct ResolvedAnalysisOptions {
 pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<serde_json::Value> {
     let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| detect_duplication_inner(options, &resolved))
+}
+
+/// Run dead-code analysis and return the JSON output contract.
+///
+/// This runtime path is owned by `fallow-api` and uses the typed engine plus
+/// output crates directly. NAPI still calls the legacy CLI-backed route until
+/// follow-up parity slices move the public binding over.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error for unsupported options, invalid
+/// options, config load failures, analysis failures, git changed-file failures,
+/// or serialization failures.
+pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_json::Value> {
+    let resolved = resolve_analysis_options(&options.analysis)?;
+    resolved.install(|| detect_dead_code_inner(options, &resolved))
+}
+
+fn detect_dead_code_inner(
+    options: &DeadCodeOptions,
+    resolved: &ResolvedAnalysisOptions,
+) -> ProgrammaticResult<serde_json::Value> {
+    validate_dead_code_runtime_options(options, resolved)?;
+    let start = Instant::now();
+    let session = load_dead_code_session(options, resolved)?;
+    let analysis = session.analyze_dead_code().map_err(|err| {
+        ProgrammaticError::new(format!("dead-code analysis failed: {err}"), 2)
+            .with_code("FALLOW_DEAD_CODE_FAILED")
+            .with_context("dead-code")
+    })?;
+    let mut results = analysis.results;
+
+    apply_dead_code_scope(options, resolved, &session, &mut results)?;
+    apply_dead_code_filters(&options.filters, &mut results);
+
+    let envelope = build_check_output(CheckOutputInput {
+        schema_version: CHECK_SCHEMA_VERSION,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        elapsed: start.elapsed(),
+        results,
+        config_fixable: false,
+        workspace_diagnostics: Vec::new(),
+        next_steps: Vec::new(),
+    });
+    let mut output = serde_json::to_value(envelope).map_err(|err| {
+        ProgrammaticError::new(format!("failed to serialize dead-code report: {err}"), 2)
+            .with_code("FALLOW_SERIALIZE_DEAD_CODE_REPORT")
+            .with_context("dead-code")
+    })?;
+    if let serde_json::Value::Object(map) = &mut output
+        && !resolved.legacy_envelope
+    {
+        map.insert(
+            "kind".to_string(),
+            serde_json::Value::String("dead_code".to_string()),
+        );
+    }
+    let root_prefix = format!("{}/", session.root().display());
+    strip_root_prefix(&mut output, &root_prefix);
+    Ok(output)
+}
+
+fn validate_dead_code_runtime_options(
+    options: &DeadCodeOptions,
+    resolved: &ResolvedAnalysisOptions,
+) -> ProgrammaticResult<()> {
+    if resolved.diff.is_some() {
+        return Err(ProgrammaticError::new(
+            "`diff_file` is not supported by the API dead-code runtime yet",
+            2,
+        )
+        .with_code("FALLOW_UNSUPPORTED_DEAD_CODE_DIFF_FILE")
+        .with_context("analysis.diffFile")
+        .with_help("Use `changed_since` or `files` for scoped API dead-code runs"));
+    }
+    if options.analysis.explain {
+        return Err(ProgrammaticError::new(
+            "`explain` is not supported by the API dead-code runtime yet",
+            2,
+        )
+        .with_code("FALLOW_UNSUPPORTED_DEAD_CODE_EXPLAIN")
+        .with_context("analysis.explain")
+        .with_help("Use the CLI dead-code JSON output for `_meta` until the metadata contract moves out of fallow-cli"));
+    }
+    Ok(())
+}
+
+fn load_dead_code_session(
+    options: &DeadCodeOptions,
+    resolved: &ResolvedAnalysisOptions,
+) -> ProgrammaticResult<AnalysisSession> {
+    let project_config = fallow_engine::config_for_project_analysis(
+        &resolved.root,
+        resolved.config_path.as_deref(),
+        ProjectConfigOptions {
+            output: OutputFormat::Json,
+            no_cache: resolved.no_cache,
+            threads: resolved.threads,
+            production_override: resolved.production_override,
+            quiet: true,
+            analysis: ProductionAnalysis::DeadCode,
+        },
+    )
+    .map_err(|err| {
+        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
+            .with_code("FALLOW_CONFIG_LOAD_FAILED")
+            .with_context("analysis.configPath")
+    })?;
+    let project_config = configure_project_for_dead_code(project_config, options);
+    Ok(AnalysisSession::from_config(project_config))
+}
+
+fn configure_project_for_dead_code(
+    mut project_config: ProjectConfig,
+    options: &DeadCodeOptions,
+) -> ProjectConfig {
+    if options.include_entry_exports {
+        project_config.config.include_entry_exports = true;
+    }
+    activate_explicit_dead_code_opt_ins(&options.filters, &mut project_config.config.rules);
+    project_config
+}
+
+fn activate_explicit_dead_code_opt_ins(
+    filters: &DeadCodeFilters,
+    rules: &mut fallow_config::RulesConfig,
+) {
+    if filters.private_type_leaks && rules.private_type_leaks == fallow_config::Severity::Off {
+        rules.private_type_leaks = fallow_config::Severity::Warn;
+    }
+}
+
+fn apply_dead_code_scope(
+    options: &DeadCodeOptions,
+    resolved: &ResolvedAnalysisOptions,
+    session: &AnalysisSession,
+    results: &mut AnalysisResults,
+) -> ProgrammaticResult<()> {
+    if let Some(workspace_roots) = resolved.workspace_roots.as_ref() {
+        fallow_engine::dead_code::filter_to_workspaces(results, workspace_roots);
+    }
+    if let Some(changed_files) = changed_files_for_run(resolved)? {
+        fallow_engine::dead_code::filter_by_changed_files(results, &changed_files);
+    }
+    apply_dead_code_file_filter(options, session.root(), results);
+    Ok(())
+}
+
+fn apply_dead_code_file_filter(
+    options: &DeadCodeOptions,
+    root: &Path,
+    results: &mut AnalysisResults,
+) {
+    if options.files.is_empty() {
+        return;
+    }
+    let file_set = options
+        .files
+        .iter()
+        .map(|path| {
+            if is_absolute_path_any_platform(path) {
+                path.clone()
+            } else {
+                root.join(path)
+            }
+        })
+        .collect::<FxHashSet<_>>();
+    fallow_engine::dead_code::filter_by_changed_files(results, &file_set);
+    clear_dead_code_dependency_findings(results);
+}
+
+fn apply_dead_code_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {
+    if !dead_code_filters_active(filters) {
+        return;
+    }
+    apply_dead_code_core_filters(filters, results);
+    apply_dead_code_component_filters(filters, results);
+    apply_dead_code_graph_filters(filters, results);
+    apply_dead_code_policy_filters(filters, results);
+    apply_dead_code_catalog_filters(filters, results);
+}
+
+fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
+    filters.unused_files
+        || filters.unused_exports
+        || filters.unused_deps
+        || filters.unused_types
+        || filters.private_type_leaks
+        || filters.unused_enum_members
+        || filters.unused_class_members
+        || filters.unused_store_members
+        || filters.unprovided_injects
+        || filters.unrendered_components
+        || filters.unused_component_props
+        || filters.unused_component_emits
+        || filters.unused_component_inputs
+        || filters.unused_component_outputs
+        || filters.unused_svelte_events
+        || filters.unused_server_actions
+        || filters.unused_load_data_keys
+        || filters.unresolved_imports
+        || filters.unlisted_deps
+        || filters.duplicate_exports
+        || filters.circular_deps
+        || filters.re_export_cycles
+        || filters.boundary_violations
+        || filters.policy_violations
+        || filters.stale_suppressions
+        || filters.unused_catalog_entries
+        || filters.empty_catalog_groups
+        || filters.unresolved_catalog_references
+        || filters.unused_dependency_overrides
+        || filters.misconfigured_dependency_overrides
+}
+
+fn apply_dead_code_core_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {
+    if !filters.unused_files {
+        results.unused_files.clear();
+    }
+    if !filters.unused_exports {
+        results.unused_exports.clear();
+    }
+    if !filters.unused_types {
+        results.unused_types.clear();
+    }
+    if !filters.private_type_leaks {
+        results.private_type_leaks.clear();
+    }
+    if !filters.unused_deps {
+        clear_dead_code_dependency_findings(results);
+    }
+    if !filters.unused_enum_members {
+        results.unused_enum_members.clear();
+    }
+    if !filters.unused_class_members {
+        results.unused_class_members.clear();
+    }
+    if !filters.unused_store_members {
+        results.unused_store_members.clear();
+    }
+    if !filters.unlisted_deps {
+        results.unlisted_dependencies.clear();
+    }
+}
+
+fn clear_dead_code_dependency_findings(results: &mut AnalysisResults) {
+    results.unused_dependencies.clear();
+    results.unused_dev_dependencies.clear();
+    results.unused_optional_dependencies.clear();
+    results.type_only_dependencies.clear();
+    results.test_only_dependencies.clear();
+}
+
+fn apply_dead_code_component_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {
+    if !filters.unprovided_injects {
+        results.unprovided_injects.clear();
+    }
+    if !filters.unrendered_components {
+        results.unrendered_components.clear();
+    }
+    if !filters.unused_component_props {
+        results.unused_component_props.clear();
+    }
+    if !filters.unused_component_emits {
+        results.unused_component_emits.clear();
+    }
+    if !filters.unused_component_inputs {
+        results.unused_component_inputs.clear();
+    }
+    if !filters.unused_component_outputs {
+        results.unused_component_outputs.clear();
+    }
+    if !filters.unused_svelte_events {
+        results.unused_svelte_events.clear();
+    }
+    if !filters.unused_server_actions {
+        results.unused_server_actions.clear();
+    }
+    if !filters.unused_load_data_keys {
+        results.unused_load_data_keys.clear();
+    }
+    if !filters.unresolved_imports {
+        results.unresolved_imports.clear();
+    }
+}
+
+fn apply_dead_code_graph_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {
+    if !filters.duplicate_exports {
+        results.duplicate_exports.clear();
+    }
+    if !filters.circular_deps {
+        results.circular_dependencies.clear();
+    }
+    if !filters.re_export_cycles {
+        results.re_export_cycles.clear();
+    }
+    if !filters.boundary_violations {
+        results.boundary_violations.clear();
+        results.boundary_coverage_violations.clear();
+        results.boundary_call_violations.clear();
+    }
+}
+
+fn apply_dead_code_policy_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {
+    if !filters.policy_violations {
+        results.policy_violations.clear();
+    }
+    if !filters.stale_suppressions {
+        results.stale_suppressions.clear();
+    }
+}
+
+fn apply_dead_code_catalog_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {
+    if !filters.unused_catalog_entries {
+        results.unused_catalog_entries.clear();
+    }
+    if !filters.empty_catalog_groups {
+        results.empty_catalog_groups.clear();
+    }
+    if !filters.unresolved_catalog_references {
+        results.unresolved_catalog_references.clear();
+    }
+    if !filters.unused_dependency_overrides {
+        results.unused_dependency_overrides.clear();
+    }
+    if !filters.misconfigured_dependency_overrides {
+        results.misconfigured_dependency_overrides.clear();
+    }
 }
 
 fn detect_duplication_inner(
@@ -854,6 +1186,92 @@ mod tests {
     }
 
     #[test]
+    fn detect_dead_code_returns_dead_code_envelope() {
+        let project = dead_code_project();
+        let root = project.path();
+
+        let json = detect_dead_code(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            filters: DeadCodeFilters {
+                unused_exports: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+
+        assert_eq!(json["kind"], "dead_code");
+        assert_eq!(json["schema_version"], CHECK_SCHEMA_VERSION);
+        assert_eq!(unused_export_names(&json), vec!["deadA", "deadB"]);
+    }
+
+    #[test]
+    fn detect_dead_code_legacy_envelope_removes_root_kind() {
+        let project = dead_code_project();
+        let root = project.path();
+
+        let json = detect_dead_code(&DeadCodeOptions {
+            analysis: AnalysisOptions {
+                legacy_envelope: true,
+                ..analysis_at(root)
+            },
+            filters: DeadCodeFilters {
+                unused_exports: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+
+        assert!(json.get("kind").is_none());
+    }
+
+    #[test]
+    fn detect_dead_code_file_filter_scopes_source_findings() {
+        let project = dead_code_project();
+        let root = project.path();
+
+        let json = detect_dead_code(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            filters: DeadCodeFilters {
+                unused_exports: true,
+                ..DeadCodeFilters::default()
+            },
+            files: vec![PathBuf::from("src/a.ts")],
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+
+        assert_eq!(unused_export_names(&json), vec!["deadA"]);
+    }
+
+    #[test]
+    fn detect_dead_code_rejects_diff_file_until_diff_contract_moves() {
+        let project = dead_code_project();
+        let root = project.path();
+        std::fs::write(
+            root.join("scope.diff"),
+            "diff --git a/src/a.ts b/src/a.ts\n",
+        )
+        .expect("diff");
+
+        let err = detect_dead_code(&DeadCodeOptions {
+            analysis: AnalysisOptions {
+                diff_file: Some(PathBuf::from("scope.diff")),
+                ..analysis_at(root)
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect_err("diff file is not supported yet");
+
+        assert_eq!(
+            err.code.as_deref(),
+            Some("FALLOW_UNSUPPORTED_DEAD_CODE_DIFF_FILE")
+        );
+        assert_eq!(err.context.as_deref(), Some("analysis.diffFile"));
+    }
+
+    #[test]
     fn diff_file_filters_clone_groups() {
         let root = PathBuf::from("/repo");
         let mut report = DuplicationReport {
@@ -959,6 +1377,38 @@ mod tests {
             token_count: 10,
             line_count: 3,
         }
+    }
+
+    fn dead_code_project() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        write_json(
+            root.join("package.json"),
+            r#"{"name":"api-dead-code","main":"src/index.ts"}"#,
+        );
+        std::fs::write(
+            root.join("src/index.ts"),
+            "import './a';\nimport './b';\nexport const entry = 1;\nconsole.log(entry);\n",
+        )
+        .expect("entry");
+        std::fs::write(root.join("src/a.ts"), "export const deadA = 1;\n").expect("a");
+        std::fs::write(root.join("src/b.ts"), "export const deadB = 1;\n").expect("b");
+        project
+    }
+
+    fn unused_export_names(json: &serde_json::Value) -> Vec<&str> {
+        json["unused_exports"]
+            .as_array()
+            .expect("unused exports array")
+            .iter()
+            .map(|item| {
+                item["name"]
+                    .as_str()
+                    .or_else(|| item["export_name"].as_str())
+                    .expect("unused export name")
+            })
+            .collect()
     }
 
     fn write_workspace(root: &Path, relative: &str, name: &str) {

@@ -17,7 +17,9 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use fallow_config::{DuplicatesConfig, ResolvedConfig};
+use fallow_config::{
+    DuplicatesConfig, FallowConfig, OutputFormat, ProductionAnalysis, ResolvedConfig,
+};
 use rustc_hash::FxHashSet;
 
 /// Duplication result types exposed through the engine boundary.
@@ -92,6 +94,17 @@ fn engine_error(err: impl fmt::Display) -> EngineError {
 pub struct ProjectConfig {
     pub config: ResolvedConfig,
     pub path: Option<PathBuf>,
+}
+
+/// Scalar config-loading knobs for one analysis family.
+#[derive(Debug, Clone, Copy)]
+pub struct ProjectConfigOptions {
+    pub output: OutputFormat,
+    pub no_cache: bool,
+    pub threads: usize,
+    pub production_override: Option<bool>,
+    pub quiet: bool,
+    pub analysis: ProductionAnalysis,
 }
 
 /// Typed dead-code analysis result.
@@ -257,6 +270,88 @@ pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResu
     fallow_core::config_for_project(root, config_path)
         .map(|(config, path)| ProjectConfig { config, path })
         .map_err(engine_error)
+}
+
+/// Resolve config for a specific analysis without depending on the CLI crate.
+///
+/// This mirrors the CLI's core config semantics: explicit production overrides
+/// are applied before resolution, per-analysis production config is flattened
+/// for the requested analysis, and boundary / external plugin / rule-pack
+/// validation happens before the resolved config reaches the engine.
+///
+/// # Errors
+///
+/// Returns an engine error when config loading or validation fails.
+pub fn config_for_project_analysis(
+    root: &Path,
+    config_path: Option<&Path>,
+    options: ProjectConfigOptions,
+) -> EngineResult<ProjectConfig> {
+    let user_config = load_user_config(root, config_path)?;
+    let loaded_user_config = user_config.is_some();
+    let (mut config, path) = match user_config {
+        Some((config, path)) => (config, Some(path)),
+        None => (
+            FallowConfig {
+                production: options.production_override.unwrap_or(false).into(),
+                ..FallowConfig::default()
+            },
+            None,
+        ),
+    };
+
+    if loaded_user_config {
+        let production = options
+            .production_override
+            .unwrap_or_else(|| config.production.for_analysis(options.analysis));
+        config.production = production.into();
+    }
+    validate_config(root, &config)?;
+    let resolved = config.resolve(
+        root.to_path_buf(),
+        options.output,
+        options.threads,
+        options.no_cache,
+        options.quiet,
+        None,
+    );
+    Ok(ProjectConfig {
+        config: resolved,
+        path,
+    })
+}
+
+fn load_user_config(
+    root: &Path,
+    config_path: Option<&Path>,
+) -> EngineResult<Option<(FallowConfig, PathBuf)>> {
+    if let Some(path) = config_path {
+        let config = FallowConfig::load(path)
+            .map_err(|err| EngineError::new(format!("invalid config: {err:#}")))?;
+        return Ok(Some((config, path.to_path_buf())));
+    }
+    FallowConfig::find_and_load(root)
+        .map_err(|err| EngineError::new(format!("invalid config: {err}")))
+}
+
+fn validate_config(root: &Path, config: &FallowConfig) -> EngineResult<()> {
+    fallow_config::discover_and_validate_external_plugins(root, &config.plugins)
+        .map_err(|errors| joined_config_errors("invalid external plugin definition", &errors))?;
+    config
+        .validate_resolved_boundaries(root)
+        .map_err(|errors| joined_config_errors("invalid boundary configuration", &errors))?;
+    fallow_config::load_rule_packs(root, &config.rule_packs)
+        .map_err(|errors| joined_config_errors("invalid rule pack", &errors))?;
+    Ok(())
+}
+
+fn joined_config_errors(label: &str, errors: &[impl ToString]) -> EngineError {
+    let joined = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n  - ");
+    EngineError::new(format!("{label}:\n  - {joined}"))
 }
 
 /// Run dead-code analysis on a project directory with export usage collection.
