@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use fallow_types::envelope::{Meta, MetaMetric};
+use fallow_types::envelope::{Meta, MetaMetric, MetaRule};
 
 use crate::{ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION};
 
@@ -10,6 +10,18 @@ pub const DUPES_DOCS: &str = "https://docs.fallow.tools/cli/dupes";
 /// Docs URL for the health command.
 pub const HEALTH_DOCS: &str = "https://docs.fallow.tools/cli/health";
 
+/// Docs URL for the security command.
+pub const SECURITY_DOCS: &str = "https://docs.fallow.tools/cli/security";
+
+/// Output-facing metadata for one security rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SecurityRuleMeta<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+    pub description: &'a str,
+    pub docs_path: &'a str,
+}
+
 /// Build the `_meta` object for `fallow health --format json --explain`.
 #[must_use]
 pub fn health_meta() -> Meta {
@@ -17,6 +29,30 @@ pub fn health_meta() -> Meta {
         docs: Some(HEALTH_DOCS.to_string()),
         field_definitions: action_field_definitions(),
         metrics: health_metrics(),
+        ..Meta::default()
+    }
+}
+
+/// Build the `_meta` object for `fallow security --format json --explain`.
+#[must_use]
+pub fn security_meta<'a>(rules: impl IntoIterator<Item = SecurityRuleMeta<'a>>) -> Meta {
+    Meta {
+        docs: Some(SECURITY_DOCS.to_string()),
+        field_definitions: security_field_definitions(),
+        metrics: BTreeMap::new(),
+        rules: rules
+            .into_iter()
+            .map(|rule| {
+                (
+                    rule.id.to_string(),
+                    MetaRule {
+                        name: Some(rule.name.to_string()),
+                        description: Some(rule.description.to_string()),
+                        docs: Some(report_rule_docs_url(rule.docs_path)),
+                    },
+                )
+            })
+            .collect(),
         ..Meta::default()
     }
 }
@@ -96,6 +132,78 @@ fn action_field_definitions() -> BTreeMap<String, String> {
         (
             "actions[].auto_fixable".to_string(),
             ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION.to_string(),
+        ),
+    ])
+}
+
+fn security_field_definitions() -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            "version".to_string(),
+            "fallow CLI version that produced this output.".to_string(),
+        ),
+        (
+            "elapsed_ms".to_string(),
+            "Wall-clock milliseconds spent producing the security report.".to_string(),
+        ),
+        (
+            "config".to_string(),
+            "Privacy-safe config context relevant to security candidate generation.".to_string(),
+        ),
+        (
+            "config.rules.*.configured".to_string(),
+            "Severity from resolved config before the security command forced default-off rules on."
+                .to_string(),
+        ),
+        (
+            "config.rules.*.effective".to_string(),
+            "Severity used for this security command run.".to_string(),
+        ),
+        (
+            "config.categories_include".to_string(),
+            "Configured security category include list. null means unset, [] means explicitly empty."
+                .to_string(),
+        ),
+        (
+            "config.categories_exclude".to_string(),
+            "Configured security category exclude list. null means unset, [] means explicitly empty."
+                .to_string(),
+        ),
+        (
+            "security_findings[]".to_string(),
+            "Unverified security candidates for downstream human or agent verification.".to_string(),
+        ),
+        (
+            "summary.security_findings".to_string(),
+            "Number of security candidates after all filters, gates, and scopes.".to_string(),
+        ),
+        (
+            "summary.by_severity".to_string(),
+            "Fixed high, medium, and low severity counts for summary JSON.".to_string(),
+        ),
+        (
+            "summary.by_category".to_string(),
+            "Candidate counts by catalogue category, or by kind for uncategorized findings."
+                .to_string(),
+        ),
+        (
+            "summary.by_reachability".to_string(),
+            "Fixed reachability and source-backed ranking-signal counts for summary JSON."
+                .to_string(),
+        ),
+        (
+            "summary.by_runtime_state".to_string(),
+            "Fixed production-runtime coverage state counts for summary JSON.".to_string(),
+        ),
+        (
+            "unresolved_edge_files".to_string(),
+            "Number of client files whose import cone contains dynamic edges the graph could not follow."
+                .to_string(),
+        ),
+        (
+            "unresolved_callee_sites".to_string(),
+            "Number of sink-shaped nodes whose callee could not be flattened to a static path."
+                .to_string(),
         ),
     ])
 }
@@ -363,6 +471,10 @@ fn metric(
     }
 }
 
+fn report_rule_docs_url(docs_path: &str) -> String {
+    format!("https://docs.fallow.tools/{docs_path}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,5 +500,22 @@ mod tests {
         assert!(meta.metrics.contains_key("health_score"));
         assert!(meta.metrics.contains_key("max_render_fan_in"));
         assert!(meta.metrics.contains_key("percent_dead_in_production"));
+    }
+
+    #[test]
+    fn security_meta_uses_output_contract_shape() {
+        let meta = security_meta([SecurityRuleMeta {
+            id: "security/example",
+            name: "Example",
+            description: "Example security candidate.",
+            docs_path: "cli/security",
+        }]);
+        assert_eq!(meta.docs.as_deref(), Some(SECURITY_DOCS));
+        assert!(meta.field_definitions.contains_key("security_findings[]"));
+        assert!(meta.metrics.is_empty());
+        assert_eq!(
+            meta.rules["security/example"].docs.as_deref(),
+            Some("https://docs.fallow.tools/cli/security")
+        );
     }
 }
