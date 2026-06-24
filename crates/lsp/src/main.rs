@@ -32,7 +32,7 @@ use fallow_core::changed_files::{
     filter_duplication_by_changed_files, filter_results_by_changed_files, resolve_git_toplevel,
     try_get_changed_files_with_toplevel,
 };
-use fallow_engine::{AnalysisResults, DuplicationReport};
+use fallow_engine::{AnalysisResults, AnalysisSession, DuplicationReport};
 use fallow_types::issue_meta::{IssueKindMeta, diagnostic_issue_metas};
 
 use crate::code_lens::{InlineComplexityExceeded, InlineComplexityFinding};
@@ -206,48 +206,46 @@ struct BlockingAnalysisOutput {
 }
 
 fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
-    let load = fallow_engine::config_for_project(input.project_root, input.config_path);
-    let (mut config, message) = match load {
-        Ok(project_config) => (
-            project_config.config,
-            (
-                MessageType::INFO,
-                project_config.path.map_or_else(
-                    || {
-                        format!(
-                            "no config file found for {}, using defaults",
-                            input.project_root.display()
-                        )
-                    },
-                    |path| format!("loaded config: {}", path.display()),
-                ),
-            ),
-        ),
-        Err(e) => {
-            analyze_project_root_config_fallback(input, &e);
-            return;
-        }
-    };
+    let session =
+        match AnalysisSession::load_with_config(input.project_root, input.config_path, |config| {
+            // Override the project config's production resolution when the
+            // editor forwarded an explicit `fallow.production` (on/off).
+            // Mirrors the CLI-driven sidebar receiving
+            // `--production`/`--no-production`, so the two surfaces agree;
+            // `None` leaves the project config in force (issue #1055).
+            if let Some(production) = input.production_override {
+                config.production = production;
+            }
+        }) {
+            Ok(session) => session,
+            Err(e) => {
+                analyze_project_root_config_fallback(input, &e);
+                return;
+            }
+        };
 
-    // Override the project config's production resolution when the editor
-    // forwarded an explicit `fallow.production` (on/off). Mirrors the
-    // CLI-driven sidebar receiving `--production`/`--no-production`, so the two
-    // surfaces agree; `None` leaves the project config in force (issue #1055).
-    if let Some(production) = input.production_override {
-        config.production = production;
-    }
+    let message = (
+        MessageType::INFO,
+        session.config_path().map_or_else(
+            || {
+                format!(
+                    "no config file found for {}, using defaults",
+                    input.project_root.display()
+                )
+            },
+            |path| format!("loaded config: {}", path.display()),
+        ),
+    );
 
     input.config_messages.push(message);
 
-    run_typed_dead_code_analysis(input, &config);
+    run_typed_dead_code_analysis(input, &session);
 
-    let files = fallow_engine::discover_files_with_plugin_scopes(&config);
     let duplicates_config = input.duplication_options.map_or_else(
-        || config.duplicates.clone(),
-        |options| options.merge_with(&config.duplicates),
+        || session.config().duplicates.clone(),
+        |options| options.merge_with(&session.config().duplicates),
     );
-    let duplication =
-        fallow_engine::find_duplicates(input.project_root, &files, &duplicates_config);
+    let duplication = session.find_duplicates_with(&duplicates_config);
     merge_duplication(input.merged_duplication, duplication);
 }
 
@@ -276,16 +274,16 @@ fn analyze_project_root_config_fallback(
 /// accumulators.
 fn run_typed_dead_code_analysis(
     input: &mut ProjectRootAnalysisInput<'_>,
-    config: &fallow_config::ResolvedConfig,
+    session: &AnalysisSession,
 ) {
     if input.inline_complexity_enabled {
-        if let Ok(output) = fallow_engine::analyze_with_usages_and_complexity(config) {
+        if let Ok(output) = session.analyze_dead_code_with_complexity() {
             input
                 .merged_inline_complexity
-                .extend(collect_inline_complexity(config, &output));
+                .extend(collect_inline_complexity(session.config(), &output));
             merge_results(input.merged_results, output.results);
         }
-    } else if let Ok(analysis) = fallow_engine::analyze_with_usages(config) {
+    } else if let Ok(analysis) = session.analyze_dead_code() {
         merge_results(input.merged_results, analysis.results);
     }
 }

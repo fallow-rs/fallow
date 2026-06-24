@@ -128,6 +128,22 @@ impl AnalysisSession {
         Ok(Self::from_config(project_config))
     }
 
+    /// Load config, apply one caller-supplied config adjustment, then discover
+    /// files for a project root.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when config loading fails.
+    pub fn load_with_config(
+        root: &Path,
+        config_path: Option<&Path>,
+        configure: impl FnOnce(&mut ResolvedConfig),
+    ) -> EngineResult<Self> {
+        let mut project_config = config_for_project(root, config_path)?;
+        configure(&mut project_config.config);
+        Ok(Self::from_config(project_config))
+    }
+
     /// Build a session from a previously resolved config.
     #[must_use]
     pub fn from_config(project_config: ProjectConfig) -> Self {
@@ -308,5 +324,28 @@ mod tests {
                 .strip_prefix(temp.path())
                 .is_ok_and(|path| path == Path::new("src/index.ts"))
         }));
+    }
+
+    #[test]
+    fn analysis_session_applies_config_adjustment_before_discovery() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(src.join("index.ts"), "export const value = 1;\n").expect("source file");
+        std::fs::write(src.join("index.test.ts"), "export const testValue = 1;\n")
+            .expect("test source file");
+
+        let session = AnalysisSession::load_with_config(temp.path(), None, |config| {
+            config.production = true;
+        })
+        .expect("session loads");
+
+        let relative_paths: Vec<_> = session
+            .files()
+            .iter()
+            .filter_map(|file| file.path.strip_prefix(temp.path()).ok())
+            .collect();
+        assert!(relative_paths.contains(&Path::new("src/index.ts")));
+        assert!(!relative_paths.contains(&Path::new("src/index.test.ts")));
     }
 }
