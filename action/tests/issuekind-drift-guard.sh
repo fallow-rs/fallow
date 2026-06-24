@@ -53,6 +53,8 @@ fallow_dead_code_source_rows() {
       code = ""
       result_key = ""
       counts = ""
+      summary_label = ""
+      summary_docs_anchor = ""
       next
     }
     in_meta && /code: "/ {
@@ -69,6 +71,20 @@ fallow_dead_code_source_rows() {
       result_key = line
       next
     }
+    in_meta && /summary_label: "/ {
+      line = $0
+      sub(/^.*summary_label: "/, "", line)
+      sub(/".*$/, "", line)
+      summary_label = line
+      next
+    }
+    in_meta && /summary_docs_anchor: "/ {
+      line = $0
+      sub(/^.*summary_docs_anchor: "/, "", line)
+      sub(/".*$/, "", line)
+      summary_docs_anchor = line
+      next
+    }
     in_meta && /counts_in_total: / {
       line = $0
       sub(/^.*counts_in_total: /, "", line)
@@ -77,8 +93,8 @@ fallow_dead_code_source_rows() {
       next
     }
     in_meta && /^[[:space:]]*\},/ {
-      if (code != "" && result_key != "" && counts != "") {
-        print code "\t" result_key "\t" counts
+      if (code != "" && result_key != "" && counts != "" && summary_label != "" && summary_docs_anchor != "") {
+        print code "\t" result_key "\t" counts "\t" summary_label "\t" summary_docs_anchor
       }
       in_meta = 0
       next
@@ -107,8 +123,14 @@ fallow_dead_code_schema_rows() {
     rows="$("$bin" schema 2>/dev/null \
       | jq -r '
         [.issue_types[] | select(.command == "dead-code")] as $rows
-        | if (($rows | length) > 0 and all($rows[]; has("result_key") and has("counts_in_total"))) then
-            $rows[] | [.id, (.result_key // ""), (.counts_in_total | tostring)] | @tsv
+        | if (($rows | length) > 0 and all($rows[]; has("result_key") and has("counts_in_total") and has("summary_label") and has("summary_docs_anchor"))) then
+            $rows[] | [
+              .id,
+              (.result_key // ""),
+              (.counts_in_total | tostring),
+              (.summary_label // ""),
+              (.summary_docs_anchor // "")
+            ] | @tsv
           else
             empty
           end
@@ -125,9 +147,9 @@ fallow_dead_code_schema_rows() {
 }
 
 issuekind_schema_field() {
-  local id="$1" field="$2" rows row_id row_key row_counts
+  local id="$1" field="$2" rows row_id row_key row_counts row_label row_anchor
   rows="$(fallow_dead_code_schema_rows)" || return 1
-  while IFS=$'\t' read -r row_id row_key row_counts; do
+  while IFS=$'\t' read -r row_id row_key row_counts row_label row_anchor; do
     [ -z "$row_id" ] && continue
     if [ "$row_id" != "$id" ]; then
       continue
@@ -135,6 +157,8 @@ issuekind_schema_field() {
     case "$field" in
       result_key) printf '%s\n' "$row_key" ;;
       counts_in_total) printf '%s\n' "$row_counts" ;;
+      summary_label) printf '%s\n' "$row_label" ;;
+      summary_docs_anchor) printf '%s\n' "$row_anchor" ;;
       *) return 1 ;;
     esac
     return 0
@@ -222,10 +246,10 @@ issuekind_diagnostic_code() {
 # command-tagged; fall back to the checked-in result metadata table so shell-only
 # guard runs still gate every counted serialized result key.
 fallow_dead_code_ids() {
-  local rows row_id _row_key _row_counts
+  local rows row_id _row_key _row_counts _row_label _row_anchor
   if rows="$(fallow_dead_code_schema_rows)" && [ -n "$rows" ]; then
     echo "__SOURCE__ fallow schema or issue_meta.rs result metadata" >&2
-    while IFS=$'\t' read -r row_id _row_key _row_counts; do
+    while IFS=$'\t' read -r row_id _row_key _row_counts _row_label _row_anchor; do
       [ -n "$row_id" ] && printf '%s\n' "$row_id"
     done <<< "$rows"
     return 0
@@ -281,6 +305,13 @@ issuekind_key_present() {
   local jq_src="$1" key="$2" stripped
   stripped="$(printf '%s' "$jq_src" | issuekind_strip_jq_comments)"
   grep -qE "\"${key}\"|\.${key}([^A-Za-z0-9_]|$)" <<< "$stripped"
+}
+
+issuekind_summary_table_row_present() {
+  local jq_src="$1" key="$2" label="$3" anchor="$4" stripped expected
+  stripped="$(printf '%s' "$jq_src" | issuekind_strip_jq_comments)"
+  expected="table_row(\"$label\"; \"$key\"; \"$anchor\")"
+  grep -qF "$expected" <<< "$stripped"
 }
 
 # Is <kebab-id> in the space-separated allowed-omission list <allow>? Used to
@@ -380,6 +411,60 @@ assert_issuekind_summary_coverage() {
   fi
 
   pass "$label: every gated dead-code IssueKind appears in the surface"
+}
+
+# Run the summary-table contract guard against standalone dead-code summary
+# renderers. Unlike the broad surface coverage guard above, this checks the
+# human-visible table label and docs anchor for each counted result row.
+assert_issuekind_summary_table_contract() {
+  local label="$1" jq_file="$2"
+  local jq_src ids id key counts summary_label summary_anchor missing=() skipped=()
+
+  if [ ! -f "$jq_file" ]; then
+    fail "$label: surface file present" "missing file: $jq_file"
+    return
+  fi
+  jq_src="$(cat "$jq_file")"
+  ids="$(fallow_dead_code_ids 2>/dev/null)"
+
+  if [ -z "$ids" ]; then
+    fail "$label: canonical IssueKind set resolved" "no dead-code ids derived"
+    return
+  fi
+
+  while IFS= read -r id; do
+    [ -z "$id" ] && continue
+    if ! key="$(issuekind_schema_field "$id" result_key)"; then
+      skipped+=("$id")
+      continue
+    fi
+    counts="$(issuekind_schema_field "$id" counts_in_total || true)"
+    if [ "$counts" != "true" ] || [ -z "$key" ]; then
+      skipped+=("$id")
+      continue
+    fi
+    summary_label="$(issuekind_schema_field "$id" summary_label || true)"
+    summary_anchor="$(issuekind_schema_field "$id" summary_docs_anchor || true)"
+    if [ -z "$summary_label" ] || [ -z "$summary_anchor" ]; then
+      missing+=("$id -> missing summary metadata")
+      continue
+    fi
+    if ! issuekind_summary_table_row_present "$jq_src" "$key" "$summary_label" "$summary_anchor"; then
+      missing+=("$id -> table_row(\"$summary_label\"; \"$key\"; \"$summary_anchor\")")
+    fi
+  done <<< "$ids"
+
+  if [ "${#skipped[@]}" -gt 0 ]; then
+    echo "    (skipped rows not counted by standalone summaries: ${skipped[*]})"
+  fi
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    fail "$label: summary labels and docs anchors match registry" \
+      "missing or mismatched row(s): ${missing[*]}"
+    return
+  fi
+
+  pass "$label: summary labels and docs anchors match registry"
 }
 
 # Assert the VS Code extension's DIAGNOSTIC_CATEGORIES (the diagnostic-code

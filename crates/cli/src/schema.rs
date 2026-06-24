@@ -111,6 +111,8 @@ fn task_matrix_schema() -> serde_json::Value {
 struct IssueTypeMeta {
     filter_flag: Option<&'static str>,
     result_key: Option<&'static str>,
+    summary_label: Option<&'static str>,
+    summary_docs_anchor: Option<&'static str>,
     counts_in_total: bool,
     fixable: bool,
     /// `(suppression token, file_level)` when comment-suppressible. The
@@ -132,6 +134,8 @@ impl IssueTypeMeta {
         }
         if let Some(result) = issue_result_meta_by_code(bare_id) {
             meta.result_key = Some(result.result_key);
+            meta.summary_label = Some(result.summary_label);
+            meta.summary_docs_anchor = Some(result.summary_docs_anchor);
             meta.counts_in_total = result.counts_in_total;
         }
         meta
@@ -176,6 +180,8 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
         "description": rule.short,
         "filter_flag": meta.filter_flag,
         "result_key": meta.result_key,
+        "summary_label": meta.summary_label,
+        "summary_docs_anchor": meta.summary_docs_anchor,
         "counts_in_total": meta.counts_in_total,
         "fixable": meta.fixable,
         "suppressible": meta.suppress.is_some(),
@@ -1012,6 +1018,8 @@ mod tests {
             for key in [
                 "filter_flag",
                 "result_key",
+                "summary_label",
+                "summary_docs_anchor",
                 "suppress_comment",
                 "note",
                 "license_note",
@@ -1049,6 +1057,16 @@ mod tests {
                     "non dead-code row {} must not expose a dead-code result_key",
                     row["id"]
                 );
+                assert!(
+                    row["summary_label"].is_null(),
+                    "non dead-code row {} must not expose a dead-code summary_label",
+                    row["id"]
+                );
+                assert!(
+                    row["summary_docs_anchor"].is_null(),
+                    "non dead-code row {} must not expose a dead-code summary_docs_anchor",
+                    row["id"]
+                );
                 assert_eq!(
                     row["counts_in_total"].as_bool(),
                     Some(false),
@@ -1060,6 +1078,20 @@ mod tests {
 
             let counts = row["counts_in_total"].as_bool().unwrap();
             if let Some(result_key) = row["result_key"].as_str() {
+                assert!(
+                    row["summary_label"]
+                        .as_str()
+                        .is_some_and(|label| !label.is_empty()),
+                    "dead-code row {} has result_key {result_key} but no summary_label",
+                    row["id"]
+                );
+                assert!(
+                    row["summary_docs_anchor"]
+                        .as_str()
+                        .is_some_and(|anchor| !anchor.is_empty()),
+                    "dead-code row {} has result_key {result_key} but no summary_docs_anchor",
+                    row["id"]
+                );
                 if counts {
                     counted.insert(result_key);
                 } else {

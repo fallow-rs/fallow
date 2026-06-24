@@ -1603,6 +1603,8 @@ fallback_rows="$(
 )"
 assert_contains "$fallback_rows" $'unused-optional-dependency\tunused_optional_dependencies\ttrue' \
   "issuekind guard: source fallback includes optional dependencies"
+assert_contains "$fallback_rows" $'unused-optional-dependency\tunused_optional_dependencies\ttrue\tUnused optionalDependencies\tunused-dependencies' \
+  "issuekind guard: source fallback includes summary metadata"
 assert_contains "$fallback_rows" $'boundary-coverage\tboundary_coverage_violations\ttrue' \
   "issuekind guard: source fallback includes boundary coverage"
 assert_contains "$fallback_rows" $'boundary-call-violation\tboundary_call_violations\ttrue' \
@@ -1623,6 +1625,7 @@ else
   fail "issuekind guard: string tokens still satisfy key coverage" "quoted key token did not match"
 fi
 assert_issuekind_summary_coverage "gitlab summary-check"    "$CI_JQ_DIR/summary-check.jq"
+assert_issuekind_summary_table_contract "gitlab summary-check" "$CI_JQ_DIR/summary-check.jq"
 assert_issuekind_summary_coverage "gitlab summary-combined" "$CI_JQ_DIR/summary-combined.jq"
 assert_issuekind_summary_coverage "gitlab summary-audit"    "$CI_JQ_DIR/summary-audit.jq"
 
