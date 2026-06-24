@@ -35,74 +35,14 @@ use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 
 use fallow_config::{
-    FallowConfig, IgnoreExportRule, OutputFormat, add_ignore_exports_rule_to_string,
+    ConfigFixPlan as ResolvedConfigPlan, IgnoreExportRule, OutputFormat,
+    add_ignore_exports_rule_to_string, classify_config_fix_plan as classify_plan,
 };
 use fallow_core::results::{AnalysisResults, DuplicateExportFinding};
 use rustc_hash::FxHashSet;
 
 use super::io::atomic_write;
 use crate::init;
-
-/// Classification of whether `fallow fix` can apply config edits at `root`.
-///
-/// Separated from the apply path so the same classification feeds the
-/// dry-run preview, the apply branch, and the JSON-layer `auto_fixable`
-/// computation. The `ResolvedConfigPlan` distinguishes the three real
-/// outcomes the orchestrator must dispatch on.
-#[derive(Debug, Clone)]
-pub enum ResolvedConfigPlan {
-    /// A fallow config file exists; append entries in place.
-    Edit { config_path: PathBuf },
-    /// No fallow config exists, but a workspace marker sits above `root`,
-    /// so creating one inside this subpackage would fragment the monorepo.
-    /// `fallow fix` refuses; the user must run `fallow init` at
-    /// `workspace_root` instead.
-    BlockedMonorepo { workspace_root: PathBuf },
-    /// No fallow config exists and `--no-create-config` was passed.
-    BlockedNoCreate { target: PathBuf },
-    /// No fallow config exists; the writer will create one at `target`.
-    Create { target: PathBuf },
-}
-
-/// Classify how `fallow fix` should behave for `root` given the user's
-/// explicit `--config <path>` (if any) and `--no-create-config` flag.
-///
-/// This is the single source of truth for both the apply path and the
-/// JSON-layer `auto_fixable` field. Keep them aligned: a wire `auto_fixable: true`
-/// MUST mean the next `fallow fix --yes` invocation will not refuse.
-pub fn classify_plan(
-    root: &Path,
-    explicit: Option<&PathBuf>,
-    no_create_config: bool,
-) -> ResolvedConfigPlan {
-    if let Some(existing) = resolve_existing_config_path(root, explicit) {
-        return ResolvedConfigPlan::Edit {
-            config_path: existing,
-        };
-    }
-    let target = root.join(".fallowrc.json");
-    if let Some(workspace_root) = find_workspace_root_above(root) {
-        return ResolvedConfigPlan::BlockedMonorepo { workspace_root };
-    }
-    if no_create_config {
-        return ResolvedConfigPlan::BlockedNoCreate { target };
-    }
-    ResolvedConfigPlan::Create { target }
-}
-
-/// Whether `fallow fix --yes` (with the default `--no-create-config=false`)
-/// could apply config edits at `root`. Drives the JSON `auto_fixable` bool.
-///
-/// Aligned with [`classify_plan`]: returns `true` for `Edit` and `Create`,
-/// `false` for `BlockedMonorepo`. (`BlockedNoCreate` cannot happen here
-/// because that branch only fires when the user passes `--no-create-config`
-/// to `fallow fix`, which doesn't propagate to non-fix commands.)
-pub fn is_config_fixable(root: &Path, explicit: Option<&PathBuf>) -> bool {
-    matches!(
-        classify_plan(root, explicit, false),
-        ResolvedConfigPlan::Edit { .. } | ResolvedConfigPlan::Create { .. }
-    )
-}
 
 /// Inputs for [`apply_config_fixes`], bundled so the entry point takes one
 /// parameter struct instead of seven (mirrors the `*FixInput` convention used
@@ -445,67 +385,6 @@ fn render_unified_diff(path_display: &str, current: &str, proposed: &str) -> Str
     let unified = diff.unified_diff().context_radius(3).to_string();
     out.push_str(&unified);
     out
-}
-
-fn resolve_existing_config_path(root: &Path, explicit: Option<&PathBuf>) -> Option<PathBuf> {
-    if let Some(path) = explicit {
-        let absolute = if path.is_absolute() {
-            path.clone()
-        } else {
-            std::env::current_dir().map_or_else(|_| path.clone(), |cwd| cwd.join(path))
-        };
-        if absolute.exists() {
-            return Some(absolute);
-        }
-        return None;
-    }
-    FallowConfig::find_config_path(root)
-}
-
-/// Walk strictly upward from `start` (skipping `start` itself) looking for
-/// workspace markers. Returns `Some(ancestor)` when found, `None` otherwise.
-///
-/// Markers, in order of detection cost (cheapest first):
-/// - `pnpm-workspace.yaml`
-/// - `turbo.json`
-/// - `lerna.json`
-/// - `rush.json`
-/// - `package.json` with a `workspaces` key (yarn/npm classic + bun)
-fn find_workspace_root_above(start: &Path) -> Option<PathBuf> {
-    let mut current = start.parent()?;
-    loop {
-        if has_workspace_marker(current) {
-            return Some(current.to_path_buf());
-        }
-        current = current.parent()?;
-    }
-}
-
-fn has_workspace_marker(dir: &Path) -> bool {
-    const SENTINELS: &[&str] = &[
-        "pnpm-workspace.yaml",
-        "turbo.json",
-        "lerna.json",
-        "rush.json",
-    ];
-    for name in SENTINELS {
-        if dir.join(name).exists() {
-            return true;
-        }
-    }
-    let pkg_path = dir.join("package.json");
-    if !pkg_path.exists() {
-        return false;
-    }
-    let Ok(content) = std::fs::read_to_string(&pkg_path) else {
-        return false;
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return false;
-    };
-    value
-        .get("workspaces")
-        .is_some_and(|v| v.is_array() || v.is_object())
 }
 
 fn ignore_export_entries(
@@ -1033,13 +912,13 @@ mod tests {
         fn is_config_fixable_true_when_config_exists() {
             let dir = tempfile::tempdir().unwrap();
             std::fs::write(dir.path().join(".fallowrc.json"), "{}\n").unwrap();
-            assert!(is_config_fixable(dir.path(), None));
+            assert!(fallow_config::is_config_fixable(dir.path(), None));
         }
 
         #[test]
         fn is_config_fixable_true_when_can_create_at_root() {
             let dir = tempfile::tempdir().unwrap();
-            assert!(is_config_fixable(dir.path(), None));
+            assert!(fallow_config::is_config_fixable(dir.path(), None));
         }
 
         #[test]
@@ -1048,7 +927,7 @@ mod tests {
             std::fs::write(dir.path().join("pnpm-workspace.yaml"), "packages:\n").unwrap();
             let sub = dir.path().join("packages/ui");
             std::fs::create_dir_all(&sub).unwrap();
-            assert!(!is_config_fixable(&sub, None));
+            assert!(!fallow_config::is_config_fixable(&sub, None));
         }
     }
 }
