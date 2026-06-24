@@ -132,6 +132,7 @@ fn make_resolved_module(
         resolved_dynamic_imports: dynamic_imports,
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         has_cjs_exports: false,
         has_angular_component_template_url: false,

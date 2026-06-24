@@ -52,10 +52,10 @@ use cache::CacheStore;
 use fallow_types::discover::{DiscoveredFile, FileId};
 
 pub use fallow_types::extract::{
-    ClassHeritageInfo, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo,
-    ImportedName, LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
-    ParseResult, PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, VisibilityTag,
-    compute_line_offsets,
+    AngularTemplateMemberAccessFact, ClassHeritageInfo, DynamicImportInfo, DynamicImportPattern,
+    ExportInfo, ExportName, ImportInfo, ImportedName, LocalTypeDeclaration, MemberAccess,
+    MemberInfo, MemberKind, ModuleInfo, ParseResult, PublicSignatureTypeReference, ReExportInfo,
+    RequireCallInfo, SemanticFact, VisibilityTag, compute_line_offsets,
 };
 
 pub use astro::{

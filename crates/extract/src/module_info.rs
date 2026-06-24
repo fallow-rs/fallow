@@ -24,6 +24,7 @@ pub fn non_js_module_info(
         require_calls: Vec::new(),
         package_path_references: Vec::new(),
         member_accesses: Vec::new(),
+        semantic_facts: Vec::new(),
         whole_object_uses: Vec::new(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,

@@ -152,6 +152,7 @@ pub(super) fn build_graph_with_npm_import_sources(
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         has_cjs_exports: false,
         has_angular_component_template_url: false,

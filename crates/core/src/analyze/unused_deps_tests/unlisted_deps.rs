@@ -100,6 +100,7 @@ fn builtin_modules_not_reported_as_unlisted() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         has_cjs_exports: false,
         has_angular_component_template_url: false,
@@ -160,6 +161,7 @@ fn virtual_modules_not_reported_as_unlisted() {
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         has_cjs_exports: false,
         has_angular_component_template_url: false,
@@ -299,6 +301,10 @@ fn peer_dep_not_reported_as_unlisted() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "multi-file dependency fixture keeps the scenario local to the test"
+)]
 fn unlisted_dep_detected_across_multiple_files() {
     let files = vec![
         DiscoveredFile {
@@ -343,6 +349,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
+            semantic_facts: Vec::new(),
             whole_object_uses: vec![],
             has_cjs_exports: false,
             has_angular_component_template_url: false,
@@ -371,6 +378,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
+            semantic_facts: Vec::new(),
             whole_object_uses: vec![],
             has_cjs_exports: false,
             has_angular_component_template_url: false,
@@ -435,6 +443,7 @@ fn dynamic_import_unlisted_dep_has_import_site() {
         }],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         has_cjs_exports: false,
         has_angular_component_template_url: false,
@@ -913,6 +922,7 @@ fn workspace_import_case(
         resolved_dynamic_imports: vec![],
         resolved_dynamic_patterns: vec![],
         member_accesses: vec![],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         has_cjs_exports: false,
         has_angular_component_template_url: false,

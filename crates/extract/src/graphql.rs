@@ -83,6 +83,7 @@ pub(crate) fn parse_graphql_to_module(
         require_calls: Vec::new(),
         package_path_references: Vec::new(),
         member_accesses: Vec::new(),
+        semantic_facts: Vec::new(),
         whole_object_uses: Vec::new(),
         has_cjs_exports: false,
         has_angular_component_template_url: false,

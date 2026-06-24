@@ -12,8 +12,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::suppress::ParsedSuppressions;
 use crate::{
-    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
-    MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
+    AngularTemplateMemberAccessFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
+    ExportName, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
+    ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
@@ -135,6 +136,7 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) require_calls: Vec<RequireCallInfo>,
     pub(crate) package_path_references: Vec<String>,
     pub(crate) member_accesses: Vec<MemberAccess>,
+    pub(crate) semantic_facts: Vec<SemanticFact>,
     pub(crate) whole_object_uses: Vec<String>,
     pub(crate) has_cjs_exports: bool,
     pub(crate) has_angular_component_template_url: bool,
@@ -492,6 +494,13 @@ impl ModuleInfoExtractor {
 
     pub(crate) fn binding_target_names(&self) -> &FxHashMap<String, String> {
         &self.binding_target_names
+    }
+
+    pub(crate) fn record_angular_template_member_fact(&mut self, member: String) {
+        self.semantic_facts
+            .push(SemanticFact::AngularTemplateMemberAccess(
+                AngularTemplateMemberAccessFact { member },
+            ));
     }
 
     pub(crate) fn record_local_declaration_name(&mut self, name: &str) {
@@ -1158,6 +1167,7 @@ impl ModuleInfoExtractor {
             require_calls: self.require_calls,
             package_path_references: self.package_path_references,
             member_accesses: self.member_accesses,
+            semantic_facts: self.semantic_facts,
             whole_object_uses: self.whole_object_uses,
             has_cjs_exports: self.has_cjs_exports,
             has_angular_component_template_url: self.has_angular_component_template_url,
