@@ -224,6 +224,13 @@ issuekind_json_key() {
       printf '%s\n' "$key"
       return 0
     fi
+    # `missing-suppression-reason` is a distinct rule identity for SARIF,
+    # CodeClimate, severity, and audit attribution, but the JSON payload keeps
+    # those rows in the shared stale_suppressions result array.
+    if [ "$1" = "missing-suppression-reason" ]; then
+      printf '%s\n' "stale_suppressions"
+      return 0
+    fi
     return 1
   fi
   issuekind_json_key_fallback "$1"
