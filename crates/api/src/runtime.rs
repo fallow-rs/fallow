@@ -76,12 +76,44 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
 /// or serialization failures.
 pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_json::Value> {
     let resolved = resolve_analysis_options(&options.analysis)?;
-    resolved.install(|| detect_dead_code_inner(options, &resolved))
+    resolved.install(|| detect_dead_code_inner(options, &resolved, |_| {}))
+}
+
+/// Run circular-dependency analysis and return the dead-code JSON envelope.
+///
+/// This is a convenience wrapper over the typed dead-code runtime. It keeps the
+/// envelope shape stable while narrowing results to `circular_dependencies`.
+///
+/// # Errors
+///
+/// Returns the same structured errors as [`detect_dead_code`].
+pub fn detect_circular_dependencies(
+    options: &DeadCodeOptions,
+) -> ProgrammaticResult<serde_json::Value> {
+    let resolved = resolve_analysis_options(&options.analysis)?;
+    resolved.install(|| detect_dead_code_inner(options, &resolved, keep_circular_dependencies))
+}
+
+/// Run boundary-family analysis and return the dead-code JSON envelope.
+///
+/// This is a convenience wrapper over the typed dead-code runtime. It keeps
+/// `boundary_violations`, `boundary_coverage_violations`, and
+/// `boundary_call_violations`.
+///
+/// # Errors
+///
+/// Returns the same structured errors as [`detect_dead_code`].
+pub fn detect_boundary_violations(
+    options: &DeadCodeOptions,
+) -> ProgrammaticResult<serde_json::Value> {
+    let resolved = resolve_analysis_options(&options.analysis)?;
+    resolved.install(|| detect_dead_code_inner(options, &resolved, keep_boundary_violations))
 }
 
 fn detect_dead_code_inner(
     options: &DeadCodeOptions,
     resolved: &ResolvedAnalysisOptions,
+    post_filter: impl FnOnce(&mut AnalysisResults),
 ) -> ProgrammaticResult<serde_json::Value> {
     validate_dead_code_runtime_options(options, resolved)?;
     let start = Instant::now();
@@ -95,6 +127,7 @@ fn detect_dead_code_inner(
 
     apply_dead_code_scope(options, resolved, &session, &mut results)?;
     apply_dead_code_filters(&options.filters, &mut results);
+    post_filter(&mut results);
 
     let envelope = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,
@@ -121,6 +154,26 @@ fn detect_dead_code_inner(
     let root_prefix = format!("{}/", session.root().display());
     strip_root_prefix(&mut output, &root_prefix);
     Ok(output)
+}
+
+fn keep_circular_dependencies(results: &mut AnalysisResults) {
+    let entry_point_summary = results.entry_point_summary.take();
+    let circular_dependencies = std::mem::take(&mut results.circular_dependencies);
+    *results = AnalysisResults::default();
+    results.entry_point_summary = entry_point_summary;
+    results.circular_dependencies = circular_dependencies;
+}
+
+fn keep_boundary_violations(results: &mut AnalysisResults) {
+    let entry_point_summary = results.entry_point_summary.take();
+    let boundary_violations = std::mem::take(&mut results.boundary_violations);
+    let boundary_coverage_violations = std::mem::take(&mut results.boundary_coverage_violations);
+    let boundary_call_violations = std::mem::take(&mut results.boundary_call_violations);
+    *results = AnalysisResults::default();
+    results.entry_point_summary = entry_point_summary;
+    results.boundary_violations = boundary_violations;
+    results.boundary_coverage_violations = boundary_coverage_violations;
+    results.boundary_call_violations = boundary_call_violations;
 }
 
 fn validate_dead_code_runtime_options(
@@ -1243,6 +1296,40 @@ mod tests {
         .expect("dead-code succeeds");
 
         assert_eq!(unused_export_names(&json), vec!["deadA"]);
+    }
+
+    #[test]
+    fn detect_circular_dependencies_keeps_dead_code_envelope_but_filters_other_findings() {
+        let project = dead_code_project();
+        let root = project.path();
+
+        let json = detect_circular_dependencies(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            ..DeadCodeOptions::default()
+        })
+        .expect("circular helper succeeds");
+
+        assert_eq!(json["kind"], "dead_code");
+        assert_eq!(json["total_issues"], 0);
+        assert!(json["circular_dependencies"].as_array().is_some());
+        assert!(json["unused_exports"].as_array().is_none_or(Vec::is_empty));
+    }
+
+    #[test]
+    fn detect_boundary_violations_keeps_only_boundary_family() {
+        let project = dead_code_project();
+        let root = project.path();
+
+        let json = detect_boundary_violations(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            ..DeadCodeOptions::default()
+        })
+        .expect("boundary helper succeeds");
+
+        assert_eq!(json["kind"], "dead_code");
+        assert_eq!(json["total_issues"], 0);
+        assert!(json["boundary_violations"].as_array().is_some());
+        assert!(json["unused_exports"].as_array().is_none_or(Vec::is_empty));
     }
 
     #[test]

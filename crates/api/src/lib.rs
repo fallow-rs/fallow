@@ -19,7 +19,9 @@ use serde::Serialize;
 pub mod dupes_output;
 pub mod runtime;
 pub use dupes_output::{CloneFamilyFinding, CloneGroupFinding, DupesReportPayload};
-pub use runtime::{detect_dead_code, detect_duplication};
+pub use runtime::{
+    detect_boundary_violations, detect_circular_dependencies, detect_dead_code, detect_duplication,
+};
 
 pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "root",

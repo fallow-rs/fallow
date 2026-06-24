@@ -509,6 +509,30 @@ fn detect_dead_code_with_api_fallback(
     }
 }
 
+fn detect_circular_dependencies_with_api_fallback(
+    options: &api::DeadCodeOptions,
+) -> Result<serde_json::Value, api::ProgrammaticError> {
+    match api::detect_circular_dependencies(options) {
+        Ok(output) => Ok(output),
+        Err(error) if is_dead_code_api_fallback_error(&error) => {
+            programmatic::detect_circular_dependencies(options)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn detect_boundary_violations_with_api_fallback(
+    options: &api::DeadCodeOptions,
+) -> Result<serde_json::Value, api::ProgrammaticError> {
+    match api::detect_boundary_violations(options) {
+        Ok(output) => Ok(output),
+        Err(error) if is_dead_code_api_fallback_error(&error) => {
+            programmatic::detect_boundary_violations(options)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn is_dead_code_api_fallback_error(error: &api::ProgrammaticError) -> bool {
     matches!(
         error.code.as_deref(),
@@ -532,7 +556,7 @@ pub fn detect_circular_dependencies(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        programmatic::detect_circular_dependencies(&options)
+        detect_circular_dependencies_with_api_fallback(&options)
     })))
 }
 
@@ -542,7 +566,7 @@ pub fn detect_boundary_violations(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        programmatic::detect_boundary_violations(&options)
+        detect_boundary_violations_with_api_fallback(&options)
     })))
 }
 
@@ -728,6 +752,39 @@ mod tests {
 
         assert!(json["_meta"].is_object());
         assert_eq!(unused_export_names(&json), vec!["dead"]);
+    }
+
+    #[test]
+    fn dead_code_family_helpers_use_api_filtered_envelopes() {
+        let project = tiny_dead_code_project();
+        let root = project.path();
+        let options = api::DeadCodeOptions {
+            analysis: api::AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                ..api::AnalysisOptions::default()
+            },
+            ..api::DeadCodeOptions::default()
+        };
+
+        let circular =
+            detect_circular_dependencies_with_api_fallback(&options).expect("circular helper");
+        let boundary =
+            detect_boundary_violations_with_api_fallback(&options).expect("boundary helper");
+
+        assert_eq!(circular["kind"], "dead_code");
+        assert_eq!(circular["total_issues"], 0);
+        assert!(
+            circular["unused_exports"]
+                .as_array()
+                .is_none_or(Vec::is_empty)
+        );
+        assert_eq!(boundary["kind"], "dead_code");
+        assert_eq!(boundary["total_issues"], 0);
+        assert!(
+            boundary["unused_exports"]
+                .as_array()
+                .is_none_or(Vec::is_empty)
+        );
     }
 
     #[test]
