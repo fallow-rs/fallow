@@ -2429,6 +2429,7 @@ impl ModuleInfoExtractor {
     }
 
     fn record_playwright_fixture_alias(&mut self, test_name: &str, base_name: &str) {
+        self.record_playwright_fixture_alias_fact(test_name.to_string(), base_name.to_string());
         self.member_accesses.push(MemberAccess {
             object: format!("{}{}:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, test_name),
             member: base_name.to_string(),

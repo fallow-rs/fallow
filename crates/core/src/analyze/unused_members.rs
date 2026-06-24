@@ -970,6 +970,38 @@ struct PlaywrightFixtureDefinitionAccess<'a> {
     type_local: &'a str,
 }
 
+struct PlaywrightFixtureAliasAccess<'a> {
+    test_local: &'a str,
+    base_local: &'a str,
+}
+
+fn playwright_fixture_alias_accesses(
+    module: &ResolvedModule,
+) -> Vec<PlaywrightFixtureAliasAccess<'_>> {
+    let mut accesses = Vec::new();
+    for fact in &module.semantic_facts {
+        if let SemanticFact::PlaywrightFixtureAlias(access) = fact {
+            accesses.push(PlaywrightFixtureAliasAccess {
+                test_local: access.test_name.as_str(),
+                base_local: access.base_name.as_str(),
+            });
+        }
+    }
+    for access in &module.member_accesses {
+        let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
+        ) else {
+            continue;
+        };
+        accesses.push(PlaywrightFixtureAliasAccess {
+            test_local: test_local_name,
+            base_local: access.member.as_str(),
+        });
+    }
+    accesses
+}
+
 fn playwright_fixture_definition_accesses(
     module: &ResolvedModule,
 ) -> Vec<PlaywrightFixtureDefinitionAccess<'_>> {
@@ -1043,13 +1075,8 @@ fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> FxHashSet<&
     for access in playwright_fixture_definition_accesses(resolved) {
         names.insert(access.test_local);
     }
-    for access in &resolved.member_accesses {
-        if let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
-            access.object.as_str(),
-            PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
-        ) {
-            names.insert(test_local_name);
-        }
+    for access in playwright_fixture_alias_accesses(resolved) {
+        names.insert(access.test_local);
     }
     names
 }
@@ -1161,24 +1188,18 @@ fn collect_playwright_fixture_aliases(
     local_playwright_test_names: &FxHashSet<&str>,
     aliases_by_test: &mut FxHashMap<PlaywrightTestKey, Vec<PlaywrightTestKey>>,
 ) {
-    for access in &resolved.member_accesses {
-        let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
-            access.object.as_str(),
-            PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
-        ) else {
-            continue;
-        };
+    for access in playwright_fixture_alias_accesses(resolved) {
         let test_keys = playwright_test_keys_for_local(
             local_to_export_keys,
             local_playwright_test_names,
             resolved.file_id,
-            test_local_name,
+            access.test_local,
         );
         let base_keys = playwright_test_keys_for_local(
             local_to_export_keys,
             local_playwright_test_names,
             resolved.file_id,
-            access.member.as_str(),
+            access.base_local,
         );
 
         for test_key in test_keys {
@@ -2722,8 +2743,8 @@ mod tests {
     use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
     use fallow_types::extract::{
         ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
-        FluentChainNewMemberAccessFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureUseFact,
-        SemanticFact,
+        FluentChainNewMemberAccessFact, PlaywrightFixtureAliasFact,
+        PlaywrightFixtureDefinitionFact, PlaywrightFixtureUseFact, SemanticFact,
     };
     use oxc_span::Span;
     use std::path::PathBuf;
@@ -2787,6 +2808,26 @@ mod tests {
         MemberInfo {
             is_self_returning: true,
             ..make_member(name, MemberKind::ClassMethod)
+        }
+    }
+
+    fn make_resolved_import(
+        source: &str,
+        imported: &str,
+        local: &str,
+        target: u32,
+    ) -> ResolvedImport {
+        ResolvedImport {
+            info: ImportInfo {
+                source: source.to_string(),
+                imported_name: ImportedName::Named(imported.to_string()),
+                local_name: local.to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: Span::new(0, 10),
+                source_span: Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(target)),
         }
     }
 
@@ -2882,6 +2923,92 @@ mod tests {
         let credited = accessed_members
             .get(&ExportKey::new(FileId(2), "AdminPage"))
             .expect("fixture target class should be credited");
+        assert!(credited.contains("assertGreeting"));
+    }
+
+    #[test]
+    fn typed_playwright_fixture_alias_fact_expands_fixture_targets() {
+        let mut graph = build_graph(&[
+            ("/src/spec.ts", true),
+            ("/src/fixtures.ts", false),
+            ("/src/wrapped-fixtures.ts", false),
+            ("/src/admin-page.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members("testPrimary", vec![], Some(2))];
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_export_with_members("mergedTest", vec![], Some(0))];
+        graph.modules[3].set_reachable(true);
+        graph.modules[3].exports = vec![make_export_with_members(
+            "AdminPage",
+            vec![make_member("assertGreeting", MemberKind::ClassMethod)],
+            Some(1),
+        )];
+
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/src/spec.ts"),
+                resolved_imports: vec![make_resolved_import(
+                    "./wrapped-fixtures",
+                    "mergedTest",
+                    "mergedTest",
+                    2,
+                )],
+                semantic_facts: vec![SemanticFact::PlaywrightFixtureUse(
+                    PlaywrightFixtureUseFact {
+                        test_name: "mergedTest".to_string(),
+                        fixture_name: "adminPage".to_string(),
+                        member: "assertGreeting".to_string(),
+                    },
+                )],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/src/fixtures.ts"),
+                resolved_imports: vec![make_resolved_import(
+                    "./admin-page",
+                    "AdminPage",
+                    "AdminPage",
+                    3,
+                )],
+                exports: vec![make_export_info("testPrimary", None)],
+                semantic_facts: vec![SemanticFact::PlaywrightFixtureDefinition(
+                    PlaywrightFixtureDefinitionFact {
+                        test_name: "testPrimary".to_string(),
+                        fixture_name: "adminPage".to_string(),
+                        type_name: "AdminPage".to_string(),
+                    },
+                )],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: PathBuf::from("/src/wrapped-fixtures.ts"),
+                resolved_imports: vec![make_resolved_import(
+                    "./fixtures",
+                    "testPrimary",
+                    "testPrimary",
+                    1,
+                )],
+                exports: vec![make_export_info("mergedTest", None)],
+                semantic_facts: vec![SemanticFact::PlaywrightFixtureAlias(
+                    PlaywrightFixtureAliasFact {
+                        test_name: "mergedTest".to_string(),
+                        base_name: "testPrimary".to_string(),
+                    },
+                )],
+                ..Default::default()
+            },
+        ];
+
+        let mut accessed_members = FxHashMap::default();
+        propagate_playwright_fixture_accesses(&graph, &resolved_modules, &mut accessed_members);
+
+        let credited = accessed_members
+            .get(&ExportKey::new(FileId(3), "AdminPage"))
+            .expect("aliased fixture target class should be credited");
         assert!(credited.contains("assertGreeting"));
     }
 

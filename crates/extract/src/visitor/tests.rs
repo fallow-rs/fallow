@@ -2603,6 +2603,31 @@ fn playwright_merge_tests_records_fixture_aliases() {
         "Playwright mergeTests should record the second inherited fixture test, found: {:?}",
         info.member_accesses
     );
+    let fixture_alias_facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            if let SemanticFact::PlaywrightFixtureAlias(access) = fact {
+                Some(access)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        fixture_alias_facts
+            .iter()
+            .any(|fact| fact.test_name == "mergedTest" && fact.base_name == "testPrimary"),
+        "Playwright mergeTests should emit a typed alias for testPrimary, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        fixture_alias_facts
+            .iter()
+            .any(|fact| fact.test_name == "mergedTest" && fact.base_name == "testSecondary"),
+        "Playwright mergeTests should emit a typed alias for testSecondary, found: {:?}",
+        info.semantic_facts
+    );
 }
 
 #[test]
