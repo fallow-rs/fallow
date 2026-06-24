@@ -536,7 +536,7 @@ fn detect_boundary_violations_with_api_fallback(
 fn is_dead_code_api_fallback_error(error: &api::ProgrammaticError) -> bool {
     matches!(
         error.code.as_deref(),
-        Some("FALLOW_UNSUPPORTED_DEAD_CODE_DIFF_FILE" | "FALLOW_UNSUPPORTED_DEAD_CODE_EXPLAIN")
+        Some("FALLOW_UNSUPPORTED_DEAD_CODE_EXPLAIN")
     )
 }
 
@@ -755,6 +755,34 @@ mod tests {
     }
 
     #[test]
+    fn dead_code_diff_file_uses_api_runtime_without_fallback() {
+        let project = tiny_dead_code_project();
+        let root = project.path();
+        std::fs::write(
+            root.join("feature.diff"),
+            "diff --git a/src/feature.ts b/src/feature.ts\n+++ b/src/feature.ts\n@@ -1 +1 @@\n+export const dead = 1;\n",
+        )
+        .expect("diff");
+
+        let json = detect_dead_code_with_api_fallback(&api::DeadCodeOptions {
+            analysis: api::AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                diff_file: Some(Path::new("feature.diff").to_path_buf()),
+                ..api::AnalysisOptions::default()
+            },
+            filters: api::DeadCodeFilters {
+                unused_exports: true,
+                ..api::DeadCodeFilters::default()
+            },
+            ..api::DeadCodeOptions::default()
+        })
+        .expect("api diff runtime succeeds");
+
+        assert!(json.get("_meta").is_none());
+        assert_eq!(unused_export_names(&json), vec!["dead"]);
+    }
+
+    #[test]
     fn dead_code_family_helpers_use_api_filtered_envelopes() {
         let project = tiny_dead_code_project();
         let root = project.path();
@@ -796,7 +824,7 @@ mod tests {
         let config_error =
             api::ProgrammaticError::new("bad config", 2).with_code("FALLOW_CONFIG_LOAD_FAILED");
 
-        assert!(is_dead_code_api_fallback_error(&diff_error));
+        assert!(!is_dead_code_api_fallback_error(&diff_error));
         assert!(is_dead_code_api_fallback_error(&explain_error));
         assert!(!is_dead_code_api_fallback_error(&config_error));
     }
