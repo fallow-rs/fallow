@@ -1865,6 +1865,18 @@ mod tests {
     }
 
     #[test]
+    fn result_sarif_rule_ids_have_explain_metadata() {
+        for meta in fallow_types::issue_meta::result_issue_metas() {
+            let rule_id = meta.sarif_rule_id();
+            assert!(
+                rule_by_id(&rule_id).is_some(),
+                "result metadata code {} has SARIF rule id {rule_id} without RuleDef",
+                meta.code
+            );
+        }
+    }
+
+    #[test]
     fn check_rules_all_have_fallow_prefix() {
         for rule in CHECK_RULES {
             assert!(

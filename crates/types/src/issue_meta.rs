@@ -711,6 +711,27 @@ pub struct IssueResultMeta {
     pub counts_in_total: bool,
 }
 
+impl IssueResultMeta {
+    /// SARIF rule id used by the CLI SARIF formatter.
+    #[must_use]
+    pub fn sarif_rule_id(self) -> String {
+        format!("fallow/{}", self.code)
+    }
+
+    /// Whether the CodeClimate formatter emits this result row.
+    #[must_use]
+    pub fn emits_codeclimate(self) -> bool {
+        CODECLIMATE_RESULT_CODES.contains(&self.code)
+    }
+
+    /// CodeClimate check name used by the CLI CodeClimate formatter.
+    #[must_use]
+    pub fn codeclimate_check_name(self) -> Option<String> {
+        self.emits_codeclimate()
+            .then(|| format!("fallow/{}", self.code))
+    }
+}
+
 /// All shared issue-to-result metadata rows.
 pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     IssueResultMeta {
@@ -933,6 +954,51 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         result_key: "duplicate_prop_shapes",
         counts_in_total: false,
     },
+];
+
+/// Result issue codes emitted by the dead-code CodeClimate formatter.
+pub const CODECLIMATE_RESULT_CODES: &[&str] = &[
+    "unused-file",
+    "unused-export",
+    "unused-type",
+    "private-type-leak",
+    "unused-dependency",
+    "unused-dev-dependency",
+    "unused-optional-dependency",
+    "unused-enum-member",
+    "unused-class-member",
+    "unused-store-member",
+    "unresolved-import",
+    "unlisted-dependency",
+    "duplicate-export",
+    "type-only-dependency",
+    "test-only-dependency",
+    "circular-dependency",
+    "re-export-cycle",
+    "boundary-violation",
+    "boundary-coverage",
+    "boundary-call-violation",
+    "policy-violation",
+    "invalid-client-export",
+    "mixed-client-server-barrel",
+    "misplaced-directive",
+    "unprovided-inject",
+    "unrendered-component",
+    "unused-component-prop",
+    "unused-component-emit",
+    "unused-component-input",
+    "unused-component-output",
+    "unused-svelte-event",
+    "unused-server-action",
+    "unused-load-data-key",
+    "route-collision",
+    "dynamic-segment-name-conflict",
+    "stale-suppression",
+    "unused-catalog-entry",
+    "empty-catalog-group",
+    "unresolved-catalog-reference",
+    "unused-dependency-override",
+    "misconfigured-dependency-override",
 ];
 
 /// Canonical names and aliases accepted by `IssueKind::parse`.
@@ -1221,6 +1287,42 @@ mod tests {
                 meta.result_key
             );
         }
+    }
+
+    fn result_ci_format_contracts_are_present() {
+        for meta in ISSUE_RESULT_META {
+            assert_eq!(
+                meta.sarif_rule_id(),
+                format!("fallow/{}", meta.code),
+                "result metadata code {} has wrong SARIF rule id",
+                meta.code
+            );
+            if let Some(check_name) = meta.codeclimate_check_name() {
+                assert_eq!(
+                    check_name,
+                    format!("fallow/{}", meta.code),
+                    "result metadata code {} has wrong CodeClimate check name",
+                    meta.code
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn codeclimate_result_exclusions_are_explicit() {
+        let expected = BTreeSet::from(["duplicate-prop-shape", "prop-drilling", "thin-wrapper"]);
+        let from_meta: BTreeSet<&str> = result_issue_metas()
+            .filter(|meta| !meta.emits_codeclimate())
+            .map(|meta| meta.code)
+            .collect();
+        assert_eq!(expected, from_meta);
+    }
+
+    #[test]
+    fn codeclimate_result_codes_match_result_metadata() {
+        let result_codes: BTreeSet<&str> = result_issue_metas().map(|meta| meta.code).collect();
+        let codeclimate_codes: BTreeSet<&str> = CODECLIMATE_RESULT_CODES.iter().copied().collect();
+        assert!(codeclimate_codes.is_subset(&result_codes));
     }
 
     #[test]

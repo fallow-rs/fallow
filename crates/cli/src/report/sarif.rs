@@ -3937,6 +3937,24 @@ mod tests {
     }
 
     #[test]
+    fn result_sarif_rule_contract_uses_explain_metadata() {
+        for meta in fallow_types::issue_meta::result_issue_metas() {
+            let rule_id = meta.sarif_rule_id();
+            let rule = sarif_rule(&rule_id, "fallback text", "warning");
+            assert!(
+                rule.get("fullDescription").is_some(),
+                "result metadata code {} fell back for SARIF rule {rule_id}",
+                meta.code
+            );
+            assert!(
+                rule.get("helpUri").is_some(),
+                "result metadata code {} has no SARIF helpUri for {rule_id}",
+                meta.code
+            );
+        }
+    }
+
+    #[test]
     fn sarif_rule_unknown_id_uses_fallback() {
         let rule = sarif_rule("fallow/nonexistent", "fallback text", "warning");
         assert_eq!(rule["shortDescription"]["text"], "fallback text");
