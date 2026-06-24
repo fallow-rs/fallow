@@ -1014,6 +1014,11 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 test_name: "mergedTest".to_string(),
                 base_name: "test".to_string(),
             }),
+            SemanticFact::PlaywrightFixtureType(PlaywrightFixtureTypeFact {
+                alias_name: "Pages".to_string(),
+                fixture_name: "adminPage".to_string(),
+                type_name: "AdminPage".to_string(),
+            }),
         ],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1129,6 +1134,11 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             SemanticFact::PlaywrightFixtureAlias(PlaywrightFixtureAliasFact {
                 test_name: "mergedTest".to_string(),
                 base_name: "test".to_string(),
+            }),
+            SemanticFact::PlaywrightFixtureType(PlaywrightFixtureTypeFact {
+                alias_name: "Pages".to_string(),
+                fixture_name: "adminPage".to_string(),
+                type_name: "AdminPage".to_string(),
             }),
         ]
     );

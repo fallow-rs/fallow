@@ -2373,20 +2373,22 @@ impl ModuleInfoExtractor {
         if !bindings.is_empty() {
             self.playwright_fixture_types
                 .insert(alias.id.name.to_string(), bindings.clone());
-            self.member_accesses
-                .extend(
-                    bindings
-                        .into_iter()
-                        .map(|(fixture_name, type_name)| MemberAccess {
-                            object: format!(
-                                "{}{}:{}",
-                                crate::PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
-                                alias.id.name,
-                                fixture_name
-                            ),
-                            member: type_name,
-                        }),
+            for (fixture_name, type_name) in bindings {
+                self.record_playwright_fixture_type_fact(
+                    alias.id.name.to_string(),
+                    fixture_name.clone(),
+                    type_name.clone(),
                 );
+                self.member_accesses.push(MemberAccess {
+                    object: format!(
+                        "{}{}:{}",
+                        crate::PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
+                        alias.id.name,
+                        fixture_name
+                    ),
+                    member: type_name,
+                });
+            }
         }
     }
 
