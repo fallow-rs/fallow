@@ -256,6 +256,10 @@ fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
     }
 }
 
+fn normalize_user_glob_pattern(pattern: &str) -> &str {
+    pattern.strip_prefix("./").unwrap_or(pattern)
+}
+
 #[expect(
     clippy::expect_used,
     reason = "user glob patterns are validated before config resolution"
@@ -263,8 +267,9 @@ fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
 fn compile_ignore_patterns(ignore_patterns: &[String]) -> GlobSet {
     let mut ignore_builder = GlobSetBuilder::new();
     for pattern in ignore_patterns {
+        let normalized = normalize_user_glob_pattern(pattern);
         ignore_builder.add(
-            Glob::new(pattern).expect("ignorePatterns entry was validated at config load time"),
+            Glob::new(normalized).expect("ignorePatterns entry was validated at config load time"),
         );
     }
 
@@ -294,7 +299,8 @@ fn compile_ignore_unresolved_imports(patterns: &[String]) -> Vec<GlobMatcher> {
     patterns
         .iter()
         .map(|pattern| {
-            Glob::new(pattern)
+            let normalized = normalize_user_glob_pattern(pattern);
+            Glob::new(normalized)
                 .expect("ignoreUnresolvedImports entry was validated at config load time")
                 .compile_matcher()
         })
@@ -1335,6 +1341,54 @@ mod tests {
                 .is_match("src/__generated__/types.ts")
         );
         assert!(resolved.ignore_patterns.is_match("node_modules/foo/bar.js"));
+    }
+
+    #[test]
+    fn resolve_normalizes_leading_dot_ignore_patterns() {
+        let mut config = make_config(false);
+        config.ignore_patterns = vec!["./src/generated/**".to_string()];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        assert!(resolved.ignore_patterns.is_match("src/generated/client.ts"));
+        assert!(
+            !resolved
+                .ignore_patterns
+                .is_match("./src/generated/client.ts")
+        );
+    }
+
+    #[test]
+    fn resolve_normalizes_leading_dot_ignore_unresolved_imports() {
+        let mut config = make_config(false);
+        config.ignore_unresolved_imports = vec!["./src/generated/**".to_string()];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        assert!(
+            resolved
+                .ignore_unresolved_imports
+                .iter()
+                .any(|matcher| matcher.is_match("src/generated/client"))
+        );
+        assert!(
+            !resolved
+                .ignore_unresolved_imports
+                .iter()
+                .any(|matcher| matcher.is_match("./src/generated/client"))
+        );
     }
 
     #[test]

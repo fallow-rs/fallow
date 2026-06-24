@@ -1386,6 +1386,27 @@ mod tests {
         }
 
         #[test]
+        fn leading_dot_ignore_patterns_exclude_matching_files() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+
+            let generated = dir.path().join("src").join("generated");
+            std::fs::create_dir_all(&generated).unwrap();
+            std::fs::write(generated.join("client.ts"), "export const api = {};").unwrap();
+
+            let src = dir.path().join("src");
+            std::fs::write(src.join("index.ts"), "export const x = 1;").unwrap();
+
+            let config = make_config_with_ignores(
+                dir.path().to_path_buf(),
+                vec!["./src/generated/**".to_string()],
+            );
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            assert_eq!(names, vec!["src/index.ts"]);
+        }
+
+        #[test]
         fn default_ignore_patterns_exclude_node_modules_and_dist() {
             let dir = tempfile::tempdir().expect("create temp dir");
 

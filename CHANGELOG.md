@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ignorePatterns` now accepts a leading `./`.** Entries such as
+  `./src/generated/**` now match the same project-root-relative files as
+  `src/generated/**`, instead of silently leaving those files in the analysis.
+  The same normalization applies to `ignoreUnresolvedImports`. (Closes
+  [#1385](https://github.com/fallow-rs/fallow/issues/1385))
+
 ## [2.102.0] - 2026-06-23
 
 ### Added
