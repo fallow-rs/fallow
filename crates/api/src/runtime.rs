@@ -133,7 +133,10 @@ fn detect_dead_code_inner(
         version: env!("CARGO_PKG_VERSION").to_string(),
         elapsed: start.elapsed(),
         results,
-        config_fixable: false,
+        config_fixable: fallow_config::is_config_fixable(
+            &resolved.root,
+            resolved.config_path.as_ref(),
+        ),
         meta: options.analysis.explain.then(check_meta),
         workspace_diagnostics: Vec::new(),
         next_steps: Vec::new(),
@@ -1451,6 +1454,52 @@ mod tests {
     }
 
     #[test]
+    fn detect_dead_code_marks_duplicate_export_config_action_fixable() {
+        let project = duplicate_export_project();
+        let root = project.path();
+
+        let json = detect_dead_code(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            filters: DeadCodeFilters {
+                duplicate_exports: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+
+        let action = &json["duplicate_exports"][0]["actions"][0];
+        assert_eq!(action["type"], "add-to-config");
+        assert_eq!(action["auto_fixable"], true);
+    }
+
+    #[test]
+    fn detect_dead_code_keeps_duplicate_export_config_action_blocked_in_subpackage() {
+        let workspace = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            workspace.path().join("pnpm-workspace.yaml"),
+            "packages:\n  - packages/*\n",
+        )
+        .expect("workspace");
+        let root = workspace.path().join("packages/app");
+        duplicate_export_project_at(&root);
+
+        let json = detect_dead_code(&DeadCodeOptions {
+            analysis: analysis_at(&root),
+            filters: DeadCodeFilters {
+                duplicate_exports: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+
+        let action = &json["duplicate_exports"][0]["actions"][0];
+        assert_eq!(action["type"], "add-to-config");
+        assert_eq!(action["auto_fixable"], false);
+    }
+
+    #[test]
     fn detect_dead_code_file_filter_scopes_source_findings() {
         let project = dead_code_project();
         let root = project.path();
@@ -1653,6 +1702,23 @@ mod tests {
         std::fs::write(root.join("src/a.ts"), "export const deadA = 1;\n").expect("a");
         std::fs::write(root.join("src/b.ts"), "export const deadB = 1;\n").expect("b");
         project
+    }
+
+    fn duplicate_export_project() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("temp dir");
+        duplicate_export_project_at(project.path());
+        project
+    }
+
+    fn duplicate_export_project_at(root: &Path) {
+        std::fs::create_dir_all(root.join("src")).expect("src dir");
+        write_json(
+            root.join("package.json"),
+            r#"{"name":"api-duplicate-export","main":"src/index.ts"}"#,
+        );
+        std::fs::write(root.join("src/index.ts"), "import './a';\nimport './b';\n").expect("entry");
+        std::fs::write(root.join("src/a.ts"), "export const Button = 1;\n").expect("a");
+        std::fs::write(root.join("src/b.ts"), "export const Button = 2;\n").expect("b");
     }
 
     fn unused_export_names(json: &serde_json::Value) -> Vec<&str> {

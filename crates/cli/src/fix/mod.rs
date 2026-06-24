@@ -14,7 +14,7 @@ mod exports;
 mod io;
 mod plan;
 
-pub use config::is_config_fixable;
+pub use fallow_config::is_config_fixable;
 
 use plan::{CapturedHashes, CommitOutcome, FixPlan, SkippedFile};
 
