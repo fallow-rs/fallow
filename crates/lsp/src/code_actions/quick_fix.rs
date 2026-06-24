@@ -802,13 +802,40 @@ fn parent_has_other_children(
     false
 }
 
+/// Typed input for unused file delete quick-fix code actions.
+#[derive(Clone, Copy)]
+pub struct DeleteFileActionInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub file_path: &'a Path,
+    pub uri: &'a Uri,
+    pub cursor_range: &'a Range,
+}
+
+impl<'a> DeleteFileActionInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        file_path: &'a Path,
+        uri: &'a Uri,
+        cursor_range: &'a Range,
+    ) -> Self {
+        Self {
+            results,
+            file_path,
+            uri,
+            cursor_range,
+        }
+    }
+}
+
 /// Build quick-fix code actions for unused files (delete the file).
-pub fn build_delete_file_actions(
-    results: &AnalysisResults,
-    file_path: &Path,
-    uri: &Uri,
-    cursor_range: &Range,
-) -> Vec<CodeActionOrCommand> {
+pub fn build_delete_file_actions(input: DeleteFileActionInput<'_>) -> Vec<CodeActionOrCommand> {
+    let DeleteFileActionInput {
+        results,
+        file_path,
+        uri,
+        cursor_range,
+    } = input;
     let mut actions = Vec::new();
 
     for file in &results.unused_files {
@@ -852,6 +879,21 @@ pub fn build_delete_file_actions(
     }
 
     actions
+}
+
+#[cfg(test)]
+fn build_delete_file_actions_for_test(
+    results: &AnalysisResults,
+    file_path: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+) -> Vec<CodeActionOrCommand> {
+    build_delete_file_actions(DeleteFileActionInput::new(
+        results,
+        file_path,
+        uri,
+        cursor_range,
+    ))
 }
 
 #[cfg(test)]
@@ -1292,7 +1334,7 @@ mod tests {
         let uri = Uri::from_file_path(&file).unwrap();
         let results = AnalysisResults::default();
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 10));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 10));
         assert!(actions.is_empty());
     }
 
@@ -1308,7 +1350,8 @@ mod tests {
             .unused_files
             .push(UnusedFileFinding::with_actions(UnusedFile { path: file_a }));
 
-        let actions = build_delete_file_actions(&results, &file_b, &uri_b, &make_range(0, 10));
+        let actions =
+            build_delete_file_actions_for_test(&results, &file_b, &uri_b, &make_range(0, 10));
         assert!(actions.is_empty());
     }
 
@@ -1325,7 +1368,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(1, 5));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(1, 5));
         assert!(actions.is_empty());
     }
 
@@ -1342,7 +1385,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 0));
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1364,7 +1407,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 0));
         let ca = unwrap_code_action(&actions[0]);
 
         let doc_changes = ca.edit.as_ref().unwrap().document_changes.as_ref().unwrap();
@@ -1399,7 +1442,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 0));
         let ca = unwrap_code_action(&actions[0]);
 
         let diags = ca.diagnostics.as_ref().unwrap();
@@ -1430,7 +1473,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 50));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 50));
         assert_eq!(actions.len(), 1);
     }
 
@@ -1452,7 +1495,7 @@ mod tests {
                 path: file.clone(),
             }));
 
-        let actions = build_delete_file_actions(&results, &file, &uri, &make_range(0, 0));
+        let actions = build_delete_file_actions_for_test(&results, &file, &uri, &make_range(0, 0));
         assert_eq!(actions.len(), 2);
     }
 
@@ -1477,7 +1520,7 @@ mod tests {
 
         let export_actions =
             build_remove_export_actions_for_test(&results, &file, &uri, &cursor, &lines);
-        let delete_actions = build_delete_file_actions(&results, &file, &uri, &cursor);
+        let delete_actions = build_delete_file_actions_for_test(&results, &file, &uri, &cursor);
 
         assert_eq!(export_actions.len(), 1);
         assert_eq!(delete_actions.len(), 1);
