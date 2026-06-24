@@ -236,6 +236,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#stale-suppressions",
     },
     RuleDef {
+        id: "fallow/missing-suppression-reason",
+        category: "Suppressions",
+        name: "Missing Suppression Reason",
+        short: "Suppression comment omits a required reason",
+        full: "A fallow-ignore-next-line or fallow-ignore-file suppression omits the explanatory reason required by the requireSuppressionReason rule. Add a short reason after the suppression token, or remove the suppression if the issue is no longer intentional.",
+        docs_path: "explanations/dead-code#stale-suppressions",
+    },
+    RuleDef {
         id: "fallow/unused-catalog-entry",
         category: "Dependencies",
         name: "Unused catalog entry",
@@ -541,6 +549,9 @@ fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
         "boundary-calls" | "boundary-call-violations" => Some("fallow/boundary-call-violation"),
         "policy-violation" | "policy-violations" => Some("fallow/policy-violation"),
         "stale-suppressions" => Some("fallow/stale-suppression"),
+        "missing-suppression-reason" | "missing-suppression-reasons" => {
+            Some("fallow/missing-suppression-reason")
+        }
         _ => None,
     }
 }
@@ -756,6 +767,10 @@ fn architecture_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/stale-suppression" => RuleGuide {
             example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",
             how_to_fix: "Remove the suppression. If a different issue is still intentional, replace it with a current, specific suppression.",
+        },
+        "fallow/missing-suppression-reason" => RuleGuide {
+            example: "// fallow-ignore-next-line unused-export appears without the required explanatory reason.",
+            how_to_fix: "Add a concise reason after the suppression token, or remove the suppression if the issue is no longer intentional.",
         },
         _ => return None,
     })
@@ -1867,12 +1882,13 @@ mod tests {
     #[test]
     fn result_sarif_rule_ids_have_explain_metadata() {
         for meta in fallow_types::issue_meta::result_issue_metas() {
-            let rule_id = meta.sarif_rule_id();
-            assert!(
-                rule_by_id(&rule_id).is_some(),
-                "result metadata code {} has SARIF rule id {rule_id} without RuleDef",
-                meta.code
-            );
+            for rule_id in meta.sarif_rule_ids() {
+                assert!(
+                    rule_by_id(&rule_id).is_some(),
+                    "result metadata code {} has SARIF rule id {rule_id} without RuleDef",
+                    meta.code
+                );
+            }
         }
     }
 
@@ -2411,7 +2427,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 44);
+        assert_eq!(CHECK_RULES.len(), 45);
     }
 
     #[test]

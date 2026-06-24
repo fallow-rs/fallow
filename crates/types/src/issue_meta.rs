@@ -712,10 +712,14 @@ pub struct IssueResultMeta {
 }
 
 impl IssueResultMeta {
-    /// SARIF rule id used by the CLI SARIF formatter.
+    /// SARIF rule ids used by the CLI SARIF formatter for this result row.
     #[must_use]
-    pub fn sarif_rule_id(self) -> String {
-        format!("fallow/{}", self.code)
+    pub fn sarif_rule_ids(self) -> Vec<String> {
+        let mut ids = vec![format!("fallow/{}", self.code)];
+        if self.code == "stale-suppression" {
+            ids.push("fallow/missing-suppression-reason".to_string());
+        }
+        ids
     }
 
     /// Whether the CodeClimate formatter emits this result row.
@@ -724,11 +728,13 @@ impl IssueResultMeta {
         CODECLIMATE_RESULT_CODES.contains(&self.code)
     }
 
-    /// CodeClimate check name used by the CLI CodeClimate formatter.
+    /// CodeClimate check names used by the CLI CodeClimate formatter.
     #[must_use]
-    pub fn codeclimate_check_name(self) -> Option<String> {
-        self.emits_codeclimate()
-            .then(|| format!("fallow/{}", self.code))
+    pub fn codeclimate_check_names(self) -> Vec<String> {
+        if !self.emits_codeclimate() {
+            return Vec::new();
+        }
+        self.sarif_rule_ids()
     }
 }
 
@@ -1289,19 +1295,26 @@ mod tests {
         }
     }
 
+    #[test]
     fn result_ci_format_contracts_are_present() {
         for meta in ISSUE_RESULT_META {
-            assert_eq!(
-                meta.sarif_rule_id(),
-                format!("fallow/{}", meta.code),
+            let sarif_rule_ids = meta.sarif_rule_ids();
+            assert!(
+                sarif_rule_ids.contains(&format!("fallow/{}", meta.code)),
                 "result metadata code {} has wrong SARIF rule id",
                 meta.code
             );
-            if let Some(check_name) = meta.codeclimate_check_name() {
-                assert_eq!(
-                    check_name,
-                    format!("fallow/{}", meta.code),
-                    "result metadata code {} has wrong CodeClimate check name",
+            for rule_id in sarif_rule_ids {
+                assert!(
+                    rule_id.starts_with("fallow/"),
+                    "result metadata code {} has unprefixed SARIF rule id {rule_id}",
+                    meta.code
+                );
+            }
+            for check_name in meta.codeclimate_check_names() {
+                assert!(
+                    check_name.starts_with("fallow/"),
+                    "result metadata code {} has unprefixed CodeClimate check name {check_name}",
                     meta.code
                 );
             }
@@ -1312,7 +1325,7 @@ mod tests {
     fn codeclimate_result_exclusions_are_explicit() {
         let expected = BTreeSet::from(["duplicate-prop-shape", "prop-drilling", "thin-wrapper"]);
         let from_meta: BTreeSet<&str> = result_issue_metas()
-            .filter(|meta| !meta.emits_codeclimate())
+            .filter(|meta| meta.codeclimate_check_names().is_empty())
             .map(|meta| meta.code)
             .collect();
         assert_eq!(expected, from_meta);

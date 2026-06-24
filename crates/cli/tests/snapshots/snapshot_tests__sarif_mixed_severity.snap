@@ -523,8 +523,12 @@ expression: redact_sarif_version(&json_str)
             {
               "id": "fallow/missing-suppression-reason",
               "shortDescription": {
-                "text": "Suppression comment or tag is missing a required reason"
+                "text": "Suppression comment omits a required reason"
               },
+              "fullDescription": {
+                "text": "A fallow-ignore-next-line or fallow-ignore-file suppression omits the explanatory reason required by the requireSuppressionReason rule. Add a short reason after the suppression token, or remove the suppression if the issue is no longer intentional."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#stale-suppressions",
               "defaultConfiguration": {
                 "level": "warning"
               }
