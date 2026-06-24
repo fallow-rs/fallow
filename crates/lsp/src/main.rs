@@ -1032,7 +1032,7 @@ impl FallowLspServer {
             code_actions::RemoveExportActionInput::new(results, file_path, uri, range, file_lines),
         ));
         actions.extend(code_actions::build_delete_file_actions(
-            results, file_path, uri, range,
+            code_actions::DeleteFileActionInput::new(results, file_path, uri, range),
         ));
 
         if let Some(root) = root {
