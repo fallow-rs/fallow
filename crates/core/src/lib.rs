@@ -473,6 +473,170 @@ struct AnalysisSetup {
     workspaces_ms: f64,
 }
 
+/// Owned state shared across one core analysis run.
+///
+/// This is the first non-persisted session boundary for the engine. It keeps
+/// discovery, workspace and package prelude state together so later slices can
+/// reuse pipeline products without introducing graph-cache invalidation risk.
+pub(crate) struct AnalysisSession<'a> {
+    config: &'a ResolvedConfig,
+    pipeline_start: Instant,
+    progress: progress::AnalysisProgress,
+    project: project::ProjectState,
+    root_pkg: Option<PackageJson>,
+    config_candidates: Vec<std::path::PathBuf>,
+    discover_ms: f64,
+    workspaces_ms: f64,
+}
+
+impl<'a> AnalysisSession<'a> {
+    fn new(config: &'a ResolvedConfig) -> Self {
+        let pipeline_start = Instant::now();
+        let AnalysisSetup {
+            progress,
+            project,
+            root_pkg,
+            config_candidates,
+            discover_ms,
+            workspaces_ms,
+        } = run_analysis_setup(config);
+
+        Self {
+            config,
+            pipeline_start,
+            progress,
+            project,
+            root_pkg,
+            config_candidates,
+            discover_ms,
+            workspaces_ms,
+        }
+    }
+
+    fn files(&self) -> &[discover::DiscoveredFile] {
+        self.project.files()
+    }
+
+    fn workspaces(&self) -> &[fallow_config::WorkspaceInfo] {
+        self.project.workspaces()
+    }
+
+    fn load_workspace_packages(&self) -> Vec<LoadedWorkspacePackage<'_>> {
+        load_workspace_packages(self.workspaces())
+    }
+
+    fn run_plugins_and_scripts(
+        &self,
+        workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+    ) -> Result<(plugins::AggregatedPluginResult, f64, f64), FallowError> {
+        run_plugins_and_scripts(&PluginScriptInput {
+            config: self.config,
+            progress: &self.progress,
+            files: self.files(),
+            workspaces: self.workspaces(),
+            root_pkg: self.root_pkg.as_ref(),
+            workspace_pkgs,
+            config_candidates: &self.config_candidates,
+        })
+    }
+
+    fn prelude_timings(&self, plugins_ms: f64, scripts_ms: f64) -> PreludeTimings {
+        PreludeTimings {
+            discover_ms: self.discover_ms,
+            workspaces_ms: self.workspaces_ms,
+            plugins_ms,
+            scripts_ms,
+        }
+    }
+
+    fn run_full(
+        self,
+        retain: bool,
+        collect_usages: bool,
+        need_complexity: bool,
+        retain_modules: bool,
+    ) -> Result<AnalysisOutput, FallowError> {
+        let workspace_pkgs = self.load_workspace_packages();
+        let (plugin_result, plugins_ms, scripts_ms) =
+            self.run_plugins_and_scripts(&workspace_pkgs)?;
+
+        let FullAnalysisCoreOutput { core, metrics } =
+            run_full_analysis_core(&FullAnalysisCoreInput {
+                config: self.config,
+                progress: &self.progress,
+                files: self.files(),
+                workspaces: self.workspaces(),
+                root_pkg: self.root_pkg.as_ref(),
+                workspace_pkgs: &workspace_pkgs,
+                plugin_result: &plugin_result,
+                need_complexity,
+                collect_usages,
+            });
+        self.progress.finish();
+
+        let profile = full_analysis_pipeline_profile(
+            &self.prelude_timings(plugins_ms, scripts_ms),
+            self.pipeline_start,
+            self.files(),
+            self.workspaces(),
+            &core,
+            &metrics,
+        );
+        trace_pipeline_profile(&profile);
+
+        Ok(assemble_full_output(
+            core,
+            plugin_result,
+            &profile,
+            self.files(),
+            retain,
+            retain_modules,
+        ))
+    }
+
+    fn run_with_parse_result(
+        self,
+        modules: &[extract::ModuleInfo],
+    ) -> Result<AnalysisOutput, FallowError> {
+        let workspace_pkgs = self.load_workspace_packages();
+        let (plugin_result, plugins_ms, scripts_ms) =
+            self.run_plugins_and_scripts(&workspace_pkgs)?;
+
+        let core = run_reused_analysis_core(&ReusedAnalysisCoreInput {
+            config: self.config,
+            progress: &self.progress,
+            files: self.files(),
+            workspaces: self.workspaces(),
+            root_pkg: self.root_pkg.as_ref(),
+            workspace_pkgs: &workspace_pkgs,
+            plugin_result: &plugin_result,
+            modules,
+        });
+        self.progress.finish();
+
+        let timings = self.prelude_timings(plugins_ms, scripts_ms);
+        let prelude = prelude_metrics(
+            &timings,
+            self.pipeline_start,
+            self.files(),
+            self.workspaces(),
+            modules.len(),
+        );
+        let profile = reused_pipeline_profile(&prelude, &core);
+        trace_reused_pipeline_profile(&profile);
+
+        Ok(AnalysisOutput {
+            results: core.result,
+            timings: retained_pipeline_timings(true, &profile),
+            graph: Some(core.graph),
+            modules: None,
+            files: None,
+            script_used_packages: plugin_result.script_used_packages,
+            file_hashes: collect_file_hashes(modules, self.files()),
+        })
+    }
+}
+
 /// Run the shared prelude: progress setup, node_modules check, workspace and
 /// root-package discovery, hidden-dir scoping, and file discovery.
 fn run_analysis_setup(config: &ResolvedConfig) -> AnalysisSetup {
@@ -563,61 +727,7 @@ pub fn analyze_with_parse_result(
     modules: &[extract::ModuleInfo],
 ) -> Result<AnalysisOutput, FallowError> {
     let _span = tracing::info_span!("fallow_analyze_with_parse_result").entered();
-    let pipeline_start = Instant::now();
-
-    let AnalysisSetup {
-        progress,
-        project,
-        root_pkg,
-        config_candidates,
-        discover_ms,
-        workspaces_ms,
-    } = run_analysis_setup(config);
-    let files = project.files();
-    let workspaces = project.workspaces();
-    let workspace_pkgs = load_workspace_packages(workspaces);
-
-    let (plugin_result, plugins_ms, scripts_ms) = run_plugins_and_scripts(&PluginScriptInput {
-        config,
-        progress: &progress,
-        files,
-        workspaces,
-        root_pkg: root_pkg.as_ref(),
-        workspace_pkgs: &workspace_pkgs,
-        config_candidates: &config_candidates,
-    })?;
-
-    let core = run_reused_analysis_core(&ReusedAnalysisCoreInput {
-        config,
-        progress: &progress,
-        files,
-        workspaces,
-        root_pkg: root_pkg.as_ref(),
-        workspace_pkgs: &workspace_pkgs,
-        plugin_result: &plugin_result,
-        modules,
-    });
-    progress.finish();
-
-    let timings = PreludeTimings {
-        discover_ms,
-        workspaces_ms,
-        plugins_ms,
-        scripts_ms,
-    };
-    let prelude = prelude_metrics(&timings, pipeline_start, files, workspaces, modules.len());
-    let profile = reused_pipeline_profile(&prelude, &core);
-    trace_reused_pipeline_profile(&profile);
-
-    Ok(AnalysisOutput {
-        results: core.result,
-        timings: retained_pipeline_timings(true, &profile),
-        graph: Some(core.graph),
-        modules: None,
-        files: None,
-        script_used_packages: plugin_result.script_used_packages,
-        file_hashes: collect_file_hashes(modules, files),
-    })
+    AnalysisSession::new(config).run_with_parse_result(modules)
 }
 
 /// Prelude/aggregate metrics shared between the parse and reuse pipeline paths
@@ -902,66 +1012,7 @@ fn analyze_full(
     retain_modules: bool,
 ) -> Result<AnalysisOutput, FallowError> {
     let _span = tracing::info_span!("fallow_analyze").entered();
-    let pipeline_start = Instant::now();
-
-    let AnalysisSetup {
-        progress,
-        project,
-        root_pkg,
-        config_candidates,
-        discover_ms,
-        workspaces_ms,
-    } = run_analysis_setup(config);
-    let files = project.files();
-    let workspaces = project.workspaces();
-    let workspace_pkgs = load_workspace_packages(workspaces);
-
-    let (plugin_result, plugins_ms, scripts_ms) = run_plugins_and_scripts(&PluginScriptInput {
-        config,
-        progress: &progress,
-        files,
-        workspaces,
-        root_pkg: root_pkg.as_ref(),
-        workspace_pkgs: &workspace_pkgs,
-        config_candidates: &config_candidates,
-    })?;
-
-    let FullAnalysisCoreOutput { core, metrics } = run_full_analysis_core(&FullAnalysisCoreInput {
-        config,
-        progress: &progress,
-        files,
-        workspaces,
-        root_pkg: root_pkg.as_ref(),
-        workspace_pkgs: &workspace_pkgs,
-        plugin_result: &plugin_result,
-        need_complexity,
-        collect_usages,
-    });
-    progress.finish();
-
-    let profile = full_analysis_pipeline_profile(
-        &PreludeTimings {
-            discover_ms,
-            workspaces_ms,
-            plugins_ms,
-            scripts_ms,
-        },
-        pipeline_start,
-        files,
-        workspaces,
-        &core,
-        &metrics,
-    );
-    trace_pipeline_profile(&profile);
-
-    Ok(assemble_full_output(
-        core,
-        plugin_result,
-        &profile,
-        files,
-        retain,
-        retain_modules,
-    ))
+    AnalysisSession::new(config).run_full(retain, collect_usages, need_complexity, retain_modules)
 }
 
 struct FullAnalysisCoreInput<'a> {
@@ -2212,7 +2263,7 @@ fn num_cpus() -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        bucket_files_by_workspace, collect_config_search_roots,
+        AnalysisSession, bucket_files_by_workspace, collect_config_search_roots, default_config,
         format_undeclared_workspace_warning, warn_undeclared_workspaces,
     };
     use std::path::{Path, PathBuf};
@@ -2225,6 +2276,70 @@ mod tests {
             root.join(relative),
             WorkspaceDiagnosticKind::UndeclaredWorkspace,
         )
+    }
+
+    fn session_config(root: &Path) -> fallow_config::ResolvedConfig {
+        let mut config = default_config(root);
+        config.no_cache = true;
+        config.quiet = true;
+        config
+    }
+
+    fn write_session_fixture(root: &Path) {
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("create src");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"session-fixture","type":"module"}"#,
+        )
+        .expect("write package json");
+        std::fs::write(
+            src.join("index.ts"),
+            "import { used } from './used';\nconsole.log(used);\n",
+        )
+        .expect("write index");
+        std::fs::write(src.join("used.ts"), "export const used = 1;\n").expect("write used");
+    }
+
+    #[test]
+    fn analysis_session_discovers_project_files() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_session_fixture(dir.path());
+        let config = session_config(dir.path());
+
+        let session = AnalysisSession::new(&config);
+
+        assert!(
+            session
+                .files()
+                .iter()
+                .any(|file| file.path.ends_with("src/index.ts")),
+            "session should own discovered project files"
+        );
+        assert_eq!(session.workspaces().len(), 0);
+    }
+
+    #[test]
+    fn analysis_session_reuses_parse_result_with_matching_results() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_session_fixture(dir.path());
+        let config = session_config(dir.path());
+
+        let fresh = AnalysisSession::new(&config)
+            .run_full(true, false, false, true)
+            .expect("fresh analysis succeeds");
+        let modules = fresh.modules.as_ref().expect("fresh modules retained");
+        let reused = AnalysisSession::new(&config)
+            .run_with_parse_result(modules)
+            .expect("reused analysis succeeds");
+
+        assert!(reused.graph.is_some());
+        assert!(reused.timings.is_some());
+        assert_eq!(reused.file_hashes, fresh.file_hashes);
+        assert_eq!(
+            serde_json::to_value(&reused.results).expect("serialize reused results"),
+            serde_json::to_value(&fresh.results).expect("serialize fresh results")
+        );
     }
 
     #[test]
