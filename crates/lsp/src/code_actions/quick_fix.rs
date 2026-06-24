@@ -327,7 +327,7 @@ fn remove_export_diagnostic(
 /// entry line's indent (covers object-form entries such as
 /// `react:\n    specifier: ^18.2.0`).
 ///
-/// The `root` parameter is required because `UnusedCatalogEntry.path` is
+/// The `root` input field is required because `UnusedCatalogEntry.path` is
 /// stored project-root-relative; `Uri::from_file_path` would silently
 /// reject the relative path and the action would never appear.
 ///
@@ -337,13 +337,44 @@ fn remove_export_diagnostic(
 /// the deletion range consistent with what the user actually sees in
 /// their editor, even when there are unsaved edits to the YAML file.
 /// Empty `file_lines` short-circuits the function with no actions.
+#[derive(Clone, Copy)]
+pub struct CatalogEntryActionInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub root: &'a Path,
+    pub uri: &'a Uri,
+    pub cursor_range: &'a Range,
+    pub file_lines: &'a [&'a str],
+}
+
+impl<'a> CatalogEntryActionInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        root: &'a Path,
+        uri: &'a Uri,
+        cursor_range: &'a Range,
+        file_lines: &'a [&'a str],
+    ) -> Self {
+        Self {
+            results,
+            root,
+            uri,
+            cursor_range,
+            file_lines,
+        }
+    }
+}
+
 pub fn build_remove_catalog_entry_actions(
-    results: &AnalysisResults,
-    root: &Path,
-    uri: &Uri,
-    cursor_range: &Range,
-    file_lines: &[&str],
+    input: CatalogEntryActionInput<'_>,
 ) -> Vec<CodeActionOrCommand> {
+    let CatalogEntryActionInput {
+        results,
+        root,
+        uri,
+        cursor_range,
+        file_lines,
+    } = input;
     let mut actions = Vec::new();
 
     if file_lines.is_empty() {
@@ -363,6 +394,23 @@ pub fn build_remove_catalog_entry_actions(
     }
 
     actions
+}
+
+#[cfg(test)]
+fn build_remove_catalog_entry_actions_for_test(
+    results: &AnalysisResults,
+    root: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Vec<CodeActionOrCommand> {
+    build_remove_catalog_entry_actions(CatalogEntryActionInput::new(
+        results,
+        root,
+        uri,
+        cursor_range,
+        file_lines,
+    ))
 }
 
 fn catalog_entry_delete_span(
@@ -1575,7 +1623,7 @@ mod tests {
         let results = AnalysisResults::default();
         let lines = vec!["catalog:", "  is-even: ^1.0.0"];
 
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1596,7 +1644,7 @@ mod tests {
             .push(make_catalog_entry("is-even", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  is-even: ^1.0.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1624,7 +1672,7 @@ mod tests {
         ));
 
         let lines = vec!["catalog:", "  react: ^18.2.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1659,7 +1707,7 @@ mod tests {
             "  }",
             "}",
         ];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1686,7 +1734,7 @@ mod tests {
             "    publishConfig: {}",
             "  is-even: ^1.0.0",
         ];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1715,7 +1763,7 @@ mod tests {
             .push(make_catalog_entry("is-even", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  different-entry: ^2.0.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1736,7 +1784,7 @@ mod tests {
             .push(make_catalog_entry("react", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  react-native: ^0.73.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1760,7 +1808,7 @@ mod tests {
             .push(make_catalog_entry("react", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  description: react fork"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1781,7 +1829,7 @@ mod tests {
             .push(make_catalog_entry("@scope/foo", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  \"@scope/foo\": ^1.0.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1802,7 +1850,7 @@ mod tests {
             .push(make_catalog_entry("is-even", "default", 3, vec![]));
 
         let lines = vec!["catalog:", "  is-odd: ^1.0.0", "  is-even: ^1.0.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1823,7 +1871,7 @@ mod tests {
             .push(make_catalog_entry("react", "react17", 3, vec![]));
 
         let lines = vec!["catalogs:", "  react17:", "    react: ^17.0.2"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1850,7 +1898,7 @@ mod tests {
             .push(make_catalog_entry("react", "react17", 3, vec![]));
 
         let lines = vec!["catalogs:", "  react17:", "    react: ^17.0.2"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1885,7 +1933,7 @@ mod tests {
             .push(make_catalog_entry("react", "日本", 3, vec![]));
 
         let lines = vec!["catalogs:", "  \"日本\":", "    react: ^17.0.2"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1922,7 +1970,7 @@ mod tests {
             "    react: ^17.0.2",
             "    react-dom: ^17.0.2",
         ];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -1952,7 +2000,7 @@ mod tests {
             .push(make_catalog_entry("is-even", "default", 2, vec![]));
 
         let lines = vec!["catalog:", "  is-even: ^1.0.0"];
-        let actions = build_remove_catalog_entry_actions(
+        let actions = build_remove_catalog_entry_actions_for_test(
             &results,
             dir.path(),
             &uri,
