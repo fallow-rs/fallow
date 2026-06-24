@@ -461,11 +461,10 @@ use crate::MemberKind;
 /// Bumped to 171 (feat/angular): Angular input/output IR
 /// (`angular_inputs` / `angular_outputs` on `ModuleInfo`) plus the
 /// `unused-component-input` / `unused-component-output` suppression tokens, and
-/// the Angular `{ ...this }` spread now records an
-/// `ANGULAR_THIS_SPREAD_SENTINEL` member access (whole-component abstain for the
-/// input/output detectors); a warm cache from 170 lacks the Angular IR and the
-/// sentinel and would report zero input/output findings or false-flag
-/// spread-forwarded inputs/outputs.
+/// the Angular `{ ...this }` spread now records a whole-component abstain marker
+/// for the input/output detectors; a warm cache from 170 lacks the Angular IR
+/// and the abstain marker and would report zero input/output findings or
+/// false-flag spread-forwarded inputs/outputs.
 ///
 /// Bumped to 172 (feat/vue-options-api-prop-emit): the Vue Options API
 /// (`export default { props, emits, ... }` / `defineComponent({ ... })`) in a
@@ -644,7 +643,11 @@ use crate::MemberKind;
 /// Bumped to 205: Angular template member accesses are now persisted only as
 /// typed semantic facts, while legacy template sentinels remain decode-only for
 /// older caches.
-pub(super) const CACHE_VERSION: u32 = 205;
+///
+/// Bumped to 206: Angular `{ ...this }` spread abstains are now persisted as
+/// typed semantic facts, while the legacy spread sentinel remains decode-only
+/// for older caches.
+pub(super) const CACHE_VERSION: u32 = 206;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

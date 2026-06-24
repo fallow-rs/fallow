@@ -12,12 +12,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::suppress::ParsedSuppressions;
 use crate::{
-    AngularTemplateMemberAccessFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
-    ExportName, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
-    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
-    MemberAccess, MemberInfo, MemberKind, ModuleInfo, PlaywrightFixtureAliasFact,
-    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
+    AngularTemplateMemberAccessFact, AngularThisSpreadFact, DynamicImportInfo,
+    DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
+    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
+    InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
+    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
+    PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
@@ -504,6 +504,11 @@ impl ModuleInfoExtractor {
             .push(SemanticFact::AngularTemplateMemberAccess(
                 AngularTemplateMemberAccessFact { member },
             ));
+    }
+
+    pub(crate) fn record_angular_this_spread_fact(&mut self) {
+        self.semantic_facts
+            .push(SemanticFact::AngularThisSpread(AngularThisSpreadFact));
     }
 
     fn record_instance_export_binding_fact(&mut self, export_name: String, target_name: String) {

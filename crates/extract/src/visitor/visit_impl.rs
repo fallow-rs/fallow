@@ -4420,14 +4420,9 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
             // `{ ...this }` forwards every member opaquely (the Angular "headless
             // pattern" convention spreads `this` into a behavior pattern). Record
-            // a sentinel member access so the Angular input/output detectors
-            // abstain the whole component instead of false-flagging spread inputs.
-            Expression::ThisExpression(_) => {
-                self.member_accesses.push(MemberAccess {
-                    object: crate::sfc_template::angular::ANGULAR_THIS_SPREAD_SENTINEL.to_string(),
-                    member: String::new(),
-                });
-            }
+            // a typed fact so the Angular input/output detectors abstain the
+            // whole component instead of false-flagging spread inputs.
+            Expression::ThisExpression(_) => self.record_angular_this_spread_fact(),
             _ => {}
         }
         walk::walk_spread_element(self, elem);

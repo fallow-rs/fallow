@@ -6184,6 +6184,33 @@ fn angular_queries_metadata_emit_typed_member_facts() {
 }
 
 #[test]
+fn angular_this_spread_emits_typed_abstain_fact() {
+    let info = parse(
+        r"
+        export class App {
+            createBehavior() {
+                return { ...this, role: 'button' };
+            }
+        }
+        ",
+    );
+    assert!(
+        info.semantic_facts
+            .iter()
+            .any(|fact| matches!(fact, SemanticFact::AngularThisSpread(_))),
+        "spread-this should emit a typed Angular abstain fact, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        !info.member_accesses.iter().any(|access| {
+            access.object == crate::sfc_template::angular::ANGULAR_THIS_SPREAD_SENTINEL
+        }),
+        "spread-this should not emit a legacy sentinel, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn angular_signal_input_marks_member_as_decorated() {
     let info = parse(
         r"

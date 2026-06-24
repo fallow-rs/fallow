@@ -1352,6 +1352,9 @@ pub enum SemanticFact {
     /// A class member referenced from an Angular template, host binding, or
     /// component metadata entry.
     AngularTemplateMemberAccess(AngularTemplateMemberAccessFact),
+    /// An Angular component spreads `this` into an object literal, so component
+    /// input/output usage is opaque.
+    AngularThisSpread(AngularThisSpreadFact),
     /// A member access on a value returned by an imported static factory call.
     FactoryCallMemberAccess(FactoryCallMemberAccessFact),
     /// A member access on a fluent chain rooted at an imported static factory.
@@ -1377,6 +1380,11 @@ pub struct AngularTemplateMemberAccessFact {
     /// Referenced class member name.
     pub member: String,
 }
+
+/// Opaque Angular `{ ...this }` forwarding marker.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AngularThisSpreadFact;
 
 /// A member access on a static factory call result.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
