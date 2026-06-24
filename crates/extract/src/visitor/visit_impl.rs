@@ -888,21 +888,11 @@ impl ModuleInfoExtractor {
             {
                 chain_prefix_reversed.push(inner_member.property.name.to_string());
                 chain_prefix_reversed.reverse();
-                let chain_prefix = chain_prefix_reversed.join(",");
                 self.record_fluent_chain_new_member_fact(
                     class_id.name.to_string(),
                     chain_prefix_reversed,
                     this_method.to_string(),
                 );
-                self.member_accesses.push(MemberAccess {
-                    object: format!(
-                        "{}{}:{}",
-                        crate::FLUENT_CHAIN_NEW_SENTINEL,
-                        class_id.name,
-                        chain_prefix,
-                    ),
-                    member: this_method.to_string(),
-                });
                 return;
             }
             chain_prefix_reversed.push(inner_member.property.name.to_string());

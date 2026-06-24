@@ -5017,7 +5017,7 @@ fn new_expression_direct_member_access_recorded() {
 }
 
 #[test]
-fn new_expression_fluent_chain_emits_new_sentinel() {
+fn new_expression_fluent_chain_emits_typed_member_facts() {
     let info = parse(
         r"
         import { OptionBuilder } from './option-builder';
@@ -5033,23 +5033,11 @@ fn new_expression_fluent_chain_emits_new_sentinel() {
         info.member_accesses,
     );
     assert!(
-        info.member_accesses.iter().any(|a| a.object
-            == format!(
-                "{}OptionBuilder:addDefault",
-                crate::FLUENT_CHAIN_NEW_SENTINEL
-            )
-            && a.member == "addFromCli"),
-        "second chained call should encode the first method in the chain prefix, found: {:?}",
-        info.member_accesses,
-    );
-    assert!(
-        info.member_accesses.iter().any(|a| a.object
-            == format!(
-                "{}OptionBuilder:addDefault,addFromCli",
-                crate::FLUENT_CHAIN_NEW_SENTINEL
-            )
-            && a.member == "build"),
-        "terminal call should encode the full prior chain, found: {:?}",
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(crate::FLUENT_CHAIN_NEW_SENTINEL)),
+        "new-expression fluent chain should not emit legacy sentinel accesses, found: {:?}",
         info.member_accesses,
     );
     let fluent_new_facts: Vec<_> = info
