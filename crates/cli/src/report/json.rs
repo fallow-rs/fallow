@@ -9,7 +9,6 @@ use fallow_core::results::AnalysisResults;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
 use super::{emit_json, normalize_uri};
-use crate::explain;
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutput,
@@ -476,6 +475,7 @@ pub fn build_baseline_deltas_json<'a>(
 }
 
 /// Insert a `_meta` key into a JSON object value.
+#[cfg(test)]
 fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     if let serde_json::Value::Object(map) = output {
         let telemetry = map
@@ -503,7 +503,7 @@ pub fn build_health_json(
         report: report.clone(),
         grouped_by: None,
         groups: None,
-        meta: None,
+        meta: explain.then(fallow_output::health_meta),
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
         next_steps: crate::report::suggestions::build_health_next_steps(
             report,
@@ -515,9 +515,6 @@ pub fn build_health_json(
     let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
-    if explain {
-        insert_meta(&mut output, explain::health_meta());
-    }
     Ok(output)
 }
 
@@ -551,7 +548,7 @@ pub fn build_grouped_health_json(
         report: report.clone(),
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         groups: None,
-        meta: None,
+        meta: explain.then(fallow_output::health_meta),
         workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
         next_steps: crate::report::suggestions::build_health_next_steps(
             report,
@@ -575,10 +572,6 @@ pub fn build_grouped_health_json(
 
     if let serde_json::Value::Object(ref mut map) = output {
         map.insert("groups".to_string(), serde_json::Value::Array(group_values));
-    }
-
-    if explain {
-        insert_meta(&mut output, explain::health_meta());
     }
 
     Ok(output)
