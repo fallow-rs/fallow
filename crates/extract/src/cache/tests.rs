@@ -989,6 +989,17 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 callee_method: "getInstance".to_string(),
                 member: "getData".to_string(),
             }),
+            SemanticFact::FluentChainMemberAccess(FluentChainMemberAccessFact {
+                root_object: "EventBuilder".to_string(),
+                root_method: "create".to_string(),
+                chain: vec!["setProcessId".to_string(), "setSubject".to_string()],
+                member: "build".to_string(),
+            }),
+            SemanticFact::FluentChainNewMemberAccess(FluentChainNewMemberAccessFact {
+                class_name: "OptionBuilder".to_string(),
+                chain: vec!["addDefault".to_string(), "addFromCli".to_string()],
+                member: "build".to_string(),
+            }),
         ],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1079,6 +1090,17 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 callee_object: "MyClass".to_string(),
                 callee_method: "getInstance".to_string(),
                 member: "getData".to_string(),
+            }),
+            SemanticFact::FluentChainMemberAccess(FluentChainMemberAccessFact {
+                root_object: "EventBuilder".to_string(),
+                root_method: "create".to_string(),
+                chain: vec!["setProcessId".to_string(), "setSubject".to_string()],
+                member: "build".to_string(),
+            }),
+            SemanticFact::FluentChainNewMemberAccess(FluentChainNewMemberAccessFact {
+                class_name: "OptionBuilder".to_string(),
+                chain: vec!["addDefault".to_string(), "addFromCli".to_string()],
+                member: "build".to_string(),
             }),
         ]
     );

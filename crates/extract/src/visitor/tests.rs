@@ -4881,6 +4881,37 @@ fn fluent_chain_emits_sentinel_member_access() {
         "terminal call should encode the full prior chain, found: {:?}",
         info.member_accesses,
     );
+    let fluent_facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            if let SemanticFact::FluentChainMemberAccess(access) = fact {
+                Some(access)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        fluent_facts
+            .iter()
+            .any(|fact| fact.root_object == "EventBuilder"
+                && fact.root_method == "create"
+                && fact.chain.is_empty()
+                && fact.member == "setProcessId"),
+        "first chained call should emit typed fluent fact, found: {:?}",
+        info.semantic_facts,
+    );
+    assert!(
+        fluent_facts
+            .iter()
+            .any(|fact| fact.root_object == "EventBuilder"
+                && fact.root_method == "create"
+                && fact.chain == vec!["setProcessId".to_string(), "setSubject".to_string()]
+                && fact.member == "build"),
+        "terminal call should emit typed fluent fact with full prior chain, found: {:?}",
+        info.semantic_facts,
+    );
 }
 
 #[test]
@@ -4936,6 +4967,35 @@ fn new_expression_fluent_chain_emits_new_sentinel() {
             && a.member == "build"),
         "terminal call should encode the full prior chain, found: {:?}",
         info.member_accesses,
+    );
+    let fluent_new_facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            if let SemanticFact::FluentChainNewMemberAccess(access) = fact {
+                Some(access)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        fluent_new_facts
+            .iter()
+            .any(|fact| fact.class_name == "OptionBuilder"
+                && fact.chain == vec!["addDefault".to_string()]
+                && fact.member == "addFromCli"),
+        "second chained call should emit typed fluent-new fact, found: {:?}",
+        info.semantic_facts,
+    );
+    assert!(
+        fluent_new_facts
+            .iter()
+            .any(|fact| fact.class_name == "OptionBuilder"
+                && fact.chain == vec!["addDefault".to_string(), "addFromCli".to_string()]
+                && fact.member == "build"),
+        "terminal call should emit typed fluent-new fact, found: {:?}",
+        info.semantic_facts,
     );
 }
 

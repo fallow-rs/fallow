@@ -1354,6 +1354,10 @@ pub enum SemanticFact {
     AngularTemplateMemberAccess(AngularTemplateMemberAccessFact),
     /// A member access on a value returned by an imported static factory call.
     FactoryCallMemberAccess(FactoryCallMemberAccessFact),
+    /// A member access on a fluent chain rooted at an imported static factory.
+    FluentChainMemberAccess(FluentChainMemberAccessFact),
+    /// A member access on a fluent chain rooted at a `new` expression.
+    FluentChainNewMemberAccess(FluentChainNewMemberAccessFact),
 }
 
 /// A member name referenced from an Angular template surface.
@@ -1373,6 +1377,32 @@ pub struct FactoryCallMemberAccessFact {
     /// Static factory method invoked on the callee object.
     pub callee_method: String,
     /// Member accessed on the returned instance-like object.
+    pub member: String,
+}
+
+/// A member access on a fluent chain rooted at a static factory call.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FluentChainMemberAccessFact {
+    /// Local imported class or namespace object used as the chain root.
+    pub root_object: String,
+    /// Static factory method that starts the fluent chain.
+    pub root_method: String,
+    /// Intermediate fluent methods between the root method and final member.
+    pub chain: Vec<String>,
+    /// Member accessed at this chain step.
+    pub member: String,
+}
+
+/// A member access on a fluent chain rooted at a `new` expression.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FluentChainNewMemberAccessFact {
+    /// Local imported class constructed by the `new` expression.
+    pub class_name: String,
+    /// Intermediate fluent methods between construction and final member.
+    pub chain: Vec<String>,
+    /// Member accessed at this chain step.
     pub member: String,
 }
 
@@ -1849,7 +1879,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SemanticFact>() == 72);
+const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]

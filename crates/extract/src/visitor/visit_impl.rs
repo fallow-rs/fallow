@@ -876,6 +876,12 @@ impl ModuleInfoExtractor {
             if let Expression::Identifier(root_id) = &inner_member.object {
                 chain_prefix_reversed.reverse();
                 let chain_prefix = chain_prefix_reversed.join(",");
+                self.record_fluent_chain_member_fact(
+                    root_id.name.to_string(),
+                    inner_member.property.name.to_string(),
+                    chain_prefix_reversed,
+                    this_method.to_string(),
+                );
                 self.member_accesses.push(MemberAccess {
                     object: format!(
                         "{}{}:{}:{}",
@@ -894,6 +900,11 @@ impl ModuleInfoExtractor {
                 chain_prefix_reversed.push(inner_member.property.name.to_string());
                 chain_prefix_reversed.reverse();
                 let chain_prefix = chain_prefix_reversed.join(",");
+                self.record_fluent_chain_new_member_fact(
+                    class_id.name.to_string(),
+                    chain_prefix_reversed,
+                    this_method.to_string(),
+                );
                 self.member_accesses.push(MemberAccess {
                     object: format!(
                         "{}{}:{}",

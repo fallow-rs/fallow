@@ -593,7 +593,10 @@ use crate::MemberKind;
 ///
 /// Bumped to 190: `SemanticFact` now includes typed static-factory call member
 /// access facts alongside the legacy factory-call sentinel entries.
-pub(super) const CACHE_VERSION: u32 = 190;
+///
+/// Bumped to 191: `SemanticFact` now includes typed fluent-chain member access
+/// facts alongside the legacy fluent-chain sentinel entries.
+pub(super) const CACHE_VERSION: u32 = 191;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -661,7 +664,7 @@ assert_cached_type_size!(CachedReExport, 88);
 assert_cached_type_size!(CachedMember, 64);
 assert_cached_type_size!(CachedDynamicImportPattern, 56);
 assert_cached_type_size!(crate::MemberAccess, 48);
-assert_cached_type_size!(fallow_types::extract::SemanticFact, 72);
+assert_cached_type_size!(fallow_types::extract::SemanticFact, 96);
 assert_cached_type_size!(fallow_types::extract::CalleeUse, 32);
 assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
 assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
