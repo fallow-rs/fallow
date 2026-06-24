@@ -669,7 +669,7 @@ assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
 pub struct CachedModule {
     /// xxh3 hash of the file content.
     pub content_hash: u64,
-    /// File modification time (seconds since epoch) for fast cache validation.
+    /// File modification time for fast cache validation.
     /// When mtime+size match the on-disk file, we skip reading file content entirely.
     pub mtime_secs: u64,
     /// File size in bytes for fast cache validation.

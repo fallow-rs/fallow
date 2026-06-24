@@ -176,19 +176,30 @@ fn update_cache(
 ) {
     for module in modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            let (mt, sz) = file_mtime_and_size(&file.path);
+            let fingerprint = file_fingerprint(&file.path);
             if let Some(cached) = store.get_by_path_only(&file.path)
                 && cached.content_hash == module.content_hash
             {
-                if cached.mtime_secs != mt || cached.file_size != sz {
+                let cached_fingerprint = fallow_types::source_fingerprint::SourceFingerprint::new(
+                    cached.mtime_secs,
+                    cached.file_size,
+                );
+                if cached_fingerprint != fingerprint {
                     let preserved_last_access = cached.last_access_secs;
-                    let mut refreshed = cache::module_to_cached(module, mt, sz);
+                    let mut refreshed = cache::module_to_cached(
+                        module,
+                        fingerprint.mtime_ns,
+                        fingerprint.file_size,
+                    );
                     refreshed.last_access_secs = preserved_last_access;
                     store.insert(&file.path, refreshed);
                 }
                 continue;
             }
-            store.insert(&file.path, cache::module_to_cached(module, mt, sz));
+            store.insert(
+                &file.path,
+                cache::module_to_cached(module, fingerprint.mtime_ns, fingerprint.file_size),
+            );
         }
     }
     store.retain_paths(files);
@@ -210,16 +221,12 @@ pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
         })
 }
 
-/// Extract mtime (seconds since epoch) and file size from a path.
-fn file_mtime_and_size(path: &std::path::Path) -> (u64, u64) {
-    std::fs::metadata(path).map_or((0, 0), |m| {
-        let mt = m
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-            .map_or(0, |d| d.as_secs());
-        (mt, m.len())
-    })
+/// Extract source fingerprint metadata from a path.
+fn file_fingerprint(path: &std::path::Path) -> fallow_types::source_fingerprint::SourceFingerprint {
+    std::fs::metadata(path).map_or(
+        fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
+        |metadata| fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata),
+    )
 }
 
 fn format_undeclared_workspace_warning(

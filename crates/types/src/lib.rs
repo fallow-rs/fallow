@@ -62,5 +62,7 @@ pub mod path_util;
 pub mod results;
 /// Custom serde serializers for cross-platform path output.
 pub mod serde_path;
+/// Shared source-file freshness metadata used by cache invalidation.
+pub mod source_fingerprint;
 /// Inline suppression comment types and issue kind definitions.
 pub mod suppress;

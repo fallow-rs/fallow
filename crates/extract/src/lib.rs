@@ -251,9 +251,9 @@ fn parse_single_file_cached(
     if let Some(store) = cache
         && let Ok(metadata) = std::fs::metadata(&file.path)
     {
-        let mt = mtime_secs(&metadata);
-        let sz = metadata.len();
-        if let Some(cached) = store.get_by_metadata(&file.path, mt, sz)
+        let fingerprint =
+            fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
+        if let Some(cached) = store.get_by_metadata(&file.path, fingerprint)
             && (!need_complexity || !cached.complexity.is_empty())
         {
             cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -289,16 +289,6 @@ fn parse_single_file_cached(
         Ordering::Relaxed,
     );
     Some(module)
-}
-
-/// Extract mtime (seconds since epoch) from file metadata.
-/// Returns 0 if mtime cannot be determined (pre-epoch, unsupported OS, etc.).
-fn mtime_secs(metadata: &std::fs::Metadata) -> u64 {
-    metadata
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_secs())
 }
 
 /// Parse a single file and extract module information (without complexity).
