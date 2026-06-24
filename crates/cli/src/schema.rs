@@ -1,7 +1,9 @@
 use std::process::ExitCode;
 
 use clap::CommandFactory;
-use fallow_types::issue_meta::{issue_meta_by_code, issue_result_meta_by_code};
+#[cfg(test)]
+use fallow_types::issue_meta::result_issue_metas;
+use fallow_types::issue_meta::{TsAliasMeta, issue_meta_by_code, issue_result_meta_by_code};
 use fallow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
 
 use crate::Cli;
@@ -115,6 +117,7 @@ struct IssueTypeMeta {
     summary_docs_anchor: Option<&'static str>,
     sarif_rule_ids: Option<Vec<String>>,
     codeclimate_check_names: Option<Vec<String>>,
+    ts_alias: Option<TsAliasMeta>,
     counts_in_total: bool,
     fixable: bool,
     /// `(suppression token, file_level)` when comment-suppressible. The
@@ -143,6 +146,7 @@ impl IssueTypeMeta {
             if !codeclimate_check_names.is_empty() {
                 meta.codeclimate_check_names = Some(codeclimate_check_names);
             }
+            meta.ts_alias = result.ts_alias();
             meta.counts_in_total = result.counts_in_total;
         }
         meta
@@ -291,6 +295,10 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
         "summary_docs_anchor": meta.summary_docs_anchor,
         "sarif_rule_ids": meta.sarif_rule_ids,
         "codeclimate_check_names": meta.codeclimate_check_names,
+        "ts_alias": meta.ts_alias.map(|alias| serde_json::json!({
+            "name": alias.name,
+            "parent": alias.parent,
+        })),
         "counts_in_total": meta.counts_in_total,
         "fixable": meta.fixable,
         "suppressible": meta.suppress.is_some(),
@@ -1131,6 +1139,7 @@ mod tests {
                 "summary_docs_anchor",
                 "sarif_rule_ids",
                 "codeclimate_check_names",
+                "ts_alias",
                 "suppress_comment",
                 "note",
                 "license_note",
@@ -1186,6 +1195,11 @@ mod tests {
                 assert!(
                     row["codeclimate_check_names"].is_null(),
                     "non dead-code row {} must not expose dead-code codeclimate_check_names",
+                    row["id"]
+                );
+                assert!(
+                    row["ts_alias"].is_null(),
+                    "non dead-code row {} must not expose a dead-code ts_alias",
                     row["id"]
                 );
                 assert_eq!(
@@ -1295,6 +1309,80 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn dead_code_ts_alias_contract_is_explicit() {
+        let schema = schema();
+        let rows = schema["issue_types"].as_array().unwrap();
+        let aliases: FxHashSet<(String, String, String)> = rows
+            .iter()
+            .filter(|row| row["command"].as_str() == Some("dead-code"))
+            .filter_map(|row| {
+                let alias = row["ts_alias"].as_object()?;
+                Some((
+                    row["id"].as_str().unwrap().to_string(),
+                    alias["name"].as_str().unwrap().to_string(),
+                    alias["parent"].as_str().unwrap().to_string(),
+                ))
+            })
+            .collect();
+        let expected: FxHashSet<(String, String, String)> = result_issue_metas()
+            .filter_map(|meta| {
+                let alias = meta.ts_alias()?;
+                Some((
+                    meta.code.to_string(),
+                    alias.name.to_string(),
+                    alias.parent.to_string(),
+                ))
+            })
+            .collect();
+
+        assert!(aliases.contains(&(
+            "unused-dependency".to_string(),
+            "UnusedDependency".to_string(),
+            "UnusedDependencyFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-dev-dependency".to_string(),
+            "UnusedDependency".to_string(),
+            "UnusedDevDependencyFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-optional-dependency".to_string(),
+            "UnusedDependency".to_string(),
+            "UnusedOptionalDependencyFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-class-member".to_string(),
+            "UnusedMember".to_string(),
+            "UnusedClassMemberFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-enum-member".to_string(),
+            "UnusedMember".to_string(),
+            "UnusedEnumMemberFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-store-member".to_string(),
+            "UnusedMember".to_string(),
+            "UnusedStoreMemberFinding".to_string()
+        )));
+        assert_eq!(
+            expected, aliases,
+            "schema ts_alias rows must exactly mirror IssueResultMeta::ts_alias()"
+        );
+
+        for (_, name, parent) in aliases {
+            assert!(
+                name.chars().next().is_some_and(char::is_uppercase),
+                "TS alias name must be PascalCase: {name}"
+            );
+            assert!(
+                parent.ends_with("Finding"),
+                "TS alias parent must target a finding wrapper: {parent}"
+            );
         }
     }
 

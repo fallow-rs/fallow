@@ -12,6 +12,7 @@
  *      `pnpm --filter fallow-vscode check:codegen`
  */
 import { compile } from "json-schema-to-typescript";
+import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,9 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_ROOT = resolve(SCRIPT_DIR, "..");
 const REPO_ROOT = resolve(EXTENSION_ROOT, "..", "..");
 const SCHEMA_PATH = resolve(REPO_ROOT, "docs", "output-schema.json");
+// Optional test hook: provide a captured `fallow schema` JSON file instead of
+// invoking Cargo while keeping normal codegen on the live capability manifest.
+const CAPABILITY_SCHEMA_PATH_ENV = "FALLOW_CODEGEN_CAPABILITY_SCHEMA";
 const SCHEMA_VERSION_SOURCE = resolve(
   REPO_ROOT,
   "crates",
@@ -317,73 +321,6 @@ const FLATTEN_DEDUPED_ALIASES = [
 ];
 
 /**
- * Bare-name backwards-compat aliases for the dead-code findings wrapped by
- * the #384 schema-derive ladder. Each maps the pre-wrapper bare name to its
- * `*Finding` envelope. jstt drops the orphan inner definitions because every
- * field is subsumed by the flattening wrapper, so external `fallow/types`
- * consumers importing the bare names would break at upgrade time without
- * these aliases. The published v2.x stable surface guarantees the bare
- * names; the kind-tagged `FallowOutput` major bump (#413) will remove them
- * after one minor cycle of `@deprecated` JSDoc.
- *
- * Generated under the same "Backwards-compat aliases" section as the
- * `FLATTEN_DEDUPED_ALIASES` dupes / health-secondary entries.
- */
-const BARE_DEAD_CODE_ALIASES = [
-  { name: "BoundaryViolation", parent: "BoundaryViolationFinding" },
-  { name: "CircularDependency", parent: "CircularDependencyFinding" },
-  { name: "DuplicateExport", parent: "DuplicateExportFinding" },
-  { name: "EmptyCatalogGroup", parent: "EmptyCatalogGroupFinding" },
-  {
-    name: "MisconfiguredDependencyOverride",
-    parent: "MisconfiguredDependencyOverrideFinding",
-  },
-  { name: "PrivateTypeLeak", parent: "PrivateTypeLeakFinding" },
-  { name: "ReExportCycle", parent: "ReExportCycleFinding" },
-  { name: "TestOnlyDependency", parent: "TestOnlyDependencyFinding" },
-  { name: "TypeOnlyDependency", parent: "TypeOnlyDependencyFinding" },
-  { name: "UnlistedDependency", parent: "UnlistedDependencyFinding" },
-  {
-    name: "UnresolvedCatalogReference",
-    parent: "UnresolvedCatalogReferenceFinding",
-  },
-  { name: "UnresolvedImport", parent: "UnresolvedImportFinding" },
-  { name: "UnusedCatalogEntry", parent: "UnusedCatalogEntryFinding" },
-  {
-    name: "UnusedDependencyOverride",
-    parent: "UnusedDependencyOverrideFinding",
-  },
-  { name: "UnusedExport", parent: "UnusedExportFinding" },
-  { name: "UnusedFile", parent: "UnusedFileFinding" },
-];
-
-/**
- * Bare-name union aliases for the dead-code findings whose pre-wrapper
- * shape was a union of multiple `*Finding` types (e.g. pre-#384
- * `UnusedDependency` covered the production / dev / optional dep variants).
- * The wire shape is unchanged; the bare names exist for the same
- * `json-schema-to-typescript` orphan reason as `BARE_DEAD_CODE_ALIASES`.
- */
-const BARE_DEAD_CODE_UNION_ALIASES = [
-  {
-    name: "UnusedDependency",
-    parents: [
-      "UnusedDependencyFinding",
-      "UnusedDevDependencyFinding",
-      "UnusedOptionalDependencyFinding",
-    ],
-  },
-  {
-    name: "UnusedMember",
-    parents: [
-      "UnusedClassMemberFinding",
-      "UnusedEnumMemberFinding",
-      "UnusedStoreMemberFinding",
-    ],
-  },
-];
-
-/**
  * Header emitted above the appended aliases so the published
  * `npm/fallow/types/output-contract.d.ts` (and the extension-internal
  * mirror) carry the alias policy inline. Public-consumer reference lives
@@ -421,7 +358,7 @@ const BACKWARDS_COMPAT_ALIASES_HEADER = `
 `;
 
 /**
- * Build the JSDoc description for a uniform `BARE_DEAD_CODE_ALIASES` entry
+ * Build the JSDoc description for a uniform schema-backed dead-code alias
  * (`X = XFinding`). Kept terse because each alias has the same rationale:
  * #384 wrapped the bare finding and jstt drops the orphan.
  */
@@ -437,7 +374,7 @@ function bareDeadCodeAliasDescription(name, parent) {
 }
 
 /**
- * Build the JSDoc description for a `BARE_DEAD_CODE_UNION_ALIASES` entry
+ * Build the JSDoc description for a schema-backed dead-code union alias
  * (`X = A | B | ...`). Same rationale as the single-parent template.
  */
 function bareDeadCodeUnionAliasDescription(name, parents) {
@@ -452,6 +389,60 @@ function bareDeadCodeUnionAliasDescription(name, parents) {
   );
 }
 
+async function loadCapabilitySchema() {
+  const schemaPath = process.env[CAPABILITY_SCHEMA_PATH_ENV];
+  if (schemaPath) {
+    return JSON.parse(await readFile(schemaPath, "utf8"));
+  }
+  const raw = execFileSync(
+    "cargo",
+    ["run", "--quiet", "-p", "fallow-cli", "--bin", "fallow", "--", "schema"],
+    {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+  return JSON.parse(raw);
+}
+
+function deadCodeAliasesFromCapabilitySchema(schema) {
+  const groups = new Map();
+  for (const issue of schema.issue_types ?? []) {
+    if (issue.command !== "dead-code" || !issue.ts_alias) {
+      continue;
+    }
+    const { name, parent } = issue.ts_alias;
+    if (typeof name !== "string" || typeof parent !== "string") {
+      throw new Error(
+        `Invalid ts_alias on issue type ${issue.id}: expected string name and parent`,
+      );
+    }
+    const parents = groups.get(name) ?? new Set();
+    parents.add(parent);
+    groups.set(name, parents);
+  }
+  if (groups.size === 0) {
+    throw new Error(
+      "No dead-code ts_alias rows found in fallow schema capability manifest",
+    );
+  }
+
+  const singles = [];
+  const unions = [];
+  for (const [name, parentSet] of [...groups.entries()].sort(([a], [b]) =>
+    a.localeCompare(b)
+  )) {
+    const parents = [...parentSet].sort((a, b) => a.localeCompare(b));
+    if (parents.length === 1) {
+      singles.push({ name, parent: parents[0] });
+    } else {
+      unions.push({ name, parents });
+    }
+  }
+  return { singles, unions };
+}
+
 /**
  * Append aliases for serde-flattened inner types that jstt dedupes (see
  * `FLATTEN_DEDUPED_ALIASES` for the full rationale and extension recipe).
@@ -463,7 +454,7 @@ function bareDeadCodeUnionAliasDescription(name, parents) {
  * `DuplicationReport` whose `clone_groups[]` items always carried injected
  * `actions[]` even before the typed wrapper migration).
  */
-function appendDedupedFlattenAliases(contents) {
+function appendDedupedFlattenAliases(contents, deadCodeAliases) {
   let out = contents;
   let backwardsCompatHeaderEmitted = false;
   for (const alias of FLATTEN_DEDUPED_ALIASES) {
@@ -481,19 +472,19 @@ function appendDedupedFlattenAliases(contents) {
           .join(" | ")}>`;
     out += `\n/**\n * ${alias.description}\n */\nexport type ${alias.name} = ${rhs};\n`;
   }
-  // Emit the BARE_DEAD_CODE_* tables under the same "Backwards-compat
-  // aliases" section header. If FLATTEN_DEDUPED_ALIASES had no
-  // backwards-compat entries, drop the header here so the section still
-  // gets one explanatory block before the first dead-code alias.
+  // Emit the schema-derived dead-code aliases under the same
+  // "Backwards-compat aliases" section header. If FLATTEN_DEDUPED_ALIASES had
+  // no backwards-compat entries, drop the header here so the section still gets
+  // one explanatory block before the first dead-code alias.
   if (!backwardsCompatHeaderEmitted) {
     out += BACKWARDS_COMPAT_ALIASES_HEADER;
     backwardsCompatHeaderEmitted = true;
   }
-  for (const alias of BARE_DEAD_CODE_ALIASES) {
+  for (const alias of deadCodeAliases.singles) {
     const description = bareDeadCodeAliasDescription(alias.name, alias.parent);
     out += `\n/**\n * ${description}\n */\nexport type ${alias.name} = ${alias.parent};\n`;
   }
-  for (const alias of BARE_DEAD_CODE_UNION_ALIASES) {
+  for (const alias of deadCodeAliases.unions) {
     const description = bareDeadCodeUnionAliasDescription(
       alias.name,
       alias.parents,
@@ -524,7 +515,7 @@ function appendDedupedFlattenAliases(contents) {
  * and `pnpm run lint` (tsc --noEmit) would fail; this assertion is
  * deliberately narrower so the failure surfaces at codegen time first.
  */
-function assertAliasesEmitted(contents) {
+function assertAliasesEmitted(contents, deadCodeAliases) {
   const assertAlias = (name, parents, table) => {
     const aliasRe = new RegExp(`^export type ${name}\\b`, "m");
     if (!aliasRe.test(contents)) {
@@ -547,17 +538,20 @@ function assertAliasesEmitted(contents) {
   for (const alias of FLATTEN_DEDUPED_ALIASES) {
     assertAlias(alias.name, [alias.parent], "FLATTEN_DEDUPED_ALIASES");
   }
-  for (const alias of BARE_DEAD_CODE_ALIASES) {
-    assertAlias(alias.name, [alias.parent], "BARE_DEAD_CODE_ALIASES");
+  for (const alias of deadCodeAliases.singles) {
+    assertAlias(alias.name, [alias.parent], "fallow schema ts_alias");
   }
-  for (const alias of BARE_DEAD_CODE_UNION_ALIASES) {
-    assertAlias(alias.name, alias.parents, "BARE_DEAD_CODE_UNION_ALIASES");
+  for (const alias of deadCodeAliases.unions) {
+    assertAlias(alias.name, alias.parents, "fallow schema ts_alias");
   }
 }
 
 async function generate() {
   const raw = await readFile(SCHEMA_PATH, "utf8");
   const parsed = JSON.parse(raw);
+  const deadCodeAliases = deadCodeAliasesFromCapabilitySchema(
+    await loadCapabilitySchema(),
+  );
   stripTitles(parsed);
   flattenRefSiblings(parsed);
   // With the root title stripped, jstt uses the second arg as the name of the
@@ -566,8 +560,9 @@ async function generate() {
   const version = await readRustSchemaVersion();
   const final = appendDedupedFlattenAliases(
     stripTrailingWhitespace(pinSchemaVersion(raw_ts, version)),
+    deadCodeAliases,
   );
-  assertAliasesEmitted(final);
+  assertAliasesEmitted(final, deadCodeAliases);
   return final;
 }
 
