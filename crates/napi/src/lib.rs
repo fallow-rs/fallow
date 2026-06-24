@@ -7,6 +7,7 @@
     )
 )]
 
+use fallow_api as api;
 use fallow_cli::programmatic;
 use napi::bindgen_prelude::{AsyncTask, JsObjectValue, ToNapiValue, Unknown};
 use napi::{Env, ScopedTask, Status};
@@ -136,7 +137,7 @@ struct CommonOptionsInput {
     legacy_envelope: Option<bool>,
 }
 
-fn map_common_options(input: CommonOptionsInput) -> napi::Result<programmatic::AnalysisOptions> {
+fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOptions> {
     let threads = input
         .threads
         .map(usize::try_from)
@@ -148,7 +149,7 @@ fn map_common_options(input: CommonOptionsInput) -> napi::Result<programmatic::A
             )
         })?;
 
-    Ok(programmatic::AnalysisOptions {
+    Ok(api::AnalysisOptions {
         root: input.root.map(std::path::PathBuf::from),
         config_path: input.config_path.map(std::path::PathBuf::from),
         no_cache: input.no_cache.unwrap_or(false),
@@ -178,15 +179,15 @@ fn normalize_enum_literal(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
-fn parse_duplication_mode(value: Option<String>) -> napi::Result<programmatic::DuplicationMode> {
+fn parse_duplication_mode(value: Option<String>) -> napi::Result<api::DuplicationMode> {
     let Some(value) = value else {
-        return Ok(programmatic::DuplicationMode::Mild);
+        return Ok(api::DuplicationMode::Mild);
     };
     match normalize_enum_literal(&value).as_str() {
-        "strict" => Ok(programmatic::DuplicationMode::Strict),
-        "mild" => Ok(programmatic::DuplicationMode::Mild),
-        "weak" => Ok(programmatic::DuplicationMode::Weak),
-        "semantic" => Ok(programmatic::DuplicationMode::Semantic),
+        "strict" => Ok(api::DuplicationMode::Strict),
+        "mild" => Ok(api::DuplicationMode::Mild),
+        "weak" => Ok(api::DuplicationMode::Weak),
+        "semantic" => Ok(api::DuplicationMode::Semantic),
         _ => Err(invalid_enum_value(
             "mode",
             &value,
@@ -195,15 +196,15 @@ fn parse_duplication_mode(value: Option<String>) -> napi::Result<programmatic::D
     }
 }
 
-fn parse_complexity_sort(value: Option<String>) -> napi::Result<programmatic::ComplexitySort> {
+fn parse_complexity_sort(value: Option<String>) -> napi::Result<api::ComplexitySort> {
     let Some(value) = value else {
-        return Ok(programmatic::ComplexitySort::Cyclomatic);
+        return Ok(api::ComplexitySort::Cyclomatic);
     };
     match normalize_enum_literal(&value).as_str() {
-        "cyclomatic" => Ok(programmatic::ComplexitySort::Cyclomatic),
-        "cognitive" => Ok(programmatic::ComplexitySort::Cognitive),
-        "lines" => Ok(programmatic::ComplexitySort::Lines),
-        "severity" => Ok(programmatic::ComplexitySort::Severity),
+        "cyclomatic" => Ok(api::ComplexitySort::Cyclomatic),
+        "cognitive" => Ok(api::ComplexitySort::Cognitive),
+        "lines" => Ok(api::ComplexitySort::Lines),
+        "severity" => Ok(api::ComplexitySort::Severity),
         _ => Err(invalid_enum_value(
             "sort",
             &value,
@@ -214,15 +215,15 @@ fn parse_complexity_sort(value: Option<String>) -> napi::Result<programmatic::Co
 
 fn parse_ownership_email_mode(
     value: Option<String>,
-) -> napi::Result<Option<programmatic::OwnershipEmailMode>> {
+) -> napi::Result<Option<api::OwnershipEmailMode>> {
     let Some(value) = value else {
         return Ok(None);
     };
     match normalize_enum_literal(&value).as_str() {
-        "raw" => Ok(Some(programmatic::OwnershipEmailMode::Raw)),
-        "handle" => Ok(Some(programmatic::OwnershipEmailMode::Handle)),
-        "anonymized" => Ok(Some(programmatic::OwnershipEmailMode::Anonymized)),
-        "hash" => Ok(Some(programmatic::OwnershipEmailMode::Hash)),
+        "raw" => Ok(Some(api::OwnershipEmailMode::Raw)),
+        "handle" => Ok(Some(api::OwnershipEmailMode::Handle)),
+        "anonymized" => Ok(Some(api::OwnershipEmailMode::Anonymized)),
+        "hash" => Ok(Some(api::OwnershipEmailMode::Hash)),
         _ => Err(invalid_enum_value(
             "ownershipEmails",
             &value,
@@ -240,14 +241,14 @@ fn narrow_to_u16(field: &str, value: u32) -> napi::Result<u16> {
     })
 }
 
-fn parse_target_effort(value: Option<String>) -> napi::Result<Option<programmatic::TargetEffort>> {
+fn parse_target_effort(value: Option<String>) -> napi::Result<Option<api::TargetEffort>> {
     let Some(value) = value else {
         return Ok(None);
     };
     match normalize_enum_literal(&value).as_str() {
-        "low" => Ok(Some(programmatic::TargetEffort::Low)),
-        "medium" => Ok(Some(programmatic::TargetEffort::Medium)),
-        "high" => Ok(Some(programmatic::TargetEffort::High)),
+        "low" => Ok(Some(api::TargetEffort::Low)),
+        "medium" => Ok(Some(api::TargetEffort::Medium)),
+        "high" => Ok(Some(api::TargetEffort::High)),
         _ => Err(invalid_enum_value(
             "effort",
             &value,
@@ -256,7 +257,7 @@ fn parse_target_effort(value: Option<String>) -> napi::Result<Option<programmati
     }
 }
 
-impl TryFrom<DeadCodeOptions> for programmatic::DeadCodeOptions {
+impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
     type Error = napi::Error;
 
     fn try_from(value: DeadCodeOptions) -> Result<Self, Self::Error> {
@@ -274,7 +275,7 @@ impl TryFrom<DeadCodeOptions> for programmatic::DeadCodeOptions {
                 explain: value.explain,
                 legacy_envelope: value.legacy_envelope,
             })?,
-            filters: programmatic::DeadCodeFilters {
+            filters: api::DeadCodeFilters {
                 unused_files: value.unused_files.unwrap_or(false),
                 unused_exports: value.unused_exports.unwrap_or(false),
                 unused_deps: value.unused_deps.unwrap_or(false),
@@ -319,11 +320,11 @@ impl TryFrom<DeadCodeOptions> for programmatic::DeadCodeOptions {
     }
 }
 
-impl TryFrom<DuplicationOptions> for programmatic::DuplicationOptions {
+impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
     type Error = napi::Error;
 
     fn try_from(value: DuplicationOptions) -> Result<Self, Self::Error> {
-        let defaults = programmatic::DuplicationOptions::default();
+        let defaults = api::DuplicationOptions::default();
         Ok(Self {
             analysis: map_common_options(CommonOptionsInput {
                 root: value.root,
@@ -362,7 +363,7 @@ impl TryFrom<DuplicationOptions> for programmatic::DuplicationOptions {
     }
 }
 
-impl TryFrom<ComplexityOptions> for programmatic::ComplexityOptions {
+impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
     type Error = napi::Error;
 
     fn try_from(value: ComplexityOptions) -> Result<Self, Self::Error> {
@@ -409,8 +410,8 @@ impl TryFrom<ComplexityOptions> for programmatic::ComplexityOptions {
     }
 }
 
-fn to_napi_error(env: Env, error: programmatic::ProgrammaticError) -> napi::Error {
-    let programmatic::ProgrammaticError {
+fn to_napi_error(env: Env, error: api::ProgrammaticError) -> napi::Error {
+    let api::ProgrammaticError {
         message,
         exit_code,
         code,
@@ -441,20 +442,19 @@ fn to_napi_error(env: Env, error: programmatic::ProgrammaticError) -> napi::Erro
     }
 }
 
-type ProgrammaticWork = Box<
-    dyn FnOnce() -> Result<serde_json::Value, programmatic::ProgrammaticError> + Send + 'static,
->;
+type ProgrammaticWork =
+    Box<dyn FnOnce() -> Result<serde_json::Value, api::ProgrammaticError> + Send + 'static>;
 
 #[doc(hidden)]
 pub struct ProgrammaticTask {
     task: Option<ProgrammaticWork>,
-    error: Option<programmatic::ProgrammaticError>,
+    error: Option<api::ProgrammaticError>,
 }
 
 impl ProgrammaticTask {
     fn new<F>(task: F) -> Self
     where
-        F: FnOnce() -> Result<serde_json::Value, programmatic::ProgrammaticError> + Send + 'static,
+        F: FnOnce() -> Result<serde_json::Value, api::ProgrammaticError> + Send + 'static,
     {
         Self {
             task: Some(Box::new(task)),
@@ -491,8 +491,7 @@ impl<'task> ScopedTask<'task> for ProgrammaticTask {
 
     fn reject(&mut self, env: &'task Env, err: napi::Error) -> napi::Result<Self::JsValue> {
         let error = self.error.take().unwrap_or_else(|| {
-            programmatic::ProgrammaticError::new(err.reason.clone(), 2)
-                .with_code("FALLOW_NODE_ERROR")
+            api::ProgrammaticError::new(err.reason.clone(), 2).with_code("FALLOW_NODE_ERROR")
         });
         Err(to_napi_error(*env, error))
     }
@@ -502,7 +501,7 @@ impl<'task> ScopedTask<'task> for ProgrammaticTask {
 pub fn detect_dead_code(
     options: Option<DeadCodeOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = programmatic::DeadCodeOptions::try_from(options.unwrap_or_default())?;
+    let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         programmatic::detect_dead_code(&options)
     })))
@@ -512,7 +511,7 @@ pub fn detect_dead_code(
 pub fn detect_circular_dependencies(
     options: Option<DeadCodeOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = programmatic::DeadCodeOptions::try_from(options.unwrap_or_default())?;
+    let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         programmatic::detect_circular_dependencies(&options)
     })))
@@ -522,7 +521,7 @@ pub fn detect_circular_dependencies(
 pub fn detect_boundary_violations(
     options: Option<DeadCodeOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = programmatic::DeadCodeOptions::try_from(options.unwrap_or_default())?;
+    let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         programmatic::detect_boundary_violations(&options)
     })))
@@ -532,7 +531,7 @@ pub fn detect_boundary_violations(
 pub fn detect_duplication(
     options: Option<DuplicationOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = programmatic::DuplicationOptions::try_from(options.unwrap_or_default())?;
+    let options = api::DuplicationOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         programmatic::detect_duplication(&options)
     })))
@@ -542,7 +541,7 @@ pub fn detect_duplication(
 pub fn compute_complexity(
     options: Option<ComplexityOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = programmatic::ComplexityOptions::try_from(options.unwrap_or_default())?;
+    let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         programmatic::compute_complexity(&options)
     })))
@@ -552,7 +551,7 @@ pub fn compute_complexity(
 pub fn compute_health(
     options: Option<ComplexityOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = programmatic::ComplexityOptions::try_from(options.unwrap_or_default())?;
+    let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         programmatic::compute_health(&options)
     })))
@@ -573,7 +572,7 @@ mod tests {
 
     #[test]
     fn dead_code_options_map_common_fields_filters_and_files() {
-        let options = programmatic::DeadCodeOptions::try_from(DeadCodeOptions {
+        let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
             root: Some("/repo".to_string()),
             config_path: Some("/repo/fallow.toml".to_string()),
             no_cache: Some(true),
@@ -672,15 +671,15 @@ mod tests {
 
     #[test]
     fn omitted_production_option_defers_to_config() {
-        let options = programmatic::DeadCodeOptions::try_from(DeadCodeOptions::default())
-            .expect("options should map");
+        let options =
+            api::DeadCodeOptions::try_from(DeadCodeOptions::default()).expect("options should map");
 
         assert_eq!(options.analysis.production_override, None);
     }
 
     #[test]
     fn explicit_production_false_is_forwarded_as_override() {
-        let options = programmatic::DeadCodeOptions::try_from(DeadCodeOptions {
+        let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
             production: Some(false),
             ..DeadCodeOptions::default()
         })
@@ -784,7 +783,7 @@ mod tests {
 
     #[test]
     fn duplication_options_map_modes_thresholds_and_flags() {
-        let options = programmatic::DuplicationOptions::try_from(DuplicationOptions {
+        let options = api::DuplicationOptions::try_from(DuplicationOptions {
             mode: Some(" SEMANTIC ".to_string()),
             min_tokens: Some(30),
             min_lines: Some(4),
@@ -798,10 +797,7 @@ mod tests {
         })
         .expect("options should map");
 
-        assert!(matches!(
-            options.mode,
-            programmatic::DuplicationMode::Semantic
-        ));
+        assert!(matches!(options.mode, api::DuplicationMode::Semantic));
         assert_eq!(options.min_tokens, 30);
         assert_eq!(options.min_lines, 4);
         assert_eq!(options.min_occurrences, 3);
@@ -814,7 +810,7 @@ mod tests {
 
     #[test]
     fn duplication_options_reject_invalid_mode_and_min_occurrences() {
-        let invalid_mode = programmatic::DuplicationOptions::try_from(DuplicationOptions {
+        let invalid_mode = api::DuplicationOptions::try_from(DuplicationOptions {
             mode: Some("exact".to_string()),
             ..DuplicationOptions::default()
         })
@@ -823,7 +819,7 @@ mod tests {
         assert_eq!(invalid_mode.status, Status::InvalidArg);
         assert!(invalid_mode.reason.contains("invalid `mode` value `exact`"));
 
-        let too_few_occurrences = programmatic::DuplicationOptions::try_from(DuplicationOptions {
+        let too_few_occurrences = api::DuplicationOptions::try_from(DuplicationOptions {
             min_occurrences: Some(1),
             ..DuplicationOptions::default()
         })
@@ -838,7 +834,7 @@ mod tests {
 
     #[test]
     fn complexity_options_map_sections_sort_ownership_effort_and_coverage() {
-        let options = programmatic::ComplexityOptions::try_from(ComplexityOptions {
+        let options = api::ComplexityOptions::try_from(ComplexityOptions {
             max_cyclomatic: Some(42),
             max_cognitive: Some(21),
             max_crap: Some(18.5),
@@ -865,10 +861,7 @@ mod tests {
         assert_eq!(options.max_cognitive, Some(21));
         assert_eq!(options.max_crap, Some(18.5));
         assert_eq!(options.top, Some(5));
-        assert!(matches!(
-            options.sort,
-            programmatic::ComplexitySort::Severity
-        ));
+        assert!(matches!(options.sort, api::ComplexitySort::Severity));
         assert!(options.complexity);
         assert!(options.file_scores);
         assert!(options.coverage_gaps);
@@ -876,13 +869,10 @@ mod tests {
         assert!(options.ownership);
         assert!(matches!(
             options.ownership_emails,
-            Some(programmatic::OwnershipEmailMode::Hash)
+            Some(api::OwnershipEmailMode::Hash)
         ));
         assert!(options.targets);
-        assert!(matches!(
-            options.effort,
-            Some(programmatic::TargetEffort::High)
-        ));
+        assert!(matches!(options.effort, Some(api::TargetEffort::High)));
         assert!(options.score);
         assert_eq!(options.since.as_deref(), Some("90d"));
         assert_eq!(options.min_commits, Some(3));
@@ -898,7 +888,7 @@ mod tests {
 
     #[test]
     fn complexity_options_reject_invalid_values_and_out_of_range_thresholds() {
-        let invalid_sort = programmatic::ComplexityOptions::try_from(ComplexityOptions {
+        let invalid_sort = api::ComplexityOptions::try_from(ComplexityOptions {
             sort: Some("weighted".to_string()),
             ..ComplexityOptions::default()
         })
@@ -911,7 +901,7 @@ mod tests {
                 .contains("invalid `sort` value `weighted`")
         );
 
-        let invalid_ownership = programmatic::ComplexityOptions::try_from(ComplexityOptions {
+        let invalid_ownership = api::ComplexityOptions::try_from(ComplexityOptions {
             ownership_emails: Some("cleartext".to_string()),
             ..ComplexityOptions::default()
         })
@@ -923,7 +913,7 @@ mod tests {
                 .contains("invalid `ownershipEmails` value `cleartext`")
         );
 
-        let invalid_effort = programmatic::ComplexityOptions::try_from(ComplexityOptions {
+        let invalid_effort = api::ComplexityOptions::try_from(ComplexityOptions {
             effort: Some("tiny".to_string()),
             ..ComplexityOptions::default()
         })
@@ -935,7 +925,7 @@ mod tests {
                 .contains("invalid `effort` value `tiny`")
         );
 
-        let invalid_threshold = programmatic::ComplexityOptions::try_from(ComplexityOptions {
+        let invalid_threshold = api::ComplexityOptions::try_from(ComplexityOptions {
             max_cyclomatic: Some(u32::from(u16::MAX) + 1),
             ..ComplexityOptions::default()
         })
@@ -959,8 +949,7 @@ mod tests {
         assert!(consumed.reason.contains("already consumed"));
 
         let mut failing_task = ProgrammaticTask::new(|| {
-            Err(programmatic::ProgrammaticError::new("analysis failed", 2)
-                .with_code("FALLOW_TEST_FAILURE"))
+            Err(api::ProgrammaticError::new("analysis failed", 2).with_code("FALLOW_TEST_FAILURE"))
         });
 
         let error = failing_task.compute().expect_err("task should fail");

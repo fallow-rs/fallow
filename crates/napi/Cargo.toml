@@ -19,6 +19,7 @@ crate-type = ["cdylib"]
 doctest = false
 
 [dependencies]
+fallow-api = { workspace = true }
 fallow-cli = { workspace = true }
 napi = { version = "3", features = ["serde-json", "tokio_rt"] }
 napi-derive = "3"
