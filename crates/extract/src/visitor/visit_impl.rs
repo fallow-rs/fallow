@@ -3700,10 +3700,6 @@ impl<'a> ModuleInfoExtractor {
         let refs = crate::sfc_template::angular::collect_angular_template_refs(template);
         for name in refs.identifiers {
             self.record_angular_template_member_fact(name.clone());
-            self.member_accesses.push(MemberAccess {
-                object: crate::sfc_template::angular::ANGULAR_TPL_SENTINEL.to_string(),
-                member: name,
-            });
         }
         self.member_accesses.extend(refs.member_accesses);
         let template_offset = meta
@@ -3724,21 +3720,13 @@ impl<'a> ModuleInfoExtractor {
     }
 
     /// Record Angular `host:` binding and `inputs:` / `outputs:` member refs as
-    /// template-sentinel member accesses.
+    /// typed template member facts.
     fn record_angular_template_members(&mut self, meta: &super::helpers::AngularComponentMetadata) {
         for name in &meta.host_member_refs {
             self.record_angular_template_member_fact(name.clone());
-            self.member_accesses.push(MemberAccess {
-                object: crate::sfc_template::angular::ANGULAR_TPL_SENTINEL.to_string(),
-                member: name.clone(),
-            });
         }
         for name in &meta.input_output_members {
             self.record_angular_template_member_fact(name.clone());
-            self.member_accesses.push(MemberAccess {
-                object: crate::sfc_template::angular::ANGULAR_TPL_SENTINEL.to_string(),
-                member: name.clone(),
-            });
         }
     }
 }

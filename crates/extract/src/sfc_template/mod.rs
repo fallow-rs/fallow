@@ -17,9 +17,9 @@
 //!   external `.html` siblings (`templateUrl`). The scanner is invoked
 //!   directly from `crate::visitor::visit_impl::visit_class` for inline
 //!   templates and from `crate::html::parse_html_to_module_with_complexity`
-//!   for external templates. Bare identifier references use an
-//!   `ANGULAR_TPL_SENTINEL` object name so the analysis phase can bridge
-//!   them to the importing component's class members.
+//!   for external templates. Bare identifier references are persisted as typed
+//!   semantic facts so the analysis phase can bridge them to the importing
+//!   component's class members.
 //!
 //! - **Glimmer (`glimmer`)**: Ember `.gts` / `.gjs` single-file components.
 //!   The host file IS valid JS once `<template>...</template>` blocks are

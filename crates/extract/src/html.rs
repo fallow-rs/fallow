@@ -5,8 +5,7 @@
 //! transitive imports) are reachable from the HTML entry point.
 //!
 //! Also scans for Angular template syntax (`{{ }}`, `[prop]`, `(event)`, `@if`, etc.)
-//! and stores referenced identifiers as typed semantic facts, while also emitting
-//! legacy sentinel `MemberAccess` entries during the migration.
+//! and stores referenced identifiers as typed semantic facts.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -14,7 +13,7 @@ use std::sync::LazyLock;
 use oxc_span::Span;
 
 use crate::asset_url::normalize_asset_url;
-use crate::sfc_template::angular::{self, ANGULAR_TPL_SENTINEL};
+use crate::sfc_template::angular;
 use crate::{
     AngularTemplateMemberAccessFact, ImportInfo, ImportedName, MemberAccess, ModuleInfo,
     SemanticFact,
@@ -197,14 +196,7 @@ fn collect_html_module_parts(source: &str, need_complexity: bool) -> HtmlModuleP
             SemanticFact::AngularTemplateMemberAccess(AngularTemplateMemberAccessFact { member })
         })
         .collect();
-    let mut member_accesses: Vec<MemberAccess> = identifiers
-        .into_iter()
-        .map(|member| MemberAccess {
-            object: ANGULAR_TPL_SENTINEL.to_string(),
-            member,
-        })
-        .collect();
-    member_accesses.extend(template_member_accesses);
+    let member_accesses = template_member_accesses;
 
     // Angular external template (`templateUrl`): harvest the custom element
     // selector tags rendered here so the Angular `unrendered-component` detector
@@ -778,22 +770,6 @@ mod tests {
              <button (click)=\"onButtonClick()\">Toggle</button>",
             0,
         );
-        let names: rustc_hash::FxHashSet<&str> = info
-            .member_accesses
-            .iter()
-            .filter(|a| a.object == ANGULAR_TPL_SENTINEL)
-            .map(|a| a.member.as_str())
-            .collect();
-        assert!(names.contains("title"), "should contain 'title'");
-        assert!(
-            names.contains("isHighlighted"),
-            "should contain 'isHighlighted'"
-        );
-        assert!(names.contains("greeting"), "should contain 'greeting'");
-        assert!(
-            names.contains("onButtonClick"),
-            "should contain 'onButtonClick'"
-        );
         let fact_names: rustc_hash::FxHashSet<&str> = info
             .semantic_facts
             .iter()
@@ -814,6 +790,13 @@ mod tests {
         assert!(
             fact_names.contains("onButtonClick"),
             "should contain 'onButtonClick'"
+        );
+        assert!(
+            info.member_accesses
+                .iter()
+                .all(|access| access.object != angular::ANGULAR_TPL_SENTINEL),
+            "Angular template refs should not emit legacy sentinels: {:?}",
+            info.member_accesses
         );
     }
 

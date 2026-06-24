@@ -59,6 +59,12 @@ fn angular_template_fact_members(info: &crate::ModuleInfo) -> Vec<&str> {
         .collect()
 }
 
+fn has_no_angular_template_sentinel(info: &crate::ModuleInfo) -> bool {
+    info.member_accesses
+        .iter()
+        .all(|access| access.object != crate::sfc_template::angular::ANGULAR_TPL_SENTINEL)
+}
+
 fn has_playwright_fixture_use_fact(
     info: &crate::ModuleInfo,
     test_name: &str,
@@ -5917,7 +5923,7 @@ fn non_component_decorator_ignored() {
 }
 
 #[test]
-fn angular_inline_template_emits_sentinel_member_accesses() {
+fn angular_inline_template_emits_typed_member_facts() {
     let info = parse(
         r#"
         import { Component, signal } from '@angular/core';
@@ -5932,18 +5938,14 @@ fn angular_inline_template_emits_sentinel_member_accesses() {
         }
         "#,
     );
-    let sentinel = crate::sfc_template::angular::ANGULAR_TPL_SENTINEL;
-    let sentinel_refs: Vec<&str> = info
-        .member_accesses
-        .iter()
-        .filter(|a| a.object == sentinel)
-        .map(|a| a.member.as_str())
-        .collect();
-    assert!(sentinel_refs.contains(&"message"));
-    assert!(sentinel_refs.contains(&"onClick"));
     let fact_refs = angular_template_fact_members(&info);
     assert!(fact_refs.contains(&"message"));
     assert!(fact_refs.contains(&"onClick"));
+    assert!(
+        has_no_angular_template_sentinel(&info),
+        "inline template should not emit legacy sentinels, found: {:?}",
+        info.member_accesses
+    );
 }
 
 #[test]
@@ -5961,12 +5963,13 @@ fn angular_inline_template_backtick_scanned() {
         }
         ",
     );
-    let sentinel = crate::sfc_template::angular::ANGULAR_TPL_SENTINEL;
-    let has_title = info
-        .member_accesses
-        .iter()
-        .any(|a| a.object == sentinel && a.member == "title");
-    assert!(has_title);
+    let fact_refs = angular_template_fact_members(&info);
+    assert!(fact_refs.contains(&"title"));
+    assert!(
+        has_no_angular_template_sentinel(&info),
+        "backtick template should not emit legacy sentinels, found: {:?}",
+        info.member_accesses
+    );
 }
 
 #[test]
@@ -6056,7 +6059,7 @@ export class A {}\n",
 }
 
 #[test]
-fn angular_host_bindings_emit_sentinel_accesses() {
+fn angular_host_bindings_emit_typed_member_facts() {
     let info = parse(
         r"
         import { Component } from '@angular/core';
@@ -6079,22 +6082,16 @@ fn angular_host_bindings_emit_sentinel_accesses() {
         }
         ",
     );
-    let sentinel = crate::sfc_template::angular::ANGULAR_TPL_SENTINEL;
-    let host_refs: Vec<&str> = info
-        .member_accesses
-        .iter()
-        .filter(|a| a.object == sentinel)
-        .map(|a| a.member.as_str())
-        .collect();
-    assert!(host_refs.contains(&"hostClass"));
-    assert!(host_refs.contains(&"isActive"));
-    assert!(host_refs.contains(&"onHostClick"));
-    assert!(host_refs.contains(&"customColor"));
     let fact_refs = angular_template_fact_members(&info);
     assert!(fact_refs.contains(&"hostClass"));
     assert!(fact_refs.contains(&"isActive"));
     assert!(fact_refs.contains(&"onHostClick"));
     assert!(fact_refs.contains(&"customColor"));
+    assert!(
+        has_no_angular_template_sentinel(&info),
+        "host bindings should not emit legacy sentinels, found: {:?}",
+        info.member_accesses
+    );
 }
 
 #[test]
@@ -6114,19 +6111,20 @@ fn angular_host_binding_skips_keywords() {
         export class App {}
         ",
     );
-    let sentinel = crate::sfc_template::angular::ANGULAR_TPL_SENTINEL;
     assert!(
+        angular_template_fact_members(&info).is_empty(),
+        "keyword-only host bindings should not emit template facts, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        has_no_angular_template_sentinel(&info),
+        "keyword-only host bindings should not emit legacy sentinels, found: {:?}",
         info.member_accesses
-            .iter()
-            .filter(|a| a.object == sentinel)
-            .map(|a| a.member.as_str())
-            .next()
-            .is_none()
     );
 }
 
 #[test]
-fn angular_inputs_outputs_metadata_emit_sentinel_accesses() {
+fn angular_inputs_outputs_metadata_emit_typed_member_facts() {
     let info = parse(
         r"
         import { Component } from '@angular/core';
@@ -6144,20 +6142,19 @@ fn angular_inputs_outputs_metadata_emit_sentinel_accesses() {
         }
         ",
     );
-    let sentinel = crate::sfc_template::angular::ANGULAR_TPL_SENTINEL;
-    let refs: Vec<&str> = info
-        .member_accesses
-        .iter()
-        .filter(|a| a.object == sentinel)
-        .map(|a| a.member.as_str())
-        .collect();
+    let refs = angular_template_fact_members(&info);
     assert!(refs.contains(&"bankName"));
     assert!(refs.contains(&"id"));
     assert!(refs.contains(&"clicked"));
+    assert!(
+        has_no_angular_template_sentinel(&info),
+        "inputs/outputs metadata should not emit legacy sentinels, found: {:?}",
+        info.member_accesses
+    );
 }
 
 #[test]
-fn angular_queries_metadata_emit_sentinel_accesses() {
+fn angular_queries_metadata_emit_typed_member_facts() {
     let info = parse(
         r"
         import { Component, ViewChild, ContentChild, ElementRef } from '@angular/core';
@@ -6176,15 +6173,14 @@ fn angular_queries_metadata_emit_sentinel_accesses() {
         }
         ",
     );
-    let sentinel = crate::sfc_template::angular::ANGULAR_TPL_SENTINEL;
-    let refs: Vec<&str> = info
-        .member_accesses
-        .iter()
-        .filter(|a| a.object == sentinel)
-        .map(|a| a.member.as_str())
-        .collect();
+    let refs = angular_template_fact_members(&info);
     assert!(refs.contains(&"header"));
     assert!(refs.contains(&"footer"));
+    assert!(
+        has_no_angular_template_sentinel(&info),
+        "queries metadata should not emit legacy sentinels, found: {:?}",
+        info.member_accesses
+    );
 }
 
 #[test]
@@ -6451,17 +6447,16 @@ fn angular_component_all_metadata_combined() {
         .any(|i| i.source == "./app.html" && matches!(i.imported_name, ImportedName::SideEffect));
     assert!(has_html_import);
 
-    let sentinel = crate::sfc_template::angular::ANGULAR_TPL_SENTINEL;
-    let refs: Vec<&str> = info
-        .member_accesses
-        .iter()
-        .filter(|a| a.object == sentinel)
-        .map(|a| a.member.as_str())
-        .collect();
+    let refs = angular_template_fact_members(&info);
     assert!(refs.contains(&"greeting"));
     assert!(refs.contains(&"handleClick"));
     assert!(refs.contains(&"externalInput"));
     assert!(refs.contains(&"externalOutput"));
+    assert!(
+        has_no_angular_template_sentinel(&info),
+        "external template should not emit legacy sentinels, found: {:?}",
+        info.member_accesses
+    );
 
     let app_export = info
         .exports
