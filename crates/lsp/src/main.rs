@@ -1188,8 +1188,9 @@ impl FallowLspServer {
             self.client.log_message(level, msg).await;
         }
 
-        let mut all_diagnostics =
-            diagnostics::build_diagnostics(&output.results, &output.duplication, root);
+        let mut all_diagnostics = diagnostics::build_diagnostics(
+            diagnostics::DiagnosticInput::new(&output.results, &output.duplication, root),
+        );
         attach_changed_since_data(&mut all_diagnostics, changed_since_for_data);
         self.publish_collected_diagnostics(all_diagnostics, version_snapshot)
             .await;

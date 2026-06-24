@@ -737,7 +737,7 @@ mod tests {
     };
     use ls_types::{DiagnosticSeverity, NumberOrString, Uri};
 
-    use crate::diagnostics::build_diagnostics;
+    use crate::diagnostics::build_diagnostics_for_test;
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -789,7 +789,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri_a = Uri::from_file_path(&file_a).unwrap();
         let file_diags = &diags[&uri_a];
@@ -842,7 +842,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&file_a).unwrap();
         let d = &diags[&uri][0];
@@ -867,7 +867,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
         assert!(diags.is_empty());
     }
 
@@ -909,7 +909,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri_a = Uri::from_file_path(&file_a).unwrap();
         let uri_b = Uri::from_file_path(&file_b).unwrap();
@@ -1012,7 +1012,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         // file_a (absolute) still renders; the relative hop is silently
         // skipped from rendering only.
@@ -1038,7 +1038,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri_a = Uri::from_file_path(&file_a).unwrap();
         let uri_b = Uri::from_file_path(&file_b).unwrap();
@@ -1096,7 +1096,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&file).unwrap();
         let d = &diags[&uri][0];
@@ -1130,7 +1130,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&from_file).unwrap();
         let file_diags = &diags[&uri];
@@ -1172,7 +1172,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&file).unwrap();
         let file_diags = diags
@@ -1217,7 +1217,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&file).unwrap();
         let file_diags = diags
@@ -1256,7 +1256,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&file).unwrap();
         let file_diags = diags
@@ -1295,7 +1295,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&file).unwrap();
         let file_diags = diags
@@ -1334,7 +1334,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&file).unwrap();
         let file_diags = diags
@@ -1373,7 +1373,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&file).unwrap();
         let file_diags = diags
@@ -1413,7 +1413,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&file).unwrap();
         let file_diags = diags
@@ -1452,7 +1452,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&from_file).unwrap();
         let d = &diags[&uri][0];
@@ -1480,7 +1480,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&from_file).unwrap();
         let d = &diags[&uri][0];
@@ -1525,7 +1525,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&from_file).unwrap();
         let file_diags = &diags[&uri];
@@ -1541,7 +1541,7 @@ mod tests {
         let results = AnalysisResults::default();
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
         assert!(diags.is_empty());
     }
 }

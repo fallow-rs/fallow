@@ -33,11 +33,35 @@ pub const FIRST_LINE_RANGE: Range = Range {
 };
 
 /// Build all LSP diagnostics from analysis results and duplication report, keyed by file URI.
-pub fn build_diagnostics(
-    results: &AnalysisResults,
-    duplication: &DuplicationReport,
-    root: &Path,
-) -> FxHashMap<Uri, Vec<Diagnostic>> {
+#[derive(Clone, Copy)]
+pub struct DiagnosticInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub duplication: &'a DuplicationReport,
+    pub root: &'a Path,
+}
+
+impl<'a> DiagnosticInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        duplication: &'a DuplicationReport,
+        root: &'a Path,
+    ) -> Self {
+        Self {
+            results,
+            duplication,
+            root,
+        }
+    }
+}
+
+/// Build all LSP diagnostics from a typed editor analysis input, keyed by file URI.
+pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagnostic>> {
+    let DiagnosticInput {
+        results,
+        duplication,
+        root,
+    } = input;
     let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
     let package_json_uri = Uri::from_file_path(root.join("package.json"));
 
@@ -62,6 +86,15 @@ pub fn build_diagnostics(
     security::push_security_diagnostics(&mut map, results);
 
     map
+}
+
+#[cfg(test)]
+fn build_diagnostics_for_test(
+    results: &AnalysisResults,
+    duplication: &DuplicationReport,
+    root: &Path,
+) -> FxHashMap<Uri, Vec<Diagnostic>> {
+    build_diagnostics(DiagnosticInput::new(results, duplication, root))
 }
 
 #[cfg(test)]
@@ -109,7 +142,7 @@ mod tests {
         let duplication = empty_duplication();
         let root = test_root();
 
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
         assert!(diags.is_empty());
     }
 
@@ -151,7 +184,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&path).unwrap();
         let file_diags = &diags[&uri];
@@ -189,7 +222,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         for file_diags in diags.values() {
             for d in file_diags {
@@ -228,7 +261,7 @@ mod tests {
             });
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
         let uri = Uri::from_file_path(&path).unwrap();
         let file_diags = diags.get(&uri).expect("security diagnostic present");
         assert!(file_diags.iter().any(|d| matches!(
@@ -293,7 +326,7 @@ mod severity_gate {
     use fallow_engine::results::AnalysisResults;
     use ls_types::DiagnosticSeverity;
 
-    use crate::diagnostics::build_diagnostics;
+    use crate::diagnostics::build_diagnostics_for_test;
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -425,7 +458,7 @@ mod severity_gate {
         let root = test_root();
         let mut results = AnalysisResults::default();
         build(&root, &mut results);
-        let diags = build_diagnostics(&results, &empty_duplication(), &root);
+        let diags = build_diagnostics_for_test(&results, &empty_duplication(), &root);
         let all: Vec<_> = diags.values().flatten().collect();
         assert_eq!(
             all.len(),

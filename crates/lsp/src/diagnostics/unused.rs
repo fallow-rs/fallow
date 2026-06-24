@@ -897,7 +897,7 @@ mod tests {
     };
     use ls_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Uri};
 
-    use crate::diagnostics::{FIRST_LINE_RANGE, build_diagnostics};
+    use crate::diagnostics::{FIRST_LINE_RANGE, build_diagnostics_for_test};
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -948,7 +948,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("src/utils.ts")).unwrap();
         let file_diags = diags.get(&uri).expect("should have diagnostics for file");
@@ -985,7 +985,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("src/types.ts")).unwrap();
         let file_diags = &diags[&uri];
@@ -1011,7 +1011,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("src/dead.ts")).unwrap();
         let file_diags = &diags[&uri];
@@ -1046,7 +1046,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("src/app.ts")).unwrap();
         let file_diags = &diags[&uri];
@@ -1078,7 +1078,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
@@ -1105,7 +1105,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
@@ -1134,7 +1134,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
@@ -1166,7 +1166,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("src/enums.ts")).unwrap();
         let file_diags = &diags[&uri];
@@ -1200,7 +1200,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("src/service.ts")).unwrap();
         let file_diags = &diags[&uri];
@@ -1231,7 +1231,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("src/store.ts")).unwrap();
         let file_diags = &diags[&uri];
@@ -1263,7 +1263,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
@@ -1298,7 +1298,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
@@ -1333,7 +1333,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("package.json")).unwrap();
         let file_diags = &diags[&uri];
@@ -1370,7 +1370,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("src/edge.ts")).unwrap();
         let d = &diags[&uri][0];
@@ -1394,7 +1394,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
         let file_diags = diags
@@ -1430,7 +1430,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
         let d = &diags[&uri][0];
@@ -1455,7 +1455,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
         let file_diags = diags
@@ -1491,7 +1491,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&abs_path).unwrap();
         let file_diags = diags
@@ -1528,7 +1528,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&abs_path).unwrap();
         let d = &diags[&uri][0];
@@ -1569,7 +1569,7 @@ mod tests {
             ));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&yaml_path).unwrap();
         let file_diags = diags
@@ -1617,7 +1617,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&json_path).unwrap();
         let d = &diags[&uri][0];

@@ -224,7 +224,7 @@ mod tests {
     };
     use ls_types::{DiagnosticSeverity, NumberOrString, Uri};
 
-    use crate::diagnostics::build_diagnostics;
+    use crate::diagnostics::build_diagnostics_for_test;
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -284,7 +284,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri_utils = Uri::from_file_path(&utils_path).unwrap();
         let uri_helpers = Uri::from_file_path(&helpers_path).unwrap();
@@ -352,7 +352,7 @@ mod tests {
             },
         };
 
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri_a = Uri::from_file_path(root.join("src/a.ts")).unwrap();
         let diags_a = &diags[&uri_a];
@@ -416,7 +416,7 @@ mod tests {
             },
         };
 
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
         let uri = Uri::from_file_path(root.join("src/only.ts")).unwrap();
         let d = &diags[&uri][0];
 
@@ -441,7 +441,7 @@ mod tests {
             }));
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&path).unwrap();
         let d = &diags[&uri][0];
@@ -495,7 +495,7 @@ mod tests {
         );
 
         let duplication = empty_duplication();
-        let diags = build_diagnostics(&results, &duplication, &root);
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
 
         let uri = Uri::from_file_path(&path).unwrap();
         let file_diags = &diags[&uri];
