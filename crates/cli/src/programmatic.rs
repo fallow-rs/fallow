@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{EmailMode, OutputFormat};
 use fallow_core::results::AnalysisResults;
-use serde::Serialize;
 
 use crate::check::{CheckOptions, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions};
@@ -11,283 +10,47 @@ use crate::health_types::EffortEstimate;
 use crate::report::ci::diff_filter::{DiffIndex, LoadedDiff, MAX_DIFF_BYTES};
 use crate::report::{build_duplication_json, build_health_json};
 
-pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
-    "root",
-    "config",
-    "no-cache",
-    "threads",
-    "changed-since",
-    "diff-file",
-    "production",
-    "workspace",
-    "changed-workspaces",
-    "explain",
-    "legacy-envelope",
-];
-
-/// Structured error surface for the programmatic API.
-#[derive(Debug, Clone, Serialize)]
-pub struct ProgrammaticError {
-    pub message: String,
-    pub exit_code: u8,
-    pub code: Option<String>,
-    pub help: Option<String>,
-    pub context: Option<String>,
-}
-
-impl ProgrammaticError {
-    #[must_use]
-    pub fn new(message: impl Into<String>, exit_code: u8) -> Self {
-        Self {
-            message: message.into(),
-            exit_code,
-            code: None,
-            help: None,
-            context: None,
-        }
-    }
-
-    #[must_use]
-    pub fn with_help(mut self, help: impl Into<String>) -> Self {
-        self.help = Some(help.into());
-        self
-    }
-
-    #[must_use]
-    pub fn with_code(mut self, code: impl Into<String>) -> Self {
-        self.code = Some(code.into());
-        self
-    }
-
-    #[must_use]
-    pub fn with_context(mut self, context: impl Into<String>) -> Self {
-        self.context = Some(context.into());
-        self
-    }
-}
-
-impl std::fmt::Display for ProgrammaticError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for ProgrammaticError {}
+pub use fallow_api::{
+    AnalysisOptions, COMMON_ANALYSIS_OPTION_FLAGS, ComplexityOptions, ComplexitySort,
+    DeadCodeFilters, DeadCodeOptions, DuplicationMode, DuplicationOptions, OwnershipEmailMode,
+    ProgrammaticError, TargetEffort,
+};
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
-/// Shared options for all one-shot analyses.
-#[derive(Debug, Clone, Default)]
-pub struct AnalysisOptions {
-    pub root: Option<PathBuf>,
-    pub config_path: Option<PathBuf>,
-    pub no_cache: bool,
-    pub threads: Option<usize>,
-    pub diff_file: Option<PathBuf>,
-    /// Legacy convenience override. `true` forces production mode; `false`
-    /// defers to config unless `production_override` is set.
-    pub production: bool,
-    /// Explicit production override from an embedder option. `None` means
-    /// use the project config for the current analysis.
-    pub production_override: Option<bool>,
-    pub changed_since: Option<String>,
-    pub workspace: Option<Vec<String>>,
-    pub changed_workspaces: Option<String>,
-    pub explain: bool,
-    /// Return the one-cycle legacy root envelope without top-level `kind`.
-    pub legacy_envelope: bool,
-}
-
-/// Issue-type filters for the dead-code analysis.
-#[derive(Debug, Clone, Default)]
-pub struct DeadCodeFilters {
-    pub unused_files: bool,
-    pub unused_exports: bool,
-    pub unused_deps: bool,
-    pub unused_types: bool,
-    pub private_type_leaks: bool,
-    pub unused_enum_members: bool,
-    pub unused_class_members: bool,
-    pub unused_store_members: bool,
-    pub unprovided_injects: bool,
-    pub unrendered_components: bool,
-    pub unused_component_props: bool,
-    pub unused_component_emits: bool,
-    pub unused_component_inputs: bool,
-    pub unused_component_outputs: bool,
-    pub unused_svelte_events: bool,
-    pub unused_server_actions: bool,
-    pub unused_load_data_keys: bool,
-    pub unresolved_imports: bool,
-    pub unlisted_deps: bool,
-    pub duplicate_exports: bool,
-    pub circular_deps: bool,
-    pub re_export_cycles: bool,
-    pub boundary_violations: bool,
-    pub policy_violations: bool,
-    pub stale_suppressions: bool,
-    pub unused_catalog_entries: bool,
-    pub empty_catalog_groups: bool,
-    pub unresolved_catalog_references: bool,
-    pub unused_dependency_overrides: bool,
-    pub misconfigured_dependency_overrides: bool,
-}
-
-/// Options for dead-code-oriented analyses.
-#[derive(Debug, Clone, Default)]
-pub struct DeadCodeOptions {
-    pub analysis: AnalysisOptions,
-    pub filters: DeadCodeFilters,
-    pub files: Vec<PathBuf>,
-    pub include_entry_exports: bool,
-}
-
-/// Programmatic duplication mode selection.
-#[derive(Debug, Clone, Copy, Default)]
-pub enum DuplicationMode {
-    Strict,
-    #[default]
-    Mild,
-    Weak,
-    Semantic,
-}
-
-impl DuplicationMode {
-    const fn to_cli(self) -> DupesMode {
-        match self {
-            Self::Strict => DupesMode::Strict,
-            Self::Mild => DupesMode::Mild,
-            Self::Weak => DupesMode::Weak,
-            Self::Semantic => DupesMode::Semantic,
-        }
+const fn duplication_mode_to_cli(mode: DuplicationMode) -> DupesMode {
+    match mode {
+        DuplicationMode::Strict => DupesMode::Strict,
+        DuplicationMode::Mild => DupesMode::Mild,
+        DuplicationMode::Weak => DupesMode::Weak,
+        DuplicationMode::Semantic => DupesMode::Semantic,
     }
 }
 
-/// Options for duplication analysis.
-#[derive(Debug, Clone)]
-pub struct DuplicationOptions {
-    pub analysis: AnalysisOptions,
-    pub mode: DuplicationMode,
-    pub min_tokens: usize,
-    pub min_lines: usize,
-    /// Minimum number of occurrences (instances) before a clone group is
-    /// reported. Values below 2 are silently treated as 2 (a single
-    /// occurrence isn't a duplicate, so the engine no-ops). The CLI and
-    /// MCP surfaces hard-reject `< 2` at parse time; the programmatic
-    /// path is permissive because callers may construct this from
-    /// untyped configuration.
-    pub min_occurrences: usize,
-    pub threshold: f64,
-    pub skip_local: bool,
-    pub cross_language: bool,
-    /// Exclude module wiring from clone detection. `None` defers to the project
-    /// config (which defaults to `true` since #1224); `Some(false)` forces
-    /// module wiring to be counted again.
-    pub ignore_imports: Option<bool>,
-    pub top: Option<usize>,
-}
-
-impl Default for DuplicationOptions {
-    fn default() -> Self {
-        Self {
-            analysis: AnalysisOptions::default(),
-            mode: DuplicationMode::Mild,
-            min_tokens: 50,
-            min_lines: 5,
-            min_occurrences: 2,
-            threshold: 0.0,
-            skip_local: false,
-            cross_language: false,
-            ignore_imports: None,
-            top: None,
-        }
+const fn complexity_sort_to_cli(sort: ComplexitySort) -> SortBy {
+    match sort {
+        ComplexitySort::Severity => SortBy::Severity,
+        ComplexitySort::Cyclomatic => SortBy::Cyclomatic,
+        ComplexitySort::Cognitive => SortBy::Cognitive,
+        ComplexitySort::Lines => SortBy::Lines,
     }
 }
 
-/// Sort criteria for complexity findings.
-#[derive(Debug, Clone, Copy, Default)]
-pub enum ComplexitySort {
-    #[default]
-    Cyclomatic,
-    Cognitive,
-    Lines,
-    Severity,
-}
-
-impl ComplexitySort {
-    const fn to_cli(self) -> SortBy {
-        match self {
-            Self::Severity => SortBy::Severity,
-            Self::Cyclomatic => SortBy::Cyclomatic,
-            Self::Cognitive => SortBy::Cognitive,
-            Self::Lines => SortBy::Lines,
-        }
+const fn ownership_email_mode_to_config(mode: OwnershipEmailMode) -> EmailMode {
+    match mode {
+        OwnershipEmailMode::Raw => EmailMode::Raw,
+        OwnershipEmailMode::Handle => EmailMode::Handle,
+        OwnershipEmailMode::Anonymized => EmailMode::Anonymized,
+        OwnershipEmailMode::Hash => EmailMode::Hash,
     }
 }
 
-/// Privacy mode for ownership-aware hotspot output.
-#[derive(Debug, Clone, Copy, Default)]
-pub enum OwnershipEmailMode {
-    Raw,
-    #[default]
-    Handle,
-    Anonymized,
-    /// Legacy spelling retained for embedders that already pass `hash`.
-    Hash,
-}
-
-impl OwnershipEmailMode {
-    const fn to_config(self) -> EmailMode {
-        match self {
-            Self::Raw => EmailMode::Raw,
-            Self::Handle => EmailMode::Handle,
-            Self::Anonymized => EmailMode::Anonymized,
-            Self::Hash => EmailMode::Hash,
-        }
+const fn target_effort_to_cli(effort: TargetEffort) -> EffortEstimate {
+    match effort {
+        TargetEffort::Low => EffortEstimate::Low,
+        TargetEffort::Medium => EffortEstimate::Medium,
+        TargetEffort::High => EffortEstimate::High,
     }
-}
-
-/// Effort filter for refactoring targets.
-#[derive(Debug, Clone, Copy)]
-pub enum TargetEffort {
-    Low,
-    Medium,
-    High,
-}
-
-impl TargetEffort {
-    const fn to_cli(self) -> EffortEstimate {
-        match self {
-            Self::Low => EffortEstimate::Low,
-            Self::Medium => EffortEstimate::Medium,
-            Self::High => EffortEstimate::High,
-        }
-    }
-}
-
-/// Options for complexity / health analysis.
-#[derive(Debug, Clone, Default)]
-pub struct ComplexityOptions {
-    pub analysis: AnalysisOptions,
-    pub max_cyclomatic: Option<u16>,
-    pub max_cognitive: Option<u16>,
-    pub max_crap: Option<f64>,
-    pub top: Option<usize>,
-    pub sort: ComplexitySort,
-    pub complexity: bool,
-    pub file_scores: bool,
-    pub coverage_gaps: bool,
-    pub hotspots: bool,
-    pub ownership: bool,
-    pub ownership_emails: Option<OwnershipEmailMode>,
-    pub targets: bool,
-    pub css: bool,
-    pub effort: Option<TargetEffort>,
-    pub score: bool,
-    pub since: Option<String>,
-    pub min_commits: Option<u32>,
-    pub coverage: Option<PathBuf>,
-    pub coverage_root: Option<PathBuf>,
 }
 
 struct ResolvedAnalysisOptions {
@@ -305,38 +68,38 @@ struct ResolvedAnalysisOptions {
     legacy_envelope: bool,
 }
 
-impl AnalysisOptions {
-    fn resolve(&self) -> ProgrammaticResult<ResolvedAnalysisOptions> {
-        validate_analysis_option_shape(self)?;
-        let root = resolve_analysis_root(self.root.as_deref())?;
-        validate_analysis_config_path(self.config_path.as_deref())?;
+fn resolve_analysis_options(
+    options: &AnalysisOptions,
+) -> ProgrammaticResult<ResolvedAnalysisOptions> {
+    validate_analysis_option_shape(options)?;
+    let root = resolve_analysis_root(options.root.as_deref())?;
+    validate_analysis_config_path(options.config_path.as_deref())?;
 
-        let threads = self.threads.unwrap_or_else(default_threads);
-        let pool = build_analysis_thread_pool(threads)?;
-        let diff = self
-            .diff_file
-            .as_deref()
-            .map(|path| load_explicit_diff_file(path, &root))
-            .transpose()?;
-        let production_override = self
-            .production_override
-            .or_else(|| self.production.then_some(true));
+    let threads = options.threads.unwrap_or_else(default_threads);
+    let pool = build_analysis_thread_pool(threads)?;
+    let diff = options
+        .diff_file
+        .as_deref()
+        .map(|path| load_explicit_diff_file(path, &root))
+        .transpose()?;
+    let production_override = options
+        .production_override
+        .or_else(|| options.production.then_some(true));
 
-        Ok(ResolvedAnalysisOptions {
-            root,
-            config_path: self.config_path.clone(),
-            no_cache: self.no_cache,
-            threads,
-            pool,
-            diff,
-            production_override,
-            changed_since: self.changed_since.clone(),
-            workspace: self.workspace.clone(),
-            changed_workspaces: self.changed_workspaces.clone(),
-            explain: self.explain,
-            legacy_envelope: self.legacy_envelope,
-        })
-    }
+    Ok(ResolvedAnalysisOptions {
+        root,
+        config_path: options.config_path.clone(),
+        no_cache: options.no_cache,
+        threads,
+        pool,
+        diff,
+        production_override,
+        changed_since: options.changed_since.clone(),
+        workspace: options.workspace.clone(),
+        changed_workspaces: options.changed_workspaces.clone(),
+        explain: options.explain,
+        legacy_envelope: options.legacy_envelope,
+    })
 }
 
 fn validate_analysis_option_shape(options: &AnalysisOptions) -> ProgrammaticResult<()> {
@@ -713,7 +476,7 @@ fn filter_for_boundary_violations(results: &AnalysisResults) -> AnalysisResults 
 
 /// Run the dead-code analysis and return the CLI JSON contract as a value.
 pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_json::Value> {
-    let resolved = options.analysis.resolve()?;
+    let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| {
         let filters = to_issue_filters(&options.filters);
         let trace_opts = TraceOptions {
@@ -743,7 +506,7 @@ pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_j
 pub fn detect_circular_dependencies(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<serde_json::Value> {
-    let resolved = options.analysis.resolve()?;
+    let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| {
         let filters = to_issue_filters(&options.filters);
         let trace_opts = TraceOptions {
@@ -775,7 +538,7 @@ pub fn detect_circular_dependencies(
 pub fn detect_boundary_violations(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<serde_json::Value> {
-    let resolved = options.analysis.resolve()?;
+    let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| {
         let filters = to_issue_filters(&options.filters);
         let trace_opts = TraceOptions {
@@ -803,7 +566,7 @@ pub fn detect_boundary_violations(
 
 /// Run the duplication analysis and return the CLI JSON contract as a value.
 pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<serde_json::Value> {
-    let resolved = options.analysis.resolve()?;
+    let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| {
         let dupes_options = DupesOptions {
             root: &resolved.root,
@@ -812,7 +575,7 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
             no_cache: resolved.no_cache,
             threads: resolved.threads,
             quiet: true,
-            mode: Some(options.mode.to_cli()),
+            mode: Some(duplication_mode_to_cli(options.mode)),
             min_tokens: Some(options.min_tokens),
             min_lines: Some(options.min_lines),
             min_occurrences: Some(options.min_occurrences),
@@ -873,7 +636,7 @@ fn build_complexity_options<'a>(
         max_cognitive: options.max_cognitive,
         max_crap: options.max_crap,
         top: options.top,
-        sort: options.sort.to_cli(),
+        sort: complexity_sort_to_cli(options.sort),
         production: resolved.production_override.unwrap_or(false),
         production_override: resolved.production_override,
         changed_since: resolved.changed_since.as_deref(),
@@ -890,13 +653,13 @@ fn build_complexity_options<'a>(
         config_activates_coverage_gaps: !state.any_section,
         hotspots: state.hotspots,
         ownership: state.ownership,
-        ownership_emails: options.ownership_emails.map(OwnershipEmailMode::to_config),
+        ownership_emails: options.ownership_emails.map(ownership_email_mode_to_config),
         targets: state.targets,
         css: options.css,
         force_full: state.force_full,
         score_only_output: state.score_only_output,
         enforce_coverage_gap_gate: true,
-        effort: options.effort.map(TargetEffort::to_cli),
+        effort: options.effort.map(target_effort_to_cli),
         score: state.score,
         min_score: None,
         since: options.since.as_deref(),
@@ -989,7 +752,7 @@ fn is_score_only_output(options: &ComplexityOptions, hotspots: bool, targets: bo
 
 /// Run the health / complexity analysis and return the CLI JSON contract as a value.
 pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
-    let resolved = options.analysis.resolve()?;
+    let resolved = resolve_analysis_options(&options.analysis)?;
     if let Some(path) = &options.coverage
         && !path.exists()
     {
@@ -1173,20 +936,20 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let root = dir.path();
 
-        let one = AnalysisOptions {
+        let one_options = AnalysisOptions {
             root: Some(root.to_path_buf()),
             threads: Some(1),
             ..AnalysisOptions::default()
-        }
-        .resolve()
-        .expect("one-thread options should resolve");
-        let two = AnalysisOptions {
+        };
+        let one =
+            resolve_analysis_options(&one_options).expect("one-thread options should resolve");
+        let two_options = AnalysisOptions {
             root: Some(root.to_path_buf()),
             threads: Some(2),
             ..AnalysisOptions::default()
-        }
-        .resolve()
-        .expect("two-thread options should resolve");
+        };
+        let two =
+            resolve_analysis_options(&two_options).expect("two-thread options should resolve");
 
         assert_eq!(one.install(rayon::current_num_threads), 1);
         assert_eq!(two.install(rayon::current_num_threads), 2);
@@ -1322,12 +1085,12 @@ mod tests {
     #[test]
     fn explicit_diff_file_rejects_stdin_sentinel() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let Err(error) = AnalysisOptions {
+        let options = AnalysisOptions {
             root: Some(dir.path().to_path_buf()),
             diff_file: Some(PathBuf::from("-")),
             ..AnalysisOptions::default()
-        }
-        .resolve() else {
+        };
+        let Err(error) = resolve_analysis_options(&options) else {
             panic!("stdin sentinel is not part of the programmatic API");
         };
 
@@ -1362,13 +1125,13 @@ mod tests {
 
     #[test]
     fn resolve_rejects_zero_threads() {
-        let err = AnalysisOptions {
+        let options = AnalysisOptions {
             threads: Some(0),
             ..AnalysisOptions::default()
-        }
-        .resolve()
-        .err()
-        .expect("zero threads must be rejected");
+        };
+        let err = resolve_analysis_options(&options)
+            .err()
+            .expect("zero threads must be rejected");
         assert_eq!(err.exit_code, 2);
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_THREADS"));
         assert_eq!(err.context.as_deref(), Some("analysis.threads"));
@@ -1376,14 +1139,14 @@ mod tests {
 
     #[test]
     fn resolve_rejects_mutually_exclusive_workspace_flags() {
-        let err = AnalysisOptions {
+        let options = AnalysisOptions {
             workspace: Some(vec!["packages/*".to_owned()]),
             changed_workspaces: Some("HEAD~1".to_owned()),
             ..AnalysisOptions::default()
-        }
-        .resolve()
-        .err()
-        .expect("workspace + changed_workspaces must be rejected");
+        };
+        let err = resolve_analysis_options(&options)
+            .err()
+            .expect("workspace + changed_workspaces must be rejected");
         assert_eq!(
             err.code.as_deref(),
             Some("FALLOW_MUTUALLY_EXCLUSIVE_OPTIONS")
@@ -1393,13 +1156,13 @@ mod tests {
 
     #[test]
     fn resolve_rejects_nonexistent_root() {
-        let err = AnalysisOptions {
+        let options = AnalysisOptions {
             root: Some(PathBuf::from("/definitely/not/a/real/path/xyzzy")),
             ..AnalysisOptions::default()
-        }
-        .resolve()
-        .err()
-        .expect("nonexistent root must be rejected");
+        };
+        let err = resolve_analysis_options(&options)
+            .err()
+            .expect("nonexistent root must be rejected");
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_ROOT"));
         assert_eq!(err.context.as_deref(), Some("analysis.root"));
     }
@@ -1409,27 +1172,27 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("not-a-dir.txt");
         std::fs::write(&file, "x").unwrap();
-        let err = AnalysisOptions {
+        let options = AnalysisOptions {
             root: Some(file),
             ..AnalysisOptions::default()
-        }
-        .resolve()
-        .err()
-        .expect("a file root must be rejected");
+        };
+        let err = resolve_analysis_options(&options)
+            .err()
+            .expect("a file root must be rejected");
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_ROOT"));
     }
 
     #[test]
     fn resolve_rejects_nonexistent_config_path() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let err = AnalysisOptions {
+        let options = AnalysisOptions {
             root: Some(dir.path().to_path_buf()),
             config_path: Some(dir.path().join("missing.fallowrc.json")),
             ..AnalysisOptions::default()
-        }
-        .resolve()
-        .err()
-        .expect("nonexistent config must be rejected");
+        };
+        let err = resolve_analysis_options(&options)
+            .err()
+            .expect("nonexistent config must be rejected");
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_CONFIG_PATH"));
         assert_eq!(err.context.as_deref(), Some("analysis.configPath"));
     }
@@ -1437,14 +1200,14 @@ mod tests {
     #[test]
     fn resolve_rejects_missing_diff_file() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let err = AnalysisOptions {
+        let options = AnalysisOptions {
             root: Some(dir.path().to_path_buf()),
             diff_file: Some(PathBuf::from("nope.diff")),
             ..AnalysisOptions::default()
-        }
-        .resolve()
-        .err()
-        .expect("missing diff file must be rejected");
+        };
+        let err = resolve_analysis_options(&options)
+            .err()
+            .expect("missing diff file must be rejected");
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_DIFF_FILE"));
         assert_eq!(err.context.as_deref(), Some("analysis.diffFile"));
     }
@@ -1453,14 +1216,14 @@ mod tests {
     fn resolve_rejects_diff_path_that_is_a_directory() {
         let dir = tempfile::tempdir().expect("temp dir");
         std::fs::create_dir_all(dir.path().join("a-dir")).unwrap();
-        let err = AnalysisOptions {
+        let options = AnalysisOptions {
             root: Some(dir.path().to_path_buf()),
             diff_file: Some(PathBuf::from("a-dir")),
             ..AnalysisOptions::default()
-        }
-        .resolve()
-        .err()
-        .expect("a directory diff path must be rejected");
+        };
+        let err = resolve_analysis_options(&options)
+            .err()
+            .expect("a directory diff path must be rejected");
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_DIFF_FILE"));
     }
 

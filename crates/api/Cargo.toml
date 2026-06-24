@@ -1,0 +1,18 @@
+[package]
+name = "fallow-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Programmatic API contract types for fallow"
+readme = "../../README.md"
+
+[dependencies]
+serde = { workspace = true }
+
+[lints]
+workspace = true

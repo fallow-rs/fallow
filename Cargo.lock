@@ -979,6 +979,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallow-api"
+version = "2.102.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "fallow-benchmarks"
 version = "2.102.0"
 dependencies = [
@@ -998,6 +1005,7 @@ dependencies = [
  "colored 3.1.1",
  "dunce",
  "ed25519-dalek",
+ "fallow-api",
  "fallow-config",
  "fallow-core",
  "fallow-cov-protocol",
