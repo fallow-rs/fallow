@@ -4949,7 +4949,7 @@ fn dotted_bound_receiver_preserves_suffix() {
 }
 
 #[test]
-fn fluent_chain_emits_sentinel_member_access() {
+fn fluent_chain_emits_typed_member_facts() {
     let info = parse(
         r#"
         import { EventBuilder } from './event-builder';
@@ -4958,30 +4958,11 @@ fn fluent_chain_emits_sentinel_member_access() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| a.object
-            == format!("{}EventBuilder:create:", crate::FLUENT_CHAIN_SENTINEL)
-            && a.member == "setProcessId"),
-        "first chained call should emit sentinel with empty chain prefix, found: {:?}",
-        info.member_accesses,
-    );
-    assert!(
-        info.member_accesses.iter().any(|a| a.object
-            == format!(
-                "{}EventBuilder:create:setProcessId",
-                crate::FLUENT_CHAIN_SENTINEL
-            )
-            && a.member == "setSubject"),
-        "second chained call should encode intermediate method in chain prefix, found: {:?}",
-        info.member_accesses,
-    );
-    assert!(
-        info.member_accesses.iter().any(|a| a.object
-            == format!(
-                "{}EventBuilder:create:setProcessId,setSubject",
-                crate::FLUENT_CHAIN_SENTINEL
-            )
-            && a.member == "build"),
-        "terminal call should encode the full prior chain, found: {:?}",
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(crate::FLUENT_CHAIN_SENTINEL)),
+        "fluent chain should not emit legacy sentinel accesses, found: {:?}",
         info.member_accesses,
     );
     let fluent_facts: Vec<_> = info

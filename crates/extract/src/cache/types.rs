@@ -614,7 +614,10 @@ use crate::MemberKind;
 ///
 /// Bumped to 197: factory-call member accesses are now persisted only as typed
 /// semantic facts, while legacy sentinels remain decode-only for older caches.
-pub(super) const CACHE_VERSION: u32 = 197;
+///
+/// Bumped to 198: fluent-chain member accesses are now persisted only as typed
+/// semantic facts, while legacy sentinels remain decode-only for older caches.
+pub(super) const CACHE_VERSION: u32 = 198;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
