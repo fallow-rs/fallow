@@ -20,7 +20,7 @@ use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
@@ -41,7 +41,7 @@ pub use types::{
 use crate::discover::{self, DiscoveredFile};
 use crate::suppress::{self, IssueKind, Suppression};
 
-/// Built-in duplicates ignores for generated framework and tool output.
+/// Built-in duplicates ignores for generated framework, tool, and test output.
 ///
 /// These are engine policy defaults, not config-file defaults: `duplicates.ignore`
 /// stays empty in round-tripped configs, while the analyzer merges these patterns
@@ -56,6 +56,10 @@ pub const DUPES_DEFAULT_IGNORES: &[&str] = &[
     "**/.cache/**",
     "**/out/**",
     "**/storybook-static/**",
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/__tests__/**",
+    "**/__mocks__/**",
 ];
 
 #[derive(Clone)]
@@ -70,18 +74,23 @@ pub(super) struct TokenizedFile {
 
 struct IgnoreSet {
     all: GlobSet,
-    defaults: Vec<(&'static str, GlobMatcher)>,
+    defaults: Vec<&'static str>,
+}
+
+enum IgnoreMatch {
+    Default(usize),
+    User,
 }
 
 impl IgnoreSet {
-    fn is_match(&self, path: &Path) -> bool {
-        self.all.is_match(path)
-    }
-
-    fn default_match_index(&self, path: &Path) -> Option<usize> {
-        self.defaults
-            .iter()
-            .position(|(_, matcher)| matcher.is_match(path))
+    fn match_path(&self, path: &Path, matches: &mut Vec<usize>) -> Option<IgnoreMatch> {
+        self.all.matches_into(path, matches);
+        let first = matches.first().copied()?;
+        if first < self.defaults.len() {
+            Some(IgnoreMatch::Default(first))
+        } else {
+            Some(IgnoreMatch::User)
+        }
     }
 }
 
@@ -414,11 +423,15 @@ fn should_skip_duplicate_file(file: &DiscoveredFile, ctx: &DuplicationTokenizeCo
     let Some(ignores) = ctx.extra_ignores else {
         return false;
     };
-    if let Some(index) = ignores.default_match_index(relative) {
-        ctx.default_skip_counts[index].fetch_add(1, Ordering::Relaxed);
-        return true;
+    let mut matches = Vec::new();
+    match ignores.match_path(relative, &mut matches) {
+        Some(IgnoreMatch::Default(index)) => {
+            ctx.default_skip_counts[index].fetch_add(1, Ordering::Relaxed);
+            true
+        }
+        Some(IgnoreMatch::User) => true,
+        None => false,
     }
-    ignores.is_match(relative)
 }
 
 fn duplication_token_cache_entry(
@@ -582,7 +595,7 @@ fn build_ignore_set(config: &DuplicatesConfig) -> Option<IgnoreSet> {
     if config.ignore_defaults {
         for pattern in DUPES_DEFAULT_IGNORES {
             let glob = Glob::new(pattern).expect("default duplication ignore pattern is valid");
-            defaults.push((*pattern, glob.compile_matcher()));
+            defaults.push(*pattern);
             builder.add(glob);
         }
     }
@@ -609,7 +622,7 @@ fn build_default_ignore_skips(
         .defaults
         .iter()
         .zip(counts)
-        .filter_map(|((pattern, _), count)| {
+        .filter_map(|(pattern, count)| {
             let count = count.load(Ordering::Relaxed);
             (count > 0).then_some(DefaultIgnoreSkipCount { pattern, count })
         })
@@ -623,6 +636,11 @@ fn build_default_ignore_skips(
 mod tests {
     use super::*;
     use crate::discover::FileId;
+
+    fn ignore_set_matches(set: &IgnoreSet, path: &str) -> bool {
+        let mut matches = Vec::new();
+        set.match_path(Path::new(path), &mut matches).is_some()
+    }
 
     #[test]
     fn find_duplicates_empty_files() {
@@ -652,9 +670,9 @@ mod tests {
         let set = build_ignore_set(&config);
         assert!(set.is_some());
         let set = set.unwrap();
-        assert!(set.is_match(Path::new("src/foo.test.ts")));
-        assert!(set.is_match(Path::new("src/bar.spec.ts")));
-        assert!(!set.is_match(Path::new("src/baz.ts")));
+        assert!(ignore_set_matches(&set, "src/foo.test.ts"));
+        assert!(ignore_set_matches(&set, "src/bar.spec.ts"));
+        assert!(!ignore_set_matches(&set, "src/baz.ts"));
     }
 
     #[test]
@@ -664,8 +682,12 @@ mod tests {
             ..DuplicatesConfig::default()
         };
         let set = build_ignore_set(&config).expect("ignore set");
-        assert!(set.is_match(Path::new(".next/static/chunks/app.js")));
-        assert!(set.is_match(Path::new("src/foo/generated.js")));
+        assert!(ignore_set_matches(&set, ".next/static/chunks/app.js"));
+        assert!(ignore_set_matches(&set, "src/foo.test.ts"));
+        assert!(ignore_set_matches(&set, "src/foo.spec.tsx"));
+        assert!(ignore_set_matches(&set, "src/__tests__/foo.ts"));
+        assert!(ignore_set_matches(&set, "src/__mocks__/foo.ts"));
+        assert!(ignore_set_matches(&set, "src/foo/generated.js"));
     }
 
     #[test]
@@ -676,8 +698,99 @@ mod tests {
             ..DuplicatesConfig::default()
         };
         let set = build_ignore_set(&config).expect("ignore set");
-        assert!(!set.is_match(Path::new(".next/static/chunks/app.js")));
-        assert!(set.is_match(Path::new("src/foo/generated.js")));
+        assert!(!ignore_set_matches(&set, ".next/static/chunks/app.js"));
+        assert!(!ignore_set_matches(&set, "src/foo.test.ts"));
+        assert!(!ignore_set_matches(&set, "src/foo.spec.tsx"));
+        assert!(!ignore_set_matches(&set, "src/__tests__/foo.ts"));
+        assert!(!ignore_set_matches(&set, "src/__mocks__/foo.ts"));
+        assert!(ignore_set_matches(&set, "src/foo/generated.js"));
+    }
+
+    #[test]
+    fn default_ignores_skip_duplicate_test_files() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let tests_dir = dir.path().join("src").join("__tests__");
+        std::fs::create_dir_all(&tests_dir).expect("create tests dir");
+
+        let code = r#"
+export function repeatedTestHelper(input: string): string {
+    const trimmed = input.trim();
+    const lowered = trimmed.toLowerCase();
+    const compact = lowered.replaceAll(" ", "-");
+    return compact;
+}
+"#;
+        let first = tests_dir.join("first.test.ts");
+        let second = tests_dir.join("second.test.ts");
+        std::fs::write(&first, code).expect("write first");
+        std::fs::write(&second, code).expect("write second");
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: first,
+                size_bytes: code.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: second,
+                size_bytes: code.len() as u64,
+            },
+        ];
+        let config = DuplicatesConfig {
+            min_tokens: 5,
+            min_lines: 2,
+            ..DuplicatesConfig::default()
+        };
+
+        let (report, skips) =
+            find_duplicates_with_default_ignore_skips(dir.path(), &files, &config);
+
+        assert!(report.clone_groups.is_empty());
+        assert_eq!(skips.total, 2);
+    }
+
+    #[test]
+    fn ignore_defaults_false_restores_duplicate_test_files() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let tests_dir = dir.path().join("src").join("__tests__");
+        std::fs::create_dir_all(&tests_dir).expect("create tests dir");
+
+        let code = r#"
+export function repeatedTestHelper(input: string): string {
+    const trimmed = input.trim();
+    const lowered = trimmed.toLowerCase();
+    const compact = lowered.replaceAll(" ", "-");
+    return compact;
+}
+"#;
+        let first = tests_dir.join("first.test.ts");
+        let second = tests_dir.join("second.test.ts");
+        std::fs::write(&first, code).expect("write first");
+        std::fs::write(&second, code).expect("write second");
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: first,
+                size_bytes: code.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: second,
+                size_bytes: code.len() as u64,
+            },
+        ];
+        let config = DuplicatesConfig {
+            min_tokens: 5,
+            min_lines: 2,
+            ignore_defaults: false,
+            ..DuplicatesConfig::default()
+        };
+
+        let report = find_duplicates(dir.path(), &files, &config);
+
+        assert!(!report.clone_groups.is_empty());
     }
 
     #[test]

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`fallow dupes` now ignores test and mock files by default.** Duplicate-code
+  analysis skips `*.test.*`, `*.spec.*`, `__tests__`, and `__mocks__` paths out
+  of the box, reducing first-run noise from intentionally repetitive tests.
+  Set `duplicates.ignoreDefaults: false` to restore the previous corpus.
+  (Closes [#1386](https://github.com/fallow-rs/fallow/issues/1386))
+
 ### Fixed
 
 - **`ignorePatterns` now accepts a leading `./`.** Entries such as
