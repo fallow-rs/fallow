@@ -88,10 +88,26 @@ struct AnalysisCompleteParams {
     clone_groups: usize,
 }
 
-fn analysis_complete_params(
-    results: &AnalysisResults,
-    duplication: &DuplicationReport,
-) -> AnalysisCompleteParams {
+#[derive(Clone, Copy)]
+struct AnalysisCompleteInput<'a> {
+    results: &'a AnalysisResults,
+    duplication: &'a DuplicationReport,
+}
+
+impl<'a> AnalysisCompleteInput<'a> {
+    const fn new(results: &'a AnalysisResults, duplication: &'a DuplicationReport) -> Self {
+        Self {
+            results,
+            duplication,
+        }
+    }
+}
+
+fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCompleteParams {
+    let AnalysisCompleteInput {
+        results,
+        duplication,
+    } = input;
     let boundary_violations = results.boundary_violations.len()
         + results.boundary_coverage_violations.len()
         + results.boundary_call_violations.len();
@@ -133,6 +149,14 @@ fn analysis_complete_params(
         duplication_percentage: duplication.stats.duplication_percentage,
         clone_groups: duplication.stats.clone_groups,
     }
+}
+
+#[cfg(test)]
+fn analysis_complete_params_for_test(
+    results: &AnalysisResults,
+    duplication: &DuplicationReport,
+) -> AnalysisCompleteParams {
+    analysis_complete_params(AnalysisCompleteInput::new(results, duplication))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1226,7 +1250,10 @@ impl FallowLspServer {
         self.publish_collected_diagnostics(all_diagnostics, version_snapshot)
             .await;
 
-        let complete_params = analysis_complete_params(&output.results, &output.duplication);
+        let complete_params = analysis_complete_params(AnalysisCompleteInput::new(
+            &output.results,
+            &output.duplication,
+        ));
         *self.results.write().await = Some(output.results);
         *self.duplication.write().await = Some(output.duplication);
         *self.inline_complexity.write().await = output.inline_complexity;
@@ -1691,13 +1718,13 @@ mod tests {
             ..AnalysisResults::default()
         };
 
-        let params = analysis_complete_params(&results, &DuplicationReport::default());
+        let params = analysis_complete_params_for_test(&results, &DuplicationReport::default());
 
         assert_eq!(params.boundary_violations, 3);
         assert_eq!(params.total_issues, 3);
 
         results.boundary_call_violations.clear();
-        let params = analysis_complete_params(&results, &DuplicationReport::default());
+        let params = analysis_complete_params_for_test(&results, &DuplicationReport::default());
         assert_eq!(params.boundary_violations, 2);
     }
 
