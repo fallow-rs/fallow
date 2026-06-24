@@ -36,7 +36,13 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
     let regression = input.regression;
     let baseline_matched = input.baseline_matched;
     let config_fixable = input.config_fixable;
-    match build_json_with_config_fixable(results, root, elapsed, config_fixable) {
+    match build_json_with_config_fixable_and_meta(
+        results,
+        root,
+        elapsed,
+        config_fixable,
+        explain.then(fallow_output::check_meta),
+    ) {
         Ok(mut output) => {
             if let Some(outcome) = regression
                 && let serde_json::Value::Object(ref mut map) = output
@@ -53,9 +59,6 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
                         "matched": matched,
                     }),
                 );
-            }
-            if explain {
-                insert_meta(&mut output, explain::check_meta());
             }
             emit_json(&output, "JSON")
         }
@@ -106,7 +109,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         grouped_by: group_by_mode_from_label(resolver.mode_label()),
         total_issues: original.total_issues(),
         groups: entries,
-        meta: None,
+        meta: explain.then(fallow_output::check_meta),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
             original,
             root,
@@ -129,10 +132,6 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
             strip_root_prefix(entry, &root_prefix);
             harmonize_multi_kind_suppress_line_actions(entry);
         }
-    }
-
-    if explain {
-        insert_meta(&mut output, explain::check_meta());
     }
 
     emit_json(&output, "JSON")
@@ -167,7 +166,17 @@ pub fn build_json_with_config_fixable(
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut envelope = build_cli_check_output(results, root, elapsed, config_fixable);
+    build_json_with_config_fixable_and_meta(results, root, elapsed, config_fixable, None)
+}
+
+fn build_json_with_config_fixable_and_meta(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    config_fixable: bool,
+    meta: Option<fallow_types::envelope::Meta>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut envelope = build_cli_check_output(results, root, elapsed, config_fixable, meta);
     envelope.next_steps = crate::report::suggestions::build_dead_code_next_steps(
         results,
         root,
@@ -185,7 +194,7 @@ pub fn build_check_json_payload_with_config_fixable(
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let envelope = build_cli_check_output(results, root, elapsed, config_fixable);
+    let envelope = build_cli_check_output(results, root, elapsed, config_fixable, None);
     let mut output = serde_json::to_value(&envelope)?;
     postprocess_check_json(&mut output, root);
     Ok(output)
@@ -196,6 +205,7 @@ fn build_cli_check_output(
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
+    meta: Option<fallow_types::envelope::Meta>,
 ) -> CheckOutput {
     build_check_output(CheckOutputInput {
         schema_version: SCHEMA_VERSION,
@@ -203,6 +213,7 @@ fn build_cli_check_output(
         elapsed,
         results: results.clone(),
         config_fixable,
+        meta,
         workspace_diagnostics: workspace_diagnostics_for_output(root),
         // Populated only at the standalone-command entry points; the combined
         // and audit envelopes reuse this struct as a sub-block and aggregate
@@ -1905,7 +1916,10 @@ mod tests {
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
         let mut output = build_json(&results, &root, elapsed).expect("should serialize");
-        insert_meta(&mut output, crate::explain::check_meta());
+        insert_meta(
+            &mut output,
+            serde_json::to_value(fallow_output::check_meta()).unwrap(),
+        );
 
         assert!(output["_meta"]["docs"].is_string());
         assert!(output["_meta"]["rules"].is_object());

@@ -534,10 +534,8 @@ fn detect_boundary_violations_with_api_fallback(
 }
 
 fn is_dead_code_api_fallback_error(error: &api::ProgrammaticError) -> bool {
-    matches!(
-        error.code.as_deref(),
-        Some("FALLOW_UNSUPPORTED_DEAD_CODE_EXPLAIN")
-    )
+    let _ = error;
+    false
 }
 
 #[napi(js_name = "detectDeadCode")]
@@ -732,7 +730,7 @@ mod tests {
     }
 
     #[test]
-    fn dead_code_fallback_preserves_legacy_explain_meta() {
+    fn dead_code_explain_uses_api_runtime_meta() {
         let project = tiny_dead_code_project();
         let root = project.path();
 
@@ -748,7 +746,7 @@ mod tests {
             },
             ..api::DeadCodeOptions::default()
         })
-        .expect("legacy fallback succeeds");
+        .expect("api runtime succeeds");
 
         assert!(json["_meta"].is_object());
         assert_eq!(unused_export_names(&json), vec!["dead"]);
@@ -816,7 +814,7 @@ mod tests {
     }
 
     #[test]
-    fn dead_code_api_fallback_is_limited_to_known_contract_gaps() {
+    fn dead_code_api_fallback_has_no_known_contract_gaps() {
         let diff_error = api::ProgrammaticError::new("unsupported", 2)
             .with_code("FALLOW_UNSUPPORTED_DEAD_CODE_DIFF_FILE");
         let explain_error = api::ProgrammaticError::new("unsupported", 2)
@@ -825,7 +823,7 @@ mod tests {
             api::ProgrammaticError::new("bad config", 2).with_code("FALLOW_CONFIG_LOAD_FAILED");
 
         assert!(!is_dead_code_api_fallback_error(&diff_error));
-        assert!(is_dead_code_api_fallback_error(&explain_error));
+        assert!(!is_dead_code_api_fallback_error(&explain_error));
         assert!(!is_dead_code_api_fallback_error(&config_error));
     }
 

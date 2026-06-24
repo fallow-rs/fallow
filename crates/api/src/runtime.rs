@@ -8,7 +8,7 @@ use fallow_config::{
 };
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
 use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
-use fallow_output::{CHECK_SCHEMA_VERSION, CheckOutputInput, build_check_output};
+use fallow_output::{CHECK_SCHEMA_VERSION, CheckOutputInput, build_check_output, check_meta};
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use globset::Glob;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -115,7 +115,6 @@ fn detect_dead_code_inner(
     resolved: &ResolvedAnalysisOptions,
     post_filter: impl FnOnce(&mut AnalysisResults),
 ) -> ProgrammaticResult<serde_json::Value> {
-    validate_dead_code_runtime_options(options, resolved)?;
     let start = Instant::now();
     let session = load_dead_code_session(options, resolved)?;
     let analysis = session.analyze_dead_code().map_err(|err| {
@@ -135,6 +134,7 @@ fn detect_dead_code_inner(
         elapsed: start.elapsed(),
         results,
         config_fixable: false,
+        meta: options.analysis.explain.then(check_meta),
         workspace_diagnostics: Vec::new(),
         next_steps: Vec::new(),
     });
@@ -174,22 +174,6 @@ fn keep_boundary_violations(results: &mut AnalysisResults) {
     results.boundary_violations = boundary_violations;
     results.boundary_coverage_violations = boundary_coverage_violations;
     results.boundary_call_violations = boundary_call_violations;
-}
-
-fn validate_dead_code_runtime_options(
-    options: &DeadCodeOptions,
-    _resolved: &ResolvedAnalysisOptions,
-) -> ProgrammaticResult<()> {
-    if options.analysis.explain {
-        return Err(ProgrammaticError::new(
-            "`explain` is not supported by the API dead-code runtime yet",
-            2,
-        )
-        .with_code("FALLOW_UNSUPPORTED_DEAD_CODE_EXPLAIN")
-        .with_context("analysis.explain")
-        .with_help("Use the CLI dead-code JSON output for `_meta` until the metadata contract moves out of fallow-cli"));
-    }
-    Ok(())
 }
 
 fn load_dead_code_session(
@@ -1438,6 +1422,32 @@ mod tests {
         .expect("dead-code succeeds");
 
         assert!(json.get("kind").is_none());
+    }
+
+    #[test]
+    fn detect_dead_code_explain_includes_output_owned_meta() {
+        let project = dead_code_project();
+        let root = project.path();
+
+        let json = detect_dead_code(&DeadCodeOptions {
+            analysis: AnalysisOptions {
+                explain: true,
+                ..analysis_at(root)
+            },
+            filters: DeadCodeFilters {
+                unused_exports: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+
+        assert_eq!(json["kind"], "dead_code");
+        assert_eq!(
+            json["_meta"]["docs"].as_str(),
+            Some(fallow_output::CHECK_DOCS)
+        );
+        assert!(json["_meta"]["rules"]["unused-export"].is_object());
     }
 
     #[test]

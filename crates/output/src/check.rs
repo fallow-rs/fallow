@@ -128,6 +128,7 @@ pub struct CheckOutputInput {
     pub elapsed: Duration,
     pub results: AnalysisResults,
     pub config_fixable: bool,
+    pub meta: Option<Meta>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
     pub next_steps: Vec<NextStep>,
 }
@@ -158,7 +159,7 @@ pub fn build_check_output(input: CheckOutputInput) -> CheckOutput {
         baseline_deltas: None,
         baseline: None,
         regression: None,
-        meta: None,
+        meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
     }
@@ -246,6 +247,7 @@ mod tests {
             elapsed: Duration::from_millis(42),
             results,
             config_fixable: false,
+            meta: None,
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
         });
