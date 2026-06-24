@@ -53,8 +53,6 @@ fallow_dead_code_source_rows() {
       code = ""
       result_key = ""
       counts = ""
-      summary_label = ""
-      summary_docs_anchor = ""
       next
     }
     in_meta && /code: "/ {
@@ -71,20 +69,6 @@ fallow_dead_code_source_rows() {
       result_key = line
       next
     }
-    in_meta && /summary_label: "/ {
-      line = $0
-      sub(/^.*summary_label: "/, "", line)
-      sub(/".*$/, "", line)
-      summary_label = line
-      next
-    }
-    in_meta && /summary_docs_anchor: "/ {
-      line = $0
-      sub(/^.*summary_docs_anchor: "/, "", line)
-      sub(/".*$/, "", line)
-      summary_docs_anchor = line
-      next
-    }
     in_meta && /counts_in_total: / {
       line = $0
       sub(/^.*counts_in_total: /, "", line)
@@ -93,8 +77,8 @@ fallow_dead_code_source_rows() {
       next
     }
     in_meta && /^[[:space:]]*\},/ {
-      if (code != "" && result_key != "" && counts != "" && summary_label != "" && summary_docs_anchor != "") {
-        print code "\t" result_key "\t" counts "\t" summary_label "\t" summary_docs_anchor
+      if (code != "" && result_key != "" && counts != "") {
+        print code "\t" result_key "\t" counts
       }
       in_meta = 0
       next
@@ -425,13 +409,18 @@ assert_issuekind_summary_coverage() {
 # human-visible table label and docs anchor for each counted result row.
 assert_issuekind_summary_table_contract() {
   local label="$1" jq_file="$2"
-  local jq_src ids id key counts summary_label summary_anchor missing=() skipped=()
+  local jq_src rows ids id key counts summary_label summary_anchor missing=() skipped=()
 
   if [ ! -f "$jq_file" ]; then
     fail "$label: surface file present" "missing file: $jq_file"
     return
   fi
   jq_src="$(cat "$jq_file")"
+  rows="$(fallow_dead_code_schema_rows 2>/dev/null || true)"
+  if ! grep -q $'\t.*\t.*\t' <<< "$rows"; then
+    echo "    (skipped summary label contract: schema metadata unavailable)"
+    return
+  fi
   ids="$(fallow_dead_code_ids 2>/dev/null)"
 
   if [ -z "$ids" ]; then

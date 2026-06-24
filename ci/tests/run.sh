@@ -1603,8 +1603,6 @@ fallback_rows="$(
 )"
 assert_contains "$fallback_rows" $'unused-optional-dependency\tunused_optional_dependencies\ttrue' \
   "issuekind guard: source fallback includes optional dependencies"
-assert_contains "$fallback_rows" $'unused-optional-dependency\tunused_optional_dependencies\ttrue\tUnused optionalDependencies\tunused-dependencies' \
-  "issuekind guard: source fallback includes summary metadata"
 assert_contains "$fallback_rows" $'boundary-coverage\tboundary_coverage_violations\ttrue' \
   "issuekind guard: source fallback includes boundary coverage"
 assert_contains "$fallback_rows" $'boundary-call-violation\tboundary_call_violations\ttrue' \

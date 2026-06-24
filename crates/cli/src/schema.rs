@@ -134,12 +134,112 @@ impl IssueTypeMeta {
         }
         if let Some(result) = issue_result_meta_by_code(bare_id) {
             meta.result_key = Some(result.result_key);
-            meta.summary_label = Some(result.summary_label);
-            meta.summary_docs_anchor = Some(result.summary_docs_anchor);
+            meta.summary_label = issue_summary_label(bare_id);
+            meta.summary_docs_anchor = issue_summary_docs_anchor(bare_id);
             meta.counts_in_total = result.counts_in_total;
         }
         meta
     }
+}
+
+fn issue_summary_label(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "unused-file" => "Unused files",
+        "unused-export" => "Unused exports",
+        "unused-type" => "Unused types",
+        "private-type-leak" => "Private type leaks",
+        "unused-dependency" => "Unused dependencies",
+        "unused-dev-dependency" => "Unused devDependencies",
+        "unused-optional-dependency" => "Unused optionalDependencies",
+        "unused-enum-member" => "Unused enum members",
+        "unused-class-member" => "Unused class members",
+        "unused-store-member" => "Unused store members",
+        "unresolved-import" => "Unresolved imports",
+        "unlisted-dependency" => "Unlisted dependencies",
+        "duplicate-export" => "Duplicate exports",
+        "type-only-dependency" => "Type-only dependencies",
+        "test-only-dependency" => "Test-only dependencies",
+        "circular-dependency" => "Circular dependencies",
+        "re-export-cycle" => "Re-export cycles",
+        "boundary-violation" => "Boundary violations",
+        "boundary-coverage" => "Boundary coverage",
+        "boundary-call-violation" => "Boundary calls",
+        "policy-violation" => "Policy violations",
+        "invalid-client-export" => "Invalid client exports",
+        "mixed-client-server-barrel" => "Mixed client/server barrels",
+        "misplaced-directive" => "Misplaced directives",
+        "unprovided-inject" => "Unprovided injects",
+        "unrendered-component" => "Unrendered components",
+        "unused-component-prop" => "Unused component props",
+        "unused-component-emit" => "Unused component emits",
+        "unused-component-input" => "Unused component inputs",
+        "unused-component-output" => "Unused component outputs",
+        "unused-svelte-event" => "Unused Svelte events",
+        "unused-server-action" => "Unused server actions",
+        "unused-load-data-key" => "Unused load data keys",
+        "route-collision" => "Route collisions",
+        "dynamic-segment-name-conflict" => "Dynamic segment conflicts",
+        "stale-suppression" => "Stale suppressions",
+        "unused-catalog-entry" => "Unused catalog entries",
+        "empty-catalog-group" => "Empty catalog groups",
+        "unresolved-catalog-reference" => "Unresolved catalog references",
+        "unused-dependency-override" => "Unused dependency overrides",
+        "misconfigured-dependency-override" => "Misconfigured dependency overrides",
+        "prop-drilling" => "Prop drilling",
+        "thin-wrapper" => "Thin wrappers",
+        "duplicate-prop-shape" => "Duplicate prop shapes",
+        _ => return None,
+    })
+}
+
+fn issue_summary_docs_anchor(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "unused-file" => "unused-files",
+        "unused-export" => "unused-exports",
+        "unused-type" => "unused-types",
+        "private-type-leak" => "private-type-leaks",
+        "unused-dependency" | "unused-dev-dependency" | "unused-optional-dependency" => {
+            "unused-dependencies"
+        }
+        "unused-enum-member" => "unused-enum-members",
+        "unused-class-member" => "unused-class-members",
+        "unused-store-member" => "unused-store-members",
+        "unresolved-import" => "unresolved-imports",
+        "unlisted-dependency" => "unlisted-dependencies",
+        "duplicate-export" => "duplicate-exports",
+        "type-only-dependency" => "type-only-dependencies",
+        "test-only-dependency" => "test-only-dependencies",
+        "circular-dependency" => "circular-dependencies",
+        "re-export-cycle" => "re-export-cycles",
+        "boundary-violation" | "boundary-coverage" | "boundary-call-violation" => {
+            "boundary-violations"
+        }
+        "policy-violation" => "policy-violations",
+        "invalid-client-export" => "invalid-client-exports",
+        "mixed-client-server-barrel" => "mixed-client-server-barrels",
+        "misplaced-directive" => "misplaced-directives",
+        "unprovided-inject" => "unprovided-inject",
+        "unrendered-component" => "unrendered-component",
+        "unused-component-prop" => "unused-component-prop",
+        "unused-component-emit" => "unused-component-emit",
+        "unused-component-input" => "unused-component-input",
+        "unused-component-output" => "unused-component-output",
+        "unused-svelte-event" => "unused-svelte-event",
+        "unused-server-action" => "unused-server-action",
+        "unused-load-data-key" => "unused-load-data-key",
+        "dynamic-segment-name-conflict" => "dynamic-segment-name-conflicts",
+        "route-collision" => "route-collisions",
+        "stale-suppression" => "stale-suppressions",
+        "unused-catalog-entry" => "unused-catalog-entries",
+        "empty-catalog-group" => "empty-catalog-groups",
+        "unresolved-catalog-reference" => "unresolved-catalog-references",
+        "unused-dependency-override" => "unused-dependency-overrides",
+        "misconfigured-dependency-override" => "misconfigured-dependency-overrides",
+        "prop-drilling" => "prop-drilling",
+        "thin-wrapper" => "thin-wrapper",
+        "duplicate-prop-shape" => "duplicate-prop-shape",
+        _ => return None,
+    })
 }
 
 fn issue_types_schema() -> serde_json::Value {
