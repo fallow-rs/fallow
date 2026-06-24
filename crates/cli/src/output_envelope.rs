@@ -11,9 +11,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
     reason = "compatibility re-export while CodeClimate output contracts move to fallow-output"
 )]
 pub use fallow_output::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue, CodeClimateIssueKind,
-    CodeClimateLines, CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, GroupByMode,
-    WorkspaceDiagnosticOutput,
+    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, CodeClimateIssue,
+    CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
+    CodeClimateSeverity, GroupByMode, WorkspaceDiagnosticOutput,
+    apply_config_fixable_to_duplicate_exports, build_check_output, build_check_summary,
 };
 use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, ToolVersion};
 use fallow_types::output::NextStep;
