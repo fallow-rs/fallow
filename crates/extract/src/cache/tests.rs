@@ -1005,6 +1005,11 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 fixture_name: "adminPage".to_string(),
                 member: "assertGreeting".to_string(),
             }),
+            SemanticFact::PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact {
+                test_name: "test".to_string(),
+                fixture_name: "adminPage".to_string(),
+                type_name: "AdminPage".to_string(),
+            }),
         ],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1111,6 +1116,11 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 test_name: "test".to_string(),
                 fixture_name: "adminPage".to_string(),
                 member: "assertGreeting".to_string(),
+            }),
+            SemanticFact::PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact {
+                test_name: "test".to_string(),
+                fixture_name: "adminPage".to_string(),
+                type_name: "AdminPage".to_string(),
             }),
         ]
     );

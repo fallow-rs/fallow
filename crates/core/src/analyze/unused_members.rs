@@ -964,6 +964,41 @@ struct PlaywrightFixtureUseAccess<'a> {
     member: &'a str,
 }
 
+struct PlaywrightFixtureDefinitionAccess<'a> {
+    test_local: &'a str,
+    fixture: &'a str,
+    type_local: &'a str,
+}
+
+fn playwright_fixture_definition_accesses(
+    module: &ResolvedModule,
+) -> Vec<PlaywrightFixtureDefinitionAccess<'_>> {
+    let mut accesses = Vec::new();
+    for fact in &module.semantic_facts {
+        if let SemanticFact::PlaywrightFixtureDefinition(access) = fact {
+            accesses.push(PlaywrightFixtureDefinitionAccess {
+                test_local: access.test_name.as_str(),
+                fixture: access.fixture_name.as_str(),
+                type_local: access.type_name.as_str(),
+            });
+        }
+    }
+    for access in &module.member_accesses {
+        let Some((test_local_name, fixture_name)) = parse_playwright_fixture_sentinel(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+        ) else {
+            continue;
+        };
+        accesses.push(PlaywrightFixtureDefinitionAccess {
+            test_local: test_local_name,
+            fixture: fixture_name,
+            type_local: access.member.as_str(),
+        });
+    }
+    accesses
+}
+
 fn playwright_fixture_use_accesses(module: &ResolvedModule) -> Vec<PlaywrightFixtureUseAccess<'_>> {
     let mut accesses = Vec::new();
     for fact in &module.semantic_facts {
@@ -1005,13 +1040,10 @@ fn push_playwright_test_key(keys: &mut Vec<PlaywrightTestKey>, key: PlaywrightTe
 
 fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> FxHashSet<&str> {
     let mut names = FxHashSet::default();
+    for access in playwright_fixture_definition_accesses(resolved) {
+        names.insert(access.test_local);
+    }
     for access in &resolved.member_accesses {
-        if let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
-            access.object.as_str(),
-            PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-        ) {
-            names.insert(test_local_name);
-        }
         if let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
             access.object.as_str(),
             PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
@@ -1094,20 +1126,14 @@ fn collect_playwright_fixture_def_targets(
     type_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
     targets_by_test: &mut FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>>,
 ) {
-    for access in &resolved.member_accesses {
-        let Some((test_local_name, fixture_name)) = parse_playwright_fixture_sentinel(
-            access.object.as_str(),
-            PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-        ) else {
-            continue;
-        };
+    for access in playwright_fixture_definition_accesses(resolved) {
         let test_keys = playwright_test_keys_for_local(
             local_to_export_keys,
             local_playwright_test_names,
             resolved.file_id,
-            test_local_name,
+            access.test_local,
         );
-        let Some(target_keys) = local_to_export_keys.get(access.member.as_str()) else {
+        let Some(target_keys) = local_to_export_keys.get(access.type_local) else {
             continue;
         };
 
@@ -1118,7 +1144,7 @@ fn collect_playwright_fixture_def_targets(
                     graph,
                     type_targets,
                     fixture_targets,
-                    fixture_name,
+                    access.fixture,
                     target_key,
                 );
             }
@@ -2696,7 +2722,8 @@ mod tests {
     use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
     use fallow_types::extract::{
         ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
-        FluentChainNewMemberAccessFact, PlaywrightFixtureUseFact, SemanticFact,
+        FluentChainNewMemberAccessFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureUseFact,
+        SemanticFact,
     };
     use oxc_span::Span;
     use std::path::PathBuf;
@@ -2834,17 +2861,18 @@ mod tests {
                     target: ResolveResult::InternalModule(FileId(2)),
                 },
             ],
-            member_accesses: vec![MemberAccess {
-                object: format!("{PLAYWRIGHT_FIXTURE_DEF_SENTINEL}test:adminPage"),
-                member: "AdminPage".to_string(),
-            }],
-            semantic_facts: vec![SemanticFact::PlaywrightFixtureUse(
-                PlaywrightFixtureUseFact {
+            semantic_facts: vec![
+                SemanticFact::PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact {
+                    test_name: "test".to_string(),
+                    fixture_name: "adminPage".to_string(),
+                    type_name: "AdminPage".to_string(),
+                }),
+                SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
                     test_name: "test".to_string(),
                     fixture_name: "adminPage".to_string(),
                     member: "assertGreeting".to_string(),
-                },
-            )],
+                }),
+            ],
             ..Default::default()
         }];
 
