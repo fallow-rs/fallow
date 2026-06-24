@@ -2395,17 +2395,8 @@ impl ModuleInfoExtractor {
             self.record_playwright_fixture_definition_fact(
                 test_name.to_string(),
                 fixture_name.clone(),
-                type_name.clone(),
+                type_name,
             );
-            self.member_accesses.push(MemberAccess {
-                object: format!(
-                    "{}{}:{}",
-                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-                    test_name,
-                    fixture_name
-                ),
-                member: type_name,
-            });
         }
     }
 
