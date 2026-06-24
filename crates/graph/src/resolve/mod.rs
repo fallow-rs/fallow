@@ -435,7 +435,7 @@ fn synthesize_auto_import_edges(
                 }
                 module.resolved_imports.push(ResolvedImport {
                     info: synthetic_auto_import_info(name, *kind),
-                    target: ResolveResult::InternalModule(*target_id),
+                    target: ResolveResult::SyntheticAutoImport(*target_id),
                 });
             }
         }

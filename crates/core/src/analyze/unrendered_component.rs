@@ -275,7 +275,7 @@ fn credit_static_import(
     let Some(target) = import.target.internal_file_id() else {
         return;
     };
-    let is_auto_import = import.info.source.starts_with("<auto-import:");
+    let is_auto_import = import.target.is_synthetic_auto_import();
     let is_referenced = referenced
         .iter()
         .any(|name| name == &import.info.local_name);
@@ -878,4 +878,132 @@ fn public_api_reexported_files(
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+    use fallow_types::extract::{ImportInfo, ReExportInfo};
+    use oxc_span::Span;
+
+    use super::*;
+    use crate::analyze::test_support::empty_module;
+    use crate::resolve::{ResolveResult, ResolvedReExport};
+
+    fn file(id: u32, path: &str) -> DiscoveredFile {
+        DiscoveredFile {
+            id: FileId(id),
+            path: PathBuf::from(path),
+            size_bytes: 1,
+        }
+    }
+
+    fn import_widget(target: ResolveResult) -> ResolvedImport {
+        ResolvedImport {
+            info: ImportInfo {
+                source: "virtual:auto-import:Widget".to_string(),
+                imported_name: ImportedName::Default,
+                local_name: "Widget".to_string(),
+                is_type_only: false,
+                from_style: false,
+                span: Span::default(),
+                source_span: Span::default(),
+            },
+            target,
+        }
+    }
+
+    fn re_export_widget() -> ResolvedReExport {
+        ResolvedReExport {
+            info: ReExportInfo {
+                source: "./Widget.vue".to_string(),
+                imported_name: "default".to_string(),
+                exported_name: "Widget".to_string(),
+                is_type_only: false,
+                span: Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(1)),
+        }
+    }
+
+    fn graph_with_consumer_import(target: ResolveResult) -> (ModuleGraph, Vec<ResolvedModule>) {
+        let files = vec![
+            file(0, "/project/src/index.ts"),
+            file(1, "/project/src/Widget.vue"),
+            file(2, "/project/src/Page.vue"),
+        ];
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: files[0].path.clone(),
+                re_exports: vec![re_export_widget()],
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: files[1].path.clone(),
+                ..ResolvedModule::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: files[2].path.clone(),
+                resolved_imports: vec![import_widget(target)],
+                ..ResolvedModule::default()
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: files[0].path.clone(),
+            source: EntryPointSource::ManualEntry,
+        }];
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        (graph, resolved_modules)
+    }
+
+    #[test]
+    fn typed_synthetic_auto_import_credits_sfc_without_source_sentinel() {
+        let mut declared_deps = FxHashSet::default();
+        declared_deps.insert("vue".to_string());
+        let modules = vec![
+            ModuleInfo {
+                file_id: FileId(0),
+                ..empty_module()
+            },
+            ModuleInfo {
+                file_id: FileId(1),
+                ..empty_module()
+            },
+            ModuleInfo {
+                file_id: FileId(2),
+                ..empty_module()
+            },
+        ];
+        let public_api_entry_points = FxHashSet::default();
+        let suppressions = SuppressionContext::new(&modules);
+
+        let (graph, resolved_modules) =
+            graph_with_consumer_import(ResolveResult::InternalModule(FileId(1)));
+        let findings = find_unrendered_components(
+            &graph,
+            &resolved_modules,
+            &modules,
+            &declared_deps,
+            &public_api_entry_points,
+            &suppressions,
+        );
+        assert_eq!(findings.len(), 1);
+
+        let (graph, resolved_modules) =
+            graph_with_consumer_import(ResolveResult::SyntheticAutoImport(FileId(1)));
+        let findings = find_unrendered_components(
+            &graph,
+            &resolved_modules,
+            &modules,
+            &declared_deps,
+            &public_api_entry_points,
+            &suppressions,
+        );
+        assert!(findings.is_empty());
+    }
 }
