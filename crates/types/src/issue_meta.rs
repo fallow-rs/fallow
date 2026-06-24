@@ -707,10 +707,6 @@ pub struct IssueResultMeta {
     pub code: &'static str,
     /// Serialized `AnalysisResults` array key that carries this issue row.
     pub result_key: &'static str,
-    /// Label used by GitHub and GitLab summary tables for this result row.
-    pub summary_label: &'static str,
-    /// Dead-code explanation anchor used by GitHub and GitLab summary tables.
-    pub summary_docs_anchor: &'static str,
     /// Whether `result_key` contributes to `AnalysisResults::total_issues()`.
     pub counts_in_total: bool,
 }
@@ -720,309 +716,221 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     IssueResultMeta {
         code: "unused-file",
         result_key: "unused_files",
-        summary_label: "Unused files",
-        summary_docs_anchor: "unused-files",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-export",
         result_key: "unused_exports",
-        summary_label: "Unused exports",
-        summary_docs_anchor: "unused-exports",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-type",
         result_key: "unused_types",
-        summary_label: "Unused types",
-        summary_docs_anchor: "unused-types",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "private-type-leak",
         result_key: "private_type_leaks",
-        summary_label: "Private type leaks",
-        summary_docs_anchor: "private-type-leaks",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-dependency",
         result_key: "unused_dependencies",
-        summary_label: "Unused dependencies",
-        summary_docs_anchor: "unused-dependencies",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-dev-dependency",
         result_key: "unused_dev_dependencies",
-        summary_label: "Unused devDependencies",
-        summary_docs_anchor: "unused-dependencies",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-optional-dependency",
         result_key: "unused_optional_dependencies",
-        summary_label: "Unused optionalDependencies",
-        summary_docs_anchor: "unused-dependencies",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-enum-member",
         result_key: "unused_enum_members",
-        summary_label: "Unused enum members",
-        summary_docs_anchor: "unused-enum-members",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-class-member",
         result_key: "unused_class_members",
-        summary_label: "Unused class members",
-        summary_docs_anchor: "unused-class-members",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-store-member",
         result_key: "unused_store_members",
-        summary_label: "Unused store members",
-        summary_docs_anchor: "unused-store-members",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unresolved-import",
         result_key: "unresolved_imports",
-        summary_label: "Unresolved imports",
-        summary_docs_anchor: "unresolved-imports",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unlisted-dependency",
         result_key: "unlisted_dependencies",
-        summary_label: "Unlisted dependencies",
-        summary_docs_anchor: "unlisted-dependencies",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "duplicate-export",
         result_key: "duplicate_exports",
-        summary_label: "Duplicate exports",
-        summary_docs_anchor: "duplicate-exports",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "type-only-dependency",
         result_key: "type_only_dependencies",
-        summary_label: "Type-only dependencies",
-        summary_docs_anchor: "type-only-dependencies",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "test-only-dependency",
         result_key: "test_only_dependencies",
-        summary_label: "Test-only dependencies",
-        summary_docs_anchor: "test-only-dependencies",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "circular-dependency",
         result_key: "circular_dependencies",
-        summary_label: "Circular dependencies",
-        summary_docs_anchor: "circular-dependencies",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "re-export-cycle",
         result_key: "re_export_cycles",
-        summary_label: "Re-export cycles",
-        summary_docs_anchor: "re-export-cycles",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "boundary-violation",
         result_key: "boundary_violations",
-        summary_label: "Boundary violations",
-        summary_docs_anchor: "boundary-violations",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "boundary-coverage",
         result_key: "boundary_coverage_violations",
-        summary_label: "Boundary coverage",
-        summary_docs_anchor: "boundary-violations",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "boundary-call-violation",
         result_key: "boundary_call_violations",
-        summary_label: "Boundary calls",
-        summary_docs_anchor: "boundary-violations",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "policy-violation",
         result_key: "policy_violations",
-        summary_label: "Policy violations",
-        summary_docs_anchor: "policy-violations",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "invalid-client-export",
         result_key: "invalid_client_exports",
-        summary_label: "Invalid client exports",
-        summary_docs_anchor: "invalid-client-exports",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "mixed-client-server-barrel",
         result_key: "mixed_client_server_barrels",
-        summary_label: "Mixed client/server barrels",
-        summary_docs_anchor: "mixed-client-server-barrels",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "misplaced-directive",
         result_key: "misplaced_directives",
-        summary_label: "Misplaced directives",
-        summary_docs_anchor: "misplaced-directives",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unprovided-inject",
         result_key: "unprovided_injects",
-        summary_label: "Unprovided injects",
-        summary_docs_anchor: "unprovided-inject",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unrendered-component",
         result_key: "unrendered_components",
-        summary_label: "Unrendered components",
-        summary_docs_anchor: "unrendered-component",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-component-prop",
         result_key: "unused_component_props",
-        summary_label: "Unused component props",
-        summary_docs_anchor: "unused-component-prop",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-component-emit",
         result_key: "unused_component_emits",
-        summary_label: "Unused component emits",
-        summary_docs_anchor: "unused-component-emit",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-component-input",
         result_key: "unused_component_inputs",
-        summary_label: "Unused component inputs",
-        summary_docs_anchor: "unused-component-input",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-component-output",
         result_key: "unused_component_outputs",
-        summary_label: "Unused component outputs",
-        summary_docs_anchor: "unused-component-output",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-svelte-event",
         result_key: "unused_svelte_events",
-        summary_label: "Unused Svelte events",
-        summary_docs_anchor: "unused-svelte-event",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-server-action",
         result_key: "unused_server_actions",
-        summary_label: "Unused server actions",
-        summary_docs_anchor: "unused-server-action",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-load-data-key",
         result_key: "unused_load_data_keys",
-        summary_label: "Unused load data keys",
-        summary_docs_anchor: "unused-load-data-key",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "route-collision",
         result_key: "route_collisions",
-        summary_label: "Route collisions",
-        summary_docs_anchor: "route-collisions",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "dynamic-segment-name-conflict",
         result_key: "dynamic_segment_name_conflicts",
-        summary_label: "Dynamic segment conflicts",
-        summary_docs_anchor: "dynamic-segment-name-conflicts",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "stale-suppression",
         result_key: "stale_suppressions",
-        summary_label: "Stale suppressions",
-        summary_docs_anchor: "stale-suppressions",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-catalog-entry",
         result_key: "unused_catalog_entries",
-        summary_label: "Unused catalog entries",
-        summary_docs_anchor: "unused-catalog-entries",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "empty-catalog-group",
         result_key: "empty_catalog_groups",
-        summary_label: "Empty catalog groups",
-        summary_docs_anchor: "empty-catalog-groups",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unresolved-catalog-reference",
         result_key: "unresolved_catalog_references",
-        summary_label: "Unresolved catalog references",
-        summary_docs_anchor: "unresolved-catalog-references",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "unused-dependency-override",
         result_key: "unused_dependency_overrides",
-        summary_label: "Unused dependency overrides",
-        summary_docs_anchor: "unused-dependency-overrides",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "misconfigured-dependency-override",
         result_key: "misconfigured_dependency_overrides",
-        summary_label: "Misconfigured dependency overrides",
-        summary_docs_anchor: "misconfigured-dependency-overrides",
         counts_in_total: true,
     },
     IssueResultMeta {
         code: "prop-drilling",
         result_key: "prop_drilling_chains",
-        summary_label: "Prop drilling",
-        summary_docs_anchor: "prop-drilling",
         counts_in_total: false,
     },
     IssueResultMeta {
         code: "thin-wrapper",
         result_key: "thin_wrappers",
-        summary_label: "Thin wrappers",
-        summary_docs_anchor: "thin-wrapper",
         counts_in_total: false,
     },
     IssueResultMeta {
         code: "duplicate-prop-shape",
         result_key: "duplicate_prop_shapes",
-        summary_label: "Duplicate prop shapes",
-        summary_docs_anchor: "duplicate-prop-shape",
         counts_in_total: false,
     },
 ];
@@ -1311,22 +1219,6 @@ mod tests {
                 seen.insert(meta.result_key),
                 "duplicate result key {}",
                 meta.result_key
-            );
-        }
-    }
-
-    #[test]
-    fn result_summary_contract_fields_are_present() {
-        for meta in ISSUE_RESULT_META {
-            assert!(
-                !meta.summary_label.is_empty(),
-                "result metadata code {} has no summary label",
-                meta.code
-            );
-            assert!(
-                !meta.summary_docs_anchor.is_empty(),
-                "result metadata code {} has no summary docs anchor",
-                meta.code
             );
         }
     }
