@@ -1129,6 +1129,7 @@ dependencies = [
  "fallow-config",
  "fallow-core",
  "fallow-types",
+ "tempfile",
 ]
 
 [[package]]

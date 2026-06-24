@@ -16,5 +16,8 @@ fallow-config = { workspace = true }
 fallow-core = { workspace = true }
 fallow-types = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true
