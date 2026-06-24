@@ -1037,7 +1037,7 @@ impl FallowLspServer {
 
         if let Some(root) = root {
             actions.extend(code_actions::build_remove_catalog_entry_actions(
-                results, root, uri, range, file_lines,
+                code_actions::CatalogEntryActionInput::new(results, root, uri, range, file_lines),
             ));
             actions.extend(code_actions::build_remove_empty_catalog_group_actions(
                 results, root, uri, range, file_lines,
