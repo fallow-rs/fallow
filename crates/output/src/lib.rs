@@ -1,0 +1,26 @@
+//! Reusable output contract types for fallow.
+//!
+//! This crate owns stable report DTOs and output-format metadata that are not
+//! tied to CLI rendering. Human, SARIF, markdown, CodeClimate, and JSON
+//! builders still live in `fallow-cli`; this crate is the typed boundary those
+//! builders and non-CLI consumers can share.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::expect_used,
+        reason = "tests use expect to keep serialization assertions concise"
+    )
+)]
+
+mod codeclimate;
+mod format;
+
+pub use codeclimate::{
+    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
+    CodeClimateOutput, CodeClimateSeverity,
+};
+pub use fallow_types::envelope;
+pub use fallow_types::output;
+pub use fallow_types::output_dead_code;
+pub use fallow_types::output_health;
+pub use format::OutputFormat;

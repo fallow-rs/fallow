@@ -4,6 +4,10 @@ use std::process::ExitCode;
 use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
+use fallow_output::{
+    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
+    CodeClimateSeverity,
+};
 
 use super::ci::{fingerprint, severity};
 use super::grouping::{self, OwnershipResolver};
@@ -11,10 +15,6 @@ use super::{emit_json, normalize_uri, relative_path};
 use crate::health_types::{
     ComplexityViolation, CoverageIntelligenceFinding, ExceededThreshold, HealthReport,
     RuntimeCoverageFinding, UntestedExportFinding, UntestedFileFinding,
-};
-use crate::output_envelope::{
-    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
-    CodeClimateSeverity,
 };
 
 /// Map fallow severity to CodeClimate severity.
@@ -1650,8 +1650,7 @@ pub fn issues_to_value(issues: &[CodeClimateIssue]) -> serde_json::Value {
 ///
 /// Returns the typed [`CodeClimateIssue`] vec; callers that emit the wire
 /// shape convert via [`issues_to_value`]. The schema drift gate locks the
-/// per-issue shape against [`CodeClimateOutput`](
-/// crate::output_envelope::CodeClimateOutput).
+/// per-issue shape against [`fallow_output::CodeClimateOutput`].
 #[must_use]
 pub fn build_codeclimate(
     results: &AnalysisResults,

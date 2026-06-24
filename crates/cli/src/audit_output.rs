@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 use colored::Colorize;
 use fallow_config::{AuditGate, OutputFormat};
+use fallow_output::CodeClimateIssue;
 
 use crate::error::emit_error;
 use crate::report;
@@ -575,7 +576,7 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
     reason = "CodeClimate issue envelope contains only infallibly serializable fields"
 )]
 fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
-    let mut all_issues: Vec<crate::output_envelope::CodeClimateIssue> = Vec::new();
+    let mut all_issues: Vec<CodeClimateIssue> = Vec::new();
 
     if let Some(ref check) = result.check {
         all_issues.extend(report::build_codeclimate(

@@ -1,5 +1,6 @@
 use std::process::ExitCode;
 
+use fallow_output::CodeClimateIssue;
 use serde_json::Value;
 
 use super::diff_filter::DiffIndex;
@@ -9,10 +10,10 @@ use super::pr_comment::{
 };
 use super::severity;
 use crate::output_envelope::{
-    CodeClimateIssue, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
-    GitLabReviewPosition, GitLabReviewPositionType, ReviewCheckConclusion, ReviewComment,
-    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
-    ReviewEnvelopeSummary, ReviewProvider, default_marker_regex, default_marker_regex_flags,
+    GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
+    GitLabReviewPositionType, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
+    ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary,
+    ReviewProvider, default_marker_regex, default_marker_regex_flags,
 };
 use crate::report::emit_json;
 

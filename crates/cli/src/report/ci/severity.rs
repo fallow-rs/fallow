@@ -1,6 +1,5 @@
 use fallow_config::Severity;
-
-use crate::output_envelope::CodeClimateSeverity;
+use fallow_output::CodeClimateSeverity;
 
 #[must_use]
 pub const fn sarif_level(severity: Severity) -> &'static str {

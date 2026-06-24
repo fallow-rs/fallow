@@ -5,6 +5,7 @@ use std::process::ExitCode;
 
 use colored::Colorize;
 use fallow_config::OutputFormat;
+use fallow_output::CodeClimateIssue;
 
 use crate::check::CheckResult;
 use crate::dupes::DupesResult;
@@ -782,8 +783,8 @@ fn build_combined_codeclimate_issues(
     check: Option<&CheckResult>,
     dupes: Option<&DupesResult>,
     health: Option<&HealthResult>,
-) -> Vec<crate::output_envelope::CodeClimateIssue> {
-    let mut all_issues: Vec<crate::output_envelope::CodeClimateIssue> = Vec::new();
+) -> Vec<CodeClimateIssue> {
+    let mut all_issues: Vec<CodeClimateIssue> = Vec::new();
     if let Some(result) = check {
         all_issues.extend(report::build_codeclimate(
             &result.results,

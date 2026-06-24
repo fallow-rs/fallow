@@ -7,6 +7,14 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use fallow_core::results::AnalysisResults;
+#[allow(
+    unused_imports,
+    reason = "compatibility re-export while CodeClimate output contracts move to fallow-output"
+)]
+pub use fallow_output::{
+    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
+    CodeClimateOutput, CodeClimateSeverity,
+};
 use fallow_types::envelope::{
     BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs, EntryPoints, Meta, RegressionResult,
     SchemaVersion, TelemetryMeta, ToolVersion,
@@ -617,93 +625,6 @@ pub enum InspectEvidenceScope {
     Symbol,
     File,
     ProjectFilteredToFile,
-}
-
-/// Envelope emitted by `fallow --format codeclimate` and
-/// `fallow --format gitlab-codequality`. GitLab Code Quality consumes the
-/// same shape. The wire form is a bare JSON array, not an object.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(title = "fallow --format codeclimate / gitlab-codequality")
-)]
-#[serde(transparent)]
-#[allow(
-    dead_code,
-    reason = "schema-source-of-truth wrapper: runtime emits a `Vec<CodeClimateIssue>` directly via `codeclimate::issues_to_value`; this newtype exists so `schemars` can title and document the bare-array shape for the drift gate."
-)]
-pub struct CodeClimateOutput(pub Vec<CodeClimateIssue>);
-
-/// Single CodeClimate-compatible issue inside [`CodeClimateOutput`].
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct CodeClimateIssue {
-    #[serde(rename = "type")]
-    pub kind: CodeClimateIssueKind,
-    pub check_name: String,
-    pub description: String,
-    pub categories: Vec<String>,
-    pub severity: CodeClimateSeverity,
-    pub fingerprint: String,
-    pub location: CodeClimateLocation,
-}
-
-/// Discriminator value for [`CodeClimateIssue::kind`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "lowercase")]
-pub enum CodeClimateIssueKind {
-    /// The only valid CodeClimate type today.
-    Issue,
-}
-
-/// CodeClimate severity scale.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "lowercase")]
-pub enum CodeClimateSeverity {
-    /// Informational. Reserved for future severity mappings; not produced
-    /// by the current runtime path (which only emits Minor / Major /
-    /// Critical via `severity_to_codeclimate` and the health / runtime-
-    /// coverage match arms).
-    #[allow(
-        dead_code,
-        reason = "schema-source-of-truth: documents the full CodeClimate severity spec; runtime never produces this variant today, but the schema needs it so consumers can validate against either fallow output or a third-party CodeClimate emitter without spec divergence."
-    )]
-    Info,
-    /// Minor finding.
-    Minor,
-    /// Major finding.
-    Major,
-    /// Critical finding.
-    Critical,
-    /// Blocker (highest severity). Reserved for future severity
-    /// mappings; not produced by the current runtime path.
-    #[allow(
-        dead_code,
-        reason = "schema-source-of-truth: documents the full CodeClimate severity spec; runtime never produces this variant today, but the schema needs it so consumers can validate against either fallow output or a third-party CodeClimate emitter without spec divergence."
-    )]
-    Blocker,
-}
-
-/// Location block inside [`CodeClimateIssue::location`].
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct CodeClimateLocation {
-    /// File path relative to the analysed root.
-    pub path: String,
-    /// Wrapper carrying the begin line so the schema lines up with
-    /// CodeClimate's spec.
-    pub lines: CodeClimateLines,
-}
-
-/// `lines.begin` for [`CodeClimateLocation`].
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct CodeClimateLines {
-    /// 1-based start line.
-    pub begin: u32,
 }
 
 /// Envelope emitted by `fallow --format review-github` / `review-gitlab`.

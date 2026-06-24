@@ -57,19 +57,17 @@ use fallow_cli::output_dupes::{
 };
 use fallow_cli::output_envelope::{
     AuditCommand, AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
-    BoundariesListing, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue,
-    CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
-    CodeClimateSeverity, CombinedOutput, CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion,
-    CoverageSetupFileToEdit, CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput,
-    CoverageSetupPackageManager, CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion,
-    CoverageSetupSnippet, DupesOutput, ExplainOutput, FallowOutput, GitHubReviewComment,
-    GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType,
-    GroupByMode, HealthOutput, InspectEvidence, InspectEvidenceScope, InspectEvidenceSection,
-    InspectFileIdentity, InspectIdentity, InspectOutput, InspectSectionStatus,
-    InspectSymbolIdentity, InspectTargetDescriptor, ListBoundariesOutput, ReviewCheckConclusion,
-    ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
-    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput,
-    ReviewReconcileSchema, WorkspaceInfo, WorkspacesOutput,
+    BoundariesListing, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CombinedOutput,
+    CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,
+    CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
+    CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet, DupesOutput,
+    ExplainOutput, FallowOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
+    GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput, InspectEvidence,
+    InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity, InspectIdentity,
+    InspectOutput, InspectSectionStatus, InspectSymbolIdentity, InspectTargetDescriptor,
+    ListBoundariesOutput, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
+    ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary,
+    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema, WorkspaceInfo, WorkspacesOutput,
 };
 use fallow_cli::report::dupes_grouping::{
     AttributedCloneGroup, AttributedInstance, DuplicationGroup,
@@ -88,6 +86,10 @@ use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
+};
+use fallow_output::{
+    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
+    CodeClimateOutput, CodeClimateSeverity,
 };
 use fallow_types::envelope::{
     AuditIntroduced, BaselineCategoryDelta, BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs,
