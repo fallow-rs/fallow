@@ -49,9 +49,12 @@ fn store_member_accesses(info: &crate::ModuleInfo) -> Vec<(String, String)> {
 fn angular_template_fact_members(info: &crate::ModuleInfo) -> Vec<&str> {
     info.semantic_facts
         .iter()
-        .map(|fact| {
-            let SemanticFact::AngularTemplateMemberAccess(access) = fact;
-            access.member.as_str()
+        .filter_map(|fact| {
+            if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
+                Some(access.member.as_str())
+            } else {
+                None
+            }
         })
         .collect()
 }

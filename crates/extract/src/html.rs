@@ -797,9 +797,12 @@ mod tests {
         let fact_names: rustc_hash::FxHashSet<&str> = info
             .semantic_facts
             .iter()
-            .map(|fact| {
-                let SemanticFact::AngularTemplateMemberAccess(access) = fact;
-                access.member.as_str()
+            .filter_map(|fact| {
+                if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
+                    Some(access.member.as_str())
+                } else {
+                    None
+                }
             })
             .collect();
         assert!(fact_names.contains("title"), "should contain 'title'");

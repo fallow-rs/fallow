@@ -1352,6 +1352,8 @@ pub enum SemanticFact {
     /// A class member referenced from an Angular template, host binding, or
     /// component metadata entry.
     AngularTemplateMemberAccess(AngularTemplateMemberAccessFact),
+    /// A member access on a value returned by an imported static factory call.
+    FactoryCallMemberAccess(FactoryCallMemberAccessFact),
 }
 
 /// A member name referenced from an Angular template surface.
@@ -1359,6 +1361,18 @@ pub enum SemanticFact {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AngularTemplateMemberAccessFact {
     /// Referenced class member name.
+    pub member: String,
+}
+
+/// A member access on a static factory call result.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FactoryCallMemberAccessFact {
+    /// Local imported class or namespace object used as the factory callee.
+    pub callee_object: String,
+    /// Static factory method invoked on the callee object.
+    pub callee_method: String,
+    /// Member accessed on the returned instance-like object.
     pub member: String,
 }
 
@@ -1835,7 +1849,7 @@ const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SemanticFact>() == 24);
+const _: () = assert!(std::mem::size_of::<SemanticFact>() == 72);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
