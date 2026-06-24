@@ -916,12 +916,12 @@ impl LanguageServer for FallowLspServer {
         let empty_report = fallow_engine::duplicates::DuplicationReport::default();
         let duplication_ref = duplication.as_ref().unwrap_or(&empty_report);
 
-        Ok(hover::build_hover(
+        Ok(hover::build_hover(hover::HoverInput::new(
             results,
             duplication_ref,
             &file_path,
             position,
-        ))
+        )))
     }
 }
 
