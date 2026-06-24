@@ -87,6 +87,29 @@ pub(crate) struct FactoryCallCandidate {
     pub(crate) callee_method: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BindingTarget {
+    Class(String),
+    FactoryCall {
+        callee_object: String,
+        callee_method: String,
+    },
+}
+
+impl BindingTarget {
+    pub(crate) fn class_name(&self) -> Option<&str> {
+        match self {
+            Self::Class(name) => Some(name),
+            Self::FactoryCall { .. } => None,
+        }
+    }
+
+    fn class_with_suffix(&self, suffix: &str) -> Option<String> {
+        self.class_name()
+            .map(|class_name| format!("{class_name}.{suffix}"))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PendingPlaywrightFactory {
     pub(crate) test_name: String,
@@ -146,7 +169,7 @@ pub(crate) struct ModuleInfoExtractor {
     handled_require_spans: FxHashSet<Span>,
     handled_import_spans: FxHashSet<Span>,
     namespace_binding_names: Vec<String>,
-    binding_target_names: FxHashMap<String, String>,
+    binding_target_names: FxHashMap<String, BindingTarget>,
     interface_property_types: FxHashMap<String, FxHashMap<String, String>>,
     pending_typed_destructures: Vec<(String, String, String)>,
     iterable_element_types: FxHashMap<String, String>,
@@ -495,8 +518,19 @@ impl ModuleInfoExtractor {
         );
     }
 
-    pub(crate) fn binding_target_names(&self) -> &FxHashMap<String, String> {
+    pub(crate) fn binding_target_names(&self) -> &FxHashMap<String, BindingTarget> {
         &self.binding_target_names
+    }
+
+    fn insert_class_binding_target(&mut self, binding: String, target: String) {
+        self.binding_target_names
+            .insert(binding, BindingTarget::Class(target));
+    }
+
+    fn insert_class_binding_target_if_absent(&mut self, binding: String, target: String) {
+        self.binding_target_names
+            .entry(binding)
+            .or_insert(BindingTarget::Class(target));
     }
 
     pub(crate) fn record_angular_template_member_fact(&mut self, member: String) {
@@ -941,11 +975,15 @@ impl ModuleInfoExtractor {
             let Some(local_name) = export.local_name.as_deref() else {
                 continue;
             };
-            let Some(target_name) = self.binding_target_names.get(local_name).cloned() else {
+            let Some(target_name) = self
+                .binding_target_names
+                .get(local_name)
+                .and_then(BindingTarget::class_name)
+            else {
                 continue;
             };
             let export_name = export.name.to_string();
-            self.record_instance_export_binding_fact(export_name, target_name);
+            self.record_instance_export_binding_fact(export_name, target_name.to_string());
         }
     }
 
@@ -1054,7 +1092,7 @@ impl ModuleInfoExtractor {
                         && m.name == callee_method
                 })
             {
-                self.binding_target_names.insert(local_name, callee_object);
+                self.insert_class_binding_target(local_name, callee_object);
                 continue;
             }
 
@@ -1063,11 +1101,13 @@ impl ModuleInfoExtractor {
                 .iter()
                 .any(|import| import.local_name == callee_object);
             if has_import {
-                let sentinel = format!(
-                    "{}{callee_object}:{callee_method}",
-                    crate::FACTORY_CALL_SENTINEL,
+                self.binding_target_names.insert(
+                    local_name,
+                    BindingTarget::FactoryCall {
+                        callee_object,
+                        callee_method,
+                    },
                 );
-                self.binding_target_names.insert(local_name, sentinel);
             }
         }
     }
@@ -1084,13 +1124,11 @@ impl ModuleInfoExtractor {
             let Some(class_name) = properties.get(&property_key) else {
                 continue;
             };
-            self.binding_target_names
-                .entry(local)
-                .or_insert_with(|| class_name.clone());
+            self.insert_class_binding_target_if_absent(local, class_name.clone());
         }
     }
 
-    fn resolve_bound_object_name(&self, object: &str) -> Option<String> {
+    fn resolve_bound_object_name(&self, object: &str) -> Option<BindingTarget> {
         if let Some(target_name) = self.binding_target_names.get(object) {
             return Some(target_name.clone());
         }
@@ -1099,10 +1137,9 @@ impl ModuleInfoExtractor {
             .iter()
             .filter_map(|(binding, target_name)| {
                 let suffix = object.strip_prefix(binding.as_str())?.strip_prefix('.')?;
-                if target_name.starts_with(crate::FACTORY_CALL_SENTINEL) {
-                    return None;
-                }
-                Some((binding.len(), format!("{target_name}.{suffix}")))
+                target_name
+                    .class_with_suffix(suffix)
+                    .map(|object_name| (binding.len(), BindingTarget::Class(object_name)))
             })
             .max_by_key(|(len, _)| *len)
             .map(|(_, object_name)| object_name)
@@ -1115,29 +1152,31 @@ impl ModuleInfoExtractor {
         let mut additional_accesses = Vec::new();
         let mut additional_facts = Vec::new();
         for access in &self.member_accesses {
-            let Some(object) = self.resolve_bound_object_name(&access.object) else {
+            let Some(target) = self.resolve_bound_object_name(&access.object) else {
                 continue;
             };
-            if let Some((callee_object, callee_method)) =
-                parse_factory_call_bound_target(object.as_str())
-            {
-                additional_facts.push((
-                    callee_object.to_string(),
-                    callee_method.to_string(),
-                    access.member.clone(),
-                ));
-                continue;
+            match target {
+                BindingTarget::Class(object) => additional_accesses.push(MemberAccess {
+                    object,
+                    member: access.member.clone(),
+                }),
+                BindingTarget::FactoryCall {
+                    callee_object,
+                    callee_method,
+                } => additional_facts.push((callee_object, callee_method, access.member.clone())),
             }
-            additional_accesses.push(MemberAccess {
-                object,
-                member: access.member.clone(),
-            });
         }
         let additional_whole: Vec<String> = self
             .whole_object_uses
             .iter()
             .filter_map(|name| self.resolve_bound_object_name(name))
-            .filter(|target| !target.starts_with(crate::FACTORY_CALL_SENTINEL))
+            .filter_map(|target| {
+                if let BindingTarget::Class(name) = target {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
             .collect();
         self.member_accesses.extend(additional_accesses);
         for (callee_object, callee_method, member) in additional_facts {
@@ -1190,8 +1229,8 @@ impl ModuleInfoExtractor {
             StructuralCallArgument::Binding(binding) => self
                 .binding_target_names
                 .get(binding.as_str())
-                .filter(|target| !target.starts_with(crate::FACTORY_CALL_SENTINEL))
-                .cloned(),
+                .and_then(BindingTarget::class_name)
+                .map(str::to_string),
         }
     }
 
@@ -1219,6 +1258,9 @@ impl ModuleInfoExtractor {
         }
         let mut aliases = Vec::new();
         for (binding_path, target_name) in &self.binding_target_names {
+            let Some(target_name) = target_name.class_name() else {
+                continue;
+            };
             if !self
                 .namespace_binding_names
                 .iter()
@@ -1240,7 +1282,7 @@ impl ModuleInfoExtractor {
                 aliases.push(fallow_types::extract::NamespaceObjectAlias {
                     via_export_name: canonical_name,
                     suffix: suffix.to_string(),
-                    namespace_local: target_name.clone(),
+                    namespace_local: target_name.to_string(),
                 });
             }
         }
@@ -1709,12 +1751,6 @@ fn extract_member_names_from_object(
         }
     }
     if names.is_empty() { None } else { Some(names) }
-}
-
-fn parse_factory_call_bound_target(object: &str) -> Option<(&str, &str)> {
-    object
-        .strip_prefix(crate::FACTORY_CALL_SENTINEL)
-        .and_then(|payload| payload.split_once(':'))
 }
 
 #[cfg(all(test, not(miri)))]

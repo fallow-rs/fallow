@@ -700,7 +700,11 @@ fn harvest_template_visible_bindings(
             .binding_target_names()
             .iter()
             .filter(|(local, _)| !local.starts_with("this."))
-            .map(|(local, target)| (local.clone(), target.clone())),
+            .filter_map(|(local, target)| {
+                target
+                    .class_name()
+                    .map(|class_name| (local.clone(), class_name.to_string()))
+            }),
     );
 }
 
