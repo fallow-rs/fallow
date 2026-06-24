@@ -1159,7 +1159,7 @@ fn print_runtime_report(
     args: &AnalyzeArgs,
 ) -> ExitCode {
     match ctx.output {
-        OutputFormat::Human => print_runtime_human(report, elapsed, args),
+        OutputFormat::Human => print_runtime_human(report, elapsed, args, ctx.root),
         _ => print_runtime_json(report, elapsed, ctx.explain),
     }
 }
@@ -1212,10 +1212,77 @@ fn print_runtime_json(
 
 const HUMAN_DEFAULT_DISPLAY_LIMIT: usize = 10;
 
+/// Build-output directories where bundlers emit `*.map` files, checked in order
+/// so the upload nudge can name the dir the user most likely needs.
+const SOURCE_MAP_BUILD_DIRS: &[&str] = &["dist", ".next", "out", "build"];
+
+/// Max recursion depth for the build-dir source-map scan: deep enough to reach
+/// `.next/static/chunks` / `dist/assets` without walking an entire tree.
+const SOURCE_MAP_SCAN_MAX_DEPTH: usize = 6;
+
+/// First build directory under `root` that contains at least one `.map` file, or
+/// `None`. A bounded, early-returning scan used only to name `--dir` in the
+/// upload nudge, never an exhaustive walk.
+fn find_local_source_map_dir(root: &Path) -> Option<&'static str> {
+    SOURCE_MAP_BUILD_DIRS.iter().copied().find(|dir| {
+        let candidate = root.join(dir);
+        candidate.is_dir() && dir_contains_source_map(&candidate, SOURCE_MAP_SCAN_MAX_DEPTH)
+    })
+}
+
+/// Whether `dir` (or a subdirectory within `depth` levels) holds a `.map` file.
+/// Skips `node_modules` and stops at the first hit.
+fn dir_contains_source_map(dir: &Path, depth: usize) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            if depth > 0
+                && path.file_name().is_none_or(|name| name != "node_modules")
+                && dir_contains_source_map(&path, depth - 1)
+            {
+                return true;
+            }
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("map"))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Copy-paste upload hint for the human report. Returned only when the cloud
+/// reported `coverage_unresolved` (runtime positions could not map to source)
+/// AND the project has built source maps on disk, so the hint can name the exact
+/// `--dir`. Re-running the upload fixes both the never-uploaded and the stale-SHA
+/// cases (it uploads maps for the current commit), so one hint covers both. The
+/// hint is human-only: JSON consumers already get the structured
+/// `coverage_unresolved` warning in `report.warnings`.
+fn source_map_upload_hint(warnings: &[RuntimeCoverageMessage], root: &Path) -> Option<String> {
+    if !warnings
+        .iter()
+        .any(|warning| warning.code.as_str() == "coverage_unresolved")
+    {
+        return None;
+    }
+    let dir = find_local_source_map_dir(root)?;
+    Some(format!(
+        "Hint: found source maps under {dir}/ that may not be uploaded for this commit.\n  Run `fallow coverage upload-source-maps --dir {dir}` so runtime coverage attributes to your source files."
+    ))
+}
+
 fn print_runtime_human(
     report: &RuntimeCoverageReport,
     elapsed: std::time::Duration,
     args: &AnalyzeArgs,
+    root: &Path,
 ) -> ExitCode {
     let display_limit = args.top.unwrap_or(HUMAN_DEFAULT_DISPLAY_LIMIT);
     println!("Runtime coverage: {}", report.verdict);
@@ -1252,6 +1319,9 @@ fn print_runtime_human(
     }
     for warning in &report.warnings {
         println!("  warning [{}]: {}", warning.code, warning.message);
+    }
+    if let Some(hint) = source_map_upload_hint(&report.warnings, root) {
+        println!("{hint}");
     }
     eprintln!("runtime coverage analyzed in {:.2}s", elapsed.as_secs_f64());
     ExitCode::SUCCESS
@@ -2072,5 +2142,54 @@ mod tests {
             importance_score: 1.0,
             reason: "Low traffic, low complexity, single owner".to_owned(),
         }
+    }
+
+    fn unresolved_warning() -> Vec<RuntimeCoverageMessage> {
+        vec![RuntimeCoverageMessage {
+            code: "coverage_unresolved".to_owned(),
+            message: "100% of runtime functions with attempted source resolution could not be mapped to source. No source maps were uploaded for this commit.".to_owned(),
+        }]
+    }
+
+    #[test]
+    fn upload_hint_absent_without_coverage_unresolved_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("dist")).unwrap();
+        std::fs::write(dir.path().join("dist").join("app.js.map"), "{}").unwrap();
+        // A different warning code must not trigger the hint even with local maps.
+        let warnings = vec![RuntimeCoverageMessage {
+            code: "no_runtime_data".to_owned(),
+            message: "no data".to_owned(),
+        }];
+        assert!(source_map_upload_hint(&warnings, dir.path()).is_none());
+    }
+
+    #[test]
+    fn upload_hint_names_the_build_dir_holding_maps() {
+        let dir = tempfile::tempdir().unwrap();
+        let chunks = dir.path().join(".next").join("static").join("chunks");
+        std::fs::create_dir_all(&chunks).unwrap();
+        std::fs::write(chunks.join("main.js.map"), "{}").unwrap();
+        let hint = source_map_upload_hint(&unresolved_warning(), dir.path()).expect("hint");
+        assert!(
+            hint.contains("fallow coverage upload-source-maps --dir .next"),
+            "{hint}"
+        );
+    }
+
+    #[test]
+    fn upload_hint_absent_when_unresolved_but_no_local_maps() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(source_map_upload_hint(&unresolved_warning(), dir.path()).is_none());
+    }
+
+    #[test]
+    fn source_map_scan_skips_node_modules() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("dist").join("node_modules").join("pkg");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("vendor.js.map"), "{}").unwrap();
+        // The only .map lives under node_modules, which the scan skips.
+        assert!(source_map_upload_hint(&unresolved_warning(), dir.path()).is_none());
     }
 }
