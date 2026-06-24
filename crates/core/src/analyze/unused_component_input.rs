@@ -163,8 +163,9 @@ pub(super) fn insert_angular_template_members<'a>(
     out: &mut FxHashSet<&'a str>,
 ) {
     for fact in &module.semantic_facts {
-        let SemanticFact::AngularTemplateMemberAccess(access) = fact;
-        out.insert(access.member.as_str());
+        if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
+            out.insert(access.member.as_str());
+        }
     }
     for access in &module.member_accesses {
         if access.object == ANGULAR_TPL_SENTINEL {

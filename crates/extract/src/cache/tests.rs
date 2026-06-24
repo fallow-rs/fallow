@@ -176,11 +176,7 @@ fn cache_store_hash_mismatch_returns_none() {
         require_calls: vec![],
         package_path_references: vec![],
         member_accesses: vec![],
-        semantic_facts: vec![SemanticFact::AngularTemplateMemberAccess(
-            AngularTemplateMemberAccessFact {
-                member: "title".to_string(),
-            },
-        )],
+        semantic_facts: Vec::new(),
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: false,
@@ -984,11 +980,16 @@ fn module_to_cached_roundtrip_dynamic_imports() {
             object: "Status".to_string(),
             member: "Active".to_string(),
         }],
-        semantic_facts: vec![SemanticFact::AngularTemplateMemberAccess(
-            AngularTemplateMemberAccessFact {
+        semantic_facts: vec![
+            SemanticFact::AngularTemplateMemberAccess(AngularTemplateMemberAccessFact {
                 member: "title".to_string(),
-            },
-        )],
+            }),
+            SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+                callee_object: "MyClass".to_string(),
+                callee_method: "getInstance".to_string(),
+                member: "getData".to_string(),
+            }),
+        ],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
         has_cjs_exports: true,
@@ -1070,11 +1071,16 @@ fn module_to_cached_roundtrip_dynamic_imports() {
     assert_eq!(restored.member_accesses[0].member, "Active");
     assert_eq!(
         restored.semantic_facts,
-        vec![SemanticFact::AngularTemplateMemberAccess(
-            AngularTemplateMemberAccessFact {
+        vec![
+            SemanticFact::AngularTemplateMemberAccess(AngularTemplateMemberAccessFact {
                 member: "title".to_string(),
-            }
-        )]
+            }),
+            SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+                callee_object: "MyClass".to_string(),
+                callee_method: "getInstance".to_string(),
+                member: "getData".to_string(),
+            }),
+        ]
     );
     assert!(restored.has_cjs_exports);
 }

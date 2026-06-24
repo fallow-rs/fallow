@@ -13,8 +13,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::suppress::ParsedSuppressions;
 use crate::{
     AngularTemplateMemberAccessFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
-    ExportName, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
-    ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
+    ExportName, FactoryCallMemberAccessFact, ImportInfo, ImportedName, MemberAccess, MemberInfo,
+    MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
@@ -500,6 +500,22 @@ impl ModuleInfoExtractor {
         self.semantic_facts
             .push(SemanticFact::AngularTemplateMemberAccess(
                 AngularTemplateMemberAccessFact { member },
+            ));
+    }
+
+    fn record_factory_call_member_fact(
+        &mut self,
+        callee_object: String,
+        callee_method: String,
+        member: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::FactoryCallMemberAccess(
+                FactoryCallMemberAccessFact {
+                    callee_object,
+                    callee_method,
+                    member,
+                },
             ));
     }
 
@@ -991,23 +1007,35 @@ impl ModuleInfoExtractor {
         if self.binding_target_names.is_empty() {
             return;
         }
-        let additional_accesses: Vec<MemberAccess> = self
-            .member_accesses
-            .iter()
-            .filter_map(|access| {
-                self.resolve_bound_object_name(&access.object)
-                    .map(|object| MemberAccess {
-                        object,
-                        member: access.member.clone(),
-                    })
-            })
-            .collect();
+        let mut additional_accesses = Vec::new();
+        let mut additional_facts = Vec::new();
+        for access in &self.member_accesses {
+            let Some(object) = self.resolve_bound_object_name(&access.object) else {
+                continue;
+            };
+            if let Some((callee_object, callee_method)) =
+                parse_factory_call_bound_target(object.as_str())
+            {
+                additional_facts.push((
+                    callee_object.to_string(),
+                    callee_method.to_string(),
+                    access.member.clone(),
+                ));
+            }
+            additional_accesses.push(MemberAccess {
+                object,
+                member: access.member.clone(),
+            });
+        }
         let additional_whole: Vec<String> = self
             .whole_object_uses
             .iter()
             .filter_map(|name| self.resolve_bound_object_name(name))
             .collect();
         self.member_accesses.extend(additional_accesses);
+        for (callee_object, callee_method, member) in additional_facts {
+            self.record_factory_call_member_fact(callee_object, callee_method, member);
+        }
         self.whole_object_uses.extend(additional_whole);
     }
 
@@ -1574,6 +1602,12 @@ fn extract_member_names_from_object(
         }
     }
     if names.is_empty() { None } else { Some(names) }
+}
+
+fn parse_factory_call_bound_target(object: &str) -> Option<(&str, &str)> {
+    object
+        .strip_prefix(crate::FACTORY_CALL_SENTINEL)
+        .and_then(|payload| payload.split_once(':'))
 }
 
 #[cfg(all(test, not(miri)))]

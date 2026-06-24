@@ -1,4 +1,4 @@
-use fallow_types::extract::{ExportName, MemberKind};
+use fallow_types::extract::{ExportName, MemberKind, SemanticFact};
 
 use crate::tests::parse_ts as parse_source;
 
@@ -1191,6 +1191,20 @@ fn static_factory_binding_emits_sentinel_member_access() {
         "sentinel should encode the call shape, got: {}",
         sentinel_access.object
     );
+    let fact = info
+        .semantic_facts
+        .iter()
+        .find_map(|fact| {
+            if let SemanticFact::FactoryCallMemberAccess(access) = fact {
+                Some(access)
+            } else {
+                None
+            }
+        })
+        .expect("typed factory call fact should be emitted");
+    assert_eq!(fact.callee_object, "MyClass");
+    assert_eq!(fact.callee_method, "getInstance");
+    assert_eq!(fact.member, "getData");
 }
 
 #[test]

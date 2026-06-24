@@ -620,9 +620,12 @@ fn angular_template_member_refs(module: &ResolvedModule) -> Vec<&str> {
     module
         .semantic_facts
         .iter()
-        .map(|fact| {
-            let SemanticFact::AngularTemplateMemberAccess(access) = fact;
-            access.member.as_str()
+        .filter_map(|fact| {
+            if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
+                Some(access.member.as_str())
+            } else {
+                None
+            }
         })
         .chain(
             module
@@ -1574,6 +1577,38 @@ fn parse_factory_call_sentinel(object: &str) -> Option<(&str, &str)> {
         .and_then(|payload| payload.split_once(':'))
 }
 
+struct FactoryCallAccess<'a> {
+    callee_object: &'a str,
+    callee_method: &'a str,
+    member: &'a str,
+}
+
+fn factory_call_accesses(module: &ResolvedModule) -> Vec<FactoryCallAccess<'_>> {
+    let mut accesses = Vec::new();
+    for fact in &module.semantic_facts {
+        if let SemanticFact::FactoryCallMemberAccess(access) = fact {
+            accesses.push(FactoryCallAccess {
+                callee_object: access.callee_object.as_str(),
+                callee_method: access.callee_method.as_str(),
+                member: access.member.as_str(),
+            });
+        }
+    }
+    for access in &module.member_accesses {
+        let Some((callee_object, callee_method)) =
+            parse_factory_call_sentinel(access.object.as_str())
+        else {
+            continue;
+        };
+        accesses.push(FactoryCallAccess {
+            callee_object,
+            callee_method,
+            member: access.member.as_str(),
+        });
+    }
+    accesses
+}
+
 /// Credit member accesses produced by static-factory call bindings on the
 /// originating class export.
 fn propagate_factory_call_accesses(
@@ -1588,13 +1623,8 @@ fn propagate_factory_call_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in &resolved.member_accesses {
-            let Some((callee_object, callee_method)) =
-                parse_factory_call_sentinel(access.object.as_str())
-            else {
-                continue;
-            };
-            let Some(seed_keys) = local_to_export_keys.get(callee_object) else {
+        for access in factory_call_accesses(resolved) {
+            let Some(seed_keys) = local_to_export_keys.get(access.callee_object) else {
                 continue;
             };
             for seed_key in seed_keys {
@@ -1609,7 +1639,7 @@ fn propagate_factory_call_accesses(
                             && export.members.iter().any(|member| {
                                 member.is_instance_returning_static
                                     && member.kind == MemberKind::ClassMethod
-                                    && member.name == callee_method
+                                    && member.name == access.callee_method
                             })
                     });
                     if !matches_factory {
@@ -1618,7 +1648,7 @@ fn propagate_factory_call_accesses(
                     accessed_members
                         .entry(origin)
                         .or_default()
-                        .insert(access.member.clone());
+                        .insert(access.member.to_string());
                 }
             }
         }
@@ -2577,7 +2607,7 @@ mod tests {
     use crate::graph::{ExportSymbol, ModuleGraph, SymbolReference};
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
-    use fallow_types::extract::ClassHeritageInfo;
+    use fallow_types::extract::{ClassHeritageInfo, FactoryCallMemberAccessFact, SemanticFact};
     use oxc_span::Span;
     use std::path::PathBuf;
 
@@ -2629,6 +2659,13 @@ mod tests {
         }
     }
 
+    fn make_factory_member(name: &str) -> MemberInfo {
+        MemberInfo {
+            is_instance_returning_static: true,
+            ..make_member(name, MemberKind::ClassMethod)
+        }
+    }
+
     fn make_export_with_members(
         name: &str,
         members: Vec<MemberInfo>,
@@ -2653,6 +2690,75 @@ mod tests {
             references,
             members,
         }
+    }
+
+    #[test]
+    fn typed_factory_call_fact_credits_class_member() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/my-class.ts", false)]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members(
+            "MyClass",
+            vec![
+                make_factory_member("getInstance"),
+                make_member("getData", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+
+        let class_export = ExportInfo {
+            name: ExportName::Named("MyClass".to_string()),
+            local_name: Some("MyClass".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: Span::new(0, 10),
+            members: vec![
+                make_factory_member("getInstance"),
+                make_member("getData", MemberKind::ClassMethod),
+            ],
+            super_class: None,
+        };
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/src/entry.ts"),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./my-class".to_string(),
+                        imported_name: ImportedName::Named("MyClass".to_string()),
+                        local_name: "MyClass".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: Span::new(0, 10),
+                        source_span: Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                semantic_facts: vec![SemanticFact::FactoryCallMemberAccess(
+                    FactoryCallMemberAccessFact {
+                        callee_object: "MyClass".to_string(),
+                        callee_method: "getInstance".to_string(),
+                        member: "getData".to_string(),
+                    },
+                )],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/src/my-class.ts"),
+                exports: vec![class_export],
+                ..Default::default()
+            },
+        ];
+
+        let mut accessed_members = FxHashMap::default();
+        propagate_factory_call_accesses(&graph, &resolved_modules, &mut accessed_members);
+
+        let credited = accessed_members
+            .get(&ExportKey::new(FileId(1), "MyClass"))
+            .expect("factory target class should be credited");
+        assert!(credited.contains("getData"));
     }
 
     fn make_module_with_class_heritage(
