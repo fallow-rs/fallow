@@ -1366,6 +1366,8 @@ pub enum SemanticFact {
     PlaywrightFixtureAlias(PlaywrightFixtureAliasFact),
     /// A nested Playwright fixture binding declared by a fixture type alias.
     PlaywrightFixtureType(PlaywrightFixtureTypeFact),
+    /// An exported value whose runtime instance targets a local class or interface.
+    InstanceExportBinding(InstanceExportBindingFact),
 }
 
 /// A member name referenced from an Angular template surface.
@@ -1458,6 +1460,16 @@ pub struct PlaywrightFixtureTypeFact {
     pub fixture_name: String,
     /// Local type symbol used as the nested fixture target.
     pub type_name: String,
+}
+
+/// An exported value whose runtime instance targets a local class or interface.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct InstanceExportBindingFact {
+    /// Exported binding name.
+    pub export_name: String,
+    /// Local class or interface symbol used as the instance target.
+    pub target_name: String,
 }
 
 /// A statically flattenable callee path invoked in a module (e.g. `execSync`,
