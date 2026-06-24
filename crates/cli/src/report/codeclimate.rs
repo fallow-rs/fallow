@@ -4517,7 +4517,7 @@ mod tests {
         use std::collections::BTreeSet;
 
         let missing: BTreeSet<&str> = fallow_types::issue_meta::result_issue_metas()
-            .filter(|meta| meta.codeclimate_check_name().is_none())
+            .filter(|meta| meta.codeclimate_check_names().is_empty())
             .map(|meta| meta.code)
             .collect();
 
@@ -4525,5 +4525,11 @@ mod tests {
             BTreeSet::from(["duplicate-prop-shape", "prop-drilling", "thin-wrapper"]),
             missing
         );
+
+        let check_names: BTreeSet<String> = fallow_types::issue_meta::result_issue_metas()
+            .flat_map(|meta| meta.codeclimate_check_names())
+            .collect();
+        assert!(check_names.contains("fallow/stale-suppression"));
+        assert!(check_names.contains("fallow/missing-suppression-reason"));
     }
 }

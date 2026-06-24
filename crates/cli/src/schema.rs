@@ -113,8 +113,8 @@ struct IssueTypeMeta {
     result_key: Option<&'static str>,
     summary_label: Option<&'static str>,
     summary_docs_anchor: Option<&'static str>,
-    sarif_rule_id: Option<String>,
-    codeclimate_check_name: Option<String>,
+    sarif_rule_ids: Option<Vec<String>>,
+    codeclimate_check_names: Option<Vec<String>>,
     counts_in_total: bool,
     fixable: bool,
     /// `(suppression token, file_level)` when comment-suppressible. The
@@ -138,8 +138,11 @@ impl IssueTypeMeta {
             meta.result_key = Some(result.result_key);
             meta.summary_label = issue_summary_label(bare_id);
             meta.summary_docs_anchor = issue_summary_docs_anchor(bare_id);
-            meta.sarif_rule_id = Some(result.sarif_rule_id());
-            meta.codeclimate_check_name = result.codeclimate_check_name();
+            meta.sarif_rule_ids = Some(result.sarif_rule_ids());
+            let codeclimate_check_names = result.codeclimate_check_names();
+            if !codeclimate_check_names.is_empty() {
+                meta.codeclimate_check_names = Some(codeclimate_check_names);
+            }
             meta.counts_in_total = result.counts_in_total;
         }
         meta
@@ -286,8 +289,8 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
         "result_key": meta.result_key,
         "summary_label": meta.summary_label,
         "summary_docs_anchor": meta.summary_docs_anchor,
-        "sarif_rule_id": meta.sarif_rule_id,
-        "codeclimate_check_name": meta.codeclimate_check_name,
+        "sarif_rule_ids": meta.sarif_rule_ids,
+        "codeclimate_check_names": meta.codeclimate_check_names,
         "counts_in_total": meta.counts_in_total,
         "fixable": meta.fixable,
         "suppressible": meta.suppress.is_some(),
@@ -1126,8 +1129,8 @@ mod tests {
                 "result_key",
                 "summary_label",
                 "summary_docs_anchor",
-                "sarif_rule_id",
-                "codeclimate_check_name",
+                "sarif_rule_ids",
+                "codeclimate_check_names",
                 "suppress_comment",
                 "note",
                 "license_note",
@@ -1176,13 +1179,13 @@ mod tests {
                     row["id"]
                 );
                 assert!(
-                    row["sarif_rule_id"].is_null(),
-                    "non dead-code row {} must not expose a dead-code sarif_rule_id",
+                    row["sarif_rule_ids"].is_null(),
+                    "non dead-code row {} must not expose dead-code sarif_rule_ids",
                     row["id"]
                 );
                 assert!(
-                    row["codeclimate_check_name"].is_null(),
-                    "non dead-code row {} must not expose a dead-code codeclimate_check_name",
+                    row["codeclimate_check_names"].is_null(),
+                    "non dead-code row {} must not expose dead-code codeclimate_check_names",
                     row["id"]
                 );
                 assert_eq!(
@@ -1210,12 +1213,23 @@ mod tests {
                     "dead-code row {} has result_key {result_key} but no summary_docs_anchor",
                     row["id"]
                 );
-                assert_eq!(
-                    row["sarif_rule_id"].as_str(),
-                    row["rule_id"].as_str(),
-                    "dead-code row {} must align SARIF rule id with the rule id",
+                let sarif_rule_ids: FxHashSet<&str> = row["sarif_rule_ids"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.as_str().unwrap())
+                    .collect();
+                assert!(
+                    sarif_rule_ids.contains(row["rule_id"].as_str().unwrap()),
+                    "dead-code row {} must include the rule id in SARIF rule ids",
                     row["id"]
                 );
+                if row["id"].as_str() == Some("stale-suppression") {
+                    assert!(
+                        sarif_rule_ids.contains("fallow/missing-suppression-reason"),
+                        "stale-suppression must expose its missing-reason SARIF variant"
+                    );
+                }
                 if counts {
                     counted.insert(result_key);
                 } else {
@@ -1250,7 +1264,7 @@ mod tests {
             .iter()
             .filter(|row| row["command"].as_str() == Some("dead-code"))
             .filter(|row| row["result_key"].as_str().is_some())
-            .filter(|row| row["codeclimate_check_name"].is_null())
+            .filter(|row| row["codeclimate_check_names"].is_null())
             .map(|row| row["id"].as_str().unwrap())
             .collect();
 
@@ -1261,14 +1275,25 @@ mod tests {
 
         for row in rows {
             if row["command"].as_str() == Some("dead-code")
-                && row["codeclimate_check_name"].as_str().is_some()
+                && row["codeclimate_check_names"].as_array().is_some()
             {
-                assert_eq!(
-                    row["codeclimate_check_name"].as_str(),
-                    row["rule_id"].as_str(),
-                    "dead-code row {} must align CodeClimate check name with the rule id",
+                let codeclimate_check_names: FxHashSet<&str> = row["codeclimate_check_names"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|value| value.as_str().unwrap())
+                    .collect();
+                assert!(
+                    codeclimate_check_names.contains(row["rule_id"].as_str().unwrap()),
+                    "dead-code row {} must include the rule id in CodeClimate check names",
                     row["id"]
                 );
+                if row["id"].as_str() == Some("stale-suppression") {
+                    assert!(
+                        codeclimate_check_names.contains("fallow/missing-suppression-reason"),
+                        "stale-suppression must expose its missing-reason CodeClimate variant"
+                    );
+                }
             }
         }
     }
