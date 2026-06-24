@@ -13,7 +13,7 @@ use crate::explain;
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, FallowOutput, GroupByMode,
-    HealthOutput, serialize_root_output,
+    HealthOutput, WorkspaceDiagnosticOutput, serialize_root_output,
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
@@ -229,12 +229,20 @@ fn build_check_output(
         baseline: None,
         regression: None,
         meta: None,
-        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
         // Populated only at the standalone-command entry points; the combined
         // and audit envelopes reuse this struct as a sub-block and aggregate
         // their own `next_steps` at the top level, so it stays empty here.
         next_steps: Vec::new(),
     }
+}
+
+fn workspace_diagnostics_for_output(root: &Path) -> Vec<WorkspaceDiagnosticOutput> {
+    crate::runtime_support::workspace_diagnostics_for(root)
+        .into_iter()
+        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
+        .map(WorkspaceDiagnosticOutput)
+        .collect()
 }
 
 fn postprocess_check_json(output: &mut serde_json::Value, root: &Path) {

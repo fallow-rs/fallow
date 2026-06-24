@@ -14,13 +14,11 @@ readme = "../../README.md"
 [dependencies]
 fallow-types = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 schemars = { workspace = true, optional = true }
 
 [features]
 schema = ["dep:schemars", "fallow-types/schema"]
-
-[dev-dependencies]
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

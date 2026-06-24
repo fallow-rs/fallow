@@ -12,11 +12,15 @@
     )
 )]
 
+mod check;
 mod codeclimate;
 mod dupes;
 mod format;
 mod issue_contract;
 
+pub use check::{
+    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, GroupByMode, WorkspaceDiagnosticOutput,
+};
 pub use codeclimate::{
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
     CodeClimateOutput, CodeClimateSeverity,
