@@ -1669,6 +1669,41 @@ fn parse_fluent_chain_sentinel(object: &str) -> Option<(&str, &str, Vec<&str>)> 
     Some((root, root_method, chain))
 }
 
+struct FluentChainAccess<'a> {
+    root_local: &'a str,
+    root_method: &'a str,
+    chain: Vec<&'a str>,
+    member: &'a str,
+}
+
+fn fluent_chain_accesses(module: &ResolvedModule) -> Vec<FluentChainAccess<'_>> {
+    let mut accesses = Vec::new();
+    for fact in &module.semantic_facts {
+        if let SemanticFact::FluentChainMemberAccess(access) = fact {
+            accesses.push(FluentChainAccess {
+                root_local: access.root_object.as_str(),
+                root_method: access.root_method.as_str(),
+                chain: access.chain.iter().map(String::as_str).collect(),
+                member: access.member.as_str(),
+            });
+        }
+    }
+    for access in &module.member_accesses {
+        let Some((root_local, root_method, chain)) =
+            parse_fluent_chain_sentinel(access.object.as_str())
+        else {
+            continue;
+        };
+        accesses.push(FluentChainAccess {
+            root_local,
+            root_method,
+            chain,
+            member: access.member.as_str(),
+        });
+    }
+    accesses
+}
+
 /// Validate a fluent chain against a single class export.
 fn export_validates_fluent_chain(
     export: &crate::extract::ExportInfo,
@@ -1709,13 +1744,8 @@ fn propagate_fluent_chain_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in &resolved.member_accesses {
-            let Some((root_local, root_method, chain)) =
-                parse_fluent_chain_sentinel(access.object.as_str())
-            else {
-                continue;
-            };
-            let Some(seed_keys) = local_to_export_keys.get(root_local) else {
+        for access in fluent_chain_accesses(resolved) {
+            let Some(seed_keys) = local_to_export_keys.get(access.root_local) else {
                 continue;
             };
             for seed_key in seed_keys {
@@ -1726,7 +1756,12 @@ fn propagate_fluent_chain_accesses(
                         continue;
                     };
                     let chain_valid = origin_module.exports.iter().any(|export| {
-                        export_validates_fluent_chain(export, &origin, root_method, &chain)
+                        export_validates_fluent_chain(
+                            export,
+                            &origin,
+                            access.root_method,
+                            &access.chain,
+                        )
                     });
                     if !chain_valid {
                         continue;
@@ -1734,7 +1769,7 @@ fn propagate_fluent_chain_accesses(
                     accessed_members
                         .entry(origin)
                         .or_default()
-                        .insert(access.member.clone());
+                        .insert(access.member.to_string());
                 }
             }
         }
@@ -1750,6 +1785,37 @@ fn parse_fluent_chain_new_sentinel(object: &str) -> Option<(&str, Vec<&str>)> {
         return None;
     }
     Some((class, chain_str.split(',').collect()))
+}
+
+struct FluentChainNewAccess<'a> {
+    class_local: &'a str,
+    chain: Vec<&'a str>,
+    member: &'a str,
+}
+
+fn fluent_chain_new_accesses(module: &ResolvedModule) -> Vec<FluentChainNewAccess<'_>> {
+    let mut accesses = Vec::new();
+    for fact in &module.semantic_facts {
+        if let SemanticFact::FluentChainNewMemberAccess(access) = fact {
+            accesses.push(FluentChainNewAccess {
+                class_local: access.class_name.as_str(),
+                chain: access.chain.iter().map(String::as_str).collect(),
+                member: access.member.as_str(),
+            });
+        }
+    }
+    for access in &module.member_accesses {
+        let Some((class_local, chain)) = parse_fluent_chain_new_sentinel(access.object.as_str())
+        else {
+            continue;
+        };
+        accesses.push(FluentChainNewAccess {
+            class_local,
+            chain,
+            member: access.member.as_str(),
+        });
+    }
+    accesses
 }
 
 /// Validate a constructor-rooted fluent chain against a single class export.
@@ -1783,13 +1849,8 @@ fn propagate_fluent_chain_new_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in &resolved.member_accesses {
-            let Some((class_local, chain)) =
-                parse_fluent_chain_new_sentinel(access.object.as_str())
-            else {
-                continue;
-            };
-            let Some(seed_keys) = local_to_export_keys.get(class_local) else {
+        for access in fluent_chain_new_accesses(resolved) {
+            let Some(seed_keys) = local_to_export_keys.get(access.class_local) else {
                 continue;
             };
             for seed_key in seed_keys {
@@ -1799,17 +1860,16 @@ fn propagate_fluent_chain_new_accesses(
                     let Some(origin_module) = module_by_id.get(&origin.file_id) else {
                         continue;
                     };
-                    let chain_valid = origin_module
-                        .exports
-                        .iter()
-                        .any(|export| export_validates_fluent_chain_new(export, &origin, &chain));
+                    let chain_valid = origin_module.exports.iter().any(|export| {
+                        export_validates_fluent_chain_new(export, &origin, &access.chain)
+                    });
                     if !chain_valid {
                         continue;
                     }
                     accessed_members
                         .entry(origin)
                         .or_default()
-                        .insert(access.member.clone());
+                        .insert(access.member.to_string());
                 }
             }
         }
@@ -2607,7 +2667,10 @@ mod tests {
     use crate::graph::{ExportSymbol, ModuleGraph, SymbolReference};
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
-    use fallow_types::extract::{ClassHeritageInfo, FactoryCallMemberAccessFact, SemanticFact};
+    use fallow_types::extract::{
+        ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
+        FluentChainNewMemberAccessFact, SemanticFact,
+    };
     use oxc_span::Span;
     use std::path::PathBuf;
 
@@ -2662,6 +2725,13 @@ mod tests {
     fn make_factory_member(name: &str) -> MemberInfo {
         MemberInfo {
             is_instance_returning_static: true,
+            ..make_member(name, MemberKind::ClassMethod)
+        }
+    }
+
+    fn make_self_member(name: &str) -> MemberInfo {
+        MemberInfo {
+            is_self_returning: true,
             ..make_member(name, MemberKind::ClassMethod)
         }
     }
@@ -2759,6 +2829,151 @@ mod tests {
             .get(&ExportKey::new(FileId(1), "MyClass"))
             .expect("factory target class should be credited");
         assert!(credited.contains("getData"));
+    }
+
+    #[test]
+    fn typed_fluent_chain_fact_credits_class_member() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/event-builder.ts", false)]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members(
+            "EventBuilder",
+            vec![
+                make_factory_member("create"),
+                make_self_member("setProcessId"),
+                make_self_member("setSubject"),
+                make_member("build", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+
+        let class_export = ExportInfo {
+            name: ExportName::Named("EventBuilder".to_string()),
+            local_name: Some("EventBuilder".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: Span::new(0, 10),
+            members: vec![
+                make_factory_member("create"),
+                make_self_member("setProcessId"),
+                make_self_member("setSubject"),
+                make_member("build", MemberKind::ClassMethod),
+            ],
+            super_class: None,
+        };
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/src/entry.ts"),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./event-builder".to_string(),
+                        imported_name: ImportedName::Named("EventBuilder".to_string()),
+                        local_name: "EventBuilder".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: Span::new(0, 10),
+                        source_span: Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                semantic_facts: vec![SemanticFact::FluentChainMemberAccess(
+                    FluentChainMemberAccessFact {
+                        root_object: "EventBuilder".to_string(),
+                        root_method: "create".to_string(),
+                        chain: vec!["setProcessId".to_string(), "setSubject".to_string()],
+                        member: "build".to_string(),
+                    },
+                )],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/src/event-builder.ts"),
+                exports: vec![class_export],
+                ..Default::default()
+            },
+        ];
+
+        let mut accessed_members = FxHashMap::default();
+        propagate_fluent_chain_accesses(&graph, &resolved_modules, &mut accessed_members);
+
+        let credited = accessed_members
+            .get(&ExportKey::new(FileId(1), "EventBuilder"))
+            .expect("fluent target class should be credited");
+        assert!(credited.contains("build"));
+    }
+
+    #[test]
+    fn typed_fluent_chain_new_fact_credits_class_member() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/option-builder.ts", false)]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members(
+            "OptionBuilder",
+            vec![
+                make_self_member("addDefault"),
+                make_self_member("addFromCli"),
+                make_member("build", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+
+        let class_export = ExportInfo {
+            name: ExportName::Named("OptionBuilder".to_string()),
+            local_name: Some("OptionBuilder".to_string()),
+            is_type_only: false,
+            is_side_effect_used: false,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+            span: Span::new(0, 10),
+            members: vec![
+                make_self_member("addDefault"),
+                make_self_member("addFromCli"),
+                make_member("build", MemberKind::ClassMethod),
+            ],
+            super_class: None,
+        };
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/src/entry.ts"),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./option-builder".to_string(),
+                        imported_name: ImportedName::Named("OptionBuilder".to_string()),
+                        local_name: "OptionBuilder".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: Span::new(0, 10),
+                        source_span: Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                semantic_facts: vec![SemanticFact::FluentChainNewMemberAccess(
+                    FluentChainNewMemberAccessFact {
+                        class_name: "OptionBuilder".to_string(),
+                        chain: vec!["addDefault".to_string(), "addFromCli".to_string()],
+                        member: "build".to_string(),
+                    },
+                )],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/src/option-builder.ts"),
+                exports: vec![class_export],
+                ..Default::default()
+            },
+        ];
+
+        let mut accessed_members = FxHashMap::default();
+        propagate_fluent_chain_new_accesses(&graph, &resolved_modules, &mut accessed_members);
+
+        let credited = accessed_members
+            .get(&ExportKey::new(FileId(1), "OptionBuilder"))
+            .expect("fluent-new target class should be credited");
+        assert!(credited.contains("build"));
     }
 
     fn make_module_with_class_heritage(

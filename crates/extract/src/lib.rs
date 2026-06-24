@@ -53,10 +53,10 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 
 pub use fallow_types::extract::{
     AngularTemplateMemberAccessFact, ClassHeritageInfo, DynamicImportInfo, DynamicImportPattern,
-    ExportInfo, ExportName, FactoryCallMemberAccessFact, ImportInfo, ImportedName,
-    LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult,
-    PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
-    compute_line_offsets,
+    ExportInfo, ExportName, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, LocalTypeDeclaration, MemberAccess,
+    MemberInfo, MemberKind, ModuleInfo, ParseResult, PublicSignatureTypeReference, ReExportInfo,
+    RequireCallInfo, SemanticFact, VisibilityTag, compute_line_offsets,
 };
 
 pub use astro::{

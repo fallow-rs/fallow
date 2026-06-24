@@ -13,8 +13,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::suppress::ParsedSuppressions;
 use crate::{
     AngularTemplateMemberAccessFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
-    ExportName, FactoryCallMemberAccessFact, ImportInfo, ImportedName, MemberAccess, MemberInfo,
-    MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
+    ExportName, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
+    ModuleInfo, ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
@@ -514,6 +515,40 @@ impl ModuleInfoExtractor {
                 FactoryCallMemberAccessFact {
                     callee_object,
                     callee_method,
+                    member,
+                },
+            ));
+    }
+
+    pub(crate) fn record_fluent_chain_member_fact(
+        &mut self,
+        root_object: String,
+        root_method: String,
+        chain: Vec<String>,
+        member: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::FluentChainMemberAccess(
+                FluentChainMemberAccessFact {
+                    root_object,
+                    root_method,
+                    chain,
+                    member,
+                },
+            ));
+    }
+
+    pub(crate) fn record_fluent_chain_new_member_fact(
+        &mut self,
+        class_name: String,
+        chain: Vec<String>,
+        member: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::FluentChainNewMemberAccess(
+                FluentChainNewMemberAccessFact {
+                    class_name,
+                    chain,
                     member,
                 },
             ));
