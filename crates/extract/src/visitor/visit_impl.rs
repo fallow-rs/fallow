@@ -4185,11 +4185,24 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.react_record_hook_call(expr);
 
         if let Some(test_name) = playwright_test_callee_name(&expr.callee) {
-            self.member_accesses
-                .extend(collect_playwright_fixture_member_uses(
-                    test_name.as_str(),
-                    &expr.arguments,
-                ));
+            let fixture_uses =
+                collect_playwright_fixture_member_uses(test_name.as_str(), &expr.arguments);
+            for access in &fixture_uses {
+                let Some(fixture_name) = access
+                    .object
+                    .strip_prefix(crate::PLAYWRIGHT_FIXTURE_USE_SENTINEL)
+                    .and_then(|payload| payload.strip_prefix(test_name.as_str()))
+                    .and_then(|payload| payload.strip_prefix(':'))
+                else {
+                    continue;
+                };
+                self.record_playwright_fixture_use_fact(
+                    test_name.clone(),
+                    fixture_name.to_string(),
+                    access.member.clone(),
+                );
+            }
+            self.member_accesses.extend(fixture_uses);
         }
 
         if let Some((tag, class_name)) = extract_custom_elements_define(expr) {

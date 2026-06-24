@@ -1000,6 +1000,11 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 chain: vec!["addDefault".to_string(), "addFromCli".to_string()],
                 member: "build".to_string(),
             }),
+            SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
+                test_name: "test".to_string(),
+                fixture_name: "adminPage".to_string(),
+                member: "assertGreeting".to_string(),
+            }),
         ],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1101,6 +1106,11 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 class_name: "OptionBuilder".to_string(),
                 chain: vec!["addDefault".to_string(), "addFromCli".to_string()],
                 member: "build".to_string(),
+            }),
+            SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
+                test_name: "test".to_string(),
+                fixture_name: "adminPage".to_string(),
+                member: "assertGreeting".to_string(),
             }),
         ]
     );
