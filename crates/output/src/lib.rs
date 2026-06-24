@@ -13,12 +13,17 @@
 )]
 
 mod codeclimate;
+mod dupes;
 mod format;
 mod issue_contract;
 
 pub use codeclimate::{
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
     CodeClimateOutput, CodeClimateSeverity,
+};
+pub use dupes::{
+    CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
+    DUPES_SUPPRESS_COMMENT, DUPES_SUPPRESS_DESCRIPTION, clone_family_actions, clone_group_actions,
 };
 pub use fallow_types::envelope;
 pub use fallow_types::output;
