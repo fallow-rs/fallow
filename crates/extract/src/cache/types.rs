@@ -611,7 +611,10 @@ use crate::MemberKind;
 ///
 /// Bumped to 196: `SemanticFact` now includes typed instance export binding
 /// facts alongside the legacy instance-export sentinel entries.
-pub(super) const CACHE_VERSION: u32 = 196;
+///
+/// Bumped to 197: factory-call member accesses are now persisted only as typed
+/// semantic facts, while legacy sentinels remain decode-only for older caches.
+pub(super) const CACHE_VERSION: u32 = 197;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
