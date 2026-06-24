@@ -76,6 +76,23 @@ fn has_playwright_fixture_use_fact(
     })
 }
 
+fn has_playwright_fixture_definition_fact(
+    info: &crate::ModuleInfo,
+    test_name: &str,
+    fixture_name: &str,
+    type_name: &str,
+) -> bool {
+    info.semantic_facts.iter().any(|fact| {
+        matches!(
+            fact,
+            SemanticFact::PlaywrightFixtureDefinition(access)
+                if access.test_name == test_name
+                    && access.fixture_name == fixture_name
+                    && access.type_name == type_name
+        )
+    })
+}
+
 #[test]
 fn pinia_option_store_harvests_state_getters_actions_keys() {
     let info = parse(
@@ -2533,47 +2550,20 @@ fn playwright_extend_type_alias_records_fixture_definitions() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:adminPage", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-                && a.member == "AdminPage"
-        }),
-        "typed Playwright fixture adminPage should be recorded, found: {:?}",
-        info.member_accesses
-    );
-    assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:userPage", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-                && a.member == "UserPage"
-        }),
-        "typed Playwright fixture userPage should be recorded, found: {:?}",
-        info.member_accesses
-    );
-    let fixture_definition_facts: Vec<_> = info
-        .semantic_facts
-        .iter()
-        .filter_map(|fact| {
-            if let SemanticFact::PlaywrightFixtureDefinition(access) = fact {
-                Some(access)
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert!(
-        fixture_definition_facts
+        !info
+            .member_accesses
             .iter()
-            .any(|fact| fact.test_name == "test"
-                && fact.fixture_name == "adminPage"
-                && fact.type_name == "AdminPage"),
+            .any(|a| a.object.starts_with(crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
+        "Playwright fixture definitions should not emit legacy sentinels, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        has_playwright_fixture_definition_fact(&info, "test", "adminPage", "AdminPage"),
         "typed Playwright fixture adminPage should emit a fixture definition fact, found: {:?}",
         info.semantic_facts
     );
     assert!(
-        fixture_definition_facts
-            .iter()
-            .any(|fact| fact.test_name == "test"
-                && fact.fixture_name == "userPage"
-                && fact.type_name == "UserPage"),
+        has_playwright_fixture_definition_fact(&info, "test", "userPage", "UserPage"),
         "typed Playwright fixture userPage should emit a fixture definition fact, found: {:?}",
         info.semantic_facts
     );
@@ -2897,28 +2887,14 @@ fn playwright_nested_fixture_type_records_dotted_path_definitions() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}test:pages.adminPage",
-                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
-                )
-                && a.member == "AdminPage"
-        }),
-        "nested Playwright fixture pages.adminPage should map to AdminPage, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_definition_fact(&info, "test", "pages.adminPage", "AdminPage"),
+        "nested Playwright fixture pages.adminPage should emit typed definition for AdminPage, found: {:?}",
+        info.semantic_facts
     );
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}test:pages.userPage",
-                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
-                )
-                && a.member == "UserPage"
-        }),
-        "nested Playwright fixture pages.userPage should map to UserPage, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_definition_fact(&info, "test", "pages.userPage", "UserPage"),
+        "nested Playwright fixture pages.userPage should emit typed definition for UserPage, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -2944,28 +2920,14 @@ fn playwright_nested_fixture_alias_type_records_dotted_path_definitions() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}test:pages.adminPage",
-                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
-                )
-                && a.member == "AdminPage"
-        }),
-        "nested alias fixture pages.adminPage should map to AdminPage, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_definition_fact(&info, "test", "pages.adminPage", "AdminPage"),
+        "nested alias fixture pages.adminPage should emit typed definition for AdminPage, found: {:?}",
+        info.semantic_facts
     );
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}test:pages.userPage",
-                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
-                )
-                && a.member == "UserPage"
-        }),
-        "nested alias fixture pages.userPage should map to UserPage, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_definition_fact(&info, "test", "pages.userPage", "UserPage"),
+        "nested alias fixture pages.userPage should emit typed definition for UserPage, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -3082,16 +3044,14 @@ fn playwright_helper_function_records_fixture_definitions() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}appTest:appUi.step.login",
-                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
-                )
-                && a.member == "LoginActions"
-        }),
-        "helper-function Playwright fixture should record a def sentinel keyed by the function name, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_definition_fact(
+            &info,
+            "appTest",
+            "appUi.step.login",
+            "LoginActions"
+        ),
+        "helper-function Playwright fixture should emit a typed definition keyed by the function name, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -3125,16 +3085,14 @@ fn playwright_helper_function_with_local_setup_records_fixture_definitions() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}appTest:appUi.step.login",
-                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
-                )
-                && a.member == "LoginActions"
-        }),
-        "helper-function Playwright fixture with local setup should record a def sentinel keyed by the function name, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_definition_fact(
+            &info,
+            "appTest",
+            "appUi.step.login",
+            "LoginActions"
+        ),
+        "helper-function Playwright fixture with local setup should emit a typed definition keyed by the function name, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -3154,12 +3112,9 @@ fn playwright_helper_arrow_records_fixture_definitions() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}appTest:login", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-                && a.member == "LoginActions"
-        }),
-        "arrow-expression helper should record a def sentinel keyed by the variable name, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_definition_fact(&info, "appTest", "login", "LoginActions"),
+        "arrow-expression helper should emit a typed definition keyed by the variable name, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -3185,24 +3140,14 @@ fn playwright_helper_chain_records_fixture_definitions() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}appTest:login", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-                && a.member == "LoginActions"
-        }),
-        "helper chain (appTest -> setupTestFixture) should propagate bindings onto the outer name, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_definition_fact(&info, "appTest", "login", "LoginActions"),
+        "helper chain should propagate typed bindings onto the outer name, found: {:?}",
+        info.semantic_facts
     );
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object
-                == format!(
-                    "{}setupTestFixture:login",
-                    crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
-                )
-                && a.member == "LoginActions"
-        }),
-        "the inner helper itself should also retain its own def sentinel, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_definition_fact(&info, "setupTestFixture", "login", "LoginActions"),
+        "the inner helper itself should also retain its own typed definition, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -8165,20 +8110,14 @@ fn playwright_extend_intersection_type_records_both_fixture_branches() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:adminPage", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-                && a.member == "AdminPage"
-        }),
+        has_playwright_fixture_definition_fact(&info, "test", "adminPage", "AdminPage"),
         "intersection type left branch (adminPage) must be recorded; got {:#?}",
-        info.member_accesses
+        info.semantic_facts
     );
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:userPage", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-                && a.member == "UserPage"
-        }),
+        has_playwright_fixture_definition_fact(&info, "test", "userPage", "UserPage"),
         "intersection type right branch (userPage) must be recorded; got {:#?}",
-        info.member_accesses
+        info.semantic_facts
     );
 }
 
@@ -8199,12 +8138,9 @@ fn playwright_extend_parenthesized_type_arg_records_fixture_bindings() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}test:adminPage", crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-                && a.member == "AdminPage"
-        }),
+        has_playwright_fixture_definition_fact(&info, "test", "adminPage", "AdminPage"),
         "parenthesized type argument must be unwrapped; got {:#?}",
-        info.member_accesses
+        info.semantic_facts
     );
 }
 

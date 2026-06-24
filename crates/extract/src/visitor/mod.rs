@@ -1017,15 +1017,11 @@ impl ModuleInfoExtractor {
 
         for (test_name, bindings) in factory_bindings {
             for (fixture_name, type_name) in bindings {
-                self.member_accesses.push(MemberAccess {
-                    object: format!(
-                        "{}{}:{}",
-                        crate::PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-                        test_name,
-                        fixture_name,
-                    ),
-                    member: type_name,
-                });
+                self.record_playwright_fixture_definition_fact(
+                    test_name.clone(),
+                    fixture_name,
+                    type_name,
+                );
             }
         }
     }
