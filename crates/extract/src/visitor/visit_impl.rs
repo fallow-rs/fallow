@@ -36,7 +36,7 @@ use super::helpers::{
     ts_import_type_qualifier_root,
 };
 use super::{
-    ModuleInfoExtractor, PendingLocalExportSpecifier, SecurityPathSinkBinding,
+    BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, SecurityPathSinkBinding,
     SideEffectRegistrationTarget, try_extract_arrow_wrapped_import, try_extract_dynamic_import,
     try_extract_import_then_callback, try_extract_property_callback_import, try_extract_require,
 };
@@ -578,16 +578,14 @@ impl ModuleInfoExtractor {
         if let Some(type_name) = extract_type_annotation_name(type_annotation)
             && let Some(resolved) = self.resolve_class_type_param(&type_name)
         {
-            self.binding_target_names
-                .insert(binding_name.to_string(), resolved);
+            self.insert_class_binding_target(binding_name.to_string(), resolved);
         }
 
         for (property_path, type_name) in extract_nested_type_bindings(type_annotation) {
             let Some(resolved) = self.resolve_class_type_param(&type_name) else {
                 continue;
             };
-            self.binding_target_names
-                .insert(format!("{binding_name}.{property_path}"), resolved);
+            self.insert_class_binding_target(format!("{binding_name}.{property_path}"), resolved);
         }
     }
 
@@ -605,9 +603,7 @@ impl ModuleInfoExtractor {
             let properties = collect_object_type_property_types(&type_lit.members);
             for (local, key) in bindings {
                 if let Some(class_name) = properties.get(&key) {
-                    self.binding_target_names
-                        .entry(local)
-                        .or_insert_with(|| class_name.clone());
+                    self.insert_class_binding_target_if_absent(local, class_name.clone());
                 }
             }
         } else if let Some(type_name) = extract_type_annotation_name(type_annotation) {
@@ -940,7 +936,7 @@ impl ModuleInfoExtractor {
             _ => None,
         };
         if let Some(name) = param_name {
-            self.binding_target_names.insert(name, element_type);
+            self.insert_class_binding_target(name, element_type);
         }
     }
 
@@ -2030,7 +2026,7 @@ impl ModuleInfoExtractor {
     fn copy_nested_binding_targets(&mut self, source_binding: &str, target_binding: &str) -> bool {
         let source_prefix = format!("{source_binding}.");
         let target_prefix = format!("{target_binding}.");
-        let copied: Vec<(String, String)> = self
+        let copied: Vec<(String, BindingTarget)> = self
             .binding_target_names
             .iter()
             .filter_map(|(binding, target)| {
@@ -2047,7 +2043,7 @@ impl ModuleInfoExtractor {
         changed
     }
 
-    fn insert_binding_target(&mut self, binding: String, target: String) -> bool {
+    fn insert_binding_target(&mut self, binding: String, target: BindingTarget) -> bool {
         if self.binding_target_names.get(&binding) == Some(&target) {
             return false;
         }
@@ -2067,7 +2063,7 @@ impl ModuleInfoExtractor {
         {
             changed |= self.insert_binding_target(
                 candidate.binding_path.clone(),
-                candidate.source_name.clone(),
+                BindingTarget::Class(candidate.source_name.clone()),
             );
         } else if let Some(target_name) = self
             .binding_target_names
@@ -3372,15 +3368,13 @@ impl<'a> ModuleInfoExtractor {
             && let BindingPattern::BindingIdentifier(id) = &declarator.id
             && !super::helpers::is_builtin_constructor(callee.name.as_str())
         {
-            self.binding_target_names
-                .insert(id.name.to_string(), callee.name.to_string());
+            self.insert_class_binding_target(id.name.to_string(), callee.name.to_string());
         }
 
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
             && let Some(class_name) = Self::svelte_derived_new_class(init)
         {
-            self.binding_target_names
-                .insert(id.name.to_string(), class_name);
+            self.insert_class_binding_target(id.name.to_string(), class_name);
         }
 
         if let Expression::CallExpression(call) = init
@@ -3388,8 +3382,7 @@ impl<'a> ModuleInfoExtractor {
             && let Some(Some(BindingPattern::BindingIdentifier(id))) = arr_pat.elements.first()
             && let Some(class_name) = super::helpers::try_extract_factory_new_class(&call.arguments)
         {
-            self.binding_target_names
-                .insert(id.name.to_string(), class_name);
+            self.insert_class_binding_target(id.name.to_string(), class_name);
         }
 
         // `const svc = useMemo(() => new Svc())`: useMemo returns the factory's
@@ -3402,9 +3395,7 @@ impl<'a> ModuleInfoExtractor {
             && is_value_returning_memo_callee(&call.callee)
             && let Some(class_name) = super::helpers::try_extract_factory_new_class(&call.arguments)
         {
-            self.binding_target_names
-                .entry(id.name.to_string())
-                .or_insert(class_name);
+            self.insert_class_binding_target_if_absent(id.name.to_string(), class_name);
         }
 
         if let Expression::CallExpression(call) = init
@@ -3563,7 +3554,7 @@ impl<'a> ModuleInfoExtractor {
             && let Expression::Identifier(callee) = &new_expr.callee
             && !super::helpers::is_builtin_constructor(callee.name.as_str())
         {
-            self.binding_target_names.insert(
+            self.insert_class_binding_target(
                 format!("this.{}", member.property.name),
                 callee.name.to_string(),
             );
@@ -3783,15 +3774,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 && let Expression::Identifier(callee) = &new_expr.callee
                 && !super::helpers::is_builtin_constructor(callee.name.as_str())
             {
-                self.binding_target_names
-                    .insert(format!("this.{name}"), callee.name.to_string());
+                self.insert_class_binding_target(format!("this.{name}"), callee.name.to_string());
             }
 
             if let Some(Expression::CallExpression(call)) = &prop.value
                 && let Some(type_name) = self.extract_angular_inject_target(call)
             {
-                self.binding_target_names
-                    .insert(format!("this.{name}"), type_name);
+                self.insert_class_binding_target(format!("this.{name}"), type_name);
             }
 
             if let Some(value) = prop.value.as_ref()
@@ -3801,7 +3790,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 if query.plural {
                     self.iterable_element_types.insert(call_key, query.type_arg);
                 } else {
-                    self.binding_target_names.insert(call_key, query.type_arg);
+                    self.insert_class_binding_target(call_key, query.type_arg);
                 }
             }
 
@@ -4399,7 +4388,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         let mut narrowings = Vec::new();
         collect_instanceof_narrowings(&stmt.test, &mut narrowings);
         for (local, class_name) in narrowings {
-            self.binding_target_names.entry(local).or_insert(class_name);
+            self.insert_class_binding_target_if_absent(local, class_name);
         }
         walk::walk_if_statement(self, stmt);
     }
@@ -7017,9 +7006,10 @@ impl ModuleInfoExtractor {
             && let Expression::Identifier(callee) = &call.callee
             && self.is_store_factory_call(callee.name.as_str())
         {
-            self.binding_target_names
-                .entry(id.name.to_string())
-                .or_insert_with(|| callee.name.to_string());
+            self.insert_class_binding_target_if_absent(
+                id.name.to_string(),
+                callee.name.to_string(),
+            );
             self.store_instance_locals.insert(id.name.to_string());
             return;
         }

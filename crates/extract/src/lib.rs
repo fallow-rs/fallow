@@ -125,14 +125,13 @@ pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_u
 /// fixture generic imports an object type alias from another module.
 pub const PLAYWRIGHT_FIXTURE_TYPE_SENTINEL: &str = "__fallow_playwright_fixture_type__:";
 
-/// Synthetic member-access object prefix for static-factory call returns.
+/// Legacy member-access object prefix for static-factory call returns.
 ///
 /// `MemberAccess { object: format!("{FACTORY_CALL_SENTINEL}{callee}:{method}"), member }`
-/// means a local binding was assigned from `<callee>.<method>()` and a member
-/// is accessed on the result. The analyze layer resolves `callee` through the
-/// consumer module's imports to a class export and credits `member` on the
-/// class when the matching method carries `is_instance_returning_static`.
-/// See issue #346.
+/// was the pre-typed-fact representation for a local binding assigned from
+/// `<callee>.<method>()` with a member access on the result. New extraction uses
+/// `SemanticFact::FactoryCallMemberAccess`; the prefix remains decode-only for
+/// older cache entries. See issue #346.
 pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
 
 /// Synthetic member-access object prefix for fluent-builder chain credit.
