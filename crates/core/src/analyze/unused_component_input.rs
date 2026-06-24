@@ -196,14 +196,17 @@ fn component_has_extends(module: &ModuleInfo) -> bool {
             .any(|h| h.super_class.is_some())
 }
 
-/// Whether the module spreads `this` into an object literal (`{ ...this }`),
-/// recorded by the extractor as an `ANGULAR_THIS_SPREAD_SENTINEL` member access.
+/// Whether the module spreads `this` into an object literal (`{ ...this }`).
 /// Every input/output is then consumed opaquely, so the whole component abstains.
 pub(super) fn component_spreads_this(module: &ModuleInfo) -> bool {
     module
-        .member_accesses
+        .semantic_facts
         .iter()
-        .any(|a| a.object == ANGULAR_THIS_SPREAD_SENTINEL)
+        .any(|fact| matches!(fact, SemanticFact::AngularThisSpread(_)))
+        || module
+            .member_accesses
+            .iter()
+            .any(|a| a.object == ANGULAR_THIS_SPREAD_SENTINEL)
 }
 
 /// The `.ts` modules reached from `from` by a `SideEffect`-shaped edge that hold
@@ -294,8 +297,8 @@ pub(super) fn is_js_reserved_word(name: &str) -> bool {
 mod tests {
     use fallow_types::discover::FileId;
     use fallow_types::extract::{
-        AngularInputMember, AngularTemplateMemberAccessFact, ClassHeritageInfo, MemberAccess,
-        SemanticFact,
+        AngularInputMember, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
+        ClassHeritageInfo, MemberAccess, SemanticFact,
     };
     use rustc_hash::FxHashSet;
 
@@ -320,6 +323,10 @@ mod tests {
         SemanticFact::AngularTemplateMemberAccess(AngularTemplateMemberAccessFact {
             member: member.to_string(),
         })
+    }
+
+    fn this_spread_fact() -> SemanticFact {
+        SemanticFact::AngularThisSpread(AngularThisSpreadFact)
     }
 
     fn this_access(member: &str) -> MemberAccess {
@@ -430,6 +437,19 @@ mod tests {
         assert!(
             !component_has_extends(&component),
             "a component with no heritage `extends` does not abstain"
+        );
+    }
+
+    #[test]
+    fn typed_this_spread_fact_abstains_component() {
+        let component = ModuleInfo {
+            angular_inputs: vec![input("label", 10)],
+            semantic_facts: vec![this_spread_fact()],
+            ..empty_module()
+        };
+        assert!(
+            component_spreads_this(&component),
+            "a typed Angular this-spread fact abstains the whole component"
         );
     }
 
