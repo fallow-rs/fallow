@@ -9,21 +9,44 @@ use fallow_engine::results::{AnalysisResults, SecurityFindingKind};
 use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;
 
-/// Build hover information for a position in a file.
+/// Typed input for building hover information from editor analysis state.
+#[derive(Clone, Copy)]
+pub struct HoverInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub duplication: &'a DuplicationReport,
+    pub file_path: &'a Path,
+    pub position: Position,
+}
+
+impl<'a> HoverInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        duplication: &'a DuplicationReport,
+        file_path: &'a Path,
+        position: Position,
+    ) -> Self {
+        Self {
+            results,
+            duplication,
+            file_path,
+            position,
+        }
+    }
+}
+
+/// Build hover information from a typed editor analysis input.
 ///
-/// Returns a hover with markdown content describing:
-/// - Unused export/type status with explanation
-/// - Used export reference counts with file locations
-/// - Unused file status
-/// - Unused member status
-/// - Unresolved import details
-/// - Code duplication instance details with other locations
-pub fn build_hover(
-    results: &AnalysisResults,
-    duplication: &DuplicationReport,
-    file_path: &Path,
-    position: Position,
-) -> Option<Hover> {
+/// Returns a hover with markdown content describing unused code, unresolved
+/// imports, security candidates, React component intelligence, or duplication
+/// evidence for the requested file position.
+pub fn build_hover(input: HoverInput<'_>) -> Option<Hover> {
+    let HoverInput {
+        results,
+        duplication,
+        file_path,
+        position,
+    } = input;
     if let Some(hover) = check_unused_file(results, file_path) {
         return Some(hover);
     }
@@ -96,6 +119,16 @@ pub fn build_hover(
     }
 
     None
+}
+
+#[cfg(test)]
+fn build_hover_for_test(
+    results: &AnalysisResults,
+    duplication: &DuplicationReport,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    build_hover(HoverInput::new(results, duplication, file_path, position))
 }
 
 /// Check if the position is on a security candidate's anchor line.
@@ -1262,7 +1295,7 @@ mod tests {
             character: 0,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos);
+        let hover = build_hover_for_test(&results, &duplication, &path, pos);
         assert!(hover.is_none());
     }
 
@@ -1282,7 +1315,7 @@ mod tests {
             character: 0,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("not imported"));
         assert!(value.contains("entry point"));
@@ -1314,7 +1347,7 @@ mod tests {
             character: 10,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("helper"));
         assert!(value.contains("not imported"));
@@ -1346,7 +1379,7 @@ mod tests {
             character: 3,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("Type export"));
         assert!(value.contains("MyType"));
@@ -1382,7 +1415,7 @@ mod tests {
             character: 10,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("format"));
         assert!(value.contains("2 files"));
@@ -1413,7 +1446,7 @@ mod tests {
             character: 0,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("1 file"));
         assert!(!value.contains("1 files"));
@@ -1438,7 +1471,7 @@ mod tests {
             character: 0,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos);
+        let hover = build_hover_for_test(&results, &duplication, &path, pos);
         assert!(hover.is_none());
     }
 
@@ -1463,7 +1496,7 @@ mod tests {
             character: 5,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("Color.Blue"));
         assert!(value.contains("never used"));
@@ -1490,7 +1523,7 @@ mod tests {
             character: 6,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("UserService.reset"));
         assert!(value.contains("Class member"));
@@ -1517,7 +1550,7 @@ mod tests {
             character: 6,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("useStore.reset"));
         assert!(value.contains("Store member"));
@@ -1543,7 +1576,7 @@ mod tests {
             character: 25, // inside the specifier range [20, 38)
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("./missing-module"));
         assert!(value.contains("Cannot resolve"));
@@ -1599,7 +1632,7 @@ mod tests {
             character: 5,
         };
 
-        let hover = build_hover(&results, &duplication, &path_a, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path_a, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("6 lines"));
         assert!(value.contains("50 tokens"));
@@ -1649,14 +1682,14 @@ mod tests {
             line: 5,
             character: 0,
         };
-        let hover = build_hover(&results, &duplication, &path, pos);
+        let hover = build_hover_for_test(&results, &duplication, &path, pos);
         assert!(hover.is_none());
 
         let pos = Position {
             line: 20,
             character: 0,
         };
-        let hover = build_hover(&results, &duplication, &path, pos);
+        let hover = build_hover_for_test(&results, &duplication, &path, pos);
         assert!(hover.is_none());
     }
 
@@ -1684,7 +1717,7 @@ mod tests {
             character: 0,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("not imported"));
         assert!(value.contains("entry point"));
@@ -1712,7 +1745,7 @@ mod tests {
             line: 10,
             character: 0,
         };
-        let hover = build_hover(&results, &duplication, &path, pos);
+        let hover = build_hover_for_test(&results, &duplication, &path, pos);
         assert!(hover.is_none());
     }
 
@@ -1738,14 +1771,14 @@ mod tests {
             line: 4,
             character: 20,
         };
-        let hover = build_hover(&results, &duplication, &path, pos);
+        let hover = build_hover_for_test(&results, &duplication, &path, pos);
         assert!(hover.is_none());
 
         let pos = Position {
             line: 4,
             character: 3,
         };
-        let hover = build_hover(&results, &duplication, &path, pos);
+        let hover = build_hover_for_test(&results, &duplication, &path, pos);
         assert!(hover.is_none());
     }
 
@@ -1807,7 +1840,7 @@ mod tests {
             line: 2,
             character: 0,
         };
-        let hover = build_hover(&results, &duplication, &path_a, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path_a, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("2 other instances"));
         assert!(value.contains("b.ts"));
@@ -1833,7 +1866,7 @@ mod tests {
             character: 0,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(
             value.ends_with('.'),
@@ -1871,7 +1904,7 @@ mod tests {
             character: 3,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("15 files"));
         for i in 1..=10 {
@@ -1915,7 +1948,7 @@ mod tests {
             character: 0,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         for i in 1..=10 {
             assert!(value.contains(&format!("ref{i}.ts")));
@@ -1943,25 +1976,25 @@ mod tests {
             line: 0,
             character: 10,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_some());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_some());
 
         let pos = Position {
             line: 0,
             character: 16,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_some());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_some());
 
         let pos = Position {
             line: 0,
             character: 17,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
 
         let pos = Position {
             line: 0,
             character: 9,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     #[test]
@@ -1986,19 +2019,19 @@ mod tests {
             line: 0,
             character: 7,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_some());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_some());
 
         let pos = Position {
             line: 0,
             character: 9,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_some());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_some());
 
         let pos = Position {
             line: 0,
             character: 10,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     #[test]
@@ -2022,13 +2055,13 @@ mod tests {
             line: 2,
             character: 4,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_some());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_some());
 
         let pos = Position {
             line: 2,
             character: 7,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     #[test]
@@ -2071,7 +2104,7 @@ mod tests {
             line: 2,
             character: 0,
         };
-        let hover = build_hover(&results, &duplication, &path_main, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path_main, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("12 other instances"));
         for i in 1..=10 {
@@ -2115,7 +2148,7 @@ mod tests {
             character: 1,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("not imported"));
     }
@@ -2143,7 +2176,7 @@ mod tests {
             character: 1,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
 
         assert!(value.contains("`[click](command:vscode.open?evil)`"));
@@ -2172,7 +2205,7 @@ mod tests {
             character: 1,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
 
         assert!(value.contains("``evil`](command:foo)``"));
@@ -2203,7 +2236,7 @@ mod tests {
             line: 0,
             character: 0,
         };
-        assert!(build_hover(&results, &duplication, &path_b, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path_b, pos).is_none());
     }
 
     fn tainted_sink_finding(path: PathBuf) -> fallow_engine::results::SecurityFinding {
@@ -2252,7 +2285,7 @@ mod tests {
             character: 10,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("security candidate"));
         assert!(value.contains("unverified"));
@@ -2283,14 +2316,14 @@ mod tests {
             line: 20,
             character: 6,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
 
         // Before the anchor column.
         let pos = Position {
             line: 7,
             character: 2,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     #[test]
@@ -2307,7 +2340,7 @@ mod tests {
             character: 6,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("`[click](command:vscode.open?evil)`"));
     }
@@ -2343,7 +2376,7 @@ mod tests {
             character: 3,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("MyCard"));
         assert!(value.contains("rendered nowhere"));
@@ -2375,7 +2408,7 @@ mod tests {
             line: 5,
             character: 0,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     #[test]
@@ -2400,7 +2433,7 @@ mod tests {
             line: 0,
             character: 2,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -2433,7 +2466,7 @@ mod tests {
             character: 5,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("variant"));
         assert!(value.contains("declared but referenced nowhere"));
@@ -2464,7 +2497,7 @@ mod tests {
             line: 2,
             character: 50,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -2497,7 +2530,7 @@ mod tests {
             character: 7,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("submit"));
         assert!(value.contains("declared but emitted nowhere"));
@@ -2528,7 +2561,7 @@ mod tests {
             line: 4,
             character: 100,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -2561,7 +2594,7 @@ mod tests {
             character: 4,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("title"));
         assert!(value.contains("declared but read nowhere"));
@@ -2592,7 +2625,7 @@ mod tests {
             line: 20,
             character: 2,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -2625,7 +2658,7 @@ mod tests {
             character: 6,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("changed"));
         assert!(value.contains("declared but emitted nowhere"));
@@ -2656,7 +2689,7 @@ mod tests {
             line: 9,
             character: 200,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -2689,7 +2722,7 @@ mod tests {
             character: 3,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("close"));
         assert!(value.contains("dispatched but listened to nowhere"));
@@ -2720,7 +2753,7 @@ mod tests {
             line: 10,
             character: 0,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -2752,7 +2785,7 @@ mod tests {
             character: 20,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("deleteUser"));
         assert!(value.contains("use server"));
@@ -2783,7 +2816,7 @@ mod tests {
             line: 7,
             character: 0,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -2816,7 +2849,7 @@ mod tests {
             character: 6,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("posts"));
         assert!(value.contains("load()"));
@@ -2848,7 +2881,7 @@ mod tests {
             line: 0,
             character: 4,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     #[test]
@@ -2872,7 +2905,7 @@ mod tests {
             line: 11,
             character: 0,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -2912,7 +2945,7 @@ mod tests {
             character: 5,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("client-server-leak"));
         assert!(value.contains("source-backed no"));
@@ -2941,7 +2974,7 @@ mod tests {
             character: 10,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("dead-code:"));
         assert!(value.contains("Verify the dead-code finding"));
@@ -2965,7 +2998,7 @@ mod tests {
             character: 10,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("blast radius 7"));
         assert!(value.contains("crosses an architecture boundary"));
@@ -2989,7 +3022,7 @@ mod tests {
             line: 7,
             character: 5,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -3025,7 +3058,7 @@ mod tests {
             character: 0,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(
             value.contains("not imported"),
@@ -3086,7 +3119,7 @@ mod tests {
             line: 2,
             character: 0,
         };
-        let hover = build_hover(&results, &duplication, &path_a, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path_a, pos).unwrap();
         let value = markup_value(&hover);
         assert!(
             value.contains("1 other instance"),
@@ -3149,7 +3182,7 @@ mod tests {
             line: 2,
             character: 0,
         };
-        let hover = build_hover(&results, &duplication, &path_main, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path_main, pos).unwrap();
         let value = markup_value(&hover);
         assert!(
             value.contains("... and 2 more"),
@@ -3182,7 +3215,7 @@ mod tests {
             line: 14,
             character: 100,
         };
-        assert!(build_hover(&results, &duplication, &path, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path, pos).is_none());
     }
 
     // -------------------------------------------------------------------------
@@ -3209,7 +3242,7 @@ mod tests {
             line: 0,
             character: 12,
         };
-        assert!(build_hover(&results, &duplication, &path_b, pos).is_none());
+        assert!(build_hover_for_test(&results, &duplication, &path_b, pos).is_none());
     }
 
     fn card_intel(path: PathBuf) -> ReactComponentIntel {
@@ -3260,7 +3293,7 @@ mod tests {
             character: 3,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("title"), "names the prop: {value}");
         assert!(value.contains("read in body"), "read state: {value}");
@@ -3283,7 +3316,7 @@ mod tests {
             character: 4,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("subtitle"), "names the prop: {value}");
         assert!(value.contains("not read in body"), "read state: {value}");
@@ -3308,7 +3341,7 @@ mod tests {
             character: 3,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(
             value.contains("passed from 1 call site"),
@@ -3341,7 +3374,7 @@ mod tests {
             character: 3,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         // The base read/passed line is preserved.
         assert!(value.contains("read in body"), "base read state: {value}");
@@ -3376,7 +3409,7 @@ mod tests {
             character: 3,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(
             value.contains("forwarded 1 level:"),
@@ -3398,7 +3431,7 @@ mod tests {
             character: 15,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         assert!(value.contains("Card"), "names the component: {value}");
         assert!(
@@ -3439,7 +3472,7 @@ mod tests {
             character: 3,
         };
 
-        let hover = build_hover(&results, &duplication, &path, pos).unwrap();
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
         let value = markup_value(&hover);
         // The finding's wording, not the intel's "not read in body / passed".
         assert!(
