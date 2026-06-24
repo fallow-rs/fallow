@@ -982,11 +982,17 @@ dependencies = [
 name = "fallow-api"
 version = "2.102.0"
 dependencies = [
+ "fallow-config",
  "fallow-engine",
  "fallow-output",
  "fallow-types",
+ "globset",
+ "rayon",
+ "rustc-hash 2.1.2",
  "schemars",
  "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

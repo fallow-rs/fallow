@@ -331,6 +331,18 @@ pub fn find_duplicates_in_project(root: &Path, config: &DuplicatesConfig) -> Dup
     fallow_core::duplicates::find_duplicates_in_project(root, config)
 }
 
+/// Resolve changed files for a git ref relative to a project root.
+///
+/// # Errors
+///
+/// Returns an error when git cannot resolve the ref or repository state.
+pub fn changed_files(
+    root: &Path,
+    git_ref: &str,
+) -> Result<FxHashSet<PathBuf>, fallow_core::changed_files::ChangedFilesError> {
+    fallow_core::changed_files::try_get_changed_files(root, git_ref)
+}
+
 /// Run duplication detection and include metadata about built-in ignored files.
 #[must_use]
 pub fn find_duplicates_with_defaults(

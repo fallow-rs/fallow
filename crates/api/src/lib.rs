@@ -1,16 +1,25 @@
 //! Programmatic API contract types for fallow.
 //!
-//! Runtime execution still lives in `fallow-cli::programmatic` during the
-//! migration. This crate owns the CLI-independent option and error contracts
-//! so NAPI, future Rust embedders, and the eventual engine facade can share
-//! them without depending on the CLI crate.
+//! Runtime execution is moving here from `fallow-cli::programmatic` one
+//! analysis at a time. This crate owns the CLI-independent option, error, and
+//! output contracts so NAPI, future Rust embedders, and the engine facade can
+//! share them without depending on the CLI crate.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::expect_used,
+        reason = "tests use expect to keep fixture setup concise"
+    )
+)]
 
 use std::path::PathBuf;
 
 use serde::Serialize;
 
 pub mod dupes_output;
+pub mod runtime;
 pub use dupes_output::{CloneFamilyFinding, CloneGroupFinding, DupesReportPayload};
+pub use runtime::detect_duplication;
 
 pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "root",

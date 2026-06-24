@@ -533,7 +533,7 @@ pub fn detect_duplication(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DuplicationOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        programmatic::detect_duplication(&options)
+        api::detect_duplication(&options)
     })))
 }
 
