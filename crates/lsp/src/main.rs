@@ -197,6 +197,36 @@ struct BlockingAnalysisInput {
     changed_since: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+struct CodeActionInput<'a> {
+    results: &'a AnalysisResults,
+    root: Option<&'a Path>,
+    file_path: &'a Path,
+    uri: &'a Uri,
+    range: &'a Range,
+    file_lines: &'a [&'a str],
+}
+
+impl<'a> CodeActionInput<'a> {
+    const fn new(
+        results: &'a AnalysisResults,
+        root: Option<&'a Path>,
+        file_path: &'a Path,
+        uri: &'a Uri,
+        range: &'a Range,
+        file_lines: &'a [&'a str],
+    ) -> Self {
+        Self {
+            results,
+            root,
+            file_path,
+            uri,
+            range,
+            file_lines,
+        }
+    }
+}
+
 struct BlockingAnalysisOutput {
     results: AnalysisResults,
     duplication: DuplicationReport,
@@ -856,14 +886,14 @@ impl LanguageServer for FallowLspServer {
         let file_lines: Vec<&str> = file_content.lines().collect();
         let root = self.root.read().await.clone();
 
-        Ok(Self::build_code_action_response(
+        Ok(Self::build_code_action_response(CodeActionInput::new(
             results,
             root.as_deref(),
             &file_path,
             uri,
             &params.range,
             &file_lines,
-        ))
+        )))
     }
 
     #[expect(
@@ -963,14 +993,15 @@ impl FallowLspServer {
         )
     }
 
-    fn build_code_action_response(
-        results: &AnalysisResults,
-        root: Option<&Path>,
-        file_path: &Path,
-        uri: &Uri,
-        range: &Range,
-        file_lines: &[&str],
-    ) -> Option<CodeActionResponse> {
+    fn build_code_action_response(input: CodeActionInput<'_>) -> Option<CodeActionResponse> {
+        let CodeActionInput {
+            results,
+            root,
+            file_path,
+            uri,
+            range,
+            file_lines,
+        } = input;
         let mut actions = Vec::new();
 
         actions.extend(code_actions::build_remove_export_actions(
