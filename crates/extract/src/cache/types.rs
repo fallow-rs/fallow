@@ -602,7 +602,10 @@ use crate::MemberKind;
 ///
 /// Bumped to 193: `SemanticFact` now includes typed Playwright fixture definition
 /// facts alongside the legacy fixture-definition sentinel entries.
-pub(super) const CACHE_VERSION: u32 = 193;
+///
+/// Bumped to 194: `SemanticFact` now includes typed Playwright fixture alias
+/// facts alongside the legacy fixture-alias sentinel entries.
+pub(super) const CACHE_VERSION: u32 = 194;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
