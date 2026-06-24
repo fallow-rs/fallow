@@ -19,7 +19,9 @@ mod format;
 mod issue_contract;
 
 pub use check::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, GroupByMode, WorkspaceDiagnosticOutput,
+    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, GroupByMode,
+    WorkspaceDiagnosticOutput, apply_config_fixable_to_duplicate_exports, build_check_output,
+    build_check_summary,
 };
 pub use codeclimate::{
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,

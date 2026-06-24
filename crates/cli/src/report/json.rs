@@ -6,25 +6,17 @@ use std::time::Duration;
 
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
-use fallow_types::envelope::{CheckSummary, ElapsedMs, EntryPoints, SchemaVersion, ToolVersion};
+use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
 use super::{emit_json, normalize_uri};
 use crate::explain;
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, DupesOutput, FallowOutput, GroupByMode,
-    HealthOutput, WorkspaceDiagnosticOutput, serialize_root_output,
+    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutput,
+    FallowOutput, GroupByMode, HealthOutput, WorkspaceDiagnosticOutput,
+    apply_config_fixable_to_duplicate_exports, build_check_output, serialize_root_output,
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
-
-fn apply_config_fixable_to_duplicate_exports(results: &mut AnalysisResults, config_fixable: bool) {
-    if !config_fixable {
-        return;
-    }
-    for finding in &mut results.duplicate_exports {
-        finding.set_config_fixable(true);
-    }
-}
 
 pub(super) struct PrintJsonInput<'a> {
     pub(super) results: &'a AnalysisResults,
@@ -175,7 +167,7 @@ pub fn build_json_with_config_fixable(
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut envelope = build_check_output(results, root, elapsed, config_fixable);
+    let mut envelope = build_cli_check_output(results, root, elapsed, config_fixable);
     envelope.next_steps = crate::report::suggestions::build_dead_code_next_steps(
         results,
         root,
@@ -193,48 +185,30 @@ pub fn build_check_json_payload_with_config_fixable(
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let envelope = build_check_output(results, root, elapsed, config_fixable);
+    let envelope = build_cli_check_output(results, root, elapsed, config_fixable);
     let mut output = serde_json::to_value(&envelope)?;
     postprocess_check_json(&mut output, root);
     Ok(output)
 }
 
-fn build_check_output(
+fn build_cli_check_output(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
 ) -> CheckOutput {
-    let mut owned_results = results.clone();
-    apply_config_fixable_to_duplicate_exports(&mut owned_results, config_fixable);
-    CheckOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        total_issues: owned_results.total_issues(),
-        entry_points: owned_results
-            .entry_point_summary
-            .as_ref()
-            .map(|ep| EntryPoints {
-                total: ep.total,
-                sources: ep
-                    .by_source
-                    .iter()
-                    .map(|(k, v)| (k.replace(' ', "_"), *v))
-                    .collect(),
-            }),
-        summary: build_check_summary(&owned_results),
-        results: owned_results,
-        baseline_deltas: None,
-        baseline: None,
-        regression: None,
-        meta: None,
+    build_check_output(CheckOutputInput {
+        schema_version: SCHEMA_VERSION,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        elapsed,
+        results: results.clone(),
+        config_fixable,
         workspace_diagnostics: workspace_diagnostics_for_output(root),
         // Populated only at the standalone-command entry points; the combined
         // and audit envelopes reuse this struct as a sub-block and aggregate
         // their own `next_steps` at the top level, so it stays empty here.
         next_steps: Vec::new(),
-    }
+    })
 }
 
 fn workspace_diagnostics_for_output(root: &Path) -> Vec<WorkspaceDiagnosticOutput> {
@@ -249,54 +223,6 @@ fn postprocess_check_json(output: &mut serde_json::Value, root: &Path) {
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(output, &root_prefix);
     harmonize_multi_kind_suppress_line_actions(output);
-}
-
-/// Compute the per-category `CheckSummary` from analysis results.
-fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
-    CheckSummary {
-        total_issues: results.total_issues(),
-        unused_files: results.unused_files.len(),
-        unused_exports: results.unused_exports.len(),
-        unused_types: results.unused_types.len(),
-        private_type_leaks: results.private_type_leaks.len(),
-        unused_dependencies: results.unused_dependencies.len()
-            + results.unused_dev_dependencies.len()
-            + results.unused_optional_dependencies.len(),
-        unused_enum_members: results.unused_enum_members.len(),
-        unused_class_members: results.unused_class_members.len(),
-        unused_store_members: results.unused_store_members.len(),
-        unresolved_imports: results.unresolved_imports.len(),
-        unlisted_dependencies: results.unlisted_dependencies.len(),
-        duplicate_exports: results.duplicate_exports.len(),
-        type_only_dependencies: results.type_only_dependencies.len(),
-        test_only_dependencies: results.test_only_dependencies.len(),
-        circular_dependencies: results.circular_dependencies.len(),
-        re_export_cycles: results.re_export_cycles.len(),
-        boundary_violations: results.boundary_violations.len(),
-        boundary_coverage_violations: results.boundary_coverage_violations.len(),
-        boundary_call_violations: results.boundary_call_violations.len(),
-        policy_violations: results.policy_violations.len(),
-        stale_suppressions: results.stale_suppressions.len(),
-        unused_catalog_entries: results.unused_catalog_entries.len(),
-        empty_catalog_groups: results.empty_catalog_groups.len(),
-        unresolved_catalog_references: results.unresolved_catalog_references.len(),
-        unused_dependency_overrides: results.unused_dependency_overrides.len(),
-        misconfigured_dependency_overrides: results.misconfigured_dependency_overrides.len(),
-        invalid_client_exports: results.invalid_client_exports.len(),
-        mixed_client_server_barrels: results.mixed_client_server_barrels.len(),
-        misplaced_directives: results.misplaced_directives.len(),
-        unprovided_injects: results.unprovided_injects.len(),
-        unrendered_components: results.unrendered_components.len(),
-        unused_component_props: results.unused_component_props.len(),
-        unused_component_emits: results.unused_component_emits.len(),
-        unused_component_inputs: results.unused_component_inputs.len(),
-        unused_component_outputs: results.unused_component_outputs.len(),
-        unused_svelte_events: results.unused_svelte_events.len(),
-        unused_server_actions: results.unused_server_actions.len(),
-        unused_load_data_keys: results.unused_load_data_keys.len(),
-        route_collisions: results.route_collisions.len(),
-        dynamic_segment_name_conflicts: results.dynamic_segment_name_conflicts.len(),
-    }
 }
 
 /// Recursively strip the root prefix from all string values in the JSON tree.
