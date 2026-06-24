@@ -1216,6 +1216,7 @@ dependencies = [
 name = "fallow-node"
 version = "2.102.0"
 dependencies = [
+ "fallow-api",
  "fallow-cli",
  "napi",
  "napi-build",
