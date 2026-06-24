@@ -556,6 +556,49 @@ impl<'a> AnalysisSession<'a> {
         parse_analysis_modules(self.config, self.files(), need_complexity, t)
     }
 
+    fn run_owned_core(
+        &self,
+        workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+        plugin_result: &plugins::AggregatedPluginResult,
+        mut modules: Vec<extract::ModuleInfo>,
+        collect_usages: bool,
+    ) -> OwnedAnalysisCore {
+        let shared = AnalysisCoreSharedInput {
+            config: self.config,
+            progress: &self.progress,
+            files: self.files(),
+            workspaces: self.workspaces(),
+            root_pkg: self.root_pkg.as_ref(),
+            workspace_pkgs,
+            plugin_result,
+        };
+
+        let entry_points = discover_analysis_entry_points(&shared);
+        let resolved = resolve_analysis_imports_timed(&shared, &modules);
+        let graph =
+            build_analysis_graph_timed(&shared, &resolved.resolved, &entry_points, &modules);
+        release_resolution_payloads(&mut modules);
+        let analysis = analyze_dead_code_timed(
+            &shared,
+            &graph.graph,
+            &resolved.resolved,
+            &modules,
+            collect_usages,
+            entry_points.summary,
+        );
+
+        OwnedAnalysisCore {
+            result: analysis.result,
+            graph: graph.graph,
+            modules,
+            entry_point_count: entry_points.count,
+            entry_points_ms: entry_points.elapsed_ms,
+            resolve_ms: resolved.elapsed_ms,
+            graph_ms: graph.elapsed_ms,
+            analyze_ms: analysis.elapsed_ms,
+        }
+    }
+
     fn run_full(
         self,
         retain: bool,
@@ -568,17 +611,7 @@ impl<'a> AnalysisSession<'a> {
             self.run_plugins_and_scripts(&workspace_pkgs)?;
 
         let AnalysisParseOutput { modules, metrics } = self.parse_modules(need_complexity);
-        let core = run_owned_analysis_core(OwnedAnalysisCoreInput {
-            config: self.config,
-            progress: &self.progress,
-            files: self.files(),
-            workspaces: self.workspaces(),
-            root_pkg: self.root_pkg.as_ref(),
-            workspace_pkgs: &workspace_pkgs,
-            plugin_result: &plugin_result,
-            modules,
-            collect_usages,
-        });
+        let core = self.run_owned_core(&workspace_pkgs, &plugin_result, modules, collect_usages);
         self.progress.finish();
 
         let profile = full_analysis_pipeline_profile(
@@ -1070,19 +1103,6 @@ fn assemble_full_output(
     }
 }
 
-/// Borrowed inputs (plus owned `modules`) for `run_owned_analysis_core`.
-struct OwnedAnalysisCoreInput<'a> {
-    config: &'a ResolvedConfig,
-    progress: &'a progress::AnalysisProgress,
-    files: &'a [discover::DiscoveredFile],
-    workspaces: &'a [fallow_config::WorkspaceInfo],
-    root_pkg: Option<&'a PackageJson>,
-    workspace_pkgs: &'a [LoadedWorkspacePackage<'a>],
-    plugin_result: &'a plugins::AggregatedPluginResult,
-    modules: Vec<extract::ModuleInfo>,
-    collect_usages: bool,
-}
-
 /// Result of the freshly-parsed analysis core; returns the owned `modules` (so the
 /// caller can retain them) plus the per-phase timings.
 struct OwnedAnalysisCore {
@@ -1094,56 +1114,6 @@ struct OwnedAnalysisCore {
     resolve_ms: f64,
     graph_ms: f64,
     analyze_ms: f64,
-}
-
-/// Run entry-point discovery, import resolution, graph construction (releasing
-/// each module's resolution payload in place), and dead-code analysis over the
-/// freshly parsed, owned modules.
-fn run_owned_analysis_core(input: OwnedAnalysisCoreInput<'_>) -> OwnedAnalysisCore {
-    let OwnedAnalysisCoreInput {
-        config,
-        progress,
-        files,
-        workspaces,
-        root_pkg,
-        workspace_pkgs,
-        plugin_result,
-        mut modules,
-        collect_usages,
-    } = input;
-    let shared = AnalysisCoreSharedInput {
-        config,
-        progress,
-        files,
-        workspaces,
-        root_pkg,
-        workspace_pkgs,
-        plugin_result,
-    };
-
-    let entry_points = discover_analysis_entry_points(&shared);
-    let resolved = resolve_analysis_imports_timed(&shared, &modules);
-    let graph = build_analysis_graph_timed(&shared, &resolved.resolved, &entry_points, &modules);
-    release_resolution_payloads(&mut modules);
-    let analysis = analyze_dead_code_timed(
-        &shared,
-        &graph.graph,
-        &resolved.resolved,
-        &modules,
-        collect_usages,
-        entry_points.summary,
-    );
-
-    OwnedAnalysisCore {
-        result: analysis.result,
-        graph: graph.graph,
-        modules,
-        entry_point_count: entry_points.count,
-        entry_points_ms: entry_points.elapsed_ms,
-        resolve_ms: resolved.elapsed_ms,
-        graph_ms: graph.elapsed_ms,
-        analyze_ms: analysis.elapsed_ms,
-    }
 }
 
 /// Assemble the `PipelineProfile` for the full (freshly parsed) pipeline path.
