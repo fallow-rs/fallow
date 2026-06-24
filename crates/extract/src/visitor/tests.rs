@@ -93,6 +93,20 @@ fn has_playwright_fixture_definition_fact(
     })
 }
 
+fn has_playwright_fixture_alias_fact(
+    info: &crate::ModuleInfo,
+    test_name: &str,
+    base_name: &str,
+) -> bool {
+    info.semantic_facts.iter().any(|fact| {
+        matches!(
+            fact,
+            SemanticFact::PlaywrightFixtureAlias(access)
+                if access.test_name == test_name && access.base_name == base_name
+        )
+    })
+}
+
 #[test]
 fn pinia_option_store_harvests_state_getters_actions_keys() {
     let info = parse(
@@ -2607,43 +2621,19 @@ fn playwright_merge_tests_records_fixture_aliases() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}mergedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
-                && a.member == "testPrimary"
-        }),
-        "Playwright mergeTests should record the first inherited fixture test, found: {:?}",
+        !info.member_accesses.iter().any(|a| a
+            .object
+            .starts_with(crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)),
+        "Playwright fixture aliases should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}mergedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
-                && a.member == "testSecondary"
-        }),
-        "Playwright mergeTests should record the second inherited fixture test, found: {:?}",
-        info.member_accesses
-    );
-    let fixture_alias_facts: Vec<_> = info
-        .semantic_facts
-        .iter()
-        .filter_map(|fact| {
-            if let SemanticFact::PlaywrightFixtureAlias(access) = fact {
-                Some(access)
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert!(
-        fixture_alias_facts
-            .iter()
-            .any(|fact| fact.test_name == "mergedTest" && fact.base_name == "testPrimary"),
+        has_playwright_fixture_alias_fact(&info, "mergedTest", "testPrimary"),
         "Playwright mergeTests should emit a typed alias for testPrimary, found: {:?}",
         info.semantic_facts
     );
     assert!(
-        fixture_alias_facts
-            .iter()
-            .any(|fact| fact.test_name == "mergedTest" && fact.base_name == "testSecondary"),
+        has_playwright_fixture_alias_fact(&info, "mergedTest", "testSecondary"),
         "Playwright mergeTests should emit a typed alias for testSecondary, found: {:?}",
         info.semantic_facts
     );
@@ -2661,12 +2651,9 @@ fn playwright_aliased_merge_tests_records_fixture_aliases() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}mergedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
-                && a.member == "testPrimary"
-        }),
-        "aliased Playwright mergeTests should record an inherited fixture test, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_alias_fact(&info, "mergedTest", "testPrimary"),
+        "aliased Playwright mergeTests should emit a typed inherited fixture test, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -2681,12 +2668,9 @@ fn playwright_wrapper_extend_records_fixture_alias() {
     );
 
     assert!(
-        info.member_accesses.iter().any(|a| {
-            a.object == format!("{}extendedTest:", crate::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
-                && a.member == "testPrimary"
-        }),
-        "chained Playwright wrapper .extend should record an inherited fixture test, found: {:?}",
-        info.member_accesses
+        has_playwright_fixture_alias_fact(&info, "extendedTest", "testPrimary"),
+        "chained Playwright wrapper .extend should emit a typed inherited fixture test, found: {:?}",
+        info.semantic_facts
     );
 }
 
