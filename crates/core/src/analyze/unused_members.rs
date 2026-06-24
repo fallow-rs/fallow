@@ -9,8 +9,6 @@ use crate::discover::FileId;
 use crate::extract::{
     ANGULAR_TPL_SENTINEL, ExportName, FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL,
     FLUENT_CHAIN_SENTINEL, INSTANCE_EXPORT_SENTINEL, MemberInfo, MemberKind, ModuleInfo,
-    PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-    PLAYWRIGHT_FIXTURE_TYPE_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL,
 };
 use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::ResolvedModule;
@@ -951,13 +949,6 @@ fn is_entry_point_public_class_export(
             || export_has_entry_point_re_export_reference(graph, export, public_api_entry_points))
 }
 
-fn parse_playwright_fixture_sentinel<'a>(
-    object: &'a str,
-    prefix: &str,
-) -> Option<(&'a str, &'a str)> {
-    object.strip_prefix(prefix)?.split_once(':')
-}
-
 struct PlaywrightFixtureUseAccess<'a> {
     test_local_name: &'a str,
     fixture_name: &'a str,
@@ -994,19 +985,6 @@ fn playwright_fixture_type_accesses(
             });
         }
     }
-    for access in &module.member_accesses {
-        let Some((alias_name, fixture_name)) = parse_playwright_fixture_sentinel(
-            access.object.as_str(),
-            PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
-        ) else {
-            continue;
-        };
-        accesses.push(PlaywrightFixtureTypeAccess {
-            alias_local: alias_name,
-            fixture: fixture_name,
-            type_local: access.member.as_str(),
-        });
-    }
     accesses
 }
 
@@ -1021,18 +999,6 @@ fn playwright_fixture_alias_accesses(
                 base_local: access.base_name.as_str(),
             });
         }
-    }
-    for access in &module.member_accesses {
-        let Some((test_local_name, _)) = parse_playwright_fixture_sentinel(
-            access.object.as_str(),
-            PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
-        ) else {
-            continue;
-        };
-        accesses.push(PlaywrightFixtureAliasAccess {
-            test_local: test_local_name,
-            base_local: access.member.as_str(),
-        });
     }
     accesses
 }
@@ -1050,19 +1016,6 @@ fn playwright_fixture_definition_accesses(
             });
         }
     }
-    for access in &module.member_accesses {
-        let Some((test_local_name, fixture_name)) = parse_playwright_fixture_sentinel(
-            access.object.as_str(),
-            PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-        ) else {
-            continue;
-        };
-        accesses.push(PlaywrightFixtureDefinitionAccess {
-            test_local: test_local_name,
-            fixture: fixture_name,
-            type_local: access.member.as_str(),
-        });
-    }
     accesses
 }
 
@@ -1076,19 +1029,6 @@ fn playwright_fixture_use_accesses(module: &ResolvedModule) -> Vec<PlaywrightFix
                 member: access.member.as_str(),
             });
         }
-    }
-    for access in &module.member_accesses {
-        let Some((test_local_name, fixture_name)) = parse_playwright_fixture_sentinel(
-            access.object.as_str(),
-            PLAYWRIGHT_FIXTURE_USE_SENTINEL,
-        ) else {
-            continue;
-        };
-        accesses.push(PlaywrightFixtureUseAccess {
-            test_local_name,
-            fixture_name,
-            member: access.member.as_str(),
-        });
     }
     accesses
 }
@@ -1620,17 +1560,13 @@ fn propagate_accesses_through_typed_instance_bindings(
 }
 
 /// Whether an access-object name is a synthetic sentinel (instance / factory /
-/// fluent-chain / Playwright-fixture / Angular-template), which the typed-instance
-/// chain resolver must skip because it is handled by a dedicated propagation pass.
+/// fluent-chain / Angular-template), which the typed-instance chain resolver
+/// must skip because it is handled by a dedicated propagation pass.
 fn is_typed_instance_member_sentinel(object: &str) -> bool {
     object.starts_with(INSTANCE_EXPORT_SENTINEL)
         || object.starts_with(FACTORY_CALL_SENTINEL)
         || object.starts_with(FLUENT_CHAIN_SENTINEL)
         || object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)
-        || object.starts_with(PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
-        || object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-        || object.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)
-        || object.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
         || object == ANGULAR_TPL_SENTINEL
 }
 
@@ -1639,10 +1575,6 @@ fn is_typed_instance_member_sentinel(object: &str) -> bool {
 fn is_typed_instance_whole_object_sentinel(object: &str) -> bool {
     object.starts_with(INSTANCE_EXPORT_SENTINEL)
         || object.starts_with(FACTORY_CALL_SENTINEL)
-        || object.starts_with(PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)
-        || object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)
-        || object.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)
-        || object.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)
         || object == ANGULAR_TPL_SENTINEL
 }
 

@@ -3151,7 +3151,7 @@ fn playwright_helper_chain_records_fixture_definitions() {
 }
 
 #[test]
-fn playwright_helper_records_use_sentinels_for_curried_call() {
+fn playwright_helper_records_typed_use_fact_for_curried_call() {
     let info = parse(
         r"
             import { appTest } from './fixtures';
