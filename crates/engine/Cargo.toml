@@ -1,0 +1,20 @@
+[package]
+name = "fallow-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Typed analysis engine facade for fallow consumers"
+readme = "../../README.md"
+
+[dependencies]
+fallow-config = { workspace = true }
+fallow-core = { workspace = true }
+fallow-types = { workspace = true }
+
+[lints]
+workspace = true
