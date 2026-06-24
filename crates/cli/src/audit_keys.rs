@@ -425,7 +425,8 @@ struct FrameworkFindingSlices<'a> {
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
 /// file) and the per-collection severity branches in
 /// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
-/// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` (`BARE_DEAD_CODE_ALIASES`).
+/// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` derives
+/// backwards-compatible aliases from `fallow schema` `ts_alias` rows.
 pub(super) fn dead_code_keys(
     results: &fallow_core::results::AnalysisResults,
     root: &Path,
@@ -1121,7 +1122,8 @@ impl<'a> DeadCodeKeyCollector<'a> {
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
 /// file) and the per-collection severity branches in
 /// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
-/// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` (`BARE_DEAD_CODE_ALIASES`).
+/// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` derives
+/// backwards-compatible aliases from `fallow schema` `ts_alias` rows.
 pub(super) fn retain_introduced_dead_code(
     results: &mut fallow_core::results::AnalysisResults,
     root: &Path,
