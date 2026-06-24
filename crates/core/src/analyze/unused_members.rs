@@ -1406,16 +1406,12 @@ fn build_instance_export_targets(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in &resolved.member_accesses {
-            let Some(instance_export_name) = access.object.strip_prefix(INSTANCE_EXPORT_SENTINEL)
-            else {
-                continue;
-            };
-            let Some(target_keys) = local_to_export_keys.get(access.member.as_str()) else {
+        for access in instance_export_binding_accesses(resolved) {
+            let Some(target_keys) = local_to_export_keys.get(access.target_local) else {
                 continue;
             };
 
-            let instance_key = ExportKey::new(resolved.file_id, instance_export_name);
+            let instance_key = ExportKey::new(resolved.file_id, access.export_name);
             let instance_targets = targets_by_instance.entry(instance_key).or_default();
             for target_key in target_keys {
                 for key in export_key_with_origins(graph, target_key) {
@@ -1426,6 +1422,35 @@ fn build_instance_export_targets(
     }
 
     targets_by_instance
+}
+
+struct InstanceExportBindingAccess<'a> {
+    export_name: &'a str,
+    target_local: &'a str,
+}
+
+fn instance_export_binding_accesses(
+    module: &ResolvedModule,
+) -> Vec<InstanceExportBindingAccess<'_>> {
+    let mut accesses = Vec::new();
+    for fact in &module.semantic_facts {
+        if let SemanticFact::InstanceExportBinding(access) = fact {
+            accesses.push(InstanceExportBindingAccess {
+                export_name: access.export_name.as_str(),
+                target_local: access.target_name.as_str(),
+            });
+        }
+    }
+    for access in &module.member_accesses {
+        let Some(export_name) = access.object.strip_prefix(INSTANCE_EXPORT_SENTINEL) else {
+            continue;
+        };
+        accesses.push(InstanceExportBindingAccess {
+            export_name,
+            target_local: access.member.as_str(),
+        });
+    }
+    accesses
 }
 
 fn propagate_accesses_through_instance_exports(
@@ -2772,7 +2797,7 @@ mod tests {
     use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
     use fallow_types::extract::{
         ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
-        FluentChainNewMemberAccessFact, PlaywrightFixtureAliasFact,
+        FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
         PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
         SemanticFact,
     };
@@ -3111,6 +3136,35 @@ mod tests {
             .get(&ExportKey::new(FileId(3), "AdminPage"))
             .expect("nested fixture target class should be credited");
         assert!(credited.contains("assertGreeting"));
+    }
+
+    #[test]
+    fn typed_instance_export_binding_fact_builds_target_map() {
+        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/service.ts", false)]);
+        graph.modules[0].exports = vec![make_export_with_members("service", vec![], Some(0))];
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members("Service", vec![], Some(0))];
+
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/src/entry.ts"),
+            resolved_imports: vec![make_resolved_import("./service", "Service", "Service", 1)],
+            exports: vec![make_export_info("service", None)],
+            semantic_facts: vec![SemanticFact::InstanceExportBinding(
+                InstanceExportBindingFact {
+                    export_name: "service".to_string(),
+                    target_name: "Service".to_string(),
+                },
+            )],
+            ..Default::default()
+        }];
+
+        let instance_targets = build_instance_export_targets(&graph, &resolved_modules);
+
+        assert_eq!(
+            instance_targets.get(&ExportKey::new(FileId(0), "service")),
+            Some(&vec![ExportKey::new(FileId(1), "Service")])
+        );
     }
 
     #[test]

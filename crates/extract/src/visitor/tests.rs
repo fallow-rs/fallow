@@ -2064,6 +2064,17 @@ fn exported_instance_binding_is_recorded() {
         "exported instance binding should be recorded, found: {:?}",
         info.member_accesses
     );
+    assert!(
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::InstanceExportBinding(access)
+                    if access.export_name == "box" && access.target_name == "Box"
+            )
+        }),
+        "exported instance binding should emit a typed fact, found: {:?}",
+        info.semantic_facts
+    );
 }
 
 #[test]

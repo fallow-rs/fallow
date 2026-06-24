@@ -14,10 +14,10 @@ use crate::suppress::ParsedSuppressions;
 use crate::{
     AngularTemplateMemberAccessFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
     ExportName, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
-    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
-    ModuleInfo, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
-    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo,
-    SemanticFact, VisibilityTag,
+    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
+    MemberAccess, MemberInfo, MemberKind, ModuleInfo, PlaywrightFixtureAliasFact,
+    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
+    ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
@@ -506,6 +506,16 @@ impl ModuleInfoExtractor {
             ));
     }
 
+    fn record_instance_export_binding_fact(&mut self, export_name: String, target_name: String) {
+        self.semantic_facts
+            .push(SemanticFact::InstanceExportBinding(
+                InstanceExportBindingFact {
+                    export_name,
+                    target_name,
+                },
+            ));
+    }
+
     fn record_factory_call_member_fact(
         &mut self,
         callee_object: String,
@@ -922,20 +932,20 @@ impl ModuleInfoExtractor {
             return;
         }
 
-        let additional_accesses: Vec<MemberAccess> = self
-            .exports
-            .iter()
-            .filter_map(|export| {
-                let local_name = export.local_name.as_deref()?;
-                let target_name = self.binding_target_names.get(local_name)?;
-                Some(MemberAccess {
-                    object: format!("{}{}", crate::INSTANCE_EXPORT_SENTINEL, export.name),
-                    member: target_name.clone(),
-                })
-            })
-            .collect();
-
-        self.member_accesses.extend(additional_accesses);
+        for export in self.exports.clone() {
+            let Some(local_name) = export.local_name.as_deref() else {
+                continue;
+            };
+            let Some(target_name) = self.binding_target_names.get(local_name).cloned() else {
+                continue;
+            };
+            let export_name = export.name.to_string();
+            self.record_instance_export_binding_fact(export_name.clone(), target_name.clone());
+            self.member_accesses.push(MemberAccess {
+                object: format!("{}{}", crate::INSTANCE_EXPORT_SENTINEL, export_name),
+                member: target_name,
+            });
+        }
     }
 
     fn map_local_signature_refs_to_exports(&mut self) {

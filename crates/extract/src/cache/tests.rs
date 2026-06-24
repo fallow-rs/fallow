@@ -1019,6 +1019,10 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 fixture_name: "adminPage".to_string(),
                 type_name: "AdminPage".to_string(),
             }),
+            SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
+                export_name: "service".to_string(),
+                target_name: "Service".to_string(),
+            }),
         ],
         whole_object_uses: vec![],
         dynamic_import_patterns: vec![],
@@ -1139,6 +1143,10 @@ fn module_to_cached_roundtrip_dynamic_imports() {
                 alias_name: "Pages".to_string(),
                 fixture_name: "adminPage".to_string(),
                 type_name: "AdminPage".to_string(),
+            }),
+            SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
+                export_name: "service".to_string(),
+                target_name: "Service".to_string(),
             }),
         ]
     );
