@@ -1029,7 +1029,7 @@ impl FallowLspServer {
         let mut actions = Vec::new();
 
         actions.extend(code_actions::build_remove_export_actions(
-            results, file_path, uri, range, file_lines,
+            code_actions::RemoveExportActionInput::new(results, file_path, uri, range, file_lines),
         ));
         actions.extend(code_actions::build_delete_file_actions(
             results, file_path, uri, range,

@@ -115,14 +115,44 @@ fn declares_export_name(line_content: &str, prefix: &str, expected_name: &str) -
     leading_identifier(after_keywords) == expected_name
 }
 
+/// Typed input for unused export quick-fix code actions.
+#[derive(Clone, Copy)]
+pub struct RemoveExportActionInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub file_path: &'a Path,
+    pub uri: &'a Uri,
+    pub cursor_range: &'a Range,
+    pub file_lines: &'a [&'a str],
+}
+
+impl<'a> RemoveExportActionInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        file_path: &'a Path,
+        uri: &'a Uri,
+        cursor_range: &'a Range,
+        file_lines: &'a [&'a str],
+    ) -> Self {
+        Self {
+            results,
+            file_path,
+            uri,
+            cursor_range,
+            file_lines,
+        }
+    }
+}
+
 /// Build quick-fix code actions for unused exports (remove the `export` keyword).
-pub fn build_remove_export_actions(
-    results: &AnalysisResults,
-    file_path: &Path,
-    uri: &Uri,
-    cursor_range: &Range,
-    file_lines: &[&str],
-) -> Vec<CodeActionOrCommand> {
+pub fn build_remove_export_actions(input: RemoveExportActionInput<'_>) -> Vec<CodeActionOrCommand> {
+    let RemoveExportActionInput {
+        results,
+        file_path,
+        uri,
+        cursor_range,
+        file_lines,
+    } = input;
     let mut actions = Vec::new();
 
     let exports_iter = results.unused_exports.iter().map(|f| &f.export);
@@ -148,6 +178,23 @@ pub fn build_remove_export_actions(
     }
 
     actions
+}
+
+#[cfg(test)]
+fn build_remove_export_actions_for_test(
+    results: &AnalysisResults,
+    file_path: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Vec<CodeActionOrCommand> {
+    build_remove_export_actions(RemoveExportActionInput::new(
+        results,
+        file_path,
+        uri,
+        cursor_range,
+        file_lines,
+    ))
 }
 
 #[expect(
@@ -867,7 +914,8 @@ mod tests {
         let results = AnalysisResults::default();
         let lines = vec!["export const foo = 1;"];
 
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(actions.is_empty());
     }
 
@@ -884,8 +932,13 @@ mod tests {
             .push(make_unused_export(&file_a, "foo", 1, 7));
 
         let lines = vec!["export const foo = 1;"];
-        let actions =
-            build_remove_export_actions(&results, &file_b, &uri_b, &make_range(0, 10), &lines);
+        let actions = build_remove_export_actions_for_test(
+            &results,
+            &file_b,
+            &uri_b,
+            &make_range(0, 10),
+            &lines,
+        );
         assert!(actions.is_empty());
     }
 
@@ -901,7 +954,8 @@ mod tests {
             .push(make_unused_export(&file, "bar", 5, 7));
 
         let lines = vec!["line0", "line1", "line2", "line3", "export const bar = 2;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 2), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 2), &lines);
         assert!(actions.is_empty());
     }
 
@@ -917,7 +971,8 @@ mod tests {
             .push(make_unused_export(&file, "foo", 1, 13));
 
         let lines = vec!["export const foo = 42;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -945,7 +1000,8 @@ mod tests {
             .push(make_unused_export(&file, "default", 1, 0));
 
         let lines = vec!["export default function App() {}"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -974,7 +1030,8 @@ mod tests {
             "    export function helper() {}", // 4 spaces indent
             "}",
         ];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(1, 1), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(1, 1), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1007,7 +1064,8 @@ mod tests {
             }));
 
         let lines = vec!["export type MyType = string;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1043,7 +1101,8 @@ mod tests {
             }));
 
         let lines = vec!["export const foo = 1;", "export type Bar = string;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 1), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 1), &lines);
 
         assert_eq!(actions.len(), 2);
 
@@ -1071,7 +1130,8 @@ mod tests {
             .push(make_unused_export(&file, "foo", 1, 0));
 
         let lines = vec!["const foo = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(
             actions.is_empty(),
             "Should skip exports where line doesn't start with 'export'"
@@ -1090,7 +1150,8 @@ mod tests {
             .push(make_unused_export(&file, "x", 0, 7));
 
         let lines = vec!["export const x = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
     }
@@ -1117,7 +1178,8 @@ mod tests {
             "export function b() {}",
             "export function c() {}",
         ];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 2), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 2), &lines);
 
         assert_eq!(actions.len(), 3);
         for action in &actions {
@@ -1150,7 +1212,8 @@ mod tests {
             "const also_used = false;",
             "export const c = 3;",
         ];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(2, 2), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(2, 2), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1169,7 +1232,8 @@ mod tests {
             .push(make_unused_export(&file, "myLongExport", 1, 13));
 
         let lines = vec!["export const myLongExport = 42;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1193,7 +1257,8 @@ mod tests {
             .push(make_unused_export(&file, "x", 1, 0));
 
         let lines: Vec<&str> = vec![];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(actions.is_empty());
     }
 
@@ -1209,7 +1274,8 @@ mod tests {
             .push(make_unused_export(&file, "val", 1, 0));
 
         let lines = vec!["\t\texport const val = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
 
         assert_eq!(actions.len(), 1);
         let ca = unwrap_code_action(&actions[0]);
@@ -1409,7 +1475,8 @@ mod tests {
         let lines = vec!["export function helper() {}"];
         let cursor = make_range(0, 0);
 
-        let export_actions = build_remove_export_actions(&results, &file, &uri, &cursor, &lines);
+        let export_actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &cursor, &lines);
         let delete_actions = build_delete_file_actions(&results, &file, &uri, &cursor);
 
         assert_eq!(export_actions.len(), 1);
@@ -2123,7 +2190,8 @@ mod tests {
             7,
         ));
         let lines = vec!["const foo = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(
             actions.is_empty(),
             "expected zero actions when live line lacks export prefix",
@@ -2141,7 +2209,8 @@ mod tests {
             7,
         ));
         let lines = vec!["export const foobar = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(
             actions.is_empty(),
             "expected zero actions when cached name only matches as a substring",
@@ -2159,7 +2228,8 @@ mod tests {
             7,
         ));
         let lines = vec!["export const bar = foo;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(
             actions.is_empty(),
             "expected zero actions when cached name appears as a value, not a declaration",
@@ -2177,7 +2247,8 @@ mod tests {
             9,
         ));
         let lines = vec!["export { foo } from './bar';"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert!(
             actions.is_empty(),
             "expected zero actions on re-export blocks (action's output would be a syntax error)",
@@ -2195,7 +2266,8 @@ mod tests {
             7,
         ));
         let lines = vec!["export const foo = 1;"];
-        let actions = build_remove_export_actions(&results, &file, &uri, &make_range(0, 0), &lines);
+        let actions =
+            build_remove_export_actions_for_test(&results, &file, &uri, &make_range(0, 0), &lines);
         assert_eq!(
             actions.len(),
             1,
