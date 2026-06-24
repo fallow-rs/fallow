@@ -2669,6 +2669,31 @@ fn playwright_test_callback_records_fixture_member_uses() {
         "aliased userPage.assertGreeting should be recorded as a Playwright fixture use, found: {:?}",
         info.member_accesses
     );
+    let fixture_use_facts: Vec<_> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| {
+            if let SemanticFact::PlaywrightFixtureUse(access) = fact {
+                Some(access)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        fixture_use_facts.iter().any(|fact| fact.test_name == "test"
+            && fact.fixture_name == "adminPage"
+            && fact.member == "assertGreeting"),
+        "adminPage.assertGreeting should emit a typed Playwright fixture use, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        fixture_use_facts.iter().any(|fact| fact.test_name == "test"
+            && fact.fixture_name == "userPage"
+            && fact.member == "assertGreeting"),
+        "aliased userPage.assertGreeting should emit a typed Playwright fixture use, found: {:?}",
+        info.semantic_facts
+    );
 }
 
 #[test]

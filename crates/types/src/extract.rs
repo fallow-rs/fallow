@@ -1358,6 +1358,8 @@ pub enum SemanticFact {
     FluentChainMemberAccess(FluentChainMemberAccessFact),
     /// A member access on a fluent chain rooted at a `new` expression.
     FluentChainNewMemberAccess(FluentChainNewMemberAccessFact),
+    /// A member access on a Playwright fixture object inside a test callback.
+    PlaywrightFixtureUse(PlaywrightFixtureUseFact),
 }
 
 /// A member name referenced from an Angular template surface.
@@ -1403,6 +1405,18 @@ pub struct FluentChainNewMemberAccessFact {
     /// Intermediate fluent methods between construction and final member.
     pub chain: Vec<String>,
     /// Member accessed at this chain step.
+    pub member: String,
+}
+
+/// A member access on a Playwright fixture object inside a test callback.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlaywrightFixtureUseFact {
+    /// Local test function or wrapper used as the callback callee.
+    pub test_name: String,
+    /// Fixture name or dotted fixture path referenced in the callback.
+    pub fixture_name: String,
+    /// Member accessed on the fixture target.
     pub member: String,
 }
 
