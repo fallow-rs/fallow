@@ -25,6 +25,8 @@ pub mod duplicates {
     pub use fallow_core::duplicates::*;
 }
 
+pub mod dead_code;
+
 /// Extracted semantic types exposed through the engine boundary.
 pub mod extract {
     pub use fallow_types::extract::*;
