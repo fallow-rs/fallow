@@ -34,18 +34,60 @@ impl InlineComplexityExceeded {
     }
 }
 
+/// Typed input for building Code Lens items from editor analysis state.
+#[derive(Clone, Copy)]
+pub struct CodeLensInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub complexity: &'a [InlineComplexityFinding],
+    pub file_path: &'a Path,
+    pub document_uri: &'a Uri,
+}
+
+impl<'a> CodeLensInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        complexity: &'a [InlineComplexityFinding],
+        file_path: &'a Path,
+        document_uri: &'a Uri,
+    ) -> Self {
+        Self {
+            results,
+            complexity,
+            file_path,
+            document_uri,
+        }
+    }
+}
+
 /// Build Code Lens items for a file showing reference counts above each export declaration.
-pub fn build_code_lenses(
-    results: &AnalysisResults,
-    complexity: &[InlineComplexityFinding],
-    file_path: &Path,
-    document_uri: &Uri,
-) -> Vec<CodeLens> {
+pub fn build_code_lenses(input: CodeLensInput<'_>) -> Vec<CodeLens> {
+    let CodeLensInput {
+        results,
+        complexity,
+        file_path,
+        document_uri,
+    } = input;
     let mut lenses = export_usage_code_lenses(results, file_path, document_uri);
     lenses.extend(complexity_code_lenses(complexity, file_path));
     lenses.extend(react_component_code_lenses(results, file_path));
 
     lenses
+}
+
+#[cfg(test)]
+fn build_code_lenses_for_test(
+    results: &AnalysisResults,
+    complexity: &[InlineComplexityFinding],
+    file_path: &Path,
+    document_uri: &Uri,
+) -> Vec<CodeLens> {
+    build_code_lenses(CodeLensInput::new(
+        results,
+        complexity,
+        file_path,
+        document_uri,
+    ))
 }
 
 /// Build the DESCRIPTIVE per-component React summary lenses for a file: one lens
@@ -322,7 +364,7 @@ mod tests {
         let results = AnalysisResults::default();
         let uri = Uri::from_file_path(&mod_path).unwrap();
 
-        let lenses = build_code_lenses(&results, &[], &mod_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &mod_path, &uri);
         assert!(lenses.is_empty());
     }
 
@@ -341,7 +383,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&mod_path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &mod_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &mod_path, &uri);
         assert!(lenses.is_empty());
     }
 
@@ -360,7 +402,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -382,7 +424,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -404,7 +446,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -426,7 +468,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         assert_eq!(lenses[0].range.start.line, 14);
@@ -450,7 +492,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -484,7 +526,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -535,7 +577,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &path, &uri);
         assert_eq!(lenses.len(), 3);
 
         let titles: Vec<&str> = lenses
@@ -563,7 +605,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&edge_path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &edge_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &edge_path, &uri);
         assert_eq!(lenses.len(), 1);
         assert_eq!(lenses[0].range.start.line, 0);
     }
@@ -594,7 +636,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &utils_path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -620,7 +662,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &path, &uri);
         assert_eq!(lenses.len(), 1);
 
         assert_eq!(lenses[0].range.start, lenses[0].range.end);
@@ -641,7 +683,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &path, &uri);
         assert!(
             lenses[0].data.is_none(),
             "Code lens data should be None since resolve_provider is false"
@@ -667,7 +709,7 @@ mod tests {
         });
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &utils_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &utils_path, &uri);
 
         let cmd = lenses[0].command.as_ref().unwrap();
         let args = cmd.arguments.as_ref().unwrap();
@@ -693,7 +735,7 @@ mod tests {
         }];
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &complexity, &utils_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &complexity, &utils_path, &uri);
 
         assert_eq!(lenses.len(), 1);
         assert_eq!(lenses[0].range.start.line, 11);
@@ -723,7 +765,7 @@ mod tests {
         }];
 
         let uri = Uri::from_file_path(&utils_path).unwrap();
-        let lenses = build_code_lenses(&results, &complexity, &utils_path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &complexity, &utils_path, &uri);
 
         assert!(lenses.is_empty());
     }
@@ -738,7 +780,7 @@ mod tests {
             .push(react_intel(path.clone()));
 
         let uri = Uri::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &path, &uri);
         assert_eq!(lenses.len(), 1);
 
         let cmd = lenses[0].command.as_ref().unwrap();
@@ -769,7 +811,7 @@ mod tests {
         results.react_component_intel.push(intel);
 
         let uri = Uri::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &path, &uri);
         let cmd = lenses[0].command.as_ref().unwrap();
         // Singular "1 parent" / "1 prop" / "1 hook", no zero memo/effect/etc.
         assert_eq!(
@@ -793,7 +835,7 @@ mod tests {
         results.react_component_intel.push(intel);
 
         let uri = Uri::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &path, &uri);
         let cmd = lenses[0].command.as_ref().unwrap();
         // No segments -> the bare "component" fallback (never "rendered 0x").
         assert_eq!(cmd.title, "component");
@@ -808,7 +850,7 @@ mod tests {
         results.react_component_intel.push(react_intel(other));
 
         let uri = Uri::from_file_path(&path).unwrap();
-        let lenses = build_code_lenses(&results, &[], &path, &uri);
+        let lenses = build_code_lenses_for_test(&results, &[], &path, &uri);
         assert!(lenses.is_empty());
     }
 }
