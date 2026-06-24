@@ -549,6 +549,13 @@ impl<'a> AnalysisSession<'a> {
         }
     }
 
+    fn parse_modules(&self, need_complexity: bool) -> AnalysisParseOutput {
+        let t = Instant::now();
+        self.progress
+            .set_stage(&format!("parsing {} files...", self.files().len()));
+        parse_analysis_modules(self.config, self.files(), need_complexity, t)
+    }
+
     fn run_full(
         self,
         retain: bool,
@@ -560,18 +567,18 @@ impl<'a> AnalysisSession<'a> {
         let (plugin_result, plugins_ms, scripts_ms) =
             self.run_plugins_and_scripts(&workspace_pkgs)?;
 
-        let FullAnalysisCoreOutput { core, metrics } =
-            run_full_analysis_core(&FullAnalysisCoreInput {
-                config: self.config,
-                progress: &self.progress,
-                files: self.files(),
-                workspaces: self.workspaces(),
-                root_pkg: self.root_pkg.as_ref(),
-                workspace_pkgs: &workspace_pkgs,
-                plugin_result: &plugin_result,
-                need_complexity,
-                collect_usages,
-            });
+        let AnalysisParseOutput { modules, metrics } = self.parse_modules(need_complexity);
+        let core = run_owned_analysis_core(OwnedAnalysisCoreInput {
+            config: self.config,
+            progress: &self.progress,
+            files: self.files(),
+            workspaces: self.workspaces(),
+            root_pkg: self.root_pkg.as_ref(),
+            workspace_pkgs: &workspace_pkgs,
+            plugin_result: &plugin_result,
+            modules,
+            collect_usages,
+        });
         self.progress.finish();
 
         let profile = full_analysis_pipeline_profile(
@@ -1013,56 +1020,6 @@ fn analyze_full(
 ) -> Result<AnalysisOutput, FallowError> {
     let _span = tracing::info_span!("fallow_analyze").entered();
     AnalysisSession::new(config).run_full(retain, collect_usages, need_complexity, retain_modules)
-}
-
-struct FullAnalysisCoreInput<'a> {
-    config: &'a ResolvedConfig,
-    progress: &'a progress::AnalysisProgress,
-    files: &'a [discover::DiscoveredFile],
-    workspaces: &'a [fallow_config::WorkspaceInfo],
-    root_pkg: Option<&'a PackageJson>,
-    workspace_pkgs: &'a [LoadedWorkspacePackage<'a>],
-    plugin_result: &'a plugins::AggregatedPluginResult,
-    need_complexity: bool,
-    collect_usages: bool,
-}
-
-struct FullAnalysisCoreOutput {
-    core: OwnedAnalysisCore,
-    metrics: ParseMetrics,
-}
-
-fn run_full_analysis_core(input: &FullAnalysisCoreInput<'_>) -> FullAnalysisCoreOutput {
-    let &FullAnalysisCoreInput {
-        config,
-        progress,
-        files,
-        workspaces,
-        root_pkg,
-        workspace_pkgs,
-        plugin_result,
-        need_complexity,
-        collect_usages,
-    } = input;
-
-    let t = Instant::now();
-    progress.set_stage(&format!("parsing {} files...", files.len()));
-    let AnalysisParseOutput { modules, metrics } =
-        parse_analysis_modules(config, files, need_complexity, t);
-
-    let core = run_owned_analysis_core(OwnedAnalysisCoreInput {
-        config,
-        progress,
-        files,
-        workspaces,
-        root_pkg,
-        workspace_pkgs,
-        plugin_result,
-        modules,
-        collect_usages,
-    });
-
-    FullAnalysisCoreOutput { core, metrics }
 }
 
 fn full_analysis_pipeline_profile(
@@ -2317,6 +2274,26 @@ mod tests {
             "session should own discovered project files"
         );
         assert_eq!(session.workspaces().len(), 0);
+    }
+
+    #[test]
+    fn analysis_session_parses_owned_modules() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        write_session_fixture(dir.path());
+        let config = session_config(dir.path());
+
+        let session = AnalysisSession::new(&config);
+        let parsed = session.parse_modules(false);
+
+        assert!(
+            parsed
+                .modules
+                .iter()
+                .any(|module| session.files()[module.file_id.0 as usize]
+                    .path
+                    .ends_with("src/index.ts")),
+            "session parsing should return modules keyed to session files"
+        );
     }
 
     #[test]
