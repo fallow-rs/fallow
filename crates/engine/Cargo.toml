@@ -17,6 +17,9 @@ fallow-core = { workspace = true }
 fallow-types = { workspace = true }
 rustc-hash = { workspace = true }
 
+[features]
+schema = ["fallow-core/schema", "fallow-types/schema"]
+
 [dev-dependencies]
 tempfile = { workspace = true }
 

@@ -12,7 +12,14 @@ description = "Programmatic API contract types for fallow"
 readme = "../../README.md"
 
 [dependencies]
+fallow-engine = { workspace = true }
+fallow-output = { workspace = true }
+fallow-types = { workspace = true }
 serde = { workspace = true }
+schemars = { workspace = true, optional = true }
+
+[features]
+schema = ["dep:schemars", "fallow-engine/schema", "fallow-output/schema", "fallow-types/schema"]
 
 [lints]
 workspace = true
