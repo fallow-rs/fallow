@@ -2356,17 +2356,8 @@ impl ModuleInfoExtractor {
                 self.record_playwright_fixture_type_fact(
                     alias.id.name.to_string(),
                     fixture_name.clone(),
-                    type_name.clone(),
+                    type_name,
                 );
-                self.member_accesses.push(MemberAccess {
-                    object: format!(
-                        "{}{}:{}",
-                        crate::PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
-                        alias.id.name,
-                        fixture_name
-                    ),
-                    member: type_name,
-                });
             }
         }
     }
