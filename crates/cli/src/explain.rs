@@ -1881,12 +1881,12 @@ mod tests {
 
     #[test]
     fn result_sarif_rule_ids_have_explain_metadata() {
-        for meta in fallow_types::issue_meta::result_issue_metas() {
-            for rule_id in meta.sarif_rule_ids() {
+        for contract in fallow_output::issue_output_contracts() {
+            for rule_id in contract.sarif_rule_ids {
                 assert!(
                     rule_by_id(&rule_id).is_some(),
                     "result metadata code {} has SARIF rule id {rule_id} without RuleDef",
-                    meta.code
+                    contract.code
                 );
             }
         }

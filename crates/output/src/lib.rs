@@ -14,6 +14,7 @@
 
 mod codeclimate;
 mod format;
+mod issue_contract;
 
 pub use codeclimate::{
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
@@ -24,3 +25,7 @@ pub use fallow_types::output;
 pub use fallow_types::output_dead_code;
 pub use fallow_types::output_health;
 pub use format::OutputFormat;
+pub use issue_contract::{
+    CODECLIMATE_RESULT_CODES, IssueOutputContract, TsAliasMeta, issue_output_contract_by_code,
+    issue_output_contracts,
+};
