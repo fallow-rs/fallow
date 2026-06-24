@@ -3938,18 +3938,18 @@ mod tests {
 
     #[test]
     fn result_sarif_rule_contract_uses_explain_metadata() {
-        for meta in fallow_types::issue_meta::result_issue_metas() {
-            for rule_id in meta.sarif_rule_ids() {
+        for contract in fallow_output::issue_output_contracts() {
+            for rule_id in contract.sarif_rule_ids {
                 let rule = sarif_rule(&rule_id, "fallback text", "warning");
                 assert!(
                     rule.get("fullDescription").is_some(),
                     "result metadata code {} fell back for SARIF rule {rule_id}",
-                    meta.code
+                    contract.code
                 );
                 assert!(
                     rule.get("helpUri").is_some(),
                     "result metadata code {} has no SARIF helpUri for {rule_id}",
-                    meta.code
+                    contract.code
                 );
             }
         }

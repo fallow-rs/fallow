@@ -4515,9 +4515,9 @@ mod tests {
     fn codeclimate_result_contract_exclusions_are_explicit() {
         use std::collections::BTreeSet;
 
-        let missing: BTreeSet<&str> = fallow_types::issue_meta::result_issue_metas()
-            .filter(|meta| meta.codeclimate_check_names().is_empty())
-            .map(|meta| meta.code)
+        let missing: BTreeSet<&str> = fallow_output::issue_output_contracts()
+            .filter(|contract| contract.codeclimate_check_names.is_empty())
+            .map(|contract| contract.code)
             .collect();
 
         assert_eq!(
@@ -4525,8 +4525,8 @@ mod tests {
             missing
         );
 
-        let check_names: BTreeSet<String> = fallow_types::issue_meta::result_issue_metas()
-            .flat_map(|meta| meta.codeclimate_check_names())
+        let check_names: BTreeSet<String> = fallow_output::issue_output_contracts()
+            .flat_map(|contract| contract.codeclimate_check_names)
             .collect();
         assert!(check_names.contains("fallow/stale-suppression"));
         assert!(check_names.contains("fallow/missing-suppression-reason"));
