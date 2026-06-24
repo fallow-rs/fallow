@@ -113,6 +113,8 @@ struct IssueTypeMeta {
     result_key: Option<&'static str>,
     summary_label: Option<&'static str>,
     summary_docs_anchor: Option<&'static str>,
+    sarif_rule_id: Option<String>,
+    codeclimate_check_name: Option<String>,
     counts_in_total: bool,
     fixable: bool,
     /// `(suppression token, file_level)` when comment-suppressible. The
@@ -136,6 +138,8 @@ impl IssueTypeMeta {
             meta.result_key = Some(result.result_key);
             meta.summary_label = issue_summary_label(bare_id);
             meta.summary_docs_anchor = issue_summary_docs_anchor(bare_id);
+            meta.sarif_rule_id = Some(result.sarif_rule_id());
+            meta.codeclimate_check_name = result.codeclimate_check_name();
             meta.counts_in_total = result.counts_in_total;
         }
         meta
@@ -282,6 +286,8 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
         "result_key": meta.result_key,
         "summary_label": meta.summary_label,
         "summary_docs_anchor": meta.summary_docs_anchor,
+        "sarif_rule_id": meta.sarif_rule_id,
+        "codeclimate_check_name": meta.codeclimate_check_name,
         "counts_in_total": meta.counts_in_total,
         "fixable": meta.fixable,
         "suppressible": meta.suppress.is_some(),
@@ -1120,6 +1126,8 @@ mod tests {
                 "result_key",
                 "summary_label",
                 "summary_docs_anchor",
+                "sarif_rule_id",
+                "codeclimate_check_name",
                 "suppress_comment",
                 "note",
                 "license_note",
@@ -1167,6 +1175,16 @@ mod tests {
                     "non dead-code row {} must not expose a dead-code summary_docs_anchor",
                     row["id"]
                 );
+                assert!(
+                    row["sarif_rule_id"].is_null(),
+                    "non dead-code row {} must not expose a dead-code sarif_rule_id",
+                    row["id"]
+                );
+                assert!(
+                    row["codeclimate_check_name"].is_null(),
+                    "non dead-code row {} must not expose a dead-code codeclimate_check_name",
+                    row["id"]
+                );
                 assert_eq!(
                     row["counts_in_total"].as_bool(),
                     Some(false),
@@ -1192,6 +1210,12 @@ mod tests {
                     "dead-code row {} has result_key {result_key} but no summary_docs_anchor",
                     row["id"]
                 );
+                assert_eq!(
+                    row["sarif_rule_id"].as_str(),
+                    row["rule_id"].as_str(),
+                    "dead-code row {} must align SARIF rule id with the rule id",
+                    row["id"]
+                );
                 if counts {
                     counted.insert(result_key);
                 } else {
@@ -1215,6 +1239,38 @@ mod tests {
             ]),
             advisory
         );
+    }
+
+    #[test]
+    fn dead_code_codeclimate_contract_is_explicit() {
+        let schema = schema();
+        let rows = schema["issue_types"].as_array().unwrap();
+
+        let missing: FxHashSet<&str> = rows
+            .iter()
+            .filter(|row| row["command"].as_str() == Some("dead-code"))
+            .filter(|row| row["result_key"].as_str().is_some())
+            .filter(|row| row["codeclimate_check_name"].is_null())
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+
+        assert_eq!(
+            FxHashSet::from_iter(["duplicate-prop-shape", "prop-drilling", "thin-wrapper"]),
+            missing
+        );
+
+        for row in rows {
+            if row["command"].as_str() == Some("dead-code")
+                && row["codeclimate_check_name"].as_str().is_some()
+            {
+                assert_eq!(
+                    row["codeclimate_check_name"].as_str(),
+                    row["rule_id"].as_str(),
+                    "dead-code row {} must align CodeClimate check name with the rule id",
+                    row["id"]
+                );
+            }
+        }
     }
 
     /// Filter flags in the manifest must exist on the live clap command,

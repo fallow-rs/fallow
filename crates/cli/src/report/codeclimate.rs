@@ -4511,4 +4511,19 @@ mod tests {
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("Type re-export"), "desc: {desc}");
     }
+
+    #[test]
+    fn codeclimate_result_contract_exclusions_are_explicit() {
+        use std::collections::BTreeSet;
+
+        let missing: BTreeSet<&str> = fallow_types::issue_meta::result_issue_metas()
+            .filter(|meta| meta.codeclimate_check_name().is_none())
+            .map(|meta| meta.code)
+            .collect();
+
+        assert_eq!(
+            BTreeSet::from(["duplicate-prop-shape", "prop-drilling", "thin-wrapper"]),
+            missing
+        );
+    }
 }
