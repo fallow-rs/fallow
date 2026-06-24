@@ -32,8 +32,7 @@ use fallow_core::changed_files::{
     filter_duplication_by_changed_files, filter_results_by_changed_files, resolve_git_toplevel,
     try_get_changed_files_with_toplevel,
 };
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use fallow_engine::{AnalysisResults, DuplicationReport};
 use fallow_types::issue_meta::{IssueKindMeta, diagnostic_issue_metas};
 
 use crate::code_lens::{InlineComplexityExceeded, InlineComplexityFinding};
@@ -207,22 +206,20 @@ struct BlockingAnalysisOutput {
 }
 
 fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
-    let load = fallow_core::config_for_project(input.project_root, input.config_path);
+    let load = fallow_engine::config_for_project(input.project_root, input.config_path);
     let (mut config, message) = match load {
-        Ok((config, Some(path))) => (
-            config,
+        Ok(project_config) => (
+            project_config.config,
             (
                 MessageType::INFO,
-                format!("loaded config: {}", path.display()),
-            ),
-        ),
-        Ok((config, None)) => (
-            config,
-            (
-                MessageType::INFO,
-                format!(
-                    "no config file found for {}, using defaults",
-                    input.project_root.display()
+                project_config.path.map_or_else(
+                    || {
+                        format!(
+                            "no config file found for {}, using defaults",
+                            input.project_root.display()
+                        )
+                    },
+                    |path| format!("loaded config: {}", path.display()),
                 ),
             ),
         ),
@@ -244,13 +241,13 @@ fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
 
     run_typed_dead_code_analysis(input, &config);
 
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
+    let files = fallow_engine::discover_files_with_plugin_scopes(&config);
     let duplicates_config = input.duplication_options.map_or_else(
         || config.duplicates.clone(),
         |options| options.merge_with(&config.duplicates),
     );
     let duplication =
-        fallow_core::duplicates::find_duplicates(input.project_root, &files, &duplicates_config);
+        fallow_engine::find_duplicates(input.project_root, &files, &duplicates_config);
     merge_duplication(input.merged_duplication, duplication);
 }
 
@@ -266,17 +263,11 @@ fn analyze_project_root_config_fallback(
     if input.config_path.is_some() {
         return;
     }
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_project externally; the LSP still uses the workspace path dependency"
-    )]
-    if let Ok(results) = fallow_core::analyze_project(input.project_root) {
-        merge_results(input.merged_results, results);
+    if let Ok(analysis) = fallow_engine::analyze_project(input.project_root) {
+        merge_results(input.merged_results, analysis.results);
     }
-    let duplication = fallow_core::duplicates::find_duplicates_in_project(
-        input.project_root,
-        &DuplicatesConfig::default(),
-    );
+    let duplication =
+        fallow_engine::find_duplicates_in_project(input.project_root, &DuplicatesConfig::default());
     merge_duplication(input.merged_duplication, duplication);
 }
 
@@ -288,24 +279,14 @@ fn run_typed_dead_code_analysis(
     config: &fallow_config::ResolvedConfig,
 ) {
     if input.inline_complexity_enabled {
-        #[expect(
-            deprecated,
-            reason = "ADR-008 deprecates fallow_core typed analysis externally; the LSP still uses the workspace path dependency"
-        )]
-        if let Ok(output) = fallow_core::analyze_with_usages_and_complexity(config) {
+        if let Ok(output) = fallow_engine::analyze_with_usages_and_complexity(config) {
             input
                 .merged_inline_complexity
                 .extend(collect_inline_complexity(config, &output));
             merge_results(input.merged_results, output.results);
         }
-    } else {
-        #[expect(
-            deprecated,
-            reason = "ADR-008 deprecates fallow_core::analyze_with_usages externally; the LSP still uses the workspace path dependency"
-        )]
-        if let Ok(results) = fallow_core::analyze_with_usages(config) {
-            merge_results(input.merged_results, results);
-        }
+    } else if let Ok(analysis) = fallow_engine::analyze_with_usages(config) {
+        merge_results(input.merged_results, analysis.results);
     }
 }
 
@@ -493,7 +474,7 @@ fn build_health_ignore_set(patterns: &[String]) -> Option<globset::GlobSet> {
 
 fn collect_inline_complexity(
     config: &fallow_config::ResolvedConfig,
-    output: &fallow_core::AnalysisOutput,
+    output: &fallow_engine::DeadCodeAnalysisOutput,
 ) -> Vec<InlineComplexityFinding> {
     let Some(modules) = output.modules.as_ref() else {
         return Vec::new();

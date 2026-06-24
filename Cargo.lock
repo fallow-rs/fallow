@@ -1123,6 +1123,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallow-engine"
+version = "2.102.0"
+dependencies = [
+ "fallow-config",
+ "fallow-core",
+ "fallow-types",
+]
+
+[[package]]
 name = "fallow-extract"
 version = "2.102.0"
 dependencies = [
@@ -1182,6 +1191,7 @@ version = "2.102.0"
 dependencies = [
  "fallow-config",
  "fallow-core",
+ "fallow-engine",
  "fallow-types",
  "futures",
  "globset",

@@ -18,6 +18,7 @@ fallow-api = { version = "2.102.0", path = "crates/api" }
 fallow-core = { version = "2.102.0", path = "crates/core" }
 fallow-config = { version = "2.102.0", path = "crates/config" }
 fallow-extract = { version = "2.102.0", path = "crates/extract" }
+fallow-engine = { version = "2.102.0", path = "crates/engine" }
 fallow-graph = { version = "2.102.0", path = "crates/graph" }
 fallow-output = { version = "2.102.0", path = "crates/output" }
 fallow-types = { version = "2.102.0", path = "crates/types" }
