@@ -881,12 +881,12 @@ impl LanguageServer for FallowLspServer {
         };
 
         let inline_complexity = self.inline_complexity.read().await;
-        let lenses = code_lens::build_code_lenses(
+        let lenses = code_lens::build_code_lenses(code_lens::CodeLensInput::new(
             results,
             &inline_complexity,
             &file_path,
             &params.text_document.uri,
-        );
+        ));
 
         if lenses.is_empty() {
             Ok(None)
