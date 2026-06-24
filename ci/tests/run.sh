@@ -1596,6 +1596,32 @@ echo "=== IssueKind summary drift guard (GitLab) ==="
 GUARD_DIR="$DIR/../../action/tests"
 # shellcheck source=action/tests/issuekind-drift-guard.sh
 . "$GUARD_DIR/issuekind-drift-guard.sh"
+fallback_rows="$(
+  FALLOW_BIN="$INSTALL_TMP/missing-fallow-binary"
+  FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="__unset__"
+  fallow_dead_code_schema_rows
+)"
+assert_contains "$fallback_rows" $'unused-optional-dependency\tunused_optional_dependencies\ttrue' \
+  "issuekind guard: source fallback includes optional dependencies"
+assert_contains "$fallback_rows" $'boundary-coverage\tboundary_coverage_violations\ttrue' \
+  "issuekind guard: source fallback includes boundary coverage"
+assert_contains "$fallback_rows" $'boundary-call-violation\tboundary_call_violations\ttrue' \
+  "issuekind guard: source fallback includes boundary call violations"
+if issuekind_key_present '# .unused_files' "unused_files"; then
+  fail "issuekind guard: comments do not satisfy key coverage" "comment-only jq source matched unused_files"
+else
+  pass "issuekind guard: comments do not satisfy key coverage"
+fi
+if issuekind_key_present 'true # .unused_files' "unused_files"; then
+  fail "issuekind guard: inline comments do not satisfy key coverage" "inline comment matched unused_files"
+else
+  pass "issuekind guard: inline comments do not satisfy key coverage"
+fi
+if issuekind_key_present '["unused_files"] # rendered table row' "unused_files"; then
+  pass "issuekind guard: string tokens still satisfy key coverage"
+else
+  fail "issuekind guard: string tokens still satisfy key coverage" "quoted key token did not match"
+fi
 assert_issuekind_summary_coverage "gitlab summary-check"    "$CI_JQ_DIR/summary-check.jq"
 assert_issuekind_summary_coverage "gitlab summary-combined" "$CI_JQ_DIR/summary-combined.jq"
 assert_issuekind_summary_coverage "gitlab summary-audit"    "$CI_JQ_DIR/summary-audit.jq"

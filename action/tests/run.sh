@@ -79,7 +79,8 @@ assert_json_value() {
 echo ""
 echo "=== Repository config hygiene ==="
 
-DUPLICATE_CONFIG_KEYS=$(cd "$DIR/../.." && node <<'NODE'
+CONFIG_HYGIENE_JS=$(mktemp)
+cat > "$CONFIG_HYGIENE_JS" <<'NODE'
 const { readdirSync, readFileSync, statSync } = require("node:fs");
 const { join } = require("node:path");
 
@@ -191,7 +192,8 @@ walk(".");
 for (const issue of issues) console.log(issue);
 process.exit(issues.length === 0 ? 0 : 1);
 NODE
-)
+DUPLICATE_CONFIG_KEYS=$(cd "$DIR/../.." && node "$CONFIG_HYGIENE_JS")
+rm -f "$CONFIG_HYGIENE_JS"
 if [ -z "$DUPLICATE_CONFIG_KEYS" ]; then
   pass "repo fallow configs have no duplicate JSON keys"
 else

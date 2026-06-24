@@ -21,8 +21,8 @@
 #
 # Canonical set: the dead-code issue-type ids, result keys, and count policy
 # from `fallow schema` (issue_types[].command == "dead-code"). When the binary
-# is unavailable the fallback derives kebab ids from crates/types/src/suppress.rs
-# `issue_kind_to_kebab` and maps them through the legacy table below.
+# is unavailable or too old to expose result metadata, the fallback derives the
+# same row contract from crates/types/src/issue_meta.rs `ISSUE_RESULT_META`.
 #
 # Non-dead-code kinds (security-*, code-duplication, complexity, coverage-gaps,
 # feature-flag) are NOT summarised by these dead-code surfaces: they belong to
@@ -38,6 +38,53 @@
 # enumerated, documented omissions are tolerated.
 
 FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="__unset__"
+
+fallow_dead_code_source_rows() {
+  local repo_root source_file
+  repo_root="$(cd "$GUARD_DIR/../.." && pwd)"
+  source_file="$repo_root/crates/types/src/issue_meta.rs"
+  if [ ! -f "$source_file" ]; then
+    return 1
+  fi
+
+  awk '
+    /IssueResultMeta[[:space:]]*\{/ {
+      in_meta = 1
+      code = ""
+      result_key = ""
+      counts = ""
+      next
+    }
+    in_meta && /code: "/ {
+      line = $0
+      sub(/^.*code: "/, "", line)
+      sub(/".*$/, "", line)
+      code = line
+      next
+    }
+    in_meta && /result_key: "/ {
+      line = $0
+      sub(/^.*result_key: "/, "", line)
+      sub(/".*$/, "", line)
+      result_key = line
+      next
+    }
+    in_meta && /counts_in_total: / {
+      line = $0
+      sub(/^.*counts_in_total: /, "", line)
+      sub(/,.*/, "", line)
+      counts = line
+      next
+    }
+    in_meta && /^[[:space:]]*\},/ {
+      if (code != "" && result_key != "" && counts != "") {
+        print code "\t" result_key "\t" counts
+      }
+      in_meta = 0
+      next
+    }
+  ' "$source_file"
+}
 
 fallow_dead_code_schema_rows() {
   if [ "$FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE" != "__unset__" ]; then
@@ -66,6 +113,10 @@ fallow_dead_code_schema_rows() {
             empty
           end
       ' 2>/dev/null)"
+  fi
+
+  if [ -z "$rows" ]; then
+    rows="$(fallow_dead_code_source_rows 2>/dev/null)"
   fi
 
   FALLOW_DEAD_CODE_SCHEMA_ROWS_CACHE="$rows"
@@ -168,22 +219,18 @@ issuekind_diagnostic_code() {
 }
 
 # Resolve the canonical dead-code id list. Prefer `fallow schema` so the set is
-# command-tagged; fall back to suppress.rs kebab ids (non-dead-code kinds drop
-# out at the mapping step, which is the desired conservative behaviour).
+# command-tagged; fall back to the checked-in result metadata table so shell-only
+# guard runs still gate every counted serialized result key.
 fallow_dead_code_ids() {
-  local repo_root rows row_id _row_key _row_counts
-  repo_root="$(cd "$GUARD_DIR/../.." && pwd)"
+  local rows row_id _row_key _row_counts
   if rows="$(fallow_dead_code_schema_rows)" && [ -n "$rows" ]; then
-    echo "__SOURCE__ fallow schema" >&2
+    echo "__SOURCE__ fallow schema or issue_meta.rs result metadata" >&2
     while IFS=$'\t' read -r row_id _row_key _row_counts; do
       [ -n "$row_id" ] && printf '%s\n' "$row_id"
     done <<< "$rows"
     return 0
   fi
-  # Fallback: kebab ids from issue_kind_to_kebab in suppress.rs.
-  echo "__SOURCE__ suppress.rs issue_kind_to_kebab (binary unavailable)" >&2
-  grep -oE '=> "[a-z-]+",' "$repo_root/crates/types/src/suppress.rs" \
-    | sed -E 's/=> "//; s/",//' | sort -u
+  return 1
 }
 
 # Does the JSON result key appear in this jq source? Surfaces reference keys in
@@ -196,9 +243,44 @@ fallow_dead_code_ids() {
 # The member-access form is matched as a literal `.` immediately followed by the
 # key, bounded so `.unused_file` never matches `.unused_files`. The trailing
 # bound also accepts end-of-line.
+issuekind_strip_jq_comments() {
+  awk '
+    {
+      out = ""
+      in_string = 0
+      escaped = 0
+      for (i = 1; i <= length($0); i++) {
+        char = substr($0, i, 1)
+        if (in_string) {
+          out = out char
+          if (escaped) {
+            escaped = 0
+          } else if (char == "\\") {
+            escaped = 1
+          } else if (char == "\"") {
+            in_string = 0
+          }
+          continue
+        }
+        if (char == "\"") {
+          in_string = 1
+          out = out char
+          continue
+        }
+        if (char == "#") {
+          break
+        }
+        out = out char
+      }
+      print out
+    }
+  '
+}
+
 issuekind_key_present() {
-  local jq_src="$1" key="$2"
-  printf '%s' "$jq_src" | grep -qE "\"${key}\"|\.${key}([^A-Za-z0-9_]|$)"
+  local jq_src="$1" key="$2" stripped
+  stripped="$(printf '%s' "$jq_src" | issuekind_strip_jq_comments)"
+  grep -qE "\"${key}\"|\.${key}([^A-Za-z0-9_]|$)" <<< "$stripped"
 }
 
 # Is <kebab-id> in the space-separated allowed-omission list <allow>? Used to

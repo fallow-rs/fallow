@@ -93,6 +93,9 @@ fn analysis_complete_params(
     results: &AnalysisResults,
     duplication: &DuplicationReport,
 ) -> AnalysisCompleteParams {
+    let boundary_violations = results.boundary_violations.len()
+        + results.boundary_coverage_violations.len()
+        + results.boundary_call_violations.len();
     AnalysisCompleteParams {
         total_issues: results.total_issues(),
         unused_files: results.unused_files.len(),
@@ -121,7 +124,7 @@ fn analysis_complete_params(
         test_only_dependencies: results.test_only_dependencies.len(),
         circular_dependencies: results.circular_dependencies.len(),
         re_export_cycles: results.re_export_cycles.len(),
-        boundary_violations: results.boundary_violations.len(),
+        boundary_violations,
         stale_suppressions: results.stale_suppressions.len(),
         unused_catalog_entries: results.unused_catalog_entries.len(),
         empty_catalog_groups: results.empty_catalog_groups.len(),
@@ -1639,6 +1642,52 @@ mod tests {
         assert!(caps.code_action_provider.is_some());
         assert!(caps.code_lens_provider.is_some());
         assert!(caps.hover_provider.is_some());
+    }
+
+    #[test]
+    fn analysis_complete_params_collapses_boundary_subresults() {
+        let mut results = AnalysisResults {
+            boundary_violations: vec![BoundaryViolationFinding::with_actions(BoundaryViolation {
+                from_path: "/ui.ts".into(),
+                to_path: "/data.ts".into(),
+                from_zone: "ui".to_string(),
+                to_zone: "data".to_string(),
+                import_specifier: "../data".to_string(),
+                line: 1,
+                col: 0,
+            })],
+            boundary_coverage_violations: vec![
+                fallow_core::results::BoundaryCoverageViolationFinding::with_actions(
+                    fallow_core::results::BoundaryCoverageViolation {
+                        path: "/unzoned.ts".into(),
+                        line: 2,
+                        col: 0,
+                    },
+                ),
+            ],
+            boundary_call_violations: vec![
+                fallow_core::results::BoundaryCallViolationFinding::with_actions(
+                    fallow_core::results::BoundaryCallViolation {
+                        path: "/domain.ts".into(),
+                        line: 3,
+                        col: 0,
+                        zone: "domain".to_string(),
+                        callee: "console.log".to_string(),
+                        pattern: "console.*".to_string(),
+                    },
+                ),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        let params = analysis_complete_params(&results, &DuplicationReport::default());
+
+        assert_eq!(params.boundary_violations, 3);
+        assert_eq!(params.total_issues, 3);
+
+        results.boundary_call_violations.clear();
+        let params = analysis_complete_params(&results, &DuplicationReport::default());
+        assert_eq!(params.boundary_violations, 2);
     }
 
     #[test]

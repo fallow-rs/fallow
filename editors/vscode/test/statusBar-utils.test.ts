@@ -321,6 +321,35 @@ describe("buildParamsFromCli", () => {
     expect(params.duplicationPercentage).toBe(0);
   });
 
+  it("collapses boundary sub-results into the boundary status count", () => {
+    const check: FallowCheckResult = {
+      ...emptyCheck(),
+      boundary_coverage_violations: [
+        {
+          path: "src/unzoned.ts",
+          line: 4,
+          col: 0,
+          actions: [],
+        },
+      ],
+      boundary_call_violations: [
+        {
+          path: "src/domain.ts",
+          line: 8,
+          col: 2,
+          zone: "domain",
+          callee: "console.log",
+          pattern: "console.*",
+          actions: [],
+        },
+      ],
+    };
+
+    const params = buildParamsFromCli(check, null);
+    expect(params.boundaryViolations).toBe(2);
+    expect(params.totalIssues).toBe(2);
+  });
+
   it("propagates duplication stats from the dupes result so the tooltip matches the status bar text", () => {
     const dupes: FallowDupesResult = {
       clone_groups: [],

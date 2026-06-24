@@ -56,7 +56,10 @@ export const buildParamsFromCli = (
   testOnlyDependencies: check?.test_only_dependencies?.length ?? 0,
   circularDependencies: check?.circular_dependencies?.length ?? 0,
   reExportCycles: check?.re_export_cycles?.length ?? 0,
-  boundaryViolations: check?.boundary_violations?.length ?? 0,
+  boundaryViolations:
+    (check?.boundary_violations?.length ?? 0) +
+    (check?.boundary_coverage_violations?.length ?? 0) +
+    (check?.boundary_call_violations?.length ?? 0),
   staleSuppressions: check?.stale_suppressions?.length ?? 0,
   unusedCatalogEntries: check?.unused_catalog_entries?.length ?? 0,
   unresolvedCatalogReferences: check?.unresolved_catalog_references?.length ?? 0,
