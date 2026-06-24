@@ -567,37 +567,20 @@ fn run_duplication_analysis(
     dupes_config: &fallow_config::DuplicatesConfig,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
 ) -> (DuplicationReport, DefaultIgnoreSkips) {
-    if let Some(changed_files) = changed_files {
-        if opts.no_cache {
-            fallow_core::duplicates::find_duplicates_touching_files_with_default_ignore_skips(
-                &config.root,
-                files,
-                dupes_config,
-                changed_files,
-            )
-        } else {
-            fallow_core::duplicates::find_duplicates_touching_files_cached_with_default_ignore_skips(
-                &config.root,
-                files,
-                dupes_config,
-                changed_files,
-                &config.cache_dir,
-            )
-        }
-    } else if opts.no_cache {
-        fallow_core::duplicates::find_duplicates_with_default_ignore_skips(
+    let cache_dir = (!opts.no_cache).then_some(config.cache_dir.as_path());
+    let analysis = if let Some(changed_files) = changed_files {
+        let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
+        fallow_engine::find_duplicates_touching_files_with_defaults(
             &config.root,
             files,
             dupes_config,
+            &changed_files,
+            cache_dir,
         )
     } else {
-        fallow_core::duplicates::find_duplicates_cached_with_default_ignore_skips(
-            &config.root,
-            files,
-            dupes_config,
-            &config.cache_dir,
-        )
-    }
+        fallow_engine::find_duplicates_with_defaults(&config.root, files, dupes_config, cache_dir)
+    };
+    (analysis.report, analysis.default_ignore_skips)
 }
 
 /// Print duplication results and return appropriate exit code.

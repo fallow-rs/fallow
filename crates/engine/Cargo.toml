@@ -15,6 +15,7 @@ readme = "../../README.md"
 fallow-config = { workspace = true }
 fallow-core = { workspace = true }
 fallow-types = { workspace = true }
+rustc-hash = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

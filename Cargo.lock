@@ -1009,6 +1009,7 @@ dependencies = [
  "fallow-config",
  "fallow-core",
  "fallow-cov-protocol",
+ "fallow-engine",
  "fallow-license",
  "fallow-output",
  "fallow-types",
@@ -1129,6 +1130,7 @@ dependencies = [
  "fallow-config",
  "fallow-core",
  "fallow-types",
+ "rustc-hash 2.1.2",
  "tempfile",
 ]
 

@@ -54,6 +54,7 @@ schema-emit = [
 [dependencies]
 fallow-api = { workspace = true }
 fallow-core = { workspace = true }
+fallow-engine = { workspace = true }
 fallow-config = { workspace = true }
 fallow-output = { workspace = true }
 fallow-types = { workspace = true }

@@ -18,6 +18,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use fallow_config::{DuplicatesConfig, ResolvedConfig};
+use rustc_hash::FxHashSet;
 
 /// Duplication result types exposed through the engine boundary.
 pub mod duplicates {
@@ -40,8 +41,8 @@ pub mod suppress {
 }
 
 pub use fallow_core::duplicates::{
-    CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
-    RefactoringSuggestion,
+    CloneFamily, CloneGroup, CloneInstance, DefaultIgnoreSkips, DuplicationReport,
+    DuplicationStats, MirroredDirectory, RefactoringSuggestion,
 };
 pub use fallow_types::discover::{DiscoveredFile, FileId};
 pub use fallow_types::extract::ModuleInfo;
@@ -103,6 +104,13 @@ pub struct DeadCodeAnalysisOutput {
     pub results: AnalysisResults,
     pub modules: Option<Vec<ModuleInfo>>,
     pub files: Option<Vec<DiscoveredFile>>,
+}
+
+/// Typed duplication analysis result.
+#[derive(Debug)]
+pub struct DuplicationAnalysis {
+    pub report: DuplicationReport,
+    pub default_ignore_skips: DefaultIgnoreSkips,
 }
 
 /// Reusable engine session for one resolved project.
@@ -208,6 +216,33 @@ impl AnalysisSession {
     pub fn find_duplicates_with(&self, config: &DuplicatesConfig) -> DuplicationReport {
         find_duplicates(&self.config.root, &self.files, config)
     }
+
+    /// Run duplication detection and return report sidecar metadata.
+    #[must_use]
+    pub fn find_duplicates_with_defaults(
+        &self,
+        config: &DuplicatesConfig,
+        cache_dir: Option<&Path>,
+    ) -> DuplicationAnalysis {
+        find_duplicates_with_defaults(&self.config.root, &self.files, config, cache_dir)
+    }
+
+    /// Run focused duplication detection for a changed-file set.
+    #[must_use]
+    pub fn find_duplicates_touching_files_with_defaults(
+        &self,
+        config: &DuplicatesConfig,
+        changed_files: &[PathBuf],
+        cache_dir: Option<&Path>,
+    ) -> DuplicationAnalysis {
+        find_duplicates_touching_files_with_defaults(
+            &self.config.root,
+            &self.files,
+            config,
+            changed_files,
+            cache_dir,
+        )
+    }
 }
 
 /// Resolve the analysis config for a project.
@@ -296,6 +331,59 @@ pub fn find_duplicates_in_project(root: &Path, config: &DuplicatesConfig) -> Dup
     fallow_core::duplicates::find_duplicates_in_project(root, config)
 }
 
+/// Run duplication detection and include metadata about built-in ignored files.
+#[must_use]
+pub fn find_duplicates_with_defaults(
+    root: &Path,
+    files: &[DiscoveredFile],
+    config: &DuplicatesConfig,
+    cache_dir: Option<&Path>,
+) -> DuplicationAnalysis {
+    let (report, default_ignore_skips) = if let Some(cache_dir) = cache_dir {
+        fallow_core::duplicates::find_duplicates_cached_with_default_ignore_skips(
+            root, files, config, cache_dir,
+        )
+    } else {
+        fallow_core::duplicates::find_duplicates_with_default_ignore_skips(root, files, config)
+    };
+    DuplicationAnalysis {
+        report,
+        default_ignore_skips,
+    }
+}
+
+/// Run focused duplication detection and include metadata about built-in ignored files.
+#[must_use]
+pub fn find_duplicates_touching_files_with_defaults(
+    root: &Path,
+    files: &[DiscoveredFile],
+    config: &DuplicatesConfig,
+    changed_files: &[PathBuf],
+    cache_dir: Option<&Path>,
+) -> DuplicationAnalysis {
+    let changed_files = changed_files.iter().cloned().collect::<FxHashSet<_>>();
+    let (report, default_ignore_skips) = if let Some(cache_dir) = cache_dir {
+        fallow_core::duplicates::find_duplicates_touching_files_cached_with_default_ignore_skips(
+            root,
+            files,
+            config,
+            &changed_files,
+            cache_dir,
+        )
+    } else {
+        fallow_core::duplicates::find_duplicates_touching_files_with_default_ignore_skips(
+            root,
+            files,
+            config,
+            &changed_files,
+        )
+    };
+    DuplicationAnalysis {
+        report,
+        default_ignore_skips,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,5 +435,29 @@ mod tests {
             .collect();
         assert!(relative_paths.contains(&Path::new("src/index.ts")));
         assert!(!relative_paths.contains(&Path::new("src/index.test.ts")));
+    }
+
+    #[test]
+    fn analysis_session_runs_duplication_with_default_skip_metadata() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        let generated = temp.path().join("storybook-static");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::create_dir(&generated).expect("generated dir");
+        let repeated =
+            "export function repeated() {\n  return ['alpha', 'beta', 'gamma'].join(',');\n}\n";
+        std::fs::write(src.join("a.ts"), repeated).expect("source file");
+        std::fs::write(src.join("b.ts"), repeated).expect("source file");
+        std::fs::write(generated.join("generated.ts"), repeated).expect("generated file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        let mut config = session.config().duplicates.clone();
+        config.min_tokens = 1;
+        config.min_lines = 1;
+
+        let analysis = session.find_duplicates_with_defaults(&config, None);
+
+        assert!(!analysis.report.clone_groups.is_empty());
+        assert!(analysis.default_ignore_skips.total > 0);
     }
 }
