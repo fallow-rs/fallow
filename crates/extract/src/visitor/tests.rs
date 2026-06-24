@@ -3000,6 +3000,19 @@ fn playwright_fixture_type_alias_records_nested_type_bindings() {
         "Playwright fixture type alias should record nested type bindings, found: {:?}",
         info.member_accesses
     );
+    assert!(
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::PlaywrightFixtureType(access)
+                    if access.alias_name == "AppFixture"
+                        && access.fixture_name == "assert.messageChecks"
+                        && access.type_name == "MessageChecks"
+            )
+        }),
+        "Playwright fixture type alias should emit a typed fixture type fact, found: {:?}",
+        info.semantic_facts
+    );
 }
 
 #[test]

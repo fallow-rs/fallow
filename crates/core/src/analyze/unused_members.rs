@@ -975,6 +975,41 @@ struct PlaywrightFixtureAliasAccess<'a> {
     base_local: &'a str,
 }
 
+struct PlaywrightFixtureTypeAccess<'a> {
+    alias_local: &'a str,
+    fixture: &'a str,
+    type_local: &'a str,
+}
+
+fn playwright_fixture_type_accesses(
+    module: &ResolvedModule,
+) -> Vec<PlaywrightFixtureTypeAccess<'_>> {
+    let mut accesses = Vec::new();
+    for fact in &module.semantic_facts {
+        if let SemanticFact::PlaywrightFixtureType(access) = fact {
+            accesses.push(PlaywrightFixtureTypeAccess {
+                alias_local: access.alias_name.as_str(),
+                fixture: access.fixture_name.as_str(),
+                type_local: access.type_name.as_str(),
+            });
+        }
+    }
+    for access in &module.member_accesses {
+        let Some((alias_name, fixture_name)) = parse_playwright_fixture_sentinel(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
+        ) else {
+            continue;
+        };
+        accesses.push(PlaywrightFixtureTypeAccess {
+            alias_local: alias_name,
+            fixture: fixture_name,
+            type_local: access.member.as_str(),
+        });
+    }
+    accesses
+}
+
 fn playwright_fixture_alias_accesses(
     module: &ResolvedModule,
 ) -> Vec<PlaywrightFixtureAliasAccess<'_>> {
@@ -1305,23 +1340,17 @@ fn build_playwright_fixture_type_targets(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in &resolved.member_accesses {
-            let Some((alias_name, fixture_name)) = parse_playwright_fixture_sentinel(
-                access.object.as_str(),
-                PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
-            ) else {
+        for access in playwright_fixture_type_accesses(resolved) {
+            let Some(alias_keys) = local_to_export_keys.get(access.alias_local) else {
                 continue;
             };
-            let Some(alias_keys) = local_to_export_keys.get(alias_name) else {
-                continue;
-            };
-            let Some(target_keys) = local_to_export_keys.get(access.member.as_str()) else {
+            let Some(target_keys) = local_to_export_keys.get(access.type_local) else {
                 continue;
             };
 
             for alias_key in alias_keys {
                 let alias_targets = targets_by_alias.entry(alias_key.clone()).or_default();
-                let fixture_targets = alias_targets.entry(fixture_name.to_string()).or_default();
+                let fixture_targets = alias_targets.entry(access.fixture.to_string()).or_default();
                 for target_key in target_keys {
                     for key in export_key_with_origins(graph, target_key) {
                         push_export_key(fixture_targets, key);
@@ -2744,7 +2773,8 @@ mod tests {
     use fallow_types::extract::{
         ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
         FluentChainNewMemberAccessFact, PlaywrightFixtureAliasFact,
-        PlaywrightFixtureDefinitionFact, PlaywrightFixtureUseFact, SemanticFact,
+        PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
+        SemanticFact,
     };
     use oxc_span::Span;
     use std::path::PathBuf;
@@ -3009,6 +3039,77 @@ mod tests {
         let credited = accessed_members
             .get(&ExportKey::new(FileId(3), "AdminPage"))
             .expect("aliased fixture target class should be credited");
+        assert!(credited.contains("assertGreeting"));
+    }
+
+    #[test]
+    fn typed_playwright_fixture_type_fact_expands_nested_fixture_targets() {
+        let mut graph = build_graph(&[
+            ("/src/spec.ts", true),
+            ("/src/fixtures.ts", false),
+            ("/src/pages.ts", false),
+            ("/src/admin-page.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members("test", vec![], Some(0))];
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_export_with_members("Pages", vec![], Some(0))];
+        graph.modules[3].set_reachable(true);
+        graph.modules[3].exports = vec![make_export_with_members(
+            "AdminPage",
+            vec![make_member("assertGreeting", MemberKind::ClassMethod)],
+            Some(2),
+        )];
+
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/src/spec.ts"),
+                resolved_imports: vec![
+                    make_resolved_import("./fixtures", "test", "test", 1),
+                    make_resolved_import("./pages", "Pages", "Pages", 2),
+                ],
+                semantic_facts: vec![
+                    SemanticFact::PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact {
+                        test_name: "test".to_string(),
+                        fixture_name: "pages".to_string(),
+                        type_name: "Pages".to_string(),
+                    }),
+                    SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
+                        test_name: "test".to_string(),
+                        fixture_name: "pages.adminPage".to_string(),
+                        member: "assertGreeting".to_string(),
+                    }),
+                ],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: PathBuf::from("/src/pages.ts"),
+                resolved_imports: vec![make_resolved_import(
+                    "./admin-page",
+                    "AdminPage",
+                    "AdminPage",
+                    3,
+                )],
+                exports: vec![make_export_info("Pages", None)],
+                semantic_facts: vec![SemanticFact::PlaywrightFixtureType(
+                    PlaywrightFixtureTypeFact {
+                        alias_name: "Pages".to_string(),
+                        fixture_name: "adminPage".to_string(),
+                        type_name: "AdminPage".to_string(),
+                    },
+                )],
+                ..Default::default()
+            },
+        ];
+
+        let mut accessed_members = FxHashMap::default();
+        propagate_playwright_fixture_accesses(&graph, &resolved_modules, &mut accessed_members);
+
+        let credited = accessed_members
+            .get(&ExportKey::new(FileId(3), "AdminPage"))
+            .expect("nested fixture target class should be credited");
         assert!(credited.contains("assertGreeting"));
     }
 

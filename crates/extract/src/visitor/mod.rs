@@ -16,7 +16,8 @@ use crate::{
     ExportName, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
     FluentChainNewMemberAccessFact, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
     ModuleInfo, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
-    PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
+    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo,
+    SemanticFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
@@ -596,6 +597,22 @@ impl ModuleInfoExtractor {
                 PlaywrightFixtureAliasFact {
                     test_name,
                     base_name,
+                },
+            ));
+    }
+
+    pub(crate) fn record_playwright_fixture_type_fact(
+        &mut self,
+        alias_name: String,
+        fixture_name: String,
+        type_name: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::PlaywrightFixtureType(
+                PlaywrightFixtureTypeFact {
+                    alias_name,
+                    fixture_name,
+                    type_name,
                 },
             ));
     }

@@ -1364,6 +1364,8 @@ pub enum SemanticFact {
     PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact),
     /// A Playwright fixture wrapper alias declared by `mergeTests` or `.extend`.
     PlaywrightFixtureAlias(PlaywrightFixtureAliasFact),
+    /// A nested Playwright fixture binding declared by a fixture type alias.
+    PlaywrightFixtureType(PlaywrightFixtureTypeFact),
 }
 
 /// A member name referenced from an Angular template surface.
@@ -1444,6 +1446,18 @@ pub struct PlaywrightFixtureAliasFact {
     pub test_name: String,
     /// Local test function or wrapper inherited by `test_name`.
     pub base_name: String,
+}
+
+/// A nested Playwright fixture binding declared by a fixture type alias.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct PlaywrightFixtureTypeFact {
+    /// Local type alias containing the nested fixture binding.
+    pub alias_name: String,
+    /// Fixture name or dotted fixture path declared inside the type alias.
+    pub fixture_name: String,
+    /// Local type symbol used as the nested fixture target.
+    pub type_name: String,
 }
 
 /// A statically flattenable callee path invoked in a module (e.g. `execSync`,
