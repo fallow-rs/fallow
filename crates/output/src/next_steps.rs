@@ -251,6 +251,22 @@ pub fn build_audit_next_steps(input: &AuditNextStepsInput) -> Vec<NextStep> {
     steps
 }
 
+/// Build audit next-step inputs from typed analysis payloads plus the
+/// caller-supplied runtime suggestions gate.
+#[must_use]
+pub fn build_audit_next_steps_input(
+    check: Option<(&AnalysisResults, &Path)>,
+    complexity: Option<&HealthReport>,
+    suggestions_enabled: bool,
+) -> AuditNextStepsInput {
+    AuditNextStepsInput {
+        suggestions_enabled,
+        trace_unused_export: check
+            .and_then(|(results, root)| trace_unused_export_input(results, root)),
+        has_complexity_findings: complexity.is_some_and(|report| !report.findings.is_empty()),
+    }
+}
+
 fn relative_command_path(path: &Path, root: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
@@ -258,7 +274,13 @@ fn relative_command_path(path: &Path, root: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextStep> {
+/// Select the deterministic unused-export target used by read-only trace
+/// next-step commands.
+#[must_use]
+pub fn trace_unused_export_input(
+    results: &AnalysisResults,
+    root: &Path,
+) -> Option<TraceUnusedExportInput> {
     let target = results
         .unused_exports
         .iter()
@@ -269,11 +291,14 @@ fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextSte
             )
         })
         .min()?;
-    Some(next_step(
-        "trace-unused-export",
-        format!("fallow dead-code --trace {}:{}", target.0, target.1),
-        "verify an export is truly unused before deleting",
-    ))
+    Some(TraceUnusedExportInput {
+        path: target.0,
+        export_name: target.1,
+    })
+}
+
+fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextStep> {
+    trace_unused_export_from_input(trace_unused_export_input(results, root).as_ref())
 }
 
 fn trace_unused_export_from_input(target: Option<&TraceUnusedExportInput>) -> Option<NextStep> {
@@ -508,6 +533,34 @@ mod tests {
         });
 
         assert!(steps.is_empty());
+    }
+
+    #[test]
+    fn audit_input_builder_derives_trace_and_complexity_facts() {
+        let results = AnalysisResults {
+            unused_exports: vec![
+                unused_export("/project/src/b.ts", "beta"),
+                unused_export("/project/src/a.ts", "alpha"),
+            ],
+            ..AnalysisResults::default()
+        };
+        let report = dirty_report();
+
+        let input = build_audit_next_steps_input(
+            Some((&results, Path::new("/project"))),
+            Some(&report),
+            true,
+        );
+
+        assert_eq!(
+            input.trace_unused_export,
+            Some(TraceUnusedExportInput {
+                path: "src/a.ts".to_string(),
+                export_name: "alpha".to_string(),
+            })
+        );
+        assert!(input.has_complexity_findings);
+        assert!(input.suggestions_enabled);
     }
 
     #[test]

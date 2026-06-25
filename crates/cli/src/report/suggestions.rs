@@ -2,20 +2,18 @@
 //!
 //! The stable command strings, ordering, caps, and read-only contract live in
 //! `fallow-output`. This module keeps the CLI-specific probes: environment
-//! toggles, project setup state, git refs, changed-branch applicability, and
-//! deterministic finding targets.
+//! toggles, project setup state, git refs, and changed-branch applicability.
 
 use std::path::Path;
 use std::process::Command;
 
 use fallow_core::results::AnalysisResults;
 use fallow_output::{
-    AuditNextStepsInput, CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput,
-    HealthNextStepsInput, ImpactDigestCounts, TraceUnusedExportInput,
-    build_audit_next_steps as build_audit_next_steps_contract,
-    build_combined_next_steps as build_combined_next_steps_contract,
+    CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput,
+    ImpactDigestCounts, build_combined_next_steps as build_combined_next_steps_contract,
     build_dead_code_next_steps as build_dead_code_next_steps_contract,
     build_dupes_next_steps as build_dupes_next_steps_contract, impact_digest_summary,
+    trace_unused_export_input,
 };
 use fallow_types::output::NextStep;
 
@@ -42,39 +40,6 @@ fn suggestions_enabled_from(value: Option<&str>) -> bool {
         ),
         None => true,
     }
-}
-
-/// Project-root-relative, forward-slash path for embedding in a command string,
-/// matching the wire form of finding paths.
-fn relative_command_path(path: &Path, root: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-// ---------------------------------------------------------------------------
-// Individual triggers. Each returns `Some(step)` only when its evidence exists.
-// ---------------------------------------------------------------------------
-
-fn trace_unused_export_input(
-    results: &AnalysisResults,
-    root: &Path,
-) -> Option<TraceUnusedExportInput> {
-    let target = results
-        .unused_exports
-        .iter()
-        .map(|finding| {
-            (
-                relative_command_path(&finding.export.path, root),
-                finding.export.export_name.clone(),
-            )
-        })
-        .min()?;
-    Some(TraceUnusedExportInput {
-        path: target.0,
-        export_name: target.1,
-    })
 }
 
 /// Shared first-contact gate for the `setup` next-step and the human setup hint
@@ -306,16 +271,16 @@ pub fn build_combined_next_steps(
 /// so the trace anchor is made root-relative the same way every other surface
 /// does it (in-memory finding paths are absolute; the wire form is relative).
 #[must_use]
+#[cfg(test)]
 pub fn build_audit_next_steps(
     check: Option<(&AnalysisResults, &Path)>,
     complexity: Option<&HealthReport>,
 ) -> Vec<NextStep> {
-    build_audit_next_steps_contract(&AuditNextStepsInput {
-        suggestions_enabled: suggestions_enabled(),
-        trace_unused_export: check
-            .and_then(|(results, root)| trace_unused_export_input(results, root)),
-        has_complexity_findings: complexity.is_some_and(|report| !report.findings.is_empty()),
-    })
+    fallow_output::build_audit_next_steps(&fallow_output::build_audit_next_steps_input(
+        check,
+        complexity,
+        suggestions_enabled(),
+    ))
 }
 
 /// The single highest-priority next-step for the human `Next:` line, computed
