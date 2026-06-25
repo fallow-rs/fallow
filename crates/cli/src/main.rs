@@ -3879,7 +3879,7 @@ fn dispatch_trace_command(
         target: symbol,
         callers,
         callees,
-        depth: depth.unwrap_or(fallow_core::trace_chain::DEFAULT_TRACE_DEPTH),
+        depth: depth.unwrap_or(fallow_engine::trace_chain::DEFAULT_TRACE_DEPTH),
     })
 }
 
