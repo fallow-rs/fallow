@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use fallow_config::{EmailMode, OutputFormat, ResolvedConfig};
 use fallow_output::{
-    EffortEstimate, FindingSeverity, HealthGrouping, HealthReport, HealthTimings,
+    DiffIndex, EffortEstimate, FindingSeverity, HealthGrouping, HealthReport, HealthTimings,
     RuntimeCoverageWatermark,
 };
 use fallow_types::path_util::is_absolute_path_any_platform;
@@ -138,6 +138,57 @@ pub struct HealthRunOptions<'a> {
     pub min_commits: Option<u32>,
     pub coverage_inputs: HealthCoverageInputs<'a>,
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
+}
+
+/// Command-neutral inputs needed to execute a health analysis.
+///
+/// The concrete health runner is still being migrated out of the CLI crate,
+/// but these fields are shared runner inputs rather than rendering concerns.
+#[derive(Debug, Clone)]
+pub struct HealthExecutionOptions<'a> {
+    pub root: &'a Path,
+    pub config_path: &'a Option<PathBuf>,
+    pub output: OutputFormat,
+    pub no_cache: bool,
+    pub threads: usize,
+    pub quiet: bool,
+    pub thresholds: HealthThresholdOverrides,
+    pub top: Option<usize>,
+    pub sort: HealthSort,
+    pub production: bool,
+    pub production_override: Option<bool>,
+    pub changed_since: Option<&'a str>,
+    pub diff_index: Option<&'a DiffIndex>,
+    pub use_shared_diff_index: bool,
+    pub workspace: Option<&'a [String]>,
+    pub changed_workspaces: Option<&'a str>,
+    pub baseline: Option<&'a Path>,
+    pub save_baseline: Option<&'a Path>,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub config_activates_coverage_gaps: bool,
+    pub hotspots: bool,
+    pub ownership: bool,
+    pub ownership_emails: Option<EmailMode>,
+    pub targets: bool,
+    pub css: bool,
+    pub force_full: bool,
+    pub score_only_output: bool,
+    pub enforce_coverage_gap_gate: bool,
+    pub effort: Option<EffortEstimate>,
+    pub score: bool,
+    pub gates: HealthGateOptions,
+    pub since: Option<&'a str>,
+    pub min_commits: Option<u32>,
+    pub explain: bool,
+    pub summary: bool,
+    pub save_snapshot: Option<PathBuf>,
+    pub trend: bool,
+    pub coverage_inputs: HealthCoverageInputs<'a>,
+    pub performance: bool,
+    pub runtime_coverage: Option<RuntimeCoverageOptions>,
+    pub churn_file: Option<&'a Path>,
 }
 
 /// Derive effective health section flags for CLI and embedders.
@@ -382,6 +433,91 @@ mod tests {
             coverage_inputs: HealthCoverageInputs::default(),
             runtime_coverage: None,
         }
+    }
+
+    #[test]
+    fn health_execution_options_own_shared_runner_scope() {
+        let root = Path::new("/project");
+        let config_path = None;
+        let workspace = vec!["packages/app".to_string()];
+        let diff = DiffIndex::from_unified_diff(
+            "diff --git a/src/a.ts b/src/a.ts\n\
+             --- a/src/a.ts\n\
+             +++ b/src/a.ts\n\
+             @@ -0,0 +1,1 @@\n\
+             +new line\n",
+        );
+        let runtime_coverage = RuntimeCoverageOptions {
+            path: PathBuf::from("coverage/v8"),
+            min_invocations_hot: 10,
+            min_observation_volume: Some(500),
+            low_traffic_threshold: Some(0.01),
+            license_jwt: "test.jwt".to_string(),
+            watermark: None,
+        };
+
+        let options = HealthExecutionOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 2,
+            quiet: true,
+            thresholds: HealthThresholdOverrides::default(),
+            top: Some(5),
+            sort: HealthSort::Cognitive,
+            production: true,
+            production_override: Some(true),
+            changed_since: Some("HEAD~1"),
+            diff_index: Some(&diff),
+            use_shared_diff_index: false,
+            workspace: Some(&workspace),
+            changed_workspaces: None,
+            baseline: Some(Path::new(".fallow/health-baseline.json")),
+            save_baseline: None,
+            complexity: true,
+            file_scores: true,
+            coverage_gaps: false,
+            config_activates_coverage_gaps: false,
+            hotspots: true,
+            ownership: false,
+            ownership_emails: None,
+            targets: true,
+            css: false,
+            force_full: true,
+            score_only_output: false,
+            enforce_coverage_gap_gate: true,
+            effort: Some(EffortEstimate::Low),
+            score: true,
+            gates: HealthGateOptions {
+                min_score: Some(80.0),
+                min_severity: None,
+                report_only: false,
+            },
+            since: Some("30d"),
+            min_commits: Some(2),
+            explain: true,
+            summary: false,
+            save_snapshot: Some(PathBuf::from(".fallow/snapshots/health.json")),
+            trend: true,
+            coverage_inputs: HealthCoverageInputs::default(),
+            performance: true,
+            runtime_coverage: Some(runtime_coverage),
+            churn_file: Some(Path::new("churn.json")),
+        };
+
+        assert_eq!(options.root, root);
+        assert!(
+            options
+                .diff_index
+                .is_some_and(|index| index.line_is_added("src/a.ts", 1))
+        );
+        assert_eq!(options.workspace, Some(workspace.as_slice()));
+        assert!(options.runtime_coverage.is_some());
+        assert_eq!(
+            options.save_snapshot.as_deref(),
+            Some(Path::new(".fallow/snapshots/health.json"))
+        );
     }
 
     #[test]

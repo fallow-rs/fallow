@@ -16,10 +16,7 @@ use std::time::{Duration, Instant};
 
 use colored::Colorize;
 use fallow_config::{OutputFormat, PackageJson, ResolvedConfig, Severity};
-use fallow_engine::{
-    HealthCoverageInputs, HealthGateOptions, HealthSharedParseData, HealthSort,
-    HealthThresholdOverrides, RuntimeCoverageOptions,
-};
+use fallow_engine::{HealthExecutionOptions, HealthGateOptions, HealthSharedParseData, HealthSort};
 
 use crate::baseline::{HealthBaselineData, filter_new_health_findings, filter_new_health_targets};
 use crate::check::{get_changed_files, resolve_workspace_scope};
@@ -58,75 +55,20 @@ impl From<SortBy> for HealthSort {
 }
 
 pub struct HealthOptions<'a> {
-    pub root: &'a std::path::Path,
-    pub config_path: &'a Option<std::path::PathBuf>,
-    pub output: OutputFormat,
-    pub no_cache: bool,
-    pub threads: usize,
-    pub quiet: bool,
-    pub thresholds: HealthThresholdOverrides,
-    pub top: Option<usize>,
-    pub sort: HealthSort,
-    pub production: bool,
-    pub production_override: Option<bool>,
-    pub changed_since: Option<&'a str>,
-    pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
-    pub use_shared_diff_index: bool,
-    pub workspace: Option<&'a [String]>,
-    pub changed_workspaces: Option<&'a str>,
-    pub baseline: Option<&'a std::path::Path>,
-    pub save_baseline: Option<&'a std::path::Path>,
-    pub complexity: bool,
+    pub execution: HealthExecutionOptions<'a>,
     /// Include the per-decision-point complexity breakdown (`contributions[]`)
     /// on each complexity finding in JSON output. Drives the VS Code inline
     /// editor breakdown; off by default to keep CI/default output lean.
     pub complexity_breakdown: bool,
-    pub file_scores: bool,
-    /// Explicitly include coverage gaps in the rendered report.
-    pub coverage_gaps: bool,
-    /// Allow config severity to enable coverage gap reporting when the caller
-    /// did not explicitly select health sections.
-    pub config_activates_coverage_gaps: bool,
-    pub hotspots: bool,
-    pub ownership: bool,
-    pub ownership_emails: Option<fallow_config::EmailMode>,
-    pub targets: bool,
-    /// Compute structural CSS analytics (`--css`): specificity hotspots,
-    /// `!important` density, over-complex selectors, deep nesting. Opt-in
-    /// because it reads and parses every project stylesheet.
-    pub css: bool,
-    /// Run the full health pipeline even if some sections are hidden, so score
-    /// and snapshot outputs stay accurate.
-    pub force_full: bool,
-    /// Render only the score/trend-oriented output, hiding supporting sections
-    /// that were computed solely for score accuracy.
-    pub score_only_output: bool,
-    /// Enforce the configured coverage-gap severity as a failing quality gate.
-    pub enforce_coverage_gap_gate: bool,
-    pub effort: Option<EffortEstimate>,
-    pub score: bool,
-    pub gates: HealthGateOptions,
-    pub since: Option<&'a str>,
-    pub min_commits: Option<u32>,
-    pub explain: bool,
-    /// When true, emit a condensed summary instead of full item-level output.
-    #[allow(
-        dead_code,
-        reason = "wired from CLI but consumed by combined mode, not standalone health"
-    )]
-    pub summary: bool,
-    pub save_snapshot: Option<std::path::PathBuf>,
-    pub trend: bool,
     pub group_by: Option<crate::GroupBy>,
-    pub coverage_inputs: HealthCoverageInputs<'a>,
-    /// Show detailed pipeline timing breakdown.
-    pub performance: bool,
-    /// Paid runtime coverage sidecar input.
-    pub runtime_coverage: Option<RuntimeCoverageOptions>,
-    /// Import churn from a `fallow-churn/v1` JSON file (`--churn-file`) instead
-    /// of `git log`, for hotspots / ownership on non-git VCS. Resolved relative
-    /// to `root`. When set, the git churn path is bypassed entirely.
-    pub churn_file: Option<&'a std::path::Path>,
+}
+
+impl<'a> std::ops::Deref for HealthOptions<'a> {
+    type Target = HealthExecutionOptions<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.execution
+    }
 }
 
 struct HealthPipelineTimings {
