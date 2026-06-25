@@ -6,14 +6,15 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::discover::FileId;
-use crate::extract::{ANGULAR_TPL_SENTINEL, ExportName, MemberInfo, MemberKind, ModuleInfo};
+use crate::extract::{ExportName, MemberInfo, MemberKind, ModuleInfo};
 use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
-    SemanticFact, is_legacy_semantic_member_access_object, is_legacy_semantic_whole_object_use,
-    semantic_facts_with_legacy_member_accesses,
+    SemanticFact, is_legacy_angular_template_member_access_object,
+    is_legacy_template_or_semantic_member_access_object,
+    is_legacy_template_or_semantic_whole_object_use, semantic_facts_with_legacy_member_accesses,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -596,7 +597,8 @@ fn build_angular_template_chain_accesses(
                 .member_accesses
                 .iter()
                 .filter(|access| {
-                    access.object != "this" && !is_legacy_member_access_object(&access.object)
+                    access.object != "this"
+                        && !is_legacy_template_or_semantic_member_access_object(&access.object)
                 })
                 .map(|access| (access.object.as_str(), access.member.as_str()))
                 .collect();
@@ -624,7 +626,7 @@ fn angular_template_member_refs(module: &ResolvedModule) -> Vec<&str> {
             module
                 .member_accesses
                 .iter()
-                .filter(|access| access.object == ANGULAR_TPL_SENTINEL)
+                .filter(|access| is_legacy_angular_template_member_access_object(&access.object))
                 .map(|access| access.member.as_str()),
         )
         .collect()
@@ -638,7 +640,7 @@ fn has_angular_template_member_refs(module: &ResolvedModule) -> bool {
         || module
             .member_accesses
             .iter()
-            .any(|access| access.object == ANGULAR_TPL_SENTINEL)
+            .any(|access| is_legacy_angular_template_member_access_object(&access.object))
 }
 
 struct AngularTemplateRefContext<'a, 'b> {
@@ -1549,13 +1551,13 @@ fn propagate_accesses_through_typed_instance_bindings(
 /// fluent-chain / Angular-template), which the typed-instance chain resolver
 /// must skip because it is handled by a dedicated propagation pass.
 fn is_typed_instance_member_sentinel(object: &str) -> bool {
-    is_legacy_member_access_object(object)
+    is_legacy_template_or_semantic_member_access_object(object)
 }
 
 /// Whether a whole-object-use name is a synthetic sentinel the typed-instance
 /// chain resolver must skip (the fluent-chain sentinels never appear here).
 fn is_typed_instance_whole_object_sentinel(object: &str) -> bool {
-    is_legacy_whole_object_use(object)
+    is_legacy_template_or_semantic_whole_object_use(object)
 }
 
 /// Credit each non-sentinel member access in one module onto the typed-instance
@@ -1607,14 +1609,6 @@ fn propagate_typed_whole_object_uses(
             whole_object_used_exports.insert(target_key);
         }
     }
-}
-
-fn is_legacy_member_access_object(object: &str) -> bool {
-    object == ANGULAR_TPL_SENTINEL || is_legacy_semantic_member_access_object(object)
-}
-
-fn is_legacy_whole_object_use(object: &str) -> bool {
-    object == ANGULAR_TPL_SENTINEL || is_legacy_semantic_whole_object_use(object)
 }
 
 struct FactoryCallAccess {
@@ -2602,7 +2596,7 @@ fn collect_direct_member_accesses(resolved_modules: &[ResolvedModule]) -> Member
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
         for access in &resolved.member_accesses {
-            if is_legacy_member_access_object(&access.object) {
+            if is_legacy_template_or_semantic_member_access_object(&access.object) {
                 continue;
             }
             if access.object == "this" {
@@ -5167,7 +5161,9 @@ mod tests {
             member: "value".to_string(),
         }];
 
-        assert!(is_legacy_member_access_object(&malformed));
+        assert!(is_legacy_template_or_semantic_member_access_object(
+            &malformed
+        ));
         assert!(
             semantic_facts_with_legacy_member_accesses(&[], &member_accesses)
                 .next()
