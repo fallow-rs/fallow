@@ -64,7 +64,7 @@ pub fn set_telemetry_analysis_run_id(run_id: Option<String>) {
     }
 }
 
-fn telemetry_analysis_run_id() -> Option<String> {
+pub fn telemetry_analysis_run_id() -> Option<String> {
     TELEMETRY_ANALYSIS_RUN_ID
         .lock()
         .ok()

@@ -19,8 +19,8 @@ use globset::Glob;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, DupesReportPayload, DuplicationMode,
-    DuplicationOptions, ProgrammaticError,
+    AnalysisOptions, ComplexityOptions, DeadCodeFilters, DeadCodeOptions, DupesReportPayload,
+    DuplicationMode, DuplicationOptions, ProgrammaticError,
 };
 
 const SCHEMA_VERSION: u32 = 1;
@@ -39,6 +39,32 @@ pub struct HealthJsonReportInput<'a> {
     pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
+}
+
+/// Health runner output consumed by the API-owned programmatic serializer.
+pub struct ProgrammaticHealthReport {
+    pub report: HealthReport,
+    pub root: PathBuf,
+    pub elapsed: std::time::Duration,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub next_steps: Vec<NextStep>,
+    pub envelope_mode: RootEnvelopeMode,
+    pub telemetry_analysis_run_id: Option<String>,
+}
+
+/// Temporary runner boundary for programmatic health while execution moves
+/// from the CLI crate into the engine/API stack.
+pub trait ProgrammaticHealthRunner {
+    /// Run health analysis for public programmatic options.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured programmatic error when the concrete runner cannot
+    /// resolve options or complete health analysis.
+    fn run_programmatic_health(
+        &self,
+        options: &ComplexityOptions,
+    ) -> Result<ProgrammaticHealthReport, ProgrammaticError>;
 }
 
 struct ResolvedAnalysisOptions {
@@ -144,6 +170,53 @@ pub fn serialize_health_report_json(
         root_prefix: Some(&root_prefix),
         envelope_mode: input.envelope_mode,
     })
+}
+
+/// Run programmatic health / complexity through the API-owned output boundary.
+///
+/// The concrete runner is injected while the health implementation is still
+/// being migrated out of the CLI crate.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error for invalid options, runner
+/// failures, or output serialization failures.
+pub fn compute_complexity_with_runner(
+    options: &ComplexityOptions,
+    runner: &impl ProgrammaticHealthRunner,
+) -> ProgrammaticResult<serde_json::Value> {
+    crate::validate_complexity_options(options)?;
+    let result = runner.run_programmatic_health(options)?;
+    let mut output = serialize_health_report_json(HealthJsonReportInput {
+        report: result.report,
+        root: &result.root,
+        elapsed: result.elapsed,
+        explain: options.analysis.explain,
+        grouped_by: None,
+        groups: None,
+        workspace_diagnostics: result.workspace_diagnostics,
+        next_steps: result.next_steps,
+        envelope_mode: result.envelope_mode,
+    })
+    .map_err(|err| {
+        ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
+            .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
+            .with_context("health")
+    })?;
+    fallow_output::attach_telemetry_meta(&mut output, result.telemetry_analysis_run_id.as_deref());
+    Ok(output)
+}
+
+/// Alias for [`compute_complexity_with_runner`] with a product-oriented name.
+///
+/// # Errors
+///
+/// Returns the same structured errors as [`compute_complexity_with_runner`].
+pub fn compute_health_with_runner(
+    options: &ComplexityOptions,
+    runner: &impl ProgrammaticHealthRunner,
+) -> ProgrammaticResult<serde_json::Value> {
+    compute_complexity_with_runner(options, runner)
 }
 
 fn detect_dead_code_inner(
@@ -1277,6 +1350,35 @@ mod tests {
 
     use super::*;
 
+    struct FakeHealthRunner {
+        root: PathBuf,
+        envelope_mode: RootEnvelopeMode,
+        telemetry_analysis_run_id: Option<String>,
+    }
+
+    impl ProgrammaticHealthRunner for FakeHealthRunner {
+        fn run_programmatic_health(
+            &self,
+            _options: &ComplexityOptions,
+        ) -> Result<ProgrammaticHealthReport, ProgrammaticError> {
+            Ok(ProgrammaticHealthReport {
+                report: HealthReport::default(),
+                root: self.root.clone(),
+                elapsed: std::time::Duration::ZERO,
+                workspace_diagnostics: vec![WorkspaceDiagnosticOutput(serde_json::json!({
+                    "path": self.root.join("package.json")
+                }))],
+                next_steps: vec![NextStep {
+                    id: "inspect-health".to_string(),
+                    command: "fallow health --format json".to_string(),
+                    reason: "inspect health details".to_string(),
+                }],
+                envelope_mode: self.envelope_mode,
+                telemetry_analysis_run_id: self.telemetry_analysis_run_id.clone(),
+            })
+        }
+    }
+
     fn analysis_at(root: &Path) -> AnalysisOptions {
         AnalysisOptions {
             root: Some(root.to_path_buf()),
@@ -1329,6 +1431,34 @@ mod tests {
         .expect("health JSON serializes");
 
         assert!(json.get("kind").is_none());
+    }
+
+    #[test]
+    fn programmatic_health_runner_serializes_api_owned_output() {
+        let root = PathBuf::from("/repo");
+        let json = compute_health_with_runner(
+            &ComplexityOptions {
+                analysis: AnalysisOptions {
+                    explain: true,
+                    ..AnalysisOptions::default()
+                },
+                ..ComplexityOptions::default()
+            },
+            &FakeHealthRunner {
+                root,
+                envelope_mode: RootEnvelopeMode::Tagged,
+                telemetry_analysis_run_id: Some("run-123".to_string()),
+            },
+        )
+        .expect("programmatic health should serialize");
+
+        assert_eq!(json["kind"], "health");
+        assert_eq!(json["workspace_diagnostics"][0]["path"], "package.json");
+        assert_eq!(json["next_steps"][0]["id"], "inspect-health");
+        assert_eq!(
+            json["_meta"]["telemetry"]["analysis_run_id"],
+            serde_json::Value::from("run-123")
+        );
     }
 
     #[test]
