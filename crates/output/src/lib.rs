@@ -91,7 +91,10 @@ pub use fallow_types::output;
 pub use fallow_types::output_dead_code;
 pub use fallow_types::output_health;
 pub use format::OutputFormat;
-pub use health::{HealthOutput, HealthOutputInput, build_health_output};
+pub use health::{
+    HealthJsonOutputInput, HealthOutput, HealthOutputInput, build_health_output,
+    serialize_health_json_output,
+};
 pub use health_actions::HealthActionsMeta;
 pub use health_coverage::CoverageModel;
 pub use health_coverage_gaps::{
