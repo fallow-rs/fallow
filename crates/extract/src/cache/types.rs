@@ -587,7 +587,12 @@ use crate::MemberKind;
 /// Bumped to 188: `HookUse` now carries the enclosing `component` name, so the
 /// descriptive per-component hook summary stays exact in multi-component files.
 /// A warm cache from 187 lacks the attribution field on persisted `hook_uses`.
-pub(super) const CACHE_VERSION: u32 = 188;
+///
+/// Bumped to 189 (issue #1489): an inline `useFooStore().member` receiver now
+/// emits a member access against the store factory, so a warm cache from 188
+/// lacks that credit and would surface the member as a false
+/// `unused-store-member`.
+pub(super) const CACHE_VERSION: u32 = 189;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

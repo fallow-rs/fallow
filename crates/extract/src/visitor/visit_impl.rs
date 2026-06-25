@@ -4344,7 +4344,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 member: expr.property.name.to_string(),
             });
         }
-        if let Some(object_name) = static_member_object_name(&expr.object) {
+        if let Some(store_factory) = Self::inline_store_factory_receiver(&expr.object) {
+            // `useFooStore().member` with no bound local: the generic receiver
+            // name would be the inert `useFooStore()` string. Credit the member on
+            // the factory import directly, mirroring the bound
+            // `const s = useFooStore(); s.member` path (see `record_pinia_store`).
+            self.member_accesses.push(MemberAccess {
+                object: store_factory,
+                member: expr.property.name.to_string(),
+            });
+        } else if let Some(object_name) = static_member_object_name(&expr.object) {
             self.member_accesses.push(MemberAccess {
                 object: object_name,
                 member: expr.property.name.to_string(),
@@ -7496,6 +7505,28 @@ impl ModuleInfoExtractor {
     fn is_store_factory_call(&self, name: &str) -> bool {
         self.imports.iter().any(|i| i.local_name == name)
             || (name.starts_with("use") && name.ends_with("Store"))
+    }
+
+    /// For an inline `useFooStore().member` receiver (a store-factory call never
+    /// bound to a local), return the factory's name so the member is credited on
+    /// the store export directly; `None` otherwise, leaving the generic
+    /// `static_member_object_name` path untouched.
+    ///
+    /// Gated on the `use<Name>Store` naming convention, not the broader
+    /// `is_store_factory_call` (any import): without a bound local there is no
+    /// store-instance signal, so an inline non-store call like `makeThing().foo`
+    /// on an imported class must not credit `foo` and mask a real
+    /// `unused-class-member` (the analyzer credits by member name regardless of
+    /// kind). A non-conventional store alias is the documented bind-to-a-const case.
+    fn inline_store_factory_receiver(object: &Expression<'_>) -> Option<String> {
+        let Expression::CallExpression(call) = object else {
+            return None;
+        };
+        let Expression::Identifier(callee) = &call.callee else {
+            return None;
+        };
+        let name = callee.name.as_str();
+        (name.starts_with("use") && name.ends_with("Store")).then(|| name.to_string())
     }
 
     fn store_name_from_refs_arg<'a>(&self, arg: &'a Argument<'_>) -> Option<&'a str> {

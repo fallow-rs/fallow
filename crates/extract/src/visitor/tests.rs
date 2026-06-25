@@ -127,6 +127,66 @@ fn pinia_credits_inline_to_refs_store_members() {
 }
 
 #[test]
+fn pinia_credits_inline_store_call_member_access() {
+    // `useCounterStore().count` / `useCounterStore().increment()` with no bound
+    // local must credit the member on the store factory, mirroring the bound
+    // `const s = useCounterStore(); s.member` path. Regression for issue #1489
+    // case 1.
+    let info = parse(
+        "import { useCounterStore } from './counter'\nconst n = useCounterStore().count\nuseCounterStore().increment()\nvoid n",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "count".to_string())),
+        "inline store call should credit a property read on the factory: {accesses:?}"
+    );
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "increment".to_string())),
+        "inline store call should credit a method call on the factory: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_credits_auto_imported_inline_store_call_member() {
+    // Nuxt auto-import: `useCounterStore` follows the `use<Name>Store` convention
+    // with no explicit import, so the inline path credits `.count` by name alone.
+    let info = parse("const n = useCounterStore().count\nvoid n");
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "count".to_string())),
+        "auto-imported inline store call should credit the member: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_credits_inline_store_call_with_argument() {
+    // `useFooStore(pinia).count` (passing the pinia instance outside setup) is a
+    // valid inline form; the member must still be credited (parity with the bound
+    // `const s = useFooStore(pinia)` path).
+    let info = parse(
+        "import { useFooStore } from './store'\nimport { pinia } from './pinia'\nconst n = useFooStore(pinia).count\nvoid n",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useFooStore".to_string(), "count".to_string())),
+        "inline store call with an argument should still credit the member: {accesses:?}"
+    );
+}
+
+#[test]
+fn inline_non_store_call_does_not_credit_member_on_import() {
+    // `makeThing().foo` on an imported NON-store name must NOT credit `makeThing.foo`:
+    // the inline path is gated on the `use*Store` convention, so an imported class
+    // or enum can never mask a real `unused-class-member` / `unused-enum-member`.
+    let info = parse("import { makeThing } from './lib'\nconst x = makeThing().foo\nvoid x");
+    let accesses = store_member_accesses(&info);
+    assert!(
+        !accesses.contains(&("makeThing".to_string(), "foo".to_string())),
+        "non-store inline call must not credit a member on the import: {accesses:?}"
+    );
+}
+
+#[test]
 fn pinia_credits_original_key_for_aliased_inline_store_to_refs_member() {
     let info = parse(
         "import { storeToRefs } from 'pinia'\nimport { useCounterStore } from './counter'\nconst { count: localCount } = storeToRefs(useCounterStore())\nvoid localCount",
