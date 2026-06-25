@@ -2,20 +2,9 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+pub use fallow_output::{DiffIndex, MAX_DIFF_BYTES, parse_new_hunk_start, relative_to_diff_path};
 
 use super::pr_comment::CiIssue;
-
-/// Refuse to parse a unified diff larger than this. The cap matches the
-/// SARIF upload limit (10 MiB) and is also far above what any sane PR
-/// produces. A pathologically large diff (binary blob, vendored dump) would
-/// otherwise eat memory proportional to its size before we can inspect it.
-pub const MAX_DIFF_BYTES: u64 = 10 * 1024 * 1024;
-
-/// Stop indexing added lines past this count. A 1M-line "diff" is a sign of
-/// a regenerated lockfile or vendored bundle and is not useful for filtering;
-/// emit a warning and proceed with whatever we already indexed.
-const MAX_ADDED_LINES: usize = 1_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiffFilterMode {
@@ -62,221 +51,6 @@ impl SummaryScope {
             _ => Self::All,
         }
     }
-}
-
-#[derive(Debug, Default)]
-pub struct DiffIndex {
-    added_lines: FxHashMap<String, FxHashSet<u64>>,
-    touched_files: FxHashSet<String>,
-    added_line_count: usize,
-    /// `head_path -> base_path` pairs for renames in the diff. Populated by
-    /// parsing `rename from <old>` and `rename to <new>` extended-header
-    /// lines that git diff emits between the `diff --git` line and the
-    /// `--- a/...` / `+++ b/...` body. Consumed by
-    /// `crates/cli/src/report/ci/review.rs` to populate GitLab's
-    /// `position.old_path` with the base-side filename, which the GitLab
-    /// API requires when anchoring an inline comment on a renamed file.
-    rename_pairs: FxHashMap<String, String>,
-}
-
-/// Mutable cursor state threaded through unified-diff parsing.
-#[derive(Default)]
-struct DiffParseState {
-    current_file: Option<String>,
-    new_line: u64,
-    warned_overflow: bool,
-    pending_rename_from: Option<String>,
-}
-
-impl DiffIndex {
-    #[must_use]
-    pub fn from_unified_diff(diff: &str) -> Self {
-        let mut index = Self::default();
-        let mut state = DiffParseState::default();
-
-        for line in diff.lines() {
-            if index.handle_diff_header_line(line, &mut state) {
-                continue;
-            }
-            index.handle_diff_content_line(line, &mut state);
-        }
-
-        index
-    }
-
-    /// Handle a metadata / header diff line; returns `true` if the line was consumed.
-    fn handle_diff_header_line(&mut self, line: &str, state: &mut DiffParseState) -> bool {
-        if line.starts_with("diff --git ") {
-            state.pending_rename_from = None;
-            return true;
-        }
-        if let Some(rest) = line.strip_prefix("rename from ") {
-            state.pending_rename_from = Some(rest.to_owned());
-            return true;
-        }
-        if let Some(rest) = line.strip_prefix("rename to ") {
-            if let Some(from) = state.pending_rename_from.take() {
-                self.rename_pairs.insert(rest.to_owned(), from);
-                self.touched_files.insert(rest.to_owned());
-            }
-            return true;
-        }
-        if let Some(path) = line.strip_prefix("+++ b/") {
-            state.current_file = Some(path.to_string());
-            self.touched_files.insert(path.to_string());
-            return true;
-        }
-        if line.starts_with("+++ /dev/null") {
-            state.current_file = None;
-            return true;
-        }
-        if let Some(header) = line.strip_prefix("@@ ") {
-            if let Some(start) = parse_new_hunk_start(header) {
-                state.new_line = start;
-            }
-            return true;
-        }
-        false
-    }
-
-    /// Handle a content diff line, recording added lines and advancing the cursor.
-    fn handle_diff_content_line(&mut self, line: &str, state: &mut DiffParseState) {
-        let Some(path) = state.current_file.as_ref() else {
-            return;
-        };
-        if line.starts_with('+') && !line.starts_with("+++") {
-            if self.added_line_count < MAX_ADDED_LINES {
-                self.added_lines
-                    .entry(path.clone())
-                    .or_default()
-                    .insert(state.new_line);
-                self.added_line_count += 1;
-            } else if !state.warned_overflow {
-                eprintln!(
-                    "fallow: diff exceeds {MAX_ADDED_LINES} added lines; \
-                     indexed prefix only, later additions skipped"
-                );
-                state.warned_overflow = true;
-            }
-            state.new_line += 1;
-        } else if !line.starts_with('-') {
-            state.new_line += 1;
-        }
-    }
-
-    /// Base-side path for a renamed file whose head-side path is
-    /// `head_path`. Returns `None` when `head_path` is not part of any
-    /// rename pair in the indexed diff (the common case: edits, additions,
-    /// deletions). Consumed by the review envelope formatter at
-    /// `crates/cli/src/report/ci/review.rs::render_comment` to populate the
-    /// GitLab `position.old_path` field for renamed files; without this the
-    /// inline comment fails to anchor in GitLab's position API.
-    #[must_use]
-    pub fn old_path_for(&self, head_path: &str) -> Option<&str> {
-        self.rename_pairs.get(head_path).map(String::as_str)
-    }
-
-    /// Count of `+` lines indexed across every file. Used by the
-    /// finding-level filter to warn when an opt-in `--diff-file` produced
-    /// an empty index (typo, wrong path, pure-rename diff with no body),
-    /// since `from_unified_diff` is intentionally infallible and would
-    /// otherwise silently drop every finding.
-    #[must_use]
-    pub fn added_line_count(&self) -> usize {
-        self.added_line_count
-    }
-
-    /// True when `path` (repo-root-relative, forward-slashed) appears as a
-    /// `+++ b/<path>` header in the diff. Used by the finding-level filter
-    /// to short-circuit before line-range checks: a file not in the diff
-    /// has no overlapping ranges by definition.
-    #[must_use]
-    pub fn touches_file(&self, path: &str) -> bool {
-        self.touched_files.contains(path)
-    }
-
-    /// True when the closed line range `[start..=end]` for `path` overlaps
-    /// any added line indexed from the diff. `start == 0` collapses to
-    /// `1..=end` so callers can pass an unsigned `line + line_count` shape
-    /// without a special case for zero-length ranges. When `end < start`,
-    /// returns `false` (degenerate range).
-    ///
-    /// Range semantics: a complexity hotspot at `[10..=120]` with a PR that
-    /// touches line 115 returns `true` (115 is in the closed range and is
-    /// also an added line). A clone instance at `[200..=210]` with the PR
-    /// touching only line 50 returns `false`.
-    #[must_use]
-    pub fn range_overlaps_added(&self, path: &str, start: u64, end: u64) -> bool {
-        if end < start {
-            return false;
-        }
-        let Some(added) = self.added_lines.get(path) else {
-            return false;
-        };
-        let lo = start.max(1);
-        added.iter().any(|&line| line >= lo && line <= end)
-    }
-
-    #[cfg(test)]
-    #[must_use]
-    pub fn keeps(&self, issue: &CiIssue, mode: DiffFilterMode) -> bool {
-        self.keeps_with_context(issue, mode, context_radius_from_env())
-    }
-
-    #[must_use]
-    pub fn keeps_with_context(&self, issue: &CiIssue, mode: DiffFilterMode, radius: u64) -> bool {
-        match mode {
-            DiffFilterMode::NoFilter => true,
-            DiffFilterMode::File => self.touched_files.contains(&issue.path),
-            DiffFilterMode::DiffContext => self.added_lines.get(&issue.path).is_some_and(|lines| {
-                lines
-                    .iter()
-                    .any(|line| issue.line.abs_diff(*line) <= radius)
-            }),
-            DiffFilterMode::Added => self
-                .added_lines
-                .get(&issue.path)
-                .is_some_and(|lines| lines.contains(&issue.line)),
-        }
-    }
-
-    /// Added-line numbers for `path` (repo-root-relative, forward-slashed),
-    /// or `None` when the file does not appear in the diff. Used by the
-    /// runtime-coverage filter to do line-overlap matching against hot-path
-    /// `[start_line, end_line]` ranges, so a PR touching the body of a hot
-    /// function flips the verdict to `hot-path-touched` while edits to
-    /// other functions in the same file do not.
-    #[must_use]
-    pub fn added_lines_in(&self, path: &str) -> Option<&FxHashSet<u64>> {
-        self.added_lines.get(path)
-    }
-}
-
-/// Reduce `path` to a forward-slashed string suitable for matching against
-/// a unified diff's `+++ b/<path>` keys. Strips the project root prefix
-/// when `path` is absolute. Returns `None` when `path` lives outside
-/// `root` (different drive, traversal escape) so the caller can keep the
-/// finding rather than silently drop it on an unfilterable path.
-///
-/// Windows checkouts emit backslash-separated paths from `to_string_lossy`;
-/// the replace normalizes them so they compare equal to the forward-slash
-/// keys `git diff` writes.
-///
-/// Implementation note: `strip_prefix` is attempted first regardless of
-/// platform because [`std::path::Path::is_absolute`] misclassifies
-/// POSIX-style absolute paths (`/project/...`) as relative on Windows.
-/// A `CiIssue.path` deserialized from JSON output on a Unix host and
-/// passed into a Windows-hosted post-processing step would otherwise
-/// silently leak through as "relative" and never get root-stripped.
-#[must_use]
-pub fn relative_to_diff_path(path: &Path, root: &Path) -> Option<String> {
-    if let Ok(stripped) = path.strip_prefix(root) {
-        return Some(stripped.to_string_lossy().replace('\\', "/"));
-    }
-    if crate::path_util::is_absolute_path_any_platform(path) {
-        return None;
-    }
-    Some(path.to_string_lossy().replace('\\', "/"))
 }
 
 /// How a diff source was located. Tracked separately from the parsed
@@ -529,15 +303,6 @@ fn context_radius_from_env() -> u64 {
         .unwrap_or(3)
 }
 
-pub fn parse_new_hunk_start(header: &str) -> Option<u64> {
-    let plus = header.find('+')?;
-    let rest = &header[plus + 1..];
-    let end = rest
-        .find(|c: char| c == ',' || c.is_ascii_whitespace())
-        .unwrap_or(rest.len());
-    rest[..end].parse().ok()
-}
-
 #[must_use]
 pub fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
     let Some(raw_path) = std::env::var_os("FALLOW_DIFF_FILE") else {
@@ -634,8 +399,24 @@ pub fn filter_issues_from_path(
     let index = DiffIndex::from_unified_diff(&diff);
     issues
         .into_iter()
-        .filter(|issue| index.keeps_with_context(issue, mode, radius))
+        .filter(|issue| diff_index_keeps_issue(&index, issue, mode, radius))
         .collect()
+}
+
+fn diff_index_keeps_issue(
+    index: &DiffIndex,
+    issue: &CiIssue,
+    mode: DiffFilterMode,
+    radius: u64,
+) -> bool {
+    match mode {
+        DiffFilterMode::NoFilter => true,
+        DiffFilterMode::File => index.touches_file(&issue.path),
+        DiffFilterMode::DiffContext => {
+            index.line_within_added_context(&issue.path, issue.line, radius)
+        }
+        DiffFilterMode::Added => index.line_is_added(&issue.path, issue.line),
+    }
 }
 
 #[cfg(test)]
@@ -643,26 +424,6 @@ mod tests {
     use std::io::Write as _;
 
     use super::*;
-
-    #[test]
-    fn from_unified_diff_caps_added_lines_at_threshold() {
-        let header =
-            "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1,100 @@\n";
-        let mut body = String::with_capacity(MAX_ADDED_LINES * 16);
-        for _ in 0..(MAX_ADDED_LINES + 100) {
-            body.push_str("+x\n");
-        }
-        let mut diff = String::with_capacity(header.len() + body.len());
-        diff.push_str(header);
-        diff.push_str(&body);
-
-        let index = DiffIndex::from_unified_diff(&diff);
-        let total: usize = index.added_lines.values().map(FxHashSet::len).sum();
-        assert!(
-            total <= MAX_ADDED_LINES,
-            "indexed {total} lines, cap is {MAX_ADDED_LINES}"
-        );
-    }
 
     #[test]
     fn filter_issues_from_path_skips_oversize_diff() {
@@ -1056,9 +817,29 @@ diff --git a/src/a.ts b/src/a.ts
             line: 3,
             ..keep.clone()
         };
-        assert!(index.keeps(&keep, DiffFilterMode::Added));
-        assert!(!index.keeps(&drop, DiffFilterMode::Added));
-        assert!(index.keeps(&drop, DiffFilterMode::DiffContext));
-        assert!(index.keeps(&drop, DiffFilterMode::File));
+        assert!(diff_index_keeps_issue(
+            &index,
+            &keep,
+            DiffFilterMode::Added,
+            3
+        ));
+        assert!(!diff_index_keeps_issue(
+            &index,
+            &drop,
+            DiffFilterMode::Added,
+            3
+        ));
+        assert!(diff_index_keeps_issue(
+            &index,
+            &drop,
+            DiffFilterMode::DiffContext,
+            3
+        ));
+        assert!(diff_index_keeps_issue(
+            &index,
+            &drop,
+            DiffFilterMode::File,
+            3
+        ));
     }
 }

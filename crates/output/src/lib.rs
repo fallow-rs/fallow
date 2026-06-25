@@ -21,6 +21,7 @@ mod audit_weakening;
 mod check;
 mod codeclimate;
 mod coverage_envelopes;
+mod diff;
 mod dupes;
 mod format;
 mod health;
@@ -81,6 +82,9 @@ pub use coverage_envelopes::{
     CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,
     CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
     CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet,
+};
+pub use diff::{
+    DiffIndex, MAX_ADDED_LINES, MAX_DIFF_BYTES, parse_new_hunk_start, relative_to_diff_path,
 };
 pub use dupes::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,

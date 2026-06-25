@@ -9,12 +9,12 @@ use fallow_config::{
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
 use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CheckOutputInput, DupesOutput, DupesOutputInput, GroupByMode,
-    HealthGroup, HealthJsonOutputInput, HealthOutputInput, HealthReport, RootEnvelopeMode,
-    WorkspaceDiagnosticOutput, apply_root_kind, build_check_output, build_dupes_output, check_meta,
-    health_meta, strip_root_prefix,
+    CHECK_SCHEMA_VERSION, CheckOutputInput, DiffIndex, DupesOutput, DupesOutputInput, GroupByMode,
+    HealthGroup, HealthJsonOutputInput, HealthOutputInput, HealthReport, MAX_DIFF_BYTES,
+    RootEnvelopeMode, WorkspaceDiagnosticOutput, apply_root_kind, build_check_output,
+    build_dupes_output, check_meta, health_meta, relative_to_diff_path, strip_root_prefix,
 };
-use fallow_types::output::NextStep;
+use fallow_types::{output::NextStep, path_util::is_absolute_path_any_platform};
 use globset::Glob;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -25,7 +25,6 @@ use crate::{
 
 const SCHEMA_VERSION: u32 = 1;
 const HEALTH_SCHEMA_VERSION: u32 = 7;
-const MAX_DIFF_BYTES: u64 = 10 * 1024 * 1024;
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
@@ -282,11 +281,8 @@ fn filter_dead_code_by_diff(results: &mut AnalysisResults, diff: &DiffIndex, roo
         relative_to_diff_path(path, root).is_none_or(|rel| diff.touches_file(&rel))
     };
     let line_in_diff = |path: &Path, line: u32| -> bool {
-        relative_to_diff_path(path, root).is_none_or(|rel| {
-            diff.added_lines
-                .get(&rel)
-                .is_some_and(|lines| lines.contains(&u64::from(line)))
-        })
+        relative_to_diff_path(path, root)
+            .is_none_or(|rel| diff.line_is_added(&rel, u64::from(line)))
     };
 
     filter_dead_code_source_findings(results, &touches_file, &line_in_diff);
@@ -1157,65 +1153,6 @@ fn relative_workspace_path(workspace_root: &Path, root: &Path) -> String {
         .replace('\\', "/")
 }
 
-#[derive(Debug, Clone, Default)]
-struct DiffIndex {
-    added_lines: FxHashMap<String, FxHashSet<u64>>,
-}
-
-impl DiffIndex {
-    fn from_unified_diff(diff: &str) -> Self {
-        let mut index = Self::default();
-        let mut current_file: Option<String> = None;
-        let mut new_line = 0_u64;
-        for line in diff.lines() {
-            if let Some(path) = line.strip_prefix("+++ b/") {
-                current_file = Some(path.to_string());
-                continue;
-            }
-            if line.starts_with("+++ /dev/null") {
-                current_file = None;
-                continue;
-            }
-            if let Some(rest) = line.strip_prefix("@@ ") {
-                if let Some(pos) = rest.find(" +") {
-                    let new = &rest[(pos + 2)..];
-                    let end = new.find([' ', '@']).map_or(new.len(), |end| end);
-                    let start = new[..end]
-                        .split(',')
-                        .next()
-                        .and_then(|n| n.parse::<u64>().ok())
-                        .unwrap_or(0);
-                    new_line = start;
-                }
-                continue;
-            }
-            if line.starts_with('+') && !line.starts_with("+++") {
-                if let Some(path) = current_file.as_ref() {
-                    index
-                        .added_lines
-                        .entry(path.clone())
-                        .or_default()
-                        .insert(new_line);
-                }
-                new_line = new_line.saturating_add(1);
-            } else if !line.starts_with('-') {
-                new_line = new_line.saturating_add(1);
-            }
-        }
-        index
-    }
-
-    fn range_overlaps_added(&self, path: &str, start: u64, end: u64) -> bool {
-        self.added_lines
-            .get(path)
-            .is_some_and(|lines| (start..=end).any(|line| lines.contains(&line)))
-    }
-
-    fn touches_file(&self, path: &str) -> bool {
-        self.added_lines.contains_key(path)
-    }
-}
-
 fn filter_by_diff(report: &mut DuplicationReport, diff_index: &DiffIndex, root: &Path) {
     let instance_overlaps = |instance: &CloneInstance| -> bool {
         let Some(rel) = relative_to_diff_path(&instance.file, root) else {
@@ -1328,24 +1265,6 @@ fn count_merged_lines(mut ranges: Vec<(usize, usize)>) -> usize {
         }
     }
     total + current.1.saturating_sub(current.0).saturating_add(1)
-}
-
-fn relative_to_diff_path(path: &Path, root: &Path) -> Option<String> {
-    if let Ok(stripped) = path.strip_prefix(root) {
-        return Some(stripped.to_string_lossy().replace('\\', "/"));
-    }
-    if is_absolute_path_any_platform(path) {
-        return None;
-    }
-    Some(path.to_string_lossy().replace('\\', "/"))
-}
-
-fn is_absolute_path_any_platform(path: &Path) -> bool {
-    let s = path.as_os_str().to_string_lossy();
-    path.is_absolute()
-        || s.starts_with('/')
-        || s.starts_with("\\\\")
-        || s.as_bytes().get(1) == Some(&b':')
 }
 
 const fn root_envelope_mode(legacy_envelope: bool) -> RootEnvelopeMode {
