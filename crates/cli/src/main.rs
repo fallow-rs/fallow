@@ -5567,7 +5567,7 @@ fn resolve_runtime_coverage_options(
     min_observation_volume: Option<u32>,
     low_traffic_threshold: Option<f64>,
     output: fallow_config::OutputFormat,
-) -> Result<Option<health::RuntimeCoverageOptions>, ExitCode> {
+) -> Result<Option<fallow_engine::RuntimeCoverageOptions>, ExitCode> {
     let Some(path) = runtime_coverage else {
         return Ok(None);
     };
@@ -5646,7 +5646,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
 /// runtime-coverage options.
 struct ResolvedHealthDispatch<'a> {
     sections: &'a fallow_api::DerivedHealthSections,
-    runtime_coverage: Option<health::RuntimeCoverageOptions>,
+    runtime_coverage: Option<fallow_engine::RuntimeCoverageOptions>,
     production: bool,
     coverage_inputs: &'a ResolvedHealthCoverageInputs,
     ownership: bool,

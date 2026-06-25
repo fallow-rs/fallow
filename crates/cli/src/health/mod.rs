@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use colored::Colorize;
 use fallow_config::{OutputFormat, PackageJson, ResolvedConfig, Severity};
-use fallow_engine::HealthSort;
+use fallow_engine::{HealthSort, RuntimeCoverageOptions};
 
 use crate::baseline::{HealthBaselineData, filter_new_health_findings, filter_new_health_targets};
 use crate::check::{get_changed_files, resolve_workspace_scope};
@@ -40,22 +40,6 @@ pub struct SharedParseData {
     pub analysis_output: Option<fallow_core::AnalysisOutput>,
 }
 use targets::{TargetAuxData, compute_refactoring_targets};
-
-pub struct RuntimeCoverageOptions {
-    pub path: std::path::PathBuf,
-    pub min_invocations_hot: u64,
-    /// Minimum total trace volume before high-confidence `safe_to_delete` /
-    /// `review_required` verdicts may be emitted. Below this the sidecar caps
-    /// confidence at `medium`. `None` lets the sidecar use its spec-default
-    /// (5000).
-    pub min_observation_volume: Option<u32>,
-    /// Fraction of total trace count below which an invoked function is
-    /// classified as `low_traffic` rather than `active`. `None` lets the
-    /// sidecar use its spec-default (0.001 = 0.1%).
-    pub low_traffic_threshold: Option<f64>,
-    pub license_jwt: String,
-    pub watermark: Option<crate::health_types::RuntimeCoverageWatermark>,
-}
 
 /// Sort criteria for complexity output.
 #[derive(Clone, clap::ValueEnum)]
