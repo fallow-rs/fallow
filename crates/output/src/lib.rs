@@ -21,6 +21,7 @@ mod health_actions;
 mod health_coverage;
 mod health_coverage_gaps;
 mod health_coverage_intelligence;
+mod health_css;
 mod health_diagnostics;
 mod health_runtime_coverage;
 mod health_targets;
@@ -61,6 +62,13 @@ pub use health_coverage_intelligence::{
     CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
     CoverageIntelligenceSchemaVersion, CoverageIntelligenceSignal, CoverageIntelligenceSummary,
     CoverageIntelligenceVerdict,
+};
+pub use health_css::{
+    CssAnalyticsReport, CssAnalyticsSummary, CssBlockOccurrence, CssCandidateAction,
+    CssCandidateActionType, CssDuplicateBlock, CssFileAnalytics, CssNotationConsistency,
+    CssNotationCount, ScopedUnusedClasses, TailwindArbitraryValue, UndefinedKeyframes,
+    UnreferencedCssClass, UnreferencedKeyframes, UnresolvedClassReference, UnusedAtRule,
+    UnusedAtRuleKind, UnusedFontFace, UnusedThemeToken,
 };
 pub use health_diagnostics::{
     FrameworkHealthDetector, FrameworkHealthDetectorStatus, FrameworkHealthDiagnostics,
