@@ -252,55 +252,26 @@ pub struct ComplexityOptions {
     pub coverage_root: Option<PathBuf>,
 }
 
-pub use fallow_engine::{DerivedHealthSections, HealthSectionOptions, derive_health_sections};
-
-/// Derived section selection for programmatic health / complexity runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DerivedComplexityOptions {
-    pub any_section: bool,
-    pub complexity: bool,
-    pub file_scores: bool,
-    pub coverage_gaps: bool,
-    pub hotspots: bool,
-    pub ownership: bool,
-    pub targets: bool,
-    pub force_full: bool,
-    pub score_only_output: bool,
-    pub score: bool,
-}
+pub use fallow_engine::{
+    ComplexitySectionOptions, DerivedComplexityOptions, DerivedHealthSections,
+    HealthSectionOptions, derive_complexity_sections, derive_health_sections,
+};
 
 /// Derive effective programmatic health / complexity section flags.
 #[must_use]
 pub fn derive_complexity_options(options: &ComplexityOptions) -> DerivedComplexityOptions {
     let ownership = options.ownership || options.ownership_emails.is_some();
-    let requested_hotspots = options.hotspots || ownership;
     let requested_targets = options.targets || options.effort.is_some();
-    let sections = derive_health_sections(&HealthSectionOptions {
-        output: fallow_config::OutputFormat::Human,
+    derive_complexity_sections(&ComplexitySectionOptions {
         complexity: options.complexity,
         file_scores: options.file_scores,
         coverage_gaps: options.coverage_gaps,
-        hotspots: requested_hotspots,
+        hotspots: options.hotspots,
+        ownership,
         targets: requested_targets,
         css: options.css,
         score: options.score,
-        score_gate: false,
-        snapshot_requested: false,
-        trend: false,
-    });
-
-    DerivedComplexityOptions {
-        any_section: sections.any_section,
-        complexity: sections.complexity,
-        file_scores: sections.file_scores,
-        coverage_gaps: sections.coverage_gaps,
-        hotspots: sections.hotspots,
-        ownership: ownership && sections.hotspots,
-        targets: sections.targets,
-        force_full: sections.force_full,
-        score_only_output: sections.score_only_output,
-        score: sections.score,
-    }
+    })
 }
 
 #[cfg(test)]

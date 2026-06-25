@@ -130,6 +130,66 @@ fn is_health_score_only_output(options: &HealthSectionOptions, score: bool) -> b
         && !options.trend
 }
 
+/// Input for deriving effective programmatic complexity sections.
+#[derive(Debug, Clone)]
+pub struct ComplexitySectionOptions {
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub ownership: bool,
+    pub targets: bool,
+    pub css: bool,
+    pub score: bool,
+}
+
+/// Derived section selection for programmatic health / complexity runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedComplexityOptions {
+    pub any_section: bool,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub ownership: bool,
+    pub targets: bool,
+    pub force_full: bool,
+    pub score_only_output: bool,
+    pub score: bool,
+}
+
+/// Derive effective programmatic health / complexity section flags.
+#[must_use]
+pub fn derive_complexity_sections(options: &ComplexitySectionOptions) -> DerivedComplexityOptions {
+    let requested_hotspots = options.hotspots || options.ownership;
+    let sections = derive_health_sections(&HealthSectionOptions {
+        output: OutputFormat::Human,
+        complexity: options.complexity,
+        file_scores: options.file_scores,
+        coverage_gaps: options.coverage_gaps,
+        hotspots: requested_hotspots,
+        targets: options.targets,
+        css: options.css,
+        score: options.score,
+        score_gate: false,
+        snapshot_requested: false,
+        trend: false,
+    });
+
+    DerivedComplexityOptions {
+        any_section: sections.any_section,
+        complexity: sections.complexity,
+        file_scores: sections.file_scores,
+        coverage_gaps: sections.coverage_gaps,
+        hotspots: sections.hotspots,
+        ownership: options.ownership && sections.hotspots,
+        targets: sections.targets,
+        force_full: sections.force_full,
+        score_only_output: sections.score_only_output,
+        score: sections.score,
+    }
+}
+
 /// Command-neutral runtime coverage input for health analysis.
 #[derive(Debug, Clone)]
 pub struct RuntimeCoverageOptions {
