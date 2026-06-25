@@ -15,24 +15,21 @@
 
 use std::process::ExitCode;
 
+pub use fallow_output::{
+    CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
+    ReviewBriefSchemaVersion, ReviewDeltas, ReviewEffort, ReviewUnitFact, RiskClass,
+};
 use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
-use serde::Serialize;
 
 use crate::audit::AuditResult;
 
-/// Wire version for the `fallow audit --brief --format json` envelope. Bumped
-/// independently of the main `--format json` contract: the brief shape can grow
-/// without touching `report::SCHEMA_VERSION`.
-///
-/// v2: adds the stage-4 weighted `focus` map (composite attention score per
-/// unit + no-skip labels + confidence flags + the `deprioritized` escape hatch).
-/// v5: adds `change_anchors` to the walkthrough guide and `anchor_kind` /
-/// `change_anchor` to the walkthrough validation judgments. This version pins the
-/// brief, the walkthrough guide, and the validation envelope together; it is a
-/// SEMANTIC marker only (the integer is not pinned in the wire schema, so the
-/// bump alone produces no schema/`.d.ts` diff).
-pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 5;
+pub type ReviewBriefOutput = fallow_output::ReviewBriefOutput<
+    crate::audit_focus::FocusMap,
+    crate::audit::weakening::WeakeningSignal,
+    crate::audit::routing::RoutingFacts,
+    crate::audit_decision_surface::DecisionSurface,
+>;
 
 /// A file count at or above which a changeset is classified [`RiskClass::High`].
 const RISK_HIGH_FILES: usize = 20;
@@ -48,182 +45,8 @@ const RISK_MEDIUM_FILES: usize = 5;
 /// [`RiskClass::Medium`].
 const RISK_MEDIUM_LINES: i64 = 100;
 
-/// Independently-versioned wire-version newtype for the brief envelope.
-/// Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ReviewBriefSchemaVersion(pub u32);
-
-impl Default for ReviewBriefSchemaVersion {
-    fn default() -> Self {
-        Self(REVIEW_BRIEF_SCHEMA_VERSION)
-    }
-}
-
-/// Coarse risk classification for a changeset, a pure function of the change
-/// size (file count plus, once threaded, net lines).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum RiskClass {
-    /// Small, contained change.
-    Low,
-    /// Moderately sized change.
-    Medium,
-    /// Large change spanning many files or lines.
-    High,
-}
-
-/// Suggested reviewer effort, a pure function of [`RiskClass`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewEffort {
-    /// A quick scan is enough.
-    Glance,
-    /// A normal line-by-line review.
-    Review,
-    /// A careful, deep review is warranted.
-    DeepDive,
-}
-
-/// Stage 0 of the brief: triage facts derived purely from the diff size.
-///
-/// `hunks` and `net_lines` are `None` in v1: the file-level audit does not yet
-/// thread a `DiffIndex` (from `report/ci/diff_filter.rs`). They populate later,
-/// on `--diff-file` / `--diff-stdin`, without a schema bump.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct DiffTriage {
-    /// Number of changed files in the audit scope.
-    pub files: usize,
-    /// Number of diff hunks. `None` in v1 (no diff index threaded yet).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hunks: Option<usize>,
-    /// Net added-minus-removed lines. `None` in v1 (no diff index threaded yet).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub net_lines: Option<i64>,
-    /// Coarse risk class derived from the change size.
-    pub risk_class: RiskClass,
-    /// Suggested reviewer effort derived from `risk_class`.
-    pub review_effort: ReviewEffort,
-}
-
-/// Stage 1 of the brief: graph-derived orientation facts.
-///
-/// `boundaries_touched` is derived from the run's boundary-violation zones;
-/// `reachable_from` is populated by the impact closure (the affected-not-shown
-/// set: modules the changed code is reachable from / affects, none in the diff).
-/// `exports_added` / `api_width_delta` stay honestly stubbed (`0`) until the
-/// export-surface delta lands. The fields are present and correctly typed so
-/// values fill in later without a schema bump.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct GraphFacts {
-    /// Number of exports added by the changeset. Stubbed to `0` in v1.
-    pub exports_added: usize,
-    /// Change in public API width (added minus removed exports). Stubbed to `0`
-    /// in v1.
-    pub api_width_delta: i64,
-    /// Root-relative paths of modules the changed code is reachable from / affects
-    /// (the impact closure's affected-but-not-in-diff set), deduped and sorted.
-    /// Empty when no graph was retained or nothing depends on the changed files.
-    pub reachable_from: Vec<String>,
-    /// Architecture boundary zones touched by the changeset, deduped and sorted.
-    /// Derived from the run's boundary-violation findings.
-    pub boundaries_touched: Vec<String>,
-}
-
-/// Stage 3 of the brief: the impact closure. The transitive
-/// affected-but-not-in-diff set plus the coordination gap. The differentiator a
-/// diff tool fundamentally cannot do, because it has no graph.
-///
-/// Honest scope (ADR-001, syntactic): the coordination gap is an attention
-/// pointer at the exact inter-module failure mode, NOT a correctness proof.
-#[derive(Debug, Clone, Default, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ImpactClosureFacts {
-    /// Root-relative paths transitively affected by the changeset (reverse-deps +
-    /// re-export chains) that are NOT in the diff, deduped and sorted.
-    pub affected_not_shown: Vec<String>,
-    /// Coordination gaps: a changed file exports a contract consumed by a module
-    /// absent from the diff. One entry per (changed file, consumer) pair.
-    pub coordination_gap: Vec<CoordinationGapFact>,
-}
-
-/// One coordination-gap entry: a changed file exports symbols consumed by a
-/// `consumer_file` that is NOT in the diff. Deduped per (changed, consumer) pair
-/// (firing-precision rule R2).
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct CoordinationGapFact {
-    /// Root-relative path of the changed file whose contract is consumed elsewhere.
-    pub changed_file: String,
-    /// Root-relative path of the consumer module that is NOT in the diff.
-    pub consumer_file: String,
-    /// The exported symbol names the consumer references, sorted.
-    pub consumed_symbols: Vec<String>,
-    /// Honest scope note: this is a syntactic attention pointer, not a proof.
-    pub note: String,
-}
-
 /// The honest-scope note stamped on every coordination-gap entry (ADR-001).
 const COORDINATION_GAP_NOTE: &str = "syntactic attention pointer, not a correctness proof";
-
-/// Stage 2 of the brief: the partition + order. The changed files split into
-/// coherent BY-MODULE units (the only byte-identical-deterministic clustering
-/// definition straight from the graph), plus a dependency-sensible review ORDER
-/// over those units (definitions before consumers, mechanical/leaf units last,
-/// ties broken by the path sort). Stage 2 sits UNDER the decision surface as a
-/// drill-down; it is the backbone the directed-review loop hands the agent.
-///
-/// Feature-cluster and concern partitioning are deferred (they need scoring
-/// heuristics whose tie-breaks are a fresh nondeterminism surface).
-#[derive(Debug, Clone, Default, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct PartitionFacts {
-    /// The by-module units, sorted by module directory. Empty when no graph was
-    /// retained or no changed file maps to a known module.
-    pub units: Vec<ReviewUnitFact>,
-    /// The dependency-sensible review order: module-directory strings,
-    /// definitions before consumers, mechanical/leaf units last. A permutation of
-    /// the `units` module directories.
-    pub order: Vec<String>,
-}
-
-/// One review unit: a coherent by-module cluster of the changed set.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ReviewUnitFact {
-    /// The module directory the unit covers (root-relative, forward-slashed).
-    /// The empty string is the repository-root group.
-    pub module_dir: String,
-    /// The changed files in this unit, path-sorted.
-    pub files: Vec<String>,
-}
-
-/// Diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against
-/// the audit base snapshot. Each entry is a brief summary/verdict line.
-///
-/// `public_api` is batch-consolidated to ONE decision per change (rule R1):
-/// the `added` list carries the introduced public-export keys as evidence, but a
-/// reviewer reads "the public surface widened by N", never one decision per
-/// symbol.
-#[derive(Debug, Clone, Default, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ReviewDeltas {
-    /// Cross-zone boundary EDGES introduced vs base (R2 first-edge-only: one per
-    /// `<from_zone>-><to_zone>` pair, never per import). New-vs-pre-existing.
-    pub boundary_introduced: Vec<String>,
-    /// Circular dependencies introduced vs base (canonical file-set keys).
-    pub cycle_introduced: Vec<String>,
-    /// Exports-aware public-API surface delta: the public-export keys
-    /// (`<rel_path>::<name>`) added vs base, resolved through `package.json`
-    /// `exports` + re-export reachability. A symbol re-exported only through an
-    /// internal barrel NOT in `exports` is absent here (zero delta); one
-    /// reachable through an `exports` path is present (exactly one).
-    pub public_api_added: Vec<String>,
-}
 
 /// Build the deltas from head sets vs a base set, sorted for determinism.
 #[must_use]
@@ -245,55 +68,6 @@ pub fn build_review_deltas(
         cycle_introduced: introduced_keys(head_cycles, base_cycles),
         public_api_added: introduced_keys(head_public_api, base_public_api),
     }
-}
-
-/// The full `fallow audit --brief --format json` envelope. Carries the
-/// informational verdict, the triage and graph-facts orientation stages, plus
-/// the reused "subtract" section (the same dead-code / duplication / complexity
-/// payload `fallow audit --format json` emits).
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(title = "fallow audit --brief --format json")
-)]
-pub struct ReviewBriefOutput {
-    /// Independently-versioned brief schema version.
-    pub schema_version: ReviewBriefSchemaVersion,
-    /// Fallow CLI version that produced this output.
-    pub version: String,
-    /// Command discriminator singleton: always `"audit-brief"`.
-    pub command: String,
-    /// Stage 0: diff triage.
-    pub triage: DiffTriage,
-    /// Stage 1: graph orientation facts.
-    pub graph_facts: GraphFacts,
-    /// Stage 2: the partition + order (by-module units + dependency-sensible
-    /// review order). The backbone the directed-review loop hands the agent.
-    pub partition: PartitionFacts,
-    /// Stage 3: the impact closure (affected-not-shown + coordination gap).
-    pub impact_closure: ImpactClosureFacts,
-    /// Stage 4: the weighted focus map. A composite attention score per
-    /// changed-file unit (fan-in/out + security taint + risk zone + change shape),
-    /// with `review-here` / `not-prioritized` labels (NEVER `skip` in free mode),
-    /// a per-unit confidence flag, and the FULL `deprioritized` escape-hatch list
-    /// so every de-prioritized piece is reachable. Stage 4 sits UNDER the decision
-    /// surface as drill-down.
-    pub focus: crate::audit_focus::FocusMap,
-    /// 6.A: diff-aware deterministic deltas (boundary/cycle introduced +
-    /// exports-aware public-API surface delta), new-vs-pre-existing.
-    pub deltas: ReviewDeltas,
-    /// 6.F, headline: reviewer-private weakening signals (tests
-    /// removed/skipped, thresholds lowered, suppressions added, security steps
-    /// removed). Advisory, never gates, never auto-posted.
-    pub weakening: Vec<crate::audit::weakening::WeakeningSignal>,
-    /// 6.D: ownership-aware reviewer routing (per-file expert + bus-factor).
-    pub routing: crate::audit::routing::RoutingFacts,
-    /// 6.G, the APEX: the decision surface. The ranked, capped,
-    /// signal_id-anchored set of consequential structural decisions, each framed
-    /// as a judgment question with its routed expert. This is the only thing the
-    /// brief visibly leads with; the stages above are its drill-down derivation.
-    pub decisions: crate::audit_decision_surface::DecisionSurface,
 }
 
 /// Classify a changeset's risk purely from its size. `net_lines` is consulted
@@ -1113,6 +887,7 @@ mod tests {
     use std::time::Duration;
 
     use fallow_config::{AuditGate, OutputFormat};
+    use fallow_output::REVIEW_BRIEF_SCHEMA_VERSION;
 
     use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
 

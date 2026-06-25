@@ -12,6 +12,7 @@
     )
 )]
 
+mod audit_brief;
 mod check;
 mod codeclimate;
 mod coverage_envelopes;
@@ -41,6 +42,11 @@ mod review_envelopes;
 mod root_envelopes;
 mod security;
 
+pub use audit_brief::{
+    CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
+    REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefOutput, ReviewBriefSchemaVersion, ReviewDeltas,
+    ReviewEffort, ReviewUnitFact, RiskClass,
+};
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
     GroupByMode, WorkspaceDiagnosticOutput, apply_config_fixable_to_duplicate_exports,
