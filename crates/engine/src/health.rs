@@ -33,6 +33,14 @@ pub struct RuntimeCoverageOptions {
     pub watermark: Option<RuntimeCoverageWatermark>,
 }
 
+/// Pre-parsed health input reused from another analysis in the same process.
+pub struct HealthSharedParseData {
+    pub files: Vec<fallow_types::discover::DiscoveredFile>,
+    pub modules: Vec<fallow_types::extract::ModuleInfo>,
+    /// Full analysis output (graph + results) for file scoring.
+    pub analysis_output: Option<fallow_core::AnalysisOutput>,
+}
+
 /// Typed health analysis result shared by CLI, API, NAPI, and future embedders.
 ///
 /// The health runner still lives in `fallow-cli` during the staged migration,

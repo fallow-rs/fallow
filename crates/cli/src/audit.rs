@@ -2524,7 +2524,7 @@ fn build_audit_dupes_options<'a>(
 fn run_audit_health<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
-    shared_parse: Option<crate::health::SharedParseData>,
+    shared_parse: Option<fallow_engine::HealthSharedParseData>,
 ) -> Result<Option<HealthResult>, ExitCode> {
     let runtime_coverage = match opts.runtime_coverage {
         Some(path) => match crate::health::coverage::prepare_options(
