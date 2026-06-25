@@ -1452,7 +1452,7 @@
         "workspace_diagnostics": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/WorkspaceDiagnostic"
+            "$ref": "#/definitions/WorkspaceDiagnosticOutput"
           }
         },
         "next_steps": {
@@ -2469,7 +2469,7 @@
         "workspace_diagnostics": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/WorkspaceDiagnostic"
+            "$ref": "#/definitions/WorkspaceDiagnosticOutput"
           },
           "description": "Workspace-discovery diagnostics surfaced during config load\n(issue #473). See [`CheckOutput::workspace_diagnostics`] for the full\ncontract; the same list is repeated on each top-level command's\nenvelope so single-command consumers see it without having to look at\na separate top-level field."
         },
