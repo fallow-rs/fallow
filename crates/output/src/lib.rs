@@ -19,6 +19,7 @@ mod format;
 mod health;
 mod health_coverage;
 mod health_targets;
+mod health_vital_signs;
 mod issue_contract;
 mod report_contract;
 
@@ -47,6 +48,10 @@ pub use health_targets::{
     CloneSiblingEvidence, Confidence, ContributingFactor, DirectCallerEvidence,
     DirectCallerSymbolEvidence, EffortEstimate, EvidenceFunction, RecommendationCategory,
     RefactoringTarget, TargetEvidence, TargetThresholds,
+};
+pub use health_vital_signs::{
+    RenderFanInTopComponent, RiskProfile, SNAPSHOT_SCHEMA_VERSION, VitalSigns, VitalSignsCounts,
+    VitalSignsSnapshot,
 };
 pub use issue_contract::{
     ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, CHECK_DOCS,
