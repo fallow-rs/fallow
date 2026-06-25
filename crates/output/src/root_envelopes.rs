@@ -50,6 +50,28 @@ pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str, mode: 
     }
 }
 
+/// Attach telemetry metadata to a JSON root object when a run id is available.
+pub fn attach_telemetry_meta(value: &mut serde_json::Value, analysis_run_id: Option<&str>) {
+    let Some(analysis_run_id) = analysis_run_id else {
+        return;
+    };
+    let serde_json::Value::Object(map) = value else {
+        return;
+    };
+    let meta = map
+        .entry("_meta".to_string())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if !meta.is_object() {
+        *meta = serde_json::Value::Object(serde_json::Map::new());
+    }
+    if let serde_json::Value::Object(meta_map) = meta {
+        meta_map.insert(
+            "telemetry".to_string(),
+            serde_json::json!({ "analysis_run_id": analysis_run_id }),
+        );
+    }
+}
+
 /// `fallow audit --format json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -295,6 +317,27 @@ mod tests {
         apply_root_kind(&mut value, "dead_code", RootEnvelopeMode::Tagged);
 
         assert_eq!(value["kind"], "dead_code");
+    }
+
+    #[test]
+    fn attach_telemetry_meta_sets_analysis_run_id() {
+        let mut value = json!({});
+
+        attach_telemetry_meta(&mut value, Some("run-123"));
+
+        assert_eq!(
+            value["_meta"]["telemetry"]["analysis_run_id"],
+            json!("run-123")
+        );
+    }
+
+    #[test]
+    fn attach_telemetry_meta_preserves_non_object_roots() {
+        let mut value = json!(["not", "an", "object"]);
+
+        attach_telemetry_meta(&mut value, Some("run-123"));
+
+        assert_eq!(value, json!(["not", "an", "object"]));
     }
 
     #[test]
