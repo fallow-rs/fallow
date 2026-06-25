@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub use fallow_output::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, CodeClimateIssue,
     CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
-    CodeClimateSeverity, GroupByMode, HealthOutput, WorkspaceDiagnosticOutput,
+    CodeClimateSeverity, DupesOutput, GroupByMode, HealthOutput, WorkspaceDiagnosticOutput,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_check_summary,
 };
 use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, ToolVersion};
@@ -330,38 +330,6 @@ pub struct CoverageAnalyzeOutput {
     pub runtime_coverage: RuntimeCoverageReport,
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow dupes --format json"))]
-pub struct DupesOutput {
-    pub schema_version: SchemaVersion,
-    pub version: ToolVersion,
-    pub elapsed_ms: ElapsedMs,
-    #[serde(flatten)]
-    pub report: DupesReportPayload,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grouped_by: Option<GroupByMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_issues: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub groups: Option<Vec<DuplicationGroup>>,
-    /// `_meta` block with metric / rule definitions, emitted when `--explain`
-    /// is passed (always present in MCP responses).
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Meta>,
-    /// Workspace-discovery diagnostics surfaced during config load
-    /// (issue #473). See [`CheckOutput::workspace_diagnostics`] for the full
-    /// contract; the same list is repeated on each top-level command's
-    /// envelope so single-command consumers see it without having to look at
-    /// a separate top-level field.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
-    /// Read-only follow-up commands computed from this run's findings. See
-    /// [`CheckOutput::next_steps`] for the contract.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub next_steps: Vec<NextStep>,
 }
 
 /// Envelope emitted by `fallow explain <issue-type> --format json`.
@@ -977,7 +945,7 @@ pub enum FallowOutput {
     /// (typed wrapper payload carrying `clone_groups[]: CloneGroupFinding`
     /// and `clone_families[]: CloneFamilyFinding`).
     #[serde(rename = "dupes")]
-    Dupes(DupesOutput),
+    Dupes(DupesOutput<DupesReportPayload, DuplicationGroup>),
     /// `fallow dead-code --format json --group-by <mode>`. Required `grouped_by`
     /// plus a `groups` array.
     #[serde(rename = "dead-code-grouped")]

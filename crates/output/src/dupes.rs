@@ -5,7 +5,42 @@
 //! core-independent and are shared by CLI schema emission, JSON output, and
 //! future API/LSP consumers.
 
+use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
+use fallow_types::output::NextStep;
 use serde::Serialize;
+
+use crate::{GroupByMode, WorkspaceDiagnosticOutput};
+
+/// Envelope emitted by `fallow dupes --format json`.
+///
+/// `Report` and `Group` are generic so the envelope can live in
+/// `fallow-output` while duplication report wrappers and grouped output
+/// internals continue to migrate out of CLI/API-specific crates.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(title = "fallow dupes --format json"))]
+pub struct DupesOutput<Report, Group> {
+    pub schema_version: SchemaVersion,
+    pub version: ToolVersion,
+    pub elapsed_ms: ElapsedMs,
+    #[serde(flatten)]
+    pub report: Report,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grouped_by: Option<GroupByMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_issues: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<Group>>,
+    /// `_meta` block with metric / rule definitions, emitted when `--explain`
+    /// is passed.
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Meta>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    /// Read-only follow-up commands computed from this run's findings.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_steps: Vec<NextStep>,
+}
 
 /// Inline suppression comment emitted for code duplication findings.
 pub const DUPES_SUPPRESS_COMMENT: &str = "// fallow-ignore-next-line code-duplication";

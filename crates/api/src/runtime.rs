@@ -8,11 +8,12 @@ use fallow_config::{
 };
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
 use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
-use fallow_output::{CHECK_SCHEMA_VERSION, CheckOutputInput, build_check_output, check_meta};
+use fallow_output::{
+    CHECK_SCHEMA_VERSION, CheckOutputInput, DupesOutput, build_check_output, check_meta,
+};
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use globset::Glob;
 use rustc_hash::{FxHashMap, FxHashSet};
-use serde::Serialize;
 
 use crate::{
     AnalysisOptions, DeadCodeFilters, DeadCodeOptions, DupesReportPayload, DuplicationMode,
@@ -23,17 +24,6 @@ const SCHEMA_VERSION: u32 = 1;
 const MAX_DIFF_BYTES: u64 = 10 * 1024 * 1024;
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
-
-#[derive(Debug, Clone, Serialize)]
-struct DupesOutput {
-    schema_version: SchemaVersion,
-    version: ToolVersion,
-    elapsed_ms: ElapsedMs,
-    #[serde(flatten)]
-    report: DupesReportPayload,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    total_issues: Option<usize>,
-}
 
 struct ResolvedAnalysisOptions {
     root: PathBuf,
@@ -619,12 +609,17 @@ fn detect_duplication_inner(
     }
 
     let payload = DupesReportPayload::from_report(&report);
-    let envelope = DupesOutput {
+    let envelope: DupesOutput<DupesReportPayload, serde_json::Value> = DupesOutput {
         schema_version: SchemaVersion(SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
         elapsed_ms: ElapsedMs(start.elapsed().as_millis() as u64),
         report: payload,
+        grouped_by: None,
         total_issues: None,
+        groups: None,
+        meta: None,
+        workspace_diagnostics: Vec::new(),
+        next_steps: Vec::new(),
     };
     let mut output = serde_json::to_value(envelope).map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize duplication report: {err}"), 2)

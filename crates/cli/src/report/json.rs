@@ -615,7 +615,7 @@ pub fn build_duplication_json(
         total_issues: None,
         groups: None,
         meta: explain.then(fallow_output::dupes_meta),
-        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps,
     };
     let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
@@ -664,7 +664,7 @@ pub fn build_grouped_duplication_json(
         total_issues: Some(report.clone_groups.len()),
         groups: None,
         meta: explain.then(fallow_output::dupes_meta),
-        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps,
     };
     let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
