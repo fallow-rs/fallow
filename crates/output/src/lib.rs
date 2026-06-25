@@ -20,6 +20,7 @@ mod health;
 mod health_actions;
 mod health_coverage;
 mod health_coverage_gaps;
+mod health_coverage_intelligence;
 mod health_runtime_coverage;
 mod health_targets;
 mod health_trends;
@@ -52,6 +53,13 @@ pub use health_coverage::CoverageModel;
 pub use health_coverage_gaps::{
     CoverageGapSummary, CoverageGaps, UntestedExport, UntestedExportFinding, UntestedFile,
     UntestedFileFinding,
+};
+pub use health_coverage_intelligence::{
+    CoverageIntelligenceAction, CoverageIntelligenceConfidence, CoverageIntelligenceEvidence,
+    CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
+    CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
+    CoverageIntelligenceSchemaVersion, CoverageIntelligenceSignal, CoverageIntelligenceSummary,
+    CoverageIntelligenceVerdict,
 };
 pub use health_runtime_coverage::{
     RuntimeCoverageAction, RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCaptureQuality,
