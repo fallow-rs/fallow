@@ -88,3 +88,126 @@ pub struct CombinedMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<TelemetryMeta>,
 }
+
+/// Typed root of every fallow JSON envelope shape that serializes as a JSON
+/// object and participates in the documented `FallowOutput` contract.
+///
+/// The default wire shape carries a top-level `kind` discriminator so agents and
+/// schema-validating clients can select the variant without probing for unique
+/// field presence. CodeClimate output is intentionally not in this enum because
+/// it serializes as a bare JSON array per the Code Climate / GitLab Code Quality
+/// spec.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow --format json (typed root)")
+)]
+#[serde(tag = "kind")]
+#[allow(
+    dead_code,
+    reason = "some variants are schema-emit only, but runtime roots serialize through this enum where practical"
+)]
+pub enum FallowOutput<
+    Audit,
+    Explain,
+    Inspect,
+    Trace,
+    ReviewEnvelope,
+    ReviewReconcile,
+    CoverageSetup,
+    CoverageAnalyze,
+    ListBoundaries,
+    Workspaces,
+    Health,
+    Dupes,
+    CheckGrouped,
+    Impact,
+    ImpactCrossRepo,
+    SecuritySummary,
+    Security,
+    SecuritySurvivors,
+    SecurityBlindSpots,
+    Check,
+    Combined,
+    AuditBrief,
+    DecisionSurface,
+    WalkthroughGuide,
+    WalkthroughValidation,
+> {
+    /// `fallow audit --format json`.
+    #[serde(rename = "audit")]
+    Audit(Audit),
+    /// `fallow explain <issue-type> --format json`.
+    #[serde(rename = "explain")]
+    Explain(Explain),
+    /// `fallow inspect --format json`.
+    #[serde(rename = "inspect_target")]
+    Inspect(Inspect),
+    /// `fallow trace <symbol> --format json`.
+    #[serde(rename = "trace")]
+    Trace(Trace),
+    /// `fallow --format review-github` / `--format review-gitlab`.
+    #[serde(rename = "review-envelope")]
+    ReviewEnvelope(ReviewEnvelope),
+    /// `fallow ci reconcile-review --format json`.
+    #[serde(rename = "review-reconcile")]
+    ReviewReconcile(ReviewReconcile),
+    /// `fallow coverage setup --json`.
+    #[serde(rename = "coverage-setup")]
+    CoverageSetup(CoverageSetup),
+    /// `fallow coverage analyze --format json`.
+    #[serde(rename = "coverage-analyze")]
+    CoverageAnalyze(CoverageAnalyze),
+    /// `fallow list --boundaries --format json`.
+    #[serde(rename = "list-boundaries")]
+    ListBoundaries(ListBoundaries),
+    /// `fallow workspaces --format json`.
+    #[serde(rename = "list-workspaces")]
+    Workspaces(Workspaces),
+    /// `fallow health --format json`.
+    #[serde(rename = "health")]
+    Health(Health),
+    /// `fallow dupes --format json`.
+    #[serde(rename = "dupes")]
+    Dupes(Dupes),
+    /// `fallow dead-code --format json --group-by <mode>`.
+    #[serde(rename = "dead-code-grouped")]
+    CheckGrouped(CheckGrouped),
+    /// `fallow impact --format json`.
+    #[serde(rename = "impact")]
+    Impact(Impact),
+    /// `fallow impact --all --format json`.
+    #[serde(rename = "impact-cross-repo")]
+    ImpactCrossRepo(ImpactCrossRepo),
+    /// `fallow security --summary --format json`.
+    #[serde(rename = "security")]
+    SecuritySummary(SecuritySummary),
+    /// `fallow security --format json`.
+    #[serde(rename = "security")]
+    Security(Security),
+    /// `fallow security survivors --format json`.
+    #[serde(rename = "security-survivors")]
+    SecuritySurvivors(SecuritySurvivors),
+    /// `fallow security blind-spots --format json`.
+    #[serde(rename = "security-blind-spots")]
+    SecurityBlindSpots(SecurityBlindSpots),
+    /// `fallow dead-code --format json`.
+    #[serde(rename = "dead-code")]
+    Check(Check),
+    /// Bare `fallow --format json`.
+    #[serde(rename = "combined")]
+    Combined(Combined),
+    /// `fallow audit --brief --format json`.
+    #[serde(rename = "audit-brief")]
+    AuditBrief(AuditBrief),
+    /// `fallow decision-surface --format json`.
+    #[serde(rename = "decision-surface")]
+    DecisionSurface(DecisionSurface),
+    /// `fallow review --walkthrough-guide --format json`.
+    #[serde(rename = "review-walkthrough-guide")]
+    WalkthroughGuide(WalkthroughGuide),
+    /// `fallow review --walkthrough-file --format json`.
+    #[serde(rename = "review-walkthrough-validation")]
+    WalkthroughValidation(WalkthroughValidation),
+}
