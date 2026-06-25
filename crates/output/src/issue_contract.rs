@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
 use fallow_types::envelope::{Meta, MetaRule};
-use fallow_types::issue_meta::{IssueResultMeta, issue_result_meta_by_code, result_issue_metas};
+use fallow_types::issue_meta::{
+    IssueResultMeta, issue_docs_anchor, issue_result_meta_by_code, result_issue_metas,
+};
 
 const DOCS_BASE: &str = "https://docs.fallow.tools";
 
@@ -59,7 +61,7 @@ impl IssueOutputContract {
             result_key: meta.result_key,
             counts_in_total: meta.counts_in_total,
             summary_label: issue_summary_label(meta.code)?,
-            summary_docs_anchor: issue_summary_docs_anchor(meta.code)?,
+            summary_docs_anchor: issue_docs_anchor(meta.code)?,
             meta_name: issue_meta_name(meta.code)?,
             meta_description: issue_meta_description(meta.code)?,
             meta_docs_path: issue_meta_docs_path(meta.code)?,
@@ -287,56 +289,6 @@ fn issue_summary_label(code: &str) -> Option<&'static str> {
         "prop-drilling" => "Prop drilling",
         "thin-wrapper" => "Thin wrappers",
         "duplicate-prop-shape" => "Duplicate prop shapes",
-        _ => return None,
-    })
-}
-
-fn issue_summary_docs_anchor(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "unused-file" => "unused-files",
-        "unused-export" => "unused-exports",
-        "unused-type" => "unused-types",
-        "private-type-leak" => "private-type-leaks",
-        "unused-dependency" | "unused-dev-dependency" | "unused-optional-dependency" => {
-            "unused-dependencies"
-        }
-        "unused-enum-member" => "unused-enum-members",
-        "unused-class-member" => "unused-class-members",
-        "unused-store-member" => "unused-store-members",
-        "unresolved-import" => "unresolved-imports",
-        "unlisted-dependency" => "unlisted-dependencies",
-        "duplicate-export" => "duplicate-exports",
-        "type-only-dependency" => "type-only-dependencies",
-        "test-only-dependency" => "test-only-dependencies",
-        "circular-dependency" => "circular-dependencies",
-        "re-export-cycle" => "re-export-cycles",
-        "boundary-violation" | "boundary-coverage" | "boundary-call-violation" => {
-            "boundary-violations"
-        }
-        "policy-violation" => "policy-violations",
-        "invalid-client-export" => "invalid-client-exports",
-        "mixed-client-server-barrel" => "mixed-client-server-barrels",
-        "misplaced-directive" => "misplaced-directives",
-        "unprovided-inject" => "unprovided-inject",
-        "unrendered-component" => "unrendered-component",
-        "unused-component-prop" => "unused-component-prop",
-        "unused-component-emit" => "unused-component-emit",
-        "unused-component-input" => "unused-component-input",
-        "unused-component-output" => "unused-component-output",
-        "unused-svelte-event" => "unused-svelte-event",
-        "unused-server-action" => "unused-server-action",
-        "unused-load-data-key" => "unused-load-data-key",
-        "dynamic-segment-name-conflict" => "dynamic-segment-name-conflicts",
-        "route-collision" => "route-collisions",
-        "stale-suppression" => "stale-suppressions",
-        "unused-catalog-entry" => "unused-catalog-entries",
-        "empty-catalog-group" => "empty-catalog-groups",
-        "unresolved-catalog-reference" => "unresolved-catalog-references",
-        "unused-dependency-override" => "unused-dependency-overrides",
-        "misconfigured-dependency-override" => "misconfigured-dependency-overrides",
-        "prop-drilling" => "prop-drilling",
-        "thin-wrapper" => "thin-wrapper",
-        "duplicate-prop-shape" => "duplicate-prop-shape",
         _ => return None,
     })
 }
