@@ -48,20 +48,20 @@ pub struct IssueOutputContract {
 
 impl IssueOutputContract {
     #[must_use]
-    fn from_result_meta(meta: &IssueResultMeta) -> Option<Self> {
-        Some(Self {
+    fn from_result_meta(meta: &IssueResultMeta) -> Self {
+        Self {
             code: meta.code,
             result_key: meta.result_key,
             counts_in_total: meta.counts_in_total,
             summary_label: meta.summary_label,
             summary_docs_anchor: meta.docs_anchor,
             meta_name: meta.meta_name,
-            meta_description: issue_meta_description(meta.code)?,
+            meta_description: meta.meta_description,
             meta_docs_path: meta.meta_docs_path,
             sarif_rule_ids: issue_sarif_rule_ids(meta.code),
             codeclimate_check_names: issue_codeclimate_check_names(meta.code),
             ts_alias: issue_ts_alias(meta.code),
-        })
+        }
     }
 }
 
@@ -117,137 +117,13 @@ pub fn rule_docs_url(docs_path: &str) -> String {
 
 /// Output-facing dead-code result contracts in stable registry order.
 pub fn issue_output_contracts() -> impl Iterator<Item = IssueOutputContract> {
-    result_issue_metas().filter_map(IssueOutputContract::from_result_meta)
+    result_issue_metas().map(IssueOutputContract::from_result_meta)
 }
 
 /// Output-facing dead-code result contract by issue code.
 #[must_use]
 pub fn issue_output_contract_by_code(code: &str) -> Option<IssueOutputContract> {
-    issue_result_meta_by_code(code).and_then(IssueOutputContract::from_result_meta)
-}
-
-#[allow(
-    clippy::too_many_lines,
-    reason = "dead-code meta prose is intentionally kept in one lookup table"
-)]
-fn issue_meta_description(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "unused-file" => {
-            "Source files that are not imported by any other module and are not entry points. Detection uses graph reachability from configured entry points."
-        }
-        "unused-export" => {
-            "Named exports that are never imported by any other module in the project, including direct exports and re-exports through barrel files."
-        }
-        "unused-type" => {
-            "Type-only exports that are never imported. These do not generate runtime code but add maintenance burden."
-        }
-        "private-type-leak" => {
-            "Exported values or types whose public TypeScript signature references a same-file type declaration that is not exported."
-        }
-        "unused-dependency" => {
-            "Packages listed in dependencies that are never imported or required by any source file."
-        }
-        "unused-dev-dependency" => {
-            "Packages listed in devDependencies that are never imported by test files, config files, or scripts."
-        }
-        "unused-optional-dependency" => {
-            "Packages listed in optionalDependencies that are never imported."
-        }
-        "unused-enum-member" => "Enum members that are never referenced in the codebase.",
-        "unused-class-member" => {
-            "Class methods and properties that are never referenced outside the class."
-        }
-        "unused-store-member" => {
-            "Pinia store members declared but never accessed by any consumer project-wide."
-        }
-        "unresolved-import" => "Import specifiers that could not be resolved to a file on disk.",
-        "unlisted-dependency" => "Packages imported in source code but not listed in package.json.",
-        "duplicate-export" => "The same export name is defined in multiple modules.",
-        "type-only-dependency" => {
-            "Production dependencies that are only imported via type-only imports."
-        }
-        "test-only-dependency" => "Production dependencies that are only imported from test files.",
-        "circular-dependency" => "A cycle in the module import graph.",
-        "re-export-cycle" => {
-            "A barrel file re-exports from another barrel that ultimately re-exports back."
-        }
-        "boundary-violation" => {
-            "A module imports from a zone that its configured boundary rules do not allow."
-        }
-        "boundary-coverage" => {
-            "A reachable source file is not assigned to any configured boundary zone while boundary coverage is required."
-        }
-        "boundary-call-violation" => {
-            "A file classified into a boundary zone calls a callee matching one of the zone's forbidden call patterns."
-        }
-        "policy-violation" => {
-            "A call site, import, or catalogue-derived effect matched a configured rule pack rule."
-        }
-        "invalid-client-export" => {
-            "A file carrying the use client directive also exports a Next.js server-only or route-segment config name."
-        }
-        "mixed-client-server-barrel" => {
-            "A barrel file forwards a name from a use client module alongside a name from a server-only module."
-        }
-        "misplaced-directive" => {
-            "A use client or use server directive string appears after a non-directive statement and is ignored."
-        }
-        "unprovided-inject" => {
-            "A Vue inject or Svelte getContext reads a dependency-injection key that no matching provider supplies."
-        }
-        "unrendered-component" => {
-            "A Vue or Svelte single-file component is reachable through the graph but rendered nowhere in the project."
-        }
-        "unused-component-prop" => {
-            "A declared Vue, Svelte, React, or Preact component prop is referenced nowhere inside its own component."
-        }
-        "unused-component-emit" => {
-            "A Vue script setup defineEmits event is emitted nowhere in its own component."
-        }
-        "unused-component-input" => "An Angular input is read nowhere in its own component.",
-        "unused-component-output" => "An Angular output is emitted nowhere in its own component.",
-        "unused-svelte-event" => {
-            "A Svelte component dispatches a custom event whose name is listened to nowhere in the analyzed project."
-        }
-        "unused-server-action" => {
-            "A Next.js Server Action exported from a use server file is referenced by no code in the project."
-        }
-        "unused-load-data-key" => {
-            "A SvelteKit load return-object key is read by no route or project-wide consumer."
-        }
-        "route-collision" => {
-            "Two or more Next.js App Router route files resolve to the same URL within one app root."
-        }
-        "dynamic-segment-name-conflict" => {
-            "Sibling Next.js dynamic route segments use different slug names at the same position."
-        }
-        "stale-suppression" => {
-            "A fallow suppression comment or tag no longer matches any active issue."
-        }
-        "unused-catalog-entry" => {
-            "A package manager catalog entry is not referenced by any workspace package.json."
-        }
-        "empty-catalog-group" => "A named package manager catalog group has no package entries.",
-        "unresolved-catalog-reference" => {
-            "A workspace package.json uses a catalog protocol reference that no catalog declares."
-        }
-        "unused-dependency-override" => {
-            "A pnpm dependency override targets a package not declared by any workspace package and not present in the lockfile."
-        }
-        "misconfigured-dependency-override" => {
-            "A pnpm dependency override key or value does not parse as a valid override spec."
-        }
-        "prop-drilling" => {
-            "A React or Preact prop is forwarded unchanged through multiple pass-through components to a distant consumer."
-        }
-        "thin-wrapper" => {
-            "A React or Preact component is structural indirection around a single spread-forwarded child render."
-        }
-        "duplicate-prop-shape" => {
-            "Multiple React or Preact components declare an identical significant prop-name set."
-        }
-        _ => return None,
-    })
+    issue_result_meta_by_code(code).map(IssueOutputContract::from_result_meta)
 }
 
 #[cfg(test)]
