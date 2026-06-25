@@ -6,8 +6,8 @@ use std::process::{Command, ExitCode};
 use std::time::Instant;
 
 use fallow_config::OutputFormat;
-use fallow_core::git_env::clear_ambient_git_env;
 use fallow_cov_protocol::function_identity_id;
+use fallow_engine::git_env::clear_ambient_git_env;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;

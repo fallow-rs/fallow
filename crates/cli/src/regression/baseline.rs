@@ -2,8 +2,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
-use fallow_core::git_env::clear_ambient_git_env;
 use fallow_core::results::AnalysisResults;
+use fallow_engine::git_env::clear_ambient_git_env;
 
 use super::counts::{CheckCounts, DupesCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline};
 use super::outcome::RegressionOutcome;

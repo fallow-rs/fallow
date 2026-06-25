@@ -40,6 +40,11 @@ pub mod graph {
     pub use fallow_core::graph::*;
 }
 
+/// Git process environment helpers exposed through the engine boundary.
+pub mod git_env {
+    pub use fallow_core::git_env::{AMBIENT_GIT_ENV_VARS, clear_ambient_git_env};
+}
+
 /// Analysis result types exposed through the engine boundary.
 pub mod results {
     pub use fallow_core::results::*;

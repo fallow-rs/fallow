@@ -4,7 +4,7 @@ use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
 use fallow_config::{AuditGate, OutputFormat};
-use fallow_core::git_env::clear_ambient_git_env;
+use fallow_engine::git_env::clear_ambient_git_env;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -659,7 +659,7 @@ fn save_cached_base_snapshot(
 /// surface the most likely culprit so a user hitting an unexpected worktree
 /// failure can short-circuit the diagnosis. Returns `None` otherwise.
 fn ambient_git_env_hint() -> Option<String> {
-    use fallow_core::git_env::AMBIENT_GIT_ENV_VARS;
+    use fallow_engine::git_env::AMBIENT_GIT_ENV_VARS;
     for var in AMBIENT_GIT_ENV_VARS {
         if let Ok(value) = std::env::var(var)
             && !value.is_empty()
