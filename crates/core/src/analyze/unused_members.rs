@@ -6,15 +6,15 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::discover::FileId;
-use crate::extract::{
-    ANGULAR_TPL_SENTINEL, ExportName, FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL,
-    FLUENT_CHAIN_SENTINEL, INSTANCE_EXPORT_SENTINEL, MemberInfo, MemberKind, ModuleInfo,
-};
+use crate::extract::{ANGULAR_TPL_SENTINEL, ExportName, MemberInfo, MemberKind, ModuleInfo};
 use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
-use fallow_types::extract::SemanticFact;
+use fallow_types::extract::{
+    LegacySemanticMemberAccess, SemanticFact, is_legacy_semantic_member_access_object,
+    is_legacy_semantic_whole_object_use, parse_legacy_semantic_member_access,
+};
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
@@ -1377,10 +1377,10 @@ fn instance_export_binding_accesses(
         }
     }
     for access in &module.member_accesses {
-        if let Some(LegacyMemberAccess::InstanceExportBinding {
+        if let Some(LegacySemanticMemberAccess::InstanceExportBinding {
             export_name,
             target_local,
-        }) = legacy_member_access(access.object.as_str(), access.member.as_str())
+        }) = parse_legacy_semantic_member_access(access.object.as_str(), access.member.as_str())
         {
             accesses.push(InstanceExportBindingAccess {
                 export_name,
@@ -1621,87 +1621,12 @@ fn propagate_typed_whole_object_uses(
     }
 }
 
-enum LegacyMemberAccess<'a> {
-    InstanceExportBinding {
-        export_name: &'a str,
-        target_local: &'a str,
-    },
-    FactoryCall {
-        callee_object: &'a str,
-        callee_method: &'a str,
-        member: &'a str,
-    },
-    FluentChain {
-        root_local: &'a str,
-        root_method: &'a str,
-        chain: Vec<&'a str>,
-        member: &'a str,
-    },
-    FluentChainNew {
-        class_local: &'a str,
-        chain: Vec<&'a str>,
-        member: &'a str,
-    },
-}
-
 fn is_legacy_member_access_object(object: &str) -> bool {
-    object == ANGULAR_TPL_SENTINEL
-        || object.starts_with(INSTANCE_EXPORT_SENTINEL)
-        || object.starts_with(FACTORY_CALL_SENTINEL)
-        || object.starts_with(FLUENT_CHAIN_SENTINEL)
-        || object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)
+    object == ANGULAR_TPL_SENTINEL || is_legacy_semantic_member_access_object(object)
 }
 
 fn is_legacy_whole_object_use(object: &str) -> bool {
-    object == ANGULAR_TPL_SENTINEL
-        || object.starts_with(INSTANCE_EXPORT_SENTINEL)
-        || object.starts_with(FACTORY_CALL_SENTINEL)
-}
-
-fn legacy_member_access<'a>(object: &'a str, member: &'a str) -> Option<LegacyMemberAccess<'a>> {
-    if let Some(export_name) = object.strip_prefix(INSTANCE_EXPORT_SENTINEL) {
-        return Some(LegacyMemberAccess::InstanceExportBinding {
-            export_name,
-            target_local: member,
-        });
-    }
-    if let Some((callee_object, callee_method)) = object
-        .strip_prefix(FACTORY_CALL_SENTINEL)
-        .and_then(|payload| payload.split_once(':'))
-    {
-        return Some(LegacyMemberAccess::FactoryCall {
-            callee_object,
-            callee_method,
-            member,
-        });
-    }
-    if let Some(payload) = object.strip_prefix(FLUENT_CHAIN_SENTINEL) {
-        let (root_local, rest) = payload.split_once(':')?;
-        let (root_method, chain_str) = rest.split_once(':')?;
-        let chain = if chain_str.is_empty() {
-            Vec::new()
-        } else {
-            chain_str.split(',').collect()
-        };
-        return Some(LegacyMemberAccess::FluentChain {
-            root_local,
-            root_method,
-            chain,
-            member,
-        });
-    }
-    if let Some(payload) = object.strip_prefix(FLUENT_CHAIN_NEW_SENTINEL) {
-        let (class_local, chain_str) = payload.split_once(':')?;
-        if chain_str.is_empty() {
-            return None;
-        }
-        return Some(LegacyMemberAccess::FluentChainNew {
-            class_local,
-            chain: chain_str.split(',').collect(),
-            member,
-        });
-    }
-    None
+    object == ANGULAR_TPL_SENTINEL || is_legacy_semantic_whole_object_use(object)
 }
 
 struct FactoryCallAccess<'a> {
@@ -1722,11 +1647,11 @@ fn factory_call_accesses(module: &ResolvedModule) -> Vec<FactoryCallAccess<'_>> 
         }
     }
     for access in &module.member_accesses {
-        if let Some(LegacyMemberAccess::FactoryCall {
+        if let Some(LegacySemanticMemberAccess::FactoryCall {
             callee_object,
             callee_method,
             member,
-        }) = legacy_member_access(access.object.as_str(), access.member.as_str())
+        }) = parse_legacy_semantic_member_access(access.object.as_str(), access.member.as_str())
         {
             accesses.push(FactoryCallAccess {
                 callee_object,
@@ -1804,12 +1729,12 @@ fn fluent_chain_accesses(module: &ResolvedModule) -> Vec<FluentChainAccess<'_>> 
         }
     }
     for access in &module.member_accesses {
-        if let Some(LegacyMemberAccess::FluentChain {
+        if let Some(LegacySemanticMemberAccess::FluentChain {
             root_local,
             root_method,
             chain,
             member,
-        }) = legacy_member_access(access.object.as_str(), access.member.as_str())
+        }) = parse_legacy_semantic_member_access(access.object.as_str(), access.member.as_str())
         {
             accesses.push(FluentChainAccess {
                 root_local,
@@ -1912,11 +1837,11 @@ fn fluent_chain_new_accesses(module: &ResolvedModule) -> Vec<FluentChainNewAcces
         }
     }
     for access in &module.member_accesses {
-        if let Some(LegacyMemberAccess::FluentChainNew {
+        if let Some(LegacySemanticMemberAccess::FluentChainNew {
             class_local,
             chain,
             member,
-        }) = legacy_member_access(access.object.as_str(), access.member.as_str())
+        }) = parse_legacy_semantic_member_access(access.object.as_str(), access.member.as_str())
         {
             accesses.push(FluentChainNewAccess {
                 class_local,
@@ -2774,10 +2699,10 @@ mod tests {
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
     use fallow_types::extract::{
-        ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
-        FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
-        PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-        SemanticFact,
+        ClassHeritageInfo, FLUENT_CHAIN_NEW_SENTINEL, FactoryCallMemberAccessFact,
+        FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, InstanceExportBindingFact,
+        PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
+        PlaywrightFixtureUseFact, SemanticFact,
     };
     use oxc_span::Span;
     use std::path::PathBuf;
@@ -5282,78 +5207,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_member_access_decodes_instance_binding() {
-        let object = format!("{INSTANCE_EXPORT_SENTINEL}exported");
-        let access = legacy_member_access(&object, "target").expect("legacy access");
-
-        match access {
-            LegacyMemberAccess::InstanceExportBinding {
-                export_name,
-                target_local,
-            } => {
-                assert_eq!(export_name, "exported");
-                assert_eq!(target_local, "target");
-            }
-            _ => panic!("expected instance binding"),
-        }
-    }
-
-    #[test]
-    fn legacy_member_access_decodes_factory_and_fluent_chains() {
-        let factory = format!("{FACTORY_CALL_SENTINEL}Service:create");
-        let factory_access = legacy_member_access(&factory, "run").expect("factory access");
-        match factory_access {
-            LegacyMemberAccess::FactoryCall {
-                callee_object,
-                callee_method,
-                member,
-            } => {
-                assert_eq!(callee_object, "Service");
-                assert_eq!(callee_method, "create");
-                assert_eq!(member, "run");
-            }
-            _ => panic!("expected factory access"),
-        }
-
-        let fluent = format!("{FLUENT_CHAIN_SENTINEL}Builder:start:next,finish");
-        let fluent_access = legacy_member_access(&fluent, "value").expect("fluent access");
-        match fluent_access {
-            LegacyMemberAccess::FluentChain {
-                root_local,
-                root_method,
-                chain,
-                member,
-            } => {
-                assert_eq!(root_local, "Builder");
-                assert_eq!(root_method, "start");
-                assert_eq!(chain, vec!["next", "finish"]);
-                assert_eq!(member, "value");
-            }
-            _ => panic!("expected fluent access"),
-        }
-
-        let fluent_new = format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:next,finish");
-        let fluent_new_access =
-            legacy_member_access(&fluent_new, "value").expect("new fluent access");
-        match fluent_new_access {
-            LegacyMemberAccess::FluentChainNew {
-                class_local,
-                chain,
-                member,
-            } => {
-                assert_eq!(class_local, "Builder");
-                assert_eq!(chain, vec!["next", "finish"]);
-                assert_eq!(member, "value");
-            }
-            _ => panic!("expected new fluent access"),
-        }
-    }
-
-    #[test]
     fn malformed_legacy_member_access_is_skip_only() {
         let malformed = format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:");
 
         assert!(is_legacy_member_access_object(&malformed));
-        assert!(legacy_member_access(&malformed, "value").is_none());
+        assert!(parse_legacy_semantic_member_access(&malformed, "value").is_none());
     }
 }

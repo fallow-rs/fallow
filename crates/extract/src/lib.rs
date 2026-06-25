@@ -54,9 +54,12 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 pub use fallow_types::extract::{
     AngularTemplateMemberAccessFact, AngularThisSpreadFact, ClassHeritageInfo,
     DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
-    ExportName, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
-    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
-    LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult,
+    ExportName, FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL, FLUENT_CHAIN_SENTINEL,
+    FactoryCallMemberAccessFact, FluentChainMemberAccessFact, FluentChainNewMemberAccessFact,
+    INSTANCE_EXPORT_SENTINEL, ImportInfo, ImportedName, InstanceExportBindingFact,
+    LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
+    PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+    PLAYWRIGHT_FIXTURE_TYPE_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL, ParseResult,
     PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
     PlaywrightFixtureUseFact, PublicSignatureTypeReference, ReExportInfo, RequireCallInfo,
     SemanticFact, VisibilityTag, compute_line_offsets,
@@ -89,63 +92,6 @@ pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
 pub(crate) fn static_regex(pattern: &str) -> regex::Regex {
     regex::Regex::new(pattern).expect("static regex pattern should compile")
 }
-
-/// Legacy member-access object prefix for exported-instance bindings.
-///
-/// New extraction writes [`SemanticFact::InstanceExportBinding`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol.
-pub const INSTANCE_EXPORT_SENTINEL: &str = "__fallow_instance_export__:";
-
-/// Legacy member-access object prefix for typed Playwright fixture definitions.
-///
-/// New extraction writes [`SemanticFact::PlaywrightFixtureDefinition`]. The
-/// prefix remains available so analysis can decode older cache entries that
-/// used `MemberAccess.object` as a string protocol.
-pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
-
-/// Legacy member-access object prefix for Playwright fixture wrapper aliases.
-///
-/// New extraction writes [`SemanticFact::PlaywrightFixtureAlias`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol.
-pub const PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL: &str = "__fallow_playwright_fixture_alias__:";
-
-/// Legacy member-access object prefix for Playwright fixture member uses.
-///
-/// New extraction writes [`SemanticFact::PlaywrightFixtureUse`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol.
-pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
-
-/// Legacy member-access object prefix for exported Playwright fixture type aliases.
-///
-/// New extraction writes [`SemanticFact::PlaywrightFixtureType`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol.
-pub const PLAYWRIGHT_FIXTURE_TYPE_SENTINEL: &str = "__fallow_playwright_fixture_type__:";
-
-/// Legacy member-access object prefix for static-factory call returns.
-///
-/// New extraction writes [`SemanticFact::FactoryCallMemberAccess`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol. See issue #346.
-pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
-
-/// Legacy member-access object prefix for fluent-builder chain credit.
-///
-/// New extraction writes [`SemanticFact::FluentChainMemberAccess`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol. See issue #387.
-pub const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
-
-/// Legacy member-access object prefix for fluent chains rooted at a `new`
-/// expression.
-///
-/// New extraction writes [`SemanticFact::FluentChainNewMemberAccess`]. The
-/// prefix remains available so analysis can decode older cache entries that
-/// used `MemberAccess.object` as a string protocol. See issue #605.
-pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
 
 pub use parse::parse_source_to_module;
 

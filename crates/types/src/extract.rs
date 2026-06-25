@@ -1375,6 +1375,175 @@ pub enum SemanticFact {
     DynamicCustomElementRender(DynamicCustomElementRenderFact),
 }
 
+/// Legacy member-access object prefix for exported-instance bindings.
+///
+/// New extraction writes [`SemanticFact::InstanceExportBinding`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol.
+pub const INSTANCE_EXPORT_SENTINEL: &str = "__fallow_instance_export__:";
+
+/// Legacy member-access object prefix for typed Playwright fixture definitions.
+///
+/// New extraction writes [`SemanticFact::PlaywrightFixtureDefinition`]. The
+/// prefix remains available so analysis can decode older cache entries that
+/// used `MemberAccess.object` as a string protocol.
+pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
+
+/// Legacy member-access object prefix for Playwright fixture wrapper aliases.
+///
+/// New extraction writes [`SemanticFact::PlaywrightFixtureAlias`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol.
+pub const PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL: &str = "__fallow_playwright_fixture_alias__:";
+
+/// Legacy member-access object prefix for Playwright fixture member uses.
+///
+/// New extraction writes [`SemanticFact::PlaywrightFixtureUse`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol.
+pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
+
+/// Legacy member-access object prefix for exported Playwright fixture type aliases.
+///
+/// New extraction writes [`SemanticFact::PlaywrightFixtureType`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol.
+pub const PLAYWRIGHT_FIXTURE_TYPE_SENTINEL: &str = "__fallow_playwright_fixture_type__:";
+
+/// Legacy member-access object prefix for static-factory call returns.
+///
+/// New extraction writes [`SemanticFact::FactoryCallMemberAccess`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol. See issue #346.
+pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
+
+/// Legacy member-access object prefix for fluent-builder chain credit.
+///
+/// New extraction writes [`SemanticFact::FluentChainMemberAccess`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol. See issue #387.
+pub const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
+
+/// Legacy member-access object prefix for fluent chains rooted at a `new`
+/// expression.
+///
+/// New extraction writes [`SemanticFact::FluentChainNewMemberAccess`]. The
+/// prefix remains available so analysis can decode older cache entries that
+/// used `MemberAccess.object` as a string protocol. See issue #605.
+pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
+
+/// A semantic member-access fact decoded from older sentinel-backed parse-cache
+/// entries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LegacySemanticMemberAccess<'a> {
+    /// An exported value whose runtime instance targets a local class or
+    /// interface.
+    InstanceExportBinding {
+        /// Exported binding name.
+        export_name: &'a str,
+        /// Local class or interface symbol used as the instance target.
+        target_local: &'a str,
+    },
+    /// A member access on a value returned by an imported static factory call.
+    FactoryCall {
+        /// Local imported class or namespace object used as the factory callee.
+        callee_object: &'a str,
+        /// Static factory method invoked on the callee object.
+        callee_method: &'a str,
+        /// Member accessed on the returned instance-like object.
+        member: &'a str,
+    },
+    /// A member access on a fluent chain rooted at an imported static factory.
+    FluentChain {
+        /// Local imported class or namespace object used as the chain root.
+        root_local: &'a str,
+        /// Static factory method that starts the fluent chain.
+        root_method: &'a str,
+        /// Intermediate fluent methods between the root method and final member.
+        chain: Vec<&'a str>,
+        /// Member accessed at this chain step.
+        member: &'a str,
+    },
+    /// A member access on a fluent chain rooted at a `new` expression.
+    FluentChainNew {
+        /// Local imported class constructed by the `new` expression.
+        class_local: &'a str,
+        /// Intermediate fluent methods between construction and final member.
+        chain: Vec<&'a str>,
+        /// Member accessed at this chain step.
+        member: &'a str,
+    },
+}
+
+/// Return true for legacy member-access object strings that encode semantic
+/// facts now represented by [`SemanticFact`].
+#[must_use]
+pub fn is_legacy_semantic_member_access_object(object: &str) -> bool {
+    object.starts_with(INSTANCE_EXPORT_SENTINEL)
+        || object.starts_with(FACTORY_CALL_SENTINEL)
+        || object.starts_with(FLUENT_CHAIN_SENTINEL)
+        || object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)
+}
+
+/// Return true for legacy whole-object-use strings that should not be treated
+/// as ordinary value reads.
+#[must_use]
+pub fn is_legacy_semantic_whole_object_use(object: &str) -> bool {
+    object.starts_with(INSTANCE_EXPORT_SENTINEL) || object.starts_with(FACTORY_CALL_SENTINEL)
+}
+
+/// Decode an older sentinel-backed member access into the semantic fact shape
+/// used by current extraction.
+#[must_use]
+pub fn parse_legacy_semantic_member_access<'a>(
+    object: &'a str,
+    member: &'a str,
+) -> Option<LegacySemanticMemberAccess<'a>> {
+    if let Some(export_name) = object.strip_prefix(INSTANCE_EXPORT_SENTINEL) {
+        return Some(LegacySemanticMemberAccess::InstanceExportBinding {
+            export_name,
+            target_local: member,
+        });
+    }
+    if let Some((callee_object, callee_method)) = object
+        .strip_prefix(FACTORY_CALL_SENTINEL)
+        .and_then(|payload| payload.split_once(':'))
+    {
+        return Some(LegacySemanticMemberAccess::FactoryCall {
+            callee_object,
+            callee_method,
+            member,
+        });
+    }
+    if let Some(payload) = object.strip_prefix(FLUENT_CHAIN_SENTINEL) {
+        let (root_local, rest) = payload.split_once(':')?;
+        let (root_method, chain_str) = rest.split_once(':')?;
+        let chain = if chain_str.is_empty() {
+            Vec::new()
+        } else {
+            chain_str.split(',').collect()
+        };
+        return Some(LegacySemanticMemberAccess::FluentChain {
+            root_local,
+            root_method,
+            chain,
+            member,
+        });
+    }
+    if let Some(payload) = object.strip_prefix(FLUENT_CHAIN_NEW_SENTINEL) {
+        let (class_local, chain_str) = payload.split_once(':')?;
+        if chain_str.is_empty() {
+            return None;
+        }
+        return Some(LegacySemanticMemberAccess::FluentChainNew {
+            class_local,
+            chain: chain_str.split(',').collect(),
+            member,
+        });
+    }
+    None
+}
+
 /// A member name referenced from an Angular template surface.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -2057,6 +2226,84 @@ mod tests {
                 "{name} should remain secret-shaped"
             );
         }
+    }
+
+    #[test]
+    fn legacy_semantic_member_access_decodes_instance_binding() {
+        let object = format!("{INSTANCE_EXPORT_SENTINEL}exported");
+        let access = parse_legacy_semantic_member_access(&object, "target").expect("legacy access");
+
+        match access {
+            LegacySemanticMemberAccess::InstanceExportBinding {
+                export_name,
+                target_local,
+            } => {
+                assert_eq!(export_name, "exported");
+                assert_eq!(target_local, "target");
+            }
+            _ => panic!("expected instance binding"),
+        }
+    }
+
+    #[test]
+    fn legacy_semantic_member_access_decodes_factory_and_fluent_chains() {
+        let factory = format!("{FACTORY_CALL_SENTINEL}Service:create");
+        let factory_access =
+            parse_legacy_semantic_member_access(&factory, "run").expect("factory access");
+        match factory_access {
+            LegacySemanticMemberAccess::FactoryCall {
+                callee_object,
+                callee_method,
+                member,
+            } => {
+                assert_eq!(callee_object, "Service");
+                assert_eq!(callee_method, "create");
+                assert_eq!(member, "run");
+            }
+            _ => panic!("expected factory access"),
+        }
+
+        let fluent = format!("{FLUENT_CHAIN_SENTINEL}Builder:start:next,finish");
+        let fluent_access =
+            parse_legacy_semantic_member_access(&fluent, "value").expect("fluent access");
+        match fluent_access {
+            LegacySemanticMemberAccess::FluentChain {
+                root_local,
+                root_method,
+                chain,
+                member,
+            } => {
+                assert_eq!(root_local, "Builder");
+                assert_eq!(root_method, "start");
+                assert_eq!(chain, vec!["next", "finish"]);
+                assert_eq!(member, "value");
+            }
+            _ => panic!("expected fluent access"),
+        }
+
+        let fluent_new = format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:next,finish");
+        let fluent_new_access =
+            parse_legacy_semantic_member_access(&fluent_new, "value").expect("new fluent access");
+        match fluent_new_access {
+            LegacySemanticMemberAccess::FluentChainNew {
+                class_local,
+                chain,
+                member,
+            } => {
+                assert_eq!(class_local, "Builder");
+                assert_eq!(chain, vec!["next", "finish"]);
+                assert_eq!(member, "value");
+            }
+            _ => panic!("expected new fluent access"),
+        }
+    }
+
+    #[test]
+    fn legacy_semantic_member_access_rejects_malformed_new_chain() {
+        let malformed = format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:");
+
+        assert!(is_legacy_semantic_member_access_object(&malformed));
+        assert!(parse_legacy_semantic_member_access(&malformed, "value").is_none());
     }
 
     #[test]
