@@ -8,7 +8,7 @@
 )]
 
 use fallow_api as api;
-use fallow_programmatic_cli::CliHealthRunner;
+use fallow_programmatic_cli as cli_health;
 use napi::bindgen_prelude::{AsyncTask, JsObjectValue, ToNapiValue, Unknown};
 use napi::{Env, ScopedTask, Status};
 use napi_derive::napi;
@@ -543,7 +543,7 @@ pub fn compute_complexity(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::compute_complexity_with_runner(&options, &CliHealthRunner)
+        cli_health::compute_complexity(&options)
     })))
 }
 
@@ -553,7 +553,7 @@ pub fn compute_health(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::compute_health_with_runner(&options, &CliHealthRunner)
+        cli_health::compute_health(&options)
     })))
 }
 
