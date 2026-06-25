@@ -1040,7 +1040,9 @@ impl FallowLspServer {
                 code_actions::CatalogEntryActionInput::new(results, root, uri, range, file_lines),
             ));
             actions.extend(code_actions::build_remove_empty_catalog_group_actions(
-                results, root, uri, range, file_lines,
+                code_actions::EmptyCatalogGroupActionInput::new(
+                    results, root, uri, range, file_lines,
+                ),
             ));
         }
 

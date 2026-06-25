@@ -571,13 +571,44 @@ fn catalog_entry_diagnostic_message(entry: &fallow_engine::results::UnusedCatalo
 /// passing the buffer in mirrors the sibling so the deletion range
 /// matches what the user sees in their editor when there are unsaved
 /// edits.
+#[derive(Clone, Copy)]
+pub struct EmptyCatalogGroupActionInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub root: &'a Path,
+    pub uri: &'a Uri,
+    pub cursor_range: &'a Range,
+    pub file_lines: &'a [&'a str],
+}
+
+impl<'a> EmptyCatalogGroupActionInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        root: &'a Path,
+        uri: &'a Uri,
+        cursor_range: &'a Range,
+        file_lines: &'a [&'a str],
+    ) -> Self {
+        Self {
+            results,
+            root,
+            uri,
+            cursor_range,
+            file_lines,
+        }
+    }
+}
+
 pub fn build_remove_empty_catalog_group_actions(
-    results: &AnalysisResults,
-    root: &Path,
-    uri: &Uri,
-    cursor_range: &Range,
-    file_lines: &[&str],
+    input: EmptyCatalogGroupActionInput<'_>,
 ) -> Vec<CodeActionOrCommand> {
+    let EmptyCatalogGroupActionInput {
+        results,
+        root,
+        uri,
+        cursor_range,
+        file_lines,
+    } = input;
     let mut actions = Vec::new();
 
     if file_lines.is_empty() {
@@ -595,6 +626,23 @@ pub fn build_remove_empty_catalog_group_actions(
     }
 
     actions
+}
+
+#[cfg(test)]
+fn build_remove_empty_catalog_group_actions_for_test(
+    results: &AnalysisResults,
+    root: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Vec<CodeActionOrCommand> {
+    build_remove_empty_catalog_group_actions(EmptyCatalogGroupActionInput::new(
+        results,
+        root,
+        uri,
+        cursor_range,
+        file_lines,
+    ))
 }
 
 /// Validate that an empty-catalog-group finding still anchors to a matching
@@ -2063,7 +2111,7 @@ mod tests {
             .push(make_empty_group("legacy", 3));
 
         let lines = vec!["catalogs:", "  react17: {}", "  legacy:"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -2118,7 +2166,7 @@ mod tests {
             "  }",
             "}",
         ];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -2139,7 +2187,7 @@ mod tests {
             .push(make_empty_group("legacy", 3));
 
         let lines = vec!["catalogs:", "  react17: {}", "  legacy:"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &other_uri,
@@ -2160,7 +2208,7 @@ mod tests {
             .push(make_empty_group("legacy", 3));
 
         let lines = vec!["catalogs:", "  react17: {}", "  legacy:"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -2184,7 +2232,7 @@ mod tests {
             .push(make_empty_group("react17", 2));
 
         let lines = vec!["catalogs:", "  react18:"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -2208,7 +2256,7 @@ mod tests {
             .push(make_empty_group("@scope/legacy", 2));
 
         let lines = vec!["catalogs:", "  \"@scope/legacy\":"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -2234,7 +2282,7 @@ mod tests {
             .push(make_empty_group("legacy", 3));
 
         let lines = vec!["catalogs:", "  react17:", "  legacy:"];
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
@@ -2260,7 +2308,7 @@ mod tests {
             .empty_catalog_groups
             .push(make_empty_group("legacy", 3));
 
-        let actions = build_remove_empty_catalog_group_actions(
+        let actions = build_remove_empty_catalog_group_actions_for_test(
             &results,
             dir.path(),
             &uri,
