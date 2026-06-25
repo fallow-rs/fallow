@@ -37,7 +37,8 @@ use std::path::Path;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
-    AngularComponentSelector, ExportName, ImportedName, ModuleInfo, SemanticFact,
+    AngularComponentSelector, ExportName, ImportedName, ModuleInfo,
+    has_dynamic_custom_element_render,
 };
 
 use crate::discover::FileId;
@@ -571,17 +572,10 @@ pub fn find_unrendered_lit_elements(input: &LitUnrenderedInput<'_>) -> Vec<Unren
     // parse caches conservative.
     let mut rendered_tags: FxHashSet<&str> = FxHashSet::default();
     for module in modules {
-        if module
-            .semantic_facts
-            .iter()
-            .any(|fact| matches!(fact, SemanticFact::DynamicCustomElementRender(_)))
-        {
+        if has_dynamic_custom_element_render(module) {
             return Vec::new();
         }
         for tag in &module.used_custom_element_tags {
-            if tag == fallow_types::extract::DYNAMIC_CUSTOM_ELEMENT_TAG {
-                return Vec::new();
-            }
             rendered_tags.insert(tag.as_str());
         }
     }

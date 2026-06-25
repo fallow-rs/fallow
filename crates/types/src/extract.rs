@@ -1534,6 +1534,23 @@ pub fn is_legacy_template_or_semantic_whole_object_use(object: &str) -> bool {
         || is_legacy_semantic_whole_object_use(object)
 }
 
+/// Return true when a module contains a dynamic custom-element render.
+///
+/// Current extraction writes [`SemanticFact::DynamicCustomElementRender`].
+/// The tag fallback is decode-only compatibility for older parse caches that
+/// persisted [`DYNAMIC_CUSTOM_ELEMENT_TAG`] in `used_custom_element_tags`.
+#[must_use]
+pub fn has_dynamic_custom_element_render(module: &ModuleInfo) -> bool {
+    module
+        .semantic_facts
+        .iter()
+        .any(|fact| matches!(fact, SemanticFact::DynamicCustomElementRender(_)))
+        || module
+            .used_custom_element_tags
+            .iter()
+            .any(|tag| tag == DYNAMIC_CUSTOM_ELEMENT_TAG)
+}
+
 /// Decode an older sentinel-backed member access into the semantic fact shape
 /// used by current extraction.
 #[must_use]
@@ -3939,6 +3956,28 @@ mod tests {
             svelte_listened_events: Vec::new(),
             has_dynamic_dispatch: false,
         }
+    }
+
+    #[test]
+    fn dynamic_custom_element_render_helper_prefers_typed_fact() {
+        let mut module = minimal_module_info();
+        module
+            .semantic_facts
+            .push(SemanticFact::DynamicCustomElementRender(
+                DynamicCustomElementRenderFact,
+            ));
+
+        assert!(has_dynamic_custom_element_render(&module));
+    }
+
+    #[test]
+    fn dynamic_custom_element_render_helper_decodes_legacy_tag() {
+        let mut module = minimal_module_info();
+        module
+            .used_custom_element_tags
+            .push(DYNAMIC_CUSTOM_ELEMENT_TAG.to_string());
+
+        assert!(has_dynamic_custom_element_render(&module));
     }
 
     #[test]
