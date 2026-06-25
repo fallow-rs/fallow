@@ -705,6 +705,8 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
 pub struct IssueResultMeta {
     /// Canonical issue code that owns this result array.
     pub code: &'static str,
+    /// Human-readable name emitted in dead-code `_meta.rules`.
+    pub meta_name: &'static str,
     /// Label used by CI summary tables.
     pub summary_label: &'static str,
     /// Documentation anchor under `/explanations/dead-code`.
@@ -728,6 +730,7 @@ pub struct TsAliasMeta {
 pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     IssueResultMeta {
         code: "unused-file",
+        meta_name: "Unused Files",
         summary_label: "Unused files",
         docs_anchor: "unused-files",
         result_key: "unused_files",
@@ -735,6 +738,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-export",
+        meta_name: "Unused Exports",
         summary_label: "Unused exports",
         docs_anchor: "unused-exports",
         result_key: "unused_exports",
@@ -742,6 +746,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-type",
+        meta_name: "Unused Type Exports",
         summary_label: "Unused types",
         docs_anchor: "unused-types",
         result_key: "unused_types",
@@ -749,6 +754,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "private-type-leak",
+        meta_name: "Private Type Leaks",
         summary_label: "Private type leaks",
         docs_anchor: "private-type-leaks",
         result_key: "private_type_leaks",
@@ -756,6 +762,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dependency",
+        meta_name: "Unused Dependencies",
         summary_label: "Unused dependencies",
         docs_anchor: "unused-dependencies",
         result_key: "unused_dependencies",
@@ -763,6 +770,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dev-dependency",
+        meta_name: "Unused Dev Dependencies",
         summary_label: "Unused devDependencies",
         docs_anchor: "unused-dependencies",
         result_key: "unused_dev_dependencies",
@@ -770,6 +778,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-optional-dependency",
+        meta_name: "Unused Optional Dependencies",
         summary_label: "Unused optionalDependencies",
         docs_anchor: "unused-dependencies",
         result_key: "unused_optional_dependencies",
@@ -777,6 +786,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-enum-member",
+        meta_name: "Unused Enum Members",
         summary_label: "Unused enum members",
         docs_anchor: "unused-enum-members",
         result_key: "unused_enum_members",
@@ -784,6 +794,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-class-member",
+        meta_name: "Unused Class Members",
         summary_label: "Unused class members",
         docs_anchor: "unused-class-members",
         result_key: "unused_class_members",
@@ -791,6 +802,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-store-member",
+        meta_name: "Unused Store Members",
         summary_label: "Unused store members",
         docs_anchor: "unused-store-members",
         result_key: "unused_store_members",
@@ -798,6 +810,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unresolved-import",
+        meta_name: "Unresolved Imports",
         summary_label: "Unresolved imports",
         docs_anchor: "unresolved-imports",
         result_key: "unresolved_imports",
@@ -805,6 +818,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unlisted-dependency",
+        meta_name: "Unlisted Dependencies",
         summary_label: "Unlisted dependencies",
         docs_anchor: "unlisted-dependencies",
         result_key: "unlisted_dependencies",
@@ -812,6 +826,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "duplicate-export",
+        meta_name: "Duplicate Exports",
         summary_label: "Duplicate exports",
         docs_anchor: "duplicate-exports",
         result_key: "duplicate_exports",
@@ -819,6 +834,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "type-only-dependency",
+        meta_name: "Type-only Dependencies",
         summary_label: "Type-only dependencies",
         docs_anchor: "type-only-dependencies",
         result_key: "type_only_dependencies",
@@ -826,6 +842,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "test-only-dependency",
+        meta_name: "Test-only Dependencies",
         summary_label: "Test-only dependencies",
         docs_anchor: "test-only-dependencies",
         result_key: "test_only_dependencies",
@@ -833,6 +850,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "circular-dependency",
+        meta_name: "Circular Dependencies",
         summary_label: "Circular dependencies",
         docs_anchor: "circular-dependencies",
         result_key: "circular_dependencies",
@@ -840,6 +858,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "re-export-cycle",
+        meta_name: "Re-Export Cycles",
         summary_label: "Re-export cycles",
         docs_anchor: "re-export-cycles",
         result_key: "re_export_cycles",
@@ -847,6 +866,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-violation",
+        meta_name: "Boundary Violations",
         summary_label: "Boundary violations",
         docs_anchor: "boundary-violations",
         result_key: "boundary_violations",
@@ -854,6 +874,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-coverage",
+        meta_name: "Boundary Coverage",
         summary_label: "Boundary coverage",
         docs_anchor: "boundary-violations",
         result_key: "boundary_coverage_violations",
@@ -861,6 +882,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-call-violation",
+        meta_name: "Boundary Call Violation",
         summary_label: "Boundary calls",
         docs_anchor: "boundary-violations",
         result_key: "boundary_call_violations",
@@ -868,6 +890,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "policy-violation",
+        meta_name: "Policy Violation",
         summary_label: "Policy violations",
         docs_anchor: "policy-violations",
         result_key: "policy_violations",
@@ -875,6 +898,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "invalid-client-export",
+        meta_name: "Invalid client export",
         summary_label: "Invalid client exports",
         docs_anchor: "invalid-client-exports",
         result_key: "invalid_client_exports",
@@ -882,6 +906,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "mixed-client-server-barrel",
+        meta_name: "Mixed client/server barrel",
         summary_label: "Mixed client/server barrels",
         docs_anchor: "mixed-client-server-barrels",
         result_key: "mixed_client_server_barrels",
@@ -889,6 +914,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "misplaced-directive",
+        meta_name: "Misplaced directive",
         summary_label: "Misplaced directives",
         docs_anchor: "misplaced-directives",
         result_key: "misplaced_directives",
@@ -896,6 +922,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unprovided-inject",
+        meta_name: "Unprovided injects",
         summary_label: "Unprovided injects",
         docs_anchor: "unprovided-inject",
         result_key: "unprovided_injects",
@@ -903,6 +930,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unrendered-component",
+        meta_name: "Unrendered components",
         summary_label: "Unrendered components",
         docs_anchor: "unrendered-component",
         result_key: "unrendered_components",
@@ -910,6 +938,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-prop",
+        meta_name: "Unused component props",
         summary_label: "Unused component props",
         docs_anchor: "unused-component-prop",
         result_key: "unused_component_props",
@@ -917,6 +946,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-emit",
+        meta_name: "Unused component emits",
         summary_label: "Unused component emits",
         docs_anchor: "unused-component-emit",
         result_key: "unused_component_emits",
@@ -924,6 +954,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-input",
+        meta_name: "Unused component inputs",
         summary_label: "Unused component inputs",
         docs_anchor: "unused-component-input",
         result_key: "unused_component_inputs",
@@ -931,6 +962,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-output",
+        meta_name: "Unused component outputs",
         summary_label: "Unused component outputs",
         docs_anchor: "unused-component-output",
         result_key: "unused_component_outputs",
@@ -938,6 +970,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-svelte-event",
+        meta_name: "Unused Svelte events",
         summary_label: "Unused Svelte events",
         docs_anchor: "unused-svelte-event",
         result_key: "unused_svelte_events",
@@ -945,6 +978,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-server-action",
+        meta_name: "Unused server actions",
         summary_label: "Unused server actions",
         docs_anchor: "unused-server-action",
         result_key: "unused_server_actions",
@@ -952,6 +986,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-load-data-key",
+        meta_name: "Unused load data keys",
         summary_label: "Unused load data keys",
         docs_anchor: "unused-load-data-key",
         result_key: "unused_load_data_keys",
@@ -959,6 +994,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "route-collision",
+        meta_name: "Route collision",
         summary_label: "Route collisions",
         docs_anchor: "route-collisions",
         result_key: "route_collisions",
@@ -966,6 +1002,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "dynamic-segment-name-conflict",
+        meta_name: "Dynamic segment name conflict",
         summary_label: "Dynamic segment conflicts",
         docs_anchor: "dynamic-segment-name-conflicts",
         result_key: "dynamic_segment_name_conflicts",
@@ -973,6 +1010,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "stale-suppression",
+        meta_name: "Stale Suppressions",
         summary_label: "Stale suppressions",
         docs_anchor: "stale-suppressions",
         result_key: "stale_suppressions",
@@ -980,6 +1018,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-catalog-entry",
+        meta_name: "Unused catalog entry",
         summary_label: "Unused catalog entries",
         docs_anchor: "unused-catalog-entries",
         result_key: "unused_catalog_entries",
@@ -987,6 +1026,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "empty-catalog-group",
+        meta_name: "Empty catalog group",
         summary_label: "Empty catalog groups",
         docs_anchor: "empty-catalog-groups",
         result_key: "empty_catalog_groups",
@@ -994,6 +1034,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unresolved-catalog-reference",
+        meta_name: "Unresolved catalog reference",
         summary_label: "Unresolved catalog references",
         docs_anchor: "unresolved-catalog-references",
         result_key: "unresolved_catalog_references",
@@ -1001,6 +1042,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dependency-override",
+        meta_name: "Unused pnpm dependency override",
         summary_label: "Unused dependency overrides",
         docs_anchor: "unused-dependency-overrides",
         result_key: "unused_dependency_overrides",
@@ -1008,6 +1050,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "misconfigured-dependency-override",
+        meta_name: "Misconfigured pnpm dependency override",
         summary_label: "Misconfigured dependency overrides",
         docs_anchor: "misconfigured-dependency-overrides",
         result_key: "misconfigured_dependency_overrides",
@@ -1015,6 +1058,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "prop-drilling",
+        meta_name: "Prop drilling",
         summary_label: "Prop drilling",
         docs_anchor: "prop-drilling",
         result_key: "prop_drilling_chains",
@@ -1022,6 +1066,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "thin-wrapper",
+        meta_name: "Thin wrapper",
         summary_label: "Thin wrappers",
         docs_anchor: "thin-wrapper",
         result_key: "thin_wrappers",
@@ -1029,6 +1074,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "duplicate-prop-shape",
+        meta_name: "Duplicate prop shape",
         summary_label: "Duplicate prop shapes",
         docs_anchor: "duplicate-prop-shape",
         result_key: "duplicate_prop_shapes",
@@ -1497,6 +1543,17 @@ mod tests {
             assert!(
                 !meta.summary_label.is_empty(),
                 "result metadata code {} has no summary label",
+                meta.code
+            );
+        }
+    }
+
+    #[test]
+    fn result_meta_codes_have_meta_names() {
+        for meta in ISSUE_RESULT_META {
+            assert!(
+                !meta.meta_name.is_empty(),
+                "result metadata code {} has no meta name",
                 meta.code
             );
         }

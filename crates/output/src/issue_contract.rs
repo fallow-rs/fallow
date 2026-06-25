@@ -55,7 +55,7 @@ impl IssueOutputContract {
             counts_in_total: meta.counts_in_total,
             summary_label: meta.summary_label,
             summary_docs_anchor: meta.docs_anchor,
-            meta_name: issue_meta_name(meta.code)?,
+            meta_name: meta.meta_name,
             meta_description: issue_meta_description(meta.code)?,
             meta_docs_path: issue_meta_docs_path(meta.code)?,
             sarif_rule_ids: issue_sarif_rule_ids(meta.code),
@@ -124,56 +124,6 @@ pub fn issue_output_contracts() -> impl Iterator<Item = IssueOutputContract> {
 #[must_use]
 pub fn issue_output_contract_by_code(code: &str) -> Option<IssueOutputContract> {
     issue_result_meta_by_code(code).and_then(IssueOutputContract::from_result_meta)
-}
-
-fn issue_meta_name(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "unused-file" => "Unused Files",
-        "unused-export" => "Unused Exports",
-        "unused-type" => "Unused Type Exports",
-        "private-type-leak" => "Private Type Leaks",
-        "unused-dependency" => "Unused Dependencies",
-        "unused-dev-dependency" => "Unused Dev Dependencies",
-        "unused-optional-dependency" => "Unused Optional Dependencies",
-        "unused-enum-member" => "Unused Enum Members",
-        "unused-class-member" => "Unused Class Members",
-        "unused-store-member" => "Unused Store Members",
-        "unresolved-import" => "Unresolved Imports",
-        "unlisted-dependency" => "Unlisted Dependencies",
-        "duplicate-export" => "Duplicate Exports",
-        "type-only-dependency" => "Type-only Dependencies",
-        "test-only-dependency" => "Test-only Dependencies",
-        "circular-dependency" => "Circular Dependencies",
-        "re-export-cycle" => "Re-Export Cycles",
-        "boundary-violation" => "Boundary Violations",
-        "boundary-coverage" => "Boundary Coverage",
-        "boundary-call-violation" => "Boundary Call Violation",
-        "policy-violation" => "Policy Violation",
-        "invalid-client-export" => "Invalid client export",
-        "mixed-client-server-barrel" => "Mixed client/server barrel",
-        "misplaced-directive" => "Misplaced directive",
-        "unprovided-inject" => "Unprovided injects",
-        "unrendered-component" => "Unrendered components",
-        "unused-component-prop" => "Unused component props",
-        "unused-component-emit" => "Unused component emits",
-        "unused-component-input" => "Unused component inputs",
-        "unused-component-output" => "Unused component outputs",
-        "unused-svelte-event" => "Unused Svelte events",
-        "unused-server-action" => "Unused server actions",
-        "unused-load-data-key" => "Unused load data keys",
-        "route-collision" => "Route collision",
-        "dynamic-segment-name-conflict" => "Dynamic segment name conflict",
-        "stale-suppression" => "Stale Suppressions",
-        "unused-catalog-entry" => "Unused catalog entry",
-        "empty-catalog-group" => "Empty catalog group",
-        "unresolved-catalog-reference" => "Unresolved catalog reference",
-        "unused-dependency-override" => "Unused pnpm dependency override",
-        "misconfigured-dependency-override" => "Misconfigured pnpm dependency override",
-        "prop-drilling" => "Prop drilling",
-        "thin-wrapper" => "Thin wrapper",
-        "duplicate-prop-shape" => "Duplicate prop shape",
-        _ => return None,
-    })
 }
 
 #[allow(
