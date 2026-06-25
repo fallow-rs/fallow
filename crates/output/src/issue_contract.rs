@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use fallow_types::envelope::{Meta, MetaRule};
 pub use fallow_types::issue_meta::{CODECLIMATE_RESULT_CODES, TsAliasMeta};
 use fallow_types::issue_meta::{
-    IssueResultMeta, issue_codeclimate_check_names, issue_docs_anchor, issue_result_meta_by_code,
+    IssueResultMeta, issue_codeclimate_check_names, issue_result_meta_by_code,
     issue_sarif_rule_ids, issue_ts_alias, result_issue_metas,
 };
 
@@ -54,7 +54,7 @@ impl IssueOutputContract {
             result_key: meta.result_key,
             counts_in_total: meta.counts_in_total,
             summary_label: issue_summary_label(meta.code)?,
-            summary_docs_anchor: issue_docs_anchor(meta.code)?,
+            summary_docs_anchor: meta.docs_anchor,
             meta_name: issue_meta_name(meta.code)?,
             meta_description: issue_meta_description(meta.code)?,
             meta_docs_path: issue_meta_docs_path(meta.code)?,
