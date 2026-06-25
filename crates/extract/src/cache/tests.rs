@@ -34,7 +34,7 @@ fn cache_roundtrip_preserves_unresolved_callee_diagnostics() {
     assert_eq!(module.security_sinks_skipped, 1);
     assert_eq!(module.security_unresolved_callee_sites.len(), 1);
 
-    let cached = module_to_cached(&module, 10, 20);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
     let restored = cached_to_module(&cached, FileId(7));
     let diagnostic = restored
         .security_unresolved_callee_sites
@@ -64,7 +64,7 @@ fn cache_roundtrip_preserves_react_structural_ir() {
     assert_eq!(module.hook_uses.len(), 1);
     assert_eq!(module.render_edges.len(), 1);
 
-    let cached = module_to_cached(&module, 10, 20);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
     let restored = cached_to_module(&cached, FileId(7));
 
     assert_eq!(restored.component_functions.len(), 1);
@@ -501,7 +501,7 @@ fn module_to_cached_roundtrip_named_export() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(
@@ -614,7 +614,7 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.exports.len(), 1);
@@ -712,7 +712,7 @@ fn module_to_cached_roundtrip_default_export() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.exports[0].name, ExportName::Default);
@@ -836,7 +836,7 @@ fn module_to_cached_roundtrip_imports() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.imports.len(), 4);
@@ -940,7 +940,7 @@ fn module_to_cached_roundtrip_re_exports() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.re_exports.len(), 1);
@@ -1089,7 +1089,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.dynamic_imports.len(), 1);
@@ -1272,7 +1272,7 @@ fn module_to_cached_roundtrip_members() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.exports[0].members.len(), 3);
@@ -1575,7 +1575,7 @@ fn module_to_cached_roundtrip_type_only_import() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert!(restored.imports[0].is_type_only);
@@ -2299,7 +2299,7 @@ fn module_to_cached_stores_mtime_and_size() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 12345, 6789);
+    let cached = module_to_cached_from_parts(&module, 12345, 6789);
     assert_eq!(cached.mtime_secs, 12345);
     assert_eq!(cached.file_size, 6789);
     assert_eq!(cached.content_hash, 42);
@@ -2381,7 +2381,7 @@ fn module_to_cached_roundtrip_line_offsets() {
         has_dynamic_component_render: false,
         has_dynamic_dispatch: false,
     };
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
     assert_eq!(restored.line_offsets, vec![0, 15, 30, 45]);
 }
@@ -2474,7 +2474,7 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.suppressions.len(), 4);
@@ -2590,7 +2590,7 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.unknown_suppression_kinds.len(), 2);
@@ -2692,7 +2692,7 @@ fn module_to_cached_roundtrip_visibility() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.exports[0].visibility, VisibilityTag::Public);
@@ -2785,7 +2785,7 @@ fn module_to_cached_roundtrip_visibility_internal() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     assert_eq!(cached.exports[0].visibility, 2);
     let restored = cached_to_module(&cached, FileId(0));
     assert_eq!(restored.exports[0].visibility, VisibilityTag::Internal);
@@ -2878,7 +2878,7 @@ fn module_to_cached_roundtrip_visibility_beta() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     assert_eq!(cached.exports[0].visibility, 3);
     let restored = cached_to_module(&cached, FileId(0));
     assert_eq!(restored.exports[0].visibility, VisibilityTag::Beta);
@@ -2971,7 +2971,7 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     assert_eq!(cached.exports[0].visibility, 4);
     let restored = cached_to_module(&cached, FileId(0));
     assert_eq!(restored.exports[0].visibility, VisibilityTag::Alpha);
@@ -3065,7 +3065,7 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.dynamic_import_patterns.len(), 2);
@@ -3157,7 +3157,7 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.unused_import_bindings.len(), 2);
@@ -3286,7 +3286,7 @@ fn module_to_cached_roundtrip_complexity() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.complexity.len(), 2);
@@ -3382,7 +3382,7 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.require_calls.len(), 1);
@@ -3477,7 +3477,7 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(
@@ -3571,7 +3571,7 @@ fn module_to_cached_roundtrip_source_span() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.imports[0].source_span.start, 25);
@@ -3673,7 +3673,7 @@ fn module_to_cached_roundtrip_member_decorators() {
         has_dynamic_dispatch: false,
     };
 
-    let cached = module_to_cached(&module, 0, 0);
+    let cached = module_to_cached_from_parts(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
     assert!(restored.exports[0].members[0].has_decorator);

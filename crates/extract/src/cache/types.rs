@@ -936,6 +936,18 @@ pub struct CachedModule {
     pub has_dynamic_dispatch: bool,
 }
 
+impl CachedModule {
+    /// Source metadata fingerprint stored with this cache entry.
+    ///
+    /// The on-disk field name `mtime_secs` is legacy. It stores the shared
+    /// nanosecond mtime value used by
+    /// [`SourceFingerprint`](fallow_types::source_fingerprint::SourceFingerprint).
+    #[must_use]
+    pub fn source_fingerprint(&self) -> fallow_types::source_fingerprint::SourceFingerprint {
+        fallow_types::source_fingerprint::SourceFingerprint::new(self.mtime_secs, self.file_size)
+    }
+}
+
 /// Cached namespace-object alias.
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct CachedNamespaceObjectAlias {
