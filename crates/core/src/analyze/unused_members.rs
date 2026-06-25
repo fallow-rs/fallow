@@ -14,7 +14,9 @@ use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
     SemanticFact, angular_template_member_names_from_parts,
     has_angular_template_members_from_parts, is_legacy_template_or_semantic_member_access_object,
-    is_legacy_template_or_semantic_whole_object_use, semantic_facts_with_legacy_member_accesses,
+    is_legacy_template_or_semantic_whole_object_use, playwright_fixture_alias_facts,
+    playwright_fixture_definition_facts, playwright_fixture_type_facts,
+    playwright_fixture_use_facts, semantic_facts_with_legacy_member_accesses,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -921,90 +923,6 @@ fn is_entry_point_public_class_export(
             || export_has_entry_point_re_export_reference(graph, export, public_api_entry_points))
 }
 
-struct PlaywrightFixtureUseAccess<'a> {
-    test_local_name: &'a str,
-    fixture_name: &'a str,
-    member: &'a str,
-}
-
-struct PlaywrightFixtureDefinitionAccess<'a> {
-    test_local: &'a str,
-    fixture: &'a str,
-    type_local: &'a str,
-}
-
-struct PlaywrightFixtureAliasAccess<'a> {
-    test_local: &'a str,
-    base_local: &'a str,
-}
-
-struct PlaywrightFixtureTypeAccess<'a> {
-    alias_local: &'a str,
-    fixture: &'a str,
-    type_local: &'a str,
-}
-
-fn playwright_fixture_type_accesses(
-    module: &ResolvedModule,
-) -> Vec<PlaywrightFixtureTypeAccess<'_>> {
-    let mut accesses = Vec::new();
-    for fact in &module.semantic_facts {
-        if let SemanticFact::PlaywrightFixtureType(access) = fact {
-            accesses.push(PlaywrightFixtureTypeAccess {
-                alias_local: access.alias_name.as_str(),
-                fixture: access.fixture_name.as_str(),
-                type_local: access.type_name.as_str(),
-            });
-        }
-    }
-    accesses
-}
-
-fn playwright_fixture_alias_accesses(
-    module: &ResolvedModule,
-) -> Vec<PlaywrightFixtureAliasAccess<'_>> {
-    let mut accesses = Vec::new();
-    for fact in &module.semantic_facts {
-        if let SemanticFact::PlaywrightFixtureAlias(access) = fact {
-            accesses.push(PlaywrightFixtureAliasAccess {
-                test_local: access.test_name.as_str(),
-                base_local: access.base_name.as_str(),
-            });
-        }
-    }
-    accesses
-}
-
-fn playwright_fixture_definition_accesses(
-    module: &ResolvedModule,
-) -> Vec<PlaywrightFixtureDefinitionAccess<'_>> {
-    let mut accesses = Vec::new();
-    for fact in &module.semantic_facts {
-        if let SemanticFact::PlaywrightFixtureDefinition(access) = fact {
-            accesses.push(PlaywrightFixtureDefinitionAccess {
-                test_local: access.test_name.as_str(),
-                fixture: access.fixture_name.as_str(),
-                type_local: access.type_name.as_str(),
-            });
-        }
-    }
-    accesses
-}
-
-fn playwright_fixture_use_accesses(module: &ResolvedModule) -> Vec<PlaywrightFixtureUseAccess<'_>> {
-    let mut accesses = Vec::new();
-    for fact in &module.semantic_facts {
-        if let SemanticFact::PlaywrightFixtureUse(access) = fact {
-            accesses.push(PlaywrightFixtureUseAccess {
-                test_local_name: access.test_name.as_str(),
-                fixture_name: access.fixture_name.as_str(),
-                member: access.member.as_str(),
-            });
-        }
-    }
-    accesses
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum PlaywrightTestKey {
     Export(ExportKey),
@@ -1019,11 +937,11 @@ fn push_playwright_test_key(keys: &mut Vec<PlaywrightTestKey>, key: PlaywrightTe
 
 fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> FxHashSet<&str> {
     let mut names = FxHashSet::default();
-    for access in playwright_fixture_definition_accesses(resolved) {
-        names.insert(access.test_local);
+    for access in playwright_fixture_definition_facts(&resolved.semantic_facts) {
+        names.insert(access.test_name.as_str());
     }
-    for access in playwright_fixture_alias_accesses(resolved) {
-        names.insert(access.test_local);
+    for access in playwright_fixture_alias_facts(&resolved.semantic_facts) {
+        names.insert(access.test_name.as_str());
     }
     names
 }
@@ -1100,14 +1018,14 @@ fn collect_playwright_fixture_def_targets(
     type_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
     targets_by_test: &mut FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>>,
 ) {
-    for access in playwright_fixture_definition_accesses(resolved) {
+    for access in playwright_fixture_definition_facts(&resolved.semantic_facts) {
         let test_keys = playwright_test_keys_for_local(
             local_to_export_keys,
             local_playwright_test_names,
             resolved.file_id,
-            access.test_local,
+            access.test_name.as_str(),
         );
-        let Some(target_keys) = local_to_export_keys.get(access.type_local) else {
+        let Some(target_keys) = local_to_export_keys.get(access.type_name.as_str()) else {
             continue;
         };
 
@@ -1118,7 +1036,7 @@ fn collect_playwright_fixture_def_targets(
                     graph,
                     type_targets,
                     fixture_targets,
-                    access.fixture,
+                    access.fixture_name.as_str(),
                     target_key,
                 );
             }
@@ -1135,18 +1053,18 @@ fn collect_playwright_fixture_aliases(
     local_playwright_test_names: &FxHashSet<&str>,
     aliases_by_test: &mut FxHashMap<PlaywrightTestKey, Vec<PlaywrightTestKey>>,
 ) {
-    for access in playwright_fixture_alias_accesses(resolved) {
+    for access in playwright_fixture_alias_facts(&resolved.semantic_facts) {
         let test_keys = playwright_test_keys_for_local(
             local_to_export_keys,
             local_playwright_test_names,
             resolved.file_id,
-            access.test_local,
+            access.test_name.as_str(),
         );
         let base_keys = playwright_test_keys_for_local(
             local_to_export_keys,
             local_playwright_test_names,
             resolved.file_id,
-            access.base_local,
+            access.base_name.as_str(),
         );
 
         for test_key in test_keys {
@@ -1252,17 +1170,19 @@ fn build_playwright_fixture_type_targets(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in playwright_fixture_type_accesses(resolved) {
-            let Some(alias_keys) = local_to_export_keys.get(access.alias_local) else {
+        for access in playwright_fixture_type_facts(&resolved.semantic_facts) {
+            let Some(alias_keys) = local_to_export_keys.get(access.alias_name.as_str()) else {
                 continue;
             };
-            let Some(target_keys) = local_to_export_keys.get(access.type_local) else {
+            let Some(target_keys) = local_to_export_keys.get(access.type_name.as_str()) else {
                 continue;
             };
 
             for alias_key in alias_keys {
                 let alias_targets = targets_by_alias.entry(alias_key.clone()).or_default();
-                let fixture_targets = alias_targets.entry(access.fixture.to_string()).or_default();
+                let fixture_targets = alias_targets
+                    .entry(access.fixture_name.clone())
+                    .or_default();
                 for target_key in target_keys {
                     for key in export_key_with_origins(graph, target_key) {
                         push_export_key(fixture_targets, key);
@@ -1287,8 +1207,8 @@ fn propagate_playwright_fixture_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in playwright_fixture_use_accesses(resolved) {
-            let Some(test_keys) = local_to_export_keys.get(access.test_local_name) else {
+        for access in playwright_fixture_use_facts(&resolved.semantic_facts) {
+            let Some(test_keys) = local_to_export_keys.get(access.test_name.as_str()) else {
                 continue;
             };
 
@@ -1296,14 +1216,14 @@ fn propagate_playwright_fixture_accesses(
                 let Some(fixture_targets) = targets_by_test.get(test_key) else {
                     continue;
                 };
-                let Some(target_keys) = fixture_targets.get(access.fixture_name) else {
+                let Some(target_keys) = fixture_targets.get(access.fixture_name.as_str()) else {
                     continue;
                 };
                 for target_key in target_keys {
                     accessed_members
                         .entry(target_key.clone())
                         .or_default()
-                        .insert(access.member.to_string());
+                        .insert(access.member.clone());
                 }
             }
         }

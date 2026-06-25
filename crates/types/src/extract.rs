@@ -1745,6 +1745,58 @@ pub fn semantic_facts_with_legacy_member_accesses<'a>(
         }))
 }
 
+/// Iterate typed Playwright fixture-use facts.
+pub fn playwright_fixture_use_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &PlaywrightFixtureUseFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::PlaywrightFixtureUse(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed Playwright fixture-definition facts.
+pub fn playwright_fixture_definition_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &PlaywrightFixtureDefinitionFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::PlaywrightFixtureDefinition(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed Playwright fixture-alias facts.
+pub fn playwright_fixture_alias_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &PlaywrightFixtureAliasFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::PlaywrightFixtureAlias(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed Playwright fixture-type facts.
+pub fn playwright_fixture_type_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &PlaywrightFixtureTypeFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::PlaywrightFixtureType(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
 /// A member name referenced from an Angular template surface.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -2668,6 +2720,71 @@ mod tests {
                     target_name: "target".to_string(),
                 }
             ))
+        );
+    }
+
+    #[test]
+    fn playwright_fixture_fact_helpers_select_each_fact_family() {
+        let mut module = minimal_module_info();
+        module
+            .semantic_facts
+            .push(SemanticFact::PlaywrightFixtureUse(
+                PlaywrightFixtureUseFact {
+                    test_name: "test".to_string(),
+                    fixture_name: "page".to_string(),
+                    member: "goto".to_string(),
+                },
+            ));
+        module
+            .semantic_facts
+            .push(SemanticFact::PlaywrightFixtureDefinition(
+                PlaywrightFixtureDefinitionFact {
+                    test_name: "test".to_string(),
+                    fixture_name: "adminPage".to_string(),
+                    type_name: "AdminPage".to_string(),
+                },
+            ));
+        module
+            .semantic_facts
+            .push(SemanticFact::PlaywrightFixtureAlias(
+                PlaywrightFixtureAliasFact {
+                    test_name: "mergedTest".to_string(),
+                    base_name: "test".to_string(),
+                },
+            ));
+        module
+            .semantic_facts
+            .push(SemanticFact::PlaywrightFixtureType(
+                PlaywrightFixtureTypeFact {
+                    alias_name: "Pages".to_string(),
+                    fixture_name: "adminPage".to_string(),
+                    type_name: "AdminPage".to_string(),
+                },
+            ));
+
+        assert_eq!(
+            playwright_fixture_use_facts(&module.semantic_facts)
+                .map(|fact| fact.member.as_str())
+                .collect::<Vec<_>>(),
+            vec!["goto"]
+        );
+        assert_eq!(
+            playwright_fixture_definition_facts(&module.semantic_facts)
+                .map(|fact| fact.type_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["AdminPage"]
+        );
+        assert_eq!(
+            playwright_fixture_alias_facts(&module.semantic_facts)
+                .map(|fact| fact.base_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["test"]
+        );
+        assert_eq!(
+            playwright_fixture_type_facts(&module.semantic_facts)
+                .map(|fact| fact.fixture_name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["adminPage"]
         );
     }
 
