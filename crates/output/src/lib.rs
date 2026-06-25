@@ -20,6 +20,7 @@ mod health;
 mod health_coverage;
 mod health_coverage_gaps;
 mod health_targets;
+mod health_trends;
 mod health_vital_signs;
 mod issue_contract;
 mod report_contract;
@@ -54,6 +55,7 @@ pub use health_targets::{
     DirectCallerSymbolEvidence, EffortEstimate, EvidenceFunction, RecommendationCategory,
     RefactoringTarget, TargetEvidence, TargetThresholds,
 };
+pub use health_trends::{HealthTrend, TrendCount, TrendDirection, TrendMetric, TrendPoint};
 pub use health_vital_signs::{
     RenderFanInTopComponent, RiskProfile, SNAPSHOT_SCHEMA_VERSION, VitalSigns, VitalSignsCounts,
     VitalSignsSnapshot,
