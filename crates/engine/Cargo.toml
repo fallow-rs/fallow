@@ -14,11 +14,12 @@ readme = "../../README.md"
 [dependencies]
 fallow-config = { workspace = true }
 fallow-core = { workspace = true }
+fallow-output = { workspace = true }
 fallow-types = { workspace = true }
 rustc-hash = { workspace = true }
 
 [features]
-schema = ["fallow-core/schema", "fallow-types/schema"]
+schema = ["fallow-core/schema", "fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

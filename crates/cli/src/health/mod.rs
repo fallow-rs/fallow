@@ -6731,27 +6731,8 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
 }
 
 /// Result of executing health analysis without printing.
-pub struct HealthResult {
-    pub report: HealthReport,
-    /// Per-group health output when `--group-by` is active.
-    ///
-    /// `None` for the default run; `Some` for any
-    /// `--group-by package|owner|directory|section` invocation. The top-level
-    /// `report` reflects the active run scope (for example, after
-    /// `--workspace`); consumers that want per-group metrics read from
-    /// `grouping.groups`.
-    pub grouping: Option<crate::health_types::HealthGrouping>,
-    /// Resolver retained alongside `grouping` so per-result formats
-    /// (SARIF, CodeClimate) can tag findings with the active group key
-    /// without re-discovering CODEOWNERS or workspace info at print time.
-    /// Always `None` when `grouping` is `None`.
-    pub group_resolver: Option<crate::report::OwnershipResolver>,
-    pub config: ResolvedConfig,
-    pub elapsed: Duration,
-    pub timings: Option<HealthTimings>,
-    pub coverage_gaps_has_findings: bool,
-    pub should_fail_on_coverage_gaps: bool,
-}
+pub type HealthResult =
+    fallow_engine::health::HealthAnalysisResult<crate::report::OwnershipResolver>;
 
 /// Print health results and return appropriate exit code.
 ///
