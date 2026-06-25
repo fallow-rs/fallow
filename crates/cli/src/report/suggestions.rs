@@ -22,8 +22,9 @@ use std::process::Command;
 
 use fallow_core::results::AnalysisResults;
 use fallow_output::{
-    DeadCodeNextStepsInput, HealthNextStepsInput, ImpactDigestCounts,
-    build_dead_code_next_steps as build_dead_code_next_steps_contract, impact_digest_summary,
+    DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput, ImpactDigestCounts,
+    build_dead_code_next_steps as build_dead_code_next_steps_contract,
+    build_dupes_next_steps as build_dupes_next_steps_contract, impact_digest_summary,
 };
 use fallow_types::output::NextStep;
 
@@ -368,23 +369,18 @@ pub fn build_dupes_next_steps(
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
 ) -> Vec<NextStep> {
-    if !suggestions_enabled() {
-        return Vec::new();
-    }
-    if payload.clone_groups.is_empty() {
-        return impact_digest_step(digest).into_iter().collect();
-    }
-    let mut steps: Vec<NextStep> = [
-        setup_pointer(offer_setup),
-        impact_digest_step(digest),
-        trace_clone(payload),
-        audit_changed(root),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    steps.truncate(MAX_NEXT_STEPS);
-    steps
+    let clone_fingerprints = payload
+        .clone_groups
+        .iter()
+        .map(|group| group.fingerprint.as_str())
+        .collect::<Vec<_>>();
+    build_dupes_next_steps_contract(DupesNextStepsInput {
+        suggestions_enabled: suggestions_enabled(),
+        clone_fingerprints: &clone_fingerprints,
+        offer_setup,
+        impact_digest: digest.map(impact_counts),
+        audit_changed: audit_changed(root).is_some(),
+    })
 }
 
 /// Aggregated next-steps for bare `fallow` (combined). Candidates are pushed in
@@ -476,6 +472,9 @@ mod tests {
     use crate::health_types::{
         ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
     };
+    use fallow_engine::duplicates::{
+        CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
+    };
     use fallow_output::build_health_next_steps as build_health_next_steps_contract;
     use fallow_types::output_dead_code::UnusedExportFinding;
     use fallow_types::results::{AnalysisResults, UnusedExport};
@@ -499,6 +498,34 @@ mod tests {
             unused_exports: exports,
             ..AnalysisResults::default()
         }
+    }
+
+    fn clone_instance(path: &str, fragment: &str) -> CloneInstance {
+        CloneInstance {
+            file: PathBuf::from(path),
+            start_line: 1,
+            end_line: 8,
+            start_col: 0,
+            end_col: 0,
+            fragment: fragment.to_string(),
+        }
+    }
+
+    fn dupes_payload() -> DupesReportPayload {
+        let group = CloneGroup {
+            instances: vec![
+                clone_instance("/project/src/a.ts", "export const shared = 1;"),
+                clone_instance("/project/src/b.ts", "export const shared = 1;"),
+            ],
+            token_count: 20,
+            line_count: 8,
+        };
+        DupesReportPayload::from_report(&DuplicationReport {
+            clone_groups: vec![group],
+            clone_families: Vec::new(),
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats::default(),
+        })
     }
 
     fn health_report_with_finding() -> HealthReport {
@@ -692,6 +719,18 @@ mod tests {
         let steps = build_health_next_steps_contract(input);
         let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["setup", "impact-report", "complexity-breakdown"]);
+    }
+
+    #[test]
+    fn dupes_next_steps_route_payload_fingerprints_to_output_contract() {
+        let payload = dupes_payload();
+
+        let steps = build_dupes_next_steps(&payload, Path::new("/project"), false, None);
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].id, "trace-clone");
+        assert!(steps[0].command.starts_with("fallow dupes --trace dup:"));
+        assert_valid(&steps[0]);
     }
 
     #[test]
