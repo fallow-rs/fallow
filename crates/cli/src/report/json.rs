@@ -8,13 +8,13 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
-use fallow_output::strip_root_prefix;
+use fallow_output::{HealthJsonOutputInput, strip_root_prefix};
 
 use super::emit_json;
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutputInput,
-    FallowOutput, GroupByMode, HealthOutputInput, WorkspaceDiagnosticOutput,
+    EnvelopeMode, FallowOutput, GroupByMode, HealthOutputInput, WorkspaceDiagnosticOutput,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
     build_health_output, serialize_root_output,
 };
@@ -429,41 +429,29 @@ pub fn build_health_json(
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let envelope = build_health_output(HealthOutputInput {
-        schema_version: SCHEMA_VERSION,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        elapsed,
-        report: report.clone(),
-        grouped_by: None,
-        groups: None,
-        meta: explain.then(fallow_output::health_meta),
-        workspace_diagnostics: workspace_diagnostics_for_output(root),
-        next_steps: crate::report::suggestions::build_health_next_steps(
-            report,
-            root,
-            crate::report::suggestions::setup_pointer_applicable(root),
-            crate::report::suggestions::due_impact_digest(root),
-        ),
-    });
-    let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
     let root_prefix = format!("{}/", root.display());
-    strip_root_prefix(&mut output, &root_prefix);
+    let mut output = fallow_output::serialize_health_json_output(HealthJsonOutputInput {
+        output: HealthOutputInput {
+            schema_version: SCHEMA_VERSION,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            elapsed,
+            report: report.clone(),
+            grouped_by: None,
+            groups: None::<Vec<crate::health_types::HealthGroup>>,
+            meta: explain.then(fallow_output::health_meta),
+            workspace_diagnostics: workspace_diagnostics_for_output(root),
+            next_steps: crate::report::suggestions::build_health_next_steps(
+                report,
+                root,
+                crate::report::suggestions::setup_pointer_applicable(root),
+                crate::report::suggestions::due_impact_digest(root),
+            ),
+        },
+        root_prefix: Some(&root_prefix),
+        envelope_mode: EnvelopeMode::current().into(),
+    })?;
+    crate::output_envelope::attach_telemetry_meta(&mut output);
     Ok(output)
-}
-
-pub(super) fn print_health_json(
-    report: &crate::health_types::HealthReport,
-    root: &Path,
-    elapsed: Duration,
-    explain: bool,
-) -> ExitCode {
-    match build_health_json(report, root, elapsed, explain) {
-        Ok(output) => emit_json(&output, "JSON"),
-        Err(e) => {
-            eprintln!("Error: failed to serialize health report: {e}");
-            ExitCode::from(2)
-        }
-    }
 }
 
 pub fn build_grouped_health_json(
@@ -508,6 +496,21 @@ pub fn build_grouped_health_json(
     }
 
     Ok(output)
+}
+
+pub(super) fn print_health_json(
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> ExitCode {
+    match build_health_json(report, root, elapsed, explain) {
+        Ok(output) => emit_json(&output, "JSON"),
+        Err(e) => {
+            eprintln!("Error: failed to serialize health report: {e}");
+            ExitCode::from(2)
+        }
+    }
 }
 
 pub(super) fn print_grouped_health_json(
