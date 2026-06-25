@@ -14,6 +14,8 @@
 
 use std::path::PathBuf;
 
+use fallow_config::EmailMode;
+use fallow_output::EffortEstimate;
 use serde::Serialize;
 
 pub mod dupes_output;
@@ -253,16 +255,45 @@ pub struct ComplexityOptions {
 }
 
 pub use fallow_engine::{
-    ComplexitySectionOptions, DerivedComplexityOptions, DerivedHealthSections,
-    HealthSectionOptions, derive_complexity_sections, derive_health_sections,
+    ComplexityRunOptions, ComplexitySectionOptions, DerivedComplexityOptions,
+    DerivedHealthSections, HealthSectionOptions, derive_complexity_sections,
+    derive_health_sections,
 };
 
 /// Derive effective programmatic health / complexity section flags.
 #[must_use]
 pub fn derive_complexity_options(options: &ComplexityOptions) -> DerivedComplexityOptions {
+    derive_complexity_sections(&complexity_section_options(options))
+}
+
+/// Normalize public API complexity options into engine-owned run contracts.
+#[must_use]
+pub fn derive_complexity_run_options(options: &ComplexityOptions) -> ComplexityRunOptions<'_> {
+    ComplexityRunOptions {
+        thresholds: fallow_engine::HealthThresholdOverrides {
+            max_cyclomatic: options.max_cyclomatic,
+            max_cognitive: options.max_cognitive,
+            max_crap: options.max_crap,
+        },
+        top: options.top,
+        sort: complexity_sort_to_engine(options.sort),
+        sections: derive_complexity_options(options),
+        ownership_emails: options.ownership_emails.map(ownership_email_mode_to_config),
+        effort: options.effort.map(target_effort_to_output),
+        css: options.css,
+        since: options.since.as_deref(),
+        min_commits: options.min_commits,
+        coverage_inputs: fallow_engine::HealthCoverageInputs {
+            coverage: options.coverage.as_deref(),
+            coverage_root: options.coverage_root.as_deref(),
+        },
+    }
+}
+
+fn complexity_section_options(options: &ComplexityOptions) -> ComplexitySectionOptions {
     let ownership = options.ownership || options.ownership_emails.is_some();
     let requested_targets = options.targets || options.effort.is_some();
-    derive_complexity_sections(&ComplexitySectionOptions {
+    ComplexitySectionOptions {
         complexity: options.complexity,
         file_scores: options.file_scores,
         coverage_gaps: options.coverage_gaps,
@@ -271,7 +302,33 @@ pub fn derive_complexity_options(options: &ComplexityOptions) -> DerivedComplexi
         targets: requested_targets,
         css: options.css,
         score: options.score,
-    })
+    }
+}
+
+const fn complexity_sort_to_engine(sort: ComplexitySort) -> fallow_engine::HealthSort {
+    match sort {
+        ComplexitySort::Severity => fallow_engine::HealthSort::Severity,
+        ComplexitySort::Cyclomatic => fallow_engine::HealthSort::Cyclomatic,
+        ComplexitySort::Cognitive => fallow_engine::HealthSort::Cognitive,
+        ComplexitySort::Lines => fallow_engine::HealthSort::Lines,
+    }
+}
+
+const fn ownership_email_mode_to_config(mode: OwnershipEmailMode) -> EmailMode {
+    match mode {
+        OwnershipEmailMode::Raw => EmailMode::Raw,
+        OwnershipEmailMode::Handle => EmailMode::Handle,
+        OwnershipEmailMode::Anonymized => EmailMode::Anonymized,
+        OwnershipEmailMode::Hash => EmailMode::Hash,
+    }
+}
+
+const fn target_effort_to_output(effort: TargetEffort) -> EffortEstimate {
+    match effort {
+        TargetEffort::Low => EffortEstimate::Low,
+        TargetEffort::Medium => EffortEstimate::Medium,
+        TargetEffort::High => EffortEstimate::High,
+    }
 }
 
 #[cfg(test)]
@@ -345,6 +402,50 @@ mod tests {
         assert!(derived.hotspots);
         assert!(derived.ownership);
         assert!(!derived.targets);
+    }
+
+    #[test]
+    fn complexity_run_options_normalize_public_api_options() {
+        let options = ComplexityOptions {
+            max_cyclomatic: Some(42),
+            max_cognitive: Some(21),
+            max_crap: Some(18.5),
+            top: Some(7),
+            sort: ComplexitySort::Severity,
+            ownership_emails: Some(OwnershipEmailMode::Hash),
+            effort: Some(TargetEffort::High),
+            coverage: Some(PathBuf::from("coverage/coverage-final.json")),
+            coverage_root: Some(PathBuf::from("/ci/workspace")),
+            since: Some("30d".to_string()),
+            min_commits: Some(4),
+            ..ComplexityOptions::default()
+        };
+
+        let run = derive_complexity_run_options(&options);
+
+        assert_eq!(run.thresholds.max_cyclomatic, Some(42));
+        assert_eq!(run.thresholds.max_cognitive, Some(21));
+        assert_eq!(run.thresholds.max_crap, Some(18.5));
+        assert_eq!(run.top, Some(7));
+        assert!(matches!(run.sort, fallow_engine::HealthSort::Severity));
+        assert!(run.sections.hotspots);
+        assert!(run.sections.ownership);
+        assert!(run.sections.targets);
+        assert!(matches!(
+            run.ownership_emails,
+            Some(fallow_config::EmailMode::Hash)
+        ));
+        assert!(matches!(
+            run.effort,
+            Some(fallow_output::EffortEstimate::High)
+        ));
+        assert_eq!(run.since, Some("30d"));
+        assert_eq!(run.min_commits, Some(4));
+        assert_eq!(run.coverage_inputs.coverage, options.coverage.as_deref());
+        assert_eq!(
+            run.coverage_inputs.coverage_root,
+            options.coverage_root.as_deref()
+        );
     }
 
     #[test]
