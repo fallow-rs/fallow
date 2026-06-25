@@ -21,7 +21,10 @@ use std::path::Path;
 use std::process::Command;
 
 use fallow_core::results::AnalysisResults;
-use fallow_output::{HealthNextStepsInput, ImpactDigestCounts, impact_digest_summary};
+use fallow_output::{
+    DeadCodeNextStepsInput, HealthNextStepsInput, ImpactDigestCounts,
+    build_dead_code_next_steps as build_dead_code_next_steps_contract, impact_digest_summary,
+};
 use fallow_types::output::NextStep;
 
 use crate::health_types::HealthReport;
@@ -231,15 +234,19 @@ fn complexity_breakdown(report: &HealthReport) -> Option<NextStep> {
 /// default branch. Emitted only when the project is a monorepo AND a concrete
 /// default ref resolves, so the embedded ref is real (never a placeholder).
 fn scope_workspaces(root: &Path) -> Option<NextStep> {
-    if fallow_config::discover_workspaces(root).is_empty() {
-        return None;
-    }
-    let reference = resolve_default_workspace_ref(root)?;
+    let reference = default_workspace_ref_for_next_step(root)?;
     Some(next_step(
         "scope-workspaces",
         format!("fallow dead-code --changed-workspaces {reference}"),
         "scope a monorepo run to the packages your branch touched",
     ))
+}
+
+fn default_workspace_ref_for_next_step(root: &Path) -> Option<String> {
+    if fallow_config::discover_workspaces(root).is_empty() {
+        return None;
+    }
+    resolve_default_workspace_ref(root)
 }
 
 /// `audit-changed`: gate only the files the current branch changed. `fallow
@@ -322,24 +329,16 @@ pub fn build_dead_code_next_steps(
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
 ) -> Vec<NextStep> {
-    if !suggestions_enabled() {
-        return Vec::new();
-    }
-    if results.total_issues() == 0 {
-        return impact_digest_step(digest).into_iter().collect();
-    }
-    let mut steps: Vec<NextStep> = [
-        setup_pointer(offer_setup),
-        impact_digest_step(digest),
-        trace_unused_export(results, root),
-        scope_workspaces(root),
-        audit_changed(root),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    steps.truncate(MAX_NEXT_STEPS);
-    steps
+    let workspace_ref = default_workspace_ref_for_next_step(root);
+    build_dead_code_next_steps_contract(DeadCodeNextStepsInput {
+        suggestions_enabled: suggestions_enabled(),
+        results,
+        root,
+        offer_setup,
+        impact_digest: digest.map(impact_counts),
+        workspace_ref: workspace_ref.as_deref(),
+        audit_changed: audit_changed(root).is_some(),
+    })
 }
 
 /// Next-steps for standalone `fallow health`. See [`build_dead_code_next_steps`]

@@ -5,6 +5,8 @@
 //! which signals apply.
 
 use fallow_types::output::NextStep;
+use fallow_types::results::AnalysisResults;
+use std::path::Path;
 
 const MAX_NEXT_STEPS: usize = 3;
 const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hooks"];
@@ -14,6 +16,18 @@ const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hoo
 pub struct ImpactDigestCounts {
     pub containment_count: usize,
     pub resolved_total: usize,
+}
+
+/// Runtime-independent inputs for standalone dead-code next steps.
+#[derive(Debug, Clone, Copy)]
+pub struct DeadCodeNextStepsInput<'a> {
+    pub suggestions_enabled: bool,
+    pub results: &'a AnalysisResults,
+    pub root: &'a Path,
+    pub offer_setup: bool,
+    pub impact_digest: Option<ImpactDigestCounts>,
+    pub workspace_ref: Option<&'a str>,
+    pub audit_changed: bool,
 }
 
 /// Runtime-independent inputs for standalone health next steps.
@@ -75,6 +89,57 @@ pub fn build_health_next_steps(input: HealthNextStepsInput) -> Vec<NextStep> {
     .collect();
     steps.truncate(MAX_NEXT_STEPS);
     steps
+}
+
+/// Next-steps for standalone `fallow dead-code`.
+#[must_use]
+pub fn build_dead_code_next_steps(input: DeadCodeNextStepsInput<'_>) -> Vec<NextStep> {
+    if !input.suggestions_enabled {
+        return Vec::new();
+    }
+    if input.results.total_issues() == 0 {
+        return impact_digest_step(input.impact_digest)
+            .into_iter()
+            .collect();
+    }
+
+    let mut steps: Vec<NextStep> = [
+        setup_pointer(input.offer_setup),
+        impact_digest_step(input.impact_digest),
+        trace_unused_export(input.results, input.root),
+        scope_workspaces(input.workspace_ref),
+        audit_changed(input.audit_changed),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    steps.truncate(MAX_NEXT_STEPS);
+    steps
+}
+
+fn relative_command_path(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextStep> {
+    let target = results
+        .unused_exports
+        .iter()
+        .map(|finding| {
+            (
+                relative_command_path(&finding.export.path, root),
+                finding.export.export_name.clone(),
+            )
+        })
+        .min()?;
+    Some(next_step(
+        "trace-unused-export",
+        format!("fallow dead-code --trace {}:{}", target.0, target.1),
+        "verify an export is truly unused before deleting",
+    ))
 }
 
 fn next_step(id: &str, command: String, reason: &str) -> NextStep {
@@ -140,9 +205,20 @@ fn audit_changed(applicable: bool) -> Option<NextStep> {
     ))
 }
 
+fn scope_workspaces(workspace_ref: Option<&str>) -> Option<NextStep> {
+    let reference = workspace_ref?;
+    Some(next_step(
+        "scope-workspaces",
+        format!("fallow dead-code --changed-workspaces {reference}"),
+        "scope a monorepo run to the packages your branch touched",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_types::output_dead_code::UnusedExportFinding;
+    use fallow_types::results::UnusedExport;
 
     fn digest(containment_count: usize, resolved_total: usize) -> ImpactDigestCounts {
         ImpactDigestCounts {
@@ -157,6 +233,30 @@ mod tests {
             has_findings: true,
             offer_setup: false,
             impact_digest: None,
+            audit_changed: false,
+        }
+    }
+
+    fn unused_export(path: &str, name: &str) -> UnusedExportFinding {
+        UnusedExportFinding::with_actions(UnusedExport {
+            path: path.into(),
+            export_name: name.to_string(),
+            is_type_only: false,
+            line: 1,
+            col: 0,
+            span_start: 0,
+            is_re_export: false,
+        })
+    }
+
+    fn dead_code_input(results: &AnalysisResults) -> DeadCodeNextStepsInput<'_> {
+        DeadCodeNextStepsInput {
+            suggestions_enabled: true,
+            results,
+            root: Path::new("/project"),
+            offer_setup: false,
+            impact_digest: None,
+            workspace_ref: None,
             audit_changed: false,
         }
     }
@@ -188,6 +288,60 @@ mod tests {
         });
 
         assert!(steps.is_empty());
+    }
+
+    #[test]
+    fn dead_code_steps_trace_smallest_unused_export() {
+        let results = AnalysisResults {
+            unused_exports: vec![
+                unused_export("/project/src/b.ts", "beta"),
+                unused_export("/project/src/a.ts", "alpha"),
+            ],
+            ..AnalysisResults::default()
+        };
+
+        let steps = build_dead_code_next_steps(dead_code_input(&results));
+
+        assert_eq!(steps[0].id, "trace-unused-export");
+        assert_eq!(steps[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        assert_valid(&steps[0]);
+    }
+
+    #[test]
+    fn dead_code_steps_order_setup_impact_trace_workspace_then_audit() {
+        let results = AnalysisResults {
+            unused_exports: vec![unused_export("/project/src/a.ts", "alpha")],
+            ..AnalysisResults::default()
+        };
+        let steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+            offer_setup: true,
+            impact_digest: Some(digest(2, 1)),
+            workspace_ref: Some("origin/main"),
+            audit_changed: true,
+            ..dead_code_input(&results)
+        });
+        let ids = steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, ["setup", "impact-report", "trace-unused-export"]);
+        for step in &steps {
+            assert_valid(step);
+        }
+    }
+
+    #[test]
+    fn clean_dead_code_run_emits_only_due_impact_digest() {
+        let results = AnalysisResults::default();
+        let steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+            impact_digest: Some(digest(2, 1)),
+            audit_changed: true,
+            ..dead_code_input(&results)
+        });
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].id, "impact-report");
     }
 
     #[test]
