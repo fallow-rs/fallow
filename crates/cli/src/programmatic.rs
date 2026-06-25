@@ -665,50 +665,49 @@ fn build_complexity_options<'a>(
     }
 }
 
-/// Run the health / complexity analysis and return the CLI JSON contract as a value.
-pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
-    let resolved = resolve_analysis_options(&options.analysis)?;
-    fallow_api::validate_complexity_options(options)?;
+pub struct CliProgrammaticHealthRunner;
 
-    resolved.install(|| {
-        let health_options = build_complexity_options(&resolved, options);
-        let result = crate::health::execute_health(&health_options)
-            .map_err(|_| generic_analysis_error("health"))?;
-        let next_steps = fallow_output::build_health_next_steps(
-            crate::report::suggestions::health_next_steps_input(
-                &result.report,
-                &result.config.root,
-                crate::report::suggestions::setup_pointer_applicable(&result.config.root),
-                crate::report::suggestions::due_impact_digest(&result.config.root),
-            ),
-        );
-        let mut output =
-            fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
-                report: result.report,
-                root: &result.config.root,
-                elapsed: result.elapsed,
-                explain: resolved.explain,
-                grouped_by: None,
-                groups: None,
+impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
+    fn run_programmatic_health(
+        &self,
+        options: &ComplexityOptions,
+    ) -> ProgrammaticResult<fallow_api::ProgrammaticHealthReport> {
+        let resolved = resolve_analysis_options(&options.analysis)?;
+        resolved.install(|| {
+            let health_options = build_complexity_options(&resolved, options);
+            let result = crate::health::execute_health(&health_options)
+                .map_err(|_| generic_analysis_error("health"))?;
+            let next_steps = fallow_output::build_health_next_steps(
+                crate::report::suggestions::health_next_steps_input(
+                    &result.report,
+                    &result.config.root,
+                    crate::report::suggestions::setup_pointer_applicable(&result.config.root),
+                    crate::report::suggestions::due_impact_digest(&result.config.root),
+                ),
+            );
+            Ok(fallow_api::ProgrammaticHealthReport {
                 workspace_diagnostics: workspace_diagnostics_for_programmatic_output(
                     &result.config.root,
                 ),
+                root: result.config.root.clone(),
+                report: result.report,
+                elapsed: result.elapsed,
                 next_steps,
                 envelope_mode: programmatic_root_envelope_mode(&resolved),
+                telemetry_analysis_run_id: crate::output_envelope::telemetry_analysis_run_id(),
             })
-            .map_err(|err| {
-                ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
-                    .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
-                    .with_context("health")
-            })?;
-        crate::output_envelope::attach_telemetry_meta(&mut output);
-        Ok(output)
-    })
+        })
+    }
+}
+
+/// Run the health / complexity analysis and return the CLI JSON contract as a value.
+pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
+    fallow_api::compute_complexity_with_runner(options, &CliProgrammaticHealthRunner)
 }
 
 /// Alias for `compute_complexity` with a more product-oriented name.
 pub fn compute_health(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
-    compute_complexity(options)
+    fallow_api::compute_health_with_runner(options, &CliProgrammaticHealthRunner)
 }
 
 #[cfg(test)]
