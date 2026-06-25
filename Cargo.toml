@@ -21,6 +21,7 @@ fallow-extract = { version = "2.102.0", path = "crates/extract" }
 fallow-engine = { version = "2.102.0", path = "crates/engine" }
 fallow-graph = { version = "2.102.0", path = "crates/graph" }
 fallow-output = { version = "2.102.0", path = "crates/output" }
+fallow-programmatic-cli = { version = "2.102.0", path = "crates/programmatic-cli" }
 fallow-types = { version = "2.102.0", path = "crates/types" }
 fallow-cli = { version = "2.102.0", path = "crates/cli" }
 
