@@ -21,6 +21,7 @@ mod health_actions;
 mod health_coverage;
 mod health_coverage_gaps;
 mod health_coverage_intelligence;
+mod health_diagnostics;
 mod health_runtime_coverage;
 mod health_targets;
 mod health_trends;
@@ -60,6 +61,10 @@ pub use health_coverage_intelligence::{
     CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
     CoverageIntelligenceSchemaVersion, CoverageIntelligenceSignal, CoverageIntelligenceSummary,
     CoverageIntelligenceVerdict,
+};
+pub use health_diagnostics::{
+    FrameworkHealthDetector, FrameworkHealthDetectorStatus, FrameworkHealthDiagnostics,
+    HealthTimings,
 };
 pub use health_runtime_coverage::{
     RuntimeCoverageAction, RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCaptureQuality,
