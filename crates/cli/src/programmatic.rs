@@ -254,11 +254,7 @@ fn apply_programmatic_envelope_options(
 fn programmatic_root_envelope_mode(
     resolved: &ResolvedAnalysisOptions,
 ) -> fallow_output::RootEnvelopeMode {
-    if resolved.legacy_envelope {
-        fallow_output::RootEnvelopeMode::Legacy
-    } else {
-        fallow_output::RootEnvelopeMode::Tagged
-    }
+    fallow_output::RootEnvelopeMode::from_legacy(resolved.legacy_envelope)
 }
 
 fn workspace_diagnostics_for_programmatic_output(

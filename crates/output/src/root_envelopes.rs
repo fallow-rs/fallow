@@ -11,6 +11,18 @@ pub enum RootEnvelopeMode {
     Legacy,
 }
 
+impl RootEnvelopeMode {
+    /// Convert a legacy-envelope flag into the root envelope mode.
+    #[must_use]
+    pub const fn from_legacy(legacy_envelope: bool) -> Self {
+        if legacy_envelope {
+            Self::Legacy
+        } else {
+            Self::Tagged
+        }
+    }
+}
+
 /// Serialize a typed fallow root envelope with the requested discriminator
 /// mode.
 ///
@@ -285,6 +297,18 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn root_envelope_mode_maps_legacy_flag() {
+        assert_eq!(
+            RootEnvelopeMode::from_legacy(false),
+            RootEnvelopeMode::Tagged
+        );
+        assert_eq!(
+            RootEnvelopeMode::from_legacy(true),
+            RootEnvelopeMode::Legacy
+        );
+    }
 
     #[test]
     fn legacy_mode_removes_only_root_kind() {

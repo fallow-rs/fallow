@@ -1349,11 +1349,7 @@ fn is_absolute_path_any_platform(path: &Path) -> bool {
 }
 
 const fn root_envelope_mode(legacy_envelope: bool) -> RootEnvelopeMode {
-    if legacy_envelope {
-        RootEnvelopeMode::Legacy
-    } else {
-        RootEnvelopeMode::Tagged
-    }
+    RootEnvelopeMode::from_legacy(legacy_envelope)
 }
 
 #[cfg(test)]
