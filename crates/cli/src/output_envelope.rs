@@ -91,24 +91,7 @@ pub fn serialize_root_output_with_mode(
 }
 
 pub fn attach_telemetry_meta(value: &mut serde_json::Value) {
-    let Some(run_id) = telemetry_analysis_run_id() else {
-        return;
-    };
-    let serde_json::Value::Object(map) = value else {
-        return;
-    };
-    let meta = map
-        .entry("_meta".to_string())
-        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-    if !meta.is_object() {
-        *meta = serde_json::Value::Object(serde_json::Map::new());
-    }
-    if let serde_json::Value::Object(meta_map) = meta {
-        meta_map.insert(
-            "telemetry".to_string(),
-            serde_json::json!({ "analysis_run_id": run_id }),
-        );
-    }
+    fallow_output::attach_telemetry_meta(value, telemetry_analysis_run_id().as_deref());
 }
 
 pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str) {
