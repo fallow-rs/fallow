@@ -212,12 +212,10 @@ fn component_name_for(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use fallow_types::extract::{
-        AngularOutputMember, AngularTemplateMemberAccessFact, ClassHeritageInfo, MemberAccess,
-        SemanticFact,
+        ANGULAR_TPL_SENTINEL, AngularOutputMember, AngularTemplateMemberAccessFact,
+        ClassHeritageInfo, MemberAccess, SemanticFact,
     };
     use rustc_hash::FxHashSet;
-
-    use fallow_extract::ANGULAR_TPL_SENTINEL;
 
     use super::*;
     use crate::analyze::test_support::empty_module;

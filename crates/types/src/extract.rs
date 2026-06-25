@@ -1512,6 +1512,12 @@ pub fn is_legacy_angular_template_member_access_object(object: &str) -> bool {
     object == ANGULAR_TPL_SENTINEL
 }
 
+/// Return true for legacy Angular `{ ...this }` spread objects.
+#[must_use]
+pub fn is_legacy_angular_this_spread_object(object: &str) -> bool {
+    object == ANGULAR_THIS_SPREAD_SENTINEL
+}
+
 /// Return true for legacy member-access object strings that encode either an
 /// Angular template reference or a typed semantic fact.
 #[must_use]
@@ -2428,6 +2434,9 @@ mod tests {
     fn legacy_template_or_semantic_predicates_include_angular_template_sentinel() {
         assert!(is_legacy_angular_template_member_access_object(
             ANGULAR_TPL_SENTINEL
+        ));
+        assert!(is_legacy_angular_this_spread_object(
+            ANGULAR_THIS_SPREAD_SENTINEL
         ));
         assert!(is_legacy_template_or_semantic_member_access_object(
             ANGULAR_TPL_SENTINEL
