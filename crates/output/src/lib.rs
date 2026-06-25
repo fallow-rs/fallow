@@ -24,6 +24,7 @@ mod health_coverage_intelligence;
 mod health_css;
 mod health_diagnostics;
 mod health_runtime_coverage;
+mod health_scores;
 mod health_targets;
 mod health_trends;
 mod health_vital_signs;
@@ -81,6 +82,18 @@ pub use health_runtime_coverage::{
     RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
     RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSignal,
     RuntimeCoverageSummary, RuntimeCoverageVerdict, RuntimeCoverageWatermark,
+};
+pub use health_scores::{
+    COGNITIVE_EXTRACTION_THRESHOLD, ComplexityViolation, ComponentRollup, ContributorEntry,
+    ContributorIdentifierFormat, CoverageSource, CoverageSourceConsistency, CoverageTier,
+    DEFAULT_COGNITIVE_CRITICAL, DEFAULT_COGNITIVE_HIGH, DEFAULT_CRAP_CRITICAL, DEFAULT_CRAP_HIGH,
+    DEFAULT_CYCLOMATIC_CRITICAL, DEFAULT_CYCLOMATIC_HIGH, ExceededThreshold, FileHealthScore,
+    FindingSeverity, HEALTH_SCORE_FORMULA_VERSION, HOTSPOT_SCORE_THRESHOLD,
+    HealthConfiguredThresholds, HealthEffectiveThresholds, HealthScore, HealthScorePenalties,
+    HealthSummary, HotspotEntry, HotspotSummary, LargeFunctionEntry, MI_DENSITY_MIN_LINES,
+    OwnershipMetrics, OwnershipState, ReactHookProfile, ThresholdOverrideMetrics,
+    ThresholdOverrideState, ThresholdOverrideStatus, ThresholdSource, compute_finding_severity,
+    letter_grade, summarize_coverage_source_consistency,
 };
 pub use health_targets::{
     CloneSiblingEvidence, Confidence, ContributingFactor, DirectCallerEvidence,
