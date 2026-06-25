@@ -14,6 +14,7 @@
 
 mod check;
 mod codeclimate;
+mod coverage_envelopes;
 mod dupes;
 mod format;
 mod health;
@@ -42,6 +43,11 @@ pub use check::{
 pub use codeclimate::{
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
     CodeClimateOutput, CodeClimateSeverity,
+};
+pub use coverage_envelopes::{
+    CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,
+    CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
+    CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet,
 };
 pub use dupes::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
