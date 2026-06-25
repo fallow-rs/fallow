@@ -188,6 +188,81 @@ fn into_module_info_transfers_whole_object_uses() {
     assert!(info.whole_object_uses.len() >= 2);
 }
 
+fn has_member_access(info: &crate::ModuleInfo, object: &str, member: &str) -> bool {
+    info.member_accesses
+        .iter()
+        .any(|a| a.object == object && a.member == member)
+}
+
+#[test]
+fn factory_return_function_decl_credits_member_on_class() {
+    // `function useApi() { return new RESTApi() }` + `const api = useApi(); api.Plan()`
+    // credits `Plan` on `RESTApi` via same-file factory-return tracing (issue #1441).
+    let info = parse(
+        "class RESTApi { Plan() {} }\nfunction useApi() { return new RESTApi() }\nconst api = useApi()\napi.Plan()",
+    );
+    assert!(
+        has_member_access(&info, "RESTApi", "Plan"),
+        "factory-return function should credit the member on the class: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn factory_return_arrow_bodies_credit_member_on_class() {
+    for source in [
+        "class RESTApi { Plan() {} }\nconst useApi = () => new RESTApi()\nconst api = useApi()\napi.Plan()",
+        "class RESTApi { Plan() {} }\nconst useApi = () => { return new RESTApi() }\nconst api = useApi()\napi.Plan()",
+    ] {
+        let info = parse(source);
+        assert!(
+            has_member_access(&info, "RESTApi", "Plan"),
+            "arrow factory-return should credit the member on the class: {source:?}"
+        );
+    }
+}
+
+#[test]
+fn non_factory_function_does_not_credit_member_on_class() {
+    // `useApi` does not return `new Class()`, so no binding is recorded and
+    // `api.Plan` is not credited on `RESTApi` (it stays a flaggable member).
+    let info = parse(
+        "class RESTApi { Plan() {} }\nfunction useApi() { return 1 }\nconst api = useApi()\napi.Plan()",
+    );
+    assert!(
+        !has_member_access(&info, "RESTApi", "Plan"),
+        "a non-factory function must not credit a class member: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn factory_returning_builtin_constructor_is_not_traced() {
+    // `return new Map()` is a builtin constructor, so no user class is bound and
+    // no spurious member access is emitted against the builtin name.
+    let info = parse("function makeMap() { return new Map() }\nconst m = makeMap()\nm.set('a', 1)");
+    assert!(
+        !has_member_access(&info, "Map", "set"),
+        "a builtin-returning factory must not bind: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn factory_return_propagates_through_object_binding() {
+    // `const box = { api }` then `box.api.Plan()` must credit `RESTApi.Plan`:
+    // the factory-return binding is resolved before object-binding propagation,
+    // matching the during-the-walk `new Class()` binding. Issue #1441.
+    let info = parse(
+        "class RESTApi { Plan() {} }\nfunction useApi() { return new RESTApi() }\nconst api = useApi()\nconst box = { api }\nbox.api.Plan()",
+    );
+    assert!(
+        has_member_access(&info, "RESTApi", "Plan"),
+        "factory-return should propagate through an object binding: {:?}",
+        info.member_accesses
+    );
+}
+
 #[test]
 fn into_module_info_transfers_member_accesses() {
     let info = parse("import { Obj } from './x';\nObj.method();");

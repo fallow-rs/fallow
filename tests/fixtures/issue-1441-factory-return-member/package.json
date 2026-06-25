@@ -1,0 +1,5 @@
+{
+  "name": "issue-1441-factory-return-member",
+  "private": true,
+  "main": "src/index.ts"
+}

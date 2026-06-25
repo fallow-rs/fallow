@@ -83,6 +83,15 @@ pub(crate) struct FactoryCallCandidate {
     pub(crate) callee_method: String,
 }
 
+/// `const local = useApi()` where `useApi` is a same-file function whose body
+/// returns `new Class()`. Resolved against `factory_return_functions` at finalize
+/// time so `local.member` credits the constructed class. See issue #1441.
+#[derive(Debug, Clone)]
+pub(crate) struct FactoryReturnCandidate {
+    pub(crate) local_name: String,
+    pub(crate) callee_name: String,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PendingPlaywrightFactory {
     pub(crate) test_name: String,
@@ -150,6 +159,10 @@ pub(crate) struct ModuleInfoExtractor {
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
     local_structural_functions: FxHashMap<String, LocalStructuralFunction>,
     structural_class_call_candidates: Vec<StructuralClassCallCandidate>,
+    /// Same-file functions whose body returns `new Class()`, mapped to the class
+    /// name, plus the `const x = fn()` bindings to resolve against them. See #1441.
+    factory_return_functions: FxHashMap<String, String>,
+    factory_return_candidates: Vec<FactoryReturnCandidate>,
     namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
     pub(crate) class_heritage: Vec<ClassHeritageInfo>,
@@ -942,6 +955,24 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Resolve `const x = useApi()` bindings against same-file functions whose
+    /// body returns `new Class()`, so `x.member` credits the constructed class.
+    /// Cross-file (imported / re-exported) factory wrappers are out of scope.
+    /// See issue #1441.
+    fn resolve_factory_return_candidates(&mut self) {
+        if self.factory_return_candidates.is_empty() || self.factory_return_functions.is_empty() {
+            return;
+        }
+        let candidates = std::mem::take(&mut self.factory_return_candidates);
+        for candidate in candidates {
+            if let Some(class_name) = self.factory_return_functions.get(&candidate.callee_name) {
+                self.binding_target_names
+                    .entry(candidate.local_name)
+                    .or_insert_with(|| class_name.clone());
+            }
+        }
+    }
+
     pub(crate) fn resolve_typed_destructure_bindings(&mut self) {
         let pending = std::mem::take(&mut self.pending_typed_destructures);
         if pending.is_empty() {
@@ -1125,6 +1156,11 @@ impl ModuleInfoExtractor {
         self.enrich_local_class_exports();
         self.enrich_store_exports();
         self.finalize_di_key_sites();
+        // Before `record_exported_instance_bindings` / `resolve_object_binding_candidates`,
+        // which read `binding_target_names`, so a factory-return-bound local also
+        // propagates through object literals and exported-instance bindings (parity
+        // with the during-the-walk `new Class()` binding). See issue #1441.
+        self.resolve_factory_return_candidates();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
         self.resolve_factory_call_candidates();

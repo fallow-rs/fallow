@@ -730,6 +730,11 @@ impl ModuleInfoExtractor {
                     &arrow.params,
                     Some(arrow.body.as_ref()),
                 );
+                self.record_factory_return_function(
+                    id.name.as_str(),
+                    Some(arrow.body.as_ref()),
+                    arrow.expression,
+                );
             }
             Expression::FunctionExpression(function) => {
                 self.record_local_structural_function(
@@ -737,9 +742,63 @@ impl ModuleInfoExtractor {
                     &function.params,
                     function.body.as_deref(),
                 );
+                self.record_factory_return_function(
+                    id.name.as_str(),
+                    function.body.as_deref(),
+                    false,
+                );
             }
             _ => {}
         }
+    }
+
+    /// Record a same-file function whose body returns `new Class()` so a later
+    /// `const x = <name>()` binding can resolve to that class. Module scope only;
+    /// imported / re-exported factory wrappers are out of scope (issue #1441).
+    fn record_factory_return_function(
+        &mut self,
+        name: &str,
+        body: Option<&FunctionBody<'_>>,
+        is_expression_body: bool,
+    ) {
+        if !self.is_module_scope() {
+            return;
+        }
+        let Some(body) = body else {
+            return;
+        };
+        if let Some(class_name) = function_body_returns_new_class(body, is_expression_body) {
+            self.factory_return_functions
+                .insert(name.to_string(), class_name);
+        }
+    }
+
+    /// Capture `const local = callee(...)` (bare-identifier callee) as a factory
+    /// return candidate. `resolve_factory_return_candidates` keeps only those
+    /// whose callee is a known same-file `new Class()` factory. See issue #1441.
+    ///
+    /// Not scope-gated, mirroring the `const n = new Class()` instance binding:
+    /// the consumer is commonly inside a setup/composable function, and
+    /// `binding_target_names` is module-flat by design.
+    fn record_factory_return_candidate(
+        &mut self,
+        declarator: &VariableDeclarator<'_>,
+        init: &Expression<'_>,
+    ) {
+        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+            return;
+        };
+        let Expression::CallExpression(call) = init else {
+            return;
+        };
+        let Expression::Identifier(callee) = &call.callee else {
+            return;
+        };
+        self.factory_return_candidates
+            .push(super::FactoryReturnCandidate {
+                local_name: id.name.to_string(),
+                callee_name: callee.name.to_string(),
+            });
     }
 
     /// Record `const TOKEN = new InjectionToken<Interface>(...)` declarations
@@ -2883,6 +2942,7 @@ impl ModuleInfoExtractor {
                 &function.params,
                 function.body.as_deref(),
             );
+            self.record_factory_return_function(id.name.as_str(), function.body.as_deref(), false);
             self.record_source_returning_function_declaration(function);
             self.record_package_resolution_function_arg(function, id.name.as_str());
             self.record_playwright_factory_helper(function, id.name.as_str());
@@ -3045,6 +3105,7 @@ impl ModuleInfoExtractor {
         init: &Expression<'_>,
     ) {
         self.record_local_structural_function_from_variable_declarator(declarator, init);
+        self.record_factory_return_candidate(declarator, init);
         self.record_source_returning_helper_from_variable_declarator(decl, declarator, init);
         self.record_sanitizer_helper_from_variable_declarator(decl, declarator, init);
         self.record_initialized_declarator_bindings(decl, declarator, init);
@@ -3394,13 +3455,11 @@ impl<'a> ModuleInfoExtractor {
         declarator: &VariableDeclarator<'a>,
         init: &Expression<'a>,
     ) {
-        if let Expression::NewExpression(new_expr) = init
-            && let Expression::Identifier(callee) = &new_expr.callee
-            && let BindingPattern::BindingIdentifier(id) = &declarator.id
-            && !super::helpers::is_builtin_constructor(callee.name.as_str())
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Some(class_name) = new_expression_class_name(init)
         {
             self.binding_target_names
-                .insert(id.name.to_string(), callee.name.to_string());
+                .insert(id.name.to_string(), class_name);
         }
 
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
@@ -6681,6 +6740,43 @@ fn collect_idents_into(expr: &Expression<'_>, out: &mut Vec<String>) {
         }
         _ => {}
     }
+}
+
+/// The class name in a `new Class()` expression, or `None` for a non-`new`
+/// expression, a non-identifier callee, or a builtin constructor.
+fn new_expression_class_name(expr: &Expression<'_>) -> Option<String> {
+    let Expression::NewExpression(new_expr) = expr else {
+        return None;
+    };
+    let Expression::Identifier(callee) = &new_expr.callee else {
+        return None;
+    };
+    if super::helpers::is_builtin_constructor(callee.name.as_str()) {
+        return None;
+    }
+    Some(callee.name.to_string())
+}
+
+/// The class a function body returns via `new Class()`: the sole expression of
+/// an expression-bodied arrow, or the last top-level `return new Class()` of a
+/// block body. Conservative — only a direct `new Class()` is traced (a value
+/// first bound to one, or a non-`new` return, is out of scope). See issue #1441.
+fn function_body_returns_new_class(
+    body: &FunctionBody<'_>,
+    is_expression_body: bool,
+) -> Option<String> {
+    if is_expression_body {
+        let [Statement::ExpressionStatement(stmt)] = body.statements.as_slice() else {
+            return None;
+        };
+        return new_expression_class_name(&stmt.expression);
+    }
+    body.statements.iter().rev().find_map(|stmt| {
+        let Statement::ReturnStatement(ret) = stmt else {
+            return None;
+        };
+        new_expression_class_name(ret.argument.as_ref()?)
+    })
 }
 
 fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
