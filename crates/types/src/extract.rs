@@ -1745,6 +1745,71 @@ pub fn semantic_facts_with_legacy_member_accesses<'a>(
         }))
 }
 
+/// Collect instance-export binding facts from typed facts plus legacy sentinels.
+pub fn instance_export_binding_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<InstanceExportBindingFact> {
+    semantic_facts_with_legacy_member_accesses(semantic_facts, member_accesses)
+        .filter_map(|fact| {
+            if let SemanticFact::InstanceExportBinding(access) = fact.as_fact() {
+                Some(access.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Collect factory-call member facts from typed facts plus legacy sentinels.
+pub fn factory_call_member_access_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<FactoryCallMemberAccessFact> {
+    semantic_facts_with_legacy_member_accesses(semantic_facts, member_accesses)
+        .filter_map(|fact| {
+            if let SemanticFact::FactoryCallMemberAccess(access) = fact.as_fact() {
+                Some(access.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Collect fluent-chain member facts from typed facts plus legacy sentinels.
+pub fn fluent_chain_member_access_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<FluentChainMemberAccessFact> {
+    semantic_facts_with_legacy_member_accesses(semantic_facts, member_accesses)
+        .filter_map(|fact| {
+            if let SemanticFact::FluentChainMemberAccess(access) = fact.as_fact() {
+                Some(access.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Collect constructor-rooted fluent-chain member facts from typed facts plus
+/// legacy sentinels.
+pub fn fluent_chain_new_member_access_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<FluentChainNewMemberAccessFact> {
+    semantic_facts_with_legacy_member_accesses(semantic_facts, member_accesses)
+        .filter_map(|fact| {
+            if let SemanticFact::FluentChainNewMemberAccess(access) = fact.as_fact() {
+                Some(access.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// Iterate typed Playwright fixture-use facts.
 pub fn playwright_fixture_use_facts(
     semantic_facts: &[SemanticFact],
@@ -2720,6 +2785,78 @@ mod tests {
                     target_name: "target".to_string(),
                 }
             ))
+        );
+    }
+
+    #[test]
+    fn legacy_backed_fact_helpers_collect_owned_family_facts() {
+        let mut module = minimal_module_info();
+        module
+            .semantic_facts
+            .push(SemanticFact::FluentChainMemberAccess(
+                FluentChainMemberAccessFact {
+                    root_object: "Builder".to_string(),
+                    root_method: "start".to_string(),
+                    chain: vec!["next".to_string()],
+                    member: "value".to_string(),
+                },
+            ));
+        module.member_accesses.push(MemberAccess {
+            object: format!("{INSTANCE_EXPORT_SENTINEL}exported"),
+            member: "target".to_string(),
+        });
+        module.member_accesses.push(MemberAccess {
+            object: format!("{FACTORY_CALL_SENTINEL}Svc:create"),
+            member: "run".to_string(),
+        });
+        module.member_accesses.push(MemberAccess {
+            object: format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:next,finish"),
+            member: "done".to_string(),
+        });
+
+        assert_eq!(
+            instance_export_binding_facts_with_legacy(
+                &module.semantic_facts,
+                &module.member_accesses
+            ),
+            vec![InstanceExportBindingFact {
+                export_name: "exported".to_string(),
+                target_name: "target".to_string(),
+            }]
+        );
+        assert_eq!(
+            factory_call_member_access_facts_with_legacy(
+                &module.semantic_facts,
+                &module.member_accesses
+            ),
+            vec![FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "create".to_string(),
+                member: "run".to_string(),
+            }]
+        );
+        assert_eq!(
+            fluent_chain_member_access_facts_with_legacy(
+                &module.semantic_facts,
+                &module.member_accesses
+            ),
+            vec![FluentChainMemberAccessFact {
+                root_object: "Builder".to_string(),
+                root_method: "start".to_string(),
+                chain: vec!["next".to_string()],
+                member: "value".to_string(),
+            }]
+        );
+        assert_eq!(
+            fluent_chain_new_member_access_facts_with_legacy(
+                &module.semantic_facts,
+                &module.member_accesses
+            ),
+            vec![FluentChainNewMemberAccessFact {
+                class_name: "Builder".to_string(),
+                chain: vec!["next".to_string(), "finish".to_string()],
+                member: "done".to_string(),
+            }]
         );
     }
 
