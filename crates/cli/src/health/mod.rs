@@ -16,7 +16,9 @@ use std::time::{Duration, Instant};
 
 use colored::Colorize;
 use fallow_config::{OutputFormat, PackageJson, ResolvedConfig, Severity};
-use fallow_engine::{HealthSharedParseData, HealthSort, RuntimeCoverageOptions};
+use fallow_engine::{
+    HealthSharedParseData, HealthSort, HealthThresholdOverrides, RuntimeCoverageOptions,
+};
 
 use crate::baseline::{HealthBaselineData, filter_new_health_findings, filter_new_health_targets};
 use crate::check::{get_changed_files, resolve_workspace_scope};
@@ -61,11 +63,7 @@ pub struct HealthOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
-    pub max_cyclomatic: Option<u16>,
-    pub max_cognitive: Option<u16>,
-    /// Maximum CRAP score threshold (overrides config, default 30.0). Functions
-    /// meeting or exceeding this score are reported as complexity findings.
-    pub max_crap: Option<f64>,
+    pub thresholds: HealthThresholdOverrides,
     pub top: Option<usize>,
     pub sort: HealthSort,
     pub production: bool,
@@ -4003,9 +4001,15 @@ fn prepare_health_scope<'a>(
     config: &ResolvedConfig,
     files: &'a [fallow_types::discover::DiscoveredFile],
 ) -> Result<HealthScope<'a>, ExitCode> {
-    let max_cyclomatic = opts.max_cyclomatic.unwrap_or(config.health.max_cyclomatic);
-    let max_cognitive = opts.max_cognitive.unwrap_or(config.health.max_cognitive);
-    let max_crap = opts.max_crap.unwrap_or(config.health.max_crap);
+    let max_cyclomatic = opts
+        .thresholds
+        .max_cyclomatic
+        .unwrap_or(config.health.max_cyclomatic);
+    let max_cognitive = opts
+        .thresholds
+        .max_cognitive
+        .unwrap_or(config.health.max_cognitive);
+    let max_crap = opts.thresholds.max_crap.unwrap_or(config.health.max_crap);
     let ignore_set = build_ignore_set(&config.health.ignore);
     let changed_files = opts
         .changed_since

@@ -15,6 +15,16 @@ pub enum HealthSort {
     Lines,
 }
 
+/// Command-neutral threshold overrides for health complexity findings.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct HealthThresholdOverrides {
+    pub max_cyclomatic: Option<u16>,
+    pub max_cognitive: Option<u16>,
+    /// Maximum CRAP score threshold. Functions meeting or exceeding this score
+    /// are reported as complexity findings.
+    pub max_crap: Option<f64>,
+}
+
 /// Command-neutral runtime coverage input for health analysis.
 #[derive(Debug, Clone)]
 pub struct RuntimeCoverageOptions {
