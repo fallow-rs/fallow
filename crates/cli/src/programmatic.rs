@@ -686,24 +686,25 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
                 crate::report::suggestions::due_impact_digest(&result.config.root),
             ),
         );
-        let mut output = fallow_api::serialize_programmatic_health_json(
-            fallow_api::ProgrammaticHealthJsonInput {
+        let mut output =
+            fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
                 report: result.report,
                 root: &result.config.root,
                 elapsed: result.elapsed,
                 explain: resolved.explain,
+                grouped_by: None,
+                groups: None,
                 workspace_diagnostics: workspace_diagnostics_for_programmatic_output(
                     &result.config.root,
                 ),
                 next_steps,
                 envelope_mode: programmatic_root_envelope_mode(&resolved),
-            },
-        )
-        .map_err(|err| {
-            ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
-                .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
-                .with_context("health")
-        })?;
+            })
+            .map_err(|err| {
+                ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
+                    .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
+                    .with_context("health")
+            })?;
         crate::output_envelope::attach_telemetry_meta(&mut output);
         Ok(output)
     })

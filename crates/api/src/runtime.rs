@@ -9,9 +9,10 @@ use fallow_config::{
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
 use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CheckOutputInput, DupesOutput, DupesOutputInput, HealthJsonOutputInput,
-    HealthOutputInput, HealthReport, RootEnvelopeMode, WorkspaceDiagnosticOutput, apply_root_kind,
-    build_check_output, build_dupes_output, check_meta, health_meta, strip_root_prefix,
+    CHECK_SCHEMA_VERSION, CheckOutputInput, DupesOutput, DupesOutputInput, GroupByMode,
+    HealthGroup, HealthJsonOutputInput, HealthOutputInput, HealthReport, RootEnvelopeMode,
+    WorkspaceDiagnosticOutput, apply_root_kind, build_check_output, build_dupes_output, check_meta,
+    health_meta, strip_root_prefix,
 };
 use fallow_types::output::NextStep;
 use globset::Glob;
@@ -28,12 +29,14 @@ const MAX_DIFF_BYTES: u64 = 10 * 1024 * 1024;
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
-/// Inputs for serializing programmatic health / complexity output.
-pub struct ProgrammaticHealthJsonInput<'a> {
+/// Inputs for serializing health JSON output through the API boundary.
+pub struct HealthJsonReportInput<'a> {
     pub report: HealthReport,
     pub root: &'a Path,
     pub elapsed: std::time::Duration,
     pub explain: bool,
+    pub grouped_by: Option<GroupByMode>,
+    pub groups: Option<Vec<HealthGroup>>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
@@ -114,8 +117,7 @@ pub fn detect_boundary_violations(
     resolved.install(|| detect_dead_code_inner(options, &resolved, keep_boundary_violations))
 }
 
-/// Serialize a programmatic health / complexity report into the stable JSON
-/// output contract.
+/// Serialize a health / complexity report into the stable JSON output contract.
 ///
 /// The health runner is still migrating out of the CLI crate, so callers pass
 /// the already assembled report plus CLI-owned suggestion and workspace
@@ -124,8 +126,8 @@ pub fn detect_boundary_violations(
 /// # Errors
 ///
 /// Returns a serde error when the report cannot be converted to JSON.
-pub fn serialize_programmatic_health_json(
-    input: ProgrammaticHealthJsonInput<'_>,
+pub fn serialize_health_report_json(
+    input: HealthJsonReportInput<'_>,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", input.root.display());
     fallow_output::serialize_health_json_output(HealthJsonOutputInput {
@@ -134,8 +136,8 @@ pub fn serialize_programmatic_health_json(
             version: env!("CARGO_PKG_VERSION").to_string(),
             elapsed: input.elapsed,
             report: input.report,
-            grouped_by: None,
-            groups: None::<Vec<fallow_output::HealthGroup>>,
+            grouped_by: input.grouped_by,
+            groups: input.groups,
             meta: input.explain.then(health_meta),
             workspace_diagnostics: input.workspace_diagnostics,
             next_steps: input.next_steps,
@@ -1368,13 +1370,15 @@ mod tests {
     }
 
     #[test]
-    fn serialize_programmatic_health_json_tags_meta_and_strips_paths() {
+    fn serialize_health_report_json_tags_meta_and_strips_paths() {
         let root = Path::new("/repo");
-        let json = serialize_programmatic_health_json(ProgrammaticHealthJsonInput {
+        let json = serialize_health_report_json(HealthJsonReportInput {
             report: HealthReport::default(),
             root,
             elapsed: std::time::Duration::ZERO,
             explain: true,
+            grouped_by: None,
+            groups: None,
             workspace_diagnostics: vec![WorkspaceDiagnosticOutput(serde_json::json!({
                 "path": "/repo/package.json"
             }))],
@@ -1395,12 +1399,14 @@ mod tests {
     }
 
     #[test]
-    fn serialize_programmatic_health_json_respects_legacy_envelope() {
-        let json = serialize_programmatic_health_json(ProgrammaticHealthJsonInput {
+    fn serialize_health_report_json_respects_legacy_envelope() {
+        let json = serialize_health_report_json(HealthJsonReportInput {
             report: HealthReport::default(),
             root: Path::new("/repo"),
             elapsed: std::time::Duration::ZERO,
             explain: false,
+            grouped_by: None,
+            groups: None,
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
             envelope_mode: RootEnvelopeMode::Legacy,

@@ -8,13 +8,13 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
-use fallow_output::{HealthJsonOutputInput, strip_root_prefix};
+use fallow_output::strip_root_prefix;
 
 use super::emit_json;
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutputInput,
-    EnvelopeMode, FallowOutput, GroupByMode, HealthOutputInput, WorkspaceDiagnosticOutput,
+    EnvelopeMode, FallowOutput, GroupByMode, WorkspaceDiagnosticOutput,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
     serialize_root_output,
 };
@@ -429,27 +429,22 @@ pub fn build_health_json(
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let root_prefix = format!("{}/", root.display());
-    let mut output = fallow_output::serialize_health_json_output(HealthJsonOutputInput {
-        output: HealthOutputInput {
-            schema_version: SCHEMA_VERSION,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            elapsed,
-            report: report.clone(),
-            grouped_by: None,
-            groups: None::<Vec<crate::health_types::HealthGroup>>,
-            meta: explain.then(fallow_output::health_meta),
-            workspace_diagnostics: workspace_diagnostics_for_output(root),
-            next_steps: fallow_output::build_health_next_steps(
-                crate::report::suggestions::health_next_steps_input(
-                    report,
-                    root,
-                    crate::report::suggestions::setup_pointer_applicable(root),
-                    crate::report::suggestions::due_impact_digest(root),
-                ),
+    let mut output = fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
+        report: report.clone(),
+        root,
+        elapsed,
+        explain,
+        grouped_by: None,
+        groups: None,
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        next_steps: fallow_output::build_health_next_steps(
+            crate::report::suggestions::health_next_steps_input(
+                report,
+                root,
+                crate::report::suggestions::setup_pointer_applicable(root),
+                crate::report::suggestions::due_impact_digest(root),
             ),
-        },
-        root_prefix: Some(&root_prefix),
+        ),
         envelope_mode: EnvelopeMode::current().into(),
     })?;
     crate::output_envelope::attach_telemetry_meta(&mut output);
@@ -463,27 +458,22 @@ pub fn build_grouped_health_json(
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let root_prefix = format!("{}/", root.display());
-    fallow_output::serialize_health_json_output(HealthJsonOutputInput {
-        output: HealthOutputInput {
-            schema_version: SCHEMA_VERSION,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            elapsed,
-            report: report.clone(),
-            grouped_by: Some(group_by_mode_from_label(grouping.mode)),
-            groups: Some(grouping.groups.clone()),
-            meta: explain.then(fallow_output::health_meta),
-            workspace_diagnostics: workspace_diagnostics_for_output(root),
-            next_steps: fallow_output::build_health_next_steps(
-                crate::report::suggestions::health_next_steps_input(
-                    report,
-                    root,
-                    crate::report::suggestions::setup_pointer_applicable(root),
-                    crate::report::suggestions::due_impact_digest(root),
-                ),
+    fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
+        report: report.clone(),
+        root,
+        elapsed,
+        explain,
+        grouped_by: Some(group_by_mode_from_label(grouping.mode)),
+        groups: Some(grouping.groups.clone()),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        next_steps: fallow_output::build_health_next_steps(
+            crate::report::suggestions::health_next_steps_input(
+                report,
+                root,
+                crate::report::suggestions::setup_pointer_applicable(root),
+                crate::report::suggestions::due_impact_digest(root),
             ),
-        },
-        root_prefix: Some(&root_prefix),
+        ),
         envelope_mode: EnvelopeMode::current().into(),
     })
 }
@@ -839,7 +829,7 @@ mod tests {
     }
 
     #[test]
-    fn grouped_health_json_uses_output_serializer_for_group_paths() {
+    fn grouped_health_json_uses_api_contract_for_group_paths() {
         let root = PathBuf::from("/project");
         let grouping = crate::health_types::HealthGrouping {
             mode: "package",
