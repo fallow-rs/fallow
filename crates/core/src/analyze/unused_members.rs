@@ -12,8 +12,8 @@ use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
-    SemanticFact, is_legacy_angular_template_member_access_object,
-    is_legacy_template_or_semantic_member_access_object,
+    SemanticFact, angular_template_member_names_from_parts,
+    has_angular_template_members_from_parts, is_legacy_template_or_semantic_member_access_object,
     is_legacy_template_or_semantic_whole_object_use, semantic_facts_with_legacy_member_accesses,
 };
 
@@ -574,7 +574,11 @@ fn build_angular_template_refs(
     resolved_modules
         .iter()
         .filter_map(|module| {
-            let refs = angular_template_member_refs(module);
+            let refs: Vec<&str> = angular_template_member_names_from_parts(
+                &module.semantic_facts,
+                &module.member_accesses,
+            )
+            .collect();
             if refs.is_empty() {
                 None
             } else {
@@ -590,7 +594,10 @@ fn build_angular_template_chain_accesses(
     resolved_modules
         .iter()
         .filter_map(|module| {
-            if !has_angular_template_member_refs(module) {
+            if !has_angular_template_members_from_parts(
+                &module.semantic_facts,
+                &module.member_accesses,
+            ) {
                 return None;
             }
             let chains: Vec<(&str, &str)> = module
@@ -609,38 +616,6 @@ fn build_angular_template_chain_accesses(
             }
         })
         .collect()
-}
-
-fn angular_template_member_refs(module: &ResolvedModule) -> Vec<&str> {
-    module
-        .semantic_facts
-        .iter()
-        .filter_map(|fact| {
-            if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
-                Some(access.member.as_str())
-            } else {
-                None
-            }
-        })
-        .chain(
-            module
-                .member_accesses
-                .iter()
-                .filter(|access| is_legacy_angular_template_member_access_object(&access.object))
-                .map(|access| access.member.as_str()),
-        )
-        .collect()
-}
-
-fn has_angular_template_member_refs(module: &ResolvedModule) -> bool {
-    module
-        .semantic_facts
-        .iter()
-        .any(|fact| matches!(fact, SemanticFact::AngularTemplateMemberAccess(_)))
-        || module
-            .member_accesses
-            .iter()
-            .any(|access| is_legacy_angular_template_member_access_object(&access.object))
 }
 
 struct AngularTemplateRefContext<'a, 'b> {
