@@ -362,56 +362,32 @@ pub fn derive_complexity_options(options: &ComplexityOptions) -> DerivedComplexi
     let ownership = options.ownership || options.ownership_emails.is_some();
     let requested_hotspots = options.hotspots || ownership;
     let requested_targets = options.targets || options.effort.is_some();
-    let any_section = options.complexity
-        || options.file_scores
-        || options.coverage_gaps
-        || requested_hotspots
-        || requested_targets
-        || options.score;
-    let score = if any_section { options.score } else { true };
-    let hotspots = if any_section {
-        requested_hotspots
-    } else {
-        true
-    };
+    let sections = derive_health_sections(&HealthSectionOptions {
+        output: fallow_config::OutputFormat::Human,
+        complexity: options.complexity,
+        file_scores: options.file_scores,
+        coverage_gaps: options.coverage_gaps,
+        hotspots: requested_hotspots,
+        targets: requested_targets,
+        css: options.css,
+        score: options.score,
+        score_gate: false,
+        snapshot_requested: false,
+        trend: false,
+    });
 
     DerivedComplexityOptions {
-        any_section,
-        complexity: if any_section {
-            options.complexity
-        } else {
-            true
-        },
-        file_scores: effective_file_scores(options, any_section, score),
-        coverage_gaps: if any_section {
-            options.coverage_gaps
-        } else {
-            false
-        },
-        hotspots,
-        ownership: ownership && hotspots,
-        targets: if any_section { requested_targets } else { true },
-        force_full: score,
-        score_only_output: is_score_only_output(options, requested_hotspots, requested_targets),
-        score,
+        any_section: sections.any_section,
+        complexity: sections.complexity,
+        file_scores: sections.file_scores,
+        coverage_gaps: sections.coverage_gaps,
+        hotspots: sections.hotspots,
+        ownership: ownership && sections.hotspots,
+        targets: sections.targets,
+        force_full: sections.force_full,
+        score_only_output: sections.score_only_output,
+        score: sections.score,
     }
-}
-
-fn effective_file_scores(options: &ComplexityOptions, any_section: bool, force_full: bool) -> bool {
-    (if any_section {
-        options.file_scores
-    } else {
-        true
-    }) || force_full
-}
-
-fn is_score_only_output(options: &ComplexityOptions, hotspots: bool, targets: bool) -> bool {
-    options.score
-        && !options.complexity
-        && !options.file_scores
-        && !options.coverage_gaps
-        && !hotspots
-        && !targets
 }
 
 #[cfg(test)]
