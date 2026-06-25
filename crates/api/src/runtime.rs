@@ -9,9 +9,11 @@ use fallow_config::{
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
 use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CheckOutputInput, DupesOutput, DupesOutputInput, RootEnvelopeMode,
-    apply_root_kind, build_check_output, build_dupes_output, check_meta, strip_root_prefix,
+    CHECK_SCHEMA_VERSION, CheckOutputInput, DupesOutput, DupesOutputInput, HealthJsonOutputInput,
+    HealthOutputInput, HealthReport, RootEnvelopeMode, WorkspaceDiagnosticOutput, apply_root_kind,
+    build_check_output, build_dupes_output, check_meta, health_meta, strip_root_prefix,
 };
+use fallow_types::output::NextStep;
 use globset::Glob;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -21,9 +23,21 @@ use crate::{
 };
 
 const SCHEMA_VERSION: u32 = 1;
+const HEALTH_SCHEMA_VERSION: u32 = 7;
 const MAX_DIFF_BYTES: u64 = 10 * 1024 * 1024;
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
+
+/// Inputs for serializing programmatic health / complexity output.
+pub struct ProgrammaticHealthJsonInput<'a> {
+    pub report: HealthReport,
+    pub root: &'a Path,
+    pub elapsed: std::time::Duration,
+    pub explain: bool,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub next_steps: Vec<NextStep>,
+    pub envelope_mode: RootEnvelopeMode,
+}
 
 struct ResolvedAnalysisOptions {
     root: PathBuf,
@@ -98,6 +112,37 @@ pub fn detect_boundary_violations(
 ) -> ProgrammaticResult<serde_json::Value> {
     let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| detect_dead_code_inner(options, &resolved, keep_boundary_violations))
+}
+
+/// Serialize a programmatic health / complexity report into the stable JSON
+/// output contract.
+///
+/// The health runner is still migrating out of the CLI crate, so callers pass
+/// the already assembled report plus CLI-owned suggestion and workspace
+/// diagnostics policy as explicit typed inputs.
+///
+/// # Errors
+///
+/// Returns a serde error when the report cannot be converted to JSON.
+pub fn serialize_programmatic_health_json(
+    input: ProgrammaticHealthJsonInput<'_>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let root_prefix = format!("{}/", input.root.display());
+    fallow_output::serialize_health_json_output(HealthJsonOutputInput {
+        output: HealthOutputInput {
+            schema_version: HEALTH_SCHEMA_VERSION,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            elapsed: input.elapsed,
+            report: input.report,
+            grouped_by: None,
+            groups: None::<Vec<fallow_output::HealthGroup>>,
+            meta: input.explain.then(health_meta),
+            workspace_diagnostics: input.workspace_diagnostics,
+            next_steps: input.next_steps,
+        },
+        root_prefix: Some(&root_prefix),
+        envelope_mode: input.envelope_mode,
+    })
 }
 
 fn detect_dead_code_inner(
@@ -1320,6 +1365,49 @@ mod tests {
             root: Some(root.to_path_buf()),
             ..AnalysisOptions::default()
         }
+    }
+
+    #[test]
+    fn serialize_programmatic_health_json_tags_meta_and_strips_paths() {
+        let root = Path::new("/repo");
+        let json = serialize_programmatic_health_json(ProgrammaticHealthJsonInput {
+            report: HealthReport::default(),
+            root,
+            elapsed: std::time::Duration::ZERO,
+            explain: true,
+            workspace_diagnostics: vec![WorkspaceDiagnosticOutput(serde_json::json!({
+                "path": "/repo/package.json"
+            }))],
+            next_steps: vec![NextStep {
+                id: "inspect-health".to_string(),
+                command: "fallow health --format json".to_string(),
+                reason: "inspect health details".to_string(),
+            }],
+            envelope_mode: RootEnvelopeMode::Tagged,
+        })
+        .expect("health JSON serializes");
+
+        assert_eq!(json["kind"], "health");
+        assert_eq!(json["schema_version"], HEALTH_SCHEMA_VERSION);
+        assert!(json["_meta"].is_object());
+        assert_eq!(json["workspace_diagnostics"][0]["path"], "package.json");
+        assert_eq!(json["next_steps"][0]["id"], "inspect-health");
+    }
+
+    #[test]
+    fn serialize_programmatic_health_json_respects_legacy_envelope() {
+        let json = serialize_programmatic_health_json(ProgrammaticHealthJsonInput {
+            report: HealthReport::default(),
+            root: Path::new("/repo"),
+            elapsed: std::time::Duration::ZERO,
+            explain: false,
+            workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
+            envelope_mode: RootEnvelopeMode::Legacy,
+        })
+        .expect("health JSON serializes");
+
+        assert!(json.get("kind").is_none());
     }
 
     #[test]

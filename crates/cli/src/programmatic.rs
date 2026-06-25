@@ -6,8 +6,8 @@ use fallow_core::results::AnalysisResults;
 use crate::check::{CheckOptions, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions};
 use crate::health::HealthOptions;
+use crate::report::build_duplication_json;
 use crate::report::ci::diff_filter::{DiffIndex, LoadedDiff, MAX_DIFF_BYTES};
-use crate::report::{build_duplication_json, build_health_json};
 
 pub use fallow_api::{
     AnalysisOptions, COMMON_ANALYSIS_OPTION_FLAGS, ComplexityOptions, ComplexitySort,
@@ -249,6 +249,26 @@ fn apply_programmatic_envelope_options(
     if resolved.legacy_envelope {
         fallow_output::remove_root_kind(output);
     }
+}
+
+fn programmatic_root_envelope_mode(
+    resolved: &ResolvedAnalysisOptions,
+) -> fallow_output::RootEnvelopeMode {
+    if resolved.legacy_envelope {
+        fallow_output::RootEnvelopeMode::Legacy
+    } else {
+        fallow_output::RootEnvelopeMode::Tagged
+    }
+}
+
+fn workspace_diagnostics_for_programmatic_output(
+    root: &Path,
+) -> Vec<fallow_output::WorkspaceDiagnosticOutput> {
+    crate::runtime_support::workspace_diagnostics_for(root)
+        .into_iter()
+        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
+        .map(fallow_output::WorkspaceDiagnosticOutput)
+        .collect()
 }
 
 fn build_dead_code_json(
@@ -658,18 +678,33 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
         let health_options = build_complexity_options(&resolved, options);
         let result = crate::health::execute_health(&health_options)
             .map_err(|_| generic_analysis_error("health"))?;
-        let mut output = build_health_json(
-            &result.report,
-            &result.config.root,
-            result.elapsed,
-            resolved.explain,
+        let next_steps = fallow_output::build_health_next_steps(
+            crate::report::suggestions::health_next_steps_input(
+                &result.report,
+                &result.config.root,
+                crate::report::suggestions::setup_pointer_applicable(&result.config.root),
+                crate::report::suggestions::due_impact_digest(&result.config.root),
+            ),
+        );
+        let mut output = fallow_api::serialize_programmatic_health_json(
+            fallow_api::ProgrammaticHealthJsonInput {
+                report: result.report,
+                root: &result.config.root,
+                elapsed: result.elapsed,
+                explain: resolved.explain,
+                workspace_diagnostics: workspace_diagnostics_for_programmatic_output(
+                    &result.config.root,
+                ),
+                next_steps,
+                envelope_mode: programmatic_root_envelope_mode(&resolved),
+            },
         )
         .map_err(|err| {
             ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
                 .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
                 .with_context("health")
         })?;
-        apply_programmatic_envelope_options(&mut output, &resolved);
+        crate::output_envelope::attach_telemetry_meta(&mut output);
         Ok(output)
     })
 }
