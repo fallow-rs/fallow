@@ -1203,7 +1203,6 @@ name = "fallow-lsp"
 version = "2.102.0"
 dependencies = [
  "fallow-config",
- "fallow-core",
  "fallow-engine",
  "fallow-types",
  "futures",
