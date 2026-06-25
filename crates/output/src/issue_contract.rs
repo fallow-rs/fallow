@@ -57,7 +57,7 @@ impl IssueOutputContract {
             summary_docs_anchor: meta.docs_anchor,
             meta_name: meta.meta_name,
             meta_description: issue_meta_description(meta.code)?,
-            meta_docs_path: issue_meta_docs_path(meta.code)?,
+            meta_docs_path: meta.meta_docs_path,
             sarif_rule_ids: issue_sarif_rule_ids(meta.code),
             codeclimate_check_names: issue_codeclimate_check_names(meta.code),
             ts_alias: issue_ts_alias(meta.code),
@@ -246,58 +246,6 @@ fn issue_meta_description(code: &str) -> Option<&'static str> {
         "duplicate-prop-shape" => {
             "Multiple React or Preact components declare an identical significant prop-name set."
         }
-        _ => return None,
-    })
-}
-
-fn issue_meta_docs_path(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "unused-file" => "explanations/dead-code#unused-files",
-        "unused-export" => "explanations/dead-code#unused-exports",
-        "unused-type" => "explanations/dead-code#unused-types",
-        "private-type-leak" => "explanations/dead-code#private-type-leaks",
-        "unused-dependency" => "explanations/dead-code#unused-dependencies",
-        "unused-dev-dependency" => "explanations/dead-code#unused-devdependencies",
-        "unused-optional-dependency" => "explanations/dead-code#unused-optionaldependencies",
-        "type-only-dependency" => "explanations/dead-code#type-only-dependencies",
-        "test-only-dependency" => "explanations/dead-code#test-only-dependencies",
-        "unused-enum-member" => "explanations/dead-code#unused-enum-members",
-        "unused-class-member" => "explanations/dead-code#unused-class-members",
-        "unused-store-member" => "explanations/dead-code#unused-store-members",
-        "unresolved-import" => "explanations/dead-code#unresolved-imports",
-        "unlisted-dependency" => "explanations/dead-code#unlisted-dependencies",
-        "duplicate-export" => "explanations/dead-code#duplicate-exports",
-        "circular-dependency" => "explanations/dead-code#circular-dependencies",
-        "re-export-cycle" => "explanations/dead-code#re-export-cycles",
-        "boundary-violation" | "boundary-coverage" | "boundary-call-violation" => {
-            "explanations/dead-code#boundary-violations"
-        }
-        "policy-violation" => "explanations/dead-code#policy-violations",
-        "stale-suppression" => "explanations/dead-code#stale-suppressions",
-        "unused-catalog-entry" => "explanations/dead-code#unused-catalog-entries",
-        "empty-catalog-group" => "explanations/dead-code#empty-catalog-groups",
-        "unresolved-catalog-reference" => "explanations/dead-code#unresolved-catalog-references",
-        "unused-dependency-override" => "explanations/dead-code#unused-dependency-overrides",
-        "misconfigured-dependency-override" => {
-            "explanations/dead-code#misconfigured-dependency-overrides"
-        }
-        "invalid-client-export" => "explanations/dead-code#invalid-client-exports",
-        "mixed-client-server-barrel" => "explanations/dead-code#mixed-client-server-barrels",
-        "misplaced-directive" => "explanations/dead-code#misplaced-directives",
-        "unprovided-inject" => "explanations/dead-code#unprovided-injects",
-        "unrendered-component" => "explanations/dead-code#unrendered-components",
-        "unused-component-prop" => "explanations/dead-code#unused-component-props",
-        "unused-component-emit" => "explanations/dead-code#unused-component-emits",
-        "unused-component-input" => "explanations/dead-code#unused-component-inputs",
-        "unused-component-output" => "explanations/dead-code#unused-component-outputs",
-        "unused-svelte-event" => "explanations/dead-code#unused-svelte-events",
-        "unused-server-action" => "explanations/dead-code#unused-server-actions",
-        "unused-load-data-key" => "explanations/dead-code#unused-load-data-keys",
-        "prop-drilling" => "explanations/dead-code#prop-drilling",
-        "thin-wrapper" => "explanations/dead-code#thin-wrapper",
-        "duplicate-prop-shape" => "explanations/dead-code#duplicate-prop-shape",
-        "route-collision" => "explanations/dead-code#route-collisions",
-        "dynamic-segment-name-conflict" => "explanations/dead-code#dynamic-segment-name-conflicts",
         _ => return None,
     })
 }
