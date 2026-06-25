@@ -40,6 +40,27 @@ pub struct DupesNextStepsInput<'a> {
     pub audit_changed: bool,
 }
 
+/// Deterministic unused-export trace target selected by the caller.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceUnusedExportInput {
+    pub path: String,
+    pub export_name: String,
+}
+
+/// Runtime-independent inputs for bare `fallow` combined next steps.
+#[derive(Debug, Clone)]
+pub struct CombinedNextStepsInput<'a> {
+    pub suggestions_enabled: bool,
+    pub has_dead_code_findings: bool,
+    pub trace_unused_export: Option<TraceUnusedExportInput>,
+    pub workspace_ref: Option<&'a str>,
+    pub clone_fingerprints: &'a [&'a str],
+    pub has_complexity_findings: bool,
+    pub offer_setup: bool,
+    pub impact_digest: Option<ImpactDigestCounts>,
+    pub audit_changed: bool,
+}
+
 /// Runtime-independent inputs for standalone health next steps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HealthNextStepsInput {
@@ -152,6 +173,37 @@ pub fn build_dupes_next_steps(input: DupesNextStepsInput<'_>) -> Vec<NextStep> {
     steps
 }
 
+/// Aggregated next-steps for bare `fallow` combined output.
+#[must_use]
+pub fn build_combined_next_steps(input: &CombinedNextStepsInput<'_>) -> Vec<NextStep> {
+    if !input.suggestions_enabled {
+        return Vec::new();
+    }
+    let has_findings = input.has_dead_code_findings
+        || !input.clone_fingerprints.is_empty()
+        || input.has_complexity_findings;
+    if !has_findings {
+        return impact_digest_step(input.impact_digest)
+            .into_iter()
+            .collect();
+    }
+
+    let mut steps: Vec<NextStep> = [
+        setup_pointer(input.offer_setup),
+        impact_digest_step(input.impact_digest),
+        trace_unused_export_from_input(input.trace_unused_export.as_ref()),
+        scope_workspaces(input.workspace_ref),
+        trace_clone(input.clone_fingerprints),
+        complexity_breakdown(input.has_complexity_findings),
+        audit_changed(input.audit_changed),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    steps.truncate(MAX_NEXT_STEPS);
+    steps
+}
+
 fn relative_command_path(path: &Path, root: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
@@ -173,6 +225,18 @@ fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextSte
     Some(next_step(
         "trace-unused-export",
         format!("fallow dead-code --trace {}:{}", target.0, target.1),
+        "verify an export is truly unused before deleting",
+    ))
+}
+
+fn trace_unused_export_from_input(target: Option<&TraceUnusedExportInput>) -> Option<NextStep> {
+    let target = target?;
+    Some(next_step(
+        "trace-unused-export",
+        format!(
+            "fallow dead-code --trace {}:{}",
+            target.path, target.export_name
+        ),
         "verify an export is truly unused before deleting",
     ))
 }
@@ -315,6 +379,20 @@ mod tests {
         }
     }
 
+    fn combined_input<'a>(clone_fingerprints: &'a [&'a str]) -> CombinedNextStepsInput<'a> {
+        CombinedNextStepsInput {
+            suggestions_enabled: true,
+            has_dead_code_findings: false,
+            trace_unused_export: None,
+            workspace_ref: None,
+            clone_fingerprints,
+            has_complexity_findings: false,
+            offer_setup: false,
+            impact_digest: None,
+            audit_changed: false,
+        }
+    }
+
     fn assert_valid(step: &NextStep) {
         assert!(
             !step.command.contains('<') && !step.command.contains('>'),
@@ -439,6 +517,87 @@ mod tests {
 
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].id, "impact-report");
+    }
+
+    #[test]
+    fn combined_steps_are_empty_when_suggestions_are_disabled() {
+        let fingerprints = ["dup:aaaaaaaa"];
+        let steps = build_combined_next_steps(&CombinedNextStepsInput {
+            suggestions_enabled: false,
+            has_dead_code_findings: true,
+            trace_unused_export: Some(TraceUnusedExportInput {
+                path: "src/a.ts".to_string(),
+                export_name: "alpha".to_string(),
+            }),
+            workspace_ref: Some("origin/main"),
+            clone_fingerprints: &fingerprints,
+            has_complexity_findings: true,
+            offer_setup: true,
+            impact_digest: Some(digest(2, 1)),
+            audit_changed: true,
+        });
+
+        assert!(steps.is_empty());
+    }
+
+    #[test]
+    fn clean_combined_run_emits_only_due_impact_digest() {
+        let steps = build_combined_next_steps(&CombinedNextStepsInput {
+            impact_digest: Some(digest(2, 1)),
+            audit_changed: true,
+            ..combined_input(&[])
+        });
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].id, "impact-report");
+    }
+
+    #[test]
+    fn combined_steps_order_and_cap_all_signals() {
+        let fingerprints = ["dup:bbbbbbbb", "dup:aaaaaaaa"];
+        let steps = build_combined_next_steps(&CombinedNextStepsInput {
+            has_dead_code_findings: true,
+            trace_unused_export: Some(TraceUnusedExportInput {
+                path: "src/a.ts".to_string(),
+                export_name: "alpha".to_string(),
+            }),
+            workspace_ref: Some("origin/main"),
+            has_complexity_findings: true,
+            offer_setup: true,
+            impact_digest: Some(digest(2, 1)),
+            audit_changed: true,
+            ..combined_input(&fingerprints)
+        });
+        let ids = steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, ["setup", "impact-report", "trace-unused-export"]);
+        for step in &steps {
+            assert_valid(step);
+        }
+    }
+
+    #[test]
+    fn combined_steps_keep_workspace_before_clone_and_complexity() {
+        let fingerprints = ["dup:aaaaaaaa"];
+        let steps = build_combined_next_steps(&CombinedNextStepsInput {
+            has_dead_code_findings: true,
+            workspace_ref: Some("origin/main"),
+            has_complexity_findings: true,
+            audit_changed: true,
+            ..combined_input(&fingerprints)
+        });
+        let ids = steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ids,
+            ["scope-workspaces", "trace-clone", "complexity-breakdown"]
+        );
     }
 
     #[test]

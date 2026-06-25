@@ -177,7 +177,8 @@ pub use list_envelopes::{
     ListBoundariesOutput, WorkspaceInfo, WorkspacesOutput,
 };
 pub use next_steps::{
-    DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput, ImpactDigestCounts,
+    CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput,
+    ImpactDigestCounts, TraceUnusedExportInput, build_combined_next_steps,
     build_dead_code_next_steps, build_dupes_next_steps, build_health_next_steps,
     impact_digest_summary,
 };
