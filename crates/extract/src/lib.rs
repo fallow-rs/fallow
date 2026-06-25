@@ -52,13 +52,14 @@ use cache::CacheStore;
 use fallow_types::discover::{DiscoveredFile, FileId};
 
 pub use fallow_types::extract::{
-    AngularTemplateMemberAccessFact, AngularThisSpreadFact, ClassHeritageInfo, DynamicImportInfo,
-    DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
-    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
-    InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind,
-    ModuleInfo, ParseResult, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
-    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, PublicSignatureTypeReference,
-    ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag, compute_line_offsets,
+    AngularTemplateMemberAccessFact, AngularThisSpreadFact, ClassHeritageInfo,
+    DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
+    ExportName, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
+    LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult,
+    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
+    PlaywrightFixtureUseFact, PublicSignatureTypeReference, ReExportInfo, RequireCallInfo,
+    SemanticFact, VisibilityTag, compute_line_offsets,
 };
 
 pub use astro::{

@@ -36,7 +36,9 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{AngularComponentSelector, ExportName, ImportedName, ModuleInfo};
+use fallow_types::extract::{
+    AngularComponentSelector, ExportName, ImportedName, ModuleInfo, SemanticFact,
+};
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -565,9 +567,17 @@ pub fn find_unrendered_lit_elements(input: &LitUnrenderedInput<'_>) -> Vec<Unren
         modules.iter().map(|m| (m.file_id, m)).collect();
 
     // Pass 1: project-wide rendered-tag union, built LIBERALLY. A dynamic-render
-    // sentinel abstains on the whole project.
+    // fact abstains on the whole project. The legacy sentinel path keeps older
+    // parse caches conservative.
     let mut rendered_tags: FxHashSet<&str> = FxHashSet::default();
     for module in modules {
+        if module
+            .semantic_facts
+            .iter()
+            .any(|fact| matches!(fact, SemanticFact::DynamicCustomElementRender(_)))
+        {
+            return Vec::new();
+        }
         for tag in &module.used_custom_element_tags {
             if tag == fallow_types::extract::DYNAMIC_CUSTOM_ELEMENT_TAG {
                 return Vec::new();
