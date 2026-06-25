@@ -11,10 +11,10 @@ use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use super::{emit_json, normalize_uri};
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutput,
+    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutputInput,
     FallowOutput, GroupByMode, HealthOutputInput, WorkspaceDiagnosticOutput,
-    apply_config_fixable_to_duplicate_exports, build_check_output, build_health_output,
-    serialize_root_output,
+    apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
+    build_health_output, serialize_root_output,
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
@@ -607,10 +607,10 @@ pub fn build_duplication_json(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    let envelope = DupesOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
+    let envelope = build_dupes_output(DupesOutputInput {
+        schema_version: SCHEMA_VERSION,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        elapsed,
         report: payload,
         grouped_by: None,
         total_issues: None,
@@ -618,7 +618,7 @@ pub fn build_duplication_json(
         meta: explain.then(fallow_output::dupes_meta),
         workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps,
-    };
+    });
     let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
@@ -656,10 +656,10 @@ pub fn build_grouped_duplication_json(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    let envelope = DupesOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
+    let envelope = build_dupes_output(DupesOutputInput {
+        schema_version: SCHEMA_VERSION,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        elapsed,
         report: payload,
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         total_issues: Some(report.clone_groups.len()),
@@ -667,7 +667,7 @@ pub fn build_grouped_duplication_json(
         meta: explain.then(fallow_output::dupes_meta),
         workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps,
-    };
+    });
     let mut output = serialize_root_output(FallowOutput::Dupes(envelope))?;
     strip_root_prefix(&mut output, &root_prefix);
 

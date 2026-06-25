@@ -31,8 +31,8 @@ pub use codeclimate::{
 };
 pub use dupes::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
-    DUPES_SUPPRESS_COMMENT, DUPES_SUPPRESS_DESCRIPTION, DupesOutput, clone_family_actions,
-    clone_group_actions,
+    DUPES_SUPPRESS_COMMENT, DUPES_SUPPRESS_DESCRIPTION, DupesOutput, DupesOutputInput,
+    build_dupes_output, clone_family_actions, clone_group_actions,
 };
 pub use fallow_types::envelope;
 pub use fallow_types::output;

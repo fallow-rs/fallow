@@ -13,9 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub use fallow_output::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, CodeClimateIssue,
     CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
-    CodeClimateSeverity, DupesOutput, GroupByMode, HealthOutput, HealthOutputInput,
-    WorkspaceDiagnosticOutput, apply_config_fixable_to_duplicate_exports, build_check_output,
-    build_check_summary, build_health_output,
+    CodeClimateSeverity, DupesOutput, DupesOutputInput, GroupByMode, HealthOutput,
+    HealthOutputInput, WorkspaceDiagnosticOutput, apply_config_fixable_to_duplicate_exports,
+    build_check_output, build_check_summary, build_dupes_output, build_health_output,
 };
 use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, ToolVersion};
 use fallow_types::output::NextStep;
