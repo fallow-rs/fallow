@@ -1101,6 +1101,51 @@ pub const MCP_ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Result issue codes emitted by the dead-code CodeClimate formatter.
+pub const CODECLIMATE_RESULT_CODES: &[&str] = &[
+    "unused-file",
+    "unused-export",
+    "unused-type",
+    "private-type-leak",
+    "unused-dependency",
+    "unused-dev-dependency",
+    "unused-optional-dependency",
+    "unused-enum-member",
+    "unused-class-member",
+    "unused-store-member",
+    "unresolved-import",
+    "unlisted-dependency",
+    "duplicate-export",
+    "type-only-dependency",
+    "test-only-dependency",
+    "circular-dependency",
+    "re-export-cycle",
+    "boundary-violation",
+    "boundary-coverage",
+    "boundary-call-violation",
+    "policy-violation",
+    "invalid-client-export",
+    "mixed-client-server-barrel",
+    "misplaced-directive",
+    "unprovided-inject",
+    "unrendered-component",
+    "unused-component-prop",
+    "unused-component-emit",
+    "unused-component-input",
+    "unused-component-output",
+    "unused-svelte-event",
+    "unused-server-action",
+    "unused-load-data-key",
+    "route-collision",
+    "dynamic-segment-name-conflict",
+    "stale-suppression",
+    "unused-catalog-entry",
+    "empty-catalog-group",
+    "unresolved-catalog-reference",
+    "unused-dependency-override",
+    "misconfigured-dependency-override",
+];
+
 /// Lookup metadata by canonical code.
 #[must_use]
 pub fn issue_meta_by_code(code: &str) -> Option<&'static IssueKindMeta> {
@@ -1125,6 +1170,25 @@ pub fn issue_meta_by_kind(kind: IssueKind) -> Option<&'static IssueKindMeta> {
 #[must_use]
 pub fn issue_result_meta_by_code(code: &str) -> Option<&'static IssueResultMeta> {
     ISSUE_RESULT_META.iter().find(|meta| meta.code == code)
+}
+
+/// SARIF rule ids used by CI formatters for a canonical issue code.
+#[must_use]
+pub fn issue_sarif_rule_ids(code: &str) -> Vec<String> {
+    let mut ids = vec![format!("fallow/{code}")];
+    if code == "stale-suppression" {
+        ids.push("fallow/missing-suppression-reason".to_string());
+    }
+    ids
+}
+
+/// CodeClimate check names used by CI formatters for a canonical issue code.
+#[must_use]
+pub fn issue_codeclimate_check_names(code: &str) -> Vec<String> {
+    if !CODECLIMATE_RESULT_CODES.contains(&code) {
+        return Vec::new();
+    }
+    issue_sarif_rule_ids(code)
 }
 
 /// Documentation anchor under `/explanations/dead-code` for a canonical issue
@@ -1378,6 +1442,32 @@ mod tests {
                 "result metadata code {} has no docs anchor",
                 meta.code
             );
+        }
+    }
+
+    #[test]
+    fn ci_format_ids_are_prefixed_and_known() {
+        let result_codes: BTreeSet<&str> = result_issue_metas().map(|meta| meta.code).collect();
+        let codeclimate_codes: BTreeSet<&str> = CODECLIMATE_RESULT_CODES.iter().copied().collect();
+        assert!(codeclimate_codes.is_subset(&result_codes));
+
+        for meta in result_issue_metas() {
+            let sarif_ids = issue_sarif_rule_ids(meta.code);
+            assert!(sarif_ids.contains(&format!("fallow/{}", meta.code)));
+            for rule_id in sarif_ids {
+                assert!(
+                    rule_id.starts_with("fallow/"),
+                    "result metadata code {} has unprefixed SARIF rule id {rule_id}",
+                    meta.code
+                );
+            }
+            for check_name in issue_codeclimate_check_names(meta.code) {
+                assert!(
+                    check_name.starts_with("fallow/"),
+                    "result metadata code {} has unprefixed CodeClimate check name {check_name}",
+                    meta.code
+                );
+            }
         }
     }
 

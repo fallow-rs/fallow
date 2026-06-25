@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use fallow_types::envelope::{Meta, MetaRule};
-pub use fallow_types::issue_meta::TsAliasMeta;
+pub use fallow_types::issue_meta::{CODECLIMATE_RESULT_CODES, TsAliasMeta};
 use fallow_types::issue_meta::{
-    IssueResultMeta, issue_docs_anchor, issue_result_meta_by_code, issue_ts_alias,
-    result_issue_metas,
+    IssueResultMeta, issue_codeclimate_check_names, issue_docs_anchor, issue_result_meta_by_code,
+    issue_sarif_rule_ids, issue_ts_alias, result_issue_metas,
 };
 
 const DOCS_BASE: &str = "https://docs.fallow.tools";
@@ -58,8 +58,8 @@ impl IssueOutputContract {
             meta_name: issue_meta_name(meta.code)?,
             meta_description: issue_meta_description(meta.code)?,
             meta_docs_path: issue_meta_docs_path(meta.code)?,
-            sarif_rule_ids: sarif_rule_ids(meta.code),
-            codeclimate_check_names: codeclimate_check_names(meta.code),
+            sarif_rule_ids: issue_sarif_rule_ids(meta.code),
+            codeclimate_check_names: issue_codeclimate_check_names(meta.code),
             ts_alias: issue_ts_alias(meta.code),
         })
     }
@@ -124,21 +124,6 @@ pub fn issue_output_contracts() -> impl Iterator<Item = IssueOutputContract> {
 #[must_use]
 pub fn issue_output_contract_by_code(code: &str) -> Option<IssueOutputContract> {
     issue_result_meta_by_code(code).and_then(IssueOutputContract::from_result_meta)
-}
-
-fn sarif_rule_ids(code: &str) -> Vec<String> {
-    let mut ids = vec![format!("fallow/{code}")];
-    if code == "stale-suppression" {
-        ids.push("fallow/missing-suppression-reason".to_string());
-    }
-    ids
-}
-
-fn codeclimate_check_names(code: &str) -> Vec<String> {
-    if !CODECLIMATE_RESULT_CODES.contains(&code) {
-        return Vec::new();
-    }
-    sarif_rule_ids(code)
 }
 
 fn issue_summary_label(code: &str) -> Option<&'static str> {
@@ -416,51 +401,6 @@ fn issue_meta_docs_path(code: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
-
-/// Result issue codes emitted by the dead-code CodeClimate formatter.
-pub const CODECLIMATE_RESULT_CODES: &[&str] = &[
-    "unused-file",
-    "unused-export",
-    "unused-type",
-    "private-type-leak",
-    "unused-dependency",
-    "unused-dev-dependency",
-    "unused-optional-dependency",
-    "unused-enum-member",
-    "unused-class-member",
-    "unused-store-member",
-    "unresolved-import",
-    "unlisted-dependency",
-    "duplicate-export",
-    "type-only-dependency",
-    "test-only-dependency",
-    "circular-dependency",
-    "re-export-cycle",
-    "boundary-violation",
-    "boundary-coverage",
-    "boundary-call-violation",
-    "policy-violation",
-    "invalid-client-export",
-    "mixed-client-server-barrel",
-    "misplaced-directive",
-    "unprovided-inject",
-    "unrendered-component",
-    "unused-component-prop",
-    "unused-component-emit",
-    "unused-component-input",
-    "unused-component-output",
-    "unused-svelte-event",
-    "unused-server-action",
-    "unused-load-data-key",
-    "route-collision",
-    "dynamic-segment-name-conflict",
-    "stale-suppression",
-    "unused-catalog-entry",
-    "empty-catalog-group",
-    "unresolved-catalog-reference",
-    "unused-dependency-override",
-    "misconfigured-dependency-override",
-];
 
 #[cfg(test)]
 mod tests {
