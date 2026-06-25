@@ -44,7 +44,7 @@ pub fn security_label(finding: &SecurityFinding) -> String {
             let title = finding
                 .category
                 .as_deref()
-                .and_then(fallow_core::analyze::security_catalogue_title)
+                .and_then(fallow_engine::security::security_catalogue_title)
                 .or(finding.category.as_deref())
                 .unwrap_or("tainted-sink");
             match finding.cwe {

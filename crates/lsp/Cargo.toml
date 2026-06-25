@@ -12,7 +12,6 @@ name = "fallow-lsp"
 path = "src/main.rs"
 
 [dependencies]
-fallow-core = { workspace = true }
 fallow-config = { workspace = true }
 fallow-engine = { workspace = true }
 fallow-types = { workspace = true }

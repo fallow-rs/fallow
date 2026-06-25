@@ -28,7 +28,7 @@ use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 use serde::{Deserialize, Serialize};
 
 use fallow_config::{DetectionMode, DuplicatesConfig};
-use fallow_core::changed_files::{
+use fallow_engine::changed_files::{
     filter_duplication_by_changed_files, filter_results_by_changed_files, resolve_git_toplevel,
     try_get_changed_files_with_toplevel,
 };

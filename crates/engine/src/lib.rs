@@ -44,6 +44,20 @@ pub mod suppress {
     pub use fallow_core::suppress::{IssueKind, is_suppressed};
 }
 
+/// Changed-file helpers exposed through the engine boundary for editor and
+/// embedding surfaces.
+pub mod changed_files {
+    pub use fallow_core::changed_files::{
+        ChangedFilesError, filter_duplication_by_changed_files, filter_results_by_changed_files,
+        resolve_git_toplevel, try_get_changed_files_with_toplevel,
+    };
+}
+
+/// Security metadata helpers exposed through the engine boundary.
+pub mod security {
+    pub use fallow_core::analyze::security_catalogue_title;
+}
+
 pub use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DefaultIgnoreSkips, DuplicationReport,
     DuplicationStats, MirroredDirectory, RefactoringSuggestion,
