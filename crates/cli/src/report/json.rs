@@ -440,11 +440,13 @@ pub fn build_health_json(
             groups: None::<Vec<crate::health_types::HealthGroup>>,
             meta: explain.then(fallow_output::health_meta),
             workspace_diagnostics: workspace_diagnostics_for_output(root),
-            next_steps: crate::report::suggestions::build_health_next_steps(
-                report,
-                root,
-                crate::report::suggestions::setup_pointer_applicable(root),
-                crate::report::suggestions::due_impact_digest(root),
+            next_steps: fallow_output::build_health_next_steps(
+                crate::report::suggestions::health_next_steps_input(
+                    report,
+                    root,
+                    crate::report::suggestions::setup_pointer_applicable(root),
+                    crate::report::suggestions::due_impact_digest(root),
+                ),
             ),
         },
         root_prefix: Some(&root_prefix),
@@ -472,11 +474,13 @@ pub fn build_grouped_health_json(
             groups: Some(grouping.groups.clone()),
             meta: explain.then(fallow_output::health_meta),
             workspace_diagnostics: workspace_diagnostics_for_output(root),
-            next_steps: crate::report::suggestions::build_health_next_steps(
-                report,
-                root,
-                crate::report::suggestions::setup_pointer_applicable(root),
-                crate::report::suggestions::due_impact_digest(root),
+            next_steps: fallow_output::build_health_next_steps(
+                crate::report::suggestions::health_next_steps_input(
+                    report,
+                    root,
+                    crate::report::suggestions::setup_pointer_applicable(root),
+                    crate::report::suggestions::due_impact_digest(root),
+                ),
             ),
         },
         root_prefix: Some(&root_prefix),
