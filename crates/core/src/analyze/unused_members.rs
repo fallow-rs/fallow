@@ -12,8 +12,8 @@ use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
-    LegacySemanticMemberAccess, SemanticFact, is_legacy_semantic_member_access_object,
-    is_legacy_semantic_whole_object_use, parse_legacy_semantic_member_access,
+    SemanticFact, is_legacy_semantic_member_access_object, is_legacy_semantic_whole_object_use,
+    legacy_member_access_to_semantic_fact,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -1342,11 +1342,11 @@ fn build_instance_export_targets(
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
         for access in instance_export_binding_accesses(resolved) {
-            let Some(target_keys) = local_to_export_keys.get(access.target_local) else {
+            let Some(target_keys) = local_to_export_keys.get(access.target_local.as_str()) else {
                 continue;
             };
 
-            let instance_key = ExportKey::new(resolved.file_id, access.export_name);
+            let instance_key = ExportKey::new(resolved.file_id, access.export_name.clone());
             let instance_targets = targets_by_instance.entry(instance_key).or_default();
             for target_key in target_keys {
                 for key in export_key_with_origins(graph, target_key) {
@@ -1359,32 +1359,28 @@ fn build_instance_export_targets(
     targets_by_instance
 }
 
-struct InstanceExportBindingAccess<'a> {
-    export_name: &'a str,
-    target_local: &'a str,
+struct InstanceExportBindingAccess {
+    export_name: String,
+    target_local: String,
 }
 
-fn instance_export_binding_accesses(
-    module: &ResolvedModule,
-) -> Vec<InstanceExportBindingAccess<'_>> {
+fn instance_export_binding_accesses(module: &ResolvedModule) -> Vec<InstanceExportBindingAccess> {
     let mut accesses = Vec::new();
     for fact in &module.semantic_facts {
         if let SemanticFact::InstanceExportBinding(access) = fact {
             accesses.push(InstanceExportBindingAccess {
-                export_name: access.export_name.as_str(),
-                target_local: access.target_name.as_str(),
+                export_name: access.export_name.clone(),
+                target_local: access.target_name.clone(),
             });
         }
     }
     for access in &module.member_accesses {
-        if let Some(LegacySemanticMemberAccess::InstanceExportBinding {
-            export_name,
-            target_local,
-        }) = parse_legacy_semantic_member_access(access.object.as_str(), access.member.as_str())
+        if let Some(SemanticFact::InstanceExportBinding(fact)) =
+            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())
         {
             accesses.push(InstanceExportBindingAccess {
-                export_name,
-                target_local,
+                export_name: fact.export_name,
+                target_local: fact.target_name,
             });
         }
     }
@@ -1629,34 +1625,31 @@ fn is_legacy_whole_object_use(object: &str) -> bool {
     object == ANGULAR_TPL_SENTINEL || is_legacy_semantic_whole_object_use(object)
 }
 
-struct FactoryCallAccess<'a> {
-    callee_object: &'a str,
-    callee_method: &'a str,
-    member: &'a str,
+struct FactoryCallAccess {
+    callee_object: String,
+    callee_method: String,
+    member: String,
 }
 
-fn factory_call_accesses(module: &ResolvedModule) -> Vec<FactoryCallAccess<'_>> {
+fn factory_call_accesses(module: &ResolvedModule) -> Vec<FactoryCallAccess> {
     let mut accesses = Vec::new();
     for fact in &module.semantic_facts {
         if let SemanticFact::FactoryCallMemberAccess(access) = fact {
             accesses.push(FactoryCallAccess {
-                callee_object: access.callee_object.as_str(),
-                callee_method: access.callee_method.as_str(),
-                member: access.member.as_str(),
+                callee_object: access.callee_object.clone(),
+                callee_method: access.callee_method.clone(),
+                member: access.member.clone(),
             });
         }
     }
     for access in &module.member_accesses {
-        if let Some(LegacySemanticMemberAccess::FactoryCall {
-            callee_object,
-            callee_method,
-            member,
-        }) = parse_legacy_semantic_member_access(access.object.as_str(), access.member.as_str())
+        if let Some(SemanticFact::FactoryCallMemberAccess(fact)) =
+            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())
         {
             accesses.push(FactoryCallAccess {
-                callee_object,
-                callee_method,
-                member,
+                callee_object: fact.callee_object,
+                callee_method: fact.callee_method,
+                member: fact.member,
             });
         }
     }
@@ -1678,7 +1671,7 @@ fn propagate_factory_call_accesses(
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
         for access in factory_call_accesses(resolved) {
-            let Some(seed_keys) = local_to_export_keys.get(access.callee_object) else {
+            let Some(seed_keys) = local_to_export_keys.get(access.callee_object.as_str()) else {
                 continue;
             };
             for seed_key in seed_keys {
@@ -1702,45 +1695,41 @@ fn propagate_factory_call_accesses(
                     accessed_members
                         .entry(origin)
                         .or_default()
-                        .insert(access.member.to_string());
+                        .insert(access.member.clone());
                 }
             }
         }
     }
 }
 
-struct FluentChainAccess<'a> {
-    root_local: &'a str,
-    root_method: &'a str,
-    chain: Vec<&'a str>,
-    member: &'a str,
+struct FluentChainAccess {
+    root_local: String,
+    root_method: String,
+    chain: Vec<String>,
+    member: String,
 }
 
-fn fluent_chain_accesses(module: &ResolvedModule) -> Vec<FluentChainAccess<'_>> {
+fn fluent_chain_accesses(module: &ResolvedModule) -> Vec<FluentChainAccess> {
     let mut accesses = Vec::new();
     for fact in &module.semantic_facts {
         if let SemanticFact::FluentChainMemberAccess(access) = fact {
             accesses.push(FluentChainAccess {
-                root_local: access.root_object.as_str(),
-                root_method: access.root_method.as_str(),
-                chain: access.chain.iter().map(String::as_str).collect(),
-                member: access.member.as_str(),
+                root_local: access.root_object.clone(),
+                root_method: access.root_method.clone(),
+                chain: access.chain.clone(),
+                member: access.member.clone(),
             });
         }
     }
     for access in &module.member_accesses {
-        if let Some(LegacySemanticMemberAccess::FluentChain {
-            root_local,
-            root_method,
-            chain,
-            member,
-        }) = parse_legacy_semantic_member_access(access.object.as_str(), access.member.as_str())
+        if let Some(SemanticFact::FluentChainMemberAccess(fact)) =
+            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())
         {
             accesses.push(FluentChainAccess {
-                root_local,
-                root_method,
-                chain,
-                member,
+                root_local: fact.root_object,
+                root_method: fact.root_method,
+                chain: fact.chain,
+                member: fact.member,
             });
         }
     }
@@ -1788,7 +1777,7 @@ fn propagate_fluent_chain_accesses(
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
         for access in fluent_chain_accesses(resolved) {
-            let Some(seed_keys) = local_to_export_keys.get(access.root_local) else {
+            let Some(seed_keys) = local_to_export_keys.get(access.root_local.as_str()) else {
                 continue;
             };
             for seed_key in seed_keys {
@@ -1798,12 +1787,13 @@ fn propagate_fluent_chain_accesses(
                     let Some(origin_module) = module_by_id.get(&origin.file_id) else {
                         continue;
                     };
+                    let chain = access.chain.iter().map(String::as_str).collect::<Vec<_>>();
                     let chain_valid = origin_module.exports.iter().any(|export| {
                         export_validates_fluent_chain(
                             export,
                             &origin,
-                            access.root_method,
-                            &access.chain,
+                            access.root_method.as_str(),
+                            &chain,
                         )
                     });
                     if !chain_valid {
@@ -1812,41 +1802,38 @@ fn propagate_fluent_chain_accesses(
                     accessed_members
                         .entry(origin)
                         .or_default()
-                        .insert(access.member.to_string());
+                        .insert(access.member.clone());
                 }
             }
         }
     }
 }
 
-struct FluentChainNewAccess<'a> {
-    class_local: &'a str,
-    chain: Vec<&'a str>,
-    member: &'a str,
+struct FluentChainNewAccess {
+    class_local: String,
+    chain: Vec<String>,
+    member: String,
 }
 
-fn fluent_chain_new_accesses(module: &ResolvedModule) -> Vec<FluentChainNewAccess<'_>> {
+fn fluent_chain_new_accesses(module: &ResolvedModule) -> Vec<FluentChainNewAccess> {
     let mut accesses = Vec::new();
     for fact in &module.semantic_facts {
         if let SemanticFact::FluentChainNewMemberAccess(access) = fact {
             accesses.push(FluentChainNewAccess {
-                class_local: access.class_name.as_str(),
-                chain: access.chain.iter().map(String::as_str).collect(),
-                member: access.member.as_str(),
+                class_local: access.class_name.clone(),
+                chain: access.chain.clone(),
+                member: access.member.clone(),
             });
         }
     }
     for access in &module.member_accesses {
-        if let Some(LegacySemanticMemberAccess::FluentChainNew {
-            class_local,
-            chain,
-            member,
-        }) = parse_legacy_semantic_member_access(access.object.as_str(), access.member.as_str())
+        if let Some(SemanticFact::FluentChainNewMemberAccess(fact)) =
+            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())
         {
             accesses.push(FluentChainNewAccess {
-                class_local,
-                chain,
-                member,
+                class_local: fact.class_name,
+                chain: fact.chain,
+                member: fact.member,
             });
         }
     }
@@ -1885,7 +1872,7 @@ fn propagate_fluent_chain_new_accesses(
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
         for access in fluent_chain_new_accesses(resolved) {
-            let Some(seed_keys) = local_to_export_keys.get(access.class_local) else {
+            let Some(seed_keys) = local_to_export_keys.get(access.class_local.as_str()) else {
                 continue;
             };
             for seed_key in seed_keys {
@@ -1895,16 +1882,18 @@ fn propagate_fluent_chain_new_accesses(
                     let Some(origin_module) = module_by_id.get(&origin.file_id) else {
                         continue;
                     };
-                    let chain_valid = origin_module.exports.iter().any(|export| {
-                        export_validates_fluent_chain_new(export, &origin, &access.chain)
-                    });
+                    let chain = access.chain.iter().map(String::as_str).collect::<Vec<_>>();
+                    let chain_valid = origin_module
+                        .exports
+                        .iter()
+                        .any(|export| export_validates_fluent_chain_new(export, &origin, &chain));
                     if !chain_valid {
                         continue;
                     }
                     accessed_members
                         .entry(origin)
                         .or_default()
-                        .insert(access.member.to_string());
+                        .insert(access.member.clone());
                 }
             }
         }
@@ -5211,6 +5200,6 @@ mod tests {
         let malformed = format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:");
 
         assert!(is_legacy_member_access_object(&malformed));
-        assert!(parse_legacy_semantic_member_access(&malformed, "value").is_none());
+        assert!(legacy_member_access_to_semantic_fact(&malformed, "value").is_none());
     }
 }
