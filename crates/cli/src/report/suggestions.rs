@@ -1,21 +1,9 @@
-//! Command-level `next_steps[]` builder.
+//! Runtime fact adapters for `next_steps[]` builders.
 //!
-//! Computes a small list of read-only, runnable follow-up commands from a run's
-//! findings, surfaced at the JSON root (and as a one-line human `Next:` hint).
-//! The purpose is to point agents and humans sideways to fallow's adjacent
-//! verification capabilities (trace, complexity breakdown, audit, workspace
-//! scoping) that telemetry shows agents rarely discover, because they act on the
-//! output in front of them rather than on reference docs.
-//!
-//! Two hard contracts, both enforced by the tests in this module and by the
-//! `next_step` constructor's debug assertions:
-//!
-//! 1. **Read-only.** A step NEVER suggests `fallow fix` or any mutating command.
-//! 2. **Runnable, placeholder-free.** Every `command` runs as-is; it never
-//!    contains an angle-bracket placeholder. Finding-derived values come from a
-//!    real, deterministically-selected finding; values that cannot be made
-//!    concrete (a coverage path) are dropped from v1 rather than shipped as a
-//!    placeholder, and an unresolvable git ref omits its step entirely.
+//! The stable command strings, ordering, caps, and read-only contract live in
+//! `fallow-output`. This module keeps the CLI-specific probes: environment
+//! toggles, project setup state, git refs, changed-branch applicability, and
+//! deterministic finding targets.
 
 use std::path::Path;
 use std::process::Command;
@@ -33,9 +21,6 @@ use fallow_types::output::NextStep;
 
 use crate::health_types::HealthReport;
 use crate::output_dupes::DupesReportPayload;
-
-/// Mutating verbs a next-step must never suggest (the read-only contract).
-const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hooks"];
 
 /// `FALLOW_SUGGESTIONS=off` (or `0`/`false`/`no`/`disabled`) disables next-steps
 /// entirely. Default on. This is the documented escape hatch for CI consumers
@@ -56,26 +41,6 @@ fn suggestions_enabled_from(value: Option<&str>) -> bool {
             "off" | "0" | "false" | "no" | "disabled"
         ),
         None => true,
-    }
-}
-
-/// Construct a next-step, asserting the two contracts in debug builds so a new
-/// trigger that violates them trips the test suite rather than shipping.
-fn next_step(id: &str, command: String, reason: &str) -> NextStep {
-    debug_assert!(
-        !command.contains('<') && !command.contains('>'),
-        "next-step command must be runnable (no placeholder): {command}"
-    );
-    debug_assert!(
-        !command
-            .split_whitespace()
-            .any(|token| MUTATING_VERBS.contains(&token)),
-        "next-step command must be read-only (no mutating verb): {command}"
-    );
-    NextStep {
-        id: id.to_string(),
-        command,
-        reason: reason.to_string(),
     }
 }
 
@@ -173,15 +138,8 @@ fn default_workspace_ref_for_next_step(root: &Path) -> Option<String> {
 
 /// `audit-changed`: gate only the files the current branch changed. `fallow
 /// audit` auto-detects its base, so no ref needs embedding.
-fn audit_changed(root: &Path) -> Option<NextStep> {
-    if !fallow_core::churn::is_git_repo(root) {
-        return None;
-    }
-    Some(next_step(
-        "audit-changed",
-        "fallow audit".to_string(),
-        "gate only the files your branch changed (auto-detects the base)",
-    ))
+fn audit_changed_applicable(root: &Path) -> bool {
+    fallow_core::churn::is_git_repo(root)
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +217,7 @@ pub fn build_dead_code_next_steps(
         offer_setup,
         impact_digest: digest.map(impact_counts),
         workspace_ref: workspace_ref.as_deref(),
-        audit_changed: audit_changed(root).is_some(),
+        audit_changed: audit_changed_applicable(root),
     })
 }
 
@@ -277,7 +235,7 @@ pub fn health_next_steps_input(
         has_findings: !report.findings.is_empty(),
         offer_setup,
         impact_digest: digest.map(impact_counts),
-        audit_changed: audit_changed(root).is_some(),
+        audit_changed: audit_changed_applicable(root),
     }
 }
 
@@ -300,7 +258,7 @@ pub fn build_dupes_next_steps(
         clone_fingerprints: &clone_fingerprints,
         offer_setup,
         impact_digest: digest.map(impact_counts),
-        audit_changed: audit_changed(root).is_some(),
+        audit_changed: audit_changed_applicable(root),
     })
 }
 
@@ -338,7 +296,7 @@ pub fn build_combined_next_steps(
         has_complexity_findings: health.is_some_and(|h| !h.findings.is_empty()),
         offer_setup,
         impact_digest: digest.map(impact_counts),
-        audit_changed: audit_changed(root).is_some(),
+        audit_changed: audit_changed_applicable(root),
     })
 }
 
@@ -473,6 +431,8 @@ mod tests {
     }
 
     fn assert_valid(step: &NextStep) {
+        const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hooks"];
+
         assert!(
             !step.command.contains('<') && !step.command.contains('>'),
             "command must be placeholder-free: {}",
@@ -693,29 +653,31 @@ mod tests {
 
     #[test]
     fn every_emitted_command_is_runnable_and_read_only() {
-        // Exercise every data-driven trigger and assert both contracts.
+        // Exercise CLI adapters and assert the output-owned command contracts.
         let root = PathBuf::from("/project");
         let results = results_with_exports(vec![unused_export("/project/src/a.ts", "alpha")]);
+        let payload = dupes_payload();
+        let report = health_report_with_finding();
         let mut all = Vec::new();
         all.extend(build_audit_next_steps(Some((&results, &root)), None));
-        // Static-command triggers (no findings needed to inspect the string).
-        all.push(next_step("audit-changed", "fallow audit".to_string(), "x"));
-        all.push(next_step(
-            "scope-workspaces",
-            "fallow dead-code --changed-workspaces origin/main".to_string(),
-            "x",
+        all.extend(build_dead_code_next_steps(
+            &results,
+            &root,
+            true,
+            Some(digest(2, 1)),
         ));
-        all.push(next_step(
-            "complexity-breakdown",
-            "fallow health --complexity-breakdown".to_string(),
-            "x",
+        all.extend(build_dupes_next_steps(&payload, &root, false, None));
+        all.extend(build_health_next_steps_contract(health_next_steps_input(
+            &report, &root, false, None,
+        )));
+        all.extend(build_combined_next_steps(
+            Some(&results),
+            Some(&payload),
+            Some(&report),
+            &root,
+            true,
+            Some(digest(2, 1)),
         ));
-        all.push(next_step(
-            "trace-clone",
-            "fallow dupes --trace dup:abcd1234".to_string(),
-            "x",
-        ));
-        all.push(next_step("setup", "fallow schema".to_string(), "x"));
         assert!(!all.is_empty());
         for step in &all {
             assert_valid(step);
