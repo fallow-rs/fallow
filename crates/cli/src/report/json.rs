@@ -12,8 +12,9 @@ use super::{emit_json, normalize_uri};
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutput,
-    FallowOutput, GroupByMode, HealthOutput, WorkspaceDiagnosticOutput,
-    apply_config_fixable_to_duplicate_exports, build_check_output, serialize_root_output,
+    FallowOutput, GroupByMode, HealthOutputInput, WorkspaceDiagnosticOutput,
+    apply_config_fixable_to_duplicate_exports, build_check_output, build_health_output,
+    serialize_root_output,
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
@@ -496,10 +497,10 @@ pub fn build_health_json(
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let envelope = HealthOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
+    let envelope = build_health_output(HealthOutputInput {
+        schema_version: SCHEMA_VERSION,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        elapsed,
         report: report.clone(),
         grouped_by: None,
         groups: None,
@@ -511,7 +512,7 @@ pub fn build_health_json(
             crate::report::suggestions::setup_pointer_applicable(root),
             crate::report::suggestions::due_impact_digest(root),
         ),
-    };
+    });
     let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
@@ -541,10 +542,10 @@ pub fn build_grouped_health_json(
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", root.display());
-    let envelope = HealthOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
+    let envelope = build_health_output(HealthOutputInput {
+        schema_version: SCHEMA_VERSION,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        elapsed,
         report: report.clone(),
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         groups: None,
@@ -556,7 +557,7 @@ pub fn build_grouped_health_json(
             crate::report::suggestions::setup_pointer_applicable(root),
             crate::report::suggestions::due_impact_digest(root),
         ),
-    };
+    });
     let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
     strip_root_prefix(&mut output, &root_prefix);
 
@@ -860,10 +861,10 @@ mod tests {
             ..Default::default()
         };
 
-        let envelope: HealthOutput<
+        let envelope: crate::output_envelope::HealthOutput<
             crate::health_types::HealthReport,
             crate::health_types::HealthGroup,
-        > = HealthOutput {
+        > = crate::output_envelope::HealthOutput {
             schema_version: SchemaVersion(SCHEMA_VERSION),
             version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
             elapsed_ms: ElapsedMs(7),

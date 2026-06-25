@@ -39,7 +39,7 @@ pub use fallow_types::output;
 pub use fallow_types::output_dead_code;
 pub use fallow_types::output_health;
 pub use format::OutputFormat;
-pub use health::HealthOutput;
+pub use health::{HealthOutput, HealthOutputInput, build_health_output};
 pub use issue_contract::{
     ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, CHECK_DOCS,
     CODECLIMATE_RESULT_CODES, IssueOutputContract, TsAliasMeta, check_meta, dead_code_docs_url,
