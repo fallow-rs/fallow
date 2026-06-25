@@ -69,8 +69,9 @@ pub use fallow_types::results::AnalysisResults;
 pub use health::{
     ComplexityRunOptions, ComplexitySectionOptions, DerivedComplexityOptions,
     DerivedHealthSections, HealthAnalysisResult, HealthCoverageInputs, HealthGateOptions,
-    HealthSectionOptions, HealthSharedParseData, HealthSort, HealthThresholdOverrides,
-    RuntimeCoverageOptions, derive_complexity_sections, derive_health_sections,
+    HealthRunOptions, HealthRunOptionsInput, HealthSectionOptions, HealthSharedParseData,
+    HealthSort, HealthThresholdOverrides, RuntimeCoverageOptions, derive_complexity_sections,
+    derive_health_run_options, derive_health_sections,
 };
 
 /// Result alias for typed engine operations.

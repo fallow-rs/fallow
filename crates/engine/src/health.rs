@@ -77,6 +77,50 @@ pub struct DerivedHealthSections {
     pub score_only_output: bool,
 }
 
+/// Command-neutral inputs used to normalize a health run before it reaches a
+/// concrete runner.
+#[derive(Debug, Clone)]
+pub struct HealthRunOptionsInput<'a> {
+    pub output: OutputFormat,
+    pub thresholds: HealthThresholdOverrides,
+    pub top: Option<usize>,
+    pub sort: HealthSort,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub ownership: bool,
+    pub ownership_emails: Option<EmailMode>,
+    pub targets: bool,
+    pub css: bool,
+    pub effort: Option<EffortEstimate>,
+    pub score: bool,
+    pub gates: HealthGateOptions,
+    pub snapshot_requested: bool,
+    pub trend: bool,
+    pub since: Option<&'a str>,
+    pub min_commits: Option<u32>,
+    pub coverage_inputs: HealthCoverageInputs<'a>,
+    pub runtime_coverage: Option<RuntimeCoverageOptions>,
+}
+
+/// Normalized health inputs shared by CLI, API, NAPI, and future runners.
+#[derive(Debug, Clone)]
+pub struct HealthRunOptions<'a> {
+    pub thresholds: HealthThresholdOverrides,
+    pub top: Option<usize>,
+    pub sort: HealthSort,
+    pub sections: DerivedHealthSections,
+    pub ownership: bool,
+    pub ownership_emails: Option<EmailMode>,
+    pub effort: Option<EffortEstimate>,
+    pub gates: HealthGateOptions,
+    pub since: Option<&'a str>,
+    pub min_commits: Option<u32>,
+    pub coverage_inputs: HealthCoverageInputs<'a>,
+    pub runtime_coverage: Option<RuntimeCoverageOptions>,
+}
+
 /// Derive effective health section flags for CLI and embedders.
 #[must_use]
 pub fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSections {
@@ -118,6 +162,40 @@ pub fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSe
         score: effective_score,
         force_full,
         score_only_output: is_health_score_only_output(options, score),
+    }
+}
+
+/// Normalize health run inputs into the engine-owned run contract.
+#[must_use]
+pub fn derive_health_run_options(input: HealthRunOptionsInput<'_>) -> HealthRunOptions<'_> {
+    let targets = input.targets || input.effort.is_some();
+    let sections = derive_health_sections(&HealthSectionOptions {
+        output: input.output,
+        complexity: input.complexity,
+        file_scores: input.file_scores,
+        coverage_gaps: input.coverage_gaps,
+        hotspots: input.hotspots,
+        targets,
+        css: input.css,
+        score: input.score,
+        score_gate: input.gates.min_score.is_some(),
+        snapshot_requested: input.snapshot_requested,
+        trend: input.trend,
+    });
+
+    HealthRunOptions {
+        thresholds: input.thresholds,
+        top: input.top,
+        sort: input.sort,
+        sections,
+        ownership: input.ownership && sections.hotspots,
+        ownership_emails: input.ownership_emails,
+        effort: input.effort,
+        gates: input.gates,
+        since: input.since,
+        min_commits: input.min_commits,
+        coverage_inputs: input.coverage_inputs,
+        runtime_coverage: input.runtime_coverage,
     }
 }
 
@@ -255,4 +333,90 @@ pub struct HealthAnalysisResult<GroupResolver = ()> {
     pub timings: Option<HealthTimings>,
     pub coverage_gaps_has_findings: bool,
     pub should_fail_on_coverage_gaps: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn health_run_input() -> HealthRunOptionsInput<'static> {
+        HealthRunOptionsInput {
+            output: OutputFormat::Json,
+            thresholds: HealthThresholdOverrides::default(),
+            top: None,
+            sort: HealthSort::Cyclomatic,
+            complexity: false,
+            file_scores: false,
+            coverage_gaps: false,
+            hotspots: false,
+            ownership: false,
+            ownership_emails: None,
+            targets: false,
+            css: false,
+            effort: None,
+            score: false,
+            gates: HealthGateOptions::default(),
+            snapshot_requested: false,
+            trend: false,
+            since: None,
+            min_commits: None,
+            coverage_inputs: HealthCoverageInputs::default(),
+            runtime_coverage: None,
+        }
+    }
+
+    #[test]
+    fn health_run_options_default_sections_match_health_defaults() {
+        let run = derive_health_run_options(health_run_input());
+
+        assert!(run.sections.complexity);
+        assert!(run.sections.file_scores);
+        assert!(run.sections.hotspots);
+        assert!(run.sections.targets);
+        assert!(run.sections.score);
+        assert!(!run.ownership);
+    }
+
+    #[test]
+    fn health_run_options_effort_requests_targets() {
+        let mut input = health_run_input();
+        input.effort = Some(EffortEstimate::Low);
+
+        let run = derive_health_run_options(input);
+
+        assert!(run.sections.targets);
+        assert_eq!(run.effort, Some(EffortEstimate::Low));
+    }
+
+    #[test]
+    fn health_run_options_ownership_requires_hotspots() {
+        let mut input = health_run_input();
+        input.complexity = true;
+        input.ownership = true;
+
+        let run = derive_health_run_options(input);
+
+        assert!(!run.sections.hotspots);
+        assert!(!run.ownership);
+
+        let mut input = health_run_input();
+        input.ownership = true;
+        input.hotspots = true;
+
+        let run = derive_health_run_options(input);
+
+        assert!(run.sections.hotspots);
+        assert!(run.ownership);
+    }
+
+    #[test]
+    fn health_run_options_score_gate_forces_score() {
+        let mut input = health_run_input();
+        input.gates.min_score = Some(90.0);
+
+        let run = derive_health_run_options(input);
+
+        assert!(run.sections.score);
+        assert_eq!(run.gates.min_score, Some(90.0));
+    }
 }
