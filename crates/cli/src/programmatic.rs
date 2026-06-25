@@ -13,7 +13,7 @@ use crate::report::{build_duplication_json, build_health_json};
 pub use fallow_api::{
     AnalysisOptions, COMMON_ANALYSIS_OPTION_FLAGS, ComplexityOptions, ComplexitySort,
     DeadCodeFilters, DeadCodeOptions, DuplicationMode, DuplicationOptions, OwnershipEmailMode,
-    ProgrammaticError, TargetEffort,
+    ProgrammaticError, TargetEffort, derive_complexity_options,
 };
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
@@ -623,7 +623,7 @@ fn build_complexity_options<'a>(
     resolved: &'a ResolvedAnalysisOptions,
     options: &'a ComplexityOptions,
 ) -> HealthOptions<'a> {
-    let state = derived_complexity_options(options);
+    let state = derive_complexity_options(options);
 
     HealthOptions {
         root: &resolved.root,
@@ -679,75 +679,6 @@ fn build_complexity_options<'a>(
         // imported hotspots call the CLI. Git churn is used when available.
         churn_file: None,
     }
-}
-
-struct DerivedComplexityOptions {
-    any_section: bool,
-    complexity: bool,
-    file_scores: bool,
-    coverage_gaps: bool,
-    hotspots: bool,
-    ownership: bool,
-    targets: bool,
-    force_full: bool,
-    score_only_output: bool,
-    score: bool,
-}
-
-fn derived_complexity_options(options: &ComplexityOptions) -> DerivedComplexityOptions {
-    let ownership = options.ownership || options.ownership_emails.is_some();
-    let requested_hotspots = options.hotspots || ownership;
-    let requested_targets = options.targets || options.effort.is_some();
-    let any_section = options.complexity
-        || options.file_scores
-        || options.coverage_gaps
-        || requested_hotspots
-        || requested_targets
-        || options.score;
-    let score = if any_section { options.score } else { true };
-    let hotspots = if any_section {
-        requested_hotspots
-    } else {
-        true
-    };
-
-    DerivedComplexityOptions {
-        any_section,
-        complexity: if any_section {
-            options.complexity
-        } else {
-            true
-        },
-        file_scores: effective_file_scores(options, any_section, score),
-        coverage_gaps: if any_section {
-            options.coverage_gaps
-        } else {
-            false
-        },
-        hotspots,
-        ownership: ownership && hotspots,
-        targets: if any_section { requested_targets } else { true },
-        force_full: score,
-        score_only_output: is_score_only_output(options, requested_hotspots, requested_targets),
-        score,
-    }
-}
-
-fn effective_file_scores(options: &ComplexityOptions, any_section: bool, force_full: bool) -> bool {
-    (if any_section {
-        options.file_scores
-    } else {
-        true
-    }) || force_full
-}
-
-fn is_score_only_output(options: &ComplexityOptions, hotspots: bool, targets: bool) -> bool {
-    options.score
-        && !options.complexity
-        && !options.file_scores
-        && !options.coverage_gaps
-        && !hotspots
-        && !targets
 }
 
 /// Run the health / complexity analysis and return the CLI JSON contract as a value.
