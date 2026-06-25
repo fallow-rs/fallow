@@ -46,7 +46,7 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
 use crate::error::emit_error;
-use crate::health::{HealthOptions, SharedParseData};
+use crate::health::HealthOptions;
 use crate::health_types::{
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageVerdict,
 };
@@ -1117,7 +1117,7 @@ fn analyze_security_runtime(
     )?;
     let result = crate::health::execute_health_with_shared_parse(
         &security_runtime_health_options(opts, runtime_coverage),
-        SharedParseData {
+        fallow_engine::HealthSharedParseData {
             files,
             modules,
             analysis_output: Some(analysis_output),

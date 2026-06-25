@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use colored::Colorize;
 use fallow_config::{OutputFormat, PackageJson, ResolvedConfig, Severity};
-use fallow_engine::{HealthSort, RuntimeCoverageOptions};
+use fallow_engine::{HealthSharedParseData, HealthSort, RuntimeCoverageOptions};
 
 use crate::baseline::{HealthBaselineData, filter_new_health_findings, filter_new_health_targets};
 use crate::check::{get_changed_files, resolve_workspace_scope};
@@ -32,13 +32,6 @@ use runtime_filter::{
 };
 use scoring::compute_file_scores;
 
-/// Pre-parsed data from the dead-code pipeline, shared with health to avoid re-analysis.
-pub struct SharedParseData {
-    pub files: Vec<fallow_types::discover::DiscoveredFile>,
-    pub modules: Vec<fallow_types::extract::ModuleInfo>,
-    /// Full analysis output (graph + results) for file scoring.
-    pub analysis_output: Option<fallow_core::AnalysisOutput>,
-}
 use targets::{TargetAuxData, compute_refactoring_targets};
 
 /// Sort criteria for complexity output.
@@ -217,7 +210,7 @@ fn validate_churn_file(opts: &HealthOptions<'_>) -> Result<(), ExitCode> {
 /// Skips file discovery and parsing (saves ~1.9s on 21K-file projects).
 pub fn execute_health_with_shared_parse(
     opts: &HealthOptions<'_>,
-    shared: SharedParseData,
+    shared: HealthSharedParseData,
 ) -> Result<HealthResult, ExitCode> {
     scoring::validate_coverage_root_absolute(opts.coverage_root)
         .map_err(|e| emit_error(&e, 2, opts.output))?;
