@@ -1002,6 +1002,7 @@ dependencies = [
  "criterion2",
  "fallow-cli",
  "fallow-core",
+ "fallow-types",
  "tempfile",
 ]
 

@@ -45,6 +45,12 @@ struct CachedTokenFile {
     suppressions: Vec<CachedSuppression>,
 }
 
+impl CachedTokenFile {
+    fn source_fingerprint(&self) -> SourceFingerprint {
+        SourceFingerprint::new(self.mtime_ns, self.file_size)
+    }
+}
+
 #[derive(Debug, Clone, Encode, Decode)]
 struct CachedHashedToken {
     hash: u64,
@@ -146,9 +152,7 @@ impl TokenCache {
             return None;
         }
         let entry = self.store.entries.get(&cache_key(path))?;
-        if SourceFingerprint::new(entry.mtime_ns, entry.file_size) != fingerprint
-            || entry.normalization_hash != mode.hash
-        {
+        if entry.source_fingerprint() != fingerprint || entry.normalization_hash != mode.hash {
             return None;
         }
         Some(entry.to_entry())

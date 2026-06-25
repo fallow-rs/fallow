@@ -185,8 +185,7 @@ impl CacheStore {
     ) -> Option<&CachedModule> {
         let key = path.to_string_lossy();
         let entry = self.entries.get(key.as_ref())?;
-        let cached = SourceFingerprint::new(entry.mtime_secs, entry.file_size);
-        if cached == fingerprint && fingerprint.has_known_mtime() {
+        if entry.source_fingerprint() == fingerprint && fingerprint.has_known_mtime() {
             Some(entry)
         } else {
             None

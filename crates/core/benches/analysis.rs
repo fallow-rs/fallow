@@ -745,12 +745,13 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
 fn cache_round_trip(c: &mut Criterion) {
     use fallow_core::cache::{cached_to_module, module_to_cached};
     use fallow_core::discover::FileId;
+    use fallow_types::source_fingerprint::SourceFingerprint;
 
     c.bench_function("cache_round_trip", |bencher| {
         bencher.iter_batched_ref(
             create_cache_round_trip_input,
             |module| {
-                let cached = module_to_cached(module, 0, 0);
+                let cached = module_to_cached(module, SourceFingerprint::new(0, 0));
                 let _ = cached_to_module(&cached, FileId(0));
             },
             BatchSize::LargeInput,

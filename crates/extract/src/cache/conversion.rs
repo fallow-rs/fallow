@@ -549,20 +549,18 @@ pub fn cached_to_module_opts(
 
 /// Convert a [`ModuleInfo`](crate::ModuleInfo) to a [`CachedModule`] for storage.
 ///
-/// `mtime_secs` and `file_size` come from `std::fs::metadata()` at parse time
-/// and enable fast cache validation on subsequent runs (skip file read when
-/// mtime+size match). Despite the legacy field name, callers now pass the
-/// shared source-fingerprint mtime value.
+/// The [`SourceFingerprint`](fallow_types::source_fingerprint::SourceFingerprint)
+/// comes from `std::fs::metadata()` at parse time and enables fast cache
+/// validation on subsequent runs.
 #[must_use]
 pub fn module_to_cached(
     module: &crate::ModuleInfo,
-    mtime_secs: u64,
-    file_size: u64,
+    fingerprint: fallow_types::source_fingerprint::SourceFingerprint,
 ) -> CachedModule {
     CachedModule {
         content_hash: module.content_hash,
-        mtime_secs,
-        file_size,
+        mtime_secs: fingerprint.mtime_ns,
+        file_size: fingerprint.file_size,
         last_access_secs: current_unix_seconds(),
         exports: module_exports_to_cached(&module.exports),
         imports: module_imports_to_cached(&module.imports),
@@ -639,4 +637,21 @@ pub fn module_to_cached(
         svelte_listened_events: module.svelte_listened_events.clone(),
         has_dynamic_dispatch: module.has_dynamic_dispatch,
     }
+}
+
+/// Convert a module to a cache entry from explicit source-fingerprint parts.
+///
+/// Kept for tests that need literal invalidation inputs without filesystem
+/// metadata.
+#[cfg(test)]
+#[must_use]
+pub fn module_to_cached_from_parts(
+    module: &crate::ModuleInfo,
+    mtime_ns: u64,
+    file_size: u64,
+) -> CachedModule {
+    module_to_cached(
+        module,
+        fallow_types::source_fingerprint::SourceFingerprint::new(mtime_ns, file_size),
+    )
 }

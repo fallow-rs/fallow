@@ -11,6 +11,8 @@ mod types;
 #[cfg(all(test, not(miri)))]
 mod tests;
 
+#[cfg(test)]
+pub use conversion::module_to_cached_from_parts;
 pub use conversion::{
     cached_to_module, cached_to_module_opts, current_unix_seconds, module_to_cached,
 };

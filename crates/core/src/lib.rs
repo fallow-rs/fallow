@@ -180,26 +180,15 @@ fn update_cache(
             if let Some(cached) = store.get_by_path_only(&file.path)
                 && cached.content_hash == module.content_hash
             {
-                let cached_fingerprint = fallow_types::source_fingerprint::SourceFingerprint::new(
-                    cached.mtime_secs,
-                    cached.file_size,
-                );
-                if cached_fingerprint != fingerprint {
+                if cached.source_fingerprint() != fingerprint {
                     let preserved_last_access = cached.last_access_secs;
-                    let mut refreshed = cache::module_to_cached(
-                        module,
-                        fingerprint.mtime_ns,
-                        fingerprint.file_size,
-                    );
+                    let mut refreshed = cache::module_to_cached(module, fingerprint);
                     refreshed.last_access_secs = preserved_last_access;
                     store.insert(&file.path, refreshed);
                 }
                 continue;
             }
-            store.insert(
-                &file.path,
-                cache::module_to_cached(module, fingerprint.mtime_ns, fingerprint.file_size),
-            );
+            store.insert(&file.path, cache::module_to_cached(module, fingerprint));
         }
     }
     store.retain_paths(files);

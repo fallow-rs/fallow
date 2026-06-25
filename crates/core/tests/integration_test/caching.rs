@@ -200,7 +200,10 @@ fn incremental_with_cache_all_hits() {
         if let Some(file) = files.get(module.file_id.0 as usize) {
             cache_store.insert(
                 &file.path,
-                fallow_core::cache::module_to_cached(module, 0, 0),
+                fallow_core::cache::module_to_cached(
+                    module,
+                    fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
+                ),
             );
         }
     }
@@ -223,7 +226,10 @@ fn incremental_results_identical() {
         if let Some(file) = files.get(module.file_id.0 as usize) {
             cache_store.insert(
                 &file.path,
-                fallow_core::cache::module_to_cached(module, 0, 0),
+                fallow_core::cache::module_to_cached(
+                    module,
+                    fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
+                ),
             );
         }
     }
