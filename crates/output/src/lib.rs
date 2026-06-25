@@ -32,6 +32,7 @@ mod health_scores;
 mod health_targets;
 mod health_trends;
 mod health_vital_signs;
+mod inspect_envelopes;
 mod issue_contract;
 mod report_contract;
 
@@ -119,6 +120,11 @@ pub use health_trends::{HealthTrend, TrendCount, TrendDirection, TrendMetric, Tr
 pub use health_vital_signs::{
     RenderFanInTopComponent, RiskProfile, SNAPSHOT_SCHEMA_VERSION, VitalSigns, VitalSignsCounts,
     VitalSignsSnapshot,
+};
+pub use inspect_envelopes::{
+    ExplainOutput, InspectEvidence, InspectEvidenceScope, InspectEvidenceSection,
+    InspectFileIdentity, InspectIdentity, InspectOutput, InspectSectionStatus,
+    InspectSymbolIdentity, InspectTargetDescriptor,
 };
 pub use issue_contract::{
     ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, CHECK_DOCS,
