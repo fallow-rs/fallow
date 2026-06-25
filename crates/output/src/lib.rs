@@ -13,6 +13,8 @@
 )]
 
 mod audit_brief;
+mod audit_decision_surface;
+mod audit_walkthrough;
 mod check;
 mod codeclimate;
 mod coverage_envelopes;
@@ -46,6 +48,17 @@ pub use audit_brief::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
     REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefOutput, ReviewBriefSchemaVersion, ReviewDeltas,
     ReviewEffort, ReviewUnitFact, RiskClass,
+};
+pub use audit_decision_surface::{
+    ALL_CATEGORIES, DECISION_SURFACE_SCHEMA_VERSION, Decision, DecisionAction, DecisionActionType,
+    DecisionCategory, DecisionSurface, DecisionSurfaceOutput, DecisionSurfaceSchemaVersion,
+    DecisionWithActions, TruncationNote, build_decision_surface_output, decision_actions,
+    suppress_comment,
+};
+pub use audit_walkthrough::{
+    AcceptedJudgment, AgentJudgment, AgentSchema, AgentWalkthrough, ChangeAnchor, DirectionUnit,
+    INJECTION_NOTE, RejectedJudgment, ReviewDirection, WalkthroughGuide, WalkthroughValidation,
+    agent_schema,
 };
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,

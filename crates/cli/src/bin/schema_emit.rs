@@ -28,15 +28,8 @@ use serde_json::{Map, Value};
 use fallow_cli::audit_brief::{
     DiffTriage, GraphFacts, ReviewBriefOutput, ReviewBriefSchemaVersion, ReviewEffort, RiskClass,
 };
-use fallow_cli::audit_decision_surface::{
-    Decision, DecisionAction, DecisionActionType, DecisionCategory, DecisionSurface,
-    DecisionSurfaceOutput, DecisionSurfaceSchemaVersion, DecisionWithActions, TruncationNote,
-};
 use fallow_cli::audit_focus::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
-use fallow_cli::audit_walkthrough::{
-    AcceptedJudgment, AgentSchema, ChangeAnchor, DirectionUnit, RejectedJudgment, ReviewDirection,
-    WalkthroughGuide, WalkthroughValidation,
-};
+use fallow_cli::audit_walkthrough::{WalkthroughGuide, WalkthroughValidation};
 use fallow_cli::health_types::{
     ComplexityViolation, ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary,
     CoverageGaps, CoverageModel, CoverageTier, ExceededThreshold, FileHealthScore, FindingSeverity,
@@ -85,6 +78,11 @@ use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
+};
+use fallow_output::{
+    AcceptedJudgment, AgentSchema, ChangeAnchor, Decision, DecisionAction, DecisionActionType,
+    DecisionCategory, DecisionSurface, DecisionSurfaceOutput, DecisionSurfaceSchemaVersion,
+    DecisionWithActions, DirectionUnit, RejectedJudgment, ReviewDirection, TruncationNote,
 };
 use fallow_output::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
