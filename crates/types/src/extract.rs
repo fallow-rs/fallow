@@ -1536,15 +1536,18 @@ pub fn is_legacy_template_or_semantic_whole_object_use(object: &str) -> bool {
 
 /// Iterate Angular template member names from typed facts plus decoded legacy
 /// template member-access sentinels.
-pub fn angular_template_member_names(module: &ModuleInfo) -> impl Iterator<Item = &str> {
-    let typed = module.semantic_facts.iter().filter_map(|fact| {
+pub fn angular_template_member_names_from_parts<'a>(
+    semantic_facts: &'a [SemanticFact],
+    member_accesses: &'a [MemberAccess],
+) -> impl Iterator<Item = &'a str> + 'a {
+    let typed = semantic_facts.iter().filter_map(|fact| {
         if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
             Some(access.member.as_str())
         } else {
             None
         }
     });
-    let legacy = module.member_accesses.iter().filter_map(|access| {
+    let legacy = member_accesses.iter().filter_map(|access| {
         if is_legacy_angular_template_member_access_object(&access.object) {
             Some(access.member.as_str())
         } else {
@@ -1554,10 +1557,28 @@ pub fn angular_template_member_names(module: &ModuleInfo) -> impl Iterator<Item 
     typed.chain(legacy)
 }
 
+/// Iterate Angular template member names from a module's typed facts plus
+/// decoded legacy template member-access sentinels.
+pub fn angular_template_member_names(module: &ModuleInfo) -> impl Iterator<Item = &str> {
+    angular_template_member_names_from_parts(&module.semantic_facts, &module.member_accesses)
+}
+
+/// Return true when the fact/member-access slices contain any Angular template
+/// member reference.
+#[must_use]
+pub fn has_angular_template_members_from_parts(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> bool {
+    angular_template_member_names_from_parts(semantic_facts, member_accesses)
+        .next()
+        .is_some()
+}
+
 /// Return true when the module contains any Angular template member reference.
 #[must_use]
 pub fn has_angular_template_members(module: &ModuleInfo) -> bool {
-    angular_template_member_names(module).next().is_some()
+    has_angular_template_members_from_parts(&module.semantic_facts, &module.member_accesses)
 }
 
 /// Return true when a module spreads `this` in Angular template context.
