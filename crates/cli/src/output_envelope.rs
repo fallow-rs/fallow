@@ -16,9 +16,12 @@ pub use fallow_output::{
     CodeClimateSeverity, CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion,
     CoverageSetupFileToEdit, CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput,
     CoverageSetupPackageManager, CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion,
-    CoverageSetupSnippet, DupesOutput, DupesOutputInput, GroupByMode, HealthOutput,
-    HealthOutputInput, WorkspaceDiagnosticOutput, apply_config_fixable_to_duplicate_exports,
-    build_check_output, build_check_summary, build_dupes_output, build_health_output,
+    CoverageSetupSnippet, DupesOutput, DupesOutputInput, ExplainOutput, GroupByMode, HealthOutput,
+    HealthOutputInput, InspectEvidence, InspectEvidenceScope, InspectEvidenceSection,
+    InspectFileIdentity, InspectIdentity, InspectOutput, InspectSectionStatus,
+    InspectSymbolIdentity, InspectTargetDescriptor, WorkspaceDiagnosticOutput,
+    apply_config_fixable_to_duplicate_exports, build_check_output, build_check_summary,
+    build_dupes_output, build_health_output,
 };
 use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, ToolVersion};
 use fallow_types::output::NextStep;
@@ -219,148 +222,6 @@ pub struct CombinedMeta {
     pub health: Option<Meta>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telemetry: Option<TelemetryMeta>,
-}
-
-/// Envelope emitted by `fallow explain <issue-type> --format json`.
-///
-/// Standalone rule explanation. This command does not run project analysis
-/// and intentionally returns a compact object without `schema_version` /
-/// `version` metadata; consumers that need those should call any other
-/// fallow JSON-producing command.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(title = "fallow explain <issue-type> --format json")
-)]
-pub struct ExplainOutput {
-    pub id: String,
-    pub name: String,
-    pub summary: String,
-    pub rationale: String,
-    pub example: String,
-    pub how_to_fix: String,
-    pub docs: String,
-}
-
-/// Envelope emitted by `fallow inspect --format json`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow inspect --format json"))]
-pub struct InspectOutput {
-    pub target: InspectTargetDescriptor,
-    pub identity: InspectIdentity,
-    pub evidence: InspectEvidence,
-    pub warnings: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum InspectTargetDescriptor {
-    File { file: String },
-    Symbol { file: String, export_name: String },
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(untagged)]
-pub enum InspectIdentity {
-    File(InspectFileIdentity),
-    Symbol(InspectSymbolIdentity),
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct InspectFileIdentity {
-    pub file: String,
-    pub is_reachable: Option<serde_json::Value>,
-    pub is_entry_point: Option<serde_json::Value>,
-    pub export_count: Option<usize>,
-    pub import_count: Option<usize>,
-    pub imported_by_count: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct InspectSymbolIdentity {
-    pub file: String,
-    pub export_name: String,
-    pub file_reachable: Option<serde_json::Value>,
-    pub is_entry_point: Option<serde_json::Value>,
-    pub is_used: Option<serde_json::Value>,
-    pub reason: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct InspectEvidence {
-    pub trace_file: InspectEvidenceSection,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trace_export: Option<InspectEvidenceSection>,
-    pub dead_code: InspectEvidenceSection,
-    pub duplication: InspectEvidenceSection,
-    pub complexity: InspectEvidenceSection,
-    pub security: InspectEvidenceSection,
-    /// Impact closure scoped to the inspected file as the seed: the transitive
-    /// affected-but-not-in-diff set + coordination gap.
-    pub impact_closure: InspectEvidenceSection,
-    /// OPT-IN symbol-level call chain. Present only when `--symbol-chain` was
-    /// requested AND the target is a SYMBOL (best-effort, syntactic, OFF the
-    /// ranked path). `None` (omitted) by default: symbol-level chains are
-    /// best-effort and not part of the trusted ranked evidence.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub symbol_chain: Option<InspectEvidenceSection>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct InspectEvidenceSection {
-    pub status: InspectSectionStatus,
-    pub scope: InspectEvidenceScope,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data: Option<serde_json::Value>,
-}
-
-impl InspectEvidenceSection {
-    #[must_use]
-    pub fn ok(scope: InspectEvidenceScope, data: serde_json::Value) -> Self {
-        Self {
-            status: InspectSectionStatus::Ok,
-            scope,
-            message: None,
-            data: Some(data),
-        }
-    }
-
-    #[must_use]
-    pub fn error(scope: InspectEvidenceScope, message: String) -> Self {
-        Self {
-            status: InspectSectionStatus::Error,
-            scope,
-            message: Some(message),
-            data: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum InspectSectionStatus {
-    Ok,
-    Error,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum InspectEvidenceScope {
-    Symbol,
-    File,
-    ProjectFilteredToFile,
 }
 
 /// Envelope emitted by `fallow --format review-github` / `review-gitlab`.
