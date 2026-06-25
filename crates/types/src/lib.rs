@@ -13,6 +13,8 @@
     )
 )]
 
+/// Shared churn output contracts.
+pub mod churn;
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
 /// JSON-output envelope and utility types: `SchemaVersion`, `ToolVersion`,

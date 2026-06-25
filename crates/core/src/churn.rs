@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+
+pub use fallow_types::churn::ChurnTrend;
 
 /// Function pointer signature used by `set_spawn_hook` to intercept the
 /// `git log --numstat` subprocess. Lets the CLI route long-running git
@@ -69,29 +71,6 @@ pub struct SinceDuration {
     pub git_after: String,
     /// Human-readable display string (e.g., `"6 months"`).
     pub display: String,
-}
-
-/// Churn trend indicator based on comparing recent vs older halves of the analysis period.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, bitcode::Encode, bitcode::Decode)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum ChurnTrend {
-    /// Recent half has >1.5× the commits of the older half.
-    Accelerating,
-    /// Churn is roughly stable between halves.
-    Stable,
-    /// Recent half has <0.67× the commits of the older half.
-    Cooling,
-}
-
-impl std::fmt::Display for ChurnTrend {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Accelerating => write!(f, "accelerating"),
-            Self::Stable => write!(f, "stable"),
-            Self::Cooling => write!(f, "cooling"),
-        }
-    }
 }
 
 /// Per-author commit aggregation for a single file.
@@ -922,7 +901,7 @@ fn intern_author(email: &str, pool: &mut Vec<String>, index: &mut FxHashMap<Stri
 }
 
 /// Parse a single numstat line: `"10\t5\tpath/to/file.ts"`.
-/// Binary files show as `"-\t-\tpath"` — skip those.
+/// Binary files show as `"-\t-\tpath"`, skip those.
 fn parse_numstat_line(line: &str) -> Option<(u32, u32, &str)> {
     let mut parts = line.splitn(3, '\t');
     let added_str = parts.next()?;
