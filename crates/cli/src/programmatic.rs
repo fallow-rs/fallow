@@ -671,13 +671,14 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
     fn run_programmatic_health(
         &self,
         options: &ComplexityOptions,
-    ) -> ProgrammaticResult<fallow_api::ProgrammaticHealthReport> {
+    ) -> ProgrammaticResult<fallow_api::ProgrammaticHealthRun> {
         let resolved = resolve_analysis_options(&options.analysis)?;
         resolved.install(|| {
             let health_options = build_complexity_options(&resolved, options);
             let result = crate::health::execute_health(&health_options)
                 .map_err(|_| generic_analysis_error("health"))?;
             let root = &result.config.root;
+            let workspace_diagnostics = workspace_diagnostics_for_programmatic_output(root);
             let next_steps = fallow_output::build_health_next_steps(
                 fallow_output::build_health_next_steps_input(
                     &result.report,
@@ -688,11 +689,18 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
                     crate::report::suggestions::audit_changed_applicable(root),
                 ),
             );
-            Ok(fallow_api::ProgrammaticHealthReport {
-                workspace_diagnostics: workspace_diagnostics_for_programmatic_output(root),
-                root: result.config.root.clone(),
-                report: result.report,
-                elapsed: result.elapsed,
+            Ok(fallow_api::ProgrammaticHealthRun {
+                analysis: fallow_engine::HealthAnalysisResult {
+                    report: result.report,
+                    grouping: result.grouping,
+                    group_resolver: None,
+                    config: result.config,
+                    elapsed: result.elapsed,
+                    timings: result.timings,
+                    coverage_gaps_has_findings: result.coverage_gaps_has_findings,
+                    should_fail_on_coverage_gaps: result.should_fail_on_coverage_gaps,
+                },
+                workspace_diagnostics,
                 next_steps,
                 envelope_mode: programmatic_root_envelope_mode(&resolved),
                 telemetry_analysis_run_id: crate::output_envelope::telemetry_analysis_run_id(),

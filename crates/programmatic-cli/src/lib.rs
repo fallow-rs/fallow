@@ -7,7 +7,7 @@
 
 #![cfg_attr(not(test), deny(clippy::disallowed_methods))]
 
-use fallow_api::{ComplexityOptions, ProgrammaticError, ProgrammaticHealthReport};
+use fallow_api::{ComplexityOptions, ProgrammaticError, ProgrammaticHealthRun};
 
 /// CLI-backed health runner used by embedders during the health migration.
 pub struct CliHealthRunner;
@@ -16,7 +16,7 @@ impl fallow_api::ProgrammaticHealthRunner for CliHealthRunner {
     fn run_programmatic_health(
         &self,
         options: &ComplexityOptions,
-    ) -> Result<ProgrammaticHealthReport, ProgrammaticError> {
+    ) -> Result<ProgrammaticHealthRun, ProgrammaticError> {
         fallow_cli::programmatic::CliProgrammaticHealthRunner.run_programmatic_health(options)
     }
 }

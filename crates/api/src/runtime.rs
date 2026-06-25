@@ -7,7 +7,9 @@ use fallow_config::{
     DetectionMode, DuplicatesConfig, OutputFormat, ProductionAnalysis, WorkspaceInfo,
 };
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
-use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
+use fallow_engine::{
+    AnalysisResults, AnalysisSession, HealthAnalysisResult, ProjectConfig, ProjectConfigOptions,
+};
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckOutputInput, DiffIndex, DupesOutput, DupesOutputInput, GroupByMode,
     HealthGroup, HealthJsonOutputInput, HealthOutputInput, HealthReport, MAX_DIFF_BYTES,
@@ -42,10 +44,12 @@ pub struct HealthJsonReportInput<'a> {
 }
 
 /// Health runner output consumed by the API-owned programmatic serializer.
-pub struct ProgrammaticHealthReport {
-    pub report: HealthReport,
-    pub root: PathBuf,
-    pub elapsed: std::time::Duration,
+///
+/// The analysis payload is the typed engine result. Runtime-only presentation
+/// probes stay explicit so the API boundary, not the concrete runner, owns the
+/// final programmatic report assembly.
+pub struct ProgrammaticHealthRun {
+    pub analysis: HealthAnalysisResult,
     pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
@@ -64,7 +68,7 @@ pub trait ProgrammaticHealthRunner {
     fn run_programmatic_health(
         &self,
         options: &ComplexityOptions,
-    ) -> Result<ProgrammaticHealthReport, ProgrammaticError>;
+    ) -> Result<ProgrammaticHealthRun, ProgrammaticError>;
 }
 
 struct ResolvedAnalysisOptions {
@@ -187,10 +191,11 @@ pub fn compute_complexity_with_runner(
 ) -> ProgrammaticResult<serde_json::Value> {
     crate::validate_complexity_options(options)?;
     let result = runner.run_programmatic_health(options)?;
+    let root = result.analysis.config.root.clone();
     let mut output = serialize_health_report_json(HealthJsonReportInput {
-        report: result.report,
-        root: &result.root,
-        elapsed: result.elapsed,
+        report: result.analysis.report,
+        root: &root,
+        elapsed: result.analysis.elapsed,
         explain: options.analysis.explain,
         grouped_by: None,
         groups: None,
@@ -1360,11 +1365,32 @@ mod tests {
         fn run_programmatic_health(
             &self,
             _options: &ComplexityOptions,
-        ) -> Result<ProgrammaticHealthReport, ProgrammaticError> {
-            Ok(ProgrammaticHealthReport {
-                report: HealthReport::default(),
-                root: self.root.clone(),
-                elapsed: std::time::Duration::ZERO,
+        ) -> Result<ProgrammaticHealthRun, ProgrammaticError> {
+            let project_config = fallow_engine::config_for_project_analysis(
+                &self.root,
+                None,
+                ProjectConfigOptions {
+                    output: OutputFormat::Json,
+                    no_cache: true,
+                    threads: 1,
+                    production_override: None,
+                    quiet: true,
+                    analysis: ProductionAnalysis::Health,
+                },
+            )
+            .expect("test config loads");
+
+            Ok(ProgrammaticHealthRun {
+                analysis: HealthAnalysisResult {
+                    report: HealthReport::default(),
+                    grouping: None,
+                    group_resolver: None,
+                    config: project_config.config,
+                    elapsed: std::time::Duration::ZERO,
+                    timings: None,
+                    coverage_gaps_has_findings: false,
+                    should_fail_on_coverage_gaps: false,
+                },
                 workspace_diagnostics: vec![WorkspaceDiagnosticOutput(serde_json::json!({
                     "path": self.root.join("package.json")
                 }))],
@@ -1435,7 +1461,8 @@ mod tests {
 
     #[test]
     fn programmatic_health_runner_serializes_api_owned_output() {
-        let root = PathBuf::from("/repo");
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path().to_path_buf();
         let json = compute_health_with_runner(
             &ComplexityOptions {
                 analysis: AnalysisOptions {
