@@ -1,5 +1,7 @@
 //! Score types, grade boundaries, file health metrics, and findings.
 
+pub use fallow_output::CoverageModel;
+
 pub const HOTSPOT_SCORE_THRESHOLD: f64 = 50.0;
 
 pub const COGNITIVE_EXTRACTION_THRESHOLD: u16 = 30;
@@ -582,20 +584,6 @@ pub struct FileHealthScore {
     pub lines: u32,
     pub crap_max: f64,
     pub crap_above_threshold: usize,
-}
-
-/// Coverage model used for CRAP score computation.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum CoverageModel {
-    #[allow(
-        dead_code,
-        reason = "retained for backwards-compatible JSON deserialization"
-    )]
-    StaticBinary,
-    StaticEstimated,
-    Istanbul,
 }
 
 /// A hotspot: a file that is both complex and frequently changing.
