@@ -4,6 +4,52 @@ use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, Tool
 use fallow_types::output::NextStep;
 use serde::Serialize;
 
+/// Whether a JSON root envelope keeps the top-level `kind` discriminator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootEnvelopeMode {
+    Tagged,
+    Legacy,
+}
+
+/// Serialize a typed fallow root envelope with the requested discriminator
+/// mode.
+///
+/// # Errors
+///
+/// Returns a serde error when the provided envelope cannot be converted to a
+/// JSON value.
+pub fn serialize_json_root_output<T: Serialize>(
+    output: T,
+    mode: RootEnvelopeMode,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serde_json::to_value(output)?;
+    if mode == RootEnvelopeMode::Legacy {
+        remove_root_kind(&mut value);
+    }
+    Ok(value)
+}
+
+/// Remove only the document-root discriminator. Nested objects may carry their
+/// own meaningful `kind` fields, so this intentionally does not recurse.
+pub fn remove_root_kind(value: &mut serde_json::Value) {
+    if let serde_json::Value::Object(map) = value {
+        map.remove("kind");
+    }
+}
+
+/// Apply a document-root discriminator unless the caller requested the legacy
+/// envelope shape.
+pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str, mode: RootEnvelopeMode) {
+    if mode == RootEnvelopeMode::Tagged
+        && let serde_json::Value::Object(map) = value
+    {
+        map.insert(
+            "kind".to_string(),
+            serde_json::Value::String(kind.to_string()),
+        );
+    }
+}
+
 /// `fallow audit --format json` envelope.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -210,4 +256,59 @@ pub enum FallowOutput<
     /// `fallow review --walkthrough-file --format json`.
     #[serde(rename = "review-walkthrough-validation")]
     WalkthroughValidation(WalkthroughValidation),
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn legacy_mode_removes_only_root_kind() {
+        let mut value = json!({
+            "kind": "root",
+            "action": {
+                "kind": "suppress"
+            }
+        });
+
+        remove_root_kind(&mut value);
+
+        assert!(value.get("kind").is_none());
+        assert_eq!(value["action"]["kind"], "suppress");
+    }
+
+    #[test]
+    fn apply_root_kind_respects_legacy_mode() {
+        let mut value = json!({});
+
+        apply_root_kind(&mut value, "dead_code", RootEnvelopeMode::Legacy);
+
+        assert!(value.get("kind").is_none());
+    }
+
+    #[test]
+    fn apply_root_kind_sets_tagged_mode() {
+        let mut value = json!({});
+
+        apply_root_kind(&mut value, "dead_code", RootEnvelopeMode::Tagged);
+
+        assert_eq!(value["kind"], "dead_code");
+    }
+
+    #[test]
+    fn serialize_json_root_output_removes_root_kind_in_legacy_mode() {
+        let value = serialize_json_root_output(
+            json!({
+                "kind": "combined",
+                "schema_version": 1
+            }),
+            RootEnvelopeMode::Legacy,
+        )
+        .expect("root should serialize");
+
+        assert!(value.get("kind").is_none());
+        assert_eq!(value["schema_version"], 1);
+    }
 }

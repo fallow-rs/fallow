@@ -184,7 +184,10 @@ pub use review_envelopes::{
     ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput,
     ReviewReconcileSchema, default_marker_regex, default_marker_regex_flags, is_false,
 };
-pub use root_envelopes::{AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, FallowOutput};
+pub use root_envelopes::{
+    AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, FallowOutput, RootEnvelopeMode,
+    apply_root_kind, remove_root_kind, serialize_json_root_output,
+};
 pub use security::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
     SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGate, SecurityGateVerdict,

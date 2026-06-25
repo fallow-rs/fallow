@@ -9,8 +9,8 @@ use fallow_config::{
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
 use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CheckOutputInput, DupesOutput, DupesOutputInput, build_check_output,
-    build_dupes_output, check_meta, strip_root_prefix,
+    CHECK_SCHEMA_VERSION, CheckOutputInput, DupesOutput, DupesOutputInput, RootEnvelopeMode,
+    apply_root_kind, build_check_output, build_dupes_output, check_meta, strip_root_prefix,
 };
 use globset::Glob;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -136,14 +136,11 @@ fn detect_dead_code_inner(
             .with_code("FALLOW_SERIALIZE_DEAD_CODE_REPORT")
             .with_context("dead-code")
     })?;
-    if let serde_json::Value::Object(map) = &mut output
-        && !resolved.legacy_envelope
-    {
-        map.insert(
-            "kind".to_string(),
-            serde_json::Value::String("dead_code".to_string()),
-        );
-    }
+    apply_root_kind(
+        &mut output,
+        "dead_code",
+        root_envelope_mode(resolved.legacy_envelope),
+    );
     let root_prefix = format!("{}/", session.root().display());
     strip_root_prefix(&mut output, &root_prefix);
     Ok(output)
@@ -627,14 +624,11 @@ fn detect_duplication_inner(
             .with_code("FALLOW_SERIALIZE_DUPLICATION_REPORT")
             .with_context("dupes")
     })?;
-    if let serde_json::Value::Object(map) = &mut output
-        && !resolved.legacy_envelope
-    {
-        map.insert(
-            "kind".to_string(),
-            serde_json::Value::String("dupes".to_string()),
-        );
-    }
+    apply_root_kind(
+        &mut output,
+        "dupes",
+        root_envelope_mode(resolved.legacy_envelope),
+    );
     let root_prefix = format!("{}/", session.root().display());
     strip_root_prefix(&mut output, &root_prefix);
     Ok(output)
@@ -1305,6 +1299,14 @@ fn is_absolute_path_any_platform(path: &Path) -> bool {
         || s.starts_with('/')
         || s.starts_with("\\\\")
         || s.as_bytes().get(1) == Some(&b':')
+}
+
+const fn root_envelope_mode(legacy_envelope: bool) -> RootEnvelopeMode {
+    if legacy_envelope {
+        RootEnvelopeMode::Legacy
+    } else {
+        RootEnvelopeMode::Tagged
+    }
 }
 
 #[cfg(test)]
