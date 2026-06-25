@@ -1544,6 +1544,50 @@ pub fn parse_legacy_semantic_member_access<'a>(
     None
 }
 
+/// Decode an older sentinel-backed member access into the owned typed
+/// semantic fact emitted by current extraction.
+#[must_use]
+pub fn legacy_member_access_to_semantic_fact(object: &str, member: &str) -> Option<SemanticFact> {
+    Some(match parse_legacy_semantic_member_access(object, member)? {
+        LegacySemanticMemberAccess::InstanceExportBinding {
+            export_name,
+            target_local,
+        } => SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
+            export_name: export_name.to_string(),
+            target_name: target_local.to_string(),
+        }),
+        LegacySemanticMemberAccess::FactoryCall {
+            callee_object,
+            callee_method,
+            member,
+        } => SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+            callee_object: callee_object.to_string(),
+            callee_method: callee_method.to_string(),
+            member: member.to_string(),
+        }),
+        LegacySemanticMemberAccess::FluentChain {
+            root_local,
+            root_method,
+            chain,
+            member,
+        } => SemanticFact::FluentChainMemberAccess(FluentChainMemberAccessFact {
+            root_object: root_local.to_string(),
+            root_method: root_method.to_string(),
+            chain: chain.into_iter().map(str::to_string).collect(),
+            member: member.to_string(),
+        }),
+        LegacySemanticMemberAccess::FluentChainNew {
+            class_local,
+            chain,
+            member,
+        } => SemanticFact::FluentChainNewMemberAccess(FluentChainNewMemberAccessFact {
+            class_name: class_local.to_string(),
+            chain: chain.into_iter().map(str::to_string).collect(),
+            member: member.to_string(),
+        }),
+    })
+}
+
 /// A member name referenced from an Angular template surface.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -2304,6 +2348,65 @@ mod tests {
 
         assert!(is_legacy_semantic_member_access_object(&malformed));
         assert!(parse_legacy_semantic_member_access(&malformed, "value").is_none());
+    }
+
+    #[test]
+    fn legacy_semantic_member_access_converts_to_owned_typed_facts() {
+        let instance = legacy_member_access_to_semantic_fact(
+            &format!("{INSTANCE_EXPORT_SENTINEL}exported"),
+            "target",
+        )
+        .expect("instance fact");
+        assert_eq!(
+            instance,
+            SemanticFact::InstanceExportBinding(InstanceExportBindingFact {
+                export_name: "exported".to_string(),
+                target_name: "target".to_string(),
+            })
+        );
+
+        let factory = legacy_member_access_to_semantic_fact(
+            &format!("{FACTORY_CALL_SENTINEL}Svc:create"),
+            "run",
+        )
+        .expect("factory fact");
+        assert_eq!(
+            factory,
+            SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "create".to_string(),
+                member: "run".to_string(),
+            })
+        );
+
+        let fluent = legacy_member_access_to_semantic_fact(
+            &format!("{FLUENT_CHAIN_SENTINEL}Builder:start:next,finish"),
+            "value",
+        )
+        .expect("fluent fact");
+        assert_eq!(
+            fluent,
+            SemanticFact::FluentChainMemberAccess(FluentChainMemberAccessFact {
+                root_object: "Builder".to_string(),
+                root_method: "start".to_string(),
+                chain: vec!["next".to_string(), "finish".to_string()],
+                member: "value".to_string(),
+            })
+        );
+
+        let fluent_new = legacy_member_access_to_semantic_fact(
+            &format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:next,finish"),
+            "value",
+        )
+        .expect("new fluent fact");
+        assert_eq!(
+            fluent_new,
+            SemanticFact::FluentChainNewMemberAccess(FluentChainNewMemberAccessFact {
+                class_name: "Builder".to_string(),
+                chain: vec!["next".to_string(), "finish".to_string()],
+                member: "value".to_string(),
+            })
+        );
     }
 
     #[test]
