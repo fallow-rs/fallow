@@ -21,10 +21,7 @@ use std::path::Path;
 use std::process::Command;
 
 use fallow_core::results::AnalysisResults;
-use fallow_output::{
-    HealthNextStepsInput, ImpactDigestCounts,
-    build_health_next_steps as build_health_next_steps_contract, impact_digest_summary,
-};
+use fallow_output::{HealthNextStepsInput, ImpactDigestCounts, impact_digest_summary};
 use fallow_types::output::NextStep;
 
 use crate::health_types::HealthReport;
@@ -348,19 +345,19 @@ pub fn build_dead_code_next_steps(
 /// Next-steps for standalone `fallow health`. See [`build_dead_code_next_steps`]
 /// for the `offer_setup` parameter contract.
 #[must_use]
-pub fn build_health_next_steps(
+pub fn health_next_steps_input(
     report: &HealthReport,
     root: &Path,
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
-) -> Vec<NextStep> {
-    build_health_next_steps_contract(HealthNextStepsInput {
+) -> HealthNextStepsInput {
+    HealthNextStepsInput {
         suggestions_enabled: suggestions_enabled(),
         has_findings: !report.findings.is_empty(),
         offer_setup,
         impact_digest: digest.map(impact_counts),
         audit_changed: audit_changed(root).is_some(),
-    })
+    }
 }
 
 /// Next-steps for standalone `fallow dupes`. See [`build_dead_code_next_steps`]
@@ -480,6 +477,7 @@ mod tests {
     use crate::health_types::{
         ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
     };
+    use fallow_output::build_health_next_steps as build_health_next_steps_contract;
     use fallow_types::output_dead_code::UnusedExportFinding;
     use fallow_types::results::{AnalysisResults, UnusedExport};
 
@@ -663,11 +661,38 @@ mod tests {
     #[test]
     fn health_steps_keep_complexity_breakdown_from_output_contract() {
         let report = health_report_with_finding();
-        let steps = build_health_next_steps(&report, Path::new("/project"), false, None);
+        let steps = build_health_next_steps_contract(health_next_steps_input(
+            &report,
+            Path::new("/project"),
+            false,
+            None,
+        ));
         let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
 
         assert_eq!(ids, ["complexity-breakdown"]);
         assert_valid(&steps[0]);
+    }
+
+    #[test]
+    fn health_next_steps_input_feeds_output_contract_builder() {
+        let report = health_report_with_finding();
+        let input =
+            health_next_steps_input(&report, Path::new("/project"), true, Some(digest(2, 1)));
+
+        assert!(input.suggestions_enabled);
+        assert!(input.has_findings);
+        assert!(input.offer_setup);
+        assert_eq!(
+            input.impact_digest,
+            Some(ImpactDigestCounts {
+                containment_count: 2,
+                resolved_total: 1,
+            })
+        );
+
+        let steps = build_health_next_steps_contract(input);
+        let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["setup", "impact-report", "complexity-breakdown"]);
     }
 
     #[test]
