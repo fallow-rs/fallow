@@ -259,6 +259,26 @@ struct BlockingAnalysisOutput {
     changed_message: Option<(MessageType, String)>,
 }
 
+struct LspAnalysisSnapshot {
+    results: AnalysisResults,
+    duplication: DuplicationReport,
+    inline_complexity: Vec<InlineComplexityFinding>,
+}
+
+impl LspAnalysisSnapshot {
+    fn new(
+        results: AnalysisResults,
+        duplication: DuplicationReport,
+        inline_complexity: Vec<InlineComplexityFinding>,
+    ) -> Self {
+        Self {
+            results,
+            duplication,
+            inline_complexity,
+        }
+    }
+}
+
 fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
     let session =
         match AnalysisSession::load_with_config(input.project_root, input.config_path, |config| {
@@ -595,9 +615,7 @@ fn filter_inline_complexity_by_changed_files(
 struct FallowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
-    results: Arc<RwLock<Option<AnalysisResults>>>,
-    duplication: Arc<RwLock<Option<DuplicationReport>>>,
-    inline_complexity: Arc<RwLock<Vec<InlineComplexityFinding>>>,
+    analysis: Arc<RwLock<Option<LspAnalysisSnapshot>>>,
     previous_diagnostic_uris: Arc<RwLock<FxHashSet<Uri>>>,
     last_analysis: Arc<Mutex<Instant>>,
     analysis_guard: Arc<tokio::sync::Mutex<()>>,
@@ -896,8 +914,8 @@ impl LanguageServer for FallowLspServer {
         reason = "RwLock guard scope is intentional"
     )]
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
-        let results = self.results.read().await;
-        let Some(results) = results.as_ref() else {
+        let analysis = self.analysis.read().await;
+        let Some(analysis) = analysis.as_ref() else {
             return Ok(None);
         };
 
@@ -911,7 +929,7 @@ impl LanguageServer for FallowLspServer {
         let root = self.root.read().await.clone();
 
         Ok(Self::build_code_action_response(CodeActionInput::new(
-            results,
+            &analysis.results,
             root.as_deref(),
             &file_path,
             uri,
@@ -925,8 +943,8 @@ impl LanguageServer for FallowLspServer {
         reason = "RwLock guard scope is intentional"
     )]
     async fn code_lens(&self, params: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
-        let results = self.results.read().await;
-        let Some(results) = results.as_ref() else {
+        let analysis = self.analysis.read().await;
+        let Some(analysis) = analysis.as_ref() else {
             return Ok(None);
         };
 
@@ -934,10 +952,9 @@ impl LanguageServer for FallowLspServer {
             return Ok(None);
         };
 
-        let inline_complexity = self.inline_complexity.read().await;
         let lenses = code_lens::build_code_lenses(code_lens::CodeLensInput::new(
-            results,
-            &inline_complexity,
+            &analysis.results,
+            &analysis.inline_complexity,
             &file_path,
             &params.text_document.uri,
         ));
@@ -954,8 +971,8 @@ impl LanguageServer for FallowLspServer {
         reason = "RwLock guard scope is intentional"
     )]
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let results = self.results.read().await;
-        let Some(results) = results.as_ref() else {
+        let analysis = self.analysis.read().await;
+        let Some(analysis) = analysis.as_ref() else {
             return Ok(None);
         };
 
@@ -966,13 +983,9 @@ impl LanguageServer for FallowLspServer {
 
         let position = params.text_document_position_params.position;
 
-        let duplication = self.duplication.read().await;
-        let empty_report = fallow_engine::duplicates::DuplicationReport::default();
-        let duplication_ref = duplication.as_ref().unwrap_or(&empty_report);
-
         Ok(hover::build_hover(hover::HoverInput::new(
-            results,
-            duplication_ref,
+            &analysis.results,
+            &analysis.duplication,
             &file_path,
             position,
         )))
@@ -984,9 +997,7 @@ impl FallowLspServer {
         Self {
             client,
             root: Arc::new(RwLock::new(None)),
-            results: Arc::new(RwLock::new(None)),
-            duplication: Arc::new(RwLock::new(None)),
-            inline_complexity: Arc::new(RwLock::new(Vec::new())),
+            analysis: Arc::new(RwLock::new(None)),
             previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
             last_analysis: Arc::new(Mutex::new(
                 Instant::now()
@@ -1258,9 +1269,11 @@ impl FallowLspServer {
             &output.results,
             &output.duplication,
         ));
-        *self.results.write().await = Some(output.results);
-        *self.duplication.write().await = Some(output.duplication);
-        *self.inline_complexity.write().await = output.inline_complexity;
+        *self.analysis.write().await = Some(LspAnalysisSnapshot::new(
+            output.results,
+            output.duplication,
+            output.inline_complexity,
+        ));
 
         self.client
             .send_notification::<AnalysisComplete>(complete_params)
@@ -1785,8 +1798,8 @@ mod tests {
         backend.shutdown().await.expect("shutdown returns Ok");
         backend.run_analysis().await;
         assert!(
-            backend.results.read().await.is_none(),
-            "results must stay None when run_analysis short-circuits on cancellation",
+            backend.analysis.read().await.is_none(),
+            "analysis snapshot must stay None when run_analysis short-circuits on cancellation",
         );
     }
 
@@ -1816,7 +1829,7 @@ mod tests {
         backend.initialized(InitializedParams {}).await;
 
         assert!(
-            backend.results.read().await.is_none(),
+            backend.analysis.read().await.is_none(),
             "initialized must not publish provisional startup results before any file is open",
         );
         assert!(
@@ -1853,14 +1866,14 @@ mod tests {
         );
 
         for _ in 0..50 {
-            if backend.results.read().await.is_some() {
+            if backend.analysis.read().await.is_some() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
 
         assert!(
-            backend.results.read().await.is_some(),
+            backend.analysis.read().await.is_some(),
             "the first opened file must trigger the initial LSP analysis",
         );
     }
@@ -1893,7 +1906,7 @@ mod tests {
             "didSave-triggered analysis must wait behind an in-flight startup analysis",
         );
         assert!(
-            backend.results.read().await.is_none(),
+            backend.analysis.read().await.is_none(),
             "analysis cannot publish while the guard is held",
         );
 
@@ -1901,7 +1914,7 @@ mod tests {
         save_task.await.expect("didSave analysis task completes");
 
         assert!(
-            backend.results.read().await.is_some(),
+            backend.analysis.read().await.is_some(),
             "didSave must rerun analysis after the in-flight startup analysis completes",
         );
     }
