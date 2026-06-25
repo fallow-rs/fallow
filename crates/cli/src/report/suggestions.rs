@@ -22,8 +22,9 @@ use std::process::Command;
 
 use fallow_core::results::AnalysisResults;
 use fallow_output::{
-    CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput,
-    ImpactDigestCounts, TraceUnusedExportInput,
+    AuditNextStepsInput, CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput,
+    HealthNextStepsInput, ImpactDigestCounts, TraceUnusedExportInput,
+    build_audit_next_steps as build_audit_next_steps_contract,
     build_combined_next_steps as build_combined_next_steps_contract,
     build_dead_code_next_steps as build_dead_code_next_steps_contract,
     build_dupes_next_steps as build_dupes_next_steps_contract, impact_digest_summary,
@@ -32,10 +33,6 @@ use fallow_types::output::NextStep;
 
 use crate::health_types::HealthReport;
 use crate::output_dupes::DupesReportPayload;
-
-/// Maximum number of next-steps emitted per envelope. Keeps the array a glance,
-/// not a wall; the priority order decides which survive the cap.
-const MAX_NEXT_STEPS: usize = 3;
 
 /// Mutating verbs a next-step must never suggest (the read-only contract).
 const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hooks"];
@@ -94,21 +91,6 @@ fn relative_command_path(path: &Path, root: &Path) -> String {
 // ---------------------------------------------------------------------------
 // Individual triggers. Each returns `Some(step)` only when its evidence exists.
 // ---------------------------------------------------------------------------
-
-/// `trace-unused-export`: verify an export is truly unused before deleting.
-/// Uses the lexicographically smallest `(path, name)` finding so the embedded
-/// command is deterministic across runs (independent of internal vec order).
-fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextStep> {
-    let target = trace_unused_export_input(results, root)?;
-    Some(next_step(
-        "trace-unused-export",
-        format!(
-            "fallow dead-code --trace {}:{}",
-            target.path, target.export_name
-        ),
-        "verify an export is truly unused before deleting",
-    ))
-}
 
 fn trace_unused_export_input(
     results: &AnalysisResults,
@@ -180,19 +162,6 @@ pub fn due_impact_digest(root: &Path) -> Option<crate::impact::ImpactDigest> {
         return None;
     }
     crate::impact::take_due_digest(root)
-}
-
-/// `complexity-breakdown`: see the per-decision-point contributions behind a
-/// high-complexity finding.
-fn complexity_breakdown(report: &HealthReport) -> Option<NextStep> {
-    if report.findings.is_empty() {
-        return None;
-    }
-    Some(next_step(
-        "complexity-breakdown",
-        "fallow health --complexity-breakdown".to_string(),
-        "see per-decision-point contributions for a hotspot",
-    ))
 }
 
 fn default_workspace_ref_for_next_step(root: &Path) -> Option<String> {
@@ -383,18 +352,12 @@ pub fn build_audit_next_steps(
     check: Option<(&AnalysisResults, &Path)>,
     complexity: Option<&HealthReport>,
 ) -> Vec<NextStep> {
-    if !suggestions_enabled() {
-        return Vec::new();
-    }
-    let mut steps: Vec<NextStep> = [
-        check.and_then(|(results, root)| trace_unused_export(results, root)),
-        complexity.and_then(complexity_breakdown),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    steps.truncate(MAX_NEXT_STEPS);
-    steps
+    build_audit_next_steps_contract(&AuditNextStepsInput {
+        suggestions_enabled: suggestions_enabled(),
+        trace_unused_export: check
+            .and_then(|(results, root)| trace_unused_export_input(results, root)),
+        has_complexity_findings: complexity.is_some_and(|report| !report.findings.is_empty()),
+    })
 }
 
 /// The single highest-priority next-step for the human `Next:` line, computed
@@ -526,17 +489,19 @@ mod tests {
     }
 
     #[test]
-    fn trace_unused_export_emits_runnable_relative_command() {
+    fn audit_next_steps_emit_runnable_relative_trace_command() {
         let root = PathBuf::from("/project");
         let results = results_with_exports(vec![unused_export("/project/src/util.ts", "foo")]);
-        let step = trace_unused_export(&results, &root).expect("step");
-        assert_eq!(step.id, "trace-unused-export");
-        assert_eq!(step.command, "fallow dead-code --trace src/util.ts:foo");
-        assert_valid(&step);
+        let steps = build_audit_next_steps(Some((&results, &root)), None);
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].id, "trace-unused-export");
+        assert_eq!(steps[0].command, "fallow dead-code --trace src/util.ts:foo");
+        assert_valid(&steps[0]);
     }
 
     #[test]
-    fn trace_unused_export_is_deterministic_regardless_of_vec_order() {
+    fn audit_next_steps_select_deterministic_trace_target() {
         let root = PathBuf::from("/project");
         let forward = results_with_exports(vec![
             unused_export("/project/src/b.ts", "beta"),
@@ -546,10 +511,10 @@ mod tests {
             unused_export("/project/src/a.ts", "alpha"),
             unused_export("/project/src/b.ts", "beta"),
         ]);
-        let a = trace_unused_export(&forward, &root).expect("step");
-        let b = trace_unused_export(&reverse, &root).expect("step");
-        assert_eq!(a.command, b.command);
-        assert_eq!(a.command, "fallow dead-code --trace src/a.ts:alpha");
+        let a = build_audit_next_steps(Some((&forward, &root)), None);
+        let b = build_audit_next_steps(Some((&reverse, &root)), None);
+        assert_eq!(a[0].command, b[0].command);
+        assert_eq!(a[0].command, "fallow dead-code --trace src/a.ts:alpha");
     }
 
     #[test]
@@ -688,6 +653,25 @@ mod tests {
     }
 
     #[test]
+    fn audit_next_steps_route_payload_facts_to_output_contract() {
+        let root = PathBuf::from("/project");
+        let results = results_with_exports(vec![
+            unused_export("/project/src/b.ts", "beta"),
+            unused_export("/project/src/a.ts", "alpha"),
+        ]);
+        let report = health_report_with_finding();
+
+        let steps = build_audit_next_steps(Some((&results, &root)), Some(&report));
+        let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
+
+        assert_eq!(ids, ["trace-unused-export", "complexity-breakdown"]);
+        assert_eq!(steps[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        for step in &steps {
+            assert_valid(step);
+        }
+    }
+
+    #[test]
     fn impact_digest_line_renders_counters() {
         let line = impact_digest_line(digest(2, 1));
         assert_eq!(
@@ -713,7 +697,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = results_with_exports(vec![unused_export("/project/src/a.ts", "alpha")]);
         let mut all = Vec::new();
-        all.extend(trace_unused_export(&results, &root));
+        all.extend(build_audit_next_steps(Some((&results, &root)), None));
         // Static-command triggers (no findings needed to inspect the string).
         all.push(next_step("audit-changed", "fallow audit".to_string(), "x"));
         all.push(next_step(
@@ -744,6 +728,6 @@ mod tests {
         let results = results_with_exports(vec![unused_export("/project/src/a.ts", "alpha")]);
         // Even if git/workspaces/setup add candidates, the cap holds.
         let steps = build_dead_code_next_steps(&results, &root, true, None);
-        assert!(steps.len() <= MAX_NEXT_STEPS);
+        assert!(steps.len() <= 3);
     }
 }

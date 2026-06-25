@@ -61,6 +61,14 @@ pub struct CombinedNextStepsInput<'a> {
     pub audit_changed: bool,
 }
 
+/// Runtime-independent inputs for audit next steps.
+#[derive(Debug, Clone)]
+pub struct AuditNextStepsInput {
+    pub suggestions_enabled: bool,
+    pub trace_unused_export: Option<TraceUnusedExportInput>,
+    pub has_complexity_findings: bool,
+}
+
 /// Runtime-independent inputs for standalone health next steps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HealthNextStepsInput {
@@ -196,6 +204,24 @@ pub fn build_combined_next_steps(input: &CombinedNextStepsInput<'_>) -> Vec<Next
         trace_clone(input.clone_fingerprints),
         complexity_breakdown(input.has_complexity_findings),
         audit_changed(input.audit_changed),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    steps.truncate(MAX_NEXT_STEPS);
+    steps
+}
+
+/// Next-steps for `fallow audit`.
+#[must_use]
+pub fn build_audit_next_steps(input: &AuditNextStepsInput) -> Vec<NextStep> {
+    if !input.suggestions_enabled {
+        return Vec::new();
+    }
+
+    let mut steps: Vec<NextStep> = [
+        trace_unused_export_from_input(input.trace_unused_export.as_ref()),
+        complexity_breakdown(input.has_complexity_findings),
     ]
     .into_iter()
     .flatten()
@@ -393,6 +419,14 @@ mod tests {
         }
     }
 
+    fn audit_input() -> AuditNextStepsInput {
+        AuditNextStepsInput {
+            suggestions_enabled: true,
+            trace_unused_export: None,
+            has_complexity_findings: false,
+        }
+    }
+
     fn assert_valid(step: &NextStep) {
         assert!(
             !step.command.contains('<') && !step.command.contains('>'),
@@ -407,6 +441,53 @@ mod tests {
             "command must be read-only: {}",
             step.command
         );
+    }
+
+    #[test]
+    fn audit_steps_are_empty_when_suggestions_are_disabled() {
+        let steps = build_audit_next_steps(&AuditNextStepsInput {
+            suggestions_enabled: false,
+            trace_unused_export: Some(TraceUnusedExportInput {
+                path: "src/a.ts".to_string(),
+                export_name: "alpha".to_string(),
+            }),
+            has_complexity_findings: true,
+        });
+
+        assert!(steps.is_empty());
+    }
+
+    #[test]
+    fn audit_steps_order_trace_before_complexity() {
+        let steps = build_audit_next_steps(&AuditNextStepsInput {
+            trace_unused_export: Some(TraceUnusedExportInput {
+                path: "src/a.ts".to_string(),
+                export_name: "alpha".to_string(),
+            }),
+            has_complexity_findings: true,
+            ..audit_input()
+        });
+        let ids = steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, ["trace-unused-export", "complexity-breakdown"]);
+        assert_eq!(steps[0].command, "fallow dead-code --trace src/a.ts:alpha");
+        for step in &steps {
+            assert_valid(step);
+        }
+    }
+
+    #[test]
+    fn audit_steps_emit_complexity_without_trace_target() {
+        let steps = build_audit_next_steps(&AuditNextStepsInput {
+            has_complexity_findings: true,
+            ..audit_input()
+        });
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].id, "complexity-breakdown");
     }
 
     #[test]
