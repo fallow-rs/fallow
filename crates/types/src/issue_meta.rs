@@ -1118,6 +1118,59 @@ pub fn issue_result_meta_by_code(code: &str) -> Option<&'static IssueResultMeta>
     ISSUE_RESULT_META.iter().find(|meta| meta.code == code)
 }
 
+/// Documentation anchor under `/explanations/dead-code` for a canonical issue
+/// code.
+#[must_use]
+pub fn issue_docs_anchor(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "unused-file" => "unused-files",
+        "unused-export" => "unused-exports",
+        "unused-type" => "unused-types",
+        "private-type-leak" => "private-type-leaks",
+        "unused-dependency" | "unused-dev-dependency" | "unused-optional-dependency" => {
+            "unused-dependencies"
+        }
+        "unused-enum-member" => "unused-enum-members",
+        "unused-class-member" => "unused-class-members",
+        "unused-store-member" => "unused-store-members",
+        "unresolved-import" => "unresolved-imports",
+        "unlisted-dependency" => "unlisted-dependencies",
+        "duplicate-export" => "duplicate-exports",
+        "type-only-dependency" => "type-only-dependencies",
+        "test-only-dependency" => "test-only-dependencies",
+        "circular-dependency" => "circular-dependencies",
+        "re-export-cycle" => "re-export-cycles",
+        "boundary-violation" | "boundary-coverage" | "boundary-call-violation" => {
+            "boundary-violations"
+        }
+        "policy-violation" => "policy-violations",
+        "invalid-client-export" => "invalid-client-exports",
+        "mixed-client-server-barrel" => "mixed-client-server-barrels",
+        "misplaced-directive" => "misplaced-directives",
+        "unprovided-inject" => "unprovided-inject",
+        "unrendered-component" => "unrendered-component",
+        "unused-component-prop" => "unused-component-prop",
+        "unused-component-emit" => "unused-component-emit",
+        "unused-component-input" => "unused-component-input",
+        "unused-component-output" => "unused-component-output",
+        "unused-svelte-event" => "unused-svelte-event",
+        "unused-server-action" => "unused-server-action",
+        "unused-load-data-key" => "unused-load-data-key",
+        "dynamic-segment-name-conflict" => "dynamic-segment-name-conflicts",
+        "route-collision" => "route-collisions",
+        "stale-suppression" => "stale-suppressions",
+        "unused-catalog-entry" => "unused-catalog-entries",
+        "empty-catalog-group" => "empty-catalog-groups",
+        "unresolved-catalog-reference" => "unresolved-catalog-references",
+        "unused-dependency-override" => "unused-dependency-overrides",
+        "misconfigured-dependency-override" => "misconfigured-dependency-overrides",
+        "prop-drilling" => "prop-drilling",
+        "thin-wrapper" => "thin-wrapper",
+        "duplicate-prop-shape" => "duplicate-prop-shape",
+        _ => return None,
+    })
+}
+
 /// Rows exposed by the LSP issue-type capability.
 pub fn diagnostic_issue_metas() -> impl Iterator<Item = &'static IssueKindMeta> {
     ISSUE_KIND_META.iter().filter(|meta| meta.lsp)
@@ -1206,6 +1259,17 @@ mod tests {
             assert!(
                 issue_meta_by_code(meta.code).is_some(),
                 "result metadata code {} has no issue metadata row",
+                meta.code
+            );
+        }
+    }
+
+    #[test]
+    fn result_meta_codes_have_docs_anchors() {
+        for meta in ISSUE_RESULT_META {
+            assert!(
+                issue_docs_anchor(meta.code).is_some(),
+                "result metadata code {} has no docs anchor",
                 meta.code
             );
         }
