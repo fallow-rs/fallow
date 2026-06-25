@@ -401,22 +401,6 @@ fn joined_config_errors(label: &str, errors: &[impl ToString]) -> EngineError {
     EngineError::new(format!("{label}:\n  - {joined}"))
 }
 
-/// Run dead-code analysis on a project directory with export usage collection.
-///
-/// # Errors
-///
-/// Returns an error if config loading, file discovery, parsing, or analysis
-/// fails.
-pub fn analyze_project(root: &Path) -> EngineResult<DeadCodeAnalysis> {
-    #[expect(
-        deprecated,
-        reason = "fallow-engine is the typed migration boundary over the internal core backend"
-    )]
-    fallow_core::analyze_project(root)
-        .map(|results| DeadCodeAnalysis { results })
-        .map_err(engine_error)
-}
-
 /// Run dead-code analysis with export usage collection for a resolved config.
 ///
 /// # Errors
@@ -467,12 +451,6 @@ pub fn find_duplicates(
     config: &DuplicatesConfig,
 ) -> DuplicationReport {
     fallow_core::duplicates::find_duplicates(root, files, config)
-}
-
-/// Run duplication detection on a project directory.
-#[must_use]
-pub fn find_duplicates_in_project(root: &Path, config: &DuplicatesConfig) -> DuplicationReport {
-    fallow_core::duplicates::find_duplicates_in_project(root, config)
 }
 
 /// Resolve changed files for a git ref relative to a project root.
