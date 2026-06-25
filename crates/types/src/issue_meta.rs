@@ -1378,8 +1378,7 @@ mod tests {
 
     #[test]
     fn issue_kind_variants_have_metadata() {
-        for discriminant in 1..=47 {
-            let kind = IssueKind::from_discriminant(discriminant).unwrap();
+        for &kind in IssueKind::ALL {
             assert!(
                 issue_meta_by_kind(kind).is_some(),
                 "IssueKind {kind:?} has no metadata row"
