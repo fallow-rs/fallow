@@ -17,6 +17,7 @@ mod codeclimate;
 mod dupes;
 mod format;
 mod health;
+mod health_coverage;
 mod health_targets;
 mod issue_contract;
 mod report_contract;
@@ -41,6 +42,7 @@ pub use fallow_types::output_dead_code;
 pub use fallow_types::output_health;
 pub use format::OutputFormat;
 pub use health::{HealthOutput, HealthOutputInput, build_health_output};
+pub use health_coverage::CoverageModel;
 pub use health_targets::{
     CloneSiblingEvidence, Confidence, ContributingFactor, DirectCallerEvidence,
     DirectCallerSymbolEvidence, EffortEstimate, EvidenceFunction, RecommendationCategory,
