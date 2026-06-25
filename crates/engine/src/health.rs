@@ -405,6 +405,24 @@ pub struct HealthAnalysisResult<GroupResolver = ()> {
     pub should_fail_on_coverage_gaps: bool,
 }
 
+impl<GroupResolver> HealthAnalysisResult<GroupResolver> {
+    /// Drop presentation-only grouping resolver state while preserving the
+    /// command-neutral health analysis payload.
+    #[must_use]
+    pub fn without_group_resolver(self) -> HealthAnalysisResult<()> {
+        HealthAnalysisResult {
+            report: self.report,
+            grouping: self.grouping,
+            group_resolver: None,
+            config: self.config,
+            elapsed: self.elapsed,
+            timings: self.timings,
+            coverage_gaps_has_findings: self.coverage_gaps_has_findings,
+            should_fail_on_coverage_gaps: self.should_fail_on_coverage_gaps,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,6 +451,41 @@ mod tests {
             coverage_inputs: HealthCoverageInputs::default(),
             runtime_coverage: None,
         }
+    }
+
+    #[test]
+    fn health_analysis_result_drops_presentation_resolver() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let project_config = crate::config_for_project_analysis(
+            project.path(),
+            None,
+            crate::ProjectConfigOptions {
+                output: OutputFormat::Json,
+                no_cache: true,
+                threads: 1,
+                production_override: None,
+                quiet: true,
+                analysis: fallow_config::ProductionAnalysis::Health,
+            },
+        )
+        .expect("project config loads");
+        let result = HealthAnalysisResult {
+            report: HealthReport::default(),
+            grouping: None,
+            group_resolver: Some("resolver"),
+            config: project_config.config,
+            elapsed: Duration::from_millis(7),
+            timings: None,
+            coverage_gaps_has_findings: true,
+            should_fail_on_coverage_gaps: true,
+        };
+
+        let neutral = result.without_group_resolver();
+
+        assert!(neutral.group_resolver.is_none());
+        assert_eq!(neutral.elapsed, Duration::from_millis(7));
+        assert!(neutral.coverage_gaps_has_findings);
+        assert!(neutral.should_fail_on_coverage_gaps);
     }
 
     #[test]
