@@ -41,6 +41,7 @@ mod health_vital_signs;
 mod impact;
 mod inspect_envelopes;
 mod issue_contract;
+mod json_paths;
 mod list_envelopes;
 mod report_contract;
 mod review_envelopes;
@@ -166,6 +167,7 @@ pub use issue_contract::{
     CODECLIMATE_RESULT_CODES, IssueOutputContract, TsAliasMeta, check_meta, dead_code_docs_url,
     issue_output_contract_by_code, issue_output_contracts, rule_docs_url,
 };
+pub use json_paths::strip_root_prefix;
 pub use list_envelopes::{
     BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone, BoundariesListing,
     ListBoundariesOutput, WorkspaceInfo, WorkspacesOutput,

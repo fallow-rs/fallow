@@ -10,7 +10,7 @@ use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationSta
 use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckOutputInput, DupesOutput, DupesOutputInput, build_check_output,
-    build_dupes_output, check_meta,
+    build_dupes_output, check_meta, strip_root_prefix,
 };
 use globset::Glob;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1305,27 +1305,6 @@ fn is_absolute_path_any_platform(path: &Path) -> bool {
         || s.starts_with('/')
         || s.starts_with("\\\\")
         || s.as_bytes().get(1) == Some(&b':')
-}
-
-fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
-    match value {
-        serde_json::Value::String(s) => {
-            if let Some(rest) = s.strip_prefix(prefix) {
-                *s = rest.to_string();
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                strip_root_prefix(item, prefix);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for value in map.values_mut() {
-                strip_root_prefix(value, prefix);
-            }
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]
