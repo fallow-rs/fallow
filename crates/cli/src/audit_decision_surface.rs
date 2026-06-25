@@ -44,8 +44,8 @@ pub use fallow_output::{
 };
 use xxhash_rust::xxh3::xxh3_64;
 
-use crate::audit::routing::RoutingFacts;
 use crate::audit_brief::ReviewDeltas;
+use fallow_output::RoutingFacts;
 
 /// Default decision-surface cap (the working-memory limit). The surface holds at
 /// most this many ranked decisions; the rest collapse into a truncation note.

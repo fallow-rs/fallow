@@ -11,8 +11,8 @@
 
 use std::path::{Path, PathBuf};
 
+pub use fallow_output::{RoutingFacts, RoutingUnit};
 use rustc_hash::FxHashSet;
-use serde::Serialize;
 
 use crate::codeowners::CodeOwners;
 use crate::health::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
@@ -22,30 +22,6 @@ use fallow_core::churn::{self, SinceDuration};
 /// Default churn window for routing: one year of history is enough to identify
 /// the per-file experts without an unbounded `git log`.
 const ROUTING_CHURN_WINDOW: &str = "1 year ago";
-
-/// One routed unit (a changed file) with its experts and bus-factor flag.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct RoutingUnit {
-    /// Root-relative path of the changed file.
-    pub file: String,
-    /// The routed expert(s): the CODEOWNERS declared owner when present, else the
-    /// top git-blame / recency contributor; empty when no signal is available.
-    pub expert: Vec<String>,
-    /// Whether the only qualified owner is a single contributor (bus-factor-1):
-    /// a knowledge-concentration risk worth a second reviewer.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub bus_factor_one: bool,
-}
-
-/// The full routing section: one unit per changed source file with a routable
-/// signal. Files with no ownership signal are omitted (no noise).
-#[derive(Debug, Clone, Default, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct RoutingFacts {
-    /// Per-changed-file routing units, sorted by file path.
-    pub units: Vec<RoutingUnit>,
-}
 
 /// Compute the routing section for the changed files. Best-effort: returns an
 /// empty `RoutingFacts` when churn is unavailable (non-git repo, shallow clone
