@@ -732,6 +732,7 @@ impl ModuleInfoExtractor {
                 );
                 self.record_factory_return_function(
                     id.name.as_str(),
+                    &arrow.params,
                     Some(arrow.body.as_ref()),
                     arrow.expression,
                 );
@@ -744,6 +745,7 @@ impl ModuleInfoExtractor {
                 );
                 self.record_factory_return_function(
                     id.name.as_str(),
+                    &function.params,
                     function.body.as_deref(),
                     false,
                 );
@@ -758,6 +760,7 @@ impl ModuleInfoExtractor {
     fn record_factory_return_function(
         &mut self,
         name: &str,
+        params: &FormalParameters<'_>,
         body: Option<&FunctionBody<'_>>,
         is_expression_body: bool,
     ) {
@@ -770,6 +773,11 @@ impl ModuleInfoExtractor {
         if let Some(class_name) = function_body_returns_new_class(body, is_expression_body) {
             self.factory_return_functions
                 .insert(name.to_string(), class_name);
+        } else if let Some(returned_id) =
+            function_body_returns_identifier(body, params, is_expression_body)
+        {
+            self.factory_return_alias_functions
+                .insert(name.to_string(), returned_id);
         }
     }
 
@@ -2942,7 +2950,12 @@ impl ModuleInfoExtractor {
                 &function.params,
                 function.body.as_deref(),
             );
-            self.record_factory_return_function(id.name.as_str(), function.body.as_deref(), false);
+            self.record_factory_return_function(
+                id.name.as_str(),
+                &function.params,
+                function.body.as_deref(),
+                false,
+            );
             self.record_source_returning_function_declaration(function);
             self.record_package_resolution_function_arg(function, id.name.as_str());
             self.record_playwright_factory_helper(function, id.name.as_str());
@@ -6777,6 +6790,181 @@ fn function_body_returns_new_class(
         };
         new_expression_class_name(ret.argument.as_ref()?)
     })
+}
+
+/// The bare identifier a function returns as its single, unshadowed result.
+/// `Some(id)` only when: an expression-bodied arrow is exactly `id`, or a block
+/// body has EXACTLY ONE `return` anywhere (no branching / early returns) whose
+/// argument is a bare identifier; AND that identifier is not bound by a parameter
+/// or a local declaration in the function. Conservative on purpose: the class is
+/// inferred later from a module binding (`let api: RESTApi`), so a shadowed local
+/// or a branchy return must abstain rather than credit a class the function does
+/// not actually return. Used only when the body does not directly return
+/// `new Class()`. See issue #1441 (var-return case).
+fn function_body_returns_identifier(
+    body: &FunctionBody<'_>,
+    params: &FormalParameters<'_>,
+    is_expression_body: bool,
+) -> Option<String> {
+    let returned = if is_expression_body {
+        let [Statement::ExpressionStatement(stmt)] = body.statements.as_slice() else {
+            return None;
+        };
+        let Expression::Identifier(id) = &stmt.expression else {
+            return None;
+        };
+        id.name.to_string()
+    } else {
+        if count_returns_in_statements(&body.statements) != 1 {
+            return None;
+        }
+        let Some(Expression::Identifier(id)) = first_return_arg_in_statements(&body.statements)
+        else {
+            return None;
+        };
+        id.name.to_string()
+    };
+    if formal_params_bind_identifier(params, &returned)
+        || statements_declare_identifier(&body.statements, &returned)
+    {
+        return None;
+    }
+    Some(returned)
+}
+
+/// The argument of the single `return` reachable in `statements` (recursively
+/// through control flow, not into nested functions). The caller guarantees
+/// exactly one return exists. See issue #1441.
+fn first_return_arg_in_statements<'b, 'a>(
+    statements: &'b [Statement<'a>],
+) -> Option<&'b Expression<'a>> {
+    statements.iter().find_map(first_return_arg_in_statement)
+}
+
+fn first_return_arg_in_statement<'b, 'a>(stmt: &'b Statement<'a>) -> Option<&'b Expression<'a>> {
+    match stmt {
+        Statement::ReturnStatement(ret) => ret.argument.as_ref(),
+        Statement::BlockStatement(block) => first_return_arg_in_statements(&block.body),
+        Statement::IfStatement(if_stmt) => first_return_arg_in_statement(&if_stmt.consequent)
+            .or_else(|| {
+                if_stmt
+                    .alternate
+                    .as_ref()
+                    .and_then(first_return_arg_in_statement)
+            }),
+        Statement::ForStatement(s) => first_return_arg_in_statement(&s.body),
+        Statement::ForInStatement(s) => first_return_arg_in_statement(&s.body),
+        Statement::ForOfStatement(s) => first_return_arg_in_statement(&s.body),
+        Statement::WhileStatement(s) => first_return_arg_in_statement(&s.body),
+        Statement::DoWhileStatement(s) => first_return_arg_in_statement(&s.body),
+        Statement::TryStatement(s) => first_return_arg_in_statements(&s.block.body)
+            .or_else(|| {
+                s.handler
+                    .as_ref()
+                    .and_then(|h| first_return_arg_in_statements(&h.body.body))
+            })
+            .or_else(|| {
+                s.finalizer
+                    .as_ref()
+                    .and_then(|f| first_return_arg_in_statements(&f.body))
+            }),
+        Statement::SwitchStatement(s) => s
+            .cases
+            .iter()
+            .find_map(|case| first_return_arg_in_statements(&case.consequent)),
+        Statement::LabeledStatement(s) => first_return_arg_in_statement(&s.body),
+        _ => None,
+    }
+}
+
+/// Whether a parameter list binds `name` (including via destructuring / defaults).
+fn formal_params_bind_identifier(params: &FormalParameters<'_>, name: &str) -> bool {
+    let binds = |pattern: &BindingPattern<'_>| {
+        pattern
+            .get_binding_identifiers()
+            .into_iter()
+            .any(|id| id.name.as_str() == name)
+    };
+    params.items.iter().any(|p| binds(&p.pattern))
+}
+
+/// Whether any local declaration in `statements` (recursively through control
+/// flow, not into nested functions) binds `name` — a local that would shadow a
+/// module binding of the same name, making a `return name` untrustworthy. #1441.
+fn statements_declare_identifier(statements: &[Statement<'_>], name: &str) -> bool {
+    statements
+        .iter()
+        .any(|stmt| statement_declares_identifier(stmt, name))
+}
+
+fn statement_declares_identifier(stmt: &Statement<'_>, name: &str) -> bool {
+    let binds = |pattern: &BindingPattern<'_>| {
+        pattern
+            .get_binding_identifiers()
+            .into_iter()
+            .any(|id| id.name.as_str() == name)
+    };
+    match stmt {
+        Statement::VariableDeclaration(decl) => decl.declarations.iter().any(|d| binds(&d.id)),
+        Statement::FunctionDeclaration(func) => {
+            func.id.as_ref().is_some_and(|id| id.name.as_str() == name)
+        }
+        Statement::ClassDeclaration(class) => {
+            class.id.as_ref().is_some_and(|id| id.name.as_str() == name)
+        }
+        Statement::BlockStatement(block) => statements_declare_identifier(&block.body, name),
+        Statement::IfStatement(if_stmt) => {
+            statement_declares_identifier(&if_stmt.consequent, name)
+                || if_stmt
+                    .alternate
+                    .as_ref()
+                    .is_some_and(|a| statement_declares_identifier(a, name))
+        }
+        Statement::ForStatement(s) => {
+            matches!(
+                s.init.as_ref(),
+                Some(ForStatementInit::VariableDeclaration(decl))
+                    if decl.declarations.iter().any(|d| binds(&d.id))
+            ) || statement_declares_identifier(&s.body, name)
+        }
+        Statement::ForInStatement(s) => {
+            for_statement_left_binds(&s.left, name) || statement_declares_identifier(&s.body, name)
+        }
+        Statement::ForOfStatement(s) => {
+            for_statement_left_binds(&s.left, name) || statement_declares_identifier(&s.body, name)
+        }
+        Statement::WhileStatement(s) => statement_declares_identifier(&s.body, name),
+        Statement::DoWhileStatement(s) => statement_declares_identifier(&s.body, name),
+        Statement::TryStatement(s) => {
+            statements_declare_identifier(&s.block.body, name)
+                || s.handler.as_ref().is_some_and(|h| {
+                    h.param.as_ref().is_some_and(|p| binds(&p.pattern))
+                        || statements_declare_identifier(&h.body.body, name)
+                })
+                || s.finalizer
+                    .as_ref()
+                    .is_some_and(|f| statements_declare_identifier(&f.body, name))
+        }
+        Statement::SwitchStatement(s) => s
+            .cases
+            .iter()
+            .any(|case| statements_declare_identifier(&case.consequent, name)),
+        Statement::LabeledStatement(s) => statement_declares_identifier(&s.body, name),
+        _ => false,
+    }
+}
+
+/// Whether a `for-in` / `for-of` header binds `name` (loop-variable shadowing).
+fn for_statement_left_binds(left: &ForStatementLeft<'_>, name: &str) -> bool {
+    match left {
+        ForStatementLeft::VariableDeclaration(decl) => decl.declarations.iter().any(|d| {
+            d.id.get_binding_identifiers()
+                .into_iter()
+                .any(|id| id.name.as_str() == name)
+        }),
+        ForStatementLeft::AssignmentTargetIdentifier(id) => id.name.as_str() == name,
+        _ => false,
+    }
 }
 
 fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {

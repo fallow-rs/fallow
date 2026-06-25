@@ -163,6 +163,12 @@ pub(crate) struct ModuleInfoExtractor {
     /// name, plus the `const x = fn()` bindings to resolve against them. See #1441.
     factory_return_functions: FxHashMap<String, String>,
     factory_return_candidates: Vec<FactoryReturnCandidate>,
+    /// Same-file functions whose body returns a bare identifier (e.g.
+    /// `useApi() { return api }`). Resolved against `binding_target_names` at
+    /// finalize: a typed local (`let api: RESTApi`) promotes the function to a
+    /// `factory_return_functions` entry, so `const x = useApi()` credits the
+    /// class without tracing the assignment chain. See issue #1441 (var-return).
+    factory_return_alias_functions: FxHashMap<String, String>,
     namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
     pub(crate) class_heritage: Vec<ClassHeritageInfo>,
@@ -955,6 +961,45 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Promote `useApi() { return api }`-style functions to `factory_return_functions`
+    /// when the returned identifier resolves to a class in `binding_target_names`
+    /// (e.g. a typed `let api: RESTApi`). Runs before `resolve_factory_return_candidates`
+    /// so `const x = useApi()` then credits the class — without tracing the
+    /// assignment chain. Conservative: skips functions already mapped to a direct
+    /// `new Class()` return, and ignores sentinel / object-path binding targets.
+    /// See issue #1441 (var-return case).
+    fn resolve_factory_return_aliases(&mut self) {
+        if self.factory_return_alias_functions.is_empty() {
+            return;
+        }
+        let aliases = std::mem::take(&mut self.factory_return_alias_functions);
+        for (fn_name, returned_id) in aliases {
+            if self.factory_return_functions.contains_key(&fn_name) {
+                continue;
+            }
+            let Some(class_name) = self.binding_target_names.get(&returned_id) else {
+                continue;
+            };
+            if !Self::is_plain_class_binding_target(class_name) {
+                continue;
+            }
+            self.factory_return_functions
+                .insert(fn_name, class_name.clone());
+        }
+    }
+
+    /// Whether a `binding_target_names` value is a plain class name usable as a
+    /// factory-return source — i.e. NOT a synthetic sentinel (factory-call, fluent
+    /// chain, …) and NOT an object-member path (`obj.member`). Extend the sentinel
+    /// checks here as new sentinels are added (e.g. a cross-module factory-fn one).
+    /// See issue #1441.
+    fn is_plain_class_binding_target(target: &str) -> bool {
+        !target.starts_with(crate::FACTORY_CALL_SENTINEL)
+            && !target.starts_with(crate::FLUENT_CHAIN_SENTINEL)
+            && !target.starts_with(crate::FLUENT_CHAIN_NEW_SENTINEL)
+            && !target.contains('.')
+    }
+
     /// Resolve `const x = useApi()` bindings against same-file functions whose
     /// body returns `new Class()`, so `x.member` credits the constructed class.
     /// Cross-file (imported / re-exported) factory wrappers are out of scope.
@@ -1160,6 +1205,9 @@ impl ModuleInfoExtractor {
         // which read `binding_target_names`, so a factory-return-bound local also
         // propagates through object literals and exported-instance bindings (parity
         // with the during-the-walk `new Class()` binding). See issue #1441.
+        // Aliases first: promote `useApi(){ return api }` to a factory-return via
+        // the typed local, so the `const x = useApi()` candidate below resolves.
+        self.resolve_factory_return_aliases();
         self.resolve_factory_return_candidates();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();

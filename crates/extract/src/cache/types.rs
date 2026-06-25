@@ -592,7 +592,12 @@ use crate::MemberKind;
 /// function returning `new Class()` now resolves `x.member` onto the class, so a
 /// warm cache from 188 lacks the added `member_accesses` and would surface those
 /// methods as false `unused-class-member`.
-pub(super) const CACHE_VERSION: u32 = 189;
+///
+/// Bumped to 190 (issue #1441, var-return): a same-file function that returns a
+/// bare identifier (`useApi() { return api }`) whose typed local (`let api: RESTApi`)
+/// resolves to a class now promotes to a factory-return, so `const x = useApi()`
+/// credits `x.member`. A warm cache from 189 lacks the added `member_accesses`.
+pub(super) const CACHE_VERSION: u32 = 190;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

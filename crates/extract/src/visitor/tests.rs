@@ -264,6 +264,45 @@ fn factory_return_propagates_through_object_binding() {
 }
 
 #[test]
+fn factory_var_return_credits_member_via_typed_local() {
+    // Real composable shape: `useApi` returns the module `let api: RESTApi` (a bare
+    // identifier, assigned from a separate factory). The typed local resolves the
+    // class, so `const x = useApi(); x.Plan()` credits `RESTApi.Plan`. Issue #1441.
+    let info = parse(
+        "class RESTApi { Plan() {} }\nlet api: RESTApi\nfunction useApi() { if (!api) { api = initializeApi() } return api }\nfunction initializeApi() { return new RESTApi() }\nconst x = useApi()\nx.Plan()",
+    );
+    assert!(
+        has_member_access(&info, "RESTApi", "Plan"),
+        "var-return through a typed local should credit the member: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn factory_var_return_abstains_on_shadowed_or_branching_returns() {
+    // Each function returns a bare `api`, but the identifier is NOT the typed module
+    // binding (shadowed by a local / loop var / catch param) or the function has more
+    // than one return — so the alias must abstain and `x.Plan()` stays uncredited.
+    for source in [
+        // local shadow
+        "class RESTApi { Plan() {} }\nlet api: RESTApi\nfunction useApi() { const api = {}; return api }\nconst x = useApi()\nx.Plan()",
+        // for-of loop-header shadow (single return, so it pins the loop-header guard)
+        "class RESTApi { Plan() {} }\nlet api: RESTApi\nfunction useApi(items) { for (const api of items) { return api } }\nconst x = useApi([])\nx.Plan()",
+        // catch-param shadow (single return, so it pins the catch-param guard)
+        "class RESTApi { Plan() {} }\nlet api: RESTApi\nfunction useApi() { try { doThing() } catch (api) { return api } }\nconst x = useApi()\nx.Plan()",
+        // multiple / branching returns
+        "class RESTApi { Plan() {} }\nlet api: RESTApi\nlet other: RESTApi\nfunction useApi(f) { if (f) { return other } return api }\nconst x = useApi(true)\nx.Plan()",
+    ] {
+        let info = parse(source);
+        assert!(
+            !has_member_access(&info, "RESTApi", "Plan"),
+            "alias-return must abstain (no over-credit) for: {source:?} -> {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
 fn into_module_info_transfers_member_accesses() {
     let info = parse("import { Obj } from './x';\nObj.method();");
     assert!(
