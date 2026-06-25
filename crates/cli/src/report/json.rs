@@ -504,7 +504,7 @@ pub fn build_health_json(
         grouped_by: None,
         groups: None,
         meta: explain.then(fallow_output::health_meta),
-        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps: crate::report::suggestions::build_health_next_steps(
             report,
             root,
@@ -549,7 +549,7 @@ pub fn build_grouped_health_json(
         grouped_by: Some(group_by_mode_from_label(grouping.mode)),
         groups: None,
         meta: explain.then(fallow_output::health_meta),
-        workspace_diagnostics: crate::runtime_support::workspace_diagnostics_for(root),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps: crate::report::suggestions::build_health_next_steps(
             report,
             root,
@@ -860,7 +860,10 @@ mod tests {
             ..Default::default()
         };
 
-        let envelope = HealthOutput {
+        let envelope: HealthOutput<
+            crate::health_types::HealthReport,
+            crate::health_types::HealthGroup,
+        > = HealthOutput {
             schema_version: SchemaVersion(SCHEMA_VERSION),
             version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
             elapsed_ms: ElapsedMs(7),

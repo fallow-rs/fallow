@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub use fallow_output::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, CodeClimateIssue,
     CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
-    CodeClimateSeverity, GroupByMode, WorkspaceDiagnosticOutput,
+    CodeClimateSeverity, GroupByMode, HealthOutput, WorkspaceDiagnosticOutput,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_check_summary,
 };
 use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, ToolVersion};
@@ -356,40 +356,6 @@ pub struct DupesOutput {
     /// contract; the same list is repeated on each top-level command's
     /// envelope so single-command consumers see it without having to look at
     /// a separate top-level field.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
-    /// Read-only follow-up commands computed from this run's findings. See
-    /// [`CheckOutput::next_steps`] for the contract.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub next_steps: Vec<NextStep>,
-}
-
-/// Envelope emitted by `fallow health --format json` (plus the `health` block
-/// inside the combined and audit envelopes).
-///
-/// The body is `HealthReport` flattened into the envelope so every report
-/// field (`findings`, `summary`, `vital_signs`, `hotspots`, `actions_meta`,
-/// ...) lives at the top level. Grouped runs populate `grouped_by` +
-/// `groups` with per-bucket recomputed metrics. The `actions_meta`
-/// breadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`
-/// and is set at construction time by the report builder when the active
-/// `HealthActionContext` requests suppress-line omission, so the schema
-/// documents the field and serde populates it natively.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow health --format json"))]
-pub struct HealthOutput {
-    pub schema_version: SchemaVersion,
-    pub version: ToolVersion,
-    pub elapsed_ms: ElapsedMs,
-    #[serde(flatten)]
-    pub report: HealthReport,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grouped_by: Option<GroupByMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub groups: Option<Vec<HealthGroup>>,
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Meta>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings. See
@@ -1006,7 +972,7 @@ pub enum FallowOutput {
     Workspaces(WorkspacesOutput),
     /// `fallow health --format json`. Required `report: HealthReport`.
     #[serde(rename = "health")]
-    Health(HealthOutput),
+    Health(HealthOutput<HealthReport, HealthGroup>),
     /// `fallow dupes --format json`. Required `report: DupesReportPayload`
     /// (typed wrapper payload carrying `clone_groups[]: CloneGroupFinding`
     /// and `clone_families[]: CloneFamilyFinding`).
