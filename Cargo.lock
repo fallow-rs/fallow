@@ -1139,6 +1139,7 @@ version = "2.102.0"
 dependencies = [
  "fallow-config",
  "fallow-core",
+ "fallow-output",
  "fallow-types",
  "rustc-hash 2.1.2",
  "tempfile",

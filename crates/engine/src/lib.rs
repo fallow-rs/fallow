@@ -28,6 +28,7 @@ pub mod duplicates {
 }
 
 pub mod dead_code;
+pub mod health;
 
 /// Extracted semantic types exposed through the engine boundary.
 pub mod extract {
@@ -65,6 +66,7 @@ pub use fallow_core::duplicates::{
 pub use fallow_types::discover::{DiscoveredFile, FileId};
 pub use fallow_types::extract::ModuleInfo;
 pub use fallow_types::results::AnalysisResults;
+pub use health::HealthAnalysisResult;
 
 /// Result alias for typed engine operations.
 pub type EngineResult<T> = Result<T, EngineError>;
