@@ -18,6 +18,7 @@ mod dupes;
 mod format;
 mod health;
 mod health_coverage;
+mod health_coverage_gaps;
 mod health_targets;
 mod health_vital_signs;
 mod issue_contract;
@@ -44,6 +45,10 @@ pub use fallow_types::output_health;
 pub use format::OutputFormat;
 pub use health::{HealthOutput, HealthOutputInput, build_health_output};
 pub use health_coverage::CoverageModel;
+pub use health_coverage_gaps::{
+    CoverageGapSummary, CoverageGaps, UntestedExport, UntestedExportFinding, UntestedFile,
+    UntestedFileFinding,
+};
 pub use health_targets::{
     CloneSiblingEvidence, Confidence, ContributingFactor, DirectCallerEvidence,
     DirectCallerSymbolEvidence, EffortEstimate, EvidenceFunction, RecommendationCategory,
