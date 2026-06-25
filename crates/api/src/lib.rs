@@ -22,7 +22,7 @@ pub mod dupes_output;
 pub mod runtime;
 pub use dupes_output::{CloneFamilyFinding, CloneGroupFinding, DupesReportPayload};
 pub use runtime::{
-    HealthJsonReportInput, ProgrammaticHealthReport, ProgrammaticHealthRunner,
+    HealthJsonReportInput, ProgrammaticHealthRun, ProgrammaticHealthRunner,
     compute_complexity_with_runner, compute_health_with_runner, detect_boundary_violations,
     detect_circular_dependencies, detect_dead_code, detect_duplication,
     serialize_health_report_json,
