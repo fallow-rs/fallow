@@ -1,0 +1,19 @@
+[package]
+name = "fallow-programmatic-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Temporary CLI-backed programmatic bridge for fallow embedders"
+readme = "../../README.md"
+
+[dependencies]
+fallow-api = { workspace = true }
+fallow-cli = { workspace = true }
+
+[lints]
+workspace = true

@@ -1241,7 +1241,7 @@ name = "fallow-node"
 version = "2.102.0"
 dependencies = [
  "fallow-api",
- "fallow-cli",
+ "fallow-programmatic-cli",
  "napi",
  "napi-build",
  "napi-derive",
@@ -1258,6 +1258,14 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "fallow-programmatic-cli"
+version = "2.102.0"
+dependencies = [
+ "fallow-api",
+ "fallow-cli",
 ]
 
 [[package]]
