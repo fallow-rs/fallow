@@ -976,7 +976,7 @@ enum Command {
         /// Use --min-severity critical to ignore moderate/high findings in CI.
         /// Composes with --min-score (the run fails if either gate trips).
         #[arg(long, value_name = "LEVEL", value_enum)]
-        min_severity: Option<crate::health_types::FindingSeverity>,
+        min_severity: Option<HealthSeverityCli>,
 
         /// Print the score and findings but never fail CI (always exit 0).
         /// Advisory mode for surfacing health in logs without blocking.
@@ -2063,6 +2063,25 @@ impl EffortFilter {
             Self::Low => health_types::EffortEstimate::Low,
             Self::Medium => health_types::EffortEstimate::Medium,
             Self::High => health_types::EffortEstimate::High,
+        }
+    }
+}
+
+/// CLI parser for the health severity gate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum HealthSeverityCli {
+    Moderate,
+    High,
+    Critical,
+}
+
+impl HealthSeverityCli {
+    /// Convert to the typed health output severity.
+    const fn to_health_severity(self) -> health_types::FindingSeverity {
+        match self {
+            Self::Moderate => health_types::FindingSeverity::Moderate,
+            Self::High => health_types::FindingSeverity::High,
+            Self::Critical => health_types::FindingSeverity::Critical,
         }
     }
 }
@@ -4288,7 +4307,7 @@ fn dispatch_health_command(command: Command, dispatch: &DispatchContext<'_>) -> 
             effort,
             score,
             min_score,
-            min_severity,
+            min_severity: min_severity.map(HealthSeverityCli::to_health_severity),
             report_only,
             since: since.as_deref(),
             min_commits,
