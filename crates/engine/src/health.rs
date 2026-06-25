@@ -1,9 +1,10 @@
 //! Typed health result contracts exposed through the engine boundary.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use fallow_config::ResolvedConfig;
-use fallow_output::{HealthGrouping, HealthReport, HealthTimings};
+use fallow_output::{HealthGrouping, HealthReport, HealthTimings, RuntimeCoverageWatermark};
 
 /// Command-neutral sort criteria for health complexity findings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,6 +13,24 @@ pub enum HealthSort {
     Cyclomatic,
     Cognitive,
     Lines,
+}
+
+/// Command-neutral runtime coverage input for health analysis.
+#[derive(Debug, Clone)]
+pub struct RuntimeCoverageOptions {
+    pub path: PathBuf,
+    pub min_invocations_hot: u64,
+    /// Minimum total trace volume before high-confidence `safe_to_delete` /
+    /// `review_required` verdicts may be emitted. Below this the sidecar caps
+    /// confidence at `medium`. `None` lets the sidecar use its spec-default
+    /// (5000).
+    pub min_observation_volume: Option<u32>,
+    /// Fraction of total trace count below which an invoked function is
+    /// classified as `low_traffic` rather than `active`. `None` lets the
+    /// sidecar use its spec-default (0.001 = 0.1%).
+    pub low_traffic_threshold: Option<f64>,
+    pub license_jwt: String,
+    pub watermark: Option<RuntimeCoverageWatermark>,
 }
 
 /// Typed health analysis result shared by CLI, API, NAPI, and future embedders.

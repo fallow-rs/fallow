@@ -2557,7 +2557,7 @@ fn run_audit_health<'a>(
 fn build_audit_health_options<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
-    runtime_coverage: Option<crate::health::RuntimeCoverageOptions>,
+    runtime_coverage: Option<fallow_engine::RuntimeCoverageOptions>,
 ) -> HealthOptions<'a> {
     HealthOptions {
         root: opts.root,

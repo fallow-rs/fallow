@@ -151,7 +151,7 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
 fn local_health_options<'a>(
     args: &AnalyzeArgs,
     ctx: &RunContext<'a>,
-    runtime_coverage: crate::health::RuntimeCoverageOptions,
+    runtime_coverage: fallow_engine::RuntimeCoverageOptions,
 ) -> HealthOptions<'a> {
     HealthOptions {
         root: ctx.root,

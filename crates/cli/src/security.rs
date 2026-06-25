@@ -1130,7 +1130,7 @@ fn analyze_security_runtime(
 /// context for security findings (complexity/hotspot/ownership all disabled).
 fn security_runtime_health_options<'a>(
     opts: &SecurityOptions<'a>,
-    runtime_coverage: crate::health::RuntimeCoverageOptions,
+    runtime_coverage: fallow_engine::RuntimeCoverageOptions,
 ) -> HealthOptions<'a> {
     HealthOptions {
         root: opts.root,

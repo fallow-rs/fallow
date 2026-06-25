@@ -27,7 +27,6 @@ use tempfile::TempDir;
 use url::Url;
 
 use crate::error::emit_error;
-use crate::health::RuntimeCoverageOptions;
 use crate::health::scoring::IstanbulCoverage;
 use crate::health_types::{
     RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
@@ -37,6 +36,7 @@ use crate::health_types::{
     RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
 use crate::license::verifying_key;
+use fallow_engine::RuntimeCoverageOptions;
 
 /// Ed25519 public key used to verify the fallow-cov sidecar binary at every
 /// spawn. Intentionally SEPARATE from the license-signing pubkey at
@@ -2143,13 +2143,13 @@ mod tests {
         resolve_sidecar_via_command, sidecar_binary_name, static_function,
         verify_sidecar_signature, write_istanbul_coverage_file,
     };
-    use crate::health::RuntimeCoverageOptions;
     use fallow_config::{FallowConfig, OutputFormat};
     use fallow_cov_protocol::{
         Confidence, CoverageSource, DiagnosticMessage, Evidence, Finding, FunctionIdentity,
         HotPath, IdentityResolution, PROTOCOL_VERSION, ReportVerdict, Response, Summary, Verdict,
         function_identity_id,
     };
+    use fallow_engine::RuntimeCoverageOptions;
     use globset::{Glob, GlobSetBuilder};
     use oxc_coverage_instrument::{Location, Position};
     use rustc_hash::{FxHashMap, FxHashSet};
