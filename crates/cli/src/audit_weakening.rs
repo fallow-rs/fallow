@@ -12,40 +12,7 @@
 //! signal is an attention pointer ("the diff weakened a guardrail here"), framed
 //! so a reviewer decides.
 
-use serde::Serialize;
-
-/// The category of a single weakening signal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum WeakeningKind {
-    /// A test was removed (a net-removed `it(`/`test(`/`describe(` callsite) or
-    /// skipped (`it.skip`/`xit`/`describe.skip` added, or a `.only` narrowing
-    /// that silently excludes sibling tests).
-    TestWeakened,
-    /// A coverage or quality threshold was lowered (a numeric config key whose
-    /// value decreased between base and head).
-    ThresholdLowered,
-    /// A suppression was added (a net-new `fallow-ignore` / `eslint-disable` /
-    /// `@ts-ignore` / `@ts-expect-error` in the diff).
-    SuppressionAdded,
-    /// A security check / step was removed from CI (a net-removed line invoking
-    /// a security scanner or audit step).
-    SecurityCheckRemoved,
-}
-
-/// One weakening signal: a category, the file it was detected in, and a short
-/// human-readable evidence string. Reviewer-private; never gates.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct WeakeningSignal {
-    /// What kind of guardrail was weakened.
-    pub kind: WeakeningKind,
-    /// Root-relative path of the changed file the signal was detected in.
-    pub file: String,
-    /// Short evidence string (e.g. the offending token or the threshold delta).
-    pub evidence: String,
-}
+pub use fallow_output::{WeakeningKind, WeakeningSignal};
 
 /// Detect skipped-test additions: an `it.skip` / `xit` / `describe.skip` /
 /// `.only` token present in head but not base. `.only` narrows the run to a

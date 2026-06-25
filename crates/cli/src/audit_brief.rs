@@ -25,9 +25,9 @@ use rustc_hash::FxHashSet;
 use crate::audit::AuditResult;
 
 pub type ReviewBriefOutput = fallow_output::ReviewBriefOutput<
-    crate::audit_focus::FocusMap,
-    crate::audit::weakening::WeakeningSignal,
-    crate::audit::routing::RoutingFacts,
+    fallow_output::FocusMap,
+    fallow_output::WeakeningSignal,
+    fallow_output::RoutingFacts,
     crate::audit_decision_surface::DecisionSurface,
 >;
 

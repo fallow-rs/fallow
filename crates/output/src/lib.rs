@@ -14,7 +14,10 @@
 
 mod audit_brief;
 mod audit_decision_surface;
+mod audit_focus;
+mod audit_routing;
 mod audit_walkthrough;
+mod audit_weakening;
 mod check;
 mod codeclimate;
 mod coverage_envelopes;
@@ -55,11 +58,14 @@ pub use audit_decision_surface::{
     DecisionWithActions, TruncationNote, build_decision_surface_output, decision_actions,
     suppress_comment,
 };
+pub use audit_focus::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
+pub use audit_routing::{RoutingFacts, RoutingUnit};
 pub use audit_walkthrough::{
     AcceptedJudgment, AgentJudgment, AgentSchema, AgentWalkthrough, ChangeAnchor, DirectionUnit,
     INJECTION_NOTE, RejectedJudgment, ReviewDirection, WalkthroughGuide, WalkthroughValidation,
     agent_schema,
 };
+pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
     GroupByMode, WorkspaceDiagnosticOutput, apply_config_fixable_to_duplicate_exports,

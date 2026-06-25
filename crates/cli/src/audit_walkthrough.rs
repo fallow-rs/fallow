@@ -36,13 +36,12 @@ pub use fallow_output::{
     AcceptedJudgment, AgentWalkthrough, ChangeAnchor, DirectionUnit, INJECTION_NOTE,
     RejectedJudgment, ReviewDirection, WalkthroughValidation, agent_schema,
 };
+use fallow_output::{FocusMap, RoutingFacts};
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
-use crate::audit::routing::RoutingFacts;
 use crate::audit_brief::{ReviewBriefOutput, ReviewBriefSchemaVersion, build_brief_output};
 use crate::audit_decision_surface::DecisionSurface;
-use crate::audit_focus::FocusMap;
 use crate::report::ci::diff_filter::parse_new_hunk_start;
 
 #[cfg(test)]
