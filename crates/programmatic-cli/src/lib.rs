@@ -20,3 +20,25 @@ impl fallow_api::ProgrammaticHealthRunner for CliHealthRunner {
         fallow_cli::programmatic::CliProgrammaticHealthRunner.run_programmatic_health(options)
     }
 }
+
+/// Run complexity analysis through the temporary CLI-backed health bridge.
+///
+/// # Errors
+///
+/// Returns structured programmatic errors from option validation, analysis, or
+/// JSON serialization.
+pub fn compute_complexity(
+    options: &ComplexityOptions,
+) -> Result<serde_json::Value, ProgrammaticError> {
+    fallow_api::compute_complexity_with_runner(options, &CliHealthRunner)
+}
+
+/// Run health analysis through the temporary CLI-backed health bridge.
+///
+/// # Errors
+///
+/// Returns structured programmatic errors from option validation, analysis, or
+/// JSON serialization.
+pub fn compute_health(options: &ComplexityOptions) -> Result<serde_json::Value, ProgrammaticError> {
+    fallow_api::compute_health_with_runner(options, &CliHealthRunner)
+}
