@@ -20,6 +20,7 @@ mod health;
 mod health_actions;
 mod health_coverage;
 mod health_coverage_gaps;
+mod health_runtime_coverage;
 mod health_targets;
 mod health_trends;
 mod health_vital_signs;
@@ -51,6 +52,14 @@ pub use health_coverage::CoverageModel;
 pub use health_coverage_gaps::{
     CoverageGapSummary, CoverageGaps, UntestedExport, UntestedExportFinding, UntestedFile,
     UntestedFileFinding,
+};
+pub use health_runtime_coverage::{
+    RuntimeCoverageAction, RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCaptureQuality,
+    RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
+    RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageImportanceEntry,
+    RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+    RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSignal,
+    RuntimeCoverageSummary, RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
 pub use health_targets::{
     CloneSiblingEvidence, Confidence, ContributingFactor, DirectCallerEvidence,
