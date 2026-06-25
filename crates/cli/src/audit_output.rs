@@ -501,13 +501,15 @@ fn insert_audit_next_steps_json(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     result: &AuditResult,
 ) {
-    let next_steps = crate::report::suggestions::build_audit_next_steps(
+    let input = fallow_output::build_audit_next_steps_input(
         result
             .check
             .as_ref()
             .map(|check| (&check.results, check.config.root.as_path())),
         result.health.as_ref().map(|health| &health.report),
+        crate::report::suggestions::suggestions_enabled(),
     );
+    let next_steps = fallow_output::build_audit_next_steps(&input);
     if !next_steps.is_empty()
         && let Ok(value) = serde_json::to_value(&next_steps)
     {
