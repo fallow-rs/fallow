@@ -677,18 +677,19 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
             let health_options = build_complexity_options(&resolved, options);
             let result = crate::health::execute_health(&health_options)
                 .map_err(|_| generic_analysis_error("health"))?;
+            let root = &result.config.root;
             let next_steps = fallow_output::build_health_next_steps(
-                crate::report::suggestions::health_next_steps_input(
+                fallow_output::build_health_next_steps_input(
                     &result.report,
-                    &result.config.root,
-                    crate::report::suggestions::setup_pointer_applicable(&result.config.root),
-                    crate::report::suggestions::due_impact_digest(&result.config.root),
+                    crate::report::suggestions::suggestions_enabled(),
+                    crate::report::suggestions::setup_pointer_applicable(root),
+                    crate::report::suggestions::due_impact_digest(root)
+                        .map(crate::report::suggestions::impact_counts),
+                    crate::report::suggestions::audit_changed_applicable(root),
                 ),
             );
             Ok(fallow_api::ProgrammaticHealthReport {
-                workspace_diagnostics: workspace_diagnostics_for_programmatic_output(
-                    &result.config.root,
-                ),
+                workspace_diagnostics: workspace_diagnostics_for_programmatic_output(root),
                 root: result.config.root.clone(),
                 report: result.report,
                 elapsed: result.elapsed,

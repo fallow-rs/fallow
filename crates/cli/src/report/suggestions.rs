@@ -96,7 +96,7 @@ pub const SETUP_HINT: &str = "Setup: `fallow init --agents` writes an agent guid
 
 /// Real-counter summary fragment shared by the next-step reason and the human
 /// one-liner. The output crate owns the `impact-report` command contract.
-fn impact_counts(digest: crate::impact::ImpactDigest) -> ImpactDigestCounts {
+pub fn impact_counts(digest: crate::impact::ImpactDigest) -> ImpactDigestCounts {
     ImpactDigestCounts {
         containment_count: digest.containment_count,
         resolved_total: digest.resolved_total,
@@ -138,7 +138,7 @@ fn default_workspace_ref_for_next_step(root: &Path) -> Option<String> {
 
 /// `audit-changed`: gate only the files the current branch changed. `fallow
 /// audit` auto-detects its base, so no ref needs embedding.
-fn audit_changed_applicable(root: &Path) -> bool {
+pub fn audit_changed_applicable(root: &Path) -> bool {
     fallow_core::churn::is_git_repo(root)
 }
 
@@ -230,13 +230,13 @@ pub fn health_next_steps_input(
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
 ) -> HealthNextStepsInput {
-    HealthNextStepsInput {
-        suggestions_enabled: suggestions_enabled(),
-        has_findings: !report.findings.is_empty(),
+    fallow_output::build_health_next_steps_input(
+        report,
+        suggestions_enabled(),
         offer_setup,
-        impact_digest: digest.map(impact_counts),
-        audit_changed: audit_changed_applicable(root),
-    }
+        digest.map(impact_counts),
+        audit_changed_applicable(root),
+    )
 }
 
 /// Next-steps for standalone `fallow dupes`. See [`build_dead_code_next_steps`]

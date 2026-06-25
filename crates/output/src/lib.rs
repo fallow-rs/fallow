@@ -184,7 +184,7 @@ pub use next_steps::{
     AuditNextStepsInput, CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput,
     HealthNextStepsInput, ImpactDigestCounts, TraceUnusedExportInput, build_audit_next_steps,
     build_combined_next_steps, build_dead_code_next_steps, build_dupes_next_steps,
-    build_health_next_steps, impact_digest_summary,
+    build_health_next_steps, build_health_next_steps_input, impact_digest_summary,
 };
 pub use report_contract::{
     COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SECURITY_DOCS,
