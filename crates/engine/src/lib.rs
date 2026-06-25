@@ -144,6 +144,13 @@ pub struct DeadCodeAnalysisOutput {
     pub files: Option<Vec<DiscoveredFile>>,
 }
 
+/// Typed project analysis result combining dead-code and duplication outputs.
+#[derive(Debug)]
+pub struct ProjectAnalysisOutput {
+    pub dead_code: DeadCodeAnalysisOutput,
+    pub duplication: DuplicationReport,
+}
+
 /// Typed duplication analysis result.
 #[derive(Debug)]
 pub struct DuplicationAnalysis {
@@ -262,6 +269,36 @@ impl AnalysisSession {
     #[must_use]
     pub fn find_duplicates_with(&self, config: &DuplicatesConfig) -> DuplicationReport {
         find_duplicates(&self.config.root, &self.files, config)
+    }
+
+    /// Run dead-code and duplication analysis for this session.
+    ///
+    /// When `retain_complexity_artifacts` is true, the dead-code result keeps
+    /// parser artifacts needed by editor overlays such as inline complexity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if dead-code parsing or analysis fails.
+    pub fn analyze_project_with(
+        &self,
+        duplicates_config: &DuplicatesConfig,
+        retain_complexity_artifacts: bool,
+    ) -> EngineResult<ProjectAnalysisOutput> {
+        let dead_code = if retain_complexity_artifacts {
+            self.analyze_dead_code_with_complexity()?
+        } else {
+            let analysis = self.analyze_dead_code()?;
+            DeadCodeAnalysisOutput {
+                results: analysis.results,
+                modules: None,
+                files: None,
+            }
+        };
+        let duplication = self.find_duplicates_with(duplicates_config);
+        Ok(ProjectAnalysisOutput {
+            dead_code,
+            duplication,
+        })
     }
 
     /// Run duplication detection and return report sidecar metadata.
@@ -569,6 +606,30 @@ mod tests {
             .collect();
         assert!(relative_paths.contains(&Path::new("src/index.ts")));
         assert!(!relative_paths.contains(&Path::new("src/index.test.ts")));
+    }
+
+    #[test]
+    fn analysis_session_returns_combined_project_analysis() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        let repeated =
+            "export function repeated() {\n  return ['alpha', 'beta', 'gamma'].join(',');\n}\n";
+        std::fs::write(src.join("a.ts"), repeated).expect("source file");
+        std::fs::write(src.join("b.ts"), repeated).expect("source file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        let mut config = session.config().duplicates.clone();
+        config.min_tokens = 1;
+        config.min_lines = 1;
+
+        let analysis = session
+            .analyze_project_with(&config, true)
+            .expect("project analysis succeeds");
+
+        assert!(analysis.dead_code.modules.is_some());
+        assert!(analysis.dead_code.files.is_some());
+        assert!(!analysis.duplication.clone_groups.is_empty());
     }
 
     #[test]
