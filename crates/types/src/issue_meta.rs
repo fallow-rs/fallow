@@ -705,6 +705,8 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
 pub struct IssueResultMeta {
     /// Canonical issue code that owns this result array.
     pub code: &'static str,
+    /// Documentation path emitted in dead-code `_meta.rules`.
+    pub meta_docs_path: &'static str,
     /// Human-readable name emitted in dead-code `_meta.rules`.
     pub meta_name: &'static str,
     /// Label used by CI summary tables.
@@ -730,6 +732,7 @@ pub struct TsAliasMeta {
 pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     IssueResultMeta {
         code: "unused-file",
+        meta_docs_path: "explanations/dead-code#unused-files",
         meta_name: "Unused Files",
         summary_label: "Unused files",
         docs_anchor: "unused-files",
@@ -738,6 +741,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-export",
+        meta_docs_path: "explanations/dead-code#unused-exports",
         meta_name: "Unused Exports",
         summary_label: "Unused exports",
         docs_anchor: "unused-exports",
@@ -746,6 +750,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-type",
+        meta_docs_path: "explanations/dead-code#unused-types",
         meta_name: "Unused Type Exports",
         summary_label: "Unused types",
         docs_anchor: "unused-types",
@@ -754,6 +759,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "private-type-leak",
+        meta_docs_path: "explanations/dead-code#private-type-leaks",
         meta_name: "Private Type Leaks",
         summary_label: "Private type leaks",
         docs_anchor: "private-type-leaks",
@@ -762,6 +768,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dependency",
+        meta_docs_path: "explanations/dead-code#unused-dependencies",
         meta_name: "Unused Dependencies",
         summary_label: "Unused dependencies",
         docs_anchor: "unused-dependencies",
@@ -770,6 +777,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dev-dependency",
+        meta_docs_path: "explanations/dead-code#unused-devdependencies",
         meta_name: "Unused Dev Dependencies",
         summary_label: "Unused devDependencies",
         docs_anchor: "unused-dependencies",
@@ -778,6 +786,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-optional-dependency",
+        meta_docs_path: "explanations/dead-code#unused-optionaldependencies",
         meta_name: "Unused Optional Dependencies",
         summary_label: "Unused optionalDependencies",
         docs_anchor: "unused-dependencies",
@@ -786,6 +795,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-enum-member",
+        meta_docs_path: "explanations/dead-code#unused-enum-members",
         meta_name: "Unused Enum Members",
         summary_label: "Unused enum members",
         docs_anchor: "unused-enum-members",
@@ -794,6 +804,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-class-member",
+        meta_docs_path: "explanations/dead-code#unused-class-members",
         meta_name: "Unused Class Members",
         summary_label: "Unused class members",
         docs_anchor: "unused-class-members",
@@ -802,6 +813,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-store-member",
+        meta_docs_path: "explanations/dead-code#unused-store-members",
         meta_name: "Unused Store Members",
         summary_label: "Unused store members",
         docs_anchor: "unused-store-members",
@@ -810,6 +822,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unresolved-import",
+        meta_docs_path: "explanations/dead-code#unresolved-imports",
         meta_name: "Unresolved Imports",
         summary_label: "Unresolved imports",
         docs_anchor: "unresolved-imports",
@@ -818,6 +831,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unlisted-dependency",
+        meta_docs_path: "explanations/dead-code#unlisted-dependencies",
         meta_name: "Unlisted Dependencies",
         summary_label: "Unlisted dependencies",
         docs_anchor: "unlisted-dependencies",
@@ -826,6 +840,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "duplicate-export",
+        meta_docs_path: "explanations/dead-code#duplicate-exports",
         meta_name: "Duplicate Exports",
         summary_label: "Duplicate exports",
         docs_anchor: "duplicate-exports",
@@ -834,6 +849,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "type-only-dependency",
+        meta_docs_path: "explanations/dead-code#type-only-dependencies",
         meta_name: "Type-only Dependencies",
         summary_label: "Type-only dependencies",
         docs_anchor: "type-only-dependencies",
@@ -842,6 +858,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "test-only-dependency",
+        meta_docs_path: "explanations/dead-code#test-only-dependencies",
         meta_name: "Test-only Dependencies",
         summary_label: "Test-only dependencies",
         docs_anchor: "test-only-dependencies",
@@ -850,6 +867,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "circular-dependency",
+        meta_docs_path: "explanations/dead-code#circular-dependencies",
         meta_name: "Circular Dependencies",
         summary_label: "Circular dependencies",
         docs_anchor: "circular-dependencies",
@@ -858,6 +876,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "re-export-cycle",
+        meta_docs_path: "explanations/dead-code#re-export-cycles",
         meta_name: "Re-Export Cycles",
         summary_label: "Re-export cycles",
         docs_anchor: "re-export-cycles",
@@ -866,6 +885,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-violation",
+        meta_docs_path: "explanations/dead-code#boundary-violations",
         meta_name: "Boundary Violations",
         summary_label: "Boundary violations",
         docs_anchor: "boundary-violations",
@@ -874,6 +894,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-coverage",
+        meta_docs_path: "explanations/dead-code#boundary-violations",
         meta_name: "Boundary Coverage",
         summary_label: "Boundary coverage",
         docs_anchor: "boundary-violations",
@@ -882,6 +903,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-call-violation",
+        meta_docs_path: "explanations/dead-code#boundary-violations",
         meta_name: "Boundary Call Violation",
         summary_label: "Boundary calls",
         docs_anchor: "boundary-violations",
@@ -890,6 +912,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "policy-violation",
+        meta_docs_path: "explanations/dead-code#policy-violations",
         meta_name: "Policy Violation",
         summary_label: "Policy violations",
         docs_anchor: "policy-violations",
@@ -898,6 +921,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "invalid-client-export",
+        meta_docs_path: "explanations/dead-code#invalid-client-exports",
         meta_name: "Invalid client export",
         summary_label: "Invalid client exports",
         docs_anchor: "invalid-client-exports",
@@ -906,6 +930,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "mixed-client-server-barrel",
+        meta_docs_path: "explanations/dead-code#mixed-client-server-barrels",
         meta_name: "Mixed client/server barrel",
         summary_label: "Mixed client/server barrels",
         docs_anchor: "mixed-client-server-barrels",
@@ -914,6 +939,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "misplaced-directive",
+        meta_docs_path: "explanations/dead-code#misplaced-directives",
         meta_name: "Misplaced directive",
         summary_label: "Misplaced directives",
         docs_anchor: "misplaced-directives",
@@ -922,6 +948,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unprovided-inject",
+        meta_docs_path: "explanations/dead-code#unprovided-injects",
         meta_name: "Unprovided injects",
         summary_label: "Unprovided injects",
         docs_anchor: "unprovided-inject",
@@ -930,6 +957,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unrendered-component",
+        meta_docs_path: "explanations/dead-code#unrendered-components",
         meta_name: "Unrendered components",
         summary_label: "Unrendered components",
         docs_anchor: "unrendered-component",
@@ -938,6 +966,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-prop",
+        meta_docs_path: "explanations/dead-code#unused-component-props",
         meta_name: "Unused component props",
         summary_label: "Unused component props",
         docs_anchor: "unused-component-prop",
@@ -946,6 +975,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-emit",
+        meta_docs_path: "explanations/dead-code#unused-component-emits",
         meta_name: "Unused component emits",
         summary_label: "Unused component emits",
         docs_anchor: "unused-component-emit",
@@ -954,6 +984,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-input",
+        meta_docs_path: "explanations/dead-code#unused-component-inputs",
         meta_name: "Unused component inputs",
         summary_label: "Unused component inputs",
         docs_anchor: "unused-component-input",
@@ -962,6 +993,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-output",
+        meta_docs_path: "explanations/dead-code#unused-component-outputs",
         meta_name: "Unused component outputs",
         summary_label: "Unused component outputs",
         docs_anchor: "unused-component-output",
@@ -970,6 +1002,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-svelte-event",
+        meta_docs_path: "explanations/dead-code#unused-svelte-events",
         meta_name: "Unused Svelte events",
         summary_label: "Unused Svelte events",
         docs_anchor: "unused-svelte-event",
@@ -978,6 +1011,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-server-action",
+        meta_docs_path: "explanations/dead-code#unused-server-actions",
         meta_name: "Unused server actions",
         summary_label: "Unused server actions",
         docs_anchor: "unused-server-action",
@@ -986,6 +1020,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-load-data-key",
+        meta_docs_path: "explanations/dead-code#unused-load-data-keys",
         meta_name: "Unused load data keys",
         summary_label: "Unused load data keys",
         docs_anchor: "unused-load-data-key",
@@ -994,6 +1029,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "route-collision",
+        meta_docs_path: "explanations/dead-code#route-collisions",
         meta_name: "Route collision",
         summary_label: "Route collisions",
         docs_anchor: "route-collisions",
@@ -1002,6 +1038,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "dynamic-segment-name-conflict",
+        meta_docs_path: "explanations/dead-code#dynamic-segment-name-conflicts",
         meta_name: "Dynamic segment name conflict",
         summary_label: "Dynamic segment conflicts",
         docs_anchor: "dynamic-segment-name-conflicts",
@@ -1010,6 +1047,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "stale-suppression",
+        meta_docs_path: "explanations/dead-code#stale-suppressions",
         meta_name: "Stale Suppressions",
         summary_label: "Stale suppressions",
         docs_anchor: "stale-suppressions",
@@ -1018,6 +1056,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-catalog-entry",
+        meta_docs_path: "explanations/dead-code#unused-catalog-entries",
         meta_name: "Unused catalog entry",
         summary_label: "Unused catalog entries",
         docs_anchor: "unused-catalog-entries",
@@ -1026,6 +1065,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "empty-catalog-group",
+        meta_docs_path: "explanations/dead-code#empty-catalog-groups",
         meta_name: "Empty catalog group",
         summary_label: "Empty catalog groups",
         docs_anchor: "empty-catalog-groups",
@@ -1034,6 +1074,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unresolved-catalog-reference",
+        meta_docs_path: "explanations/dead-code#unresolved-catalog-references",
         meta_name: "Unresolved catalog reference",
         summary_label: "Unresolved catalog references",
         docs_anchor: "unresolved-catalog-references",
@@ -1042,6 +1083,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dependency-override",
+        meta_docs_path: "explanations/dead-code#unused-dependency-overrides",
         meta_name: "Unused pnpm dependency override",
         summary_label: "Unused dependency overrides",
         docs_anchor: "unused-dependency-overrides",
@@ -1050,6 +1092,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "misconfigured-dependency-override",
+        meta_docs_path: "explanations/dead-code#misconfigured-dependency-overrides",
         meta_name: "Misconfigured pnpm dependency override",
         summary_label: "Misconfigured dependency overrides",
         docs_anchor: "misconfigured-dependency-overrides",
@@ -1058,6 +1101,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "prop-drilling",
+        meta_docs_path: "explanations/dead-code#prop-drilling",
         meta_name: "Prop drilling",
         summary_label: "Prop drilling",
         docs_anchor: "prop-drilling",
@@ -1066,6 +1110,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "thin-wrapper",
+        meta_docs_path: "explanations/dead-code#thin-wrapper",
         meta_name: "Thin wrapper",
         summary_label: "Thin wrappers",
         docs_anchor: "thin-wrapper",
@@ -1074,6 +1119,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "duplicate-prop-shape",
+        meta_docs_path: "explanations/dead-code#duplicate-prop-shape",
         meta_name: "Duplicate prop shape",
         summary_label: "Duplicate prop shapes",
         docs_anchor: "duplicate-prop-shape",
@@ -1554,6 +1600,17 @@ mod tests {
             assert!(
                 !meta.meta_name.is_empty(),
                 "result metadata code {} has no meta name",
+                meta.code
+            );
+        }
+    }
+
+    #[test]
+    fn result_meta_codes_have_meta_docs_paths() {
+        for meta in ISSUE_RESULT_META {
+            assert!(
+                meta.meta_docs_path.starts_with("explanations/dead-code#"),
+                "result metadata code {} has invalid meta docs path",
                 meta.code
             );
         }
