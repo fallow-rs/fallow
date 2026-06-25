@@ -8,6 +8,7 @@ use fallow_output::{
     EffortEstimate, FindingSeverity, HealthGrouping, HealthReport, HealthTimings,
     RuntimeCoverageWatermark,
 };
+use fallow_types::path_util::is_absolute_path_any_platform;
 
 /// Command-neutral sort criteria for health complexity findings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,24 @@ pub struct HealthCoverageInputs<'a> {
     /// Absolute coverage-path prefix to strip before rebasing files onto the
     /// project root.
     pub coverage_root: Option<&'a Path>,
+}
+
+/// Validate that a coverage-data root is absolute under Unix or Windows path
+/// conventions.
+///
+/// Istanbul coverage paths often come from a Linux CI runner even when fallow
+/// is invoked on another host, so POSIX-rooted paths and Windows drive paths
+/// are both accepted on every platform.
+pub fn validate_coverage_root_absolute(coverage_root: Option<&Path>) -> Result<(), String> {
+    if let Some(path) = coverage_root
+        && !is_absolute_path_any_platform(path)
+    {
+        return Err(format!(
+            "--coverage-root expects an absolute path prefix from the coverage data, got '{}'. Use the checkout prefix from the machine that generated coverage, for example '/home/runner/work/myapp'.",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Command-neutral health exit gate options.
@@ -418,5 +437,30 @@ mod tests {
 
         assert!(run.sections.score);
         assert_eq!(run.gates.min_score, Some(90.0));
+    }
+
+    #[test]
+    fn coverage_root_accepts_posix_absolute() {
+        assert!(validate_coverage_root_absolute(Some(Path::new("/ci/workspace"))).is_ok());
+        assert!(
+            validate_coverage_root_absolute(Some(Path::new("/home/runner/work/myapp"))).is_ok()
+        );
+    }
+
+    #[test]
+    fn coverage_root_rejects_relative() {
+        assert!(validate_coverage_root_absolute(Some(Path::new("src"))).is_err());
+        assert!(validate_coverage_root_absolute(Some(Path::new("./coverage"))).is_err());
+        assert!(validate_coverage_root_absolute(Some(Path::new("a/b/c"))).is_err());
+    }
+
+    #[test]
+    fn coverage_root_accepts_none() {
+        assert!(validate_coverage_root_absolute(None).is_ok());
+    }
+
+    #[test]
+    fn coverage_root_accepts_windows_absolute_on_all_hosts() {
+        assert!(validate_coverage_root_absolute(Some(Path::new(r"C:\ci\workspace"))).is_ok());
     }
 }

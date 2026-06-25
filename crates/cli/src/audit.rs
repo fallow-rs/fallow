@@ -2629,7 +2629,7 @@ pub use output::{
 /// clears. The marker only affects the local Impact store; it never changes
 /// the verdict, exit code, or output.
 pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode {
-    if let Err(e) = crate::health::scoring::validate_coverage_root_absolute(opts.coverage_root) {
+    if let Err(e) = fallow_engine::validate_coverage_root_absolute(opts.coverage_root) {
         return emit_error(&e, 2, opts.output);
     }
     let coverage_resolved = opts

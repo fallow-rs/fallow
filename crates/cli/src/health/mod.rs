@@ -202,7 +202,7 @@ pub fn execute_health_with_shared_parse(
     opts: &HealthOptions<'_>,
     shared: HealthSharedParseData,
 ) -> Result<HealthResult, ExitCode> {
-    scoring::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
+    fallow_engine::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
         .map_err(|e| emit_error(&e, 2, opts.output))?;
     validate_churn_file(opts)?;
     let t = Instant::now();
@@ -240,7 +240,7 @@ pub fn execute_health_with_shared_parse(
 }
 
 pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode> {
-    scoring::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
+    fallow_engine::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
         .map_err(|e| emit_error(&e, 2, opts.output))?;
     validate_churn_file(opts)?;
     let t = Instant::now();

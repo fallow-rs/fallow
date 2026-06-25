@@ -71,7 +71,7 @@ pub use health::{
     DerivedHealthSections, HealthAnalysisResult, HealthCoverageInputs, HealthGateOptions,
     HealthRunOptions, HealthRunOptionsInput, HealthSectionOptions, HealthSharedParseData,
     HealthSort, HealthThresholdOverrides, RuntimeCoverageOptions, derive_complexity_sections,
-    derive_health_run_options, derive_health_sections,
+    derive_health_run_options, derive_health_sections, validate_coverage_root_absolute,
 };
 
 /// Result alias for typed engine operations.

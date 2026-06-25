@@ -899,20 +899,6 @@ pub fn resolve_relative_to_root(
     }
 }
 
-pub fn validate_coverage_root_absolute(
-    coverage_root: Option<&std::path::Path>,
-) -> Result<(), String> {
-    if let Some(path) = coverage_root
-        && !path.has_root()
-    {
-        return Err(format!(
-            "--coverage-root expects an absolute path prefix from the coverage data, got '{}'. Use the checkout prefix from the machine that generated coverage, for example '/home/runner/work/myapp'.",
-            path.display()
-        ));
-    }
-    Ok(())
-}
-
 /// If `path` is a directory, looks for `coverage-final.json` inside it.
 /// Parses the Istanbul JSON format and pre-computes per-function statement
 /// coverage percentages for efficient lookup during CRAP scoring.
@@ -929,7 +915,7 @@ pub(super) fn load_istanbul_coverage(
     coverage_root: Option<&std::path::Path>,
     project_root: Option<&std::path::Path>,
 ) -> Result<IstanbulCoverage, String> {
-    validate_coverage_root_absolute(coverage_root)?;
+    fallow_engine::validate_coverage_root_absolute(coverage_root)?;
     let resolved = resolve_relative_to_root(path, project_root);
     let file_path = if resolved.is_dir() {
         let candidate = resolved.join("coverage-final.json");
@@ -4778,52 +4764,5 @@ mod tests {
         let (max, above) = compute_crap_scores_binary(&funcs, false);
         assert!((max - 72.0).abs() < f64::EPSILON);
         assert_eq!(above, 1);
-    }
-
-    #[test]
-    fn validate_coverage_root_accepts_posix_absolute() {
-        assert!(
-            validate_coverage_root_absolute(Some(std::path::Path::new("/ci/workspace"))).is_ok()
-        );
-        assert!(
-            validate_coverage_root_absolute(Some(std::path::Path::new("/home/runner/work/myapp")))
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn validate_coverage_root_rejects_truly_relative() {
-        assert!(validate_coverage_root_absolute(Some(std::path::Path::new("src"))).is_err());
-        assert!(validate_coverage_root_absolute(Some(std::path::Path::new("./coverage"))).is_err());
-        assert!(validate_coverage_root_absolute(Some(std::path::Path::new("a/b/c"))).is_err());
-    }
-
-    #[test]
-    fn validate_coverage_root_accepts_none() {
-        assert!(validate_coverage_root_absolute(None).is_ok());
-    }
-
-    /// Regression for issue #561: `Path::is_absolute` on Windows requires a
-    /// drive letter, so a POSIX-style `--coverage-root /ci/workspace` (the
-    /// shape Linux-CI-generated Istanbul data uses) was rejected with exit 2
-    /// when fallow ran on Windows. The prefix-strip in `load_istanbul_coverage`
-    /// is component-wise and works on root-anchored POSIX paths regardless of
-    /// host OS, so the validator must accept `has_root` rather than
-    /// `is_absolute`.
-    #[cfg(windows)]
-    #[test]
-    fn validate_coverage_root_accepts_posix_absolute_on_windows() {
-        assert!(
-            validate_coverage_root_absolute(Some(std::path::Path::new(r"/ci/workspace"))).is_ok(),
-            "POSIX-absolute prefix must be accepted on Windows: coverage data from Linux CI uses this exact shape"
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn validate_coverage_root_accepts_windows_absolute() {
-        assert!(
-            validate_coverage_root_absolute(Some(std::path::Path::new(r"C:\ci\workspace"))).is_ok()
-        );
     }
 }
