@@ -404,7 +404,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         enforce_coverage_gap_gate: false,
         effort: None,
         score: opts.score || opts.trend,
-        min_score: None,
+        gates: fallow_engine::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: opts.explain,
@@ -419,8 +419,6 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
             coverage_root: opts.coverage_root,
         },
         performance: opts.performance,
-        min_severity: None,
-        report_only: false,
         runtime_coverage: None,
         churn_file: opts.churn_file,
     }

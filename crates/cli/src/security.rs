@@ -1166,7 +1166,7 @@ fn security_runtime_health_options<'a>(
         enforce_coverage_gap_gate: false,
         effort: None,
         score: false,
-        min_score: None,
+        gates: fallow_engine::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: false,
@@ -1176,8 +1176,6 @@ fn security_runtime_health_options<'a>(
         group_by: None,
         coverage_inputs: fallow_engine::HealthCoverageInputs::default(),
         performance: false,
-        min_severity: None,
-        report_only: false,
         runtime_coverage: Some(runtime_coverage),
         churn_file: None,
     }

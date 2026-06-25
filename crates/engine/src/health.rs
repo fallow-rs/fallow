@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use fallow_config::ResolvedConfig;
-use fallow_output::{HealthGrouping, HealthReport, HealthTimings, RuntimeCoverageWatermark};
+use fallow_output::{
+    FindingSeverity, HealthGrouping, HealthReport, HealthTimings, RuntimeCoverageWatermark,
+};
 
 /// Command-neutral sort criteria for health complexity findings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +34,15 @@ pub struct HealthCoverageInputs<'a> {
     /// Absolute coverage-path prefix to strip before rebasing files onto the
     /// project root.
     pub coverage_root: Option<&'a Path>,
+}
+
+/// Command-neutral health exit gate options.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct HealthGateOptions {
+    pub min_score: Option<f64>,
+    pub min_severity: Option<FindingSeverity>,
+    /// Render the score and findings but never fail CI on a health gate.
+    pub report_only: bool,
 }
 
 /// Command-neutral runtime coverage input for health analysis.
