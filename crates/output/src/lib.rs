@@ -72,7 +72,7 @@ pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
     GroupByMode, WorkspaceDiagnosticOutput, apply_config_fixable_to_duplicate_exports,
-    build_check_output, build_check_summary,
+    build_check_output, build_check_summary, workspace_diagnostics_output,
 };
 pub use codeclimate::{
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
