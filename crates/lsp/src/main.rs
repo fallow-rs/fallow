@@ -335,11 +335,11 @@ fn analyze_project_root_config_fallback(
     if input.config_path.is_some() {
         return;
     }
-    if let Ok(analysis) = fallow_engine::analyze_project(input.project_root) {
+    let session = AnalysisSession::load_default(input.project_root);
+    if let Ok(analysis) = session.analyze_dead_code() {
         merge_results(input.merged_results, analysis.results);
     }
-    let duplication =
-        fallow_engine::find_duplicates_in_project(input.project_root, &DuplicatesConfig::default());
+    let duplication = session.find_duplicates_with(&DuplicatesConfig::default());
     merge_duplication(input.merged_duplication, duplication);
 }
 
@@ -2335,6 +2335,53 @@ mod tests {
         assert!(
             test_file_reported(Some(false)),
             "forcing production off keeps the test file in analysis"
+        );
+    }
+
+    #[test]
+    fn analyze_project_root_implicit_config_error_falls_back_to_default_session() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).expect("create src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"lsp-config-fallback","private":true,"main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(root.join(".fallowrc.jsonc"), "{ invalid json").expect("write config");
+        std::fs::write(root.join("src/index.ts"), "export const used = 1;\n").expect("write index");
+        std::fs::write(root.join("src/orphan.ts"), "export const orphan = 2;\n")
+            .expect("write orphan");
+
+        let mut results = AnalysisResults::default();
+        let mut duplication = DuplicationReport::default();
+        let mut inline_complexity = Vec::new();
+        let mut messages = Vec::new();
+        analyze_project_root_for_test(
+            root,
+            None,
+            None,
+            None,
+            false,
+            &mut results,
+            &mut duplication,
+            &mut inline_complexity,
+            &mut messages,
+        );
+
+        assert!(
+            messages
+                .iter()
+                .any(|(kind, message)| *kind == MessageType::WARNING
+                    && message.contains("config error for")),
+            "implicit config failure should be surfaced as a warning"
+        );
+        assert!(
+            results
+                .unused_files
+                .iter()
+                .any(|finding| finding.file.path.ends_with("orphan.ts")),
+            "implicit config failure should still produce default-session diagnostics"
         );
     }
 
