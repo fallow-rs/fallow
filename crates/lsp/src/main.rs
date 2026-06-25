@@ -1047,7 +1047,9 @@ impl FallowLspServer {
         }
 
         actions.extend(code_actions::build_suppress_security_actions(
-            results, file_path, uri, range, file_lines,
+            code_actions::SuppressSecurityActionInput::new(
+                results, file_path, uri, range, file_lines,
+            ),
         ));
 
         (!actions.is_empty()).then_some(actions)
