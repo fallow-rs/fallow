@@ -38,8 +38,10 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_extract::{ANGULAR_THIS_SPREAD_SENTINEL, ANGULAR_TPL_SENTINEL};
-use fallow_types::extract::{ModuleInfo, SemanticFact};
+use fallow_types::extract::{
+    ModuleInfo, SemanticFact, is_legacy_angular_template_member_access_object,
+    is_legacy_angular_this_spread_object,
+};
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -168,7 +170,7 @@ pub(super) fn insert_angular_template_members<'a>(
         }
     }
     for access in &module.member_accesses {
-        if access.object == ANGULAR_TPL_SENTINEL {
+        if is_legacy_angular_template_member_access_object(&access.object) {
             out.insert(access.member.as_str());
         }
     }
@@ -182,7 +184,7 @@ pub(super) fn has_angular_template_members(module: &ModuleInfo) -> bool {
         || module
             .member_accesses
             .iter()
-            .any(|a| a.object == ANGULAR_TPL_SENTINEL)
+            .any(|a| is_legacy_angular_template_member_access_object(&a.object))
 }
 
 /// Whether the component declares an `extends` heritage clause anywhere in its
@@ -206,7 +208,7 @@ pub(super) fn component_spreads_this(module: &ModuleInfo) -> bool {
         || module
             .member_accesses
             .iter()
-            .any(|a| a.object == ANGULAR_THIS_SPREAD_SENTINEL)
+            .any(|a| is_legacy_angular_this_spread_object(&a.object))
 }
 
 /// The `.ts` modules reached from `from` by a `SideEffect`-shaped edge that hold
@@ -297,8 +299,8 @@ pub(super) fn is_js_reserved_word(name: &str) -> bool {
 mod tests {
     use fallow_types::discover::FileId;
     use fallow_types::extract::{
-        AngularInputMember, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
-        ClassHeritageInfo, MemberAccess, SemanticFact,
+        ANGULAR_TPL_SENTINEL, AngularInputMember, AngularTemplateMemberAccessFact,
+        AngularThisSpreadFact, ClassHeritageInfo, MemberAccess, SemanticFact,
     };
     use rustc_hash::FxHashSet;
 
