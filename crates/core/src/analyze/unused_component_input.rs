@@ -39,8 +39,8 @@ use std::path::Path;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{
-    ModuleInfo, SemanticFact, is_legacy_angular_template_member_access_object,
-    is_legacy_angular_this_spread_object,
+    ModuleInfo, angular_template_member_names, has_angular_template_members,
+    has_angular_this_spread,
 };
 
 use crate::discover::FileId;
@@ -164,27 +164,7 @@ pub(super) fn insert_angular_template_members<'a>(
     module: &'a ModuleInfo,
     out: &mut FxHashSet<&'a str>,
 ) {
-    for fact in &module.semantic_facts {
-        if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
-            out.insert(access.member.as_str());
-        }
-    }
-    for access in &module.member_accesses {
-        if is_legacy_angular_template_member_access_object(&access.object) {
-            out.insert(access.member.as_str());
-        }
-    }
-}
-
-pub(super) fn has_angular_template_members(module: &ModuleInfo) -> bool {
-    module
-        .semantic_facts
-        .iter()
-        .any(|fact| matches!(fact, SemanticFact::AngularTemplateMemberAccess(_)))
-        || module
-            .member_accesses
-            .iter()
-            .any(|a| is_legacy_angular_template_member_access_object(&a.object))
+    out.extend(angular_template_member_names(module));
 }
 
 /// Whether the component declares an `extends` heritage clause anywhere in its
@@ -201,14 +181,7 @@ fn component_has_extends(module: &ModuleInfo) -> bool {
 /// Whether the module spreads `this` into an object literal (`{ ...this }`).
 /// Every input/output is then consumed opaquely, so the whole component abstains.
 pub(super) fn component_spreads_this(module: &ModuleInfo) -> bool {
-    module
-        .semantic_facts
-        .iter()
-        .any(|fact| matches!(fact, SemanticFact::AngularThisSpread(_)))
-        || module
-            .member_accesses
-            .iter()
-            .any(|a| is_legacy_angular_this_spread_object(&a.object))
+    has_angular_this_spread(module)
 }
 
 /// The `.ts` modules reached from `from` by a `SideEffect`-shaped edge that hold
