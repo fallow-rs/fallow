@@ -172,6 +172,57 @@ pub enum IssueKind {
 }
 
 impl IssueKind {
+    /// Stable inventory of all issue kinds.
+    pub const ALL: &'static [Self] = &[
+        Self::UnusedFile,
+        Self::UnusedExport,
+        Self::UnusedType,
+        Self::PrivateTypeLeak,
+        Self::UnusedDependency,
+        Self::UnusedDevDependency,
+        Self::UnusedEnumMember,
+        Self::UnusedClassMember,
+        Self::UnresolvedImport,
+        Self::UnlistedDependency,
+        Self::DuplicateExport,
+        Self::CodeDuplication,
+        Self::CircularDependency,
+        Self::ReExportCycle,
+        Self::TypeOnlyDependency,
+        Self::TestOnlyDependency,
+        Self::BoundaryViolation,
+        Self::CoverageGaps,
+        Self::FeatureFlag,
+        Self::Complexity,
+        Self::StaleSuppression,
+        Self::PnpmCatalogEntry,
+        Self::EmptyCatalogGroup,
+        Self::UnresolvedCatalogReference,
+        Self::UnusedDependencyOverride,
+        Self::MisconfiguredDependencyOverride,
+        Self::SecurityClientServerLeak,
+        Self::SecuritySink,
+        Self::PolicyViolation,
+        Self::InvalidClientExport,
+        Self::MixedClientServerBarrel,
+        Self::MisplacedDirective,
+        Self::UnusedStoreMember,
+        Self::UnprovidedInject,
+        Self::RouteCollision,
+        Self::DynamicSegmentNameConflict,
+        Self::UnrenderedComponent,
+        Self::UnusedComponentProp,
+        Self::UnusedComponentEmit,
+        Self::UnusedComponentInput,
+        Self::UnusedComponentOutput,
+        Self::UnusedServerAction,
+        Self::UnusedLoadDataKey,
+        Self::PropDrilling,
+        Self::ThinWrapper,
+        Self::DuplicatePropShape,
+        Self::UnusedSvelteEvent,
+    ];
+
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
@@ -348,56 +399,11 @@ impl SuppressionTarget {
 
 /// Convert an [`IssueKind`] to its canonical suppression token.
 #[must_use]
-pub const fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
-    match kind {
-        IssueKind::UnusedFile => "unused-file",
-        IssueKind::UnusedExport => "unused-export",
-        IssueKind::UnusedType => "unused-type",
-        IssueKind::PrivateTypeLeak => "private-type-leak",
-        IssueKind::UnusedDependency => "unused-dependency",
-        IssueKind::UnusedDevDependency => "unused-dev-dependency",
-        IssueKind::UnusedEnumMember => "unused-enum-member",
-        IssueKind::UnusedClassMember => "unused-class-member",
-        IssueKind::UnresolvedImport => "unresolved-import",
-        IssueKind::UnlistedDependency => "unlisted-dependency",
-        IssueKind::DuplicateExport => "duplicate-export",
-        IssueKind::CodeDuplication => "code-duplication",
-        IssueKind::CircularDependency => "circular-dependency",
-        IssueKind::ReExportCycle => "re-export-cycle",
-        IssueKind::TypeOnlyDependency => "type-only-dependency",
-        IssueKind::TestOnlyDependency => "test-only-dependency",
-        IssueKind::BoundaryViolation => "boundary-violation",
-        IssueKind::CoverageGaps => "coverage-gaps",
-        IssueKind::FeatureFlag => "feature-flag",
-        IssueKind::Complexity => "complexity",
-        IssueKind::StaleSuppression => "stale-suppression",
-        IssueKind::PnpmCatalogEntry => "unused-catalog-entry",
-        IssueKind::EmptyCatalogGroup => "empty-catalog-group",
-        IssueKind::UnresolvedCatalogReference => "unresolved-catalog-reference",
-        IssueKind::UnusedDependencyOverride => "unused-dependency-override",
-        IssueKind::MisconfiguredDependencyOverride => "misconfigured-dependency-override",
-        IssueKind::SecurityClientServerLeak => "security-client-server-leak",
-        IssueKind::SecuritySink => "security-sink",
-        IssueKind::PolicyViolation => "policy-violation",
-        IssueKind::InvalidClientExport => "invalid-client-export",
-        IssueKind::MixedClientServerBarrel => "mixed-client-server-barrel",
-        IssueKind::MisplacedDirective => "misplaced-directive",
-        IssueKind::UnusedStoreMember => "unused-store-member",
-        IssueKind::UnprovidedInject => "unprovided-inject",
-        IssueKind::RouteCollision => "route-collision",
-        IssueKind::DynamicSegmentNameConflict => "dynamic-segment-name-conflict",
-        IssueKind::UnrenderedComponent => "unrendered-component",
-        IssueKind::UnusedComponentProp => "unused-component-prop",
-        IssueKind::UnusedComponentEmit => "unused-component-emit",
-        IssueKind::UnusedComponentInput => "unused-component-input",
-        IssueKind::UnusedComponentOutput => "unused-component-output",
-        IssueKind::UnusedServerAction => "unused-server-action",
-        IssueKind::UnusedLoadDataKey => "unused-load-data-key",
-        IssueKind::PropDrilling => "prop-drilling",
-        IssueKind::ThinWrapper => "thin-wrapper",
-        IssueKind::DuplicatePropShape => "duplicate-prop-shape",
-        IssueKind::UnusedSvelteEvent => "unused-svelte-event",
-    }
+pub fn issue_kind_to_kebab(kind: IssueKind) -> &'static str {
+    let Some(meta) = crate::issue_meta::issue_meta_by_kind(kind) else {
+        unreachable!("IssueKind {kind:?} has no metadata row");
+    };
+    meta.suppress_token.unwrap_or(meta.code)
 }
 
 /// Parse a suppression token into a structured target.
@@ -999,122 +1005,38 @@ mod tests {
             IssueKind::from_discriminant(47),
             Some(IssueKind::UnusedSvelteEvent)
         );
-        assert_eq!(IssueKind::from_discriminant(48), None);
+        let max_discriminant = IssueKind::ALL
+            .iter()
+            .map(|kind| kind.to_discriminant())
+            .max()
+            .expect("IssueKind::ALL should not be empty");
+        assert_eq!(IssueKind::from_discriminant(max_discriminant + 1), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
     #[test]
     fn discriminant_roundtrip() {
-        for kind in [
-            IssueKind::UnusedFile,
-            IssueKind::UnusedExport,
-            IssueKind::UnusedType,
-            IssueKind::PrivateTypeLeak,
-            IssueKind::UnusedDependency,
-            IssueKind::UnusedDevDependency,
-            IssueKind::UnusedEnumMember,
-            IssueKind::UnusedClassMember,
-            IssueKind::UnresolvedImport,
-            IssueKind::UnlistedDependency,
-            IssueKind::DuplicateExport,
-            IssueKind::CodeDuplication,
-            IssueKind::CircularDependency,
-            IssueKind::ReExportCycle,
-            IssueKind::TypeOnlyDependency,
-            IssueKind::TestOnlyDependency,
-            IssueKind::BoundaryViolation,
-            IssueKind::CoverageGaps,
-            IssueKind::FeatureFlag,
-            IssueKind::Complexity,
-            IssueKind::StaleSuppression,
-            IssueKind::PnpmCatalogEntry,
-            IssueKind::EmptyCatalogGroup,
-            IssueKind::UnresolvedCatalogReference,
-            IssueKind::UnusedDependencyOverride,
-            IssueKind::MisconfiguredDependencyOverride,
-            IssueKind::SecurityClientServerLeak,
-            IssueKind::SecuritySink,
-            IssueKind::PolicyViolation,
-            IssueKind::InvalidClientExport,
-            IssueKind::MixedClientServerBarrel,
-            IssueKind::MisplacedDirective,
-            IssueKind::UnusedStoreMember,
-            IssueKind::UnprovidedInject,
-            IssueKind::RouteCollision,
-            IssueKind::DynamicSegmentNameConflict,
-            IssueKind::UnrenderedComponent,
-            IssueKind::UnusedComponentProp,
-            IssueKind::UnusedComponentEmit,
-            IssueKind::UnusedServerAction,
-            IssueKind::UnusedLoadDataKey,
-            IssueKind::PropDrilling,
-            IssueKind::ThinWrapper,
-            IssueKind::DuplicatePropShape,
-            IssueKind::UnusedComponentInput,
-            IssueKind::UnusedComponentOutput,
-            IssueKind::UnusedSvelteEvent,
-        ] {
+        for &kind in IssueKind::ALL {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
                 Some(kind)
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(48), None);
+        let max_discriminant = IssueKind::ALL
+            .iter()
+            .map(|kind| kind.to_discriminant())
+            .max()
+            .expect("IssueKind::ALL should not be empty");
+        assert_eq!(IssueKind::from_discriminant(max_discriminant + 1), None);
     }
 
     #[test]
     fn discriminant_values_are_unique() {
-        let all_kinds = [
-            IssueKind::UnusedFile,
-            IssueKind::UnusedExport,
-            IssueKind::UnusedType,
-            IssueKind::PrivateTypeLeak,
-            IssueKind::UnusedDependency,
-            IssueKind::UnusedDevDependency,
-            IssueKind::UnusedEnumMember,
-            IssueKind::UnusedClassMember,
-            IssueKind::UnresolvedImport,
-            IssueKind::UnlistedDependency,
-            IssueKind::DuplicateExport,
-            IssueKind::CodeDuplication,
-            IssueKind::CircularDependency,
-            IssueKind::ReExportCycle,
-            IssueKind::TypeOnlyDependency,
-            IssueKind::TestOnlyDependency,
-            IssueKind::BoundaryViolation,
-            IssueKind::CoverageGaps,
-            IssueKind::FeatureFlag,
-            IssueKind::Complexity,
-            IssueKind::StaleSuppression,
-            IssueKind::PnpmCatalogEntry,
-            IssueKind::EmptyCatalogGroup,
-            IssueKind::UnresolvedCatalogReference,
-            IssueKind::UnusedDependencyOverride,
-            IssueKind::MisconfiguredDependencyOverride,
-            IssueKind::SecurityClientServerLeak,
-            IssueKind::SecuritySink,
-            IssueKind::PolicyViolation,
-            IssueKind::InvalidClientExport,
-            IssueKind::MixedClientServerBarrel,
-            IssueKind::MisplacedDirective,
-            IssueKind::UnusedStoreMember,
-            IssueKind::UnprovidedInject,
-            IssueKind::RouteCollision,
-            IssueKind::DynamicSegmentNameConflict,
-            IssueKind::UnrenderedComponent,
-            IssueKind::UnusedComponentProp,
-            IssueKind::UnusedComponentEmit,
-            IssueKind::UnusedServerAction,
-            IssueKind::UnusedLoadDataKey,
-            IssueKind::PropDrilling,
-            IssueKind::ThinWrapper,
-            IssueKind::DuplicatePropShape,
-            IssueKind::UnusedComponentInput,
-            IssueKind::UnusedComponentOutput,
-            IssueKind::UnusedSvelteEvent,
-        ];
-        let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
+        let discriminants: Vec<u8> = IssueKind::ALL
+            .iter()
+            .map(|kind| kind.to_discriminant())
+            .collect();
         let mut sorted = discriminants.clone();
         sorted.sort_unstable();
         sorted.dedup();
@@ -1128,6 +1050,17 @@ mod tests {
     #[test]
     fn discriminant_starts_at_one() {
         assert_eq!(IssueKind::UnusedFile.to_discriminant(), 1);
+    }
+
+    #[test]
+    fn issue_kind_to_kebab_uses_registry_suppression_token() {
+        for &kind in IssueKind::ALL {
+            let meta = crate::issue_meta::issue_meta_by_kind(kind)
+                .unwrap_or_else(|| panic!("IssueKind {kind:?} has no metadata row"));
+            let token = issue_kind_to_kebab(kind);
+            assert_eq!(token, meta.suppress_token.unwrap_or(meta.code));
+            assert_eq!(IssueKind::parse(token), Some(kind));
+        }
     }
 
     #[test]
