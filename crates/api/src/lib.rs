@@ -252,6 +252,83 @@ pub struct ComplexityOptions {
     pub coverage_root: Option<PathBuf>,
 }
 
+/// Derived section selection for programmatic health / complexity runs.
+///
+/// Owned by `fallow-api` so embedders and the remaining CLI-backed runtime path
+/// share the same defaulting rules while health execution moves behind the
+/// typed API boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedComplexityOptions {
+    pub any_section: bool,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub ownership: bool,
+    pub targets: bool,
+    pub force_full: bool,
+    pub score_only_output: bool,
+    pub score: bool,
+}
+
+/// Derive effective programmatic health / complexity section flags.
+#[must_use]
+pub fn derive_complexity_options(options: &ComplexityOptions) -> DerivedComplexityOptions {
+    let ownership = options.ownership || options.ownership_emails.is_some();
+    let requested_hotspots = options.hotspots || ownership;
+    let requested_targets = options.targets || options.effort.is_some();
+    let any_section = options.complexity
+        || options.file_scores
+        || options.coverage_gaps
+        || requested_hotspots
+        || requested_targets
+        || options.score;
+    let score = if any_section { options.score } else { true };
+    let hotspots = if any_section {
+        requested_hotspots
+    } else {
+        true
+    };
+
+    DerivedComplexityOptions {
+        any_section,
+        complexity: if any_section {
+            options.complexity
+        } else {
+            true
+        },
+        file_scores: effective_file_scores(options, any_section, score),
+        coverage_gaps: if any_section {
+            options.coverage_gaps
+        } else {
+            false
+        },
+        hotspots,
+        ownership: ownership && hotspots,
+        targets: if any_section { requested_targets } else { true },
+        force_full: score,
+        score_only_output: is_score_only_output(options, requested_hotspots, requested_targets),
+        score,
+    }
+}
+
+fn effective_file_scores(options: &ComplexityOptions, any_section: bool, force_full: bool) -> bool {
+    (if any_section {
+        options.file_scores
+    } else {
+        true
+    }) || force_full
+}
+
+fn is_score_only_output(options: &ComplexityOptions, hotspots: bool, targets: bool) -> bool {
+    options.score
+        && !options.complexity
+        && !options.file_scores
+        && !options.coverage_gaps
+        && !hotspots
+        && !targets
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +354,51 @@ mod tests {
         assert_eq!(error.code.as_deref(), Some("FALLOW_TEST"));
         assert_eq!(error.help.as_deref(), Some("Try again"));
         assert_eq!(error.context.as_deref(), Some("analysis.root"));
+    }
+
+    #[test]
+    fn default_complexity_options_match_programmatic_health_defaults() {
+        let derived = derive_complexity_options(&ComplexityOptions::default());
+
+        assert!(!derived.any_section);
+        assert!(derived.complexity);
+        assert!(derived.file_scores);
+        assert!(!derived.coverage_gaps);
+        assert!(derived.hotspots);
+        assert!(!derived.ownership);
+        assert!(derived.targets);
+        assert!(derived.force_full);
+        assert!(!derived.score_only_output);
+        assert!(derived.score);
+    }
+
+    #[test]
+    fn score_only_complexity_options_request_score_only_output() {
+        let derived = derive_complexity_options(&ComplexityOptions {
+            score: true,
+            ..ComplexityOptions::default()
+        });
+
+        assert!(derived.any_section);
+        assert!(!derived.complexity);
+        assert!(derived.file_scores);
+        assert!(!derived.hotspots);
+        assert!(!derived.targets);
+        assert!(derived.force_full);
+        assert!(derived.score_only_output);
+        assert!(derived.score);
+    }
+
+    #[test]
+    fn ownership_implies_hotspots_when_requested() {
+        let derived = derive_complexity_options(&ComplexityOptions {
+            ownership: true,
+            ..ComplexityOptions::default()
+        });
+
+        assert!(derived.any_section);
+        assert!(derived.hotspots);
+        assert!(derived.ownership);
+        assert!(!derived.targets);
     }
 }
