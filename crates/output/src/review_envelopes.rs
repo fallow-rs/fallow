@@ -194,3 +194,43 @@ pub enum ReviewCheckConclusion {
     /// At least one finding gated as failure.
     Failure,
 }
+
+/// Envelope emitted by `fallow ci reconcile-review --format json`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow ci reconcile-review --format json")
+)]
+pub struct ReviewReconcileOutput {
+    pub schema: ReviewReconcileSchema,
+    pub provider: ReviewProvider,
+    pub target: Option<String>,
+    pub dry_run: bool,
+    pub comments: u32,
+    pub current_fingerprints: u32,
+    pub existing_fingerprints: u32,
+    pub new_fingerprints: u32,
+    pub stale_fingerprints: u32,
+    pub new: Vec<String>,
+    pub stale: Vec<String>,
+    pub provider_warning: Option<String>,
+    pub resolution_comments_posted: u32,
+    pub threads_resolved: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub apply_hint: Option<String>,
+    pub apply_errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed_fingerprints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unapplied_fingerprints: Vec<String>,
+}
+
+/// Schema-version discriminator for the review reconcile envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum ReviewReconcileSchema {
+    /// First release of the review reconcile format.
+    #[serde(rename = "fallow-review-reconcile/v1")]
+    V1,
+}
