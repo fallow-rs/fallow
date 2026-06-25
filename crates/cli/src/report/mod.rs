@@ -25,13 +25,13 @@ use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, Pi
 
 use crate::report::sink::outln;
 
-pub use grouping::OwnershipResolver;
-pub use human::health::{render_health_score, render_health_trend};
 #[allow(
     unused_imports,
     reason = "used by binary crate modules (combined.rs, audit.rs)"
 )]
-pub use json::strip_root_prefix;
+pub use fallow_output::strip_root_prefix;
+pub use grouping::OwnershipResolver;
+pub use human::health::{render_health_score, render_health_trend};
 
 /// Shared context for all report dispatch functions.
 ///

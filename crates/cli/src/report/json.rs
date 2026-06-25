@@ -8,7 +8,9 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
-use super::{emit_json, normalize_uri};
+use fallow_output::strip_root_prefix;
+
+use super::emit_json;
 use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutputInput,
@@ -234,76 +236,6 @@ fn postprocess_check_json(output: &mut serde_json::Value, root: &Path) {
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(output, &root_prefix);
     harmonize_multi_kind_suppress_line_actions(output);
-}
-
-/// Recursively strip the root prefix from all string values in the JSON tree.
-///
-/// This converts absolute paths (e.g., `/home/runner/work/repo/repo/src/utils.ts`)
-/// to relative paths (`src/utils.ts`) for all output fields.
-pub fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
-    match value {
-        serde_json::Value::String(s) => {
-            if let Some(rest) = s.strip_prefix(prefix) {
-                *s = rest.to_string();
-            } else {
-                let normalized = normalize_uri(s);
-                let normalized_prefix = normalize_uri(prefix);
-                if let Some(rest) = normalized.strip_prefix(&normalized_prefix) {
-                    *s = rest.to_string();
-                } else if let Some(stripped) =
-                    strip_embedded_root_prefixes(&normalized, &normalized_prefix)
-                {
-                    *s = stripped;
-                }
-            }
-        }
-        serde_json::Value::Array(arr) => {
-            for item in arr {
-                strip_root_prefix(item, prefix);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for (_, v) in map.iter_mut() {
-                strip_root_prefix(v, prefix);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn strip_embedded_root_prefixes(value: &str, prefix: &str) -> Option<String> {
-    let mut output = String::with_capacity(value.len());
-    let mut changed = false;
-    let mut last = 0;
-    let mut search_from = 0;
-
-    while let Some(offset) = value[search_from..].find(prefix) {
-        let index = search_from + offset;
-        let can_strip = index > 0
-            && value[..index]
-                .chars()
-                .next_back()
-                .is_some_and(is_embedded_path_boundary);
-
-        if can_strip {
-            output.push_str(&value[last..index]);
-            last = index + prefix.len();
-            changed = true;
-        }
-
-        search_from = index + prefix.len();
-    }
-
-    if changed {
-        output.push_str(&value[last..]);
-        Some(output)
-    } else {
-        None
-    }
-}
-
-fn is_embedded_path_boundary(c: char) -> bool {
-    c.is_whitespace() || matches!(c, '"' | '\'' | '`' | '(' | '[' | '{' | ':' | '=')
 }
 
 type SuppressAnchor = (String, u64);
