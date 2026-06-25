@@ -688,16 +688,7 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
                 ),
             );
             Ok(fallow_api::ProgrammaticHealthRun {
-                analysis: fallow_engine::HealthAnalysisResult {
-                    report: result.report,
-                    grouping: result.grouping,
-                    group_resolver: None,
-                    config: result.config,
-                    elapsed: result.elapsed,
-                    timings: result.timings,
-                    coverage_gaps_has_findings: result.coverage_gaps_has_findings,
-                    should_fail_on_coverage_gaps: result.should_fail_on_coverage_gaps,
-                },
+                analysis: result.without_group_resolver(),
                 workspace_diagnostics,
                 next_steps,
                 envelope_mode: programmatic_root_envelope_mode(&resolved),
