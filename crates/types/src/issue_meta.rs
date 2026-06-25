@@ -711,6 +711,15 @@ pub struct IssueResultMeta {
     pub counts_in_total: bool,
 }
 
+/// TypeScript backwards-compat alias emitted for a dead-code result row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TsAliasMeta {
+    /// Bare alias name kept available from the published `fallow/types` subpath.
+    pub name: &'static str,
+    /// Generated `*Finding` wrapper type the alias resolves to.
+    pub parent: &'static str,
+}
+
 /// All shared issue-to-result metadata rows.
 pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     IssueResultMeta {
@@ -1171,6 +1180,103 @@ pub fn issue_docs_anchor(code: &str) -> Option<&'static str> {
     })
 }
 
+/// Published TypeScript alias policy for backwards-compatible bare names.
+#[must_use]
+pub fn issue_ts_alias(code: &str) -> Option<TsAliasMeta> {
+    let alias = match code {
+        "unused-file" => TsAliasMeta {
+            name: "UnusedFile",
+            parent: "UnusedFileFinding",
+        },
+        "unused-export" => TsAliasMeta {
+            name: "UnusedExport",
+            parent: "UnusedExportFinding",
+        },
+        "private-type-leak" => TsAliasMeta {
+            name: "PrivateTypeLeak",
+            parent: "PrivateTypeLeakFinding",
+        },
+        "unused-dependency" => TsAliasMeta {
+            name: "UnusedDependency",
+            parent: "UnusedDependencyFinding",
+        },
+        "unused-dev-dependency" => TsAliasMeta {
+            name: "UnusedDependency",
+            parent: "UnusedDevDependencyFinding",
+        },
+        "unused-optional-dependency" => TsAliasMeta {
+            name: "UnusedDependency",
+            parent: "UnusedOptionalDependencyFinding",
+        },
+        "unused-enum-member" => TsAliasMeta {
+            name: "UnusedMember",
+            parent: "UnusedEnumMemberFinding",
+        },
+        "unused-class-member" => TsAliasMeta {
+            name: "UnusedMember",
+            parent: "UnusedClassMemberFinding",
+        },
+        "unused-store-member" => TsAliasMeta {
+            name: "UnusedMember",
+            parent: "UnusedStoreMemberFinding",
+        },
+        "unresolved-import" => TsAliasMeta {
+            name: "UnresolvedImport",
+            parent: "UnresolvedImportFinding",
+        },
+        "unlisted-dependency" => TsAliasMeta {
+            name: "UnlistedDependency",
+            parent: "UnlistedDependencyFinding",
+        },
+        "duplicate-export" => TsAliasMeta {
+            name: "DuplicateExport",
+            parent: "DuplicateExportFinding",
+        },
+        "type-only-dependency" => TsAliasMeta {
+            name: "TypeOnlyDependency",
+            parent: "TypeOnlyDependencyFinding",
+        },
+        "test-only-dependency" => TsAliasMeta {
+            name: "TestOnlyDependency",
+            parent: "TestOnlyDependencyFinding",
+        },
+        "circular-dependency" => TsAliasMeta {
+            name: "CircularDependency",
+            parent: "CircularDependencyFinding",
+        },
+        "re-export-cycle" => TsAliasMeta {
+            name: "ReExportCycle",
+            parent: "ReExportCycleFinding",
+        },
+        "boundary-violation" => TsAliasMeta {
+            name: "BoundaryViolation",
+            parent: "BoundaryViolationFinding",
+        },
+        "unused-catalog-entry" => TsAliasMeta {
+            name: "UnusedCatalogEntry",
+            parent: "UnusedCatalogEntryFinding",
+        },
+        "empty-catalog-group" => TsAliasMeta {
+            name: "EmptyCatalogGroup",
+            parent: "EmptyCatalogGroupFinding",
+        },
+        "unresolved-catalog-reference" => TsAliasMeta {
+            name: "UnresolvedCatalogReference",
+            parent: "UnresolvedCatalogReferenceFinding",
+        },
+        "unused-dependency-override" => TsAliasMeta {
+            name: "UnusedDependencyOverride",
+            parent: "UnusedDependencyOverrideFinding",
+        },
+        "misconfigured-dependency-override" => TsAliasMeta {
+            name: "MisconfiguredDependencyOverride",
+            parent: "MisconfiguredDependencyOverrideFinding",
+        },
+        _ => return None,
+    };
+    Some(alias)
+}
+
 /// Rows exposed by the LSP issue-type capability.
 pub fn diagnostic_issue_metas() -> impl Iterator<Item = &'static IssueKindMeta> {
     ISSUE_KIND_META.iter().filter(|meta| meta.lsp)
@@ -1273,6 +1379,50 @@ mod tests {
                 meta.code
             );
         }
+    }
+
+    #[test]
+    fn ts_alias_policy_is_explicit() {
+        let aliases: BTreeSet<(&str, &str)> = result_issue_metas()
+            .filter_map(|meta| issue_ts_alias(meta.code).map(|alias| (alias.name, alias.parent)))
+            .collect();
+
+        assert_eq!(
+            BTreeSet::from([
+                ("BoundaryViolation", "BoundaryViolationFinding"),
+                ("CircularDependency", "CircularDependencyFinding"),
+                ("DuplicateExport", "DuplicateExportFinding"),
+                ("EmptyCatalogGroup", "EmptyCatalogGroupFinding"),
+                (
+                    "MisconfiguredDependencyOverride",
+                    "MisconfiguredDependencyOverrideFinding",
+                ),
+                ("PrivateTypeLeak", "PrivateTypeLeakFinding"),
+                ("ReExportCycle", "ReExportCycleFinding"),
+                ("TestOnlyDependency", "TestOnlyDependencyFinding"),
+                ("TypeOnlyDependency", "TypeOnlyDependencyFinding"),
+                (
+                    "UnresolvedCatalogReference",
+                    "UnresolvedCatalogReferenceFinding",
+                ),
+                ("UnresolvedImport", "UnresolvedImportFinding"),
+                ("UnlistedDependency", "UnlistedDependencyFinding"),
+                ("UnusedCatalogEntry", "UnusedCatalogEntryFinding"),
+                ("UnusedDependency", "UnusedDependencyFinding"),
+                ("UnusedDependency", "UnusedDevDependencyFinding"),
+                ("UnusedDependency", "UnusedOptionalDependencyFinding"),
+                (
+                    "UnusedDependencyOverride",
+                    "UnusedDependencyOverrideFinding",
+                ),
+                ("UnusedExport", "UnusedExportFinding"),
+                ("UnusedFile", "UnusedFileFinding"),
+                ("UnusedMember", "UnusedClassMemberFinding"),
+                ("UnusedMember", "UnusedEnumMemberFinding"),
+                ("UnusedMember", "UnusedStoreMemberFinding"),
+            ]),
+            aliases
+        );
     }
 
     #[test]

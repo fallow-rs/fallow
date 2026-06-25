@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 
 use fallow_types::envelope::{Meta, MetaRule};
+pub use fallow_types::issue_meta::TsAliasMeta;
 use fallow_types::issue_meta::{
-    IssueResultMeta, issue_docs_anchor, issue_result_meta_by_code, result_issue_metas,
+    IssueResultMeta, issue_docs_anchor, issue_result_meta_by_code, issue_ts_alias,
+    result_issue_metas,
 };
 
 const DOCS_BASE: &str = "https://docs.fallow.tools";
@@ -16,15 +18,6 @@ pub const ACTIONS_FIELD_DEFINITION: &str = "Per-finding fix and suppression sugg
 
 /// `_meta` description for the per-action `auto_fixable` bool.
 pub const ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION: &str = "Evaluated PER FINDING, not per action type. The same `type` may carry `auto_fixable: true` on one finding and `auto_fixable: false` on another when per-instance guards in the `fallow fix` applier discriminate. Filter on this bool of each individual action, not on `type` alone. Current per-instance flips: (1) `remove-catalog-entry` is `true` only when the finding's `hardcoded_consumers` array is empty (else fallow fix skips the entry to avoid breaking `pnpm install`); (2) the primary dependency action flips between `remove-dependency` (`auto_fixable: true`) and `move-dependency` (`auto_fixable: false`) based on `used_in_workspaces`; (3) `add-to-config` for `ignoreExports` is `true` when fallow fix can safely apply the action, which means EITHER a fallow config file already exists OR no config exists and the working directory is NOT inside a monorepo subpackage (the applier then creates `.fallowrc.json` using `fallow init`'s framework-aware scaffolding and layers the new rules on top); `false` inside a monorepo subpackage with no workspace-root config because the applier refuses to fragment per-package configs; (4) `update-catalog-reference` is always `false` today (catalog-switching applier not yet wired). All `suppress-line` and `suppress-file` actions are uniformly `false`.";
-
-/// TypeScript backwards-compat alias emitted for a dead-code result row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TsAliasMeta {
-    /// Bare alias name kept available from the published `fallow/types` subpath.
-    pub name: &'static str,
-    /// Generated `*Finding` wrapper type the alias resolves to.
-    pub parent: &'static str,
-}
 
 /// Output-facing contract metadata for a serialized dead-code result row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +60,7 @@ impl IssueOutputContract {
             meta_docs_path: issue_meta_docs_path(meta.code)?,
             sarif_rule_ids: sarif_rule_ids(meta.code),
             codeclimate_check_names: codeclimate_check_names(meta.code),
-            ts_alias: ts_alias(meta.code),
+            ts_alias: issue_ts_alias(meta.code),
         })
     }
 }
@@ -146,101 +139,6 @@ fn codeclimate_check_names(code: &str) -> Vec<String> {
         return Vec::new();
     }
     sarif_rule_ids(code)
-}
-
-fn ts_alias(code: &str) -> Option<TsAliasMeta> {
-    let alias = match code {
-        "unused-file" => TsAliasMeta {
-            name: "UnusedFile",
-            parent: "UnusedFileFinding",
-        },
-        "unused-export" => TsAliasMeta {
-            name: "UnusedExport",
-            parent: "UnusedExportFinding",
-        },
-        "private-type-leak" => TsAliasMeta {
-            name: "PrivateTypeLeak",
-            parent: "PrivateTypeLeakFinding",
-        },
-        "unused-dependency" => TsAliasMeta {
-            name: "UnusedDependency",
-            parent: "UnusedDependencyFinding",
-        },
-        "unused-dev-dependency" => TsAliasMeta {
-            name: "UnusedDependency",
-            parent: "UnusedDevDependencyFinding",
-        },
-        "unused-optional-dependency" => TsAliasMeta {
-            name: "UnusedDependency",
-            parent: "UnusedOptionalDependencyFinding",
-        },
-        "unused-enum-member" => TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedEnumMemberFinding",
-        },
-        "unused-class-member" => TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedClassMemberFinding",
-        },
-        "unused-store-member" => TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedStoreMemberFinding",
-        },
-        "unresolved-import" => TsAliasMeta {
-            name: "UnresolvedImport",
-            parent: "UnresolvedImportFinding",
-        },
-        "unlisted-dependency" => TsAliasMeta {
-            name: "UnlistedDependency",
-            parent: "UnlistedDependencyFinding",
-        },
-        "duplicate-export" => TsAliasMeta {
-            name: "DuplicateExport",
-            parent: "DuplicateExportFinding",
-        },
-        "type-only-dependency" => TsAliasMeta {
-            name: "TypeOnlyDependency",
-            parent: "TypeOnlyDependencyFinding",
-        },
-        "test-only-dependency" => TsAliasMeta {
-            name: "TestOnlyDependency",
-            parent: "TestOnlyDependencyFinding",
-        },
-        "circular-dependency" => TsAliasMeta {
-            name: "CircularDependency",
-            parent: "CircularDependencyFinding",
-        },
-        "re-export-cycle" => TsAliasMeta {
-            name: "ReExportCycle",
-            parent: "ReExportCycleFinding",
-        },
-        "boundary-violation" => TsAliasMeta {
-            name: "BoundaryViolation",
-            parent: "BoundaryViolationFinding",
-        },
-        "unused-catalog-entry" => TsAliasMeta {
-            name: "UnusedCatalogEntry",
-            parent: "UnusedCatalogEntryFinding",
-        },
-        "empty-catalog-group" => TsAliasMeta {
-            name: "EmptyCatalogGroup",
-            parent: "EmptyCatalogGroupFinding",
-        },
-        "unresolved-catalog-reference" => TsAliasMeta {
-            name: "UnresolvedCatalogReference",
-            parent: "UnresolvedCatalogReferenceFinding",
-        },
-        "unused-dependency-override" => TsAliasMeta {
-            name: "UnusedDependencyOverride",
-            parent: "UnusedDependencyOverrideFinding",
-        },
-        "misconfigured-dependency-override" => TsAliasMeta {
-            name: "MisconfiguredDependencyOverride",
-            parent: "MisconfiguredDependencyOverrideFinding",
-        },
-        _ => return None,
-    };
-    Some(alias)
 }
 
 fn issue_summary_label(code: &str) -> Option<&'static str> {
