@@ -274,7 +274,7 @@ fn apply_programmatic_envelope_options(
     resolved: &ResolvedAnalysisOptions,
 ) {
     if resolved.legacy_envelope {
-        crate::output_envelope::remove_root_kind(output);
+        fallow_output::remove_root_kind(output);
     }
 }
 

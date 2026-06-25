@@ -78,21 +78,14 @@ pub fn serialize_root_output(output: FallowOutput) -> Result<serde_json::Value, 
 pub fn serialize_root_output_without_telemetry(
     output: FallowOutput,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serde_json::to_value(output)?;
-    if EnvelopeMode::current() == EnvelopeMode::Legacy {
-        remove_root_kind(&mut value);
-    }
-    Ok(value)
+    fallow_output::serialize_json_root_output(output, EnvelopeMode::current().into())
 }
 
 pub fn serialize_root_output_with_mode(
     output: FallowOutput,
     mode: EnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serde_json::to_value(output)?;
-    if mode == EnvelopeMode::Legacy {
-        remove_root_kind(&mut value);
-    }
+    let mut value = fallow_output::serialize_json_root_output(output, mode.into())?;
     attach_telemetry_meta(&mut value);
     Ok(value)
 }
@@ -118,23 +111,16 @@ pub fn attach_telemetry_meta(value: &mut serde_json::Value) {
     }
 }
 
-/// Remove only the document-root discriminator for the one-cycle
-/// compatibility mode. Nested objects may carry their own meaningful `kind`
-/// fields, so this intentionally does not recurse.
-pub fn remove_root_kind(value: &mut serde_json::Value) {
-    if let serde_json::Value::Object(map) = value {
-        map.remove("kind");
-    }
+pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str) {
+    fallow_output::apply_root_kind(value, kind, EnvelopeMode::current().into());
 }
 
-pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str) {
-    if EnvelopeMode::current() == EnvelopeMode::Tagged
-        && let serde_json::Value::Object(map) = value
-    {
-        map.insert(
-            "kind".to_string(),
-            serde_json::Value::String(kind.to_string()),
-        );
+impl From<EnvelopeMode> for fallow_output::RootEnvelopeMode {
+    fn from(mode: EnvelopeMode) -> Self {
+        match mode {
+            EnvelopeMode::Tagged => Self::Tagged,
+            EnvelopeMode::Legacy => Self::Legacy,
+        }
     }
 }
 pub type AuditOutput = fallow_output::AuditOutput<
@@ -277,7 +263,7 @@ mod tests {
                 "kind": "suppress"
             }
         });
-        remove_root_kind(&mut nested);
+        fallow_output::remove_root_kind(&mut nested);
         assert!(nested.get("kind").is_none());
         assert_eq!(nested["action"]["kind"], "suppress");
     }
