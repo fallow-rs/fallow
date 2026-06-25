@@ -4485,8 +4485,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     .as_ref()
                     .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str());
                 if text.ends_with('<') || text.ends_with("</") {
-                    self.used_custom_element_tags
-                        .insert(fallow_types::extract::DYNAMIC_CUSTOM_ELEMENT_TAG.to_string());
+                    self.record_dynamic_custom_element_render_fact();
                 }
             }
         }

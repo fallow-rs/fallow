@@ -1371,6 +1371,8 @@ pub enum SemanticFact {
     PlaywrightFixtureType(PlaywrightFixtureTypeFact),
     /// An exported value whose runtime instance targets a local class or interface.
     InstanceExportBinding(InstanceExportBindingFact),
+    /// A dynamic custom-element tag render that makes static Lit tag credit opaque.
+    DynamicCustomElementRender(DynamicCustomElementRenderFact),
 }
 
 /// A member name referenced from an Angular template surface.
@@ -1479,6 +1481,11 @@ pub struct InstanceExportBindingFact {
     /// Local class or interface symbol used as the instance target.
     pub target_name: String,
 }
+
+/// Opaque marker for a dynamic custom-element render site.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DynamicCustomElementRenderFact;
 
 /// A statically flattenable callee path invoked in a module (e.g. `execSync`,
 /// `child_process.exec`, `console.log`). One entry per unique `callee_path`
@@ -1673,12 +1680,9 @@ pub struct AngularComponentSelector {
     pub class_name: String,
 }
 
-/// Sentinel pushed into `ModuleInfo.used_custom_element_tags` when an `html`
-/// template renders a DYNAMIC tag (`` html`<${tag}>` ``, the lit `static-html`
-/// form). It contains `<`/`>` so it can never collide with a real (hyphenated,
-/// no-angle-bracket) custom-element tag. When present project-wide, the Lit
-/// `unrendered-component` arm abstains on EVERY element (a dynamic render could
-/// instantiate any of them), mirroring `unprovided-inject`'s `has_dynamic_provide`.
+/// Legacy sentinel decoded from older parse caches when an `html` template
+/// renders a dynamic tag. New extraction persists
+/// `SemanticFact::DynamicCustomElementRender` instead.
 pub const DYNAMIC_CUSTOM_ELEMENT_TAG: &str = "<dynamic>";
 
 /// A Lit / web-component custom element registered in a module via

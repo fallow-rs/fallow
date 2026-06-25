@@ -647,7 +647,11 @@ use crate::MemberKind;
 /// Bumped to 206: Angular `{ ...this }` spread abstains are now persisted as
 /// typed semantic facts, while the legacy spread sentinel remains decode-only
 /// for older caches.
-pub(super) const CACHE_VERSION: u32 = 206;
+///
+/// Bumped to 207: dynamic custom-element render abstains are now persisted as
+/// typed semantic facts, while the legacy `<dynamic>` tag sentinel remains
+/// decode-only for older caches.
+pub(super) const CACHE_VERSION: u32 = 207;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

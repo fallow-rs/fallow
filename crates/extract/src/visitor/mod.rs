@@ -12,8 +12,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::suppress::ParsedSuppressions;
 use crate::{
-    AngularTemplateMemberAccessFact, AngularThisSpreadFact, DynamicImportInfo,
-    DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
+    AngularTemplateMemberAccessFact, AngularThisSpreadFact, DynamicCustomElementRenderFact,
+    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
     FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
     InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
     PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
@@ -543,6 +543,13 @@ impl ModuleInfoExtractor {
     pub(crate) fn record_angular_this_spread_fact(&mut self) {
         self.semantic_facts
             .push(SemanticFact::AngularThisSpread(AngularThisSpreadFact));
+    }
+
+    pub(crate) fn record_dynamic_custom_element_render_fact(&mut self) {
+        self.semantic_facts
+            .push(SemanticFact::DynamicCustomElementRender(
+                DynamicCustomElementRenderFact,
+            ));
     }
 
     fn record_instance_export_binding_fact(&mut self, export_name: String, target_name: String) {

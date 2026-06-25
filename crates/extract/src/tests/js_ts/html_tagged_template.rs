@@ -5,7 +5,7 @@
 //! components emit HTML via a tagged template whose tag is the identifier
 //! `html`. See issue #105 (till's follow-up comment).
 
-use fallow_types::extract::ImportedName;
+use fallow_types::extract::{DYNAMIC_CUSTOM_ELEMENT_TAG, ImportedName, SemanticFact};
 
 use crate::tests::parse_ts;
 
@@ -307,15 +307,23 @@ fn document_create_element_credits_custom_element_tag() {
 }
 
 #[test]
-fn dynamic_html_tag_records_dynamic_sentinel() {
+fn dynamic_html_tag_records_typed_dynamic_render_fact() {
     let info = parse_ts(
         r#"import { html } from "lit";
 export const render = (tag) => html`<${tag}></${tag}>`;"#,
     );
     assert!(
-        info.used_custom_element_tags
-            .contains(&"<dynamic>".to_string()),
-        "a `<${{tag}}>` dynamic render must record the dynamic sentinel: {:?}",
+        info.semantic_facts
+            .iter()
+            .any(|fact| matches!(fact, SemanticFact::DynamicCustomElementRender(_))),
+        "a `<${{tag}}>` dynamic render must record a typed semantic fact: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        !info
+            .used_custom_element_tags
+            .contains(&DYNAMIC_CUSTOM_ELEMENT_TAG.to_string()),
+        "new extraction must not persist the legacy dynamic sentinel: {:?}",
         info.used_custom_element_tags
     );
 }
