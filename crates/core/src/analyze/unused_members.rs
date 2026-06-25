@@ -13,7 +13,7 @@ use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
     SemanticFact, is_legacy_semantic_member_access_object, is_legacy_semantic_whole_object_use,
-    legacy_member_access_to_semantic_fact,
+    semantic_facts_with_legacy_member_accesses,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -1366,21 +1366,13 @@ struct InstanceExportBindingAccess {
 
 fn instance_export_binding_accesses(module: &ResolvedModule) -> Vec<InstanceExportBindingAccess> {
     let mut accesses = Vec::new();
-    for fact in &module.semantic_facts {
-        if let SemanticFact::InstanceExportBinding(access) = fact {
+    for fact in
+        semantic_facts_with_legacy_member_accesses(&module.semantic_facts, &module.member_accesses)
+    {
+        if let SemanticFact::InstanceExportBinding(access) = fact.as_fact() {
             accesses.push(InstanceExportBindingAccess {
                 export_name: access.export_name.clone(),
                 target_local: access.target_name.clone(),
-            });
-        }
-    }
-    for access in &module.member_accesses {
-        if let Some(SemanticFact::InstanceExportBinding(fact)) =
-            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())
-        {
-            accesses.push(InstanceExportBindingAccess {
-                export_name: fact.export_name,
-                target_local: fact.target_name,
             });
         }
     }
@@ -1633,23 +1625,14 @@ struct FactoryCallAccess {
 
 fn factory_call_accesses(module: &ResolvedModule) -> Vec<FactoryCallAccess> {
     let mut accesses = Vec::new();
-    for fact in &module.semantic_facts {
-        if let SemanticFact::FactoryCallMemberAccess(access) = fact {
+    for fact in
+        semantic_facts_with_legacy_member_accesses(&module.semantic_facts, &module.member_accesses)
+    {
+        if let SemanticFact::FactoryCallMemberAccess(access) = fact.as_fact() {
             accesses.push(FactoryCallAccess {
                 callee_object: access.callee_object.clone(),
                 callee_method: access.callee_method.clone(),
                 member: access.member.clone(),
-            });
-        }
-    }
-    for access in &module.member_accesses {
-        if let Some(SemanticFact::FactoryCallMemberAccess(fact)) =
-            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())
-        {
-            accesses.push(FactoryCallAccess {
-                callee_object: fact.callee_object,
-                callee_method: fact.callee_method,
-                member: fact.member,
             });
         }
     }
@@ -1711,25 +1694,15 @@ struct FluentChainAccess {
 
 fn fluent_chain_accesses(module: &ResolvedModule) -> Vec<FluentChainAccess> {
     let mut accesses = Vec::new();
-    for fact in &module.semantic_facts {
-        if let SemanticFact::FluentChainMemberAccess(access) = fact {
+    for fact in
+        semantic_facts_with_legacy_member_accesses(&module.semantic_facts, &module.member_accesses)
+    {
+        if let SemanticFact::FluentChainMemberAccess(access) = fact.as_fact() {
             accesses.push(FluentChainAccess {
                 root_local: access.root_object.clone(),
                 root_method: access.root_method.clone(),
                 chain: access.chain.clone(),
                 member: access.member.clone(),
-            });
-        }
-    }
-    for access in &module.member_accesses {
-        if let Some(SemanticFact::FluentChainMemberAccess(fact)) =
-            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())
-        {
-            accesses.push(FluentChainAccess {
-                root_local: fact.root_object,
-                root_method: fact.root_method,
-                chain: fact.chain,
-                member: fact.member,
             });
         }
     }
@@ -1817,23 +1790,14 @@ struct FluentChainNewAccess {
 
 fn fluent_chain_new_accesses(module: &ResolvedModule) -> Vec<FluentChainNewAccess> {
     let mut accesses = Vec::new();
-    for fact in &module.semantic_facts {
-        if let SemanticFact::FluentChainNewMemberAccess(access) = fact {
+    for fact in
+        semantic_facts_with_legacy_member_accesses(&module.semantic_facts, &module.member_accesses)
+    {
+        if let SemanticFact::FluentChainNewMemberAccess(access) = fact.as_fact() {
             accesses.push(FluentChainNewAccess {
                 class_local: access.class_name.clone(),
                 chain: access.chain.clone(),
                 member: access.member.clone(),
-            });
-        }
-    }
-    for access in &module.member_accesses {
-        if let Some(SemanticFact::FluentChainNewMemberAccess(fact)) =
-            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())
-        {
-            accesses.push(FluentChainNewAccess {
-                class_local: fact.class_name,
-                chain: fact.chain,
-                member: fact.member,
             });
         }
     }
@@ -5198,8 +5162,16 @@ mod tests {
     #[test]
     fn malformed_legacy_member_access_is_skip_only() {
         let malformed = format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:");
+        let member_accesses = vec![crate::extract::MemberAccess {
+            object: malformed.clone(),
+            member: "value".to_string(),
+        }];
 
         assert!(is_legacy_member_access_object(&malformed));
-        assert!(legacy_member_access_to_semantic_fact(&malformed, "value").is_none());
+        assert!(
+            semantic_facts_with_legacy_member_accesses(&[], &member_accesses)
+                .next()
+                .is_none()
+        );
     }
 }
