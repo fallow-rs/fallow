@@ -34,6 +34,7 @@ mod health_trends;
 mod health_vital_signs;
 mod inspect_envelopes;
 mod issue_contract;
+mod list_envelopes;
 mod report_contract;
 mod review_envelopes;
 
@@ -131,6 +132,10 @@ pub use issue_contract::{
     ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, CHECK_DOCS,
     CODECLIMATE_RESULT_CODES, IssueOutputContract, TsAliasMeta, check_meta, dead_code_docs_url,
     issue_output_contract_by_code, issue_output_contracts, rule_docs_url,
+};
+pub use list_envelopes::{
+    BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone, BoundariesListing,
+    ListBoundariesOutput, WorkspaceInfo, WorkspacesOutput,
 };
 pub use report_contract::{
     COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SECURITY_DOCS,

@@ -8,22 +8,23 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 #[allow(
     unused_imports,
-    reason = "compatibility re-export while CodeClimate output contracts move to fallow-output"
+    reason = "compatibility re-export while CLI output contracts move to fallow-output"
 )]
 pub use fallow_output::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, CodeClimateIssue,
-    CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
-    CodeClimateSeverity, CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion,
-    CoverageSetupFileToEdit, CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput,
-    CoverageSetupPackageManager, CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion,
-    CoverageSetupSnippet, DupesOutput, DupesOutputInput, ExplainOutput, GitHubReviewComment,
-    GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType,
-    GroupByMode, HealthOutput, HealthOutputInput, InspectEvidence, InspectEvidenceScope,
-    InspectEvidenceSection, InspectFileIdentity, InspectIdentity, InspectOutput,
-    InspectSectionStatus, InspectSymbolIdentity, InspectTargetDescriptor, MARKER_REGEX_FLAGS_V2,
-    MARKER_REGEX_V2, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta,
-    ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider,
-    ReviewReconcileOutput, ReviewReconcileSchema, WorkspaceDiagnosticOutput,
+    BoundariesListRule, BoundariesListZone, CheckGroupedEntry, CheckGroupedOutput, CheckOutput,
+    CheckOutputInput, CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines,
+    CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, CoverageAnalyzeOutput,
+    CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit, CoverageSetupFramework,
+    CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
+    CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet, DupesOutput,
+    DupesOutputInput, ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
+    GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput, HealthOutputInput,
+    InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
+    InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
+    InspectTargetDescriptor, MARKER_REGEX_FLAGS_V2, MARKER_REGEX_V2, ReviewCheckConclusion,
+    ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
+    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput,
+    ReviewReconcileSchema, WorkspaceDiagnosticOutput, WorkspaceInfo,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_check_summary,
     build_dupes_output, build_health_output, default_marker_regex, default_marker_regex_flags,
     is_false,
@@ -229,133 +230,30 @@ pub struct CombinedMeta {
     pub telemetry: Option<TelemetryMeta>,
 }
 
-/// Envelope emitted by `fallow list --boundaries --format json`. Surfaces
-/// the architecture boundary zones, rules, and (issue #373) the user's
-/// pre-expansion `autoDiscover` logical groups so consumers can render
-/// grouping intent that `expand_auto_discover` would otherwise flatten out
-/// of `zones[]`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(title = "fallow list --boundaries --format json")
-)]
+pub type ListBoundariesOutput = fallow_output::ListBoundariesOutput<
+    fallow_config::LogicalGroupStatus,
+    fallow_config::AuthoredRule,
+>;
+
+pub type WorkspacesOutput = fallow_output::WorkspacesOutput<fallow_config::WorkspaceDiagnostic>;
+
 #[allow(
     dead_code,
-    reason = "schema-source-of-truth: list.rs still builds the wire via serde_json::json!; this struct and its sub-types lock the schema shape via the drift gate. Migration is a follow-up to issue #384 items 3a/3b/3c."
+    reason = "schema compatibility alias for the concrete fallow-config boundary contract"
 )]
-pub struct ListBoundariesOutput {
-    pub boundaries: BoundariesListing,
-}
+pub type BoundariesListing = fallow_output::BoundariesListing<
+    fallow_config::LogicalGroupStatus,
+    fallow_config::AuthoredRule,
+>;
 
-/// `fallow workspaces --format json` envelope.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(title = "fallow workspaces --format json")
-)]
-pub struct WorkspacesOutput {
-    /// Number of workspace package entries in `workspaces`.
-    pub workspace_count: usize,
-    /// Workspace packages discovered from package manager and tsconfig workspace
-    /// declarations. Paths are project-root-relative and use forward slashes.
-    pub workspaces: Vec<WorkspaceInfo>,
-    /// Workspace discovery diagnostics produced while reading workspace
-    /// declarations. Present for compatibility with the current wire contract,
-    /// even when empty.
-    pub workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
-}
-
-/// One workspace package emitted by `fallow workspaces --format json`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct WorkspaceInfo {
-    /// Package name from the workspace package.json. This is the value accepted
-    /// by `--workspace <name>`.
-    pub name: String,
-    /// Project-root-relative path to the workspace directory, normalized to
-    /// forward slashes for cross-platform JSON consumers.
-    pub path: String,
-    /// Whether the package is a generated or platform-specific dependency
-    /// package rather than a hand-authored workspace.
-    pub is_internal_dependency: bool,
-}
-
-/// `boundaries` block carried by [`ListBoundariesOutput`].
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[allow(
     dead_code,
-    reason = "schema-source-of-truth: see `ListBoundariesOutput`."
+    reason = "schema compatibility alias for the concrete fallow-config boundary contract"
 )]
-pub struct BoundariesListing {
-    pub configured: bool,
-    pub zone_count: usize,
-    pub zones: Vec<BoundariesListZone>,
-    pub rule_count: usize,
-    pub rules: Vec<BoundariesListRule>,
-    pub logical_group_count: usize,
-    pub logical_groups: Vec<BoundariesListLogicalGroup>,
-}
-
-/// A boundary zone after preset and `autoDiscover` expansion. Each entry
-/// classifies files into a single zone via glob patterns.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[allow(
-    dead_code,
-    reason = "schema-source-of-truth: see `ListBoundariesOutput`."
-)]
-pub struct BoundariesListZone {
-    pub name: String,
-    pub patterns: Vec<String>,
-    pub file_count: usize,
-}
-
-/// A boundary import rule, expanded to operate on concrete child zone
-/// names after `autoDiscover` flattening. The user's pre-expansion rule
-/// (keyed on the logical parent name, if any) is preserved on the
-/// corresponding [`BoundariesListLogicalGroup::authored_rule`].
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[allow(
-    dead_code,
-    reason = "schema-source-of-truth: see `ListBoundariesOutput`."
-)]
-pub struct BoundariesListRule {
-    pub from: String,
-    pub allow: Vec<String>,
-}
-
-/// A pre-expansion `autoDiscover` logical group surfaced for observability
-/// (issue #373). Captured during `expand_auto_discover` so consumers can
-/// see the user-authored parent name and grouping intent after expansion
-/// would otherwise flatten it out of [`BoundariesListing::zones`].
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[allow(
-    dead_code,
-    reason = "schema-source-of-truth: see `ListBoundariesOutput`."
-)]
-pub struct BoundariesListLogicalGroup {
-    pub name: String,
-    pub children: Vec<String>,
-    pub auto_discover: Vec<String>,
-    pub status: fallow_config::LogicalGroupStatus,
-    pub source_zone_index: usize,
-    pub file_count: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub authored_rule: Option<fallow_config::AuthoredRule>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fallback_zone: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub merged_from: Option<Vec<usize>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub original_zone_root: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub child_source_indices: Vec<usize>,
-}
+pub type BoundariesListLogicalGroup = fallow_output::BoundariesListLogicalGroup<
+    fallow_config::LogicalGroupStatus,
+    fallow_config::AuthoredRule,
+>;
 
 /// Typed root of every fallow JSON envelope shape that serializes as a JSON
 /// object and participates in the documented `FallowOutput` contract. The

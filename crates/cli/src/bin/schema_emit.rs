@@ -791,8 +791,12 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<CheckOutput>();
     let _ = generator.subschema_for::<CheckGroupedOutput>();
     let _ = generator.subschema_for::<CheckGroupedEntry>();
-    let _ = generator.subschema_for::<DupesOutput>();
-    let _ = generator.subschema_for::<HealthOutput>();
+    let _ = generator.subschema_for::<DupesOutput<DupesReportPayload, DuplicationGroup>>();
+    let _ =
+        generator.subschema_for::<HealthOutput<
+            fallow_cli::health_types::HealthReport,
+            fallow_cli::health_types::HealthGroup,
+        >>();
     let _ = generator.subschema_for::<fallow_cli::health_types::HealthGroup>();
     let _ = generator.subschema_for::<fallow_cli::health_types::HealthReport>();
     let _ = generator.subschema_for::<GroupByMode>();

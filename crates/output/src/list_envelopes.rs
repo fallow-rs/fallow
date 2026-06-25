@@ -1,0 +1,108 @@
+//! List command output envelopes.
+
+use serde::Serialize;
+
+/// Envelope emitted by `fallow list --boundaries --format json`. Surfaces
+/// the architecture boundary zones, rules, and the user's pre-expansion
+/// `autoDiscover` logical groups so consumers can render grouping intent that
+/// expansion would otherwise flatten out of `zones[]`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow list --boundaries --format json")
+)]
+pub struct ListBoundariesOutput<Status, Rule> {
+    pub boundaries: BoundariesListing<Status, Rule>,
+}
+
+/// `fallow workspaces --format json` envelope.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow workspaces --format json")
+)]
+pub struct WorkspacesOutput<Diagnostic> {
+    /// Number of workspace package entries in `workspaces`.
+    pub workspace_count: usize,
+    /// Workspace packages discovered from package manager and tsconfig workspace
+    /// declarations. Paths are project-root-relative and use forward slashes.
+    pub workspaces: Vec<WorkspaceInfo>,
+    /// Workspace discovery diagnostics produced while reading workspace
+    /// declarations. Present for compatibility with the current wire contract,
+    /// even when empty.
+    pub workspace_diagnostics: Vec<Diagnostic>,
+}
+
+/// One workspace package emitted by `fallow workspaces --format json`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct WorkspaceInfo {
+    /// Package name from the workspace package.json. This is the value accepted
+    /// by `--workspace <name>`.
+    pub name: String,
+    /// Project-root-relative path to the workspace directory, normalized to
+    /// forward slashes for cross-platform JSON consumers.
+    pub path: String,
+    /// Whether the package is a generated or platform-specific dependency
+    /// package rather than a hand-authored workspace.
+    pub is_internal_dependency: bool,
+}
+
+/// `boundaries` block carried by [`ListBoundariesOutput`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundariesListing<Status, Rule> {
+    pub configured: bool,
+    pub zone_count: usize,
+    pub zones: Vec<BoundariesListZone>,
+    pub rule_count: usize,
+    pub rules: Vec<BoundariesListRule>,
+    pub logical_group_count: usize,
+    pub logical_groups: Vec<BoundariesListLogicalGroup<Status, Rule>>,
+}
+
+/// A boundary zone after preset and `autoDiscover` expansion. Each entry
+/// classifies files into a single zone via glob patterns.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundariesListZone {
+    pub name: String,
+    pub patterns: Vec<String>,
+    pub file_count: usize,
+}
+
+/// A boundary import rule, expanded to operate on concrete child zone names
+/// after `autoDiscover` flattening.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundariesListRule {
+    pub from: String,
+    pub allow: Vec<String>,
+}
+
+/// A pre-expansion `autoDiscover` logical group surfaced for observability.
+/// Captured during expansion so consumers can see the user-authored parent
+/// name and grouping intent after expansion would otherwise flatten it out of
+/// [`BoundariesListing::zones`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundariesListLogicalGroup<Status, Rule> {
+    pub name: String,
+    pub children: Vec<String>,
+    pub auto_discover: Vec<String>,
+    pub status: Status,
+    pub source_zone_index: usize,
+    pub file_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authored_rule: Option<Rule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_zone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged_from: Option<Vec<usize>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_zone_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub child_source_indices: Vec<usize>,
+}
