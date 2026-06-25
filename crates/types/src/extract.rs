@@ -1375,6 +1375,20 @@ pub enum SemanticFact {
     DynamicCustomElementRender(DynamicCustomElementRenderFact),
 }
 
+/// Legacy member-access object used by Angular template scanners.
+///
+/// New extraction writes [`SemanticFact::AngularTemplateMemberAccess`]. The
+/// object value remains available so analysis can decode older cache entries
+/// that used `MemberAccess.object` as a string protocol.
+pub const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
+
+/// Legacy member-access object recorded for Angular `{ ...this }` forwarding.
+///
+/// New extraction writes [`SemanticFact::AngularThisSpread`]. The object value
+/// remains available so component member detectors can honor older cache
+/// entries that used `MemberAccess.object` as a string protocol.
+pub const ANGULAR_THIS_SPREAD_SENTINEL: &str = "__angular_this_spread__";
+
 /// Legacy member-access object prefix for exported-instance bindings.
 ///
 /// New extraction writes [`SemanticFact::InstanceExportBinding`]. The prefix
@@ -1490,6 +1504,28 @@ pub fn is_legacy_semantic_member_access_object(object: &str) -> bool {
 #[must_use]
 pub fn is_legacy_semantic_whole_object_use(object: &str) -> bool {
     object.starts_with(INSTANCE_EXPORT_SENTINEL) || object.starts_with(FACTORY_CALL_SENTINEL)
+}
+
+/// Return true for legacy Angular template member-access objects.
+#[must_use]
+pub fn is_legacy_angular_template_member_access_object(object: &str) -> bool {
+    object == ANGULAR_TPL_SENTINEL
+}
+
+/// Return true for legacy member-access object strings that encode either an
+/// Angular template reference or a typed semantic fact.
+#[must_use]
+pub fn is_legacy_template_or_semantic_member_access_object(object: &str) -> bool {
+    is_legacy_angular_template_member_access_object(object)
+        || is_legacy_semantic_member_access_object(object)
+}
+
+/// Return true for legacy whole-object-use strings that should not be treated
+/// as ordinary value reads in typed-instance propagation.
+#[must_use]
+pub fn is_legacy_template_or_semantic_whole_object_use(object: &str) -> bool {
+    is_legacy_angular_template_member_access_object(object)
+        || is_legacy_semantic_whole_object_use(object)
 }
 
 /// Decode an older sentinel-backed member access into the semantic fact shape
@@ -2386,6 +2422,27 @@ mod tests {
 
         assert!(is_legacy_semantic_member_access_object(&malformed));
         assert!(parse_legacy_semantic_member_access(&malformed, "value").is_none());
+    }
+
+    #[test]
+    fn legacy_template_or_semantic_predicates_include_angular_template_sentinel() {
+        assert!(is_legacy_angular_template_member_access_object(
+            ANGULAR_TPL_SENTINEL
+        ));
+        assert!(is_legacy_template_or_semantic_member_access_object(
+            ANGULAR_TPL_SENTINEL
+        ));
+        assert!(is_legacy_template_or_semantic_whole_object_use(
+            ANGULAR_TPL_SENTINEL
+        ));
+        assert!(is_legacy_template_or_semantic_member_access_object(
+            &format!("{INSTANCE_EXPORT_SENTINEL}exported")
+        ));
+        assert!(is_legacy_template_or_semantic_whole_object_use(&format!(
+            "{FACTORY_CALL_SENTINEL}Svc:create"
+        )));
+        assert!(!is_legacy_template_or_semantic_member_access_object("this"));
+        assert!(!is_legacy_template_or_semantic_whole_object_use("this"));
     }
 
     #[test]
