@@ -705,6 +705,8 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
 pub struct IssueResultMeta {
     /// Canonical issue code that owns this result array.
     pub code: &'static str,
+    /// Explanation emitted in dead-code `_meta.rules`.
+    pub meta_description: &'static str,
     /// Documentation path emitted in dead-code `_meta.rules`.
     pub meta_docs_path: &'static str,
     /// Human-readable name emitted in dead-code `_meta.rules`.
@@ -732,6 +734,7 @@ pub struct TsAliasMeta {
 pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     IssueResultMeta {
         code: "unused-file",
+        meta_description: "Source files that are not imported by any other module and are not entry points. Detection uses graph reachability from configured entry points.",
         meta_docs_path: "explanations/dead-code#unused-files",
         meta_name: "Unused Files",
         summary_label: "Unused files",
@@ -741,6 +744,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-export",
+        meta_description: "Named exports that are never imported by any other module in the project, including direct exports and re-exports through barrel files.",
         meta_docs_path: "explanations/dead-code#unused-exports",
         meta_name: "Unused Exports",
         summary_label: "Unused exports",
@@ -750,6 +754,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-type",
+        meta_description: "Type-only exports that are never imported. These do not generate runtime code but add maintenance burden.",
         meta_docs_path: "explanations/dead-code#unused-types",
         meta_name: "Unused Type Exports",
         summary_label: "Unused types",
@@ -759,6 +764,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "private-type-leak",
+        meta_description: "Exported values or types whose public TypeScript signature references a same-file type declaration that is not exported.",
         meta_docs_path: "explanations/dead-code#private-type-leaks",
         meta_name: "Private Type Leaks",
         summary_label: "Private type leaks",
@@ -768,6 +774,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dependency",
+        meta_description: "Packages listed in dependencies that are never imported or required by any source file.",
         meta_docs_path: "explanations/dead-code#unused-dependencies",
         meta_name: "Unused Dependencies",
         summary_label: "Unused dependencies",
@@ -777,6 +784,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dev-dependency",
+        meta_description: "Packages listed in devDependencies that are never imported by test files, config files, or scripts.",
         meta_docs_path: "explanations/dead-code#unused-devdependencies",
         meta_name: "Unused Dev Dependencies",
         summary_label: "Unused devDependencies",
@@ -786,6 +794,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-optional-dependency",
+        meta_description: "Packages listed in optionalDependencies that are never imported.",
         meta_docs_path: "explanations/dead-code#unused-optionaldependencies",
         meta_name: "Unused Optional Dependencies",
         summary_label: "Unused optionalDependencies",
@@ -795,6 +804,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-enum-member",
+        meta_description: "Enum members that are never referenced in the codebase.",
         meta_docs_path: "explanations/dead-code#unused-enum-members",
         meta_name: "Unused Enum Members",
         summary_label: "Unused enum members",
@@ -804,6 +814,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-class-member",
+        meta_description: "Class methods and properties that are never referenced outside the class.",
         meta_docs_path: "explanations/dead-code#unused-class-members",
         meta_name: "Unused Class Members",
         summary_label: "Unused class members",
@@ -813,6 +824,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-store-member",
+        meta_description: "Pinia store members declared but never accessed by any consumer project-wide.",
         meta_docs_path: "explanations/dead-code#unused-store-members",
         meta_name: "Unused Store Members",
         summary_label: "Unused store members",
@@ -822,6 +834,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unresolved-import",
+        meta_description: "Import specifiers that could not be resolved to a file on disk.",
         meta_docs_path: "explanations/dead-code#unresolved-imports",
         meta_name: "Unresolved Imports",
         summary_label: "Unresolved imports",
@@ -831,6 +844,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unlisted-dependency",
+        meta_description: "Packages imported in source code but not listed in package.json.",
         meta_docs_path: "explanations/dead-code#unlisted-dependencies",
         meta_name: "Unlisted Dependencies",
         summary_label: "Unlisted dependencies",
@@ -840,6 +854,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "duplicate-export",
+        meta_description: "The same export name is defined in multiple modules.",
         meta_docs_path: "explanations/dead-code#duplicate-exports",
         meta_name: "Duplicate Exports",
         summary_label: "Duplicate exports",
@@ -849,6 +864,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "type-only-dependency",
+        meta_description: "Production dependencies that are only imported via type-only imports.",
         meta_docs_path: "explanations/dead-code#type-only-dependencies",
         meta_name: "Type-only Dependencies",
         summary_label: "Type-only dependencies",
@@ -858,6 +874,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "test-only-dependency",
+        meta_description: "Production dependencies that are only imported from test files.",
         meta_docs_path: "explanations/dead-code#test-only-dependencies",
         meta_name: "Test-only Dependencies",
         summary_label: "Test-only dependencies",
@@ -867,6 +884,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "circular-dependency",
+        meta_description: "A cycle in the module import graph.",
         meta_docs_path: "explanations/dead-code#circular-dependencies",
         meta_name: "Circular Dependencies",
         summary_label: "Circular dependencies",
@@ -876,6 +894,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "re-export-cycle",
+        meta_description: "A barrel file re-exports from another barrel that ultimately re-exports back.",
         meta_docs_path: "explanations/dead-code#re-export-cycles",
         meta_name: "Re-Export Cycles",
         summary_label: "Re-export cycles",
@@ -885,6 +904,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-violation",
+        meta_description: "A module imports from a zone that its configured boundary rules do not allow.",
         meta_docs_path: "explanations/dead-code#boundary-violations",
         meta_name: "Boundary Violations",
         summary_label: "Boundary violations",
@@ -894,6 +914,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-coverage",
+        meta_description: "A reachable source file is not assigned to any configured boundary zone while boundary coverage is required.",
         meta_docs_path: "explanations/dead-code#boundary-violations",
         meta_name: "Boundary Coverage",
         summary_label: "Boundary coverage",
@@ -903,6 +924,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-call-violation",
+        meta_description: "A file classified into a boundary zone calls a callee matching one of the zone's forbidden call patterns.",
         meta_docs_path: "explanations/dead-code#boundary-violations",
         meta_name: "Boundary Call Violation",
         summary_label: "Boundary calls",
@@ -912,6 +934,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "policy-violation",
+        meta_description: "A call site, import, or catalogue-derived effect matched a configured rule pack rule.",
         meta_docs_path: "explanations/dead-code#policy-violations",
         meta_name: "Policy Violation",
         summary_label: "Policy violations",
@@ -921,6 +944,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "invalid-client-export",
+        meta_description: "A file carrying the use client directive also exports a Next.js server-only or route-segment config name.",
         meta_docs_path: "explanations/dead-code#invalid-client-exports",
         meta_name: "Invalid client export",
         summary_label: "Invalid client exports",
@@ -930,6 +954,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "mixed-client-server-barrel",
+        meta_description: "A barrel file forwards a name from a use client module alongside a name from a server-only module.",
         meta_docs_path: "explanations/dead-code#mixed-client-server-barrels",
         meta_name: "Mixed client/server barrel",
         summary_label: "Mixed client/server barrels",
@@ -939,6 +964,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "misplaced-directive",
+        meta_description: "A use client or use server directive string appears after a non-directive statement and is ignored.",
         meta_docs_path: "explanations/dead-code#misplaced-directives",
         meta_name: "Misplaced directive",
         summary_label: "Misplaced directives",
@@ -948,6 +974,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unprovided-inject",
+        meta_description: "A Vue inject or Svelte getContext reads a dependency-injection key that no matching provider supplies.",
         meta_docs_path: "explanations/dead-code#unprovided-injects",
         meta_name: "Unprovided injects",
         summary_label: "Unprovided injects",
@@ -957,6 +984,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unrendered-component",
+        meta_description: "A Vue or Svelte single-file component is reachable through the graph but rendered nowhere in the project.",
         meta_docs_path: "explanations/dead-code#unrendered-components",
         meta_name: "Unrendered components",
         summary_label: "Unrendered components",
@@ -966,6 +994,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-prop",
+        meta_description: "A declared Vue, Svelte, React, or Preact component prop is referenced nowhere inside its own component.",
         meta_docs_path: "explanations/dead-code#unused-component-props",
         meta_name: "Unused component props",
         summary_label: "Unused component props",
@@ -975,6 +1004,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-emit",
+        meta_description: "A Vue script setup defineEmits event is emitted nowhere in its own component.",
         meta_docs_path: "explanations/dead-code#unused-component-emits",
         meta_name: "Unused component emits",
         summary_label: "Unused component emits",
@@ -984,6 +1014,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-input",
+        meta_description: "An Angular input is read nowhere in its own component.",
         meta_docs_path: "explanations/dead-code#unused-component-inputs",
         meta_name: "Unused component inputs",
         summary_label: "Unused component inputs",
@@ -993,6 +1024,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-output",
+        meta_description: "An Angular output is emitted nowhere in its own component.",
         meta_docs_path: "explanations/dead-code#unused-component-outputs",
         meta_name: "Unused component outputs",
         summary_label: "Unused component outputs",
@@ -1002,6 +1034,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-svelte-event",
+        meta_description: "A Svelte component dispatches a custom event whose name is listened to nowhere in the analyzed project.",
         meta_docs_path: "explanations/dead-code#unused-svelte-events",
         meta_name: "Unused Svelte events",
         summary_label: "Unused Svelte events",
@@ -1011,6 +1044,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-server-action",
+        meta_description: "A Next.js Server Action exported from a use server file is referenced by no code in the project.",
         meta_docs_path: "explanations/dead-code#unused-server-actions",
         meta_name: "Unused server actions",
         summary_label: "Unused server actions",
@@ -1020,6 +1054,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-load-data-key",
+        meta_description: "A SvelteKit load return-object key is read by no route or project-wide consumer.",
         meta_docs_path: "explanations/dead-code#unused-load-data-keys",
         meta_name: "Unused load data keys",
         summary_label: "Unused load data keys",
@@ -1029,6 +1064,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "route-collision",
+        meta_description: "Two or more Next.js App Router route files resolve to the same URL within one app root.",
         meta_docs_path: "explanations/dead-code#route-collisions",
         meta_name: "Route collision",
         summary_label: "Route collisions",
@@ -1038,6 +1074,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "dynamic-segment-name-conflict",
+        meta_description: "Sibling Next.js dynamic route segments use different slug names at the same position.",
         meta_docs_path: "explanations/dead-code#dynamic-segment-name-conflicts",
         meta_name: "Dynamic segment name conflict",
         summary_label: "Dynamic segment conflicts",
@@ -1047,6 +1084,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "stale-suppression",
+        meta_description: "A fallow suppression comment or tag no longer matches any active issue.",
         meta_docs_path: "explanations/dead-code#stale-suppressions",
         meta_name: "Stale Suppressions",
         summary_label: "Stale suppressions",
@@ -1056,6 +1094,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-catalog-entry",
+        meta_description: "A package manager catalog entry is not referenced by any workspace package.json.",
         meta_docs_path: "explanations/dead-code#unused-catalog-entries",
         meta_name: "Unused catalog entry",
         summary_label: "Unused catalog entries",
@@ -1065,6 +1104,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "empty-catalog-group",
+        meta_description: "A named package manager catalog group has no package entries.",
         meta_docs_path: "explanations/dead-code#empty-catalog-groups",
         meta_name: "Empty catalog group",
         summary_label: "Empty catalog groups",
@@ -1074,6 +1114,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unresolved-catalog-reference",
+        meta_description: "A workspace package.json uses a catalog protocol reference that no catalog declares.",
         meta_docs_path: "explanations/dead-code#unresolved-catalog-references",
         meta_name: "Unresolved catalog reference",
         summary_label: "Unresolved catalog references",
@@ -1083,6 +1124,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dependency-override",
+        meta_description: "A pnpm dependency override targets a package not declared by any workspace package and not present in the lockfile.",
         meta_docs_path: "explanations/dead-code#unused-dependency-overrides",
         meta_name: "Unused pnpm dependency override",
         summary_label: "Unused dependency overrides",
@@ -1092,6 +1134,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "misconfigured-dependency-override",
+        meta_description: "A pnpm dependency override key or value does not parse as a valid override spec.",
         meta_docs_path: "explanations/dead-code#misconfigured-dependency-overrides",
         meta_name: "Misconfigured pnpm dependency override",
         summary_label: "Misconfigured dependency overrides",
@@ -1101,6 +1144,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "prop-drilling",
+        meta_description: "A React or Preact prop is forwarded unchanged through multiple pass-through components to a distant consumer.",
         meta_docs_path: "explanations/dead-code#prop-drilling",
         meta_name: "Prop drilling",
         summary_label: "Prop drilling",
@@ -1110,6 +1154,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "thin-wrapper",
+        meta_description: "A React or Preact component is structural indirection around a single spread-forwarded child render.",
         meta_docs_path: "explanations/dead-code#thin-wrapper",
         meta_name: "Thin wrapper",
         summary_label: "Thin wrappers",
@@ -1119,6 +1164,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "duplicate-prop-shape",
+        meta_description: "Multiple React or Preact components declare an identical significant prop-name set.",
         meta_docs_path: "explanations/dead-code#duplicate-prop-shape",
         meta_name: "Duplicate prop shape",
         summary_label: "Duplicate prop shapes",
@@ -1611,6 +1657,17 @@ mod tests {
             assert!(
                 meta.meta_docs_path.starts_with("explanations/dead-code#"),
                 "result metadata code {} has invalid meta docs path",
+                meta.code
+            );
+        }
+    }
+
+    #[test]
+    fn result_meta_codes_have_meta_descriptions() {
+        for meta in ISSUE_RESULT_META {
+            assert!(
+                !meta.meta_description.is_empty(),
+                "result metadata code {} has no meta description",
                 meta.code
             );
         }
