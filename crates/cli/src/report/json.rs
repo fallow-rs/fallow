@@ -225,11 +225,9 @@ fn build_cli_check_output(
 }
 
 fn workspace_diagnostics_for_output(root: &Path) -> Vec<WorkspaceDiagnosticOutput> {
-    crate::runtime_support::workspace_diagnostics_for(root)
-        .into_iter()
-        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
-        .map(WorkspaceDiagnosticOutput)
-        .collect()
+    fallow_output::workspace_diagnostics_output(crate::runtime_support::workspace_diagnostics_for(
+        root,
+    ))
 }
 
 fn postprocess_check_json(output: &mut serde_json::Value, root: &Path) {

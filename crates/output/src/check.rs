@@ -21,6 +21,22 @@ pub const CHECK_SCHEMA_VERSION: u32 = 7;
 #[serde(transparent)]
 pub struct WorkspaceDiagnosticOutput(pub serde_json::Value);
 
+/// Convert runtime workspace diagnostics into the output-layer DTO.
+///
+/// Serialization failures are skipped to match the existing JSON output
+/// behavior: diagnostics are advisory and must never make analysis fail.
+pub fn workspace_diagnostics_output<I, T>(diagnostics: I) -> Vec<WorkspaceDiagnosticOutput>
+where
+    I: IntoIterator<Item = T>,
+    T: Serialize,
+{
+    diagnostics
+        .into_iter()
+        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
+        .map(WorkspaceDiagnosticOutput)
+        .collect()
+}
+
 /// Envelope emitted by `fallow dead-code --format json` (plus the `check`
 /// block inside the combined and audit envelopes).
 ///
@@ -231,6 +247,13 @@ mod tests {
     use super::*;
     use fallow_types::output_dead_code::UnusedFileFinding;
     use fallow_types::results::UnusedFile;
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct Diagnostic {
+        path: &'static str,
+        message: &'static str,
+    }
 
     #[test]
     fn build_check_output_counts_issues_and_entry_points() {
@@ -256,5 +279,17 @@ mod tests {
         assert_eq!(output.total_issues, 1);
         assert_eq!(output.summary.unused_files, 1);
         assert_eq!(output.elapsed_ms.0, 42);
+    }
+
+    #[test]
+    fn workspace_diagnostics_output_serializes_runtime_diagnostics() {
+        let output = workspace_diagnostics_output([Diagnostic {
+            path: "package.json",
+            message: "workspace is not declared",
+        }]);
+
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].0["path"], "package.json");
+        assert_eq!(output[0].0["message"], "workspace is not declared");
     }
 }

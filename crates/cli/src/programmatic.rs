@@ -260,11 +260,9 @@ fn programmatic_root_envelope_mode(
 fn workspace_diagnostics_for_programmatic_output(
     root: &Path,
 ) -> Vec<fallow_output::WorkspaceDiagnosticOutput> {
-    crate::runtime_support::workspace_diagnostics_for(root)
-        .into_iter()
-        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
-        .map(fallow_output::WorkspaceDiagnosticOutput)
-        .collect()
+    fallow_output::workspace_diagnostics_output(crate::runtime_support::workspace_diagnostics_for(
+        root,
+    ))
 }
 
 fn build_dead_code_json(
