@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fallow_config::ResolvedConfig;
+use fallow_config::{OutputFormat, ResolvedConfig};
 use fallow_output::{
     FindingSeverity, HealthGrouping, HealthReport, HealthTimings, RuntimeCoverageWatermark,
 };
@@ -43,6 +43,91 @@ pub struct HealthGateOptions {
     pub min_severity: Option<FindingSeverity>,
     /// Render the score and findings but never fail CI on a health gate.
     pub report_only: bool,
+}
+
+/// Input for deriving effective health sections from command-neutral flags.
+#[derive(Debug, Clone)]
+pub struct HealthSectionOptions {
+    pub output: OutputFormat,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub targets: bool,
+    pub css: bool,
+    pub score: bool,
+    pub score_gate: bool,
+    pub snapshot_requested: bool,
+    pub trend: bool,
+}
+
+/// Derived section selection for health runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedHealthSections {
+    pub any_section: bool,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub targets: bool,
+    pub css: bool,
+    pub score: bool,
+    pub force_full: bool,
+    pub score_only_output: bool,
+}
+
+/// Derive effective health section flags for CLI and embedders.
+#[must_use]
+pub fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSections {
+    let score = options.score
+        || options.score_gate
+        || options.trend
+        || matches!(options.output, OutputFormat::Badge);
+    let any_section = options.complexity
+        || options.file_scores
+        || options.coverage_gaps
+        || options.hotspots
+        || options.targets
+        || score;
+    let effective_score = if any_section { score } else { true } || options.snapshot_requested;
+    let force_full = options.snapshot_requested || effective_score;
+
+    DerivedHealthSections {
+        any_section,
+        complexity: if any_section {
+            options.complexity
+        } else {
+            true
+        },
+        file_scores: if any_section {
+            options.file_scores
+        } else {
+            true
+        } || force_full,
+        coverage_gaps: if any_section {
+            options.coverage_gaps
+        } else {
+            false
+        },
+        hotspots: if any_section { options.hotspots } else { true }
+            || options.snapshot_requested
+            || options.trend,
+        targets: if any_section { options.targets } else { true },
+        css: options.css,
+        score: effective_score,
+        force_full,
+        score_only_output: is_health_score_only_output(options, score),
+    }
+}
+
+fn is_health_score_only_output(options: &HealthSectionOptions, score: bool) -> bool {
+    score
+        && !options.complexity
+        && !options.file_scores
+        && !options.coverage_gaps
+        && !options.hotspots
+        && !options.targets
+        && !options.trend
 }
 
 /// Command-neutral runtime coverage input for health analysis.
