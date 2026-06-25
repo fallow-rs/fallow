@@ -290,6 +290,39 @@ pub fn derive_complexity_run_options(options: &ComplexityOptions) -> ComplexityR
     }
 }
 
+/// Validate programmatic complexity / health inputs before invoking a concrete
+/// runner.
+///
+/// The runner still lives in `fallow-cli` during the migration, but these
+/// option contracts belong to the API boundary because NAPI and future Rust
+/// embedders construct the same [`ComplexityOptions`] type.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error when a coverage path does not exist
+/// or when `coverage_root` is not an absolute prefix from the coverage data.
+pub fn validate_complexity_options(options: &ComplexityOptions) -> Result<(), ProgrammaticError> {
+    if let Some(path) = &options.coverage
+        && !path.exists()
+    {
+        return Err(ProgrammaticError::new(
+            format!("coverage path does not exist: {}", path.display()),
+            2,
+        )
+        .with_code("FALLOW_INVALID_COVERAGE_PATH")
+        .with_context("health.coverage"));
+    }
+    if let Err(message) =
+        fallow_engine::validate_coverage_root_absolute(options.coverage_root.as_deref())
+    {
+        return Err(ProgrammaticError::new(message, 2)
+            .with_code("FALLOW_INVALID_COVERAGE_ROOT")
+            .with_context("health.coverage_root"));
+    }
+
+    Ok(())
+}
+
 fn complexity_section_options(options: &ComplexityOptions) -> ComplexitySectionOptions {
     let ownership = options.ownership || options.ownership_emails.is_some();
     let requested_targets = options.targets || options.effort.is_some();
@@ -446,6 +479,47 @@ mod tests {
             run.coverage_inputs.coverage_root,
             options.coverage_root.as_deref()
         );
+    }
+
+    #[test]
+    fn complexity_options_validation_accepts_existing_coverage_path_and_absolute_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let coverage = dir.path().join("coverage-final.json");
+        std::fs::write(&coverage, "{}").expect("coverage fixture");
+
+        let result = validate_complexity_options(&ComplexityOptions {
+            coverage: Some(coverage),
+            coverage_root: Some(PathBuf::from("/ci/workspace")),
+            ..ComplexityOptions::default()
+        });
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn complexity_options_validation_keeps_missing_coverage_error_contract() {
+        let err = validate_complexity_options(&ComplexityOptions {
+            coverage: Some(PathBuf::from("/missing/coverage-final.json")),
+            ..ComplexityOptions::default()
+        })
+        .expect_err("missing coverage path should fail");
+
+        assert_eq!(err.exit_code, 2);
+        assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_COVERAGE_PATH"));
+        assert_eq!(err.context.as_deref(), Some("health.coverage"));
+    }
+
+    #[test]
+    fn complexity_options_validation_keeps_relative_coverage_root_error_contract() {
+        let err = validate_complexity_options(&ComplexityOptions {
+            coverage_root: Some(PathBuf::from("coverage")),
+            ..ComplexityOptions::default()
+        })
+        .expect_err("relative coverage root should fail");
+
+        assert_eq!(err.exit_code, 2);
+        assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_COVERAGE_ROOT"));
+        assert_eq!(err.context.as_deref(), Some("health.coverage_root"));
     }
 
     #[test]

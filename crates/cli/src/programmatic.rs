@@ -652,23 +652,7 @@ fn build_complexity_options<'a>(
 /// Run the health / complexity analysis and return the CLI JSON contract as a value.
 pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
     let resolved = resolve_analysis_options(&options.analysis)?;
-    if let Some(path) = &options.coverage
-        && !path.exists()
-    {
-        return Err(ProgrammaticError::new(
-            format!("coverage path does not exist: {}", path.display()),
-            2,
-        )
-        .with_code("FALLOW_INVALID_COVERAGE_PATH")
-        .with_context("health.coverage"));
-    }
-    if let Err(message) =
-        crate::health::scoring::validate_coverage_root_absolute(options.coverage_root.as_deref())
-    {
-        return Err(ProgrammaticError::new(message, 2)
-            .with_code("FALLOW_INVALID_COVERAGE_ROOT")
-            .with_context("health.coverage_root"));
-    }
+    fallow_api::validate_complexity_options(options)?;
 
     resolved.install(|| {
         let health_options = build_complexity_options(&resolved, options);
