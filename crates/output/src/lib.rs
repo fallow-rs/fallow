@@ -35,6 +35,7 @@ mod health_vital_signs;
 mod inspect_envelopes;
 mod issue_contract;
 mod report_contract;
+mod review_envelopes;
 
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
@@ -135,4 +136,11 @@ pub use report_contract::{
     COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SECURITY_DOCS,
     SecurityRuleMeta, coverage_analyze_meta, coverage_setup_meta, dupes_meta, health_meta,
     security_meta,
+};
+pub use review_envelopes::{
+    GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
+    GitLabReviewPositionType, MARKER_REGEX_FLAGS_V2, MARKER_REGEX_V2, ReviewCheckConclusion,
+    ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
+    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, default_marker_regex,
+    default_marker_regex_flags, is_false,
 };
