@@ -23,6 +23,9 @@ mod health_coverage_gaps;
 mod health_coverage_intelligence;
 mod health_css;
 mod health_diagnostics;
+mod health_findings;
+mod health_grouped;
+mod health_report;
 mod health_runtime_coverage;
 mod health_scores;
 mod health_targets;
@@ -75,6 +78,12 @@ pub use health_diagnostics::{
     FrameworkHealthDetector, FrameworkHealthDetectorStatus, FrameworkHealthDiagnostics,
     HealthTimings,
 };
+pub use health_findings::{
+    HealthActionContext, HealthActionOptions, HealthFinding, HotspotFinding,
+    RefactoringTargetFinding, build_health_finding_actions,
+};
+pub use health_grouped::{HealthGroup, HealthGrouping};
+pub use health_report::HealthReport;
 pub use health_runtime_coverage::{
     RuntimeCoverageAction, RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCaptureQuality,
     RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
