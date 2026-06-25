@@ -5,6 +5,15 @@ use std::time::Duration;
 use fallow_config::ResolvedConfig;
 use fallow_output::{HealthGrouping, HealthReport, HealthTimings};
 
+/// Command-neutral sort criteria for health complexity findings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HealthSort {
+    Severity,
+    Cyclomatic,
+    Cognitive,
+    Lines,
+}
+
 /// Typed health analysis result shared by CLI, API, NAPI, and future embedders.
 ///
 /// The health runner still lives in `fallow-cli` during the staged migration,

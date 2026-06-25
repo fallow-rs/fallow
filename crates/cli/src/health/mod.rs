@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use colored::Colorize;
 use fallow_config::{OutputFormat, PackageJson, ResolvedConfig, Severity};
+use fallow_engine::HealthSort;
 
 use crate::baseline::{HealthBaselineData, filter_new_health_findings, filter_new_health_targets};
 use crate::check::{get_changed_files, resolve_workspace_scope};
@@ -65,6 +66,17 @@ pub enum SortBy {
     Lines,
 }
 
+impl From<SortBy> for HealthSort {
+    fn from(sort: SortBy) -> Self {
+        match sort {
+            SortBy::Severity => Self::Severity,
+            SortBy::Cyclomatic => Self::Cyclomatic,
+            SortBy::Cognitive => Self::Cognitive,
+            SortBy::Lines => Self::Lines,
+        }
+    }
+}
+
 pub struct HealthOptions<'a> {
     pub root: &'a std::path::Path,
     pub config_path: &'a Option<std::path::PathBuf>,
@@ -78,7 +90,7 @@ pub struct HealthOptions<'a> {
     /// meeting or exceeding this score are reported as complexity findings.
     pub max_crap: Option<f64>,
     pub top: Option<usize>,
-    pub sort: SortBy,
+    pub sort: HealthSort,
     pub production: bool,
     pub production_override: Option<bool>,
     pub changed_since: Option<&'a str>,
@@ -3858,7 +3870,7 @@ fn finalize_health_findings(
     if let Some(diff_index) = diff_index {
         filter_complexity_findings_by_diff(findings, diff_index, &config.root);
     }
-    sort_findings(findings, &opts.sort);
+    sort_findings(findings, opts.sort);
     let total_above_threshold = findings.len();
     let (sev_critical, sev_high, sev_moderate) = count_finding_severities(findings);
     let loaded_baseline = apply_health_baseline_and_top(opts, config, findings)?;
@@ -5396,9 +5408,9 @@ fn apply_duplication_metrics(
 }
 
 /// Sort findings by the specified criteria.
-fn sort_findings(findings: &mut [ComplexityViolation], sort: &SortBy) {
+fn sort_findings(findings: &mut [ComplexityViolation], sort: HealthSort) {
     match sort {
-        SortBy::Severity => findings.sort_by_key(|f| {
+        HealthSort::Severity => findings.sort_by_key(|f| {
             std::cmp::Reverse((
                 exceeded_priority(f.exceeded),
                 severity_priority(f.severity),
@@ -5408,9 +5420,9 @@ fn sort_findings(findings: &mut [ComplexityViolation], sort: &SortBy) {
                 f.line_count,
             ))
         }),
-        SortBy::Cyclomatic => findings.sort_by_key(|f| std::cmp::Reverse(f.cyclomatic)),
-        SortBy::Cognitive => findings.sort_by_key(|f| std::cmp::Reverse(f.cognitive)),
-        SortBy::Lines => findings.sort_by_key(|f| std::cmp::Reverse(f.line_count)),
+        HealthSort::Cyclomatic => findings.sort_by_key(|f| std::cmp::Reverse(f.cyclomatic)),
+        HealthSort::Cognitive => findings.sort_by_key(|f| std::cmp::Reverse(f.cognitive)),
+        HealthSort::Lines => findings.sort_by_key(|f| std::cmp::Reverse(f.line_count)),
     }
 }
 
@@ -7307,7 +7319,7 @@ mod tests {
             make_finding("all", ExceededThreshold::All),
         ];
 
-        sort_findings(&mut findings, &SortBy::Severity);
+        sort_findings(&mut findings, HealthSort::Severity);
 
         let names = findings
             .iter()
