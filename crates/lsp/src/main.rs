@@ -313,14 +313,11 @@ fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
 
     input.config_messages.push(message);
 
-    run_typed_dead_code_analysis(input, &session);
-
     let duplicates_config = input.duplication_options.map_or_else(
         || session.config().duplicates.clone(),
         |options| options.merge_with(&session.config().duplicates),
     );
-    let duplication = session.find_duplicates_with(&duplicates_config);
-    merge_duplication(input.merged_duplication, duplication);
+    run_typed_project_analysis(input, &session, &duplicates_config);
 }
 
 /// Config-load failure path: record the warning, and when no explicit config
@@ -336,29 +333,30 @@ fn analyze_project_root_config_fallback(
         return;
     }
     let session = AnalysisSession::load_default(input.project_root);
-    if let Ok(analysis) = session.analyze_dead_code() {
-        merge_results(input.merged_results, analysis.results);
-    }
-    let duplication = session.find_duplicates_with(&DuplicatesConfig::default());
-    merge_duplication(input.merged_duplication, duplication);
+    run_typed_project_analysis(input, &session, &DuplicatesConfig::default());
 }
 
-/// Run the typed dead-code analysis for a loaded config, with the optional
-/// inline-complexity pass when the client opted in, folding results into the
-/// accumulators.
-fn run_typed_dead_code_analysis(
+/// Run typed project analysis for a loaded config, with the optional
+/// inline-complexity artifact retention when the client opted in, folding
+/// results into the accumulators.
+fn run_typed_project_analysis(
     input: &mut ProjectRootAnalysisInput<'_>,
     session: &AnalysisSession,
+    duplicates_config: &DuplicatesConfig,
 ) {
-    if input.inline_complexity_enabled {
-        if let Ok(output) = session.analyze_dead_code_with_complexity() {
+    if let Ok(output) =
+        session.analyze_project_with(duplicates_config, input.inline_complexity_enabled)
+    {
+        if input.inline_complexity_enabled {
             input
                 .merged_inline_complexity
-                .extend(collect_inline_complexity(session.config(), &output));
-            merge_results(input.merged_results, output.results);
+                .extend(collect_inline_complexity(
+                    session.config(),
+                    &output.dead_code,
+                ));
         }
-    } else if let Ok(analysis) = session.analyze_dead_code() {
-        merge_results(input.merged_results, analysis.results);
+        merge_results(input.merged_results, output.dead_code.results);
+        merge_duplication(input.merged_duplication, output.duplication);
     }
 }
 
