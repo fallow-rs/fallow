@@ -8,6 +8,8 @@ use fallow_types::output::NextStep;
 use fallow_types::results::AnalysisResults;
 use std::path::Path;
 
+use crate::HealthReport;
+
 const MAX_NEXT_STEPS: usize = 3;
 const MUTATING_VERBS: [&str; 5] = ["fix", "init", "hooks", "migrate", "setup-hooks"];
 
@@ -77,6 +79,25 @@ pub struct HealthNextStepsInput {
     pub offer_setup: bool,
     pub impact_digest: Option<ImpactDigestCounts>,
     pub audit_changed: bool,
+}
+
+/// Build standalone health next-step inputs from a typed health report plus
+/// caller-supplied runtime probes.
+#[must_use]
+pub fn build_health_next_steps_input(
+    report: &HealthReport,
+    suggestions_enabled: bool,
+    offer_setup: bool,
+    impact_digest: Option<ImpactDigestCounts>,
+    audit_changed: bool,
+) -> HealthNextStepsInput {
+    HealthNextStepsInput {
+        suggestions_enabled,
+        has_findings: !report.findings.is_empty(),
+        offer_setup,
+        impact_digest,
+        audit_changed,
+    }
 }
 
 /// Render the human-readable impact counter summary shared by JSON and human
@@ -351,6 +372,7 @@ fn scope_workspaces(workspace_ref: Option<&str>) -> Option<NextStep> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding};
     use fallow_types::output_dead_code::UnusedExportFinding;
     use fallow_types::results::UnusedExport;
 
@@ -368,6 +390,37 @@ mod tests {
             offer_setup: false,
             impact_digest: None,
             audit_changed: false,
+        }
+    }
+
+    fn dirty_report() -> HealthReport {
+        HealthReport {
+            findings: vec![HealthFinding::from(ComplexityViolation {
+                path: "/project/src/hot.ts".into(),
+                name: "hot".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 21,
+                cognitive: 16,
+                line_count: 42,
+                param_count: 0,
+                react_hook_count: 0,
+                react_jsx_max_depth: 0,
+                react_prop_count: 0,
+                react_hook_profile: None,
+                exceeded: ExceededThreshold::Both,
+                severity: FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
+                coverage_tier: None,
+                coverage_source: None,
+                inherited_from: None,
+                component_rollup: None,
+                contributions: Vec::new(),
+                effective_thresholds: None,
+                threshold_source: None,
+            })],
+            ..HealthReport::default()
         }
     }
 
@@ -501,6 +554,30 @@ mod tests {
         });
 
         assert!(steps.is_empty());
+    }
+
+    #[test]
+    fn health_input_builder_derives_findings_from_report() {
+        let clean = build_health_next_steps_input(
+            &HealthReport::default(),
+            true,
+            true,
+            Some(digest(2, 1)),
+            true,
+        );
+        assert_eq!(
+            clean,
+            HealthNextStepsInput {
+                suggestions_enabled: true,
+                has_findings: false,
+                offer_setup: true,
+                impact_digest: Some(digest(2, 1)),
+                audit_changed: true,
+            }
+        );
+
+        let dirty = build_health_next_steps_input(&dirty_report(), true, false, None, false);
+        assert!(dirty.has_findings);
     }
 
     #[test]
