@@ -1,6 +1,6 @@
 //! Typed health result contracts exposed through the engine boundary.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use fallow_config::ResolvedConfig;
@@ -23,6 +23,15 @@ pub struct HealthThresholdOverrides {
     /// Maximum CRAP score threshold. Functions meeting or exceeding this score
     /// are reported as complexity findings.
     pub max_crap: Option<f64>,
+}
+
+/// Command-neutral Istanbul coverage inputs for health CRAP scoring.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HealthCoverageInputs<'a> {
+    pub coverage: Option<&'a Path>,
+    /// Absolute coverage-path prefix to strip before rebasing files onto the
+    /// project root.
+    pub coverage_root: Option<&'a Path>,
 }
 
 /// Command-neutral runtime coverage input for health analysis.

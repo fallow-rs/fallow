@@ -5714,8 +5714,10 @@ fn run_health_dispatch(
             .map(|opt| PathBuf::from(opt.as_deref().unwrap_or_default())),
         trend: args.trend,
         group_by: cli.group_by,
-        coverage: resolved.coverage_inputs.coverage.as_deref(),
-        coverage_root: resolved.coverage_inputs.coverage_root.as_deref(),
+        coverage_inputs: fallow_engine::HealthCoverageInputs {
+            coverage: resolved.coverage_inputs.coverage.as_deref(),
+            coverage_root: resolved.coverage_inputs.coverage_root.as_deref(),
+        },
         performance: cli.performance,
         runtime_coverage: resolved.runtime_coverage,
         churn_file: cli.churn_file.as_deref(),

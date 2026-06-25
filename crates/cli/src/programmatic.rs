@@ -671,8 +671,10 @@ fn build_complexity_options<'a>(
         save_snapshot: None,
         trend: false,
         group_by: None,
-        coverage: options.coverage.as_deref(),
-        coverage_root: options.coverage_root.as_deref(),
+        coverage_inputs: fallow_engine::HealthCoverageInputs {
+            coverage: options.coverage.as_deref(),
+            coverage_root: options.coverage_root.as_deref(),
+        },
         performance: false,
         min_severity: None,
         report_only: false,
