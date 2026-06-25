@@ -5595,7 +5595,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         return code;
     }
     let targets = args.targets || args.effort.is_some();
-    let sections = fallow_api::derive_health_sections(&fallow_api::HealthSectionOptions {
+    let sections = fallow_engine::derive_health_sections(&fallow_engine::HealthSectionOptions {
         output,
         complexity: args.complexity,
         file_scores: args.file_scores,
@@ -5645,7 +5645,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
 /// builder. Borrows the section flags and coverage inputs; owns the resolved
 /// runtime-coverage options.
 struct ResolvedHealthDispatch<'a> {
-    sections: &'a fallow_api::DerivedHealthSections,
+    sections: &'a fallow_engine::DerivedHealthSections,
     runtime_coverage: Option<fallow_engine::RuntimeCoverageOptions>,
     production: bool,
     coverage_inputs: &'a ResolvedHealthCoverageInputs,

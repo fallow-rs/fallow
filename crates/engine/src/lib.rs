@@ -67,8 +67,9 @@ pub use fallow_types::discover::{DiscoveredFile, FileId};
 pub use fallow_types::extract::ModuleInfo;
 pub use fallow_types::results::AnalysisResults;
 pub use health::{
-    HealthAnalysisResult, HealthCoverageInputs, HealthGateOptions, HealthSharedParseData,
-    HealthSort, HealthThresholdOverrides, RuntimeCoverageOptions,
+    DerivedHealthSections, HealthAnalysisResult, HealthCoverageInputs, HealthGateOptions,
+    HealthSectionOptions, HealthSharedParseData, HealthSort, HealthThresholdOverrides,
+    RuntimeCoverageOptions, derive_health_sections,
 };
 
 /// Result alias for typed engine operations.
