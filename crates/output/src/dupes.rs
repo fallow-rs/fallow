@@ -5,6 +5,8 @@
 //! core-independent and are shared by CLI schema emission, JSON output, and
 //! future API/LSP consumers.
 
+use std::time::Duration;
+
 use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
 use serde::Serialize;
@@ -40,6 +42,41 @@ pub struct DupesOutput<Report, Group> {
     /// Read-only follow-up commands computed from this run's findings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_steps: Vec<NextStep>,
+}
+
+/// Inputs for constructing a [`DupesOutput`] without exposing envelope assembly
+/// details to callers.
+#[derive(Debug, Clone)]
+pub struct DupesOutputInput<Report, Group> {
+    pub schema_version: u32,
+    pub version: String,
+    pub elapsed: Duration,
+    pub report: Report,
+    pub grouped_by: Option<GroupByMode>,
+    pub total_issues: Option<usize>,
+    pub groups: Option<Vec<Group>>,
+    pub meta: Option<Meta>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub next_steps: Vec<NextStep>,
+}
+
+/// Build a duplication JSON envelope from caller-owned report data.
+#[must_use]
+pub fn build_dupes_output<Report, Group>(
+    input: DupesOutputInput<Report, Group>,
+) -> DupesOutput<Report, Group> {
+    DupesOutput {
+        schema_version: SchemaVersion(input.schema_version),
+        version: ToolVersion(input.version),
+        elapsed_ms: ElapsedMs(input.elapsed.as_millis() as u64),
+        report: input.report,
+        grouped_by: input.grouped_by,
+        total_issues: input.total_issues,
+        groups: input.groups,
+        meta: input.meta,
+        workspace_diagnostics: input.workspace_diagnostics,
+        next_steps: input.next_steps,
+    }
 }
 
 /// Inline suppression comment emitted for code duplication findings.
