@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_engine::git_env::clear_ambient_git_env;
+
 /// Number of seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;
 
@@ -602,7 +604,7 @@ fn git_sha(root: &Path) -> Option<String> {
     command
         .args(["rev-parse", "--short", "HEAD"])
         .current_dir(root);
-    fallow_core::git_env::clear_ambient_git_env(&mut command);
+    clear_ambient_git_env(&mut command);
     command
         .output()
         .ok()
@@ -616,7 +618,7 @@ fn git_branch(root: &Path) -> Option<String> {
     command
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(root);
-    fallow_core::git_env::clear_ambient_git_env(&mut command);
+    clear_ambient_git_env(&mut command);
     command
         .output()
         .ok()
