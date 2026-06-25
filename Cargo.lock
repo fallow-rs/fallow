@@ -1253,6 +1253,7 @@ name = "fallow-output"
 version = "2.102.0"
 dependencies = [
  "fallow-types",
+ "rustc-hash 2.1.2",
  "schemars",
  "serde",
  "serde_json",

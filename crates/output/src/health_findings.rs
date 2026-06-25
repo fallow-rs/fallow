@@ -10,10 +10,10 @@ use fallow_types::output_health::{
 use std::ops::Deref;
 use std::path::Path;
 
-use crate::health_types::scores::{
-    ComplexityViolation, CoverageTier, HotspotEntry, OwnershipState,
+use crate::{
+    ComplexityViolation, CoverageTier, ExceededThreshold, HotspotEntry, OwnershipMetrics,
+    OwnershipState, RecommendationCategory, RefactoringTarget,
 };
-use crate::health_types::targets::{RecommendationCategory, RefactoringTarget};
 
 /// Options controlling how the action builder populates `actions`.
 #[derive(Debug, Clone, Copy, Default)]
@@ -115,7 +115,7 @@ pub fn build_health_finding_actions(
     let name = violation.name.as_str();
     let exceeded = violation.exceeded;
     let includes_crap = exceeded.includes_crap();
-    let crap_only = matches!(exceeded, crate::health_types::ExceededThreshold::Crap);
+    let crap_only = matches!(exceeded, ExceededThreshold::Crap);
     let cyclomatic = violation.cyclomatic;
     let cognitive = violation.cognitive;
     let max_cyclomatic_threshold = violation
@@ -481,7 +481,7 @@ fn base_hotspot_actions(path: &str) -> Vec<HotspotAction> {
 
 fn append_ownership_hotspot_actions(
     actions: &mut Vec<HotspotAction>,
-    ownership: &crate::health_types::OwnershipMetrics,
+    ownership: &OwnershipMetrics,
     path: &str,
 ) {
     if ownership.bus_factor == 1 {
@@ -497,10 +497,7 @@ fn append_ownership_hotspot_actions(
     }
 }
 
-fn low_bus_factor_action(
-    ownership: &crate::health_types::OwnershipMetrics,
-    path: &str,
-) -> HotspotAction {
+fn low_bus_factor_action(ownership: &OwnershipMetrics, path: &str) -> HotspotAction {
     let top = &ownership.top_contributor;
     let owner = top.identifier.as_str();
     HotspotAction {
@@ -515,7 +512,7 @@ fn low_bus_factor_action(
     }
 }
 
-fn low_bus_factor_note(ownership: &crate::health_types::OwnershipMetrics) -> Option<String> {
+fn low_bus_factor_note(ownership: &OwnershipMetrics) -> Option<String> {
     let suggested: Vec<&str> = ownership
         .suggested_reviewers
         .iter()
@@ -550,10 +547,7 @@ fn unowned_hotspot_action(path: &str) -> HotspotAction {
     }
 }
 
-fn ownership_drift_action(
-    ownership: &crate::health_types::OwnershipMetrics,
-    path: &str,
-) -> HotspotAction {
+fn ownership_drift_action(ownership: &OwnershipMetrics, path: &str) -> HotspotAction {
     let reason = ownership
         .drift_reason
         .as_deref()
@@ -715,10 +709,11 @@ const fn category_snake_case(cat: &RecommendationCategory) -> &'static str {
 #[cfg(test)]
 mod hotspot_target_tests {
     use super::*;
-    use crate::health_types::scores::{
-        ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
+    use crate::{
+        Confidence, ContributorEntry, ContributorIdentifierFormat, EffortEstimate,
+        EvidenceFunction, OwnershipMetrics, OwnershipState, TargetEvidence,
     };
-    use fallow_core::churn::ChurnTrend;
+    use fallow_types::churn::ChurnTrend;
     use std::path::PathBuf;
 
     fn sample_entry(path: &str) -> HotspotEntry {
@@ -754,8 +749,8 @@ mod hotspot_target_tests {
             efficiency: 75.0,
             recommendation: "Extract `handleRequest` into helpers".to_string(),
             category: RecommendationCategory::ExtractComplexFunctions,
-            effort: crate::health_types::EffortEstimate::Low,
-            confidence: crate::health_types::Confidence::High,
+            effort: EffortEstimate::Low,
+            confidence: Confidence::High,
             factors: Vec::new(),
             evidence: None,
         }
@@ -765,8 +760,10 @@ mod hotspot_target_tests {
     fn hotspot_finding_flattens_inner_fields_at_top_level() {
         let entry = sample_entry("/root/src/api.ts");
         let finding = HotspotFinding::with_actions(entry, Path::new("/root"));
-        let json = serde_json::to_value(&finding).unwrap();
-        let obj = json.as_object().unwrap();
+        let json = serde_json::to_value(&finding).expect("hotspot finding should serialize");
+        let obj = json
+            .as_object()
+            .expect("hotspot finding should serialize as object");
         assert!(obj.contains_key("score"));
         assert!(obj.contains_key("commits"));
         assert!(obj.contains_key("weighted_commits"));
@@ -959,8 +956,11 @@ mod hotspot_target_tests {
     fn refactoring_target_finding_flattens_inner_fields_at_top_level() {
         let target = sample_target();
         let finding = RefactoringTargetFinding::with_actions(target);
-        let json = serde_json::to_value(&finding).unwrap();
-        let obj = json.as_object().unwrap();
+        let json =
+            serde_json::to_value(&finding).expect("refactoring target finding should serialize");
+        let obj = json
+            .as_object()
+            .expect("refactoring target finding should serialize as object");
         assert!(obj.contains_key("priority"));
         assert!(obj.contains_key("efficiency"));
         assert!(obj.contains_key("recommendation"));
@@ -992,9 +992,9 @@ mod hotspot_target_tests {
     #[test]
     fn refactoring_target_actions_append_suppress_when_evidence_present() {
         let mut target = sample_target();
-        target.evidence = Some(crate::health_types::TargetEvidence {
+        target.evidence = Some(TargetEvidence {
             unused_exports: Vec::new(),
-            complex_functions: vec![crate::health_types::EvidenceFunction {
+            complex_functions: vec![EvidenceFunction {
                 name: "handleRequest".to_string(),
                 line: 12,
                 cognitive: 30,
@@ -1052,8 +1052,10 @@ mod hotspot_target_tests {
             RecommendationCategory::AddTestCoverage,
         ];
         for cat in &variants {
-            let via_serde = serde_json::to_value(cat).unwrap();
-            let serde_str = via_serde.as_str().unwrap();
+            let via_serde = serde_json::to_value(cat).expect("category should serialize");
+            let serde_str = via_serde
+                .as_str()
+                .expect("category should serialize as string");
             assert_eq!(
                 serde_str,
                 category_snake_case(cat),
