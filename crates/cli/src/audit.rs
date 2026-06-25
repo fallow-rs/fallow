@@ -2605,8 +2605,10 @@ fn build_audit_health_options<'a>(
         save_snapshot: None,
         trend: false,
         group_by: opts.group_by,
-        coverage: opts.coverage,
-        coverage_root: opts.coverage_root,
+        coverage_inputs: fallow_engine::HealthCoverageInputs {
+            coverage: opts.coverage,
+            coverage_root: opts.coverage_root,
+        },
         performance: opts.performance,
         min_severity: None,
         report_only: false,

@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 use colored::Colorize;
 use fallow_config::{OutputFormat, PackageJson, ResolvedConfig, Severity};
 use fallow_engine::{
-    HealthSharedParseData, HealthSort, HealthThresholdOverrides, RuntimeCoverageOptions,
+    HealthCoverageInputs, HealthSharedParseData, HealthSort, HealthThresholdOverrides,
+    RuntimeCoverageOptions,
 };
 
 use crate::baseline::{HealthBaselineData, filter_new_health_findings, filter_new_health_targets};
@@ -117,10 +118,7 @@ pub struct HealthOptions<'a> {
     pub save_snapshot: Option<std::path::PathBuf>,
     pub trend: bool,
     pub group_by: Option<crate::GroupBy>,
-    /// Path to Istanbul-format coverage data (coverage-final.json) for accurate CRAP scores.
-    pub coverage: Option<&'a std::path::Path>,
-    /// Rebase file paths in coverage data by stripping this prefix and prepending project root.
-    pub coverage_root: Option<&'a std::path::Path>,
+    pub coverage_inputs: HealthCoverageInputs<'a>,
     /// Show detailed pipeline timing breakdown.
     pub performance: bool,
     /// Only exit with error for findings at or above this severity level.
@@ -210,7 +208,7 @@ pub fn execute_health_with_shared_parse(
     opts: &HealthOptions<'_>,
     shared: HealthSharedParseData,
 ) -> Result<HealthResult, ExitCode> {
-    scoring::validate_coverage_root_absolute(opts.coverage_root)
+    scoring::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
         .map_err(|e| emit_error(&e, 2, opts.output))?;
     validate_churn_file(opts)?;
     let t = Instant::now();
@@ -248,7 +246,7 @@ pub fn execute_health_with_shared_parse(
 }
 
 pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode> {
-    scoring::validate_coverage_root_absolute(opts.coverage_root)
+    scoring::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
         .map_err(|e| emit_error(&e, 2, opts.output))?;
     validate_churn_file(opts)?;
     let t = Instant::now();
@@ -4064,10 +4062,10 @@ fn load_health_coverage(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
 ) -> Result<Option<scoring::IstanbulCoverage>, ExitCode> {
-    if let Some(coverage_path) = opts.coverage {
+    if let Some(coverage_path) = opts.coverage_inputs.coverage {
         return scoring::load_istanbul_coverage(
             coverage_path,
-            opts.coverage_root,
+            opts.coverage_inputs.coverage_root,
             Some(&config.root),
         )
         .map(Some)
@@ -4086,7 +4084,12 @@ fn load_health_coverage(
             auto_path.display()
         );
     }
-    Ok(scoring::load_istanbul_coverage(&auto_path, opts.coverage_root, Some(&config.root)).ok())
+    Ok(scoring::load_istanbul_coverage(
+        &auto_path,
+        opts.coverage_inputs.coverage_root,
+        Some(&config.root),
+    )
+    .ok())
 }
 
 #[expect(
