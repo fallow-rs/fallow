@@ -34,13 +34,44 @@ use crate::diagnostics::security::{security_diagnostic, security_label, security
 /// suppression (`analyze/security/mod.rs`), so a line-level marker would be a
 /// dead no-op for it (the squiggle would reappear on the next analysis pass).
 /// `TaintedSink` honors both (`analyze/security/tainted_sink.rs`).
+#[derive(Clone, Copy)]
+pub struct SuppressSecurityActionInput<'a> {
+    pub results: &'a AnalysisResults,
+    pub file_path: &'a Path,
+    pub uri: &'a Uri,
+    pub cursor_range: &'a Range,
+    pub file_lines: &'a [&'a str],
+}
+
+impl<'a> SuppressSecurityActionInput<'a> {
+    #[must_use]
+    pub const fn new(
+        results: &'a AnalysisResults,
+        file_path: &'a Path,
+        uri: &'a Uri,
+        cursor_range: &'a Range,
+        file_lines: &'a [&'a str],
+    ) -> Self {
+        Self {
+            results,
+            file_path,
+            uri,
+            cursor_range,
+            file_lines,
+        }
+    }
+}
+
 pub fn build_suppress_security_actions(
-    results: &AnalysisResults,
-    file_path: &Path,
-    uri: &Uri,
-    cursor_range: &Range,
-    file_lines: &[&str],
+    input: SuppressSecurityActionInput<'_>,
 ) -> Vec<CodeActionOrCommand> {
+    let SuppressSecurityActionInput {
+        results,
+        file_path,
+        uri,
+        cursor_range,
+        file_lines,
+    } = input;
     let mut actions = Vec::new();
     let mut file_level_tokens: FxHashSet<&'static str> = FxHashSet::default();
 
@@ -97,6 +128,23 @@ pub fn build_suppress_security_actions(
     }
 
     actions
+}
+
+#[cfg(test)]
+fn build_suppress_security_actions_for_test(
+    results: &AnalysisResults,
+    file_path: &Path,
+    uri: &Uri,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Vec<CodeActionOrCommand> {
+    build_suppress_security_actions(SuppressSecurityActionInput::new(
+        results,
+        file_path,
+        uri,
+        cursor_range,
+        file_lines,
+    ))
 }
 
 /// A zero-width insertion `TextEdit` at the start of `line`.
@@ -239,7 +287,8 @@ mod tests {
             },
         };
 
-        let actions = build_suppress_security_actions(&results, &path, &uri, &cursor, &file_lines);
+        let actions =
+            build_suppress_security_actions_for_test(&results, &path, &uri, &cursor, &file_lines);
         let titles = action_titles(&actions);
         assert_eq!(titles.len(), 2);
         assert!(titles[0].contains("Dismiss this security candidate on this line"));
@@ -275,7 +324,8 @@ mod tests {
             },
         };
 
-        let actions = build_suppress_security_actions(&results, &path, &uri, &cursor, &file_lines);
+        let actions =
+            build_suppress_security_actions_for_test(&results, &path, &uri, &cursor, &file_lines);
         // Two line-level (one per finding) + ONE file-level (deduped).
         let file_level = action_titles(&actions)
             .iter()
@@ -306,7 +356,8 @@ mod tests {
             },
         };
 
-        let actions = build_suppress_security_actions(&results, &path, &uri, &cursor, &file_lines);
+        let actions =
+            build_suppress_security_actions_for_test(&results, &path, &uri, &cursor, &file_lines);
         let titles = action_titles(&actions);
         assert_eq!(titles.len(), 1);
         assert!(titles[0].contains("type in this file"));
@@ -336,7 +387,8 @@ mod tests {
             },
         };
 
-        let actions = build_suppress_security_actions(&results, &path, &uri, &cursor, &file_lines);
+        let actions =
+            build_suppress_security_actions_for_test(&results, &path, &uri, &cursor, &file_lines);
         assert!(actions.is_empty());
     }
 }
