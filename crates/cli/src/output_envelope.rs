@@ -6,6 +6,10 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
+use crate::health_types::{HealthGroup, HealthReport};
+use crate::output_dupes::DupesReportPayload;
+use crate::report::dupes_grouping::DuplicationGroup;
 #[allow(
     unused_imports,
     reason = "compatibility re-export while CLI output contracts move to fallow-output"
@@ -29,12 +33,6 @@ pub use fallow_output::{
     build_dupes_output, build_health_output, default_marker_regex, default_marker_regex_flags,
     is_false,
 };
-use serde::Serialize;
-
-use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
-use crate::health_types::{HealthGroup, HealthReport};
-use crate::output_dupes::DupesReportPayload;
-use crate::report::dupes_grouping::DuplicationGroup;
 
 static LEGACY_ENVELOPE: AtomicBool = AtomicBool::new(false);
 static TELEMETRY_ANALYSIS_RUN_ID: Mutex<Option<String>> = Mutex::new(None);
@@ -176,155 +174,37 @@ pub type BoundariesListLogicalGroup = fallow_output::BoundariesListLogicalGroup<
     fallow_config::AuthoredRule,
 >;
 
-/// Typed root of every fallow JSON envelope shape that serializes as a JSON
-/// object and participates in the documented `FallowOutput` contract. The
-/// schema derived from this enum drives the document-root `oneOf` in
-/// `docs/output-schema.json`.
-///
-/// The default wire shape now carries a top-level `kind` discriminator so
-/// agents and schema-validating clients can select the variant in O(1) instead
-/// of probing for unique field presence. `--legacy-envelope` is a one-cycle
-/// compatibility flag that removes only this document-root `kind` field from
-/// CLI JSON output; nested report objects are not rewritten.
-///
-/// One envelope is intentionally NOT in this enum:
-/// - `CodeClimateOutput` serializes as a bare JSON array
-///   (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality
-///   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
-///   variant and wrapping the array would break the spec. The root schema
-///   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(title = "fallow --format json (typed root)")
-)]
-#[serde(tag = "kind")]
 #[allow(
-    dead_code,
-    reason = "some variants are schema-emit only, but runtime roots serialize through this enum where practical"
+    clippy::type_complexity,
+    reason = "concrete CLI alias fills every generic payload slot in the shared root output contract"
 )]
-pub enum FallowOutput {
-    /// `fallow audit --format json`. Required `command: "audit"` singleton
-    /// plus `verdict` and `summary`.
-    #[serde(rename = "audit")]
-    Audit(AuditOutput),
-    /// `fallow explain <issue-type> --format json`. Required `id`, `name`,
-    /// `rationale`, `example`, `how_to_fix`, `docs`; no `schema_version`.
-    #[serde(rename = "explain")]
-    Explain(ExplainOutput),
-    /// `fallow inspect --format json`. Required `target`, `identity`,
-    /// `evidence`, and `warnings`; no `schema_version`.
-    #[serde(rename = "inspect_target")]
-    Inspect(InspectOutput),
-    /// `fallow trace <symbol> --format json` (symbol-level call chains).
-    /// Required `file`, `symbol`, `symbol_found`, `depth`, `best_effort`,
-    /// `reason`; optional `callers`, `callees`, `unresolved_callees`. Its OWN
-    /// surface, best-effort and EXPLICITLY OFF the ranked path: NEVER folded
-    /// into the ranked brief and NEVER a focus-map input.
-    #[serde(rename = "trace")]
-    Trace(fallow_core::trace_chain::SymbolChainTrace),
-    /// `fallow --format review-github` / `--format review-gitlab`. Required
-    /// `body`, `comments`, `meta`; no `schema_version`.
-    #[serde(rename = "review-envelope")]
-    ReviewEnvelope(ReviewEnvelopeOutput),
-    /// `fallow ci reconcile-review --format json`. Required `schema`
-    /// singleton plus `provider`, `comments`, and the various
-    /// `*_fingerprints` arrays.
-    #[serde(rename = "review-reconcile")]
-    ReviewReconcile(ReviewReconcileOutput),
-    /// `fallow coverage setup --json`. Required `schema_version` singleton
-    /// plus `framework_detected`, `members`, `commands`, `snippets`.
-    #[serde(rename = "coverage-setup")]
-    CoverageSetup(CoverageSetupOutput),
-    /// `fallow coverage analyze --format json`. Required
-    /// `schema_version: "1"` singleton plus `version`, `elapsed_ms`,
-    /// `runtime_coverage`.
-    #[serde(rename = "coverage-analyze")]
-    CoverageAnalyze(CoverageAnalyzeOutput),
-    /// `fallow list --boundaries --format json`. Required `boundaries`
-    /// sub-object; no `schema_version`.
-    #[serde(rename = "list-boundaries")]
-    ListBoundaries(ListBoundariesOutput),
-    /// `fallow workspaces --format json`. Required `workspace_count`,
-    /// `workspaces`, and `workspace_diagnostics`.
-    #[serde(rename = "list-workspaces")]
-    Workspaces(WorkspacesOutput),
-    /// `fallow health --format json`. Required `report: HealthReport`.
-    #[serde(rename = "health")]
-    Health(HealthOutput<HealthReport, HealthGroup>),
-    /// `fallow dupes --format json`. Required `report: DupesReportPayload`
-    /// (typed wrapper payload carrying `clone_groups[]: CloneGroupFinding`
-    /// and `clone_families[]: CloneFamilyFinding`).
-    #[serde(rename = "dupes")]
-    Dupes(DupesOutput<DupesReportPayload, DuplicationGroup>),
-    /// `fallow dead-code --format json --group-by <mode>`. Required `grouped_by`
-    /// plus a `groups` array.
-    #[serde(rename = "dead-code-grouped")]
-    CheckGrouped(CheckGroupedOutput),
-    /// `fallow impact --format json`. Required `enabled`, `record_count`,
-    /// `containment_count`, `recent_containment`; no global `schema_version`,
-    /// `command`, `total_issues`, or `report`.
-    #[serde(rename = "impact")]
-    Impact(crate::impact::ImpactReport),
-    /// `fallow impact --all --format json`. Required `project_count`,
-    /// `tracked_count`, `totals`, `projects`; the cross-repo roll-up. Each
-    /// `projects[]` entry embeds a per-project `report` (the same shape as the
-    /// `impact` variant). Independently versioned via `CrossRepoImpactSchemaVersion`.
-    #[serde(rename = "impact-cross-repo")]
-    ImpactCrossRepo(crate::impact::CrossRepoImpactReport),
-    /// `fallow security --summary --format json`. Required `summary`; no
-    /// per-finding arrays.
-    #[serde(rename = "security")]
-    SecuritySummary(crate::security::SecuritySummaryOutput),
-    /// `fallow security --format json`. Required `security_findings`,
-    /// `unresolved_edge_files`, and `unresolved_callee_sites`; ordered before the
-    /// broader variants because the `security_findings` discriminator is uniquely
-    /// present here.
-    #[serde(rename = "security")]
-    Security(crate::security::SecurityOutput),
-    /// `fallow security survivors --format json`. Required `survivors` and
-    /// `needs_human_review`, both keyed by `finding_id`.
-    #[serde(rename = "security-survivors")]
-    SecuritySurvivors(crate::security::SecuritySurvivorsOutput),
-    /// `fallow security blind-spots --format json`. Required `summary` and
-    /// grouped unresolved-callee diagnostics.
-    #[serde(rename = "security-blind-spots")]
-    SecurityBlindSpots(crate::security::SecurityBlindSpotsOutput),
-    /// `fallow dead-code --format json`.
-    /// Required `total_issues` plus `summary: CheckSummary`.
-    #[serde(rename = "dead-code")]
-    Check(CheckOutput),
-    /// Bare `fallow --format json` (combined dead-code + dupes + health).
-    /// Required `schema_version`, `version`, and `elapsed_ms`, with optional
-    /// `check`, `dupes`, and `health` subreports.
-    #[serde(rename = "combined")]
-    Combined(CombinedOutput),
-    /// `fallow audit --brief --format json` (alias `fallow review`). Required
-    /// `schema_version`, `version`, `command: "audit-brief"`, `triage`, and
-    /// `graph_facts`. Independently versioned via `ReviewBriefSchemaVersion`;
-    /// always emitted with exit 0.
-    #[serde(rename = "audit-brief")]
-    AuditBrief(crate::audit_brief::ReviewBriefOutput),
-    /// `fallow decision-surface --format json` (the `decision_surface` MCP tool's
-    /// output). The separable, cheap apex: a ranked, capped, signal_id-anchored
-    /// set of consequential structural decisions framed as judgment questions,
-    /// each with structured `actions[]`. Independently versioned; always exit 0.
-    #[serde(rename = "decision-surface")]
-    DecisionSurface(crate::audit_decision_surface::DecisionSurfaceOutput),
-    /// `fallow review --walkthrough-guide --format json`. The digest +
-    /// schema the agent fetches: the brief + decision surface, the review
-    /// direction, the graph-snapshot pin, and the embedded agent schema. The
-    /// digest is graph-derived only (injection-resistant). Always exit 0.
-    #[serde(rename = "review-walkthrough-guide")]
-    WalkthroughGuide(crate::audit_walkthrough::WalkthroughGuide),
-    /// `fallow review --walkthrough-file --format json`. The post-validation
-    /// of an agent's judgment JSON against the live graph: accepted (anchored,
-    /// framing fenced), rejected (unanchored), and a stale flag (the tree moved).
-    /// The verifier is the graph, never a second model. Always exit 0.
-    #[serde(rename = "review-walkthrough-validation")]
-    WalkthroughValidation(crate::audit_walkthrough::WalkthroughValidation),
-}
+pub type FallowOutput = fallow_output::FallowOutput<
+    AuditOutput,
+    ExplainOutput,
+    InspectOutput,
+    fallow_core::trace_chain::SymbolChainTrace,
+    ReviewEnvelopeOutput,
+    ReviewReconcileOutput,
+    CoverageSetupOutput,
+    CoverageAnalyzeOutput,
+    ListBoundariesOutput,
+    WorkspacesOutput,
+    HealthOutput<HealthReport, HealthGroup>,
+    DupesOutput<DupesReportPayload, DuplicationGroup>,
+    CheckGroupedOutput,
+    crate::impact::ImpactReport,
+    crate::impact::CrossRepoImpactReport,
+    crate::security::SecuritySummaryOutput,
+    crate::security::SecurityOutput,
+    crate::security::SecuritySurvivorsOutput,
+    crate::security::SecurityBlindSpotsOutput,
+    CheckOutput,
+    CombinedOutput,
+    crate::audit_brief::ReviewBriefOutput,
+    crate::audit_decision_surface::DecisionSurfaceOutput,
+    crate::audit_walkthrough::WalkthroughGuide,
+    crate::audit_walkthrough::WalkthroughValidation,
+>;
 
 #[cfg(test)]
 mod tests {
