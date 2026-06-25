@@ -105,7 +105,7 @@ fn find_template_body_end(source: &str, body_start: usize) -> Option<usize> {
             && let Some((tag, next_index)) = scan_html_tag(source, index)
         {
             let trimmed = tag.trim();
-            if trimmed.eq_ignore_ascii_case("</template>") {
+            if is_template_close_tag(trimmed) {
                 depth -= 1;
                 if depth == 0 {
                     return Some(index);
@@ -135,6 +135,20 @@ fn is_template_open_tag(tag: &str) -> bool {
             .chars()
             .next()
             .is_none_or(|c| c.is_whitespace() || c == '>' || c == '/')
+}
+
+/// Whether `tag` (a full `<...>` tag string) is a `</template>` closing tag
+/// (case-insensitive), tolerating interior whitespace before `>` such as the
+/// `</template >` Prettier emits for slot blocks. Guards against `</templatefoo>`
+/// via the post-name remainder check.
+fn is_template_close_tag(tag: &str) -> bool {
+    let Some(rest) = tag.strip_prefix("</") else {
+        return false;
+    };
+    let Some(after) = rest.get(..8) else {
+        return false;
+    };
+    after.eq_ignore_ascii_case("template") && rest[8..].trim() == ">"
 }
 
 fn scan_template_body(
@@ -595,6 +609,54 @@ mod tests {
             assert!(
                 usage.used_bindings.contains(name),
                 "{name} should be credited across nested slot templates"
+            );
+        }
+    }
+
+    #[test]
+    fn closing_template_tag_with_interior_whitespace_is_matched() {
+        // Prettier emits `</template >` (space before `>`) for slot blocks. The
+        // root close must still be recognized so `find_template_body_end` does not
+        // return `None` and drop the whole body, falsely reporting every
+        // template-only binding unused. Regression for issue #1439.
+        for source in [
+            "<template><Content /></template >",
+            "<template><Content /></template\n>",
+        ] {
+            let usage = collect_template_usage(source, &imported(&["Content"]));
+            assert!(
+                usage.used_bindings.contains("Content"),
+                "component must stay credited when the root close tag has interior whitespace: {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn nested_slot_close_with_whitespace_does_not_truncate_root_body() {
+        // A `</template >` closing a nested slot must decrement depth like the
+        // exact form, so the trailing component after it stays credited.
+        let usage = collect_template_usage(
+            "<template><Header><template #logo>x</template ></Header><Content /></template >",
+            &imported(&["Header", "Content"]),
+        );
+        assert!(usage.used_bindings.contains("Header"));
+        assert!(usage.used_bindings.contains("Content"));
+    }
+
+    #[test]
+    fn whitespace_close_inside_comment_or_attribute_does_not_truncate() {
+        // A `</template >` appearing in an HTML comment or a quoted attribute must
+        // not be treated as the root close: comments are skipped and `scan_html_tag`
+        // is quote-aware, so the real close still ends the body and trailing
+        // bindings stay credited.
+        for source in [
+            "<template><!-- </template > --><Content /></template >",
+            "<template><div title=\"</template >\"></div><Content /></template >",
+        ] {
+            let usage = collect_template_usage(source, &imported(&["Content"]));
+            assert!(
+                usage.used_bindings.contains("Content"),
+                "spurious whitespace close must not truncate the body: {source:?}"
             );
         }
     }

@@ -587,7 +587,12 @@ use crate::MemberKind;
 /// Bumped to 188: `HookUse` now carries the enclosing `component` name, so the
 /// descriptive per-component hook summary stays exact in multi-component files.
 /// A warm cache from 187 lacks the attribution field on persisted `hook_uses`.
-pub(super) const CACHE_VERSION: u32 = 188;
+///
+/// Bumped to 189 (issue #1439): the Vue SFC template scanner now recognizes a
+/// `</template >` close tag with interior whitespace, so a warm cache from 188
+/// that dropped such a template's body recorded too few template-credited
+/// `member_accesses` / prop uses and must be re-extracted.
+pub(super) const CACHE_VERSION: u32 = 189;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
