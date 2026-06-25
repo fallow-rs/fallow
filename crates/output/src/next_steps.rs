@@ -30,6 +30,16 @@ pub struct DeadCodeNextStepsInput<'a> {
     pub audit_changed: bool,
 }
 
+/// Runtime-independent inputs for standalone duplication next steps.
+#[derive(Debug, Clone, Copy)]
+pub struct DupesNextStepsInput<'a> {
+    pub suggestions_enabled: bool,
+    pub clone_fingerprints: &'a [&'a str],
+    pub offer_setup: bool,
+    pub impact_digest: Option<ImpactDigestCounts>,
+    pub audit_changed: bool,
+}
+
 /// Runtime-independent inputs for standalone health next steps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HealthNextStepsInput {
@@ -117,6 +127,31 @@ pub fn build_dead_code_next_steps(input: DeadCodeNextStepsInput<'_>) -> Vec<Next
     steps
 }
 
+/// Next-steps for standalone `fallow dupes`.
+#[must_use]
+pub fn build_dupes_next_steps(input: DupesNextStepsInput<'_>) -> Vec<NextStep> {
+    if !input.suggestions_enabled {
+        return Vec::new();
+    }
+    if input.clone_fingerprints.is_empty() {
+        return impact_digest_step(input.impact_digest)
+            .into_iter()
+            .collect();
+    }
+
+    let mut steps: Vec<NextStep> = [
+        setup_pointer(input.offer_setup),
+        impact_digest_step(input.impact_digest),
+        trace_clone(input.clone_fingerprints),
+        audit_changed(input.audit_changed),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    steps.truncate(MAX_NEXT_STEPS);
+    steps
+}
+
 fn relative_command_path(path: &Path, root: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
@@ -139,6 +174,15 @@ fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextSte
         "trace-unused-export",
         format!("fallow dead-code --trace {}:{}", target.0, target.1),
         "verify an export is truly unused before deleting",
+    ))
+}
+
+fn trace_clone(fingerprints: &[&str]) -> Option<NextStep> {
+    let fingerprint = fingerprints.iter().copied().min()?;
+    Some(next_step(
+        "trace-clone",
+        format!("fallow dupes --trace {fingerprint}"),
+        "see sibling locations and an extract-function suggestion",
     ))
 }
 
@@ -261,6 +305,16 @@ mod tests {
         }
     }
 
+    fn dupes_input<'a>(clone_fingerprints: &'a [&'a str]) -> DupesNextStepsInput<'a> {
+        DupesNextStepsInput {
+            suggestions_enabled: true,
+            clone_fingerprints,
+            offer_setup: false,
+            impact_digest: None,
+            audit_changed: false,
+        }
+    }
+
     fn assert_valid(step: &NextStep) {
         assert!(
             !step.command.contains('<') && !step.command.contains('>'),
@@ -338,6 +392,49 @@ mod tests {
             impact_digest: Some(digest(2, 1)),
             audit_changed: true,
             ..dead_code_input(&results)
+        });
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].id, "impact-report");
+    }
+
+    #[test]
+    fn dupes_steps_trace_smallest_clone_fingerprint() {
+        let fingerprints = ["dup:bbbbbbbb", "dup:aaaaaaaa"];
+
+        let steps = build_dupes_next_steps(dupes_input(&fingerprints));
+
+        assert_eq!(steps[0].id, "trace-clone");
+        assert_eq!(steps[0].command, "fallow dupes --trace dup:aaaaaaaa");
+        assert_valid(&steps[0]);
+    }
+
+    #[test]
+    fn dupes_steps_order_setup_impact_trace_then_audit() {
+        let fingerprints = ["dup:aaaaaaaa"];
+        let steps = build_dupes_next_steps(DupesNextStepsInput {
+            offer_setup: true,
+            impact_digest: Some(digest(2, 1)),
+            audit_changed: true,
+            ..dupes_input(&fingerprints)
+        });
+        let ids = steps
+            .iter()
+            .map(|step| step.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, ["setup", "impact-report", "trace-clone"]);
+        for step in &steps {
+            assert_valid(step);
+        }
+    }
+
+    #[test]
+    fn clean_dupes_run_emits_only_due_impact_digest() {
+        let steps = build_dupes_next_steps(DupesNextStepsInput {
+            impact_digest: Some(digest(2, 1)),
+            audit_changed: true,
+            ..dupes_input(&[])
         });
 
         assert_eq!(steps.len(), 1);
