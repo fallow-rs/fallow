@@ -21,7 +21,7 @@ use std::time::Duration;
 use fallow_config::{OutputFormat, RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
-use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
+use fallow_engine::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
 
 use crate::report::sink::outln;
 
@@ -622,7 +622,7 @@ pub fn print_clone_trace(trace: &CloneTrace, root: &Path, format: OutputFormat) 
 /// Print impact-closure trace results. JSON only emits the structured
 /// closure; human renders a short summary.
 pub fn print_impact_closure_trace(
-    trace: &fallow_core::trace::ImpactClosureTrace,
+    trace: &fallow_engine::trace::ImpactClosureTrace,
     format: OutputFormat,
 ) {
     match format {

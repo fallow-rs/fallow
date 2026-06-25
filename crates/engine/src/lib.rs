@@ -35,6 +35,11 @@ pub mod extract {
     pub use fallow_types::extract::*;
 }
 
+/// Module graph types exposed through the engine boundary.
+pub mod graph {
+    pub use fallow_core::graph::*;
+}
+
 /// Analysis result types exposed through the engine boundary.
 pub mod results {
     pub use fallow_core::results::*;
@@ -64,6 +69,16 @@ pub mod trace_chain {
     pub use fallow_core::trace_chain::{
         ChainHop, DEFAULT_TRACE_DEPTH, SymbolChainQuery, SymbolChainTrace, TraceDirections,
         UnresolvedCallee, UnresolvedReason,
+    };
+}
+
+/// Read-only trace helpers exposed through the engine boundary.
+pub mod trace {
+    pub use fallow_core::trace::{
+        CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ImpactClosureGap,
+        ImpactClosureTrace, PipelineTimings, ReExportChain, TracedCloneGroup, TracedExport,
+        TracedReExport, trace_clone, trace_clone_by_fingerprint, trace_dependency, trace_export,
+        trace_file, trace_impact_closure,
     };
 }
 

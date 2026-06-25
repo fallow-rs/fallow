@@ -318,7 +318,7 @@ pub struct CheckResult {
     pub baseline_deltas: Option<crate::baseline::BaselineDeltas>,
     /// When a baseline was loaded: (total entries in baseline, entries that matched current issues).
     pub baseline_matched: Option<(usize, usize)>,
-    pub timings: Option<fallow_core::trace::PipelineTimings>,
+    pub timings: Option<fallow_engine::trace::PipelineTimings>,
     /// Retained parse data for sharing with health (only populated when retain_modules_for_health=true).
     pub shared_parse: Option<fallow_engine::HealthSharedParseData>,
     /// Impact closure for the review brief: the transitive
@@ -363,8 +363,8 @@ pub struct CheckResult {
 
 struct CheckAnalysisData {
     results: AnalysisResults,
-    trace_graph: Option<fallow_core::graph::ModuleGraph>,
-    trace_timings: Option<fallow_core::trace::PipelineTimings>,
+    trace_graph: Option<fallow_engine::graph::ModuleGraph>,
+    trace_timings: Option<fallow_engine::trace::PipelineTimings>,
     retained_modules: Option<Vec<fallow_core::extract::ModuleInfo>>,
     retained_files: Option<Vec<fallow_core::discover::DiscoveredFile>>,
     script_used_packages: rustc_hash::FxHashSet<String>,
@@ -441,8 +441,8 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
 fn handle_trace_side_effects(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
-    trace_graph: Option<&fallow_core::graph::ModuleGraph>,
-    trace_timings: Option<&fallow_core::trace::PipelineTimings>,
+    trace_graph: Option<&fallow_engine::graph::ModuleGraph>,
+    trace_timings: Option<&fallow_engine::trace::PipelineTimings>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
 ) -> Result<(), ExitCode> {
     if let Some(timings) = trace_timings
@@ -586,7 +586,7 @@ fn regression_config_path(opts: &CheckOptions<'_>) -> std::path::PathBuf {
 
 fn build_shared_parse_data(
     results: &AnalysisResults,
-    trace_graph: Option<fallow_core::graph::ModuleGraph>,
+    trace_graph: Option<fallow_engine::graph::ModuleGraph>,
     retained_modules: Option<Vec<fallow_core::extract::ModuleInfo>>,
     retained_files: Option<Vec<fallow_core::discover::DiscoveredFile>>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
