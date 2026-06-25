@@ -16,7 +16,7 @@ use crate::coverage::cloud_client::{
     CloudTrackingState, fetch_runtime_context,
 };
 use crate::error::emit_error;
-use crate::health::{HealthOptions, SortBy};
+use crate::health::HealthOptions;
 use crate::health_types::{
     RuntimeCoverageAction, RuntimeCoverageCaptureQuality, RuntimeCoverageConfidence,
     RuntimeCoverageDataSource, RuntimeCoverageEvidence, RuntimeCoverageFinding,
@@ -164,7 +164,7 @@ fn local_health_options<'a>(
         max_cognitive: None,
         max_crap: None,
         top: args.top,
-        sort: SortBy::Cyclomatic,
+        sort: fallow_engine::HealthSort::Cyclomatic,
         production: args.production,
         production_override: Some(args.production),
         changed_since: None,

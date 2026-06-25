@@ -5675,7 +5675,7 @@ fn run_health_dispatch(
         max_cognitive: args.max_cognitive,
         max_crap: args.max_crap,
         top: args.top,
-        sort: args.sort,
+        sort: args.sort.into(),
         production,
         production_override: Some(production),
         changed_since: cli.changed_since.as_deref(),

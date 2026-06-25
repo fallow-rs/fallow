@@ -14,7 +14,7 @@ use crate::base_worktree::{
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
 use crate::error::emit_error;
-use crate::health::{HealthOptions, HealthResult, SortBy};
+use crate::health::{HealthOptions, HealthResult};
 
 const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 3;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
@@ -2570,7 +2570,7 @@ fn build_audit_health_options<'a>(
         max_cognitive: None,
         max_crap: opts.max_crap,
         top: None,
-        sort: SortBy::Cyclomatic,
+        sort: fallow_engine::HealthSort::Cyclomatic,
         production: opts.production_health.unwrap_or(opts.production),
         production_override: opts.production_health,
         changed_since,

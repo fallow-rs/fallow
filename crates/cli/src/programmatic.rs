@@ -5,7 +5,7 @@ use fallow_core::results::AnalysisResults;
 
 use crate::check::{CheckOptions, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions};
-use crate::health::{HealthOptions, SortBy};
+use crate::health::HealthOptions;
 use crate::health_types::EffortEstimate;
 use crate::report::ci::diff_filter::{DiffIndex, LoadedDiff, MAX_DIFF_BYTES};
 use crate::report::{build_duplication_json, build_health_json};
@@ -27,12 +27,12 @@ const fn duplication_mode_to_cli(mode: DuplicationMode) -> DupesMode {
     }
 }
 
-const fn complexity_sort_to_cli(sort: ComplexitySort) -> SortBy {
+const fn complexity_sort_to_engine(sort: ComplexitySort) -> fallow_engine::HealthSort {
     match sort {
-        ComplexitySort::Severity => SortBy::Severity,
-        ComplexitySort::Cyclomatic => SortBy::Cyclomatic,
-        ComplexitySort::Cognitive => SortBy::Cognitive,
-        ComplexitySort::Lines => SortBy::Lines,
+        ComplexitySort::Severity => fallow_engine::HealthSort::Severity,
+        ComplexitySort::Cyclomatic => fallow_engine::HealthSort::Cyclomatic,
+        ComplexitySort::Cognitive => fallow_engine::HealthSort::Cognitive,
+        ComplexitySort::Lines => fallow_engine::HealthSort::Lines,
     }
 }
 
@@ -636,7 +636,7 @@ fn build_complexity_options<'a>(
         max_cognitive: options.max_cognitive,
         max_crap: options.max_crap,
         top: options.top,
-        sort: complexity_sort_to_cli(options.sort),
+        sort: complexity_sort_to_engine(options.sort),
         production: resolved.production_override.unwrap_or(false),
         production_override: resolved.production_override,
         changed_since: resolved.changed_since.as_deref(),

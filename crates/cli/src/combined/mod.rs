@@ -5,7 +5,7 @@ use fallow_config::{DuplicatesConfig, OutputFormat};
 
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
-use crate::health::{HealthOptions, HealthResult, SortBy};
+use crate::health::{HealthOptions, HealthResult};
 use crate::regression;
 use crate::report;
 use crate::{AnalysisKind, load_config_for_analysis};
@@ -381,7 +381,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         max_cognitive: None,
         max_crap: None,
         top: None,
-        sort: SortBy::Cyclomatic,
+        sort: fallow_engine::HealthSort::Cyclomatic,
         production: opts.production_health.unwrap_or(opts.production),
         production_override: opts.production_health,
         changed_since: opts.changed_since,

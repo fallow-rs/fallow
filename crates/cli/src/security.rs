@@ -46,7 +46,7 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
 use crate::error::emit_error;
-use crate::health::{HealthOptions, SharedParseData, SortBy};
+use crate::health::{HealthOptions, SharedParseData};
 use crate::health_types::{
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageVerdict,
 };
@@ -1143,7 +1143,7 @@ fn security_runtime_health_options<'a>(
         max_cognitive: None,
         max_crap: None,
         top: None,
-        sort: SortBy::Cyclomatic,
+        sort: fallow_engine::HealthSort::Cyclomatic,
         production: true,
         production_override: Some(true),
         changed_since: opts.changed_since,
