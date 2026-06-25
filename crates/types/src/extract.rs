@@ -1810,6 +1810,13 @@ pub fn fluent_chain_new_member_access_facts_with_legacy(
         .collect()
 }
 
+fn parse_legacy_playwright_fixture_member_access<'a>(
+    object: &'a str,
+    prefix: &str,
+) -> Option<(&'a str, &'a str)> {
+    object.strip_prefix(prefix)?.split_once(':')
+}
+
 /// Iterate typed Playwright fixture-use facts.
 pub fn playwright_fixture_use_facts(
     semantic_facts: &[SemanticFact],
@@ -1821,6 +1828,27 @@ pub fn playwright_fixture_use_facts(
             None
         }
     })
+}
+
+/// Collect Playwright fixture-use facts from typed facts plus legacy sentinels.
+pub fn playwright_fixture_use_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<PlaywrightFixtureUseFact> {
+    playwright_fixture_use_facts(semantic_facts)
+        .cloned()
+        .chain(member_accesses.iter().filter_map(|access| {
+            let (test_name, fixture_name) = parse_legacy_playwright_fixture_member_access(
+                access.object.as_str(),
+                PLAYWRIGHT_FIXTURE_USE_SENTINEL,
+            )?;
+            Some(PlaywrightFixtureUseFact {
+                test_name: test_name.to_string(),
+                fixture_name: fixture_name.to_string(),
+                member: access.member.clone(),
+            })
+        }))
+        .collect()
 }
 
 /// Iterate typed Playwright fixture-definition facts.
@@ -1836,6 +1864,27 @@ pub fn playwright_fixture_definition_facts(
     })
 }
 
+/// Collect Playwright fixture-definition facts from typed facts plus legacy sentinels.
+pub fn playwright_fixture_definition_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<PlaywrightFixtureDefinitionFact> {
+    playwright_fixture_definition_facts(semantic_facts)
+        .cloned()
+        .chain(member_accesses.iter().filter_map(|access| {
+            let (test_name, fixture_name) = parse_legacy_playwright_fixture_member_access(
+                access.object.as_str(),
+                PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+            )?;
+            Some(PlaywrightFixtureDefinitionFact {
+                test_name: test_name.to_string(),
+                fixture_name: fixture_name.to_string(),
+                type_name: access.member.clone(),
+            })
+        }))
+        .collect()
+}
+
 /// Iterate typed Playwright fixture-alias facts.
 pub fn playwright_fixture_alias_facts(
     semantic_facts: &[SemanticFact],
@@ -1849,6 +1898,26 @@ pub fn playwright_fixture_alias_facts(
     })
 }
 
+/// Collect Playwright fixture-alias facts from typed facts plus legacy sentinels.
+pub fn playwright_fixture_alias_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<PlaywrightFixtureAliasFact> {
+    playwright_fixture_alias_facts(semantic_facts)
+        .cloned()
+        .chain(member_accesses.iter().filter_map(|access| {
+            let (test_name, _) = parse_legacy_playwright_fixture_member_access(
+                access.object.as_str(),
+                PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
+            )?;
+            Some(PlaywrightFixtureAliasFact {
+                test_name: test_name.to_string(),
+                base_name: access.member.clone(),
+            })
+        }))
+        .collect()
+}
+
 /// Iterate typed Playwright fixture-type facts.
 pub fn playwright_fixture_type_facts(
     semantic_facts: &[SemanticFact],
@@ -1860,6 +1929,27 @@ pub fn playwright_fixture_type_facts(
             None
         }
     })
+}
+
+/// Collect Playwright fixture-type facts from typed facts plus legacy sentinels.
+pub fn playwright_fixture_type_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<PlaywrightFixtureTypeFact> {
+    playwright_fixture_type_facts(semantic_facts)
+        .cloned()
+        .chain(member_accesses.iter().filter_map(|access| {
+            let (alias_name, fixture_name) = parse_legacy_playwright_fixture_member_access(
+                access.object.as_str(),
+                PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
+            )?;
+            Some(PlaywrightFixtureTypeFact {
+                alias_name: alias_name.to_string(),
+                fixture_name: fixture_name.to_string(),
+                type_name: access.member.clone(),
+            })
+        }))
+        .collect()
 }
 
 /// A member name referenced from an Angular template surface.
@@ -2922,6 +3012,87 @@ mod tests {
                 .map(|fact| fact.fixture_name.as_str())
                 .collect::<Vec<_>>(),
             vec!["adminPage"]
+        );
+    }
+
+    #[test]
+    fn playwright_fixture_legacy_backed_helpers_collect_owned_family_facts() {
+        let mut module = minimal_module_info();
+        module
+            .semantic_facts
+            .push(SemanticFact::PlaywrightFixtureUse(
+                PlaywrightFixtureUseFact {
+                    test_name: "test".to_string(),
+                    fixture_name: "typedPage".to_string(),
+                    member: "goto".to_string(),
+                },
+            ));
+        module.member_accesses.push(MemberAccess {
+            object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}test:legacyPage"),
+            member: "click".to_string(),
+        });
+        module.member_accesses.push(MemberAccess {
+            object: format!("{PLAYWRIGHT_FIXTURE_DEF_SENTINEL}test:adminPage"),
+            member: "AdminPage".to_string(),
+        });
+        module.member_accesses.push(MemberAccess {
+            object: format!("{PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL}mergedTest:"),
+            member: "test".to_string(),
+        });
+        module.member_accesses.push(MemberAccess {
+            object: format!("{PLAYWRIGHT_FIXTURE_TYPE_SENTINEL}Pages:adminPage"),
+            member: "AdminPage".to_string(),
+        });
+
+        assert_eq!(
+            playwright_fixture_use_facts_with_legacy(
+                &module.semantic_facts,
+                &module.member_accesses
+            ),
+            vec![
+                PlaywrightFixtureUseFact {
+                    test_name: "test".to_string(),
+                    fixture_name: "typedPage".to_string(),
+                    member: "goto".to_string(),
+                },
+                PlaywrightFixtureUseFact {
+                    test_name: "test".to_string(),
+                    fixture_name: "legacyPage".to_string(),
+                    member: "click".to_string(),
+                }
+            ]
+        );
+        assert_eq!(
+            playwright_fixture_definition_facts_with_legacy(
+                &module.semantic_facts,
+                &module.member_accesses
+            ),
+            vec![PlaywrightFixtureDefinitionFact {
+                test_name: "test".to_string(),
+                fixture_name: "adminPage".to_string(),
+                type_name: "AdminPage".to_string(),
+            }]
+        );
+        assert_eq!(
+            playwright_fixture_alias_facts_with_legacy(
+                &module.semantic_facts,
+                &module.member_accesses
+            ),
+            vec![PlaywrightFixtureAliasFact {
+                test_name: "mergedTest".to_string(),
+                base_name: "test".to_string(),
+            }]
+        );
+        assert_eq!(
+            playwright_fixture_type_facts_with_legacy(
+                &module.semantic_facts,
+                &module.member_accesses
+            ),
+            vec![PlaywrightFixtureTypeFact {
+                alias_name: "Pages".to_string(),
+                fixture_name: "adminPage".to_string(),
+                type_name: "AdminPage".to_string(),
+            }]
         );
     }
 
