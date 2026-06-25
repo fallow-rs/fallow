@@ -22,7 +22,9 @@ use std::process::Command;
 
 use fallow_core::results::AnalysisResults;
 use fallow_output::{
-    DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput, ImpactDigestCounts,
+    CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput,
+    ImpactDigestCounts, TraceUnusedExportInput,
+    build_combined_next_steps as build_combined_next_steps_contract,
     build_dead_code_next_steps as build_dead_code_next_steps_contract,
     build_dupes_next_steps as build_dupes_next_steps_contract, impact_digest_summary,
 };
@@ -97,6 +99,21 @@ fn relative_command_path(path: &Path, root: &Path) -> String {
 /// Uses the lexicographically smallest `(path, name)` finding so the embedded
 /// command is deterministic across runs (independent of internal vec order).
 fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextStep> {
+    let target = trace_unused_export_input(results, root)?;
+    Some(next_step(
+        "trace-unused-export",
+        format!(
+            "fallow dead-code --trace {}:{}",
+            target.path, target.export_name
+        ),
+        "verify an export is truly unused before deleting",
+    ))
+}
+
+fn trace_unused_export_input(
+    results: &AnalysisResults,
+    root: &Path,
+) -> Option<TraceUnusedExportInput> {
     let target = results
         .unused_exports
         .iter()
@@ -107,29 +124,10 @@ fn trace_unused_export(results: &AnalysisResults, root: &Path) -> Option<NextSte
             )
         })
         .min()?;
-    Some(next_step(
-        "trace-unused-export",
-        format!("fallow dead-code --trace {}:{}", target.0, target.1),
-        "verify an export is truly unused before deleting",
-    ))
-}
-
-/// `setup`: first-contact pointer for unconfigured projects. The command is the
-/// read-only capability manifest (`fallow schema`), whose `task_matrix` and
-/// commands list name the guided-setup surface (`init --agents`, the hooks
-/// installer); the mutating commands themselves are never embedded here (the
-/// read-only contract), the agent offers them to the user instead. Callers gate
-/// this via [`setup_pointer_applicable`] so CI runs, configured projects, and
-/// projects that declined onboarding never see it.
-fn setup_pointer(offer_setup: bool) -> Option<NextStep> {
-    if !offer_setup {
-        return None;
-    }
-    Some(next_step(
-        "setup",
-        "fallow schema".to_string(),
-        "fallow has no config here; the manifest lists guided-setup commands (agent guide, commit gate) to offer the user",
-    ))
+    Some(TraceUnusedExportInput {
+        path: target.0,
+        export_name: target.1,
+    })
 }
 
 /// Shared first-contact gate for the `setup` next-step and the human setup hint
@@ -149,27 +147,8 @@ pub fn setup_pointer_applicable(root: &Path) -> bool {
 /// Worded as an offer, not a deficiency: zero-config is a supported happy path.
 pub const SETUP_HINT: &str = "Setup: `fallow init --agents` writes an agent guide; `fallow hooks install --target agent` adds a commit gate (hide this hint: `fallow init --decline`).";
 
-/// `impact-report`: the periodic local value digest. Emitted at most once per
-/// week per project (the cadence stamp lives in the impact store, not the
-/// agent, so it is consistent across agents and sessions), only when impact
-/// tracking is enabled and has non-zero value to report, never in CI. Unlike
-/// every other trigger this one may surface on a CLEAN run: a clean project
-/// after a period of gate containment is exactly the moment the value report
-/// is informative.
-fn impact_digest_step(digest: Option<crate::impact::ImpactDigest>) -> Option<NextStep> {
-    let digest = digest?;
-    Some(next_step(
-        "impact-report",
-        "fallow impact".to_string(),
-        &format!(
-            "local value report: {}; share the non-zero numbers with the user",
-            digest_summary(digest)
-        ),
-    ))
-}
-
 /// Real-counter summary fragment shared by the next-step reason and the human
-/// one-liner (the placeholder-free contract: numbers come from the store).
+/// one-liner. The output crate owns the `impact-report` command contract.
 fn impact_counts(digest: crate::impact::ImpactDigest) -> ImpactDigestCounts {
     ImpactDigestCounts {
         containment_count: digest.containment_count,
@@ -203,21 +182,6 @@ pub fn due_impact_digest(root: &Path) -> Option<crate::impact::ImpactDigest> {
     crate::impact::take_due_digest(root)
 }
 
-/// `trace-clone`: see sibling locations and an extract-function suggestion for a
-/// duplicated block. Uses the smallest fingerprint for run-to-run determinism.
-fn trace_clone(payload: &DupesReportPayload) -> Option<NextStep> {
-    let fingerprint = payload
-        .clone_groups
-        .iter()
-        .map(|group| group.fingerprint.as_str())
-        .min()?;
-    Some(next_step(
-        "trace-clone",
-        format!("fallow dupes --trace {fingerprint}"),
-        "see sibling locations and an extract-function suggestion",
-    ))
-}
-
 /// `complexity-breakdown`: see the per-decision-point contributions behind a
 /// high-complexity finding.
 fn complexity_breakdown(report: &HealthReport) -> Option<NextStep> {
@@ -228,18 +192,6 @@ fn complexity_breakdown(report: &HealthReport) -> Option<NextStep> {
         "complexity-breakdown",
         "fallow health --complexity-breakdown".to_string(),
         "see per-decision-point contributions for a hotspot",
-    ))
-}
-
-/// `scope-workspaces`: scope a monorepo run to the packages touched since the
-/// default branch. Emitted only when the project is a monorepo AND a concrete
-/// default ref resolves, so the embedded ref is real (never a placeholder).
-fn scope_workspaces(root: &Path) -> Option<NextStep> {
-    let reference = default_workspace_ref_for_next_step(root)?;
-    Some(next_step(
-        "scope-workspaces",
-        format!("fallow dead-code --changed-workspaces {reference}"),
-        "scope a monorepo run to the packages your branch touched",
     ))
 }
 
@@ -398,29 +350,27 @@ pub fn build_combined_next_steps(
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
 ) -> Vec<NextStep> {
-    if !suggestions_enabled() {
-        return Vec::new();
-    }
-    let has_findings = results.is_some_and(|r| r.total_issues() > 0)
-        || dupes.is_some_and(|d| !d.clone_groups.is_empty())
-        || health.is_some_and(|h| !h.findings.is_empty());
-    if !has_findings {
-        return impact_digest_step(digest).into_iter().collect();
-    }
-    let mut steps: Vec<NextStep> = [
-        setup_pointer(offer_setup),
-        impact_digest_step(digest),
-        results.and_then(|r| trace_unused_export(r, root)),
-        scope_workspaces(root),
-        dupes.and_then(trace_clone),
-        health.and_then(complexity_breakdown),
-        audit_changed(root),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    steps.truncate(MAX_NEXT_STEPS);
-    steps
+    let workspace_ref = default_workspace_ref_for_next_step(root);
+    let clone_fingerprints = dupes
+        .map(|payload| {
+            payload
+                .clone_groups
+                .iter()
+                .map(|group| group.fingerprint.as_str())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    build_combined_next_steps_contract(&CombinedNextStepsInput {
+        suggestions_enabled: suggestions_enabled(),
+        has_dead_code_findings: results.is_some_and(|r| r.total_issues() > 0),
+        trace_unused_export: results.and_then(|r| trace_unused_export_input(r, root)),
+        workspace_ref: workspace_ref.as_deref(),
+        clone_fingerprints: &clone_fingerprints,
+        has_complexity_findings: health.is_some_and(|h| !h.findings.is_empty()),
+        offer_setup,
+        impact_digest: digest.map(impact_counts),
+        audit_changed: audit_changed(root).is_some(),
+    })
 }
 
 /// Next-steps for `fallow audit`. No `audit-changed` (audit IS the changed
@@ -610,15 +560,6 @@ mod tests {
     }
 
     #[test]
-    fn setup_pointer_emits_only_when_applicable() {
-        assert!(setup_pointer(false).is_none());
-        let step = setup_pointer(true).expect("step");
-        assert_eq!(step.id, "setup");
-        assert_eq!(step.command, "fallow schema");
-        assert_valid(&step);
-    }
-
-    #[test]
     fn setup_pointer_gate_ignores_nonexistent_roots() {
         assert!(!setup_pointer_applicable(Path::new(
             "/fallow-test-project-does-not-exist"
@@ -649,20 +590,6 @@ mod tests {
             containment_count: containment,
             resolved_total: resolved,
         }
-    }
-
-    #[test]
-    fn impact_digest_step_carries_real_counters() {
-        assert!(impact_digest_step(None).is_none());
-        let step = impact_digest_step(Some(digest(4, 12))).expect("step");
-        assert_eq!(step.id, "impact-report");
-        assert_eq!(step.command, "fallow impact");
-        assert!(step.reason.contains("4 commits contained at the gate"));
-        assert!(step.reason.contains("12 findings resolved"));
-        assert_valid(&step);
-        let singular = impact_digest_step(Some(digest(1, 0))).expect("step");
-        assert!(singular.reason.contains("1 commit contained at the gate"));
-        assert!(!singular.reason.contains("resolved"));
     }
 
     #[test]
@@ -734,6 +661,33 @@ mod tests {
     }
 
     #[test]
+    fn combined_next_steps_route_payload_facts_to_output_contract() {
+        let root = PathBuf::from("/project");
+        let results = results_with_exports(vec![
+            unused_export("/project/src/b.ts", "beta"),
+            unused_export("/project/src/a.ts", "alpha"),
+        ]);
+        let payload = dupes_payload();
+        let report = health_report_with_finding();
+
+        let steps = build_combined_next_steps(
+            Some(&results),
+            Some(&payload),
+            Some(&report),
+            &root,
+            true,
+            Some(digest(2, 1)),
+        );
+        let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
+
+        assert_eq!(ids, ["setup", "impact-report", "trace-unused-export"]);
+        assert_eq!(steps[2].command, "fallow dead-code --trace src/a.ts:alpha");
+        for step in &steps {
+            assert_valid(step);
+        }
+    }
+
+    #[test]
     fn impact_digest_line_renders_counters() {
         let line = impact_digest_line(digest(2, 1));
         assert_eq!(
@@ -777,7 +731,7 @@ mod tests {
             "fallow dupes --trace dup:abcd1234".to_string(),
             "x",
         ));
-        all.extend(setup_pointer(true));
+        all.push(next_step("setup", "fallow schema".to_string(), "x"));
         assert!(!all.is_empty());
         for step in &all {
             assert_valid(step);
