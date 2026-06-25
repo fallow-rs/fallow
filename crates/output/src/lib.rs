@@ -43,6 +43,7 @@ mod inspect_envelopes;
 mod issue_contract;
 mod json_paths;
 mod list_envelopes;
+mod next_steps;
 mod report_contract;
 mod review_envelopes;
 mod root_envelopes;
@@ -174,6 +175,9 @@ pub use json_paths::strip_root_prefix;
 pub use list_envelopes::{
     BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone, BoundariesListing,
     ListBoundariesOutput, WorkspaceInfo, WorkspacesOutput,
+};
+pub use next_steps::{
+    HealthNextStepsInput, ImpactDigestCounts, build_health_next_steps, impact_digest_summary,
 };
 pub use report_contract::{
     COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SECURITY_DOCS,

@@ -21,6 +21,10 @@ use std::path::Path;
 use std::process::Command;
 
 use fallow_core::results::AnalysisResults;
+use fallow_output::{
+    HealthNextStepsInput, ImpactDigestCounts,
+    build_health_next_steps as build_health_next_steps_contract, impact_digest_summary,
+};
 use fallow_types::output::NextStep;
 
 use crate::health_types::HealthReport;
@@ -165,27 +169,15 @@ fn impact_digest_step(digest: Option<crate::impact::ImpactDigest>) -> Option<Nex
 
 /// Real-counter summary fragment shared by the next-step reason and the human
 /// one-liner (the placeholder-free contract: numbers come from the store).
+fn impact_counts(digest: crate::impact::ImpactDigest) -> ImpactDigestCounts {
+    ImpactDigestCounts {
+        containment_count: digest.containment_count,
+        resolved_total: digest.resolved_total,
+    }
+}
+
 fn digest_summary(digest: crate::impact::ImpactDigest) -> String {
-    let mut parts = Vec::new();
-    if digest.containment_count > 0 {
-        parts.push(format!(
-            "{} commit{} contained at the gate",
-            digest.containment_count,
-            if digest.containment_count == 1 {
-                ""
-            } else {
-                "s"
-            }
-        ));
-    }
-    if digest.resolved_total > 0 {
-        parts.push(format!(
-            "{} finding{} resolved",
-            digest.resolved_total,
-            if digest.resolved_total == 1 { "" } else { "s" }
-        ));
-    }
-    parts.join(", ")
+    impact_digest_summary(impact_counts(digest))
 }
 
 /// One-line human counterpart of the `impact-report` next-step, printed with
@@ -362,23 +354,13 @@ pub fn build_health_next_steps(
     offer_setup: bool,
     digest: Option<crate::impact::ImpactDigest>,
 ) -> Vec<NextStep> {
-    if !suggestions_enabled() {
-        return Vec::new();
-    }
-    if report.findings.is_empty() {
-        return impact_digest_step(digest).into_iter().collect();
-    }
-    let mut steps: Vec<NextStep> = [
-        setup_pointer(offer_setup),
-        impact_digest_step(digest),
-        complexity_breakdown(report),
-        audit_changed(root),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    steps.truncate(MAX_NEXT_STEPS);
-    steps
+    build_health_next_steps_contract(HealthNextStepsInput {
+        suggestions_enabled: suggestions_enabled(),
+        has_findings: !report.findings.is_empty(),
+        offer_setup,
+        impact_digest: digest.map(impact_counts),
+        audit_changed: audit_changed(root).is_some(),
+    })
 }
 
 /// Next-steps for standalone `fallow dupes`. See [`build_dead_code_next_steps`]
@@ -495,6 +477,9 @@ pub fn top_combined_next_step(
 mod tests {
     use std::path::PathBuf;
 
+    use crate::health_types::{
+        ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
+    };
     use fallow_types::output_dead_code::UnusedExportFinding;
     use fallow_types::results::{AnalysisResults, UnusedExport};
 
@@ -516,6 +501,37 @@ mod tests {
         AnalysisResults {
             unused_exports: exports,
             ..AnalysisResults::default()
+        }
+    }
+
+    fn health_report_with_finding() -> HealthReport {
+        HealthReport {
+            findings: vec![HealthFinding::from(ComplexityViolation {
+                path: PathBuf::from("/project/src/hot.ts"),
+                name: "hot".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 21,
+                cognitive: 16,
+                line_count: 42,
+                param_count: 0,
+                react_hook_count: 0,
+                react_jsx_max_depth: 0,
+                react_prop_count: 0,
+                react_hook_profile: None,
+                exceeded: ExceededThreshold::Both,
+                severity: FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
+                coverage_tier: None,
+                coverage_source: None,
+                inherited_from: None,
+                component_rollup: None,
+                contributions: Vec::new(),
+                effective_thresholds: None,
+                threshold_source: None,
+            })],
+            ..HealthReport::default()
         }
     }
 
@@ -642,6 +658,16 @@ mod tests {
         let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids[0], "setup");
         assert_eq!(ids[1], "impact-report");
+    }
+
+    #[test]
+    fn health_steps_keep_complexity_breakdown_from_output_contract() {
+        let report = health_report_with_finding();
+        let steps = build_health_next_steps(&report, Path::new("/project"), false, None);
+        let ids: Vec<&str> = steps.iter().map(|s| s.id.as_str()).collect();
+
+        assert_eq!(ids, ["complexity-breakdown"]);
+        assert_valid(&steps[0]);
     }
 
     #[test]
