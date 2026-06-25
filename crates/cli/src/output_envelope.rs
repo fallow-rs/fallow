@@ -11,11 +11,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
     reason = "compatibility re-export while CLI output contracts move to fallow-output"
 )]
 pub use fallow_output::{
-    BoundariesListRule, BoundariesListZone, CheckGroupedEntry, CheckGroupedOutput, CheckOutput,
-    CheckOutputInput, CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines,
-    CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, CoverageAnalyzeOutput,
-    CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit, CoverageSetupFramework,
-    CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
+    AuditCommand, BoundariesListRule, BoundariesListZone, CheckGroupedEntry, CheckGroupedOutput,
+    CheckOutput, CheckOutputInput, CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines,
+    CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, CombinedMeta,
+    CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,
+    CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
     CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet, DupesOutput,
     DupesOutputInput, ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
     GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput, HealthOutputInput,
@@ -29,8 +29,6 @@ pub use fallow_output::{
     build_dupes_output, build_health_output, default_marker_regex, default_marker_regex_flags,
     is_false,
 };
-use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, ToolVersion};
-use fallow_types::output::NextStep;
 use serde::Serialize;
 
 use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
@@ -141,94 +139,17 @@ pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str) {
         );
     }
 }
-/// `fallow audit --format json` envelope.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(feature = "schema", schemars(title = "fallow audit --format json"))]
-#[allow(
-    dead_code,
-    reason = "schema-source-of-truth: audit.rs still builds the wire via serde_json::json!; this struct locks the schema shape via the drift gate. Migration is a follow-up to issue #384 items 3a/3b/3c."
-)]
-pub struct AuditOutput {
-    pub schema_version: SchemaVersion,
-    pub version: ToolVersion,
-    pub command: AuditCommand,
-    pub verdict: AuditVerdict,
-    pub changed_files_count: u32,
-    pub base_ref: String,
-    /// Human-readable provenance of `base_ref`, e.g. `merge-base with
-    /// origin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.
-    /// Present when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;
-    /// absent for an explicit `--base` (the ref the user typed is already
-    /// self-describing).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub head_sha: Option<String>,
-    pub elapsed_ms: ElapsedMs,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_snapshot_skipped: Option<bool>,
-    pub summary: AuditSummary,
-    pub attribution: AuditAttribution,
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Meta>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dead_code: Option<CheckOutput>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duplication: Option<DupesReportPayload>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub complexity: Option<HealthReport>,
-    /// Read-only follow-up commands computed from this run's findings. See
-    /// [`CheckOutput::next_steps`] for the contract.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub next_steps: Vec<NextStep>,
-}
+pub type AuditOutput = fallow_output::AuditOutput<
+    AuditVerdict,
+    AuditSummary,
+    AuditAttribution,
+    CheckOutput,
+    DupesReportPayload,
+    HealthReport,
+>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "lowercase")]
-#[allow(dead_code, reason = "schema-source-of-truth: see `AuditOutput`.")]
-pub enum AuditCommand {
-    Audit,
-}
-
-/// Bare `fallow --format json` envelope.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(title = "fallow --format json (bare, combined)")
-)]
-pub struct CombinedOutput {
-    pub schema_version: SchemaVersion,
-    pub version: ToolVersion,
-    pub elapsed_ms: ElapsedMs,
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<CombinedMeta>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub check: Option<CheckOutput>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dupes: Option<DupesReportPayload>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub health: Option<HealthReport>,
-    /// Read-only follow-up commands aggregated across the combined run's
-    /// findings. See [`CheckOutput::next_steps`] for the contract.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub next_steps: Vec<NextStep>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct CombinedMeta {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub check: Option<Meta>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dupes: Option<Meta>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub health: Option<Meta>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub telemetry: Option<TelemetryMeta>,
-}
+pub type CombinedOutput =
+    fallow_output::CombinedOutput<CheckOutput, DupesReportPayload, HealthReport>;
 
 pub type ListBoundariesOutput = fallow_output::ListBoundariesOutput<
     fallow_config::LogicalGroupStatus,
@@ -407,7 +328,7 @@ pub enum FallowOutput {
 
 #[cfg(test)]
 mod tests {
-    use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+    use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
 
     use super::*;
 
