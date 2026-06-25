@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 use colored::Colorize;
 use fallow_config::{OutputFormat, PackageJson, ResolvedConfig, Severity};
 use fallow_engine::{
-    HealthCoverageInputs, HealthSharedParseData, HealthSort, HealthThresholdOverrides,
-    RuntimeCoverageOptions,
+    HealthCoverageInputs, HealthGateOptions, HealthSharedParseData, HealthSort,
+    HealthThresholdOverrides, RuntimeCoverageOptions,
 };
 
 use crate::baseline::{HealthBaselineData, filter_new_health_findings, filter_new_health_targets};
@@ -105,7 +105,7 @@ pub struct HealthOptions<'a> {
     pub enforce_coverage_gap_gate: bool,
     pub effort: Option<EffortEstimate>,
     pub score: bool,
-    pub min_score: Option<f64>,
+    pub gates: HealthGateOptions,
     pub since: Option<&'a str>,
     pub min_commits: Option<u32>,
     pub explain: bool,
@@ -121,12 +121,6 @@ pub struct HealthOptions<'a> {
     pub coverage_inputs: HealthCoverageInputs<'a>,
     /// Show detailed pipeline timing breakdown.
     pub performance: bool,
-    /// Only exit with error for findings at or above this severity level.
-    pub min_severity: Option<FindingSeverity>,
-    /// Render the score and findings but never fail CI on any quality gate.
-    /// Mutually exclusive with `min_score` / `min_severity` (validated at the
-    /// CLI dispatch layer).
-    pub report_only: bool,
     /// Paid runtime coverage sidecar input.
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
     /// Import churn from a `fallow-churn/v1` JSON file (`--churn-file`) instead
@@ -6715,9 +6709,7 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
         HealthPrintOptions {
             quiet: opts.quiet,
             explain: opts.explain,
-            min_score: opts.min_score,
-            min_severity: opts.min_severity,
-            report_only: opts.report_only,
+            gates: opts.gates,
             summary: opts.summary,
             summary_heading: true,
             show_explain_tip: true,
@@ -6753,9 +6745,7 @@ pub type HealthResult =
 pub struct HealthPrintOptions {
     pub quiet: bool,
     pub explain: bool,
-    pub min_score: Option<f64>,
-    pub min_severity: Option<FindingSeverity>,
-    pub report_only: bool,
+    pub gates: HealthGateOptions,
     pub summary: bool,
     pub summary_heading: bool,
     pub show_explain_tip: bool,
@@ -6775,7 +6765,7 @@ pub fn print_health_result(result: &HealthResult, options: HealthPrintOptions) -
         return report_code;
     }
 
-    if options.report_only {
+    if options.gates.report_only {
         return ExitCode::SUCCESS;
     }
 
@@ -6818,7 +6808,7 @@ fn health_exit_gate_failed(result: &HealthResult, options: HealthPrintOptions) -
 }
 
 fn score_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
-    let Some(threshold) = options.min_score else {
+    let Some(threshold) = options.gates.min_score else {
         return false;
     };
     let Some(ref hs) = result.report.health_score else {
@@ -6838,9 +6828,9 @@ fn score_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool
 }
 
 fn findings_gate_failed(result: &HealthResult, options: HealthPrintOptions) -> bool {
-    if let Some(min_sev) = options.min_severity {
+    if let Some(min_sev) = options.gates.min_severity {
         result.report.findings.iter().any(|f| f.severity >= min_sev)
-    } else if options.min_score.is_none() {
+    } else if options.gates.min_score.is_none() {
         !result.report.findings.is_empty()
     } else {
         false
@@ -6865,8 +6855,8 @@ fn is_failing_runtime_coverage(finding: &crate::health_types::RuntimeCoverageFin
 }
 
 fn maybe_print_score_gate_note(result: &HealthResult, options: HealthPrintOptions) {
-    if options.min_score.is_none()
-        || options.min_severity.is_some()
+    if options.gates.min_score.is_none()
+        || options.gates.min_severity.is_some()
         || options.quiet
         || result.report.findings.is_empty()
         || !matches!(result.config.output, OutputFormat::Human)
@@ -8746,9 +8736,7 @@ mod tests {
                 HealthPrintOptions {
                     quiet: true,
                     explain: false,
-                    min_score: None,
-                    min_severity: None,
-                    report_only: false,
+                    gates: HealthGateOptions::default(),
                     summary: false,
                     summary_heading: true,
                     show_explain_tip: true,
@@ -8823,9 +8811,11 @@ mod tests {
             HealthPrintOptions {
                 quiet: true,
                 explain: false,
-                min_score,
-                min_severity,
-                report_only,
+                gates: HealthGateOptions {
+                    min_score,
+                    min_severity,
+                    report_only,
+                },
                 summary: false,
                 summary_heading: true,
                 show_explain_tip: true,

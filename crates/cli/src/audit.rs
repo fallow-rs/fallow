@@ -2597,7 +2597,7 @@ fn build_audit_health_options<'a>(
         enforce_coverage_gap_gate: false,
         effort: None,
         score: false,
-        min_score: None,
+        gates: fallow_engine::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: opts.explain,
@@ -2610,8 +2610,6 @@ fn build_audit_health_options<'a>(
             coverage_root: opts.coverage_root,
         },
         performance: opts.performance,
-        min_severity: None,
-        report_only: false,
         runtime_coverage,
         churn_file: None,
     }
