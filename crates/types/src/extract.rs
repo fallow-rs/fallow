@@ -1588,6 +1588,44 @@ pub fn legacy_member_access_to_semantic_fact(object: &str, member: &str) -> Opti
     })
 }
 
+/// A semantic fact yielded from current typed extraction or decoded from an
+/// older sentinel-backed cache entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SemanticFactCompat<'a> {
+    /// Fact borrowed from a module's typed semantic facts.
+    Borrowed(&'a SemanticFact),
+    /// Fact decoded from a legacy `MemberAccess` sentinel.
+    Owned(SemanticFact),
+}
+
+impl SemanticFactCompat<'_> {
+    /// View the semantic fact regardless of whether it was borrowed or decoded.
+    #[must_use]
+    pub const fn as_fact(&self) -> &SemanticFact {
+        match self {
+            Self::Borrowed(fact) => fact,
+            Self::Owned(fact) => fact,
+        }
+    }
+}
+
+/// Iterate over typed semantic facts plus decoded legacy member-access facts.
+///
+/// New extraction persists typed facts directly. The legacy path exists only so
+/// older parse-cache entries still feed the same typed analysis code.
+pub fn semantic_facts_with_legacy_member_accesses<'a>(
+    semantic_facts: &'a [SemanticFact],
+    member_accesses: &'a [MemberAccess],
+) -> impl Iterator<Item = SemanticFactCompat<'a>> + 'a {
+    semantic_facts
+        .iter()
+        .map(SemanticFactCompat::Borrowed)
+        .chain(member_accesses.iter().filter_map(|access| {
+            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())
+                .map(SemanticFactCompat::Owned)
+        }))
+}
+
 /// A member name referenced from an Angular template surface.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -2406,6 +2444,49 @@ mod tests {
                 chain: vec!["next".to_string(), "finish".to_string()],
                 member: "value".to_string(),
             })
+        );
+    }
+
+    #[test]
+    fn semantic_fact_compat_iterator_yields_typed_and_legacy_facts() {
+        let mut module = minimal_module_info();
+        module
+            .semantic_facts
+            .push(SemanticFact::FactoryCallMemberAccess(
+                FactoryCallMemberAccessFact {
+                    callee_object: "Svc".to_string(),
+                    callee_method: "make".to_string(),
+                    member: "run".to_string(),
+                },
+            ));
+        module.member_accesses.push(MemberAccess {
+            object: format!("{INSTANCE_EXPORT_SENTINEL}exported"),
+            member: "target".to_string(),
+        });
+
+        let facts = semantic_facts_with_legacy_member_accesses(
+            &module.semantic_facts,
+            &module.member_accesses,
+        )
+        .collect::<Vec<_>>();
+
+        assert!(matches!(facts[0], SemanticFactCompat::Borrowed(_)));
+        assert_eq!(
+            facts[0].as_fact(),
+            &SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "make".to_string(),
+                member: "run".to_string(),
+            })
+        );
+        assert_eq!(
+            facts[1],
+            SemanticFactCompat::Owned(SemanticFact::InstanceExportBinding(
+                InstanceExportBindingFact {
+                    export_name: "exported".to_string(),
+                    target_name: "target".to_string(),
+                }
+            ))
         );
     }
 
