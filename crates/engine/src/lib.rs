@@ -59,6 +59,14 @@ pub mod security {
     pub use fallow_core::analyze::security_catalogue_title;
 }
 
+/// Symbol trace types exposed through the engine boundary.
+pub mod trace_chain {
+    pub use fallow_core::trace_chain::{
+        ChainHop, SymbolChainQuery, SymbolChainTrace, TraceDirections, UnresolvedCallee,
+        UnresolvedReason,
+    };
+}
+
 pub use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DefaultIgnoreSkips, DuplicationReport,
     DuplicationStats, MirroredDirectory, RefactoringSuggestion,
@@ -502,6 +510,35 @@ pub fn changed_files(
     fallow_core::changed_files::try_get_changed_files(root, git_ref)
 }
 
+/// Run symbol-level call-chain tracing through the engine boundary.
+///
+/// # Errors
+///
+/// Returns an error if parsing, graph construction, or retained module
+/// analysis fails.
+pub fn trace_symbol_chain(
+    config: &ResolvedConfig,
+    query: trace_chain::SymbolChainQuery<'_>,
+) -> EngineResult<Option<trace_chain::SymbolChainTrace>> {
+    #[expect(
+        deprecated,
+        reason = "fallow-engine is the typed migration boundary over the internal core backend"
+    )]
+    let output =
+        fallow_core::analyze_retaining_modules(config, true, true).map_err(engine_error)?;
+    let graph = output
+        .graph
+        .as_ref()
+        .ok_or_else(|| EngineError::new("trace requires a retained module graph"))?;
+    let modules = output.modules.as_deref().unwrap_or(&[]);
+    Ok(fallow_core::trace_chain::trace_symbol_chain(
+        graph,
+        modules,
+        &config.root,
+        query,
+    ))
+}
+
 /// Run duplication detection and include metadata about built-in ignored files.
 #[must_use]
 pub fn find_duplicates_with_defaults(
@@ -654,5 +691,58 @@ mod tests {
 
         assert!(!analysis.report.clone_groups.is_empty());
         assert!(analysis.default_ignore_skips.total > 0);
+    }
+
+    #[test]
+    fn trace_symbol_chain_uses_retained_engine_analysis() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(
+            src.join("util.ts"),
+            "export function helper() { return 1; }\n",
+        )
+        .expect("util source");
+        std::fs::write(
+            src.join("index.ts"),
+            "import { helper } from './util';\nexport const value = helper();\n",
+        )
+        .expect("index source");
+
+        let project_config = config_for_project_analysis(
+            temp.path(),
+            None,
+            ProjectConfigOptions {
+                output: OutputFormat::Json,
+                no_cache: true,
+                threads: 1,
+                production_override: None,
+                quiet: true,
+                analysis: ProductionAnalysis::DeadCode,
+            },
+        )
+        .expect("project config loads");
+        let trace = trace_symbol_chain(
+            &project_config.config,
+            trace_chain::SymbolChainQuery {
+                file: "src/util.ts",
+                symbol: "helper",
+                depth: 1,
+                directions: trace_chain::TraceDirections {
+                    callers: true,
+                    callees: false,
+                },
+            },
+        )
+        .expect("trace succeeds")
+        .expect("trace target exists");
+
+        assert!(trace.symbol_found);
+        assert_eq!(trace.file, Path::new("src/util.ts"));
+        assert!(trace.callers.is_some_and(|callers| {
+            callers
+                .iter()
+                .any(|caller| caller.file == Path::new("src/index.ts"))
+        }));
     }
 }

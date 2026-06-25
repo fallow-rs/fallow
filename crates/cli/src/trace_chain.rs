@@ -11,9 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ProductionAnalysis};
-use fallow_core::trace_chain::{
-    SymbolChainQuery, SymbolChainTrace, TraceDirections, trace_symbol_chain,
-};
+use fallow_engine::trace_chain::{SymbolChainQuery, SymbolChainTrace, TraceDirections};
 
 use crate::error::emit_error;
 use crate::output_envelope::{FallowOutput, serialize_root_output};
@@ -40,10 +38,6 @@ pub struct TraceChainOptions<'a> {
 }
 
 /// Run the symbol-level call-chain trace and emit its own output surface.
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates fallow_core::analyze APIs externally; the CLI uses the workspace path dependency"
-)]
 pub fn run_trace(opts: &TraceChainOptions<'_>) -> ExitCode {
     let Some((file, symbol)) = parse_target(&opts.target) else {
         return emit_error(
@@ -83,33 +77,24 @@ pub fn run_trace(opts: &TraceChainOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    // Retain BOTH the graph (for the import-symbol edge walk) and the parsed
-    // modules (for honest unresolved-callee reporting).
-    let output = match fallow_core::analyze_retaining_modules(&config, true, true) {
-        Ok(output) => output,
-        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
-    };
-    let Some(graph) = output.graph.as_ref() else {
-        return emit_error("trace requires a retained module graph", 2, opts.output);
-    };
-    let modules = output.modules.as_deref().unwrap_or(&[]);
-
-    let Some(trace) = trace_symbol_chain(
-        graph,
-        modules,
-        &config.root,
+    let trace = match fallow_engine::trace_symbol_chain(
+        &config,
         SymbolChainQuery {
             file: &file,
             symbol: &symbol,
             depth: opts.depth,
             directions,
         },
-    ) else {
-        return emit_error(
-            &format!("file '{file}' not found in module graph"),
-            2,
-            opts.output,
-        );
+    ) {
+        Ok(Some(trace)) => trace,
+        Ok(None) => {
+            return emit_error(
+                &format!("file '{file}' not found in module graph"),
+                2,
+                opts.output,
+            );
+        }
+        Err(err) => return emit_error(&format!("Analysis error: {err}"), 2, opts.output),
     };
 
     emit_trace(trace, opts)
