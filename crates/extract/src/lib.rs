@@ -89,77 +89,61 @@ pub(crate) fn static_regex(pattern: &str) -> regex::Regex {
     regex::Regex::new(pattern).expect("static regex pattern should compile")
 }
 
-/// Synthetic member-access object used to carry exported-instance bindings.
+/// Legacy member-access object prefix for exported-instance bindings.
 ///
-/// `MemberAccess { object: format!("{INSTANCE_EXPORT_SENTINEL}{export_name}"), member: target }`
-/// means the exported value named `export_name` is an instance of the local
-/// class/interface symbol named `target`.
+/// New extraction writes [`SemanticFact::InstanceExportBinding`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol.
 pub const INSTANCE_EXPORT_SENTINEL: &str = "__fallow_instance_export__:";
 
-/// Synthetic member-access object prefix for typed Playwright fixtures.
+/// Legacy member-access object prefix for typed Playwright fixture definitions.
 ///
-/// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_DEF_SENTINEL}{test}:{fixture}"), member: type_name }`
-/// means the exported Playwright test object named `test` provides a fixture
-/// named `fixture` whose declared type is `type_name`.
+/// New extraction writes [`SemanticFact::PlaywrightFixtureDefinition`]. The
+/// prefix remains available so analysis can decode older cache entries that
+/// used `MemberAccess.object` as a string protocol.
 pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
 
-/// Synthetic member-access object prefix for Playwright fixture wrapper aliases.
+/// Legacy member-access object prefix for Playwright fixture wrapper aliases.
 ///
-/// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL}{alias}:"), member: base }`
-/// means the exported Playwright test object named `alias` inherits fixture
-/// definitions from the exported test object named `base`.
+/// New extraction writes [`SemanticFact::PlaywrightFixtureAlias`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol.
 pub const PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL: &str = "__fallow_playwright_fixture_alias__:";
 
-/// Synthetic member-access object prefix for Playwright fixture member uses.
+/// Legacy member-access object prefix for Playwright fixture member uses.
 ///
-/// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}{test}:{fixture}"), member }`
-/// means a callback passed to the Playwright test object named `test`
-/// destructures `fixture` and accesses `fixture.member`.
+/// New extraction writes [`SemanticFact::PlaywrightFixtureUse`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol.
 pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
 
-/// Synthetic member-access object prefix for exported Playwright fixture type aliases.
+/// Legacy member-access object prefix for exported Playwright fixture type aliases.
 ///
-/// `MemberAccess { object: format!("{PLAYWRIGHT_FIXTURE_TYPE_SENTINEL}{alias}:{fixture_path}"), member: type_name }`
-/// means a local type alias named `alias` contains a nested fixture path whose
-/// declared type is `type_name`. The analyze layer uses this when a Playwright
-/// fixture generic imports an object type alias from another module.
+/// New extraction writes [`SemanticFact::PlaywrightFixtureType`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol.
 pub const PLAYWRIGHT_FIXTURE_TYPE_SENTINEL: &str = "__fallow_playwright_fixture_type__:";
 
 /// Legacy member-access object prefix for static-factory call returns.
 ///
-/// `MemberAccess { object: format!("{FACTORY_CALL_SENTINEL}{callee}:{method}"), member }`
-/// was the pre-typed-fact representation for a local binding assigned from
-/// `<callee>.<method>()` with a member access on the result. New extraction uses
-/// `SemanticFact::FactoryCallMemberAccess`; the prefix remains decode-only for
-/// older cache entries. See issue #346.
+/// New extraction writes [`SemanticFact::FactoryCallMemberAccess`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol. See issue #346.
 pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
 
-/// Synthetic member-access object prefix for fluent-builder chain credit.
+/// Legacy member-access object prefix for fluent-builder chain credit.
 ///
-/// `MemberAccess { object: format!("{FLUENT_CHAIN_SENTINEL}{callee}:{root_method}:{chain}"), member }`
-/// means a fluent chain `<callee>.<root_method>().<...chain>.<member>` was
-/// observed. `chain` is a comma-separated list of method names (empty when
-/// `member` is the first chained call after `root_method`). The analyze layer
-/// resolves `callee` to a class export, validates `root_method` has
-/// `is_instance_returning_static`, walks each `chain` segment requiring
-/// `is_self_returning` on the class, and credits `member` on the class
-/// when the chain remains on the class type. See issue #387.
+/// New extraction writes [`SemanticFact::FluentChainMemberAccess`]. The prefix
+/// remains available so analysis can decode older cache entries that used
+/// `MemberAccess.object` as a string protocol. See issue #387.
 pub const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
 
-/// Synthetic member-access object prefix for fluent chains rooted at a `new`
+/// Legacy member-access object prefix for fluent chains rooted at a `new`
 /// expression.
 ///
-/// `MemberAccess { object: format!("{FLUENT_CHAIN_NEW_SENTINEL}{class}:{chain}"), member }`
-/// means a chain `new <class>(...).<...chain>.<member>` was observed. Unlike
-/// `FLUENT_CHAIN_SENTINEL`, there is no root method: a constructor always
-/// returns an instance of `class`, so no `is_instance_returning_static` check
-/// applies. `chain` is a comma-separated list of the intermediate method names
-/// between the constructor and `member` (it always contains at least the first
-/// method, which must be `is_self_returning` to reach `member`). The analyze
-/// layer resolves `class` to a class export, requires every `chain` segment to
-/// be `is_self_returning` on the class, and credits `member` on the class.
-/// The first method directly off the constructor is credited separately via
-/// the `static_member_object_name` `NewExpression` arm. See issue #605.
+/// New extraction writes [`SemanticFact::FluentChainNewMemberAccess`]. The
+/// prefix remains available so analysis can decode older cache entries that
+/// used `MemberAccess.object` as a string protocol. See issue #605.
 pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
 
 pub use parse::parse_source_to_module;
