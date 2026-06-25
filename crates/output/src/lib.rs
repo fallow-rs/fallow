@@ -177,7 +177,8 @@ pub use list_envelopes::{
     ListBoundariesOutput, WorkspaceInfo, WorkspacesOutput,
 };
 pub use next_steps::{
-    HealthNextStepsInput, ImpactDigestCounts, build_health_next_steps, impact_digest_summary,
+    DeadCodeNextStepsInput, HealthNextStepsInput, ImpactDigestCounts, build_dead_code_next_steps,
+    build_health_next_steps, impact_digest_summary,
 };
 pub use report_contract::{
     COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SECURITY_DOCS,
