@@ -16,7 +16,7 @@ use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutputInput,
     EnvelopeMode, FallowOutput, GroupByMode, HealthOutputInput, WorkspaceDiagnosticOutput,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
-    build_health_output, serialize_root_output,
+    serialize_root_output,
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
@@ -462,40 +462,26 @@ pub fn build_grouped_health_json(
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", root.display());
-    let envelope = build_health_output(HealthOutputInput {
-        schema_version: SCHEMA_VERSION,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        elapsed,
-        report: report.clone(),
-        grouped_by: Some(group_by_mode_from_label(grouping.mode)),
-        groups: None,
-        meta: explain.then(fallow_output::health_meta),
-        workspace_diagnostics: workspace_diagnostics_for_output(root),
-        next_steps: crate::report::suggestions::build_health_next_steps(
-            report,
-            root,
-            crate::report::suggestions::setup_pointer_applicable(root),
-            crate::report::suggestions::due_impact_digest(root),
-        ),
-    });
-    let mut output = serialize_root_output(FallowOutput::Health(envelope))?;
-    strip_root_prefix(&mut output, &root_prefix);
-
-    let group_values: Vec<serde_json::Value> = grouping
-        .groups
-        .iter()
-        .map(|g| {
-            let mut value = serde_json::to_value(g)?;
-            strip_root_prefix(&mut value, &root_prefix);
-            Ok(value)
-        })
-        .collect::<Result<_, serde_json::Error>>()?;
-
-    if let serde_json::Value::Object(ref mut map) = output {
-        map.insert("groups".to_string(), serde_json::Value::Array(group_values));
-    }
-
-    Ok(output)
+    fallow_output::serialize_health_json_output(HealthJsonOutputInput {
+        output: HealthOutputInput {
+            schema_version: SCHEMA_VERSION,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            elapsed,
+            report: report.clone(),
+            grouped_by: Some(group_by_mode_from_label(grouping.mode)),
+            groups: Some(grouping.groups.clone()),
+            meta: explain.then(fallow_output::health_meta),
+            workspace_diagnostics: workspace_diagnostics_for_output(root),
+            next_steps: crate::report::suggestions::build_health_next_steps(
+                report,
+                root,
+                crate::report::suggestions::setup_pointer_applicable(root),
+                crate::report::suggestions::due_impact_digest(root),
+            ),
+        },
+        root_prefix: Some(&root_prefix),
+        envelope_mode: EnvelopeMode::current().into(),
+    })
 }
 
 pub(super) fn print_health_json(
@@ -845,6 +831,50 @@ mod tests {
         assert_eq!(
             output["runtime_coverage"]["warnings"][0]["code"],
             serde_json::Value::String("partial-merge".to_owned())
+        );
+    }
+
+    #[test]
+    fn grouped_health_json_uses_output_serializer_for_group_paths() {
+        let root = PathBuf::from("/project");
+        let grouping = crate::health_types::HealthGrouping {
+            mode: "package",
+            groups: vec![crate::health_types::HealthGroup {
+                key: "app".to_string(),
+                owners: None,
+                files_analyzed: 1,
+                functions_above_threshold: 0,
+                coverage_source_consistency: None,
+                vital_signs: None,
+                health_score: None,
+                findings: Vec::new(),
+                file_scores: Vec::new(),
+                hotspots: Vec::new(),
+                large_functions: vec![crate::health_types::LargeFunctionEntry {
+                    path: root.join("src/large.ts"),
+                    name: "large".to_string(),
+                    line: 12,
+                    line_count: 80,
+                }],
+                targets: Vec::new(),
+                actions_meta: None,
+            }],
+        };
+
+        let output = build_grouped_health_json(
+            &crate::health_types::HealthReport::default(),
+            &grouping,
+            &root,
+            Duration::ZERO,
+            false,
+        )
+        .expect("grouped health JSON should serialize");
+
+        assert_eq!(output["kind"], "health");
+        assert_eq!(output["grouped_by"], "package");
+        assert_eq!(
+            output["groups"][0]["large_functions"][0]["path"],
+            "src/large.ts"
         );
     }
 
