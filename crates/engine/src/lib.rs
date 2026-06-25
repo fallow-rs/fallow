@@ -190,6 +190,15 @@ impl AnalysisSession {
         Ok(Self::from_config(project_config))
     }
 
+    /// Build a session from built-in defaults, ignoring project config files.
+    ///
+    /// This is intended for editor fallback paths that have already reported a
+    /// config-load warning but should still surface best-effort diagnostics.
+    #[must_use]
+    pub fn load_default(root: &Path) -> Self {
+        Self::from_config(default_project_config(root))
+    }
+
     /// Build a session from a previously resolved config.
     #[must_use]
     pub fn from_config(project_config: ProjectConfig) -> Self {
@@ -293,6 +302,21 @@ pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResu
     fallow_core::config_for_project(root, config_path)
         .map(|(config, path)| ProjectConfig { config, path })
         .map_err(engine_error)
+}
+
+fn default_project_config(root: &Path) -> ProjectConfig {
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    ProjectConfig {
+        config: FallowConfig::default().resolve(
+            root.to_path_buf(),
+            OutputFormat::Human,
+            threads,
+            false,
+            true,
+            None,
+        ),
+        path: None,
+    }
 }
 
 /// Resolve config for a specific analysis without depending on the CLI crate.
