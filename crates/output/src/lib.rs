@@ -37,6 +37,7 @@ mod issue_contract;
 mod list_envelopes;
 mod report_contract;
 mod review_envelopes;
+mod root_envelopes;
 
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
@@ -149,3 +150,4 @@ pub use review_envelopes::{
     ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput,
     ReviewReconcileSchema, default_marker_regex, default_marker_regex_flags, is_false,
 };
+pub use root_envelopes::{AuditCommand, AuditOutput, CombinedMeta, CombinedOutput};
