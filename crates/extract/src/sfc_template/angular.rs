@@ -9,8 +9,9 @@
 //! - `@let name = expr;` template-local variables (Angular 18+)
 //! - `| pipeName` pipe references
 //!
-//! Referenced identifiers are stored as `MemberAccess` entries with a sentinel object name
-//! so the analysis phase can bridge them to the importing component's class members.
+//! Referenced bare identifiers are persisted as typed semantic facts, while
+//! member-access chains keep their real object/member shape for typed-instance
+//! propagation.
 
 use std::sync::LazyLock;
 
