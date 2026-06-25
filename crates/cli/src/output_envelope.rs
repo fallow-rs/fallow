@@ -151,7 +151,7 @@ pub type FallowOutput = fallow_output::FallowOutput<
     AuditOutput,
     ExplainOutput,
     InspectOutput,
-    fallow_core::trace_chain::SymbolChainTrace,
+    fallow_engine::trace_chain::SymbolChainTrace,
     ReviewEnvelopeOutput,
     ReviewReconcileOutput,
     CoverageSetupOutput,

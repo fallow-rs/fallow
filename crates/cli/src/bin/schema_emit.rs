@@ -809,10 +809,10 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<InspectSectionStatus>();
     let _ = generator.subschema_for::<InspectEvidenceScope>();
     // Symbol-level call chain (`fallow trace`, `FallowOutput::Trace`).
-    let _ = generator.subschema_for::<fallow_core::trace_chain::SymbolChainTrace>();
-    let _ = generator.subschema_for::<fallow_core::trace_chain::ChainHop>();
-    let _ = generator.subschema_for::<fallow_core::trace_chain::UnresolvedCallee>();
-    let _ = generator.subschema_for::<fallow_core::trace_chain::UnresolvedReason>();
+    let _ = generator.subschema_for::<fallow_engine::trace_chain::SymbolChainTrace>();
+    let _ = generator.subschema_for::<fallow_engine::trace_chain::ChainHop>();
+    let _ = generator.subschema_for::<fallow_engine::trace_chain::UnresolvedCallee>();
+    let _ = generator.subschema_for::<fallow_engine::trace_chain::UnresolvedReason>();
     let _ = generator.subschema_for::<CodeClimateOutput>();
     let _ = generator.subschema_for::<CodeClimateIssue>();
     let _ = generator.subschema_for::<CodeClimateIssueKind>();

@@ -62,8 +62,8 @@ pub mod security {
 /// Symbol trace types exposed through the engine boundary.
 pub mod trace_chain {
     pub use fallow_core::trace_chain::{
-        ChainHop, SymbolChainQuery, SymbolChainTrace, TraceDirections, UnresolvedCallee,
-        UnresolvedReason,
+        ChainHop, DEFAULT_TRACE_DEPTH, SymbolChainQuery, SymbolChainTrace, TraceDirections,
+        UnresolvedCallee, UnresolvedReason,
     };
 }
 
