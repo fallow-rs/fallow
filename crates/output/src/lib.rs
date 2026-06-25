@@ -39,6 +39,7 @@ mod list_envelopes;
 mod report_contract;
 mod review_envelopes;
 mod root_envelopes;
+mod security;
 
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
@@ -157,3 +158,14 @@ pub use review_envelopes::{
     ReviewReconcileSchema, default_marker_regex, default_marker_regex_flags, is_false,
 };
 pub use root_envelopes::{AuditCommand, AuditOutput, CombinedMeta, CombinedOutput};
+pub use security::{
+    SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
+    SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGate, SecurityGateVerdict,
+    SecurityOutput, SecurityOutputConfig, SecurityOutputRulesConfig, SecurityReachabilityCounts,
+    SecurityRuleSeverityConfig, SecurityRuntimeStateCounts, SecuritySchemaVersion,
+    SecuritySeverityCounts, SecuritySummary, SecuritySummaryOutput, SecuritySurvivor,
+    SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary,
+    SecurityUnresolvedCalleeDiagnostics, SecurityUnresolvedCalleeReasonCount,
+    SecurityUnresolvedCalleeSample, SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict,
+    SecurityVerifierVerdictStatus,
+};

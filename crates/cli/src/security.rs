@@ -24,15 +24,24 @@ use fallow_core::results::{
     AnalysisResults, SecurityAttackSurfaceEntry, SecurityDeadCodeKind, SecurityFinding,
     SecurityFindingKind, TraceHop, TraceHopRole,
 };
+pub use fallow_output::{
+    SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
+    SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
+    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySchemaVersion,
+    SecuritySeverityCounts, SecuritySummary, SecuritySurvivor, SecuritySurvivorsOutput,
+    SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
+    SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
+    SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
+};
 use fallow_types::discover::DiscoveredFile;
-use fallow_types::envelope::{ElapsedMs, Meta, ToolVersion};
+use fallow_types::envelope::{ElapsedMs, ToolVersion};
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::{
     SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity,
     SecurityUnresolvedCalleeDiagnostic, TaintConfidence,
 };
 use rustc_hash::FxHashSet;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
@@ -45,59 +54,6 @@ use crate::load_config_for_analysis;
 
 const UNRESOLVED_CALLEE_SAMPLE_LIMIT: usize = 25;
 const UNRESOLVED_CALLEE_TOP_FILES_LIMIT: usize = 10;
-
-/// The `fallow security --format json` schema version. Independently versioned
-/// from the main contract, mirroring `ImpactReportSchemaVersion`.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum SecuritySchemaVersion {
-    /// First release of the `fallow security --format json` shape.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v1"
-    )]
-    #[serde(rename = "1")]
-    V1,
-    /// Adds per-finding `severity` for verification-priority tiering.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v2"
-    )]
-    #[serde(rename = "2")]
-    V2,
-    /// Adds version, elapsed time, explain metadata, and safe config metadata.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v3"
-    )]
-    #[serde(rename = "3")]
-    V3,
-    /// Adds bounded diagnostics for unresolved callee blind spots.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v4"
-    )]
-    #[serde(rename = "4")]
-    V4,
-    /// Adds summary metadata to security summary JSON.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v5"
-    )]
-    #[serde(rename = "5")]
-    V5,
-    /// Adds `candidate.sink.url_shape` for URL-shaped security candidates.
-    #[allow(
-        dead_code,
-        reason = "kept so the generated schema documents historical v6"
-    )]
-    #[serde(rename = "6")]
-    V6,
-    /// Adds the server-only-import category on client-server-leak findings when a
-    /// use-client cone reaches a server-only module.
-    #[serde(rename = "7")]
-    V7,
-}
 
 /// Gate mode for `fallow security --gate <mode>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
@@ -114,410 +70,18 @@ pub enum SecurityGateMode {
     NewlyReachable,
 }
 
-/// Gate verdict on the wire. `fail` is the CI-state token; human output renders
-/// it as "REVIEW REQUIRED" because these stay unverified candidates, never
-/// confirmed vulnerabilities.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum SecurityGateVerdict {
-    /// No new candidate in the changed lines.
-    Pass,
-    /// At least one new candidate in the changed lines; review required.
-    Fail,
-}
+pub type SecurityGate = fallow_output::SecurityGate<SecurityGateMode>;
 
-/// The `gate` block on `SecurityOutput`, present only when `--gate <mode>` ran.
-/// Invariant: `verdict == Fail  IFF  exit code 8  IFF  new_count > 0`.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityGate {
-    /// Which delta the gate checked.
-    pub mode: SecurityGateMode,
-    /// `pass` or `fail`.
-    pub verdict: SecurityGateVerdict,
-    /// Number of candidates matching the selected gate mode.
-    pub new_count: usize,
-}
+pub type SecurityOutputConfig = fallow_output::SecurityOutputConfig<Severity>;
 
-/// Allowlisted config context for `fallow security --format json`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[cfg_attr(
-    feature = "schema",
-    schemars(extend("required" = ["rules", "categories_include", "categories_exclude"]))
-)]
-pub struct SecurityOutputConfig {
-    /// Relevant rule severities before and after this command applies its
-    /// default-on behavior for security-only rules.
-    pub rules: SecurityOutputRulesConfig,
-    /// `security.categories.include` from config. `null` means unset, `[]`
-    /// means explicitly empty.
-    pub categories_include: Option<Vec<String>>,
-    /// `security.categories.exclude` from config. `null` means unset, `[]`
-    /// means explicitly empty.
-    pub categories_exclude: Option<Vec<String>>,
-}
+pub type SecurityOutputRulesConfig = fallow_output::SecurityOutputRulesConfig<Severity>;
 
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityOutputRulesConfig {
-    pub security_client_server_leak: SecurityRuleSeverityConfig,
-    pub security_sink: SecurityRuleSeverityConfig,
-}
+pub type SecurityRuleSeverityConfig = fallow_output::SecurityRuleSeverityConfig<Severity>;
 
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityRuleSeverityConfig {
-    /// Severity read from resolved config before the security command applies
-    /// its default-on behavior.
-    pub configured: Severity,
-    /// Severity used for this command run.
-    pub effective: Severity,
-}
+pub type SecurityOutput = fallow_output::SecurityOutput<SecurityOutputConfig, SecurityGate>;
 
-/// The `fallow security --format json` envelope. `FallowOutput` discriminates it
-/// by the `kind: "security"` tag; the optional `gate` block is additive and is
-/// not part of that discrimination.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityOutput {
-    /// Schema version of this envelope.
-    pub schema_version: SecuritySchemaVersion,
-    /// Fallow CLI version that produced this output.
-    pub version: ToolVersion,
-    /// Wall-clock milliseconds spent producing the report.
-    pub elapsed_ms: ElapsedMs,
-    /// Privacy-safe config context relevant to security candidate generation.
-    pub config: SecurityOutputConfig,
-    /// Security-specific rule and field metadata, emitted with `--explain`.
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Meta>,
-    /// Gate verdict, present only when `--gate <mode>` was set (issue #886).
-    /// Emitted on pass too (`verdict: "pass"`, `new_count: 0`) so consumers
-    /// distinguish "gate ran and passed" from "gate did not run" (absent).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gate: Option<SecurityGate>,
-    /// Security candidates. Paths are project-root-relative, forward-slash.
-    pub security_findings: Vec<SecurityFinding>,
-    /// Opt-in attack-surface inventory from untrusted entry points to reachable
-    /// sinks. Present only when `--surface` was requested.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attack_surface: Option<Vec<SecurityAttackSurfaceEntry>>,
-    /// In-band blind spot: number of `"use client"` files whose transitive
-    /// import cone contains a dynamic `import()` the reachability BFS could not
-    /// follow. A leak hidden behind such an edge would not be reported, so a
-    /// zero finding count with a non-zero value here is NOT a clean bill.
-    pub unresolved_edge_files: usize,
-    /// In-band blind spot: number of sink-shaped nodes the catalogue detector
-    /// could not flatten to a static callee path (dynamic dispatch, computed
-    /// members, aliased bindings). A zero finding count with a non-zero value
-    /// here is NOT a clean bill.
-    pub unresolved_callee_sites: usize,
-    /// Bounded diagnostics for unresolved callee blind spots.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unresolved_callee_diagnostics: Option<SecurityUnresolvedCalleeDiagnostics>,
-}
-
-/// Bounded unresolved-callee diagnostics for `fallow security --format json`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityUnresolvedCalleeDiagnostics {
-    /// Deterministic sample rows, capped by `sample_limit`.
-    pub sampled: Vec<SecurityUnresolvedCalleeSample>,
-    /// Files with the most unresolved callees, capped by `top_files_limit`.
-    pub top_files: Vec<SecurityUnresolvedCalleeTopFile>,
-    /// Full count by unresolved-callee reason, sorted by count then reason.
-    pub by_reason: Vec<SecurityUnresolvedCalleeReasonCount>,
-    /// Maximum number of sample rows emitted.
-    pub sample_limit: usize,
-    /// Maximum number of top-file rows emitted.
-    pub top_files_limit: usize,
-}
-
-/// One sampled unresolved-callee row.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityUnresolvedCalleeSample {
-    /// Project-relative source path.
-    pub path: String,
-    /// 1-based source line.
-    pub line: u32,
-    /// 0-based byte column.
-    pub col: u32,
-    /// Why the callee was skipped.
-    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
-    /// Compact syntax shape of the skipped callee.
-    pub expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind,
-}
-
-/// Count of unresolved callees in one file.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityUnresolvedCalleeTopFile {
-    /// Project-relative source path.
-    pub path: String,
-    /// Number of unresolved callees in this file.
-    pub count: usize,
-}
-
-/// Count of unresolved callees for one reason.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityUnresolvedCalleeReasonCount {
-    /// Why the callees were skipped.
-    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
-    /// Number of unresolved callees with this reason.
-    pub count: usize,
-}
-
-/// Compact `fallow security --summary --format json` payload. Uses the same
-/// `kind: "security"` discriminator as the full payload, but omits candidate
-/// arrays and exposes only aggregate counts.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecuritySummaryOutput {
-    /// Schema version of this envelope.
-    pub schema_version: SecuritySchemaVersion,
-    /// Fallow CLI version that produced this output.
-    pub version: ToolVersion,
-    /// Wall-clock milliseconds spent producing the report.
-    pub elapsed_ms: ElapsedMs,
-    /// Privacy-safe config context relevant to security candidate generation.
-    pub config: SecurityOutputConfig,
-    /// Security-specific rule and field metadata, emitted with `--explain`.
-    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Meta>,
-    /// Gate verdict, present only when `--gate <mode>` was set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gate: Option<SecurityGate>,
-    /// Aggregate security counts after all filters, gates, and scopes.
-    pub summary: SecuritySummary,
-}
-
-/// Aggregate counts for `fallow security --summary --format json`.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecuritySummary {
-    /// Number of security candidates after all filters, gates, and scopes.
-    pub security_findings: usize,
-    /// Fixed severity counts for the closed security severity enum.
-    pub by_severity: SecuritySeverityCounts,
-    /// Finding counts by catalogue category, or by kind for findings without a
-    /// catalogue category.
-    pub by_category: BTreeMap<String, usize>,
-    /// Fixed reachability counts for ranking and triage signals.
-    pub by_reachability: SecurityReachabilityCounts,
-    /// Fixed runtime coverage counts for runtime-state triage signals.
-    pub by_runtime_state: SecurityRuntimeStateCounts,
-    /// Number of client files whose dynamic imports could not be followed.
-    pub unresolved_edge_files: usize,
-    /// Number of sink-shaped callees that could not be statically flattened.
-    pub unresolved_callee_sites: usize,
-    /// Number of attack-surface entries included in the prepared full output.
-    pub attack_surface_entries: usize,
-}
-
-/// Fixed severity counters for summary JSON.
-#[derive(Debug, Clone, Copy, Default, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecuritySeverityCounts {
-    pub high: usize,
-    pub medium: usize,
-    pub low: usize,
-}
-
-/// Fixed reachability counters for summary JSON.
-#[derive(Debug, Clone, Copy, Default, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityReachabilityCounts {
-    pub entry_reachable: usize,
-    pub untrusted_source_reachable: usize,
-    pub arg_level: usize,
-    pub module_level: usize,
-    pub crosses_boundary: usize,
-    pub source_backed: usize,
-}
-
-/// Fixed runtime coverage counters for summary JSON.
-#[derive(Debug, Clone, Copy, Default, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityRuntimeStateCounts {
-    pub runtime_hot: usize,
-    pub runtime_cold: usize,
-    pub never_executed: usize,
-    pub low_traffic: usize,
-    pub coverage_unavailable: usize,
-    pub runtime_unknown: usize,
-    pub not_collected: usize,
-}
-
-/// The `fallow security survivors --format json` schema version.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum SecuritySurvivorsSchemaVersion {
-    /// Adds `summary.unverdicted` for incomplete verdict files.
-    #[serde(rename = "2")]
-    V2,
-}
-
-/// Verifier verdict status accepted by `fallow security survivors`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum SecurityVerifierVerdictStatus {
-    /// The verifier could not dismiss the candidate from supplied evidence.
-    Survivor,
-    /// The verifier dismissed the candidate from supplied evidence.
-    Dismissed,
-    /// The verifier needs human review before dismissal or remediation.
-    NeedsHumanReview,
-}
-
-/// One supported verifier verdict input row.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityVerifierVerdict {
-    /// Must be `fallow-security-verdict/v1`.
-    pub schema_version: String,
-    /// Stable candidate id from `security_findings[].finding_id`.
-    pub finding_id: String,
-    /// External verifier disposition.
-    pub verdict: SecurityVerifierVerdictStatus,
-    /// Short verifier reason.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// Short verifier rationale.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rationale: Option<String>,
-    /// Optional verifier-provided confidence or review priority.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub confidence: Option<String>,
-    /// Optional verifier-provided impact statement.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub impact: Option<String>,
-    /// Optional verifier-owned remediation direction.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fix_direction: Option<String>,
-}
-
-/// The `fallow security survivors --format json` envelope.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecuritySurvivorsOutput {
-    /// Schema version of this envelope.
-    pub schema_version: SecuritySurvivorsSchemaVersion,
-    /// Fallow CLI version that produced this output.
-    pub version: ToolVersion,
-    /// Wall-clock milliseconds spent producing the report.
-    pub elapsed_ms: ElapsedMs,
-    /// Survivor render summary.
-    pub summary: SecuritySurvivorsSummary,
-    /// Verifier-retained candidates keyed by finding id.
-    pub survivors: BTreeMap<String, SecuritySurvivor>,
-    /// Ambiguous candidates keyed by finding id. These are not dismissed and are
-    /// kept explicit so queues can decide whether to include them.
-    pub needs_human_review: BTreeMap<String, SecuritySurvivor>,
-}
-
-/// Aggregate counts for survivor rendering.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecuritySurvivorsSummary {
-    pub candidates: usize,
-    pub verdicts: usize,
-    pub survivors: usize,
-    pub dismissed: usize,
-    pub needs_human_review: usize,
-    pub unverdicted: usize,
-}
-
-/// One verifier-retained candidate row.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecuritySurvivor {
-    /// Stable candidate id from `security_findings[].finding_id`.
-    pub finding_id: String,
-    /// External verifier disposition.
-    pub verdict: SecurityVerifierVerdictStatus,
-    /// Short verifier reason.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// Short verifier rationale.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rationale: Option<String>,
-    /// Optional verifier-provided confidence or review priority.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub confidence: Option<String>,
-    /// Optional verifier-provided impact statement.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub impact: Option<String>,
-    /// Optional verifier-owned remediation direction.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fix_direction: Option<String>,
-    /// Original typed fallow security candidate.
-    pub candidate: SecurityFinding,
-}
-
-/// The `fallow security blind-spots --format json` schema version.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub enum SecurityBlindSpotsSchemaVersion {
-    /// Initial blind-spot grouping output contract.
-    #[serde(rename = "1")]
-    V1,
-}
-
-/// The `fallow security blind-spots --format json` envelope.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityBlindSpotsOutput {
-    /// Schema version of this envelope.
-    pub schema_version: SecurityBlindSpotsSchemaVersion,
-    /// Fallow CLI version that produced this output.
-    pub version: ToolVersion,
-    /// Wall-clock milliseconds spent producing the report.
-    pub elapsed_ms: ElapsedMs,
-    /// Aggregate blind-spot counts from the security analysis.
-    pub summary: SecurityBlindSpotsSummary,
-    /// Grouped unresolved callee diagnostics, derived from existing samples.
-    pub groups: Vec<SecurityBlindSpotGroup>,
-}
-
-/// Aggregate counts for blind-spot output.
-#[derive(Debug, Clone, Copy, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityBlindSpotsSummary {
-    pub unresolved_edge_files: usize,
-    pub unresolved_callee_sites: usize,
-    pub sampled_callee_sites: usize,
-}
-
-/// One actionable blind-spot group.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityBlindSpotGroup {
-    /// Why the callees were skipped.
-    pub reason: fallow_types::extract::SkippedSecurityCalleeReason,
-    /// Compact syntax shape of the skipped callee.
-    pub expression_kind: fallow_types::extract::SkippedSecurityCalleeExpressionKind,
-    /// Count in the bounded diagnostic sample.
-    pub sampled_count: usize,
-    /// Top files in this bounded diagnostic sample.
-    pub files: Vec<SecurityBlindSpotFile>,
-    /// Suggested next action for this group.
-    pub suggestion: String,
-}
-
-/// One file inside a blind-spot group.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct SecurityBlindSpotFile {
-    /// Project-relative source path.
-    pub path: String,
-    /// Count in the bounded diagnostic sample.
-    pub sampled_count: usize,
-}
+pub type SecuritySummaryOutput =
+    fallow_output::SecuritySummaryOutput<SecurityOutputConfig, SecurityGate>;
 
 /// Options for `fallow security`, mirroring the global CLI flags it honors.
 pub struct SecurityOptions<'a> {
