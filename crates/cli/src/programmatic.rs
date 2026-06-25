@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::OutputFormat;
-use fallow_core::results::AnalysisResults;
+use fallow_engine::results::AnalysisResults;
 
 use crate::check::{CheckOptions, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions};
