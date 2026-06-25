@@ -1534,6 +1534,45 @@ pub fn is_legacy_template_or_semantic_whole_object_use(object: &str) -> bool {
         || is_legacy_semantic_whole_object_use(object)
 }
 
+/// Iterate Angular template member names from typed facts plus decoded legacy
+/// template member-access sentinels.
+pub fn angular_template_member_names(module: &ModuleInfo) -> impl Iterator<Item = &str> {
+    let typed = module.semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
+            Some(access.member.as_str())
+        } else {
+            None
+        }
+    });
+    let legacy = module.member_accesses.iter().filter_map(|access| {
+        if is_legacy_angular_template_member_access_object(&access.object) {
+            Some(access.member.as_str())
+        } else {
+            None
+        }
+    });
+    typed.chain(legacy)
+}
+
+/// Return true when the module contains any Angular template member reference.
+#[must_use]
+pub fn has_angular_template_members(module: &ModuleInfo) -> bool {
+    angular_template_member_names(module).next().is_some()
+}
+
+/// Return true when a module spreads `this` in Angular template context.
+#[must_use]
+pub fn has_angular_this_spread(module: &ModuleInfo) -> bool {
+    module
+        .semantic_facts
+        .iter()
+        .any(|fact| matches!(fact, SemanticFact::AngularThisSpread(_)))
+        || module
+            .member_accesses
+            .iter()
+            .any(|access| is_legacy_angular_this_spread_object(&access.object))
+}
+
 /// Return true when a module contains a dynamic custom-element render.
 ///
 /// Current extraction writes [`SemanticFact::DynamicCustomElementRender`].
@@ -2469,6 +2508,44 @@ mod tests {
         )));
         assert!(!is_legacy_template_or_semantic_member_access_object("this"));
         assert!(!is_legacy_template_or_semantic_whole_object_use("this"));
+    }
+
+    #[test]
+    fn angular_template_member_names_include_typed_and_legacy_facts() {
+        let mut module = minimal_module_info();
+        module
+            .semantic_facts
+            .push(SemanticFact::AngularTemplateMemberAccess(
+                AngularTemplateMemberAccessFact {
+                    member: "typed".to_string(),
+                },
+            ));
+        module.member_accesses.push(MemberAccess {
+            object: ANGULAR_TPL_SENTINEL.to_string(),
+            member: "legacy".to_string(),
+        });
+
+        let names: Vec<&str> = angular_template_member_names(&module).collect();
+
+        assert_eq!(names, vec!["typed", "legacy"]);
+        assert!(has_angular_template_members(&module));
+    }
+
+    #[test]
+    fn angular_this_spread_accepts_typed_and_legacy_facts() {
+        let mut typed = minimal_module_info();
+        typed
+            .semantic_facts
+            .push(SemanticFact::AngularThisSpread(AngularThisSpreadFact));
+        let mut legacy = minimal_module_info();
+        legacy.member_accesses.push(MemberAccess {
+            object: ANGULAR_THIS_SPREAD_SENTINEL.to_string(),
+            member: "*".to_string(),
+        });
+
+        assert!(has_angular_this_spread(&typed));
+        assert!(has_angular_this_spread(&legacy));
+        assert!(!has_angular_this_spread(&minimal_module_info()));
     }
 
     #[test]

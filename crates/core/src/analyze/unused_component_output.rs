@@ -35,7 +35,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::ModuleInfo;
+use fallow_types::extract::{ModuleInfo, has_angular_template_members};
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -183,7 +183,7 @@ fn external_template_modules<'a>(
         let Some(target_module) = modules_by_id.get(&target) else {
             continue;
         };
-        if super::unused_component_input::has_angular_template_members(target_module) {
+        if has_angular_template_members(target_module) {
             out.push(*target_module);
         }
     }
