@@ -5595,7 +5595,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         return code;
     }
     let targets = args.targets || args.effort.is_some();
-    let sections = effective_health_sections(&EffectiveHealthSectionInput {
+    let sections = fallow_api::derive_health_sections(&fallow_api::HealthSectionOptions {
         output,
         complexity: args.complexity,
         file_scores: args.file_scores,
@@ -5604,8 +5604,8 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
         targets,
         css: args.css,
         score: args.score,
-        min_score: args.min_score,
-        save_snapshot: args.save_snapshot,
+        score_gate: args.min_score.is_some(),
+        snapshot_requested: args.save_snapshot.is_some(),
         trend: args.trend,
     });
     let runtime_coverage = match resolve_runtime_coverage_options(
@@ -5645,7 +5645,7 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>)
 /// builder. Borrows the section flags and coverage inputs; owns the resolved
 /// runtime-coverage options.
 struct ResolvedHealthDispatch<'a> {
-    sections: &'a EffectiveHealthSections,
+    sections: &'a fallow_api::DerivedHealthSections,
     runtime_coverage: Option<health::RuntimeCoverageOptions>,
     production: bool,
     coverage_inputs: &'a ResolvedHealthCoverageInputs,
@@ -5718,77 +5718,6 @@ fn run_health_dispatch(
         runtime_coverage: resolved.runtime_coverage,
         churn_file: cli.churn_file.as_deref(),
     })
-}
-
-struct EffectiveHealthSectionInput<'a> {
-    output: fallow_config::OutputFormat,
-    complexity: bool,
-    file_scores: bool,
-    coverage_gaps: bool,
-    hotspots: bool,
-    targets: bool,
-    css: bool,
-    score: bool,
-    min_score: Option<f64>,
-    save_snapshot: Option<&'a Option<String>>,
-    trend: bool,
-}
-
-struct EffectiveHealthSections {
-    any_section: bool,
-    complexity: bool,
-    file_scores: bool,
-    coverage_gaps: bool,
-    hotspots: bool,
-    targets: bool,
-    css: bool,
-    score: bool,
-    force_full: bool,
-    score_only_output: bool,
-}
-
-fn effective_health_sections(input: &EffectiveHealthSectionInput<'_>) -> EffectiveHealthSections {
-    let score = input.score
-        || input.min_score.is_some()
-        || input.trend
-        || matches!(input.output, fallow_config::OutputFormat::Badge);
-    let snapshot_requested = input.save_snapshot.is_some();
-    let any_section = input.complexity
-        || input.file_scores
-        || input.coverage_gaps
-        || input.hotspots
-        || input.targets
-        || score;
-    let eff_score = if any_section { score } else { true } || snapshot_requested;
-    let force_full = snapshot_requested || eff_score;
-    EffectiveHealthSections {
-        any_section,
-        complexity: if any_section { input.complexity } else { true },
-        file_scores: if any_section { input.file_scores } else { true } || force_full,
-        coverage_gaps: if any_section {
-            input.coverage_gaps
-        } else {
-            false
-        },
-        hotspots: if any_section { input.hotspots } else { true }
-            || snapshot_requested
-            || input.trend,
-        targets: if any_section { input.targets } else { true },
-        css: input.css,
-        score: eff_score,
-        force_full,
-        score_only_output: is_health_score_only_output(input, score),
-    }
-}
-
-fn is_health_score_only_output(input: &EffectiveHealthSectionInput<'_>, score: bool) -> bool {
-    score
-        && !input.complexity
-        && !input.file_scores
-        && !input.coverage_gaps
-        && !input.hotspots
-        && !input.targets
-        && !input.trend
 }
 
 #[cfg(test)]

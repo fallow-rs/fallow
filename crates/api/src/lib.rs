@@ -271,6 +271,91 @@ pub struct DerivedComplexityOptions {
     pub score: bool,
 }
 
+/// Input for deriving effective health sections from command-neutral flags.
+#[derive(Debug, Clone)]
+pub struct HealthSectionOptions {
+    pub output: fallow_config::OutputFormat,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub targets: bool,
+    pub css: bool,
+    pub score: bool,
+    pub score_gate: bool,
+    pub snapshot_requested: bool,
+    pub trend: bool,
+}
+
+/// Derived section selection for health runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedHealthSections {
+    pub any_section: bool,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub targets: bool,
+    pub css: bool,
+    pub score: bool,
+    pub force_full: bool,
+    pub score_only_output: bool,
+}
+
+/// Derive effective health section flags for CLI and embedders.
+#[must_use]
+pub fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSections {
+    let score = options.score
+        || options.score_gate
+        || options.trend
+        || matches!(options.output, fallow_config::OutputFormat::Badge);
+    let any_section = options.complexity
+        || options.file_scores
+        || options.coverage_gaps
+        || options.hotspots
+        || options.targets
+        || score;
+    let effective_score = if any_section { score } else { true } || options.snapshot_requested;
+    let force_full = options.snapshot_requested || effective_score;
+
+    DerivedHealthSections {
+        any_section,
+        complexity: if any_section {
+            options.complexity
+        } else {
+            true
+        },
+        file_scores: if any_section {
+            options.file_scores
+        } else {
+            true
+        } || force_full,
+        coverage_gaps: if any_section {
+            options.coverage_gaps
+        } else {
+            false
+        },
+        hotspots: if any_section { options.hotspots } else { true }
+            || options.snapshot_requested
+            || options.trend,
+        targets: if any_section { options.targets } else { true },
+        css: options.css,
+        score: effective_score,
+        force_full,
+        score_only_output: is_health_score_only_output(options, score),
+    }
+}
+
+fn is_health_score_only_output(options: &HealthSectionOptions, score: bool) -> bool {
+    score
+        && !options.complexity
+        && !options.file_scores
+        && !options.coverage_gaps
+        && !options.hotspots
+        && !options.targets
+        && !options.trend
+}
+
 /// Derive effective programmatic health / complexity section flags.
 #[must_use]
 pub fn derive_complexity_options(options: &ComplexityOptions) -> DerivedComplexityOptions {
@@ -400,5 +485,82 @@ mod tests {
         assert!(derived.hotspots);
         assert!(derived.ownership);
         assert!(!derived.targets);
+    }
+
+    #[test]
+    fn default_health_sections_match_full_health_output() {
+        let derived = derive_health_sections(&HealthSectionOptions {
+            output: fallow_config::OutputFormat::Human,
+            complexity: false,
+            file_scores: false,
+            coverage_gaps: false,
+            hotspots: false,
+            targets: false,
+            css: false,
+            score: false,
+            score_gate: false,
+            snapshot_requested: false,
+            trend: false,
+        });
+
+        assert!(!derived.any_section);
+        assert!(derived.complexity);
+        assert!(derived.file_scores);
+        assert!(!derived.coverage_gaps);
+        assert!(derived.hotspots);
+        assert!(derived.targets);
+        assert!(derived.score);
+        assert!(derived.force_full);
+        assert!(!derived.score_only_output);
+    }
+
+    #[test]
+    fn health_score_gate_requests_score_only_output() {
+        let derived = derive_health_sections(&HealthSectionOptions {
+            output: fallow_config::OutputFormat::Human,
+            complexity: false,
+            file_scores: false,
+            coverage_gaps: false,
+            hotspots: false,
+            targets: false,
+            css: false,
+            score: false,
+            score_gate: true,
+            snapshot_requested: false,
+            trend: false,
+        });
+
+        assert!(derived.any_section);
+        assert!(!derived.complexity);
+        assert!(derived.file_scores);
+        assert!(!derived.hotspots);
+        assert!(!derived.targets);
+        assert!(derived.score);
+        assert!(derived.force_full);
+        assert!(derived.score_only_output);
+    }
+
+    #[test]
+    fn health_snapshot_keeps_full_hidden_inputs_without_section_request() {
+        let derived = derive_health_sections(&HealthSectionOptions {
+            output: fallow_config::OutputFormat::Human,
+            complexity: false,
+            file_scores: false,
+            coverage_gaps: false,
+            hotspots: false,
+            targets: false,
+            css: true,
+            score: false,
+            score_gate: false,
+            snapshot_requested: true,
+            trend: false,
+        });
+
+        assert!(!derived.any_section);
+        assert!(derived.css);
+        assert!(derived.file_scores);
+        assert!(derived.hotspots);
+        assert!(derived.score);
+        assert!(derived.force_full);
     }
 }
