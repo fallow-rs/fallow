@@ -735,6 +735,8 @@ impl ModuleInfoExtractor {
                     &arrow.params,
                     Some(arrow.body.as_ref()),
                     arrow.expression,
+                    arrow.r#async,
+                    false,
                 );
             }
             Expression::FunctionExpression(function) => {
@@ -748,6 +750,8 @@ impl ModuleInfoExtractor {
                     &function.params,
                     function.body.as_deref(),
                     false,
+                    function.r#async,
+                    function.generator,
                 );
             }
             _ => {}
@@ -763,6 +767,8 @@ impl ModuleInfoExtractor {
         params: &FormalParameters<'_>,
         body: Option<&FunctionBody<'_>>,
         is_expression_body: bool,
+        is_async: bool,
+        is_generator: bool,
     ) {
         if !self.is_module_scope() {
             return;
@@ -770,12 +776,45 @@ impl ModuleInfoExtractor {
         let Some(body) = body else {
             return;
         };
+        // A cross-module factory must hand back the class instance synchronously:
+        // an `async` fn returns `Promise<T>` and a generator returns an iterator,
+        // so `const x = make(); x.member` would be on the wrong type. Such
+        // factories are excluded from the STRICT (cross-module) map; the same-file
+        // (loose) maps below are unaffected. See #1441 (Part A).
+        let strict_eligible = !is_async && !is_generator;
         if let Some(class_name) = function_body_returns_new_class(body, is_expression_body) {
+            // An all-paths-unanimous, non-falling-through proof additionally
+            // qualifies this factory for cross-module export (see
+            // `strict_factory_return_functions`); the same-file map below keeps
+            // the looser last-return semantics.
+            if strict_eligible
+                && let Some(unanimous_class) =
+                    function_body_returns_new_class_unanimous(body, is_expression_body)
+            {
+                self.strict_factory_return_functions
+                    .insert(name.to_string(), unanimous_class);
+            }
             self.factory_return_functions
                 .insert(name.to_string(), class_name);
         } else if let Some(returned_id) =
             function_body_returns_identifier(body, params, is_expression_body)
         {
+            // The alias is eligible for STRICT promotion only when it returns
+            // synchronously and the body cannot fall through to `undefined`. The
+            // class is value-proven later in `resolve_factory_return_aliases`.
+            if strict_eligible && function_body_is_terminal(body, is_expression_body) {
+                self.strict_alias_eligible.insert(name.to_string());
+                // Collect assignments to the returned id from THIS function's own
+                // body (not nested functions), tying the value-proof to the alias
+                // function — an assignment in a sibling/unrelated function must not
+                // prove it. See #1441 (Part A), Codex finding (round 2).
+                let mut assignments = Vec::new();
+                collect_self_scope_assignments(&body.statements, &returned_id, &mut assignments);
+                if !assignments.is_empty() {
+                    self.alias_in_body_assignments
+                        .insert(name.to_string(), assignments);
+                }
+            }
             self.factory_return_alias_functions
                 .insert(name.to_string(), returned_id);
         }
@@ -2955,6 +2994,8 @@ impl ModuleInfoExtractor {
                 &function.params,
                 function.body.as_deref(),
                 false,
+                function.r#async,
+                function.generator,
             );
             self.record_source_returning_function_declaration(function);
             self.record_package_resolution_function_arg(function, id.name.as_str());
@@ -3538,6 +3579,19 @@ impl<'a> ModuleInfoExtractor {
         self.record_initialized_variable_bindings(decl, declarator, init);
         self.record_playwright_variable_helpers(declarator, init);
         self.record_pinia_store(declarator, init);
+
+        // Capture a MODULE-SCOPE `let id = new Class()` / `let id = factory()`
+        // initializer for the alias value-proof. Module scope only: a declarator
+        // inside another function is a local binding, not the module binding an
+        // alias factory returns. See #1441 (Part A).
+        if self.is_module_scope()
+            && let BindingPattern::BindingIdentifier(id) = &declarator.id
+        {
+            self.module_scope_initializers
+                .entry(id.name.to_string())
+                .or_default()
+                .push(classify_factory_assigned_value(init));
+        }
 
         // FP-1 (unused-load-data-key): `const X = data` passes the whole
         // SvelteKit `data` prop opaquely, so a child could read any key the
@@ -4398,6 +4452,27 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
 
         self.record_assignment_target_bindings(&expr.left);
+
+        // Track writes to a bare identifier for the alias value-proof. POISON
+        // (any scope, ANY operator): a write that can leave the binding holding a
+        // non-class value — incl. a compound/logical `api ??= {} as any` — must
+        // abstain an otherwise class-proven binding. PROOF (module scope, plain
+        // `=` only): a dominating module-scope initializer. See #1441 (Part A).
+        if let AssignmentTarget::AssignmentTargetIdentifier(ident) = &expr.left {
+            let classified = classify_factory_assigned_value(&expr.right);
+            // Module-scope plain `=` writes also serve as proof; clone only for
+            // that rarer case so the common poison-only path moves the value.
+            if self.is_module_scope() && matches!(expr.operator, AssignmentOperator::Assign) {
+                self.module_scope_initializers
+                    .entry(ident.name.to_string())
+                    .or_default()
+                    .push(classified.clone());
+            }
+            self.identifier_write_values
+                .entry(ident.name.to_string())
+                .or_default()
+                .push(classified);
+        }
 
         if let AssignmentTarget::StaticMemberExpression(member) = &expr.left {
             self.handle_cjs_member_export(member, expr);
@@ -5552,49 +5627,61 @@ fn ts_type_reference_base_name(ty: &TSType<'_>) -> Option<String> {
 /// through nested blocks / control flow, but NOT into nested function or arrow
 /// bodies, which have their own return scope). More than one means an
 /// early-return / multi-branch `load`, which the harvest abstains on.
-fn count_returns_in_statements(statements: &[Statement<'_>]) -> usize {
-    let mut count = 0;
+/// Visit every `return` statement reachable in `statements` in source order,
+/// recursing through control flow (block / if / loops / try / switch / labeled)
+/// but NOT into nested functions, which have their own return scope. The shared
+/// traversal behind the return-shape helpers (count / first-arg / collect-args)
+/// so the control-flow node set lives in one place. See issues #1265, #1441.
+fn for_each_return_statement<'b, 'a>(
+    statements: &'b [Statement<'a>],
+    visit: &mut impl FnMut(&'b ReturnStatement<'a>),
+) {
     for stmt in statements {
-        count += count_returns_in_statement(stmt);
+        for_each_return_in_statement(stmt, visit);
     }
-    count
 }
 
-fn count_returns_in_statement(stmt: &Statement<'_>) -> usize {
+fn for_each_return_in_statement<'b, 'a>(
+    stmt: &'b Statement<'a>,
+    visit: &mut impl FnMut(&'b ReturnStatement<'a>),
+) {
     match stmt {
-        Statement::ReturnStatement(_) => 1,
-        Statement::BlockStatement(block) => count_returns_in_statements(&block.body),
-        Statement::IfStatement(if_stmt) => {
-            count_returns_in_statement(&if_stmt.consequent)
-                + if_stmt
-                    .alternate
-                    .as_ref()
-                    .map_or(0, count_returns_in_statement)
+        Statement::ReturnStatement(ret) => visit(ret),
+        Statement::BlockStatement(block) => for_each_return_statement(&block.body, visit),
+        Statement::IfStatement(s) => {
+            for_each_return_in_statement(&s.consequent, visit);
+            if let Some(alternate) = s.alternate.as_ref() {
+                for_each_return_in_statement(alternate, visit);
+            }
         }
-        Statement::ForStatement(for_stmt) => count_returns_in_statement(&for_stmt.body),
-        Statement::ForInStatement(for_stmt) => count_returns_in_statement(&for_stmt.body),
-        Statement::ForOfStatement(for_stmt) => count_returns_in_statement(&for_stmt.body),
-        Statement::WhileStatement(while_stmt) => count_returns_in_statement(&while_stmt.body),
-        Statement::DoWhileStatement(do_stmt) => count_returns_in_statement(&do_stmt.body),
-        Statement::TryStatement(try_stmt) => {
-            count_returns_in_statements(&try_stmt.block.body)
-                + try_stmt
-                    .handler
-                    .as_ref()
-                    .map_or(0, |h| count_returns_in_statements(&h.body.body))
-                + try_stmt
-                    .finalizer
-                    .as_ref()
-                    .map_or(0, |f| count_returns_in_statements(&f.body))
+        Statement::ForStatement(s) => for_each_return_in_statement(&s.body, visit),
+        Statement::ForInStatement(s) => for_each_return_in_statement(&s.body, visit),
+        Statement::ForOfStatement(s) => for_each_return_in_statement(&s.body, visit),
+        Statement::WhileStatement(s) => for_each_return_in_statement(&s.body, visit),
+        Statement::DoWhileStatement(s) => for_each_return_in_statement(&s.body, visit),
+        Statement::TryStatement(s) => {
+            for_each_return_statement(&s.block.body, visit);
+            if let Some(handler) = s.handler.as_ref() {
+                for_each_return_statement(&handler.body.body, visit);
+            }
+            if let Some(finalizer) = s.finalizer.as_ref() {
+                for_each_return_statement(&finalizer.body, visit);
+            }
         }
-        Statement::SwitchStatement(switch_stmt) => switch_stmt
-            .cases
-            .iter()
-            .map(|case| count_returns_in_statements(&case.consequent))
-            .sum(),
-        Statement::LabeledStatement(labeled) => count_returns_in_statement(&labeled.body),
-        _ => 0,
+        Statement::SwitchStatement(s) => {
+            for case in &s.cases {
+                for_each_return_statement(&case.consequent, visit);
+            }
+        }
+        Statement::LabeledStatement(s) => for_each_return_in_statement(&s.body, visit),
+        _ => {}
     }
+}
+
+fn count_returns_in_statements(statements: &[Statement<'_>]) -> usize {
+    let mut count = 0;
+    for_each_return_statement(statements, &mut |_| count += 1);
+    count
 }
 
 /// Harvest the load() return-object keys from a terminal return object literal.
@@ -6770,6 +6857,150 @@ fn new_expression_class_name(expr: &Expression<'_>) -> Option<String> {
     Some(callee.name.to_string())
 }
 
+/// Classify the right-hand side of a module-local assignment for the alias
+/// value-proof: a direct `new Class()`, a bare `callee(...)` call (proven only if
+/// `callee` is a strict same-file factory, resolved later), or anything else
+/// (which poisons the proof). Unwraps parenthesized / `as` / `satisfies` / `!`
+/// wrappers; `await` and every other shape are `Other`. See issue #1441 (Part A).
+fn classify_factory_assigned_value(expr: &Expression<'_>) -> super::FactoryAssignedValue {
+    let expr = unwrap_static_expr(expr);
+    match expr {
+        Expression::NewExpression(_) => match new_expression_class_name(expr) {
+            Some(class) => super::FactoryAssignedValue::NewClass(class),
+            None => super::FactoryAssignedValue::Other,
+        },
+        Expression::CallExpression(call) => match &call.callee {
+            Expression::Identifier(callee) => {
+                super::FactoryAssignedValue::Call(callee.name.to_string())
+            }
+            _ => super::FactoryAssignedValue::Other,
+        },
+        _ => super::FactoryAssignedValue::Other,
+    }
+}
+
+/// Collect classified right-hand sides of plain `target = <rhs>` assignments
+/// that DOMINATE the function's terminal return, so the proof reflects what the
+/// alias actually returns. Only two dominating shapes are accepted:
+///   - unconditional assignments at the function body's top level (incl. inside
+///     an unconditionally-entered block / labeled statement), and
+///   - the lazy-singleton init `if (!target) { target = ... }` (and the null /
+///     undefined equivalents), whose guard guarantees `target` ends up set.
+/// Assignments inside arbitrary conditionals, loops, switch, try, or nested
+/// functions are NOT counted (they may not run). See #1441 (Part A), Codex
+/// finding (round 3); covers the canonical `useApi` composable shape.
+fn collect_self_scope_assignments(
+    statements: &[Statement<'_>],
+    target: &str,
+    out: &mut Vec<super::FactoryAssignedValue>,
+) {
+    for stmt in statements {
+        collect_self_scope_assignments_in_statement(stmt, target, out);
+    }
+}
+
+fn collect_self_scope_assignments_in_statement(
+    stmt: &Statement<'_>,
+    target: &str,
+    out: &mut Vec<super::FactoryAssignedValue>,
+) {
+    match stmt {
+        Statement::ExpressionStatement(expr_stmt) => {
+            collect_self_scope_assignment_expr(&expr_stmt.expression, target, out);
+        }
+        Statement::BlockStatement(block) => {
+            collect_self_scope_assignments(&block.body, target, out);
+        }
+        Statement::LabeledStatement(s) => {
+            collect_self_scope_assignments_in_statement(&s.body, target, out);
+        }
+        // Lazy-singleton init: the `if (!target)` guard guarantees `target` is
+        // assigned when it was unset, so the consequent's assignment dominates.
+        // Only the consequent (the guarded branch) is inspected.
+        Statement::IfStatement(s) if if_test_is_falsy_guard_on(&s.test, target) => {
+            collect_self_scope_assignments_in_statement(&s.consequent, target, out);
+        }
+        _ => {}
+    }
+}
+
+/// Whether an `if` test is a falsiness guard on `id` for the lazy-init pattern
+/// `if (!api) { api = ... }`. An uninitialized typed module local holds
+/// `undefined`, NOT `null`, so a STRICT `=== null` guard would never fire and is
+/// unsound. Accepted: `!id`; loose `id == null` / `id == undefined` (loose `null`
+/// matches `undefined`); strict `id === undefined` (either operand order). A
+/// strict `=== null` is intentionally rejected. See #1441 (Part A), Codex round 4.
+fn if_test_is_falsy_guard_on(test: &Expression<'_>, id: &str) -> bool {
+    match test {
+        Expression::ParenthesizedExpression(paren) => {
+            if_test_is_falsy_guard_on(&paren.expression, id)
+        }
+        Expression::UnaryExpression(unary) => {
+            unary.operator == UnaryOperator::LogicalNot
+                && matches!(&unary.argument, Expression::Identifier(arg) if arg.name.as_str() == id)
+        }
+        Expression::BinaryExpression(bin) => {
+            let other = if is_identifier_named(&bin.left, id) {
+                &bin.right
+            } else if is_identifier_named(&bin.right, id) {
+                &bin.left
+            } else {
+                return false;
+            };
+            match bin.operator {
+                // Loose equality: `== null` and `== undefined` both match an
+                // uninitialized (undefined) value.
+                BinaryOperator::Equality => is_null_literal(other) || is_undefined(other),
+                // Strict: only `=== undefined` matches an uninitialized value.
+                BinaryOperator::StrictEquality => is_undefined(other),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+fn is_identifier_named(expr: &Expression<'_>, id: &str) -> bool {
+    matches!(expr, Expression::Identifier(ident) if ident.name.as_str() == id)
+}
+
+fn is_null_literal(expr: &Expression<'_>) -> bool {
+    matches!(expr, Expression::NullLiteral(_))
+}
+
+fn is_undefined(expr: &Expression<'_>) -> bool {
+    matches!(expr, Expression::Identifier(ident) if ident.name == "undefined")
+}
+
+fn collect_self_scope_assignment_expr(
+    expr: &Expression<'_>,
+    target: &str,
+    out: &mut Vec<super::FactoryAssignedValue>,
+) {
+    match expr {
+        Expression::AssignmentExpression(assign) => {
+            if matches!(assign.operator, AssignmentOperator::Assign)
+                && matches!(
+                    &assign.left,
+                    AssignmentTarget::AssignmentTargetIdentifier(id)
+                        if id.name.as_str() == target
+                )
+            {
+                out.push(classify_factory_assigned_value(&assign.right));
+            }
+        }
+        Expression::SequenceExpression(seq) => {
+            for inner in &seq.expressions {
+                collect_self_scope_assignment_expr(inner, target, out);
+            }
+        }
+        Expression::ParenthesizedExpression(paren) => {
+            collect_self_scope_assignment_expr(&paren.expression, target, out);
+        }
+        _ => {}
+    }
+}
+
 /// The class a function body returns via `new Class()`: the sole expression of
 /// an expression-bodied arrow, or the last top-level `return new Class()` of a
 /// block body. Conservative — only a direct `new Class()` is traced (a value
@@ -6790,6 +7021,85 @@ fn function_body_returns_new_class(
         };
         new_expression_class_name(ret.argument.as_ref()?)
     })
+}
+
+/// The class a function body returns when EVERY static return path resolves to
+/// `new SameClass()` — the all-paths-unanimous proof. `Some(class)` only when:
+/// the body has at least one return, every reachable `return` carries an
+/// argument (no bare `return;`), and every such argument is `new <class>()` for
+/// the SAME class. A non-`new` return, a bare return, or two different classes
+/// abstains. Stricter than `function_body_returns_new_class` (last-return), and
+/// required before a factory is exported as cross-module metadata: a wrong
+/// cross-module credit is a silent false-negative with a wide blast radius.
+/// See issue #1441 (Part A).
+fn function_body_returns_new_class_unanimous(
+    body: &FunctionBody<'_>,
+    is_expression_body: bool,
+) -> Option<String> {
+    if is_expression_body {
+        let [Statement::ExpressionStatement(stmt)] = body.statements.as_slice() else {
+            return None;
+        };
+        return new_expression_class_name(&stmt.expression);
+    }
+    // A body that can fall through to an implicit `undefined` (e.g.
+    // `if (flag) return new C()` with no trailing return) does NOT provably
+    // return the class on every path, so it must abstain. See #1441 (Part A).
+    if !function_body_is_terminal(body, is_expression_body) {
+        return None;
+    }
+    let total_returns = count_returns_in_statements(&body.statements);
+    if total_returns == 0 {
+        return None;
+    }
+    let mut args = Vec::new();
+    collect_return_args_in_statements(&body.statements, &mut args);
+    // A bare `return;` (counted but argless) means a non-instance path exists.
+    if args.len() != total_returns {
+        return None;
+    }
+    let mut class: Option<String> = None;
+    for arg in args {
+        let name = new_expression_class_name(arg)?;
+        match &class {
+            None => class = Some(name),
+            Some(existing) if *existing == name => {}
+            Some(_) => return None,
+        }
+    }
+    class
+}
+
+/// Whether a function body is guaranteed to return on its terminal path — it
+/// cannot fall through to an implicit `undefined`. Conservative: an
+/// expression-bodied arrow always returns; a block body qualifies only when its
+/// LAST top-level statement is a `return` or `throw`. A branch-only terminal
+/// (if/else where both arms return, with no trailing statement) is treated as
+/// non-terminal — a safe coverage gap, never an over-credit. Required before a
+/// factory may be exported cross-module. See issue #1441 (Part A).
+fn function_body_is_terminal(body: &FunctionBody<'_>, is_expression_body: bool) -> bool {
+    if is_expression_body {
+        return true;
+    }
+    matches!(
+        body.statements.last(),
+        Some(Statement::ReturnStatement(_) | Statement::ThrowStatement(_))
+    )
+}
+
+/// Collect the argument of EVERY `return` reachable in `statements` (through
+/// control flow, not into nested functions). A bare `return;` contributes
+/// nothing, so a shorter result than the return count signals a non-value return
+/// path. See issue #1441.
+fn collect_return_args_in_statements<'b, 'a>(
+    statements: &'b [Statement<'a>],
+    out: &mut Vec<&'b Expression<'a>>,
+) {
+    for_each_return_statement(statements, &mut |ret| {
+        if let Some(arg) = ret.argument.as_ref() {
+            out.push(arg);
+        }
+    });
 }
 
 /// The bare identifier a function returns as its single, unshadowed result.
@@ -6832,49 +7142,21 @@ fn function_body_returns_identifier(
     Some(returned)
 }
 
-/// The argument of the single `return` reachable in `statements` (recursively
-/// through control flow, not into nested functions). The caller guarantees
-/// exactly one return exists. See issue #1441.
+/// The argument of the single `return` reachable in `statements` (through
+/// control flow, not into nested functions). The caller guarantees exactly one
+/// return exists; a leading bare `return;` (no argument) is skipped. See #1441.
 fn first_return_arg_in_statements<'b, 'a>(
     statements: &'b [Statement<'a>],
 ) -> Option<&'b Expression<'a>> {
-    statements.iter().find_map(first_return_arg_in_statement)
-}
-
-fn first_return_arg_in_statement<'b, 'a>(stmt: &'b Statement<'a>) -> Option<&'b Expression<'a>> {
-    match stmt {
-        Statement::ReturnStatement(ret) => ret.argument.as_ref(),
-        Statement::BlockStatement(block) => first_return_arg_in_statements(&block.body),
-        Statement::IfStatement(if_stmt) => first_return_arg_in_statement(&if_stmt.consequent)
-            .or_else(|| {
-                if_stmt
-                    .alternate
-                    .as_ref()
-                    .and_then(first_return_arg_in_statement)
-            }),
-        Statement::ForStatement(s) => first_return_arg_in_statement(&s.body),
-        Statement::ForInStatement(s) => first_return_arg_in_statement(&s.body),
-        Statement::ForOfStatement(s) => first_return_arg_in_statement(&s.body),
-        Statement::WhileStatement(s) => first_return_arg_in_statement(&s.body),
-        Statement::DoWhileStatement(s) => first_return_arg_in_statement(&s.body),
-        Statement::TryStatement(s) => first_return_arg_in_statements(&s.block.body)
-            .or_else(|| {
-                s.handler
-                    .as_ref()
-                    .and_then(|h| first_return_arg_in_statements(&h.body.body))
-            })
-            .or_else(|| {
-                s.finalizer
-                    .as_ref()
-                    .and_then(|f| first_return_arg_in_statements(&f.body))
-            }),
-        Statement::SwitchStatement(s) => s
-            .cases
-            .iter()
-            .find_map(|case| first_return_arg_in_statements(&case.consequent)),
-        Statement::LabeledStatement(s) => first_return_arg_in_statement(&s.body),
-        _ => None,
-    }
+    let mut first = None;
+    for_each_return_statement(statements, &mut |ret| {
+        if first.is_none()
+            && let Some(arg) = ret.argument.as_ref()
+        {
+            first = Some(arg);
+        }
+    });
+    first
 }
 
 /// Whether a parameter list binds `name` (including via destructuring / defaults).

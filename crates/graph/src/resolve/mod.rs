@@ -368,6 +368,7 @@ fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule 
         type_referenced_import_bindings: input.module.type_referenced_import_bindings.clone(),
         value_referenced_import_bindings: input.module.value_referenced_import_bindings.clone(),
         namespace_object_aliases: input.module.namespace_object_aliases.clone(),
+        exported_factory_returns: input.module.exported_factory_returns.clone(),
     }
 }
 

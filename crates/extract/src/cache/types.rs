@@ -597,7 +597,13 @@ use crate::MemberKind;
 /// bare identifier (`useApi() { return api }`) whose typed local (`let api: RESTApi`)
 /// resolves to a class now promotes to a factory-return, so `const x = useApi()`
 /// credits `x.member`. A warm cache from 189 lacks the added `member_accesses`.
-pub(super) const CACHE_VERSION: u32 = 190;
+///
+/// Bumped to 191 (issue #1441, cross-module Part A): exported free-function
+/// factories now persist `exported_factory_returns`, and a consumer's
+/// `const x = importedFactory()` emits a cross-module factory-fn sentinel access
+/// so `x.member` credits the class across module boundaries. A warm cache from
+/// 190 lacks both the new metadata and the added sentinel `member_accesses`.
+pub(super) const CACHE_VERSION: u32 = 191;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -651,7 +657,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1304);
+assert_cached_type_size!(CachedModule, 1328);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -672,6 +678,7 @@ assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
 assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
+assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 48);
 assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
 
 /// Cached data for a single module.
@@ -734,6 +741,9 @@ pub struct CachedModule {
     pub flag_uses: Vec<fallow_types::extract::FlagUse>,
     /// Heritage metadata for exported classes.
     pub class_heritage: Vec<fallow_types::extract::ClassHeritageInfo>,
+    /// Exported free-function factories that provably return one class instance
+    /// (`export function useApi() { return new RESTApi() }`). See #1441 Part A.
+    pub exported_factory_returns: Vec<fallow_types::extract::FactoryReturnExport>,
     /// Angular `InjectionToken<Interface>` `(token, interface)` pairs (#920).
     pub injection_tokens: Vec<(String, String)>,
     /// Local type-capable declarations.

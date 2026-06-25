@@ -133,6 +133,7 @@ mod tests {
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: vec![],
             })
             .collect();
 
@@ -293,6 +294,7 @@ mod tests {
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: vec![],
             })
             .collect();
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

@@ -1,0 +1,5 @@
+{
+  "name": "issue-1441-cross-module-factory-member",
+  "private": true,
+  "main": "src/index.ts"
+}

@@ -6941,6 +6941,7 @@ mod tests {
             complexity,
             flag_uses: vec![],
             class_heritage: vec![],
+            exported_factory_returns: vec![],
             injection_tokens: vec![],
             local_type_declarations: Vec::new(),
             public_signature_type_references: Vec::new(),
