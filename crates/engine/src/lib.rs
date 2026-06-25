@@ -67,10 +67,10 @@ pub use fallow_types::discover::{DiscoveredFile, FileId};
 pub use fallow_types::extract::ModuleInfo;
 pub use fallow_types::results::AnalysisResults;
 pub use health::{
-    ComplexitySectionOptions, DerivedComplexityOptions, DerivedHealthSections,
-    HealthAnalysisResult, HealthCoverageInputs, HealthGateOptions, HealthSectionOptions,
-    HealthSharedParseData, HealthSort, HealthThresholdOverrides, RuntimeCoverageOptions,
-    derive_complexity_sections, derive_health_sections,
+    ComplexityRunOptions, ComplexitySectionOptions, DerivedComplexityOptions,
+    DerivedHealthSections, HealthAnalysisResult, HealthCoverageInputs, HealthGateOptions,
+    HealthSectionOptions, HealthSharedParseData, HealthSort, HealthThresholdOverrides,
+    RuntimeCoverageOptions, derive_complexity_sections, derive_health_sections,
 };
 
 /// Result alias for typed engine operations.

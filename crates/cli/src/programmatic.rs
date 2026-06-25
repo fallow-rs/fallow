@@ -1,19 +1,18 @@
 use std::path::{Path, PathBuf};
 
-use fallow_config::{EmailMode, OutputFormat};
+use fallow_config::OutputFormat;
 use fallow_core::results::AnalysisResults;
 
 use crate::check::{CheckOptions, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions};
 use crate::health::HealthOptions;
-use crate::health_types::EffortEstimate;
 use crate::report::ci::diff_filter::{DiffIndex, LoadedDiff, MAX_DIFF_BYTES};
 use crate::report::{build_duplication_json, build_health_json};
 
 pub use fallow_api::{
     AnalysisOptions, COMMON_ANALYSIS_OPTION_FLAGS, ComplexityOptions, ComplexitySort,
     DeadCodeFilters, DeadCodeOptions, DuplicationMode, DuplicationOptions, OwnershipEmailMode,
-    ProgrammaticError, TargetEffort, derive_complexity_options,
+    ProgrammaticError, TargetEffort, derive_complexity_options, derive_complexity_run_options,
 };
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
@@ -24,32 +23,6 @@ const fn duplication_mode_to_cli(mode: DuplicationMode) -> DupesMode {
         DuplicationMode::Mild => DupesMode::Mild,
         DuplicationMode::Weak => DupesMode::Weak,
         DuplicationMode::Semantic => DupesMode::Semantic,
-    }
-}
-
-const fn complexity_sort_to_engine(sort: ComplexitySort) -> fallow_engine::HealthSort {
-    match sort {
-        ComplexitySort::Severity => fallow_engine::HealthSort::Severity,
-        ComplexitySort::Cyclomatic => fallow_engine::HealthSort::Cyclomatic,
-        ComplexitySort::Cognitive => fallow_engine::HealthSort::Cognitive,
-        ComplexitySort::Lines => fallow_engine::HealthSort::Lines,
-    }
-}
-
-const fn ownership_email_mode_to_config(mode: OwnershipEmailMode) -> EmailMode {
-    match mode {
-        OwnershipEmailMode::Raw => EmailMode::Raw,
-        OwnershipEmailMode::Handle => EmailMode::Handle,
-        OwnershipEmailMode::Anonymized => EmailMode::Anonymized,
-        OwnershipEmailMode::Hash => EmailMode::Hash,
-    }
-}
-
-const fn target_effort_to_cli(effort: TargetEffort) -> EffortEstimate {
-    match effort {
-        TargetEffort::Low => EffortEstimate::Low,
-        TargetEffort::Medium => EffortEstimate::Medium,
-        TargetEffort::High => EffortEstimate::High,
     }
 }
 
@@ -623,7 +596,7 @@ fn build_complexity_options<'a>(
     resolved: &'a ResolvedAnalysisOptions,
     options: &'a ComplexityOptions,
 ) -> HealthOptions<'a> {
-    let state = derive_complexity_options(options);
+    let run = derive_complexity_run_options(options);
 
     HealthOptions {
         root: &resolved.root,
@@ -632,13 +605,9 @@ fn build_complexity_options<'a>(
         no_cache: resolved.no_cache,
         threads: resolved.threads,
         quiet: true,
-        thresholds: fallow_engine::HealthThresholdOverrides {
-            max_cyclomatic: options.max_cyclomatic,
-            max_cognitive: options.max_cognitive,
-            max_crap: options.max_crap,
-        },
-        top: options.top,
-        sort: complexity_sort_to_engine(options.sort),
+        thresholds: run.thresholds,
+        top: run.top,
+        sort: run.sort,
         production: resolved.production_override.unwrap_or(false),
         production_override: resolved.production_override,
         changed_since: resolved.changed_since.as_deref(),
@@ -648,33 +617,30 @@ fn build_complexity_options<'a>(
         changed_workspaces: resolved.changed_workspaces.as_deref(),
         baseline: None,
         save_baseline: None,
-        complexity: state.complexity,
+        complexity: run.sections.complexity,
         complexity_breakdown: false,
-        file_scores: state.file_scores,
-        coverage_gaps: state.coverage_gaps,
-        config_activates_coverage_gaps: !state.any_section,
-        hotspots: state.hotspots,
-        ownership: state.ownership,
-        ownership_emails: options.ownership_emails.map(ownership_email_mode_to_config),
-        targets: state.targets,
-        css: options.css,
-        force_full: state.force_full,
-        score_only_output: state.score_only_output,
+        file_scores: run.sections.file_scores,
+        coverage_gaps: run.sections.coverage_gaps,
+        config_activates_coverage_gaps: !run.sections.any_section,
+        hotspots: run.sections.hotspots,
+        ownership: run.sections.ownership,
+        ownership_emails: run.ownership_emails,
+        targets: run.sections.targets,
+        css: run.css,
+        force_full: run.sections.force_full,
+        score_only_output: run.sections.score_only_output,
         enforce_coverage_gap_gate: true,
-        effort: options.effort.map(target_effort_to_cli),
-        score: state.score,
+        effort: run.effort,
+        score: run.sections.score,
         gates: fallow_engine::HealthGateOptions::default(),
-        since: options.since.as_deref(),
-        min_commits: options.min_commits,
+        since: run.since,
+        min_commits: run.min_commits,
         explain: resolved.explain,
         summary: false,
         save_snapshot: None,
         trend: false,
         group_by: None,
-        coverage_inputs: fallow_engine::HealthCoverageInputs {
-            coverage: options.coverage.as_deref(),
-            coverage_root: options.coverage_root.as_deref(),
-        },
+        coverage_inputs: run.coverage_inputs,
         performance: false,
         runtime_coverage: None,
         // The programmatic facade has no churn-file knob; embedders that want

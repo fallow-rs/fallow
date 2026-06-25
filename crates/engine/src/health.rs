@@ -3,9 +3,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fallow_config::{OutputFormat, ResolvedConfig};
+use fallow_config::{EmailMode, OutputFormat, ResolvedConfig};
 use fallow_output::{
-    FindingSeverity, HealthGrouping, HealthReport, HealthTimings, RuntimeCoverageWatermark,
+    EffortEstimate, FindingSeverity, HealthGrouping, HealthReport, HealthTimings,
+    RuntimeCoverageWatermark,
 };
 
 /// Command-neutral sort criteria for health complexity findings.
@@ -188,6 +189,22 @@ pub fn derive_complexity_sections(options: &ComplexitySectionOptions) -> Derived
         score_only_output: sections.score_only_output,
         score: sections.score,
     }
+}
+
+/// Normalized programmatic complexity / health inputs shared by API, NAPI, and
+/// the CLI-backed runner during the engine migration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComplexityRunOptions<'a> {
+    pub thresholds: HealthThresholdOverrides,
+    pub top: Option<usize>,
+    pub sort: HealthSort,
+    pub sections: DerivedComplexityOptions,
+    pub ownership_emails: Option<EmailMode>,
+    pub effort: Option<EffortEstimate>,
+    pub css: bool,
+    pub since: Option<&'a str>,
+    pub min_commits: Option<u32>,
+    pub coverage_inputs: HealthCoverageInputs<'a>,
 }
 
 /// Command-neutral runtime coverage input for health analysis.
