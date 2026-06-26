@@ -6,7 +6,7 @@ use std::time::Duration;
 use fallow_config::{EmailMode, OutputFormat, ResolvedConfig};
 use fallow_output::{
     DiffIndex, EffortEstimate, FindingSeverity, GroupByMode, HealthGrouping, HealthReport,
-    HealthTimings, ImpactDigestCounts, RuntimeCoverageWatermark, WorkspaceDiagnosticOutput,
+    HealthTimings, RuntimeCoverageWatermark,
 };
 use fallow_types::path_util::is_absolute_path_any_platform;
 
@@ -386,30 +386,6 @@ pub struct HealthSharedParseData {
     pub modules: Vec<fallow_types::extract::ModuleInfo>,
     /// Full analysis output (graph + results) for file scoring.
     pub analysis_output: Option<crate::DeadCodeAnalysisArtifacts>,
-}
-
-/// Runtime probes used by programmatic health output assembly.
-///
-/// The current CLI-backed runner still supplies environment and project facts
-/// while health execution moves into the engine/API stack. The stable command
-/// strings and output ordering remain owned by `fallow-output`.
-pub struct ProgrammaticHealthNextStepFacts {
-    pub suggestions_enabled: bool,
-    pub offer_setup: bool,
-    pub impact_digest: Option<ImpactDigestCounts>,
-    pub audit_changed: bool,
-}
-
-/// Health runner output shared by API, NAPI, and temporary CLI adapters.
-///
-/// The analysis payload is a typed engine result. Runtime-only presentation
-/// probes stay explicit so the API boundary, not the concrete runner, owns the
-/// final programmatic report assembly.
-pub struct ProgrammaticHealthRun {
-    pub analysis: HealthAnalysisResult,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
-    pub next_step_facts: ProgrammaticHealthNextStepFacts,
-    pub telemetry_analysis_run_id: Option<String>,
 }
 
 /// Typed health analysis result shared by CLI, API, NAPI, and future embedders.

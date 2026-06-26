@@ -7,9 +7,7 @@ use fallow_config::{
     DetectionMode, DuplicatesConfig, OutputFormat, ProductionAnalysis, WorkspaceInfo,
 };
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
-use fallow_engine::{
-    AnalysisResults, AnalysisSession, ProgrammaticHealthRun, ProjectConfig, ProjectConfigOptions,
-};
+use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckOutput, CheckOutputInput, DiffIndex, DupesOutput, DupesOutputInput,
     GroupByMode, HealthGroup, HealthGrouping, HealthJsonOutputInput, HealthOutputInput,
@@ -43,6 +41,30 @@ pub struct HealthJsonReportInput<'a> {
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<&'a str>,
+}
+
+/// Runtime probes used by programmatic health output assembly.
+///
+/// The current CLI-backed runner supplies environment and project facts while
+/// health execution moves into the engine/API stack. The stable command strings
+/// and output ordering remain owned by `fallow-output`.
+pub struct ProgrammaticHealthNextStepFacts {
+    pub suggestions_enabled: bool,
+    pub offer_setup: bool,
+    pub impact_digest: Option<fallow_output::ImpactDigestCounts>,
+    pub audit_changed: bool,
+}
+
+/// Health runner output shared by API, NAPI, and temporary CLI adapters.
+///
+/// The analysis payload is a typed engine result. Runtime-only presentation
+/// probes stay explicit so the API boundary, not the concrete runner, owns the
+/// final programmatic report assembly.
+pub struct ProgrammaticHealthRun {
+    pub analysis: fallow_engine::HealthAnalysisResult,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub next_step_facts: ProgrammaticHealthNextStepFacts,
+    pub telemetry_analysis_run_id: Option<String>,
 }
 
 /// Temporary runner boundary for programmatic health while execution moves from
@@ -1742,7 +1764,7 @@ mod tests {
                 workspace_diagnostics: vec![WorkspaceDiagnosticOutput(serde_json::json!({
                     "path": self.root.join("package.json")
                 }))],
-                next_step_facts: fallow_engine::ProgrammaticHealthNextStepFacts {
+                next_step_facts: ProgrammaticHealthNextStepFacts {
                     suggestions_enabled: true,
                     offer_setup: false,
                     impact_digest: Some(fallow_output::ImpactDigestCounts {

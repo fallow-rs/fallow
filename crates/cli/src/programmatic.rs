@@ -6,14 +6,13 @@
 
 use std::path::Path;
 
-use fallow_engine::{ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun};
-
 use crate::health::HealthOptions;
 
 #[cfg(test)]
 use fallow_api::AnalysisOptions;
 use fallow_api::{
     ComplexityOptions, ProgrammaticAnalysisContext, ProgrammaticError,
+    ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun,
     derive_programmatic_health_execution_options, resolve_programmatic_analysis_context,
 };
 
