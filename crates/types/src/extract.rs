@@ -1802,9 +1802,35 @@ impl<'a> SemanticFactView<'a> {
         instance_export_binding_facts_from_parts(self.semantic_facts, self.member_accesses)
     }
 
+    /// Collect only typed instance-export binding facts.
+    pub fn typed_instance_export_bindings(self) -> Vec<InstanceExportBindingFact> {
+        instance_export_binding_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect only legacy instance-export binding facts decoded from
+    /// `member_accesses`.
+    pub fn legacy_instance_export_bindings(self) -> Vec<InstanceExportBindingFact> {
+        legacy_instance_export_binding_facts(self.member_accesses).collect()
+    }
+
     /// Collect static factory call member facts.
     pub fn factory_call_member_accesses(self) -> Vec<FactoryCallMemberAccessFact> {
         factory_call_member_access_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect only typed static factory call member facts.
+    pub fn typed_factory_call_member_accesses(self) -> Vec<FactoryCallMemberAccessFact> {
+        factory_call_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect only legacy static factory call member facts decoded from
+    /// `member_accesses`.
+    pub fn legacy_factory_call_member_accesses(self) -> Vec<FactoryCallMemberAccessFact> {
+        legacy_factory_call_member_access_facts(self.member_accesses).collect()
     }
 
     /// Collect static factory fluent-chain member facts.
@@ -1812,9 +1838,35 @@ impl<'a> SemanticFactView<'a> {
         fluent_chain_member_access_facts_from_parts(self.semantic_facts, self.member_accesses)
     }
 
+    /// Collect only typed static factory fluent-chain member facts.
+    pub fn typed_fluent_chain_member_accesses(self) -> Vec<FluentChainMemberAccessFact> {
+        fluent_chain_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect only legacy static factory fluent-chain member facts decoded from
+    /// `member_accesses`.
+    pub fn legacy_fluent_chain_member_accesses(self) -> Vec<FluentChainMemberAccessFact> {
+        legacy_fluent_chain_member_access_facts(self.member_accesses).collect()
+    }
+
     /// Collect constructor-rooted fluent-chain member facts.
     pub fn fluent_chain_new_member_accesses(self) -> Vec<FluentChainNewMemberAccessFact> {
         fluent_chain_new_member_access_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect only typed constructor-rooted fluent-chain member facts.
+    pub fn typed_fluent_chain_new_member_accesses(self) -> Vec<FluentChainNewMemberAccessFact> {
+        fluent_chain_new_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect only legacy constructor-rooted fluent-chain member facts decoded
+    /// from `member_accesses`.
+    pub fn legacy_fluent_chain_new_member_accesses(self) -> Vec<FluentChainNewMemberAccessFact> {
+        legacy_fluent_chain_new_member_access_facts(self.member_accesses).collect()
     }
 
     /// Collect Playwright fixture-use facts.
@@ -1933,21 +1985,68 @@ pub fn ordinary_whole_object_uses(whole_object_uses: &[String]) -> impl Iterator
         .filter(|object| !is_legacy_template_or_semantic_whole_object_use(object))
 }
 
+/// Iterate typed instance-export binding facts.
+fn instance_export_binding_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &InstanceExportBindingFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::InstanceExportBinding(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+fn legacy_instance_export_binding_facts(
+    member_accesses: &[MemberAccess],
+) -> impl Iterator<Item = InstanceExportBindingFact> + '_ {
+    member_accesses.iter().filter_map(|access| {
+        let SemanticFact::InstanceExportBinding(fact) =
+            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())?
+        else {
+            return None;
+        };
+        Some(fact)
+    })
+}
+
 /// Collect instance-export binding facts from typed facts plus cache-compatible
 /// decoded legacy sentinels.
 fn instance_export_binding_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<InstanceExportBindingFact> {
-    semantic_facts_from_parts(semantic_facts, member_accesses)
-        .filter_map(|fact| {
-            if let SemanticFact::InstanceExportBinding(access) = fact.as_fact() {
-                Some(access.clone())
-            } else {
-                None
-            }
-        })
+    instance_export_binding_facts(semantic_facts)
+        .cloned()
+        .chain(legacy_instance_export_binding_facts(member_accesses))
         .collect()
+}
+
+/// Iterate typed factory-call member facts.
+fn factory_call_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &FactoryCallMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::FactoryCallMemberAccess(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+fn legacy_factory_call_member_access_facts(
+    member_accesses: &[MemberAccess],
+) -> impl Iterator<Item = FactoryCallMemberAccessFact> + '_ {
+    member_accesses.iter().filter_map(|access| {
+        let SemanticFact::FactoryCallMemberAccess(fact) =
+            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())?
+        else {
+            return None;
+        };
+        Some(fact)
+    })
 }
 
 /// Collect factory-call member facts from typed facts plus cache-compatible
@@ -1956,15 +2055,36 @@ fn factory_call_member_access_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<FactoryCallMemberAccessFact> {
-    semantic_facts_from_parts(semantic_facts, member_accesses)
-        .filter_map(|fact| {
-            if let SemanticFact::FactoryCallMemberAccess(access) = fact.as_fact() {
-                Some(access.clone())
-            } else {
-                None
-            }
-        })
+    factory_call_member_access_facts(semantic_facts)
+        .cloned()
+        .chain(legacy_factory_call_member_access_facts(member_accesses))
         .collect()
+}
+
+/// Iterate typed fluent-chain member facts.
+fn fluent_chain_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &FluentChainMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::FluentChainMemberAccess(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+fn legacy_fluent_chain_member_access_facts(
+    member_accesses: &[MemberAccess],
+) -> impl Iterator<Item = FluentChainMemberAccessFact> + '_ {
+    member_accesses.iter().filter_map(|access| {
+        let SemanticFact::FluentChainMemberAccess(fact) =
+            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())?
+        else {
+            return None;
+        };
+        Some(fact)
+    })
 }
 
 /// Collect fluent-chain member facts from typed facts plus cache-compatible
@@ -1973,15 +2093,36 @@ fn fluent_chain_member_access_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<FluentChainMemberAccessFact> {
-    semantic_facts_from_parts(semantic_facts, member_accesses)
-        .filter_map(|fact| {
-            if let SemanticFact::FluentChainMemberAccess(access) = fact.as_fact() {
-                Some(access.clone())
-            } else {
-                None
-            }
-        })
+    fluent_chain_member_access_facts(semantic_facts)
+        .cloned()
+        .chain(legacy_fluent_chain_member_access_facts(member_accesses))
         .collect()
+}
+
+/// Iterate typed constructor-rooted fluent-chain member facts.
+fn fluent_chain_new_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &FluentChainNewMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::FluentChainNewMemberAccess(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+fn legacy_fluent_chain_new_member_access_facts(
+    member_accesses: &[MemberAccess],
+) -> impl Iterator<Item = FluentChainNewMemberAccessFact> + '_ {
+    member_accesses.iter().filter_map(|access| {
+        let SemanticFact::FluentChainNewMemberAccess(fact) =
+            legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())?
+        else {
+            return None;
+        };
+        Some(fact)
+    })
 }
 
 /// Collect constructor-rooted fluent-chain member facts from typed facts plus
@@ -1990,14 +2131,9 @@ fn fluent_chain_new_member_access_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<FluentChainNewMemberAccessFact> {
-    semantic_facts_from_parts(semantic_facts, member_accesses)
-        .filter_map(|fact| {
-            if let SemanticFact::FluentChainNewMemberAccess(access) = fact.as_fact() {
-                Some(access.clone())
-            } else {
-                None
-            }
-        })
+    fluent_chain_new_member_access_facts(semantic_facts)
+        .cloned()
+        .chain(legacy_fluent_chain_new_member_access_facts(member_accesses))
         .collect()
 }
 

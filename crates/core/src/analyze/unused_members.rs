@@ -12,8 +12,10 @@ use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
-    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
-    PlaywrightFixtureUseFact, SemanticFactView, ordinary_whole_object_uses,
+    FactoryCallMemberAccessFact, FluentChainMemberAccessFact, FluentChainNewMemberAccessFact,
+    InstanceExportBindingFact, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
+    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, SemanticFactView,
+    ordinary_whole_object_uses,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -974,6 +976,36 @@ fn playwright_fixture_types(resolved: &ResolvedModule) -> Vec<PlaywrightFixtureT
     })
 }
 
+fn instance_export_bindings(resolved: &ResolvedModule) -> Vec<InstanceExportBindingFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    typed_or_legacy_facts(view.typed_instance_export_bindings(), || {
+        view.legacy_instance_export_bindings()
+    })
+}
+
+fn factory_call_member_accesses(resolved: &ResolvedModule) -> Vec<FactoryCallMemberAccessFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    typed_or_legacy_facts(view.typed_factory_call_member_accesses(), || {
+        view.legacy_factory_call_member_accesses()
+    })
+}
+
+fn fluent_chain_member_accesses(resolved: &ResolvedModule) -> Vec<FluentChainMemberAccessFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    typed_or_legacy_facts(view.typed_fluent_chain_member_accesses(), || {
+        view.legacy_fluent_chain_member_accesses()
+    })
+}
+
+fn fluent_chain_new_member_accesses(
+    resolved: &ResolvedModule,
+) -> Vec<FluentChainNewMemberAccessFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    typed_or_legacy_facts(view.typed_fluent_chain_new_member_accesses(), || {
+        view.legacy_fluent_chain_new_member_accesses()
+    })
+}
+
 fn playwright_test_keys_for_local(
     local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
     local_playwright_test_names: &FxHashSet<String>,
@@ -1270,9 +1302,7 @@ fn build_instance_export_targets(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
-            .instance_export_bindings()
-        {
+        for access in instance_export_bindings(resolved) {
             let Some(target_keys) = local_to_export_keys.get(access.target_name.as_str()) else {
                 continue;
             };
@@ -1517,9 +1547,7 @@ fn propagate_factory_call_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
-            .factory_call_member_accesses()
-        {
+        for access in factory_call_member_accesses(resolved) {
             let Some(seed_keys) = local_to_export_keys.get(access.callee_object.as_str()) else {
                 continue;
             };
@@ -1591,9 +1619,7 @@ fn propagate_fluent_chain_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
-            .fluent_chain_member_accesses()
-        {
+        for access in fluent_chain_member_accesses(resolved) {
             let Some(seed_keys) = local_to_export_keys.get(access.root_object.as_str()) else {
                 continue;
             };
@@ -1657,9 +1683,7 @@ fn propagate_fluent_chain_new_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
-            .fluent_chain_new_member_accesses()
-        {
+        for access in fluent_chain_new_member_accesses(resolved) {
             let Some(seed_keys) = local_to_export_keys.get(access.class_name.as_str()) else {
                 continue;
             };
@@ -2485,6 +2509,9 @@ mod tests {
 
     const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
     const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
+    const INSTANCE_EXPORT_SENTINEL: &str = "__fallow_instance_export__:";
+    const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
+    const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
     const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
 
     #[expect(
@@ -2936,15 +2963,24 @@ mod tests {
 
     #[test]
     fn typed_instance_export_binding_fact_builds_target_map() {
-        let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/service.ts", false)]);
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/service.ts", false),
+            ("/src/stale-service.ts", false),
+        ]);
         graph.modules[0].exports = vec![make_export_with_members("service", vec![], Some(0))];
         graph.modules[1].set_reachable(true);
         graph.modules[1].exports = vec![make_export_with_members("Service", vec![], Some(0))];
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_export_with_members("StaleService", vec![], Some(0))];
 
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/src/entry.ts"),
-            resolved_imports: vec![make_resolved_import("./service", "Service", "Service", 1)],
+            resolved_imports: vec![
+                make_resolved_import("./service", "Service", "Service", 1),
+                make_resolved_import("./stale-service", "StaleService", "StaleService", 2),
+            ],
             exports: vec![make_export_info("service", None)],
             semantic_facts: vec![SemanticFact::InstanceExportBinding(
                 InstanceExportBindingFact {
@@ -2953,6 +2989,10 @@ mod tests {
                 },
             )]
             .into(),
+            member_accesses: vec![MemberAccess {
+                object: format!("{INSTANCE_EXPORT_SENTINEL}service"),
+                member: "StaleService".to_string(),
+            }],
             ..Default::default()
         }];
 
@@ -3015,6 +3055,10 @@ mod tests {
                     },
                 )]
                 .into(),
+                member_accesses: vec![MemberAccess {
+                    object: format!("{FACTORY_CALL_SENTINEL}MyClass:getInstance"),
+                    member: "legacyData".to_string(),
+                }],
                 ..Default::default()
             },
             ResolvedModule {
@@ -3032,6 +3076,7 @@ mod tests {
             .get(&ExportKey::new(FileId(1), "MyClass"))
             .expect("factory target class should be credited");
         assert!(credited.contains("getData"));
+        assert!(!credited.contains("legacyData"));
     }
 
     #[test]
@@ -3090,6 +3135,12 @@ mod tests {
                     },
                 )]
                 .into(),
+                member_accesses: vec![MemberAccess {
+                    object: format!(
+                        "{FLUENT_CHAIN_SENTINEL}EventBuilder:create:setProcessId,setSubject"
+                    ),
+                    member: "legacyBuild".to_string(),
+                }],
                 ..Default::default()
             },
             ResolvedModule {
@@ -3107,6 +3158,7 @@ mod tests {
             .get(&ExportKey::new(FileId(1), "EventBuilder"))
             .expect("fluent target class should be credited");
         assert!(credited.contains("build"));
+        assert!(!credited.contains("legacyBuild"));
     }
 
     #[test]
@@ -3162,6 +3214,12 @@ mod tests {
                     },
                 )]
                 .into(),
+                member_accesses: vec![MemberAccess {
+                    object: format!(
+                        "{FLUENT_CHAIN_NEW_SENTINEL}OptionBuilder:addDefault,addFromCli"
+                    ),
+                    member: "legacyBuild".to_string(),
+                }],
                 ..Default::default()
             },
             ResolvedModule {
@@ -3179,6 +3237,7 @@ mod tests {
             .get(&ExportKey::new(FileId(1), "OptionBuilder"))
             .expect("fluent-new target class should be credited");
         assert!(credited.contains("build"));
+        assert!(!credited.contains("legacyBuild"));
     }
 
     fn make_module_with_class_heritage(
