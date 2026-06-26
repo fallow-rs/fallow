@@ -14,7 +14,6 @@ readme = "../../README.md"
 [dependencies]
 fallow-api = { workspace = true }
 fallow-cli = { workspace = true }
-fallow-engine = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -45,10 +45,92 @@ pub mod editor_suppress {
 }
 
 pub type EditorAnalysisResults = fallow_types::results::AnalysisResults;
-pub type EditorAnalysisSession = fallow_engine::AnalysisSession;
 pub type EditorDeadCodeAnalysisOutput = fallow_engine::DeadCodeAnalysisOutput;
 pub type EditorDuplicationReport = fallow_engine::DuplicationReport;
-pub type EditorProjectAnalysisOutput = fallow_engine::ProjectAnalysisOutput;
+
+/// Reusable editor analysis session owned by the API boundary.
+#[derive(Debug)]
+pub struct EditorAnalysisSession {
+    inner: fallow_engine::AnalysisSession,
+}
+
+impl EditorAnalysisSession {
+    /// Load config and discover files for an editor project root.
+    ///
+    /// # Errors
+    ///
+    /// Returns an engine error when project config loading fails.
+    pub fn load(root: &Path, config_path: Option<&Path>) -> fallow_engine::EngineResult<Self> {
+        fallow_engine::AnalysisSession::load(root, config_path).map(Self::from_engine)
+    }
+
+    /// Load config, apply one editor-specific adjustment, then discover files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an engine error when project config loading fails.
+    pub fn load_with_config(
+        root: &Path,
+        config_path: Option<&Path>,
+        configure: impl FnOnce(&mut fallow_config::ResolvedConfig),
+    ) -> fallow_engine::EngineResult<Self> {
+        fallow_engine::AnalysisSession::load_with_config(root, config_path, configure)
+            .map(Self::from_engine)
+    }
+
+    /// Build a session from built-in defaults, ignoring project config files.
+    #[must_use]
+    pub fn load_default(root: &Path) -> Self {
+        Self::from_engine(fallow_engine::AnalysisSession::load_default(root))
+    }
+
+    /// Resolved project config.
+    #[must_use]
+    pub fn config(&self) -> &fallow_config::ResolvedConfig {
+        self.inner.config()
+    }
+
+    /// Config file path when one was loaded.
+    #[must_use]
+    pub fn config_path(&self) -> Option<&Path> {
+        self.inner.config_path()
+    }
+
+    /// Run dead-code and duplication analysis for this editor session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an engine error when dead-code parsing or analysis fails.
+    pub fn analyze_project_with(
+        &self,
+        duplicates_config: &fallow_config::DuplicatesConfig,
+        retain_complexity_artifacts: bool,
+    ) -> fallow_engine::EngineResult<EditorProjectAnalysisOutput> {
+        self.inner
+            .analyze_project_with(duplicates_config, retain_complexity_artifacts)
+            .map(EditorProjectAnalysisOutput::from_engine)
+    }
+
+    const fn from_engine(inner: fallow_engine::AnalysisSession) -> Self {
+        Self { inner }
+    }
+}
+
+/// Dead-code and duplication project output owned by the editor API boundary.
+#[derive(Debug)]
+pub struct EditorProjectAnalysisOutput {
+    pub dead_code: EditorDeadCodeAnalysisOutput,
+    pub duplication: EditorDuplicationReport,
+}
+
+impl EditorProjectAnalysisOutput {
+    fn from_engine(output: fallow_engine::ProjectAnalysisOutput) -> Self {
+        Self {
+            dead_code: output.dead_code,
+            duplication: output.duplication,
+        }
+    }
+}
 
 /// Dead-code and duplication output shaped for editor integrations.
 #[derive(Debug, Default)]
@@ -197,5 +279,36 @@ mod tests {
             3
         );
         assert!((output.duplication.stats.duplication_percentage - 20.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn editor_session_returns_api_owned_project_output() {
+        let temp = tempfile::tempdir().expect("temp project");
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("src")).expect("src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"editor-api-session","main":"src/index.ts"}"#,
+        )
+        .expect("package.json");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export const used = 1;\nconsole.log(used);\n",
+        )
+        .expect("source");
+
+        let session = EditorAnalysisSession::load(root, None).expect("session loads");
+        let output = session
+            .analyze_project_with(&fallow_config::DuplicatesConfig::default(), true)
+            .expect("analysis runs");
+
+        assert!(output.dead_code.modules.is_some());
+        assert!(
+            output
+                .dead_code
+                .files
+                .as_ref()
+                .is_some_and(|files| !files.is_empty())
+        );
     }
 }
