@@ -747,7 +747,7 @@ pub struct CachedModule {
     pub class_heritage: Vec<fallow_types::extract::ClassHeritageInfo>,
     /// Exported free-function factories that provably return one class instance
     /// (`export function useApi() { return new RESTApi() }`). See #1441 Part A.
-    pub exported_factory_returns: Vec<fallow_types::extract::FactoryReturnExport>,
+    pub exported_factory_returns: Option<Vec<fallow_types::extract::FactoryReturnExport>>,
     /// Angular `InjectionToken<Interface>` `(token, interface)` pairs (#920).
     pub injection_tokens: Vec<(String, String)>,
     /// Local type-capable declarations.

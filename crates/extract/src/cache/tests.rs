@@ -78,6 +78,33 @@ fn cache_roundtrip_preserves_react_structural_ir() {
 }
 
 #[test]
+fn cache_omits_empty_exported_factory_returns_but_roundtrips_non_empty() {
+    let empty = parse_from_content(
+        FileId(7),
+        Path::new("src/plain.ts"),
+        "export const value = 1;",
+    );
+    assert!(empty.exported_factory_returns.is_empty());
+    let cached_empty = module_to_cached(&empty, 10, 20);
+    assert!(cached_empty.exported_factory_returns.is_none());
+
+    let module = parse_from_content(
+        FileId(8),
+        Path::new("src/factory.ts"),
+        "class RESTApi {}\nexport function useApi() { return new RESTApi(); }",
+    );
+    assert_eq!(module.exported_factory_returns.len(), 1);
+    let cached = module_to_cached(&module, 10, 20);
+    assert!(cached.exported_factory_returns.is_some());
+    let restored = cached_to_module(&cached, FileId(8));
+
+    assert_eq!(
+        restored.exported_factory_returns,
+        module.exported_factory_returns
+    );
+}
+
+#[test]
 fn cache_store_insert_and_get() {
     let mut store = CacheStore::new();
     let module = CachedModule {
@@ -105,7 +132,7 @@ fn cache_store_insert_and_get() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -188,7 +215,7 @@ fn cache_store_hash_mismatch_returns_none() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -279,7 +306,7 @@ fn cache_store_overwrite_entry() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -353,7 +380,7 @@ fn cache_store_overwrite_entry() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -1239,7 +1266,7 @@ fn cache_save_and_load_roundtrip() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -1333,7 +1360,7 @@ fn cache_version_mismatch_returns_none() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -1520,7 +1547,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -1617,7 +1644,7 @@ fn retain_paths_removes_stale_entries() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -1720,7 +1747,7 @@ fn retain_paths_with_empty_files_clears_cache() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -1804,7 +1831,7 @@ fn get_by_metadata_returns_entry_on_match() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -1888,7 +1915,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -1974,7 +2001,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -2060,7 +2087,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
@@ -3617,7 +3644,7 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
