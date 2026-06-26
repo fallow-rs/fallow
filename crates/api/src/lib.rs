@@ -21,13 +21,16 @@ use fallow_output::EffortEstimate;
 use serde::Serialize;
 
 pub mod audit_output;
+pub mod dead_code_codeclimate;
 pub mod dupes_output;
 pub mod editor;
 pub mod grouped_output;
+pub mod health_codeclimate;
 pub mod output_contracts;
 pub mod runtime;
 pub mod security_output;
 pub use audit_output::{AuditAttribution, AuditSummary, AuditVerdict};
+pub use dead_code_codeclimate::build_codeclimate;
 pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneFamilyFinding,
     CloneGroupFinding, DupesReportPayload, DuplicationGroup, DuplicationGrouping,
@@ -43,6 +46,7 @@ pub use grouped_output::{
     ResultGroup, UNOWNED_GROUP_LABEL, build_duplication_grouping_with, group_analysis_results_with,
     largest_clone_group_owner_with,
 };
+pub use health_codeclimate::build_health_codeclimate;
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListing, CombinedOutput, FallowOutput,
     ListBoundariesOutput, SecurityGate, SecurityOutput, SecurityOutputConfig,
