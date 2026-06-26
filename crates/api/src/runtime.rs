@@ -60,7 +60,14 @@ pub trait ProgrammaticHealthRunner {
     ) -> Result<ProgrammaticHealthRun, ProgrammaticError>;
 }
 
-struct ResolvedAnalysisOptions {
+/// Resolved common programmatic analysis context.
+///
+/// This owns validation, root/config/diff resolution, production overrides,
+/// workspace scope, and the per-call thread pool shared by programmatic
+/// analysis families. API runtimes use it directly, and temporary concrete
+/// runners can use the same context while execution finishes moving behind
+/// typed engine results.
+pub struct ProgrammaticAnalysisContext {
     root: PathBuf,
     config_path: Option<PathBuf>,
     no_cache: bool,
@@ -69,8 +76,11 @@ struct ResolvedAnalysisOptions {
     diff: Option<DiffIndex>,
     production_override: Option<bool>,
     changed_since: Option<String>,
+    workspace: Option<Vec<String>>,
+    changed_workspaces: Option<String>,
     workspace_roots: Option<Vec<PathBuf>>,
     legacy_envelope: bool,
+    explain: bool,
 }
 
 /// Typed programmatic dead-code output before JSON serialization.
@@ -235,7 +245,7 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
 pub fn run_duplication(
     options: &DuplicationOptions,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
-    let resolved = resolve_analysis_options(&options.analysis)?;
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| detect_duplication_inner(options, &resolved))
 }
 
@@ -262,7 +272,7 @@ pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_j
 /// options, config load failures, analysis failures, or git changed-file
 /// failures.
 pub fn run_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
-    let resolved = resolve_analysis_options(&options.analysis)?;
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| detect_dead_code_inner(options, &resolved, |_| {}))
 }
 
@@ -288,7 +298,7 @@ pub fn detect_circular_dependencies(
 pub fn run_circular_dependencies(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
-    let resolved = resolve_analysis_options(&options.analysis)?;
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| detect_dead_code_inner(options, &resolved, keep_circular_dependencies))
 }
 
@@ -315,7 +325,7 @@ pub fn detect_boundary_violations(
 pub fn run_boundary_violations(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
-    let resolved = resolve_analysis_options(&options.analysis)?;
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| detect_dead_code_inner(options, &resolved, keep_boundary_violations))
 }
 
@@ -448,7 +458,7 @@ fn group_by_mode_from_label(label: &str) -> Option<GroupByMode> {
 
 fn detect_dead_code_inner(
     options: &DeadCodeOptions,
-    resolved: &ResolvedAnalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
     post_filter: impl FnOnce(&mut AnalysisResults),
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let start = Instant::now();
@@ -507,7 +517,7 @@ fn keep_boundary_violations(results: &mut AnalysisResults) {
 
 fn load_dead_code_session(
     options: &DeadCodeOptions,
-    resolved: &ResolvedAnalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
     let project_config = fallow_engine::config_for_project_analysis(
         &resolved.root,
@@ -552,7 +562,7 @@ fn activate_explicit_dead_code_opt_ins(
 
 fn apply_dead_code_scope(
     options: &DeadCodeOptions,
-    resolved: &ResolvedAnalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
     results: &mut AnalysisResults,
 ) -> ProgrammaticResult<()> {
@@ -913,7 +923,7 @@ fn apply_dead_code_catalog_filters(filters: &DeadCodeFilters, results: &mut Anal
 
 fn detect_duplication_inner(
     options: &DuplicationOptions,
-    resolved: &ResolvedAnalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let start = Instant::now();
     let session = load_duplication_session(options, resolved)?;
@@ -965,7 +975,7 @@ fn detect_duplication_inner(
 
 fn load_duplication_session(
     options: &DuplicationOptions,
-    resolved: &ResolvedAnalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
     let project_config =
         fallow_engine::config_for_project(&resolved.root, resolved.config_path.as_deref())
@@ -981,7 +991,7 @@ fn load_duplication_session(
 fn configure_project_for_duplication(
     mut project_config: ProjectConfig,
     options: &DuplicationOptions,
-    resolved: &ResolvedAnalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
 ) -> ProjectConfig {
     let production = resolved
         .production_override
@@ -1023,9 +1033,15 @@ const fn duplication_mode_to_config(mode: DuplicationMode) -> DetectionMode {
     }
 }
 
-fn resolve_analysis_options(
+/// Resolve common programmatic analysis options once for a concrete runtime.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error for invalid roots, configs, thread
+/// counts, workspace scopes, or explicit diff files.
+pub fn resolve_programmatic_analysis_context(
     options: &AnalysisOptions,
-) -> ProgrammaticResult<ResolvedAnalysisOptions> {
+) -> ProgrammaticResult<ProgrammaticAnalysisContext> {
     validate_analysis_option_shape(options)?;
     let root = resolve_analysis_root(options.root.as_deref())?;
     validate_analysis_config_path(options.config_path.as_deref())?;
@@ -1048,7 +1064,7 @@ fn resolve_analysis_options(
         options.workspace.as_deref(),
         options.changed_workspaces.as_deref(),
     )?;
-    Ok(ResolvedAnalysisOptions {
+    Ok(ProgrammaticAnalysisContext {
         root,
         config_path: options.config_path.clone(),
         no_cache: options.no_cache,
@@ -1059,8 +1075,11 @@ fn resolve_analysis_options(
             .production_override
             .or_else(|| options.production.then_some(true)),
         changed_since: options.changed_since.clone(),
+        workspace: options.workspace.clone(),
+        changed_workspaces: options.changed_workspaces.clone(),
         workspace_roots,
         legacy_envelope: options.legacy_envelope,
+        explain: options.explain,
     })
 }
 
@@ -1128,9 +1147,70 @@ fn validate_analysis_config_path(config_path: Option<&Path>) -> ProgrammaticResu
     Ok(())
 }
 
-impl ResolvedAnalysisOptions {
-    fn install<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
+impl ProgrammaticAnalysisContext {
+    /// Run work inside the per-call Rayon pool.
+    pub fn install<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
         self.pool.install(f)
+    }
+
+    /// Resolved analysis root.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Config path supplied by the caller, if any.
+    #[must_use]
+    pub fn config_path(&self) -> &Option<PathBuf> {
+        &self.config_path
+    }
+
+    /// Whether parser cache use is disabled for this call.
+    #[must_use]
+    pub const fn no_cache(&self) -> bool {
+        self.no_cache
+    }
+
+    /// Effective parser thread count for this call.
+    #[must_use]
+    pub const fn threads(&self) -> usize {
+        self.threads
+    }
+
+    /// Parsed explicit diff file, if supplied.
+    #[must_use]
+    pub const fn diff_index(&self) -> Option<&DiffIndex> {
+        self.diff.as_ref()
+    }
+
+    /// Explicit production override supplied by the caller.
+    #[must_use]
+    pub const fn production_override(&self) -> Option<bool> {
+        self.production_override
+    }
+
+    /// Git ref used to scope changed files.
+    #[must_use]
+    pub fn changed_since(&self) -> Option<&str> {
+        self.changed_since.as_deref()
+    }
+
+    /// Workspace filter patterns supplied by the caller.
+    #[must_use]
+    pub fn workspace(&self) -> Option<&[String]> {
+        self.workspace.as_deref()
+    }
+
+    /// Git ref used to scope changed workspaces.
+    #[must_use]
+    pub fn changed_workspaces(&self) -> Option<&str> {
+        self.changed_workspaces.as_deref()
+    }
+
+    /// Whether API JSON should include explanatory metadata.
+    #[must_use]
+    pub const fn explain_enabled(&self) -> bool {
+        self.explain
     }
 }
 
@@ -1195,7 +1275,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<DiffI
 }
 
 fn changed_files_for_run(
-    resolved: &ResolvedAnalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<Option<FxHashSet<PathBuf>>> {
     let Some(git_ref) = resolved.changed_since.as_deref() else {
         return Ok(None);

@@ -4,219 +4,21 @@
 //! This module remains only to adapt the still-CLI-owned health implementation
 //! into the typed `ProgrammaticHealthRunner` contract.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use fallow_config::OutputFormat;
 use fallow_engine::{ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun};
 
 use crate::health::HealthOptions;
-use crate::report::ci::diff_filter::{DiffIndex, LoadedDiff, MAX_DIFF_BYTES};
 
+#[cfg(test)]
+use fallow_api::AnalysisOptions;
 use fallow_api::{
-    AnalysisOptions, ComplexityOptions, ProgrammaticError, derive_complexity_run_options,
+    ComplexityOptions, ProgrammaticAnalysisContext, ProgrammaticError,
+    derive_complexity_run_options, resolve_programmatic_analysis_context,
 };
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
-
-struct ResolvedAnalysisOptions {
-    root: PathBuf,
-    config_path: Option<PathBuf>,
-    no_cache: bool,
-    threads: usize,
-    pool: rayon::ThreadPool,
-    diff: Option<LoadedDiff>,
-    production_override: Option<bool>,
-    changed_since: Option<String>,
-    workspace: Option<Vec<String>>,
-    changed_workspaces: Option<String>,
-    explain: bool,
-}
-
-fn resolve_analysis_options(
-    options: &AnalysisOptions,
-) -> ProgrammaticResult<ResolvedAnalysisOptions> {
-    validate_analysis_option_shape(options)?;
-    let root = resolve_analysis_root(options.root.as_deref())?;
-    validate_analysis_config_path(options.config_path.as_deref())?;
-
-    let threads = options.threads.unwrap_or_else(default_threads);
-    let pool = build_analysis_thread_pool(threads)?;
-    let diff = options
-        .diff_file
-        .as_deref()
-        .map(|path| load_explicit_diff_file(path, &root))
-        .transpose()?;
-    let production_override = options
-        .production_override
-        .or_else(|| options.production.then_some(true));
-
-    Ok(ResolvedAnalysisOptions {
-        root,
-        config_path: options.config_path.clone(),
-        no_cache: options.no_cache,
-        threads,
-        pool,
-        diff,
-        production_override,
-        changed_since: options.changed_since.clone(),
-        workspace: options.workspace.clone(),
-        changed_workspaces: options.changed_workspaces.clone(),
-        explain: options.explain,
-    })
-}
-
-fn validate_analysis_option_shape(options: &AnalysisOptions) -> ProgrammaticResult<()> {
-    if options.threads == Some(0) {
-        return Err(
-            ProgrammaticError::new("`threads` must be greater than 0", 2)
-                .with_code("FALLOW_INVALID_THREADS")
-                .with_context("analysis.threads"),
-        );
-    }
-    if options.workspace.is_some() && options.changed_workspaces.is_some() {
-        return Err(ProgrammaticError::new(
-            "`workspace` and `changed_workspaces` are mutually exclusive",
-            2,
-        )
-        .with_code("FALLOW_MUTUALLY_EXCLUSIVE_OPTIONS")
-        .with_context("analysis.workspace"));
-    }
-
-    Ok(())
-}
-
-fn resolve_analysis_root(root: Option<&Path>) -> ProgrammaticResult<PathBuf> {
-    let root = match root {
-        Some(root) => root.to_path_buf(),
-        None => std::env::current_dir().map_err(|err| {
-            ProgrammaticError::new(
-                format!("failed to resolve current working directory: {err}"),
-                2,
-            )
-            .with_code("FALLOW_CWD_UNAVAILABLE")
-            .with_context("analysis.root")
-        })?,
-    };
-
-    if !root.exists() {
-        return Err(ProgrammaticError::new(
-            format!("analysis root does not exist: {}", root.display()),
-            2,
-        )
-        .with_code("FALLOW_INVALID_ROOT")
-        .with_context("analysis.root"));
-    }
-    if !root.is_dir() {
-        return Err(ProgrammaticError::new(
-            format!("analysis root is not a directory: {}", root.display()),
-            2,
-        )
-        .with_code("FALLOW_INVALID_ROOT")
-        .with_context("analysis.root"));
-    }
-
-    Ok(root)
-}
-
-fn validate_analysis_config_path(config_path: Option<&Path>) -> ProgrammaticResult<()> {
-    if let Some(config_path) = config_path
-        && !config_path.exists()
-    {
-        return Err(ProgrammaticError::new(
-            format!("config file does not exist: {}", config_path.display()),
-            2,
-        )
-        .with_code("FALLOW_INVALID_CONFIG_PATH")
-        .with_context("analysis.configPath"));
-    }
-
-    Ok(())
-}
-
-fn build_analysis_thread_pool(threads: usize) -> ProgrammaticResult<rayon::ThreadPool> {
-    crate::rayon_pool::build_thread_pool(threads).map_err(|err| {
-        ProgrammaticError::new(format!("failed to build analysis thread pool: {err}"), 2)
-            .with_code("FALLOW_THREAD_POOL_INIT_FAILED")
-            .with_context("analysis.threads")
-    })
-}
-
-impl ResolvedAnalysisOptions {
-    fn install<R: Send>(&self, f: impl FnOnce() -> R + Send) -> R {
-        self.pool.install(f)
-    }
-
-    fn diff_index(&self) -> Option<&DiffIndex> {
-        self.diff.as_ref().map(|loaded| &loaded.index)
-    }
-}
-
-fn default_threads() -> usize {
-    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
-}
-
-fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<LoadedDiff> {
-    if path == Path::new("-") {
-        return Err(ProgrammaticError::new(
-            "`diff_file` does not support stdin; pass a file path",
-            2,
-        )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
-        .with_context("analysis.diffFile"));
-    }
-
-    let abs = if crate::path_util::is_absolute_path_any_platform(path) {
-        path.to_path_buf()
-    } else {
-        root.join(path)
-    };
-
-    let meta = std::fs::metadata(&abs).map_err(|err| {
-        ProgrammaticError::new(
-            format!(
-                "diff file does not exist or cannot be read: {} ({err})",
-                abs.display()
-            ),
-            2,
-        )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
-        .with_context("analysis.diffFile")
-    })?;
-    if !meta.is_file() {
-        return Err(ProgrammaticError::new(
-            format!("diff path is not a file: {}", abs.display()),
-            2,
-        )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
-        .with_context("analysis.diffFile"));
-    }
-    if meta.len() > MAX_DIFF_BYTES {
-        return Err(ProgrammaticError::new(
-            format!(
-                "diff file is {} bytes, above the {MAX_DIFF_BYTES} byte limit: {}",
-                meta.len(),
-                abs.display()
-            ),
-            2,
-        )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
-        .with_context("analysis.diffFile"));
-    }
-
-    let text = std::fs::read_to_string(&abs).map_err(|err| {
-        ProgrammaticError::new(
-            format!("failed to read diff file {}: {err}", abs.display()),
-            2,
-        )
-        .with_code("FALLOW_INVALID_DIFF_FILE")
-        .with_context("analysis.diffFile")
-    })?;
-
-    Ok(LoadedDiff {
-        index: DiffIndex::from_unified_diff(&text),
-        raw: text,
-    })
-}
 
 fn workspace_diagnostics_for_programmatic_output(
     root: &Path,
@@ -240,29 +42,29 @@ fn generic_analysis_error(command: &str) -> ProgrammaticError {
 }
 
 fn build_complexity_options<'a>(
-    resolved: &'a ResolvedAnalysisOptions,
+    resolved: &'a ProgrammaticAnalysisContext,
     options: &'a ComplexityOptions,
 ) -> HealthOptions<'a> {
     let run = derive_complexity_run_options(options);
 
     HealthOptions {
         execution: fallow_engine::HealthExecutionOptions {
-            root: &resolved.root,
-            config_path: &resolved.config_path,
+            root: resolved.root(),
+            config_path: resolved.config_path(),
             output: OutputFormat::Human,
-            no_cache: resolved.no_cache,
-            threads: resolved.threads,
+            no_cache: resolved.no_cache(),
+            threads: resolved.threads(),
             quiet: true,
             thresholds: run.thresholds,
             top: run.top,
             sort: run.sort,
-            production: resolved.production_override.unwrap_or(false),
-            production_override: resolved.production_override,
-            changed_since: resolved.changed_since.as_deref(),
+            production: resolved.production_override().unwrap_or(false),
+            production_override: resolved.production_override(),
+            changed_since: resolved.changed_since(),
             diff_index: resolved.diff_index(),
             use_shared_diff_index: false,
-            workspace: resolved.workspace.as_deref(),
-            changed_workspaces: resolved.changed_workspaces.as_deref(),
+            workspace: resolved.workspace(),
+            changed_workspaces: resolved.changed_workspaces(),
             baseline: None,
             save_baseline: None,
             complexity: run.sections.complexity,
@@ -282,7 +84,7 @@ fn build_complexity_options<'a>(
             gates: fallow_engine::HealthGateOptions::default(),
             since: run.since,
             min_commits: run.min_commits,
-            explain: resolved.explain,
+            explain: resolved.explain_enabled(),
             summary: false,
             save_snapshot: None,
             trend: false,
@@ -303,7 +105,7 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
         &self,
         options: &ComplexityOptions,
     ) -> ProgrammaticResult<ProgrammaticHealthRun> {
-        let resolved = resolve_analysis_options(&options.analysis)?;
+        let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
         resolved.install(|| {
             let health_options = build_complexity_options(&resolved, options);
             let result = crate::health::execute_health(&health_options)
@@ -356,6 +158,7 @@ fn compute_health(options: &ComplexityOptions) -> ProgrammaticResult<serde_json:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn analysis_resolve_uses_per_call_thread_pool() {
@@ -367,15 +170,15 @@ mod tests {
             threads: Some(1),
             ..AnalysisOptions::default()
         };
-        let one =
-            resolve_analysis_options(&one_options).expect("one-thread options should resolve");
+        let one = resolve_programmatic_analysis_context(&one_options)
+            .expect("one-thread options should resolve");
         let two_options = AnalysisOptions {
             root: Some(root.to_path_buf()),
             threads: Some(2),
             ..AnalysisOptions::default()
         };
-        let two =
-            resolve_analysis_options(&two_options).expect("two-thread options should resolve");
+        let two = resolve_programmatic_analysis_context(&two_options)
+            .expect("two-thread options should resolve");
 
         assert_eq!(one.install(rayon::current_num_threads), 1);
         assert_eq!(two.install(rayon::current_num_threads), 2);
@@ -389,7 +192,7 @@ mod tests {
             diff_file: Some(PathBuf::from("-")),
             ..AnalysisOptions::default()
         };
-        let Err(error) = resolve_analysis_options(&options) else {
+        let Err(error) = resolve_programmatic_analysis_context(&options) else {
             panic!("stdin sentinel is not part of the programmatic API");
         };
 
@@ -428,7 +231,7 @@ mod tests {
             threads: Some(0),
             ..AnalysisOptions::default()
         };
-        let err = resolve_analysis_options(&options)
+        let err = resolve_programmatic_analysis_context(&options)
             .err()
             .expect("zero threads must be rejected");
         assert_eq!(err.exit_code, 2);
@@ -443,13 +246,10 @@ mod tests {
             changed_workspaces: Some("HEAD~1".to_owned()),
             ..AnalysisOptions::default()
         };
-        let err = resolve_analysis_options(&options)
+        let err = resolve_programmatic_analysis_context(&options)
             .err()
             .expect("workspace + changed_workspaces must be rejected");
-        assert_eq!(
-            err.code.as_deref(),
-            Some("FALLOW_MUTUALLY_EXCLUSIVE_OPTIONS")
-        );
+        assert_eq!(err.code.as_deref(), Some("FALLOW_MUTUALLY_EXCLUSIVE_SCOPE"));
         assert_eq!(err.context.as_deref(), Some("analysis.workspace"));
     }
 
@@ -459,7 +259,7 @@ mod tests {
             root: Some(PathBuf::from("/definitely/not/a/real/path/xyzzy")),
             ..AnalysisOptions::default()
         };
-        let err = resolve_analysis_options(&options)
+        let err = resolve_programmatic_analysis_context(&options)
             .err()
             .expect("nonexistent root must be rejected");
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_ROOT"));
@@ -475,7 +275,7 @@ mod tests {
             root: Some(file),
             ..AnalysisOptions::default()
         };
-        let err = resolve_analysis_options(&options)
+        let err = resolve_programmatic_analysis_context(&options)
             .err()
             .expect("a file root must be rejected");
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_ROOT"));
@@ -489,7 +289,7 @@ mod tests {
             config_path: Some(dir.path().join("missing.fallowrc.json")),
             ..AnalysisOptions::default()
         };
-        let err = resolve_analysis_options(&options)
+        let err = resolve_programmatic_analysis_context(&options)
             .err()
             .expect("nonexistent config must be rejected");
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_CONFIG_PATH"));
@@ -504,7 +304,7 @@ mod tests {
             diff_file: Some(PathBuf::from("nope.diff")),
             ..AnalysisOptions::default()
         };
-        let err = resolve_analysis_options(&options)
+        let err = resolve_programmatic_analysis_context(&options)
             .err()
             .expect("missing diff file must be rejected");
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_DIFF_FILE"));
@@ -520,7 +320,7 @@ mod tests {
             diff_file: Some(PathBuf::from("a-dir")),
             ..AnalysisOptions::default()
         };
-        let err = resolve_analysis_options(&options)
+        let err = resolve_programmatic_analysis_context(&options)
             .err()
             .expect("a directory diff path must be rejected");
         assert_eq!(err.code.as_deref(), Some("FALLOW_INVALID_DIFF_FILE"));
