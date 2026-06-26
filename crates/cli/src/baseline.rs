@@ -2,7 +2,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use fallow_core::duplicates::DuplicationReport;
+use fallow_engine::duplicates::DuplicationReport;
 
 /// Strip the project root from a path to produce a portable relative key.
 ///
@@ -184,7 +184,7 @@ pub struct BaselineData {
 }
 
 impl BaselineData {
-    pub fn from_results(results: &fallow_core::results::AnalysisResults, root: &Path) -> Self {
+    pub fn from_results(results: &fallow_engine::results::AnalysisResults, root: &Path) -> Self {
         let file_exports = baseline_file_export_keys(results, root);
         let member_imports = baseline_member_import_keys(results, root);
         let dependencies = baseline_dependency_keys(results, root);
@@ -295,7 +295,7 @@ struct BaselineFileExportKeys {
 }
 
 fn baseline_file_export_keys(
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
 ) -> BaselineFileExportKeys {
     BaselineFileExportKeys {
@@ -332,7 +332,7 @@ fn baseline_file_export_keys(
 }
 
 fn unused_export_baseline_keys(
-    items: &[fallow_core::results::UnusedExportFinding],
+    items: &[fallow_engine::results::UnusedExportFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -348,7 +348,7 @@ fn unused_export_baseline_keys(
 }
 
 fn unused_type_baseline_keys(
-    items: &[fallow_core::results::UnusedTypeFinding],
+    items: &[fallow_engine::results::UnusedTypeFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -364,7 +364,7 @@ fn unused_type_baseline_keys(
 }
 
 fn invalid_client_export_baseline_keys(
-    items: &[fallow_core::results::InvalidClientExportFinding],
+    items: &[fallow_engine::results::InvalidClientExportFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -380,7 +380,7 @@ fn invalid_client_export_baseline_keys(
 }
 
 fn private_type_leak_baseline_keys(
-    items: &[fallow_core::results::PrivateTypeLeakFinding],
+    items: &[fallow_engine::results::PrivateTypeLeakFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -397,7 +397,7 @@ fn private_type_leak_baseline_keys(
 }
 
 fn barrel_baseline_keys(
-    items: &[fallow_core::results::MixedClientServerBarrelFinding],
+    items: &[fallow_engine::results::MixedClientServerBarrelFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -414,7 +414,7 @@ fn barrel_baseline_keys(
 }
 
 fn directive_baseline_keys(
-    items: &[fallow_core::results::MisplacedDirectiveFinding],
+    items: &[fallow_engine::results::MisplacedDirectiveFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -431,7 +431,7 @@ fn directive_baseline_keys(
 }
 
 fn route_collision_baseline_keys(
-    items: &[fallow_core::results::RouteCollisionFinding],
+    items: &[fallow_engine::results::RouteCollisionFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -465,7 +465,7 @@ struct BaselineMemberImportKeys {
 }
 
 fn baseline_member_import_keys(
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
 ) -> BaselineMemberImportKeys {
     BaselineMemberImportKeys {
@@ -502,7 +502,7 @@ fn baseline_member_import_keys(
 }
 
 fn stale_suppression_baseline_key(
-    suppression: &fallow_core::results::StaleSuppression,
+    suppression: &fallow_engine::results::StaleSuppression,
     root: &Path,
 ) -> String {
     let rule_id = if suppression.missing_reason {
@@ -518,7 +518,7 @@ fn stale_suppression_baseline_key(
 }
 
 fn enum_member_baseline_keys(
-    items: &[fallow_core::results::UnusedEnumMemberFinding],
+    items: &[fallow_engine::results::UnusedEnumMemberFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -528,7 +528,7 @@ fn enum_member_baseline_keys(
 }
 
 fn class_member_baseline_keys(
-    items: &[fallow_core::results::UnusedClassMemberFinding],
+    items: &[fallow_engine::results::UnusedClassMemberFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -538,7 +538,7 @@ fn class_member_baseline_keys(
 }
 
 fn store_member_baseline_keys(
-    items: &[fallow_core::results::UnusedStoreMemberFinding],
+    items: &[fallow_engine::results::UnusedStoreMemberFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -547,7 +547,10 @@ fn store_member_baseline_keys(
         .collect()
 }
 
-fn unused_member_baseline_key(member: &fallow_core::results::UnusedMember, root: &Path) -> String {
+fn unused_member_baseline_key(
+    member: &fallow_engine::results::UnusedMember,
+    root: &Path,
+) -> String {
     format!(
         "{}:{}.{}",
         relative_path(&member.path, root),
@@ -557,7 +560,7 @@ fn unused_member_baseline_key(member: &fallow_core::results::UnusedMember, root:
 }
 
 fn inject_baseline_keys(
-    items: &[fallow_core::results::UnprovidedInjectFinding],
+    items: &[fallow_engine::results::UnprovidedInjectFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -573,7 +576,7 @@ fn inject_baseline_keys(
 }
 
 fn component_baseline_keys(
-    items: &[fallow_core::results::UnrenderedComponentFinding],
+    items: &[fallow_engine::results::UnrenderedComponentFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -589,7 +592,7 @@ fn component_baseline_keys(
 }
 
 fn component_prop_baseline_keys(
-    items: &[fallow_core::results::UnusedComponentPropFinding],
+    items: &[fallow_engine::results::UnusedComponentPropFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -599,7 +602,7 @@ fn component_prop_baseline_keys(
 }
 
 fn component_emit_baseline_keys(
-    items: &[fallow_core::results::UnusedComponentEmitFinding],
+    items: &[fallow_engine::results::UnusedComponentEmitFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -609,7 +612,7 @@ fn component_emit_baseline_keys(
 }
 
 fn component_input_baseline_keys(
-    items: &[fallow_core::results::UnusedComponentInputFinding],
+    items: &[fallow_engine::results::UnusedComponentInputFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -625,7 +628,7 @@ fn component_input_baseline_keys(
 }
 
 fn component_output_baseline_keys(
-    items: &[fallow_core::results::UnusedComponentOutputFinding],
+    items: &[fallow_engine::results::UnusedComponentOutputFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -641,7 +644,7 @@ fn component_output_baseline_keys(
 }
 
 fn svelte_event_baseline_keys(
-    items: &[fallow_core::results::UnusedSvelteEventFinding],
+    items: &[fallow_engine::results::UnusedSvelteEventFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -657,7 +660,7 @@ fn svelte_event_baseline_keys(
 }
 
 fn server_action_baseline_keys(
-    items: &[fallow_core::results::UnusedServerActionFinding],
+    items: &[fallow_engine::results::UnusedServerActionFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -673,7 +676,7 @@ fn server_action_baseline_keys(
 }
 
 fn load_data_key_baseline_keys(
-    items: &[fallow_core::results::UnusedLoadDataKeyFinding],
+    items: &[fallow_engine::results::UnusedLoadDataKeyFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -683,7 +686,7 @@ fn load_data_key_baseline_keys(
 }
 
 fn unresolved_import_baseline_keys(
-    items: &[fallow_core::results::UnresolvedImportFinding],
+    items: &[fallow_engine::results::UnresolvedImportFinding],
     root: &Path,
 ) -> Vec<String> {
     items
@@ -708,7 +711,7 @@ struct BaselineDependencyKeys {
 }
 
 fn baseline_dependency_keys(
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
 ) -> BaselineDependencyKeys {
     BaselineDependencyKeys {
@@ -755,7 +758,7 @@ struct BaselineGraphKeys {
 }
 
 fn baseline_graph_keys(
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
 ) -> BaselineGraphKeys {
     BaselineGraphKeys {
@@ -801,7 +804,7 @@ struct BaselineCatalogKeys {
 }
 
 fn baseline_catalog_keys(
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
 ) -> BaselineCatalogKeys {
     BaselineCatalogKeys {
@@ -842,7 +845,7 @@ fn baseline_catalog_keys(
 }
 
 /// Generate a stable key for a boundary violation: `from_path->to_path`.
-fn boundary_violation_key(v: &fallow_core::results::BoundaryViolation, root: &Path) -> String {
+fn boundary_violation_key(v: &fallow_engine::results::BoundaryViolation, root: &Path) -> String {
     format!(
         "{}->{}",
         relative_path(&v.from_path, root),
@@ -852,7 +855,7 @@ fn boundary_violation_key(v: &fallow_core::results::BoundaryViolation, root: &Pa
 
 /// Generate a stable key for a boundary call violation: `path:callee`.
 fn boundary_call_violation_key(
-    v: &fallow_core::results::BoundaryCallViolation,
+    v: &fallow_engine::results::BoundaryCallViolation,
     root: &Path,
 ) -> String {
     format!("{}:{}", relative_path(&v.path, root), v.callee)
@@ -861,7 +864,7 @@ fn boundary_call_violation_key(
 /// Generate a stable key for a rule-pack policy violation:
 /// `path:pack/rule_id:matched`. Line numbers are deliberately excluded so a
 /// baselined finding survives unrelated edits above it.
-fn policy_violation_key(v: &fallow_core::results::PolicyViolation, root: &Path) -> String {
+fn policy_violation_key(v: &fallow_engine::results::PolicyViolation, root: &Path) -> String {
     format!(
         "{}:{}/{}:{}",
         relative_path(&v.path, root),
@@ -872,7 +875,7 @@ fn policy_violation_key(v: &fallow_core::results::PolicyViolation, root: &Path) 
 }
 
 /// Generate a stable key for a duplicate export: `name|sorted_paths`.
-fn duplicate_export_key(dup: &fallow_core::results::DuplicateExport, root: &Path) -> String {
+fn duplicate_export_key(dup: &fallow_engine::results::DuplicateExport, root: &Path) -> String {
     let mut locs: Vec<String> = dup
         .locations
         .iter()
@@ -883,7 +886,7 @@ fn duplicate_export_key(dup: &fallow_core::results::DuplicateExport, root: &Path
 }
 
 /// Generate a stable key for a circular dependency based on sorted file paths.
-fn circular_dep_key(dep: &fallow_core::results::CircularDependency, root: &Path) -> String {
+fn circular_dep_key(dep: &fallow_engine::results::CircularDependency, root: &Path) -> String {
     let mut paths: Vec<String> = dep.files.iter().map(|f| relative_path(f, root)).collect();
     paths.sort();
     paths.join("->")
@@ -894,17 +897,17 @@ fn circular_dep_key(dep: &fallow_core::results::CircularDependency, root: &Path)
 /// it a self-loop on `src/foo.ts` would keyspace-collide with any future
 /// single-file multi-node shape, and the `--baseline new` filter would
 /// silently drop the new one as already-seen (panel catch #7).
-fn re_export_cycle_key(cycle: &fallow_core::results::ReExportCycle, root: &Path) -> String {
+fn re_export_cycle_key(cycle: &fallow_engine::results::ReExportCycle, root: &Path) -> String {
     let kind = match cycle.kind {
-        fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
-        fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+        fallow_engine::results::ReExportCycleKind::MultiNode => "multi-node",
+        fallow_engine::results::ReExportCycleKind::SelfLoop => "self-loop",
     };
     let mut paths: Vec<String> = cycle.files.iter().map(|f| relative_path(f, root)).collect();
     paths.sort();
     format!("{kind}:{}", paths.join("<->"))
 }
 
-fn private_type_leak_key(leak: &fallow_core::results::PrivateTypeLeak, root: &Path) -> String {
+fn private_type_leak_key(leak: &fallow_engine::results::PrivateTypeLeak, root: &Path) -> String {
     format!(
         "{}:{}->{}",
         relative_path(&leak.path, root),
@@ -932,7 +935,7 @@ struct BaselineFilterContext<'a> {
 }
 
 impl BaselineFilterContext<'_> {
-    fn filter_cycles_and_members(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_cycles_and_members(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_circular: FxHashSet<&str> = self
             .baseline
             .circular_dependencies
@@ -959,13 +962,16 @@ impl BaselineFilterContext<'_> {
         self.filter_unresolved_and_exports(results);
     }
 
-    fn filter_unused_members(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_unused_members(&self, results: &mut fallow_engine::results::AnalysisResults) {
         self.filter_enum_class_store_members(results);
         self.filter_component_surface_members(results);
         self.filter_route_action_members(results);
     }
 
-    fn filter_enum_class_store_members(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_enum_class_store_members(
+        &self,
+        results: &mut fallow_engine::results::AnalysisResults,
+    ) {
         let baseline_enum_members: FxHashSet<&str> = self
             .baseline
             .unused_enum_members
@@ -1017,7 +1023,7 @@ impl BaselineFilterContext<'_> {
 
     fn filter_component_surface_members(
         &self,
-        results: &mut fallow_core::results::AnalysisResults,
+        results: &mut fallow_engine::results::AnalysisResults,
     ) {
         retain_new_by_keys(
             &mut results.unprovided_injects,
@@ -1063,7 +1069,7 @@ impl BaselineFilterContext<'_> {
         );
     }
 
-    fn filter_route_action_members(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_route_action_members(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_unused_server_actions: FxHashSet<&str> = self
             .baseline
             .unused_server_actions
@@ -1095,7 +1101,7 @@ impl BaselineFilterContext<'_> {
         });
     }
 
-    fn filter_unresolved_and_exports(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_unresolved_and_exports(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_unresolved: FxHashSet<&str> = self
             .baseline
             .unresolved_imports
@@ -1133,7 +1139,7 @@ impl BaselineFilterContext<'_> {
         });
     }
 
-    fn filter_dependency_variants(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_dependency_variants(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_optional_deps: FxHashSet<&str> = self
             .baseline
             .unused_optional_dependencies
@@ -1154,7 +1160,7 @@ impl BaselineFilterContext<'_> {
 
     fn filter_type_and_test_only_dependencies(
         &self,
-        results: &mut fallow_core::results::AnalysisResults,
+        results: &mut fallow_engine::results::AnalysisResults,
     ) {
         let baseline_type_only: FxHashSet<&str> = self
             .baseline
@@ -1181,7 +1187,7 @@ impl BaselineFilterContext<'_> {
 
     fn filter_boundaries_and_suppressions(
         &self,
-        results: &mut fallow_core::results::AnalysisResults,
+        results: &mut fallow_engine::results::AnalysisResults,
     ) {
         let baseline_boundary: FxHashSet<&str> = self
             .baseline
@@ -1203,7 +1209,7 @@ impl BaselineFilterContext<'_> {
         self.filter_dynamic_segment_name_conflicts(results);
     }
 
-    fn filter_invalid_client_exports(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_invalid_client_exports(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_invalid: FxHashSet<&str> = self
             .baseline
             .invalid_client_exports
@@ -1222,7 +1228,7 @@ impl BaselineFilterContext<'_> {
 
     fn filter_mixed_client_server_barrels(
         &self,
-        results: &mut fallow_core::results::AnalysisResults,
+        results: &mut fallow_engine::results::AnalysisResults,
     ) {
         let baseline_barrels: FxHashSet<&str> = self
             .baseline
@@ -1241,7 +1247,7 @@ impl BaselineFilterContext<'_> {
         });
     }
 
-    fn filter_misplaced_directives(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_misplaced_directives(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_directives: FxHashSet<&str> = self
             .baseline
             .misplaced_directives
@@ -1259,7 +1265,7 @@ impl BaselineFilterContext<'_> {
         });
     }
 
-    fn filter_route_collisions(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_route_collisions(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_collisions: FxHashSet<&str> = self
             .baseline
             .route_collisions
@@ -1278,7 +1284,7 @@ impl BaselineFilterContext<'_> {
 
     fn filter_dynamic_segment_name_conflicts(
         &self,
-        results: &mut fallow_core::results::AnalysisResults,
+        results: &mut fallow_engine::results::AnalysisResults,
     ) {
         let baseline_conflicts: FxHashSet<&str> = self
             .baseline
@@ -1296,7 +1302,7 @@ impl BaselineFilterContext<'_> {
         });
     }
 
-    fn filter_boundary_details(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_boundary_details(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_boundary_coverage: FxHashSet<&str> = self
             .baseline
             .boundary_coverage_violations
@@ -1320,7 +1326,7 @@ impl BaselineFilterContext<'_> {
         });
     }
 
-    fn filter_stale_suppressions(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_stale_suppressions(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_stale: FxHashSet<&str> = self
             .baseline
             .stale_suppressions
@@ -1338,7 +1344,7 @@ impl BaselineFilterContext<'_> {
         });
     }
 
-    fn filter_pnpm_entries(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_pnpm_entries(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_catalog: FxHashSet<&str> = self
             .baseline
             .unused_catalog_entries
@@ -1365,7 +1371,7 @@ impl BaselineFilterContext<'_> {
 
     fn filter_pnpm_references_and_overrides(
         &self,
-        results: &mut fallow_core::results::AnalysisResults,
+        results: &mut fallow_engine::results::AnalysisResults,
     ) {
         let baseline_unresolved: FxHashSet<&str> = self
             .baseline
@@ -1387,7 +1393,7 @@ impl BaselineFilterContext<'_> {
         self.filter_pnpm_overrides(results);
     }
 
-    fn filter_pnpm_overrides(&self, results: &mut fallow_core::results::AnalysisResults) {
+    fn filter_pnpm_overrides(&self, results: &mut fallow_engine::results::AnalysisResults) {
         let baseline_unused_overrides: FxHashSet<&str> = self
             .baseline
             .unused_dependency_overrides
@@ -1424,10 +1430,10 @@ impl BaselineFilterContext<'_> {
 
 /// Filter results to only include issues not present in the baseline.
 pub fn filter_new_issues(
-    mut results: fallow_core::results::AnalysisResults,
+    mut results: fallow_engine::results::AnalysisResults,
     baseline: &BaselineData,
     root: &Path,
-) -> fallow_core::results::AnalysisResults {
+) -> fallow_engine::results::AnalysisResults {
     let baseline_files: FxHashSet<&str> =
         baseline.unused_files.iter().map(String::as_str).collect();
     let baseline_exports: FxHashSet<&str> =
@@ -1512,7 +1518,7 @@ impl DuplicationBaselineData {
 }
 
 /// Generate a stable key for a clone group based on its instance locations.
-fn clone_group_key(group: &fallow_core::duplicates::CloneGroup, root: &Path) -> String {
+fn clone_group_key(group: &fallow_engine::duplicates::CloneGroup, root: &Path) -> String {
     let mut parts: Vec<String> = group
         .instances
         .iter()
@@ -1543,8 +1549,8 @@ pub fn filter_new_clone_groups(
     });
 
     report.clone_families =
-        fallow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = fallow_core::duplicates::families::detect_mirrored_directories(
+        fallow_engine::duplicates::families::group_into_families(&report.clone_groups, root);
+    report.mirrored_directories = fallow_engine::duplicates::families::detect_mirrored_directories(
         &report.clone_families,
         root,
     );
@@ -1558,7 +1564,7 @@ pub fn filter_new_clone_groups(
 ///
 /// Uses per-file line deduplication (matching `compute_stats` in `detect.rs`)
 /// so overlapping clone instances don't inflate the duplicated line count.
-pub fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::DuplicationStats {
+pub fn recompute_stats(report: &DuplicationReport) -> fallow_engine::duplicates::DuplicationStats {
     let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
     let mut file_dup_lines: FxHashMap<&Path, FxHashSet<usize>> = FxHashMap::default();
     let mut duplicated_tokens = 0usize;
@@ -1578,7 +1584,7 @@ pub fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::D
 
     let duplicated_lines: usize = file_dup_lines.values().map(FxHashSet::len).sum();
 
-    fallow_core::duplicates::DuplicationStats {
+    fallow_engine::duplicates::DuplicationStats {
         total_files: report.stats.total_files,
         files_with_clones: files_with_clones.len(),
         total_lines: report.stats.total_lines,
@@ -2033,8 +2039,10 @@ pub struct BaselineDeltas {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
-    use fallow_core::results::{
+    use fallow_engine::duplicates::{
+        CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
+    };
+    use fallow_engine::results::{
         AnalysisResults, BoundaryViolationFinding, CircularDependencyFinding, DependencyLocation,
         UnusedDependency, UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedExport,
         UnusedFile,
@@ -2862,7 +2870,7 @@ mod tests {
 
     #[test]
     fn circular_dep_key_is_order_independent() {
-        use fallow_core::results::CircularDependency;
+        use fallow_engine::results::CircularDependency;
 
         let dep_ab = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
@@ -2889,7 +2897,7 @@ mod tests {
 
     #[test]
     fn circular_dep_key_different_files_different_keys() {
-        use fallow_core::results::CircularDependency;
+        use fallow_engine::results::CircularDependency;
 
         let dep1 = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![PathBuf::from("src/a.ts"), PathBuf::from("src/b.ts")],
@@ -2915,7 +2923,7 @@ mod tests {
 
     #[test]
     fn circular_dep_key_three_files_order_independent() {
-        use fallow_core::results::CircularDependency;
+        use fallow_engine::results::CircularDependency;
 
         let dep_abc = CircularDependencyFinding::with_actions(CircularDependency {
             files: vec![
@@ -2953,7 +2961,7 @@ mod tests {
     )]
     fn make_full_results() -> AnalysisResults {
         use fallow_core::extract::MemberKind;
-        use fallow_core::results::*;
+        use fallow_engine::results::*;
 
         let mut r = make_results();
         r.circular_dependencies
@@ -3006,7 +3014,7 @@ mod tests {
             }));
         r.unresolved_imports.push(
             fallow_types::output_dead_code::UnresolvedImportFinding::with_actions(
-                fallow_core::results::UnresolvedImport {
+                fallow_engine::results::UnresolvedImport {
                     path: PathBuf::from("src/app.ts"),
                     specifier: "./missing".to_string(),
                     line: 3,
@@ -3016,38 +3024,39 @@ mod tests {
             ),
         );
         r.unlisted_dependencies.push(
-            fallow_core::results::UnlistedDependencyFinding::with_actions(UnlistedDependency {
+            fallow_engine::results::UnlistedDependencyFinding::with_actions(UnlistedDependency {
                 package_name: "chalk".to_string(),
                 imported_from: vec![],
             }),
         );
-        r.duplicate_exports
-            .push(fallow_core::results::DuplicateExportFinding::with_actions(
-                fallow_core::results::DuplicateExport {
+        r.duplicate_exports.push(
+            fallow_engine::results::DuplicateExportFinding::with_actions(
+                fallow_engine::results::DuplicateExport {
                     export_name: "Config".to_string(),
                     locations: vec![
-                        fallow_core::results::DuplicateLocation {
+                        fallow_engine::results::DuplicateLocation {
                             path: PathBuf::from("src/a.ts"),
                             line: 1,
                             col: 0,
                         },
-                        fallow_core::results::DuplicateLocation {
+                        fallow_engine::results::DuplicateLocation {
                             path: PathBuf::from("src/b.ts"),
                             line: 5,
                             col: 0,
                         },
                     ],
                 },
-            ));
+            ),
+        );
         r.type_only_dependencies.push(
-            fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
+            fallow_engine::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
                 package_name: "zod".to_string(),
                 path: PathBuf::from("package.json"),
                 line: 8,
             }),
         );
         r.test_only_dependencies.push(
-            fallow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
+            fallow_engine::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
                 package_name: "vitest".to_string(),
                 path: PathBuf::from("package.json"),
                 line: 10,
@@ -3055,7 +3064,7 @@ mod tests {
         );
         r.boundary_violations.push(
             fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
-                fallow_core::results::BoundaryViolation {
+                fallow_engine::results::BoundaryViolation {
                     from_path: PathBuf::from("src/ui/btn.ts"),
                     to_path: PathBuf::from("src/db/query.ts"),
                     from_zone: "ui".to_string(),
@@ -3115,7 +3124,7 @@ mod tests {
 
     #[test]
     fn filter_keeps_new_circular_deps() {
-        use fallow_core::results::CircularDependency;
+        use fallow_engine::results::CircularDependency;
         let baseline = BaselineData {
             circular_dependencies: vec!["src/a.ts->src/b.ts".to_string()],
             ..BaselineData::from_results(&AnalysisResults::default(), Path::new(""))
@@ -3151,7 +3160,7 @@ mod tests {
 
     #[test]
     fn filter_keeps_new_boundary_violations() {
-        use fallow_core::results::BoundaryViolation;
+        use fallow_engine::results::BoundaryViolation;
         let baseline = BaselineData {
             boundary_violations: vec!["src/a.ts->src/b.ts".to_string()],
             boundary_coverage_violations: vec![],
@@ -3221,7 +3230,7 @@ mod tests {
 
     #[test]
     fn duplicate_export_key_is_sorted() {
-        use fallow_core::results::{DuplicateExport, DuplicateLocation};
+        use fallow_engine::results::{DuplicateExport, DuplicateLocation};
         let dup_ab = DuplicateExport {
             export_name: "foo".to_string(),
             locations: vec![
@@ -3260,7 +3269,7 @@ mod tests {
 
     #[test]
     fn boundary_violation_key_format() {
-        use fallow_core::results::BoundaryViolation;
+        use fallow_engine::results::BoundaryViolation;
         let v = BoundaryViolation {
             from_path: PathBuf::from("src/ui/btn.ts"),
             to_path: PathBuf::from("src/db/query.ts"),
@@ -3277,7 +3286,7 @@ mod tests {
     /// Build results with absolute paths rooted at the given prefix.
     fn make_absolute_results(root: &str) -> AnalysisResults {
         use fallow_core::extract::MemberKind;
-        use fallow_core::results::*;
+        use fallow_engine::results::*;
 
         let p = |rel: &str| PathBuf::from(format!("{root}/{rel}"));
 
@@ -3426,22 +3435,22 @@ mod tests {
     #[test]
     fn stale_suppression_baseline_keys_include_missing_reason_state() {
         let root = Path::new("/project");
-        let stale = fallow_core::results::StaleSuppression {
+        let stale = fallow_engine::results::StaleSuppression {
             path: root.join("src/file.ts"),
             line: 1,
             col: 0,
-            origin: fallow_core::results::SuppressionOrigin::Comment {
+            origin: fallow_engine::results::SuppressionOrigin::Comment {
                 issue_kind: Some("unused-export".to_string()),
                 reason: None,
                 is_file_level: false,
                 kind_known: true,
             },
             missing_reason: false,
-            actions: fallow_core::results::StaleSuppression::actions_for(false),
+            actions: fallow_engine::results::StaleSuppression::actions_for(false),
         };
-        let missing = fallow_core::results::StaleSuppression {
+        let missing = fallow_engine::results::StaleSuppression {
             missing_reason: true,
-            actions: fallow_core::results::StaleSuppression::actions_for(true),
+            actions: fallow_engine::results::StaleSuppression::actions_for(true),
             ..stale.clone()
         };
         let results = AnalysisResults {
