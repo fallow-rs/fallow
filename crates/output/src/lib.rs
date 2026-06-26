@@ -1,9 +1,9 @@
 //! Reusable output contract types for fallow.
 //!
 //! This crate owns stable report DTOs and output-format metadata that are not
-//! tied to CLI rendering. Human, SARIF, markdown, CodeClimate, and JSON
-//! builders still live in `fallow-cli`; this crate is the typed boundary those
-//! builders and non-CLI consumers can share.
+//! tied to CLI rendering. Higher-level output assemblers live above this crate
+//! in `fallow-api` or the CLI, while this crate remains the shared typed
+//! boundary those builders and non-CLI consumers can use.
 #![cfg_attr(
     test,
     allow(

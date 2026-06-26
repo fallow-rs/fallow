@@ -21,6 +21,7 @@ use fallow_output::EffortEstimate;
 use serde::Serialize;
 
 pub mod audit_output;
+pub mod compact_output;
 pub mod dead_code_codeclimate;
 pub mod dupes_output;
 pub mod editor;
@@ -32,6 +33,10 @@ pub mod runtime;
 pub mod sarif_output;
 pub mod security_output;
 pub use audit_output::{AuditAttribution, AuditSummary, AuditVerdict};
+pub use compact_output::{
+    build_compact_lines, build_duplication_compact_lines, build_grouped_compact_lines,
+    build_health_compact_lines,
+};
 pub use dead_code_codeclimate::build_codeclimate;
 pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneFamilyFinding,

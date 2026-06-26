@@ -686,7 +686,7 @@ pub use codeclimate::build_health_codeclimate;
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
 )]
-pub use compact::build_compact_lines;
+pub use fallow_api::build_compact_lines;
 #[allow(
     clippy::redundant_pub_crate,
     reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
