@@ -2,8 +2,8 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
-use fallow_core::results::AnalysisResults;
 use fallow_engine::git_env::clear_ambient_git_env;
+use fallow_engine::results::AnalysisResults;
 
 use super::counts::{CheckCounts, DupesCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline};
 use super::outcome::RegressionOutcome;
@@ -597,7 +597,7 @@ fn chrono_now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::results::*;
+    use fallow_engine::results::*;
     use std::path::PathBuf;
 
     fn sample_baseline() -> fallow_config::RegressionBaseline {
