@@ -21,6 +21,7 @@ use fallow_output::EffortEstimate;
 use serde::Serialize;
 
 pub mod audit_output;
+pub mod combined_output;
 pub mod compact_output;
 pub mod dead_code_codeclimate;
 pub mod dead_code_sarif;
@@ -59,6 +60,10 @@ pub use ci_output::{
     issues_from_codeclimate, issues_from_codeclimate_issues, render_pr_comment,
     render_review_comment_for_group, render_review_envelope, review_label_from_codeclimate,
     summary_fingerprint, summary_label,
+};
+pub use combined_output::{
+    CombinedCheckJsonSection, CombinedJsonOutputInput, serialize_combined_dupes_json,
+    serialize_combined_health_json, serialize_combined_json,
 };
 pub use compact_output::{
     build_compact_lines, build_duplication_compact_lines, build_grouped_compact_lines,

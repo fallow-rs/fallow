@@ -733,10 +733,7 @@ pub use json::build_health_json;
     reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
 )]
 pub(crate) use json::harmonize_multi_kind_suppress_line_actions;
-pub use json::{
-    build_baseline_deltas_output, build_check_json_payload_with_config_fixable_and_extras,
-    check_json_extras,
-};
+pub use json::{build_baseline_deltas_output, check_json_extras};
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"

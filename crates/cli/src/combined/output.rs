@@ -4,12 +4,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use colored::Colorize;
-use fallow_api::DupesReportPayload;
+use fallow_api::{CombinedCheckJsonSection, CombinedJsonOutputInput, DupesReportPayload};
 use fallow_config::OutputFormat;
-use fallow_output::{
-    CodeClimateIssue, CombinedMeta, CombinedOutput, RootEnvelopeMode, codeclimate_issues_to_value,
-};
-use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use fallow_output::{CodeClimateIssue, RootEnvelopeMode, codeclimate_issues_to_value};
 
 use crate::check::CheckResult;
 use crate::dupes::DupesResult;
@@ -458,18 +455,9 @@ fn print_combined_json(input: CombinedJsonPrintInput<'_>) -> ExitCode {
 fn build_combined_json_output(
     input: CombinedJsonPrintInput<'_>,
 ) -> Result<serde_json::Value, ExitCode> {
-    let root_prefix = format!("{}/", input.root.display());
-
-    let check = input
-        .check_result
-        .map(|result| build_combined_check_json(result, input.config_fixable))
-        .transpose()?;
-
     let dupes_payload = input
         .dupes_result
         .map(|result| DupesReportPayload::from_report(&result.report));
-    let dupes = build_combined_dupes_json(dupes_payload.as_ref(), input.root)?;
-    let health = build_combined_health_json(input.health_result, &root_prefix)?;
     let next_steps = combined_next_steps(
         input.check_result,
         dupes_payload.as_ref(),
@@ -477,84 +465,24 @@ fn build_combined_json_output(
         input.root,
     );
 
-    let output = CombinedOutput {
-        schema_version: SchemaVersion(crate::report::SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed_ms_for_output(input.elapsed)),
-        meta: input.explain.then(|| {
-            combined_meta_for_output(
-                input.check_result.is_some(),
-                input.dupes_result.is_some(),
-                input.health_result.is_some(),
-            )
+    fallow_api::serialize_combined_json(CombinedJsonOutputInput {
+        check: input.check_result.map(|result| CombinedCheckJsonSection {
+            results: &result.results,
+            root: &result.config.root,
+            elapsed: result.elapsed,
+            config_fixable: input.config_fixable,
+            extras: check_json_extras_for_combined(result),
         }),
-        check,
-        dupes,
-        health,
+        dupes: dupes_payload.as_ref(),
+        health: input.health_result.map(|result| &result.report),
+        root: input.root,
+        elapsed: input.elapsed,
+        explain: input.explain,
         next_steps,
-    };
-
-    fallow_output::serialize_combined_json_output(
-        output,
-        RootEnvelopeMode::Tagged,
-        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
-    )
+        envelope_mode: RootEnvelopeMode::Tagged,
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    })
     .map_err(|err| json_output_error(&err))
-}
-
-fn elapsed_ms_for_output(elapsed: std::time::Duration) -> u64 {
-    u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-}
-
-#[cfg(test)]
-fn combined_json_root(elapsed: std::time::Duration) -> Result<serde_json::Value, ExitCode> {
-    let envelope = CombinedOutput::<serde_json::Value, serde_json::Value, serde_json::Value> {
-        schema_version: fallow_types::envelope::SchemaVersion(crate::report::SCHEMA_VERSION),
-        version: fallow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: fallow_types::envelope::ElapsedMs(elapsed_ms_for_output(elapsed)),
-        meta: None,
-        check: None,
-        dupes: None,
-        health: None,
-        next_steps: Vec::new(),
-    };
-    fallow_output::serialize_combined_json_output(envelope, RootEnvelopeMode::Tagged, None)
-        .map_err(|err| json_output_error(&err))
-}
-
-fn build_combined_dupes_json(
-    dupes_payload: Option<&DupesReportPayload>,
-    root: &std::path::Path,
-) -> Result<Option<serde_json::Value>, ExitCode> {
-    let root_prefix = format!("{}/", root.display());
-    if let Some(payload) = dupes_payload {
-        match serde_json::to_value(payload) {
-            Ok(mut json) => {
-                report::strip_root_prefix(&mut json, &root_prefix);
-                Ok(Some(json))
-            }
-            Err(e) => Err(json_output_error(&e)),
-        }
-    } else {
-        Ok(None)
-    }
-}
-
-fn build_combined_health_json(
-    health: Option<&HealthResult>,
-    root_prefix: &str,
-) -> Result<Option<serde_json::Value>, ExitCode> {
-    if let Some(result) = health {
-        match serde_json::to_value(&result.report) {
-            Ok(mut json) => {
-                report::strip_root_prefix(&mut json, root_prefix);
-                Ok(Some(json))
-            }
-            Err(e) => Err(json_output_error(&e)),
-        }
-    } else {
-        Ok(None)
-    }
 }
 
 fn combined_next_steps(
@@ -573,19 +501,6 @@ fn combined_next_steps(
     )
 }
 
-fn combined_meta_for_output(
-    include_check: bool,
-    include_dupes: bool,
-    include_health: bool,
-) -> CombinedMeta {
-    CombinedMeta {
-        check: include_check.then(fallow_output::check_meta),
-        dupes: include_dupes.then(fallow_output::dupes_meta),
-        health: include_health.then(fallow_output::health_meta),
-        telemetry: None,
-    }
-}
-
 fn emit_combined_json_output(mut output: serde_json::Value) -> ExitCode {
     report::harmonize_multi_kind_suppress_line_actions(&mut output);
 
@@ -602,10 +517,7 @@ fn emit_combined_json_output(mut output: serde_json::Value) -> ExitCode {
     }
 }
 
-fn build_combined_check_json(
-    result: &CheckResult,
-    config_fixable: bool,
-) -> Result<serde_json::Value, ExitCode> {
+fn check_json_extras_for_combined(result: &CheckResult) -> fallow_api::CheckJsonExtraOutputs {
     let baseline_deltas = result.baseline_deltas.as_ref().map(|deltas| {
         report::build_baseline_deltas_output(
             deltas.total_delta,
@@ -615,18 +527,11 @@ fn build_combined_check_json(
                 .map(|(cat, delta)| (cat.as_str(), delta.current, delta.baseline, delta.delta)),
         )
     });
-    report::build_check_json_payload_with_config_fixable_and_extras(
-        &result.results,
-        &result.config.root,
-        result.elapsed,
-        config_fixable,
-        report::check_json_extras(
-            result.regression.as_ref(),
-            baseline_deltas,
-            result.baseline_matched,
-        ),
+    report::check_json_extras(
+        result.regression.as_ref(),
+        baseline_deltas,
+        result.baseline_matched,
     )
-    .map_err(|error| json_output_error(&error))
 }
 
 fn json_output_error(error: &serde_json::Error) -> ExitCode {
@@ -768,12 +673,10 @@ pub(super) fn exit_code_to_u8(code: ExitCode) -> u8 {
 #[cfg(test)]
 mod tests {
     use std::process::ExitCode;
-    use std::time::Duration;
 
     use super::{
-        build_combined_codeclimate, build_combined_dupes_json, build_combined_health_json,
-        combined_json_root, combined_machine_success, emit_combined_json_output, exit_code_to_u8,
-        print_combined_codeclimate, print_combined_sarif,
+        build_combined_codeclimate, combined_machine_success, emit_combined_json_output,
+        exit_code_to_u8, print_combined_codeclimate, print_combined_sarif,
     };
 
     #[test]
@@ -796,22 +699,6 @@ mod tests {
     }
 
     #[test]
-    fn combined_json_root_contains_stable_envelope_fields() {
-        let root = combined_json_root(Duration::from_millis(42)).expect("combined JSON root");
-
-        assert_eq!(
-            root.get("kind").and_then(serde_json::Value::as_str),
-            Some("combined")
-        );
-        assert_eq!(
-            root.get("elapsed_ms").and_then(serde_json::Value::as_u64),
-            Some(42)
-        );
-        assert!(root.get("schema_version").is_some());
-        assert!(root.get("version").is_some());
-    }
-
-    #[test]
     fn empty_combined_codeclimate_output_is_an_empty_issue_list() {
         assert_eq!(
             build_combined_codeclimate(None, None, None),
@@ -830,10 +717,10 @@ mod tests {
 
     #[test]
     fn insert_empty_optional_sections_leaves_combined_map_unchanged() {
-        let dupes = build_combined_dupes_json(None, std::path::Path::new("."))
+        let dupes = fallow_api::serialize_combined_dupes_json(None, std::path::Path::new("."))
             .expect("empty dupes section should serialize");
-        let health =
-            build_combined_health_json(None, ".").expect("empty health section should serialize");
+        let health = fallow_api::serialize_combined_health_json(None, std::path::Path::new("."))
+            .expect("empty health section should serialize");
 
         assert!(dupes.is_none());
         assert!(health.is_none());
@@ -841,7 +728,12 @@ mod tests {
 
     #[test]
     fn emit_combined_json_output_can_attach_empty_meta() {
-        let combined = combined_json_root(Duration::ZERO).expect("combined JSON root");
+        let combined = serde_json::json!({
+            "kind": "combined",
+            "schema_version": 7,
+            "version": env!("CARGO_PKG_VERSION"),
+            "elapsed_ms": 0,
+        });
 
         assert_eq!(emit_combined_json_output(combined), ExitCode::SUCCESS);
     }
