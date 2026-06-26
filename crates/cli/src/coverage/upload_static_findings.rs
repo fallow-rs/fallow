@@ -164,11 +164,8 @@ fn run_inner(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadE
     enforce_clean_worktree(args, root)?;
 
     let config = load_resolved_config(root)?;
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze* externally; the CLI still uses the workspace path dependency"
-    )]
-    let results = fallow_core::analyze(&config)
+    let results = fallow_engine::analyze(&config)
+        .map(|analysis| analysis.results)
         .map_err(|err| UploadError::Validation(format!("analysis failed: {err}")))?;
     let findings = collect_findings(&config, &results);
 

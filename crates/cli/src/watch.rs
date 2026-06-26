@@ -295,12 +295,8 @@ fn print_waiting(opts: &WatchOptions<'_>) {
 
 fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOptions<'_>) -> ExitCode {
     let start = Instant::now();
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze externally; the CLI still uses the workspace path dependency"
-    )]
-    let results = match fallow_core::analyze(config) {
-        Ok(r) => r,
+    let results = match fallow_engine::analyze(config) {
+        Ok(analysis) => analysis.results,
         Err(e) => {
             eprintln!("Analysis error: {e}");
             return ExitCode::from(2);

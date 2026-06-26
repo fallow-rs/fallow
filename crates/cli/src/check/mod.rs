@@ -404,9 +404,9 @@ fn run_check_analysis(
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
-    fallow_core::analyze(config)
-        .map(|results| CheckAnalysisData {
-            results,
+    fallow_engine::analyze(config)
+        .map(|analysis| CheckAnalysisData {
+            results: analysis.results,
             trace_graph: None,
             trace_timings: None,
             retained_modules: None,
