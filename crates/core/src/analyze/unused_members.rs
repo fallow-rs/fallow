@@ -12,13 +12,8 @@ use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
-    angular_template_member_names_from_parts, factory_call_member_access_facts_with_legacy,
-    fluent_chain_member_access_facts_with_legacy, fluent_chain_new_member_access_facts_with_legacy,
-    has_angular_template_members_from_parts, instance_export_binding_facts_with_legacy,
-    is_legacy_template_or_semantic_member_access_object,
-    is_legacy_template_or_semantic_whole_object_use, playwright_fixture_alias_facts_with_legacy,
-    playwright_fixture_definition_facts_with_legacy, playwright_fixture_type_facts_with_legacy,
-    playwright_fixture_use_facts_with_legacy,
+    SemanticFactView, is_legacy_template_or_semantic_member_access_object,
+    is_legacy_template_or_semantic_whole_object_use,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -578,11 +573,10 @@ fn build_angular_template_refs(
     resolved_modules
         .iter()
         .filter_map(|module| {
-            let refs: Vec<&str> = angular_template_member_names_from_parts(
-                &module.semantic_facts,
-                &module.member_accesses,
-            )
-            .collect();
+            let refs: Vec<&str> =
+                SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+                    .angular_template_member_names()
+                    .collect();
             if refs.is_empty() {
                 None
             } else {
@@ -598,10 +592,9 @@ fn build_angular_template_chain_accesses(
     resolved_modules
         .iter()
         .filter_map(|module| {
-            if !has_angular_template_members_from_parts(
-                &module.semantic_facts,
-                &module.member_accesses,
-            ) {
+            if !SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+                .has_angular_template_members()
+            {
                 return None;
             }
             let chains: Vec<(&str, &str)> = module
@@ -939,17 +932,12 @@ fn push_playwright_test_key(keys: &mut Vec<PlaywrightTestKey>, key: PlaywrightTe
 
 fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> FxHashSet<String> {
     let mut names = FxHashSet::default();
-    let definition_facts = playwright_fixture_definition_facts_with_legacy(
-        &resolved.semantic_facts,
-        &resolved.member_accesses,
-    );
+    let facts = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    let definition_facts = facts.playwright_fixture_definitions();
     for access in &definition_facts {
         names.insert(access.test_name.clone());
     }
-    let alias_facts = playwright_fixture_alias_facts_with_legacy(
-        &resolved.semantic_facts,
-        &resolved.member_accesses,
-    );
+    let alias_facts = facts.playwright_fixture_aliases();
     for access in &alias_facts {
         names.insert(access.test_name.clone());
     }
@@ -1018,8 +1006,8 @@ fn build_playwright_fixture_targets(
         .collect()
 }
 
-/// Collect fixture-definition sentinels for one module, recording each fixture's
-/// POM-type export keys under its owning test key.
+/// Collect fixture-definition facts for one module, recording each fixture's
+/// POM type export keys under its owning test key.
 fn collect_playwright_fixture_def_targets(
     graph: &ModuleGraph,
     resolved: &ResolvedModule,
@@ -1028,10 +1016,9 @@ fn collect_playwright_fixture_def_targets(
     type_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
     targets_by_test: &mut FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>>,
 ) {
-    let definition_facts = playwright_fixture_definition_facts_with_legacy(
-        &resolved.semantic_facts,
-        &resolved.member_accesses,
-    );
+    let definition_facts =
+        SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+            .playwright_fixture_definitions();
     for access in definition_facts {
         let test_keys = playwright_test_keys_for_local(
             local_to_export_keys,
@@ -1058,8 +1045,8 @@ fn collect_playwright_fixture_def_targets(
     }
 }
 
-/// Collect wrapper-alias sentinels for one module, recording each alias's base
-/// test keys (origins expanded) under its owning test key.
+/// Collect wrapper-alias facts for one module, recording each alias's base test
+/// keys (origins expanded) under its owning test key.
 fn collect_playwright_fixture_aliases(
     graph: &ModuleGraph,
     resolved: &ResolvedModule,
@@ -1067,10 +1054,8 @@ fn collect_playwright_fixture_aliases(
     local_playwright_test_names: &FxHashSet<String>,
     aliases_by_test: &mut FxHashMap<PlaywrightTestKey, Vec<PlaywrightTestKey>>,
 ) {
-    let alias_facts = playwright_fixture_alias_facts_with_legacy(
-        &resolved.semantic_facts,
-        &resolved.member_accesses,
-    );
+    let alias_facts = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+        .playwright_fixture_aliases();
     for access in alias_facts {
         let test_keys = playwright_test_keys_for_local(
             local_to_export_keys,
@@ -1188,10 +1173,8 @@ fn build_playwright_fixture_type_targets(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        let type_facts = playwright_fixture_type_facts_with_legacy(
-            &resolved.semantic_facts,
-            &resolved.member_accesses,
-        );
+        let type_facts = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+            .playwright_fixture_types();
         for access in type_facts {
             let Some(alias_keys) = local_to_export_keys.get(access.alias_name.as_str()) else {
                 continue;
@@ -1229,10 +1212,8 @@ fn propagate_playwright_fixture_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        let use_facts = playwright_fixture_use_facts_with_legacy(
-            &resolved.semantic_facts,
-            &resolved.member_accesses,
-        );
+        let use_facts = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+            .playwright_fixture_uses();
         for access in use_facts {
             let Some(test_keys) = local_to_export_keys.get(access.test_name.as_str()) else {
                 continue;
@@ -1264,10 +1245,9 @@ fn build_instance_export_targets(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in instance_export_binding_facts_with_legacy(
-            &resolved.semantic_facts,
-            &resolved.member_accesses,
-        ) {
+        for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+            .instance_export_bindings()
+        {
             let Some(target_keys) = local_to_export_keys.get(access.target_name.as_str()) else {
                 continue;
             };
@@ -1529,10 +1509,9 @@ fn propagate_factory_call_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in factory_call_member_access_facts_with_legacy(
-            &resolved.semantic_facts,
-            &resolved.member_accesses,
-        ) {
+        for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+            .factory_call_member_accesses()
+        {
             let Some(seed_keys) = local_to_export_keys.get(access.callee_object.as_str()) else {
                 continue;
             };
@@ -1604,10 +1583,9 @@ fn propagate_fluent_chain_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in fluent_chain_member_access_facts_with_legacy(
-            &resolved.semantic_facts,
-            &resolved.member_accesses,
-        ) {
+        for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+            .fluent_chain_member_accesses()
+        {
             let Some(seed_keys) = local_to_export_keys.get(access.root_object.as_str()) else {
                 continue;
             };
@@ -1671,10 +1649,9 @@ fn propagate_fluent_chain_new_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in fluent_chain_new_member_access_facts_with_legacy(
-            &resolved.semantic_facts,
-            &resolved.member_accesses,
-        ) {
+        for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+            .fluent_chain_new_member_accesses()
+        {
             let Some(seed_keys) = local_to_export_keys.get(access.class_name.as_str()) else {
                 continue;
             };

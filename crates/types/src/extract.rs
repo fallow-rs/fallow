@@ -1750,11 +1750,93 @@ impl SemanticFactCompat<'_> {
     }
 }
 
+/// Typed-first view over semantic extraction facts.
+///
+/// New extraction populates `semantic_facts` directly. `member_accesses` is only
+/// consulted to decode older sentinel-backed parse-cache payloads into the same
+/// typed shape before analysis consumes them.
+#[derive(Debug, Clone, Copy)]
+pub struct SemanticFactView<'a> {
+    semantic_facts: &'a [SemanticFact],
+    member_accesses: &'a [MemberAccess],
+}
+
+impl<'a> SemanticFactView<'a> {
+    /// Create a typed semantic fact view from current facts plus legacy cache
+    /// member accesses.
+    #[must_use]
+    pub const fn new(
+        semantic_facts: &'a [SemanticFact],
+        member_accesses: &'a [MemberAccess],
+    ) -> Self {
+        Self {
+            semantic_facts,
+            member_accesses,
+        }
+    }
+
+    /// Iterate typed facts, including facts decoded from older cache payloads.
+    pub fn facts(self) -> impl Iterator<Item = SemanticFactCompat<'a>> + 'a {
+        semantic_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Iterate Angular template member references.
+    pub fn angular_template_member_names(self) -> impl Iterator<Item = &'a str> + 'a {
+        angular_template_member_names_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Return true when any Angular template member reference exists.
+    #[must_use]
+    pub fn has_angular_template_members(self) -> bool {
+        self.angular_template_member_names().next().is_some()
+    }
+
+    /// Collect instance-export binding facts.
+    pub fn instance_export_bindings(self) -> Vec<InstanceExportBindingFact> {
+        instance_export_binding_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect static factory call member facts.
+    pub fn factory_call_member_accesses(self) -> Vec<FactoryCallMemberAccessFact> {
+        factory_call_member_access_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect static factory fluent-chain member facts.
+    pub fn fluent_chain_member_accesses(self) -> Vec<FluentChainMemberAccessFact> {
+        fluent_chain_member_access_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect constructor-rooted fluent-chain member facts.
+    pub fn fluent_chain_new_member_accesses(self) -> Vec<FluentChainNewMemberAccessFact> {
+        fluent_chain_new_member_access_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect Playwright fixture-use facts.
+    pub fn playwright_fixture_uses(self) -> Vec<PlaywrightFixtureUseFact> {
+        playwright_fixture_use_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect Playwright fixture-definition facts.
+    pub fn playwright_fixture_definitions(self) -> Vec<PlaywrightFixtureDefinitionFact> {
+        playwright_fixture_definition_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect Playwright fixture-alias facts.
+    pub fn playwright_fixture_aliases(self) -> Vec<PlaywrightFixtureAliasFact> {
+        playwright_fixture_alias_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect Playwright fixture-type facts.
+    pub fn playwright_fixture_types(self) -> Vec<PlaywrightFixtureTypeFact> {
+        playwright_fixture_type_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+}
+
 /// Iterate over typed semantic facts plus decoded legacy member-access facts.
 ///
 /// New extraction persists typed facts directly. The legacy path exists only so
 /// older parse-cache entries still feed the same typed analysis code.
-pub fn semantic_facts_with_legacy_member_accesses<'a>(
+pub fn semantic_facts_from_parts<'a>(
     semantic_facts: &'a [SemanticFact],
     member_accesses: &'a [MemberAccess],
 ) -> impl Iterator<Item = SemanticFactCompat<'a>> + 'a {
@@ -1767,12 +1849,13 @@ pub fn semantic_facts_with_legacy_member_accesses<'a>(
         }))
 }
 
-/// Collect instance-export binding facts from typed facts plus legacy sentinels.
-pub fn instance_export_binding_facts_with_legacy(
+/// Collect instance-export binding facts from typed facts plus cache-compatible
+/// decoded legacy sentinels.
+pub fn instance_export_binding_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<InstanceExportBindingFact> {
-    semantic_facts_with_legacy_member_accesses(semantic_facts, member_accesses)
+    semantic_facts_from_parts(semantic_facts, member_accesses)
         .filter_map(|fact| {
             if let SemanticFact::InstanceExportBinding(access) = fact.as_fact() {
                 Some(access.clone())
@@ -1783,12 +1866,13 @@ pub fn instance_export_binding_facts_with_legacy(
         .collect()
 }
 
-/// Collect factory-call member facts from typed facts plus legacy sentinels.
-pub fn factory_call_member_access_facts_with_legacy(
+/// Collect factory-call member facts from typed facts plus cache-compatible
+/// decoded legacy sentinels.
+pub fn factory_call_member_access_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<FactoryCallMemberAccessFact> {
-    semantic_facts_with_legacy_member_accesses(semantic_facts, member_accesses)
+    semantic_facts_from_parts(semantic_facts, member_accesses)
         .filter_map(|fact| {
             if let SemanticFact::FactoryCallMemberAccess(access) = fact.as_fact() {
                 Some(access.clone())
@@ -1799,12 +1883,13 @@ pub fn factory_call_member_access_facts_with_legacy(
         .collect()
 }
 
-/// Collect fluent-chain member facts from typed facts plus legacy sentinels.
-pub fn fluent_chain_member_access_facts_with_legacy(
+/// Collect fluent-chain member facts from typed facts plus cache-compatible
+/// decoded legacy sentinels.
+pub fn fluent_chain_member_access_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<FluentChainMemberAccessFact> {
-    semantic_facts_with_legacy_member_accesses(semantic_facts, member_accesses)
+    semantic_facts_from_parts(semantic_facts, member_accesses)
         .filter_map(|fact| {
             if let SemanticFact::FluentChainMemberAccess(access) = fact.as_fact() {
                 Some(access.clone())
@@ -1816,12 +1901,12 @@ pub fn fluent_chain_member_access_facts_with_legacy(
 }
 
 /// Collect constructor-rooted fluent-chain member facts from typed facts plus
-/// legacy sentinels.
-pub fn fluent_chain_new_member_access_facts_with_legacy(
+/// cache-compatible decoded legacy sentinels.
+pub fn fluent_chain_new_member_access_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<FluentChainNewMemberAccessFact> {
-    semantic_facts_with_legacy_member_accesses(semantic_facts, member_accesses)
+    semantic_facts_from_parts(semantic_facts, member_accesses)
         .filter_map(|fact| {
             if let SemanticFact::FluentChainNewMemberAccess(access) = fact.as_fact() {
                 Some(access.clone())
@@ -1852,8 +1937,9 @@ pub fn playwright_fixture_use_facts(
     })
 }
 
-/// Collect Playwright fixture-use facts from typed facts plus legacy sentinels.
-pub fn playwright_fixture_use_facts_with_legacy(
+/// Collect Playwright fixture-use facts from typed facts plus cache-compatible
+/// decoded legacy sentinels.
+pub fn playwright_fixture_use_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<PlaywrightFixtureUseFact> {
@@ -1886,8 +1972,9 @@ pub fn playwright_fixture_definition_facts(
     })
 }
 
-/// Collect Playwright fixture-definition facts from typed facts plus legacy sentinels.
-pub fn playwright_fixture_definition_facts_with_legacy(
+/// Collect Playwright fixture-definition facts from typed facts plus
+/// cache-compatible decoded legacy sentinels.
+pub fn playwright_fixture_definition_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<PlaywrightFixtureDefinitionFact> {
@@ -1920,8 +2007,9 @@ pub fn playwright_fixture_alias_facts(
     })
 }
 
-/// Collect Playwright fixture-alias facts from typed facts plus legacy sentinels.
-pub fn playwright_fixture_alias_facts_with_legacy(
+/// Collect Playwright fixture-alias facts from typed facts plus
+/// cache-compatible decoded legacy sentinels.
+pub fn playwright_fixture_alias_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<PlaywrightFixtureAliasFact> {
@@ -1953,8 +2041,9 @@ pub fn playwright_fixture_type_facts(
     })
 }
 
-/// Collect Playwright fixture-type facts from typed facts plus legacy sentinels.
-pub fn playwright_fixture_type_facts_with_legacy(
+/// Collect Playwright fixture-type facts from typed facts plus cache-compatible
+/// decoded legacy sentinels.
+pub fn playwright_fixture_type_facts_from_parts(
     semantic_facts: &[SemanticFact],
     member_accesses: &[MemberAccess],
 ) -> Vec<PlaywrightFixtureTypeFact> {
@@ -1972,6 +2061,87 @@ pub fn playwright_fixture_type_facts_with_legacy(
             })
         }))
         .collect()
+}
+
+/// Compatibility alias for callers that have not yet switched to
+/// [`semantic_facts_from_parts`].
+pub fn semantic_facts_with_legacy_member_accesses<'a>(
+    semantic_facts: &'a [SemanticFact],
+    member_accesses: &'a [MemberAccess],
+) -> impl Iterator<Item = SemanticFactCompat<'a>> + 'a {
+    semantic_facts_from_parts(semantic_facts, member_accesses)
+}
+
+/// Compatibility alias for callers that have not yet switched to
+/// [`instance_export_binding_facts_from_parts`].
+pub fn instance_export_binding_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<InstanceExportBindingFact> {
+    instance_export_binding_facts_from_parts(semantic_facts, member_accesses)
+}
+
+/// Compatibility alias for callers that have not yet switched to
+/// [`factory_call_member_access_facts_from_parts`].
+pub fn factory_call_member_access_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<FactoryCallMemberAccessFact> {
+    factory_call_member_access_facts_from_parts(semantic_facts, member_accesses)
+}
+
+/// Compatibility alias for callers that have not yet switched to
+/// [`fluent_chain_member_access_facts_from_parts`].
+pub fn fluent_chain_member_access_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<FluentChainMemberAccessFact> {
+    fluent_chain_member_access_facts_from_parts(semantic_facts, member_accesses)
+}
+
+/// Compatibility alias for callers that have not yet switched to
+/// [`fluent_chain_new_member_access_facts_from_parts`].
+pub fn fluent_chain_new_member_access_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<FluentChainNewMemberAccessFact> {
+    fluent_chain_new_member_access_facts_from_parts(semantic_facts, member_accesses)
+}
+
+/// Compatibility alias for callers that have not yet switched to
+/// [`playwright_fixture_use_facts_from_parts`].
+pub fn playwright_fixture_use_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<PlaywrightFixtureUseFact> {
+    playwright_fixture_use_facts_from_parts(semantic_facts, member_accesses)
+}
+
+/// Compatibility alias for callers that have not yet switched to
+/// [`playwright_fixture_definition_facts_from_parts`].
+pub fn playwright_fixture_definition_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<PlaywrightFixtureDefinitionFact> {
+    playwright_fixture_definition_facts_from_parts(semantic_facts, member_accesses)
+}
+
+/// Compatibility alias for callers that have not yet switched to
+/// [`playwright_fixture_alias_facts_from_parts`].
+pub fn playwright_fixture_alias_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<PlaywrightFixtureAliasFact> {
+    playwright_fixture_alias_facts_from_parts(semantic_facts, member_accesses)
+}
+
+/// Compatibility alias for callers that have not yet switched to
+/// [`playwright_fixture_type_facts_from_parts`].
+pub fn playwright_fixture_type_facts_with_legacy(
+    semantic_facts: &[SemanticFact],
+    member_accesses: &[MemberAccess],
+) -> Vec<PlaywrightFixtureTypeFact> {
+    playwright_fixture_type_facts_from_parts(semantic_facts, member_accesses)
 }
 
 /// A member name referenced from an Angular template surface.
@@ -2960,6 +3130,57 @@ mod tests {
                 class_name: "Builder".to_string(),
                 chain: vec!["next".to_string(), "finish".to_string()],
                 member: "done".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn semantic_fact_view_exposes_typed_first_contract() {
+        let mut module = minimal_module_info();
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "create".to_string(),
+                member: "run".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
+                test_name: "test".to_string(),
+                fixture_name: "page".to_string(),
+                member: "goto".to_string(),
+            }),
+        );
+        module.member_accesses.push(MemberAccess {
+            object: format!("{INSTANCE_EXPORT_SENTINEL}exported"),
+            member: "target".to_string(),
+        });
+
+        let view = SemanticFactView::new(&module.semantic_facts, &module.member_accesses);
+
+        assert_eq!(
+            view.factory_call_member_accesses(),
+            vec![FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "create".to_string(),
+                member: "run".to_string(),
+            }]
+        );
+        assert_eq!(
+            view.playwright_fixture_uses(),
+            vec![PlaywrightFixtureUseFact {
+                test_name: "test".to_string(),
+                fixture_name: "page".to_string(),
+                member: "goto".to_string(),
+            }]
+        );
+        assert_eq!(
+            view.instance_export_bindings(),
+            vec![InstanceExportBindingFact {
+                export_name: "exported".to_string(),
+                target_name: "target".to_string(),
             }]
         );
     }
