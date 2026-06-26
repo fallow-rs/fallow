@@ -3,7 +3,9 @@ use std::process::ExitCode;
 
 use colored::Colorize;
 use fallow_config::{AuditGate, OutputFormat};
-use fallow_output::{AuditCommand, AuditOutput, CodeClimateIssue, RootEnvelopeMode};
+use fallow_output::{
+    AuditCommand, AuditOutput, CodeClimateIssue, RootEnvelopeMode, codeclimate_issues_to_value,
+};
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
 use crate::error::emit_error;
@@ -619,10 +621,6 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
     report::emit_json(&value, "CodeClimate audit")
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "CodeClimate issue envelope contains only infallibly serializable fields"
-)]
 fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
     let mut all_issues: Vec<CodeClimateIssue> = Vec::new();
 
@@ -648,7 +646,7 @@ fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
         ));
     }
 
-    serde_json::to_value(&all_issues).expect("CodeClimateIssue serializes infallibly")
+    codeclimate_issues_to_value(&all_issues)
 }
 
 #[cfg(test)]

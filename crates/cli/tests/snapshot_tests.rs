@@ -17,12 +17,12 @@ use fallow_cli::report::{
         pr_comment::{Provider, issues_from_codeclimate, render_pr_comment},
         review::render_review_envelope,
     },
-    codeclimate_issues_to_value,
 };
 use fallow_config::RulesConfig;
 use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
 use fallow_core::extract::MemberKind;
 use fallow_core::results::*;
+use fallow_output::codeclimate_issues_to_value;
 
 /// Build sample `AnalysisResults` with one issue of each type for consistent snapshots.
 #[expect(

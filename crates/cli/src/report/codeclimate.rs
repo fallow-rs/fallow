@@ -6,7 +6,7 @@ use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_output::{
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
-    CodeClimateSeverity,
+    CodeClimateSeverity, annotate_codeclimate_issues, codeclimate_issues_to_value,
 };
 
 use super::ci::{fingerprint, severity};
@@ -1629,28 +1629,12 @@ fn push_misconfigured_dependency_override_issues(
     }
 }
 
-/// Serialize a typed CodeClimate issue list to the wire-shape JSON array.
-/// Centralizes the `serde_json::to_value(&issues)` conversion used by every
-/// callsite that needs a `serde_json::Value` (PR comment, review envelope,
-/// CodeClimate format dispatch, combined / audit aggregation).
-///
-/// Infallible: `CodeClimateIssue` only contains `String`, `u32`, and enum
-/// variants serialized as kebab-case strings; serde_json cannot fail on
-/// these shapes.
-#[must_use]
-#[expect(
-    clippy::expect_used,
-    reason = "CodeClimateIssue contains only infallibly serializable fields"
-)]
-pub fn issues_to_value(issues: &[CodeClimateIssue]) -> serde_json::Value {
-    serde_json::to_value(issues).expect("CodeClimateIssue serializes infallibly")
-}
-
 /// Build CodeClimate issues from dead-code analysis results.
 ///
 /// Returns the typed [`CodeClimateIssue`] vec; callers that emit the wire
-/// shape convert via [`issues_to_value`]. The schema drift gate locks the
-/// per-issue shape against [`fallow_output::CodeClimateOutput`].
+/// shape convert via [`fallow_output::codeclimate_issues_to_value`]. The schema
+/// drift gate locks the per-issue shape against
+/// [`fallow_output::CodeClimateOutput`].
 #[must_use]
 pub fn build_codeclimate(
     results: &AnalysisResults,
@@ -2004,7 +1988,7 @@ pub(super) fn print_codeclimate(
     rules: &RulesConfig,
 ) -> ExitCode {
     let issues = build_codeclimate(results, root, rules);
-    let value = issues_to_value(&issues);
+    let value = codeclimate_issues_to_value(&issues);
     emit_json(&value, "CodeClimate")
 }
 
@@ -2013,10 +1997,6 @@ pub(super) fn print_codeclimate(
 /// Calls `build_codeclimate` to produce the standard CodeClimate JSON array,
 /// then post-processes each entry to add `"owner": "@team"` by resolving the
 /// issue's location path through the `OwnershipResolver`.
-#[expect(
-    clippy::expect_used,
-    reason = "grouped CodeClimate entries are JSON objects created by issues_to_value"
-)]
 pub(super) fn print_grouped_codeclimate(
     results: &AnalysisResults,
     root: &Path,
@@ -2024,21 +2004,10 @@ pub(super) fn print_grouped_codeclimate(
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let issues = build_codeclimate(results, root, rules);
-    let mut value = issues_to_value(&issues);
-
-    if let Some(items) = value.as_array_mut() {
-        for issue in items {
-            let path = issue
-                .pointer("/location/path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let owner = grouping::resolve_owner(Path::new(path), Path::new(""), resolver);
-            issue
-                .as_object_mut()
-                .expect("CodeClimate issue should be an object")
-                .insert("owner".to_string(), serde_json::Value::String(owner));
-        }
-    }
+    let mut value = codeclimate_issues_to_value(&issues);
+    annotate_codeclimate_issues(&mut value, "owner", |path| {
+        grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
+    });
 
     emit_json(&value, "CodeClimate")
 }
@@ -2088,7 +2057,7 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
 /// Print health analysis results in CodeClimate format.
 pub(super) fn print_health_codeclimate(report: &HealthReport, root: &Path) -> ExitCode {
     let issues = build_health_codeclimate(report, root);
-    let value = issues_to_value(&issues);
+    let value = codeclimate_issues_to_value(&issues);
     emit_json(&value, "CodeClimate")
 }
 
@@ -2100,31 +2069,16 @@ pub(super) fn print_health_codeclimate(report: &HealthReport, root: &Path) -> Ex
 /// `OwnershipResolver`. Lets GitLab Code Quality and other CodeClimate
 /// consumers partition findings per team / package without re-parsing the
 /// project structure.
-#[expect(
-    clippy::expect_used,
-    reason = "grouped health CodeClimate entries are JSON objects created by issues_to_value"
-)]
 pub(super) fn print_grouped_health_codeclimate(
     report: &HealthReport,
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let issues = build_health_codeclimate(report, root);
-    let mut value = issues_to_value(&issues);
-
-    if let Some(items) = value.as_array_mut() {
-        for issue in items {
-            let path = issue
-                .pointer("/location/path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let group = grouping::resolve_owner(Path::new(path), Path::new(""), resolver);
-            issue
-                .as_object_mut()
-                .expect("CodeClimate issue should be an object")
-                .insert("group".to_string(), serde_json::Value::String(group));
-        }
-    }
+    let mut value = codeclimate_issues_to_value(&issues);
+    annotate_codeclimate_issues(&mut value, "group", |path| {
+        grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
+    });
 
     emit_json(&value, "CodeClimate")
 }
@@ -2184,7 +2138,7 @@ pub fn build_duplication_codeclimate(
 /// Print duplication analysis results in CodeClimate format.
 pub(super) fn print_duplication_codeclimate(report: &DuplicationReport, root: &Path) -> ExitCode {
     let issues = build_duplication_codeclimate(report, root);
-    let value = issues_to_value(&issues);
+    let value = codeclimate_issues_to_value(&issues);
     emit_json(&value, "CodeClimate")
 }
 
@@ -2196,17 +2150,13 @@ pub(super) fn print_duplication_codeclimate(report: &DuplicationReport, root: &P
 /// top-level `group` key. Lets GitLab Code Quality and other CodeClimate
 /// consumers partition findings per team / package / directory without
 /// re-parsing the project structure.
-#[expect(
-    clippy::expect_used,
-    reason = "grouped duplication CodeClimate entries are JSON objects created by issues_to_value"
-)]
 pub(super) fn print_grouped_duplication_codeclimate(
     report: &DuplicationReport,
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let issues = build_duplication_codeclimate(report, root);
-    let mut value = issues_to_value(&issues);
+    let mut value = codeclimate_issues_to_value(&issues);
 
     use rustc_hash::FxHashMap;
     let mut path_to_owner: FxHashMap<String, String> = FxHashMap::default();
@@ -2218,23 +2168,12 @@ pub(super) fn print_grouped_duplication_codeclimate(
         }
     }
 
-    if let Some(items) = value.as_array_mut() {
-        for issue in items {
-            let path = issue
-                .pointer("/location/path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let group = path_to_owner
-                .get(&path)
-                .cloned()
-                .unwrap_or_else(|| crate::codeowners::UNOWNED_LABEL.to_string());
-            issue
-                .as_object_mut()
-                .expect("CodeClimate issue should be an object")
-                .insert("group".to_string(), serde_json::Value::String(group));
-        }
-    }
+    annotate_codeclimate_issues(&mut value, "group", |path| {
+        path_to_owner
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| crate::codeowners::UNOWNED_LABEL.to_string())
+    });
 
     emit_json(&value, "CodeClimate")
 }
@@ -2268,7 +2207,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert!(arr.is_empty());
     }
@@ -2278,7 +2217,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert!(output.is_array());
         let arr = output.as_array().unwrap();
         assert!(!arr.is_empty());
@@ -2307,7 +2246,7 @@ mod tests {
             ..Default::default()
         };
 
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
 
         assert_eq!(output[0]["check_name"], "fallow/missing-suppression-reason");
         assert_eq!(output[0]["severity"], "major");
@@ -2345,7 +2284,7 @@ mod tests {
             ..Default::default()
         };
 
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
 
         assert_eq!(output[0]["check_name"], "fallow/stale-suppression");
         assert_eq!(output[1]["check_name"], "fallow/missing-suppression-reason");
@@ -2362,7 +2301,7 @@ mod tests {
                 path: root.join("src/dead.ts"),
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let issue = &output.as_array().unwrap()[0];
 
         assert_eq!(issue["type"], "issue");
@@ -2387,14 +2326,14 @@ mod tests {
             }));
 
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["severity"], "major");
 
         let rules = RulesConfig {
             unused_files: Severity::Warn,
             ..RulesConfig::default()
         };
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["severity"], "minor");
     }
 
@@ -2414,7 +2353,7 @@ mod tests {
                 is_re_export: false,
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let issue = &output[0];
         assert_eq!(issue["location"]["lines"]["begin"], 10);
     }
@@ -2429,7 +2368,7 @@ mod tests {
                 path: root.join("src/dead.ts"),
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let issue = &output[0];
         assert_eq!(issue["location"]["lines"]["begin"], 1);
     }
@@ -2444,7 +2383,7 @@ mod tests {
                 path: root.join("src/deep/nested/file.ts"),
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let path = output[0]["location"]["path"].as_str().unwrap();
         assert_eq!(path, "src/deep/nested/file.ts");
         assert!(!path.starts_with("/project"));
@@ -2466,7 +2405,7 @@ mod tests {
                 is_re_export: true,
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("Re-export"));
     }
@@ -2495,7 +2434,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0]["check_name"], "fallow/unlisted-dependency");
@@ -2529,7 +2468,7 @@ mod tests {
                 ],
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert_eq!(arr.len(), 3);
     }
@@ -2551,7 +2490,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("Circular dependency"));
         assert!(desc.contains("src/a.ts"));
@@ -2563,8 +2502,8 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let rules = RulesConfig::default();
-        let output1 = issues_to_value(&build_codeclimate(&results, &root, &rules));
-        let output2 = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output1 = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output2 = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
 
         let fps1: Vec<&str> = output1
             .as_array()
@@ -2586,7 +2525,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
 
         let mut fps: Vec<&str> = output
             .as_array()
@@ -2614,7 +2553,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/type-only-dependency");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("zod"));
@@ -2635,7 +2574,7 @@ mod tests {
                 used_in_workspaces: Vec::new(),
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["location"]["lines"]["begin"], 1);
     }
 
@@ -2787,7 +2726,7 @@ mod tests {
             ..Default::default()
         };
 
-        let output = issues_to_value(&build_health_codeclimate(&report, &root));
+        let output = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = output.as_array().unwrap();
         assert_eq!(issues.len(), 2);
         assert_eq!(issues[0]["check_name"], "fallow/untested-file");
@@ -2853,7 +2792,7 @@ mod tests {
             ..Default::default()
         };
 
-        let output = issues_to_value(&build_health_codeclimate(&report, &root));
+        let output = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = output.as_array().unwrap();
         assert_eq!(issues.len(), 1);
         assert_eq!(
@@ -2937,7 +2876,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let json = issues_to_value(&build_health_codeclimate(&report, &root));
+        let json = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues[0]["check_name"], "fallow/high-crap-score");
         assert_eq!(issues[0]["severity"], "major");
@@ -3011,7 +2950,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let json = issues_to_value(&build_health_codeclimate(&report, &root));
+        let json = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues[0]["check_name"], "fallow/high-complexity");
         let desc = issues[0]["description"].as_str().unwrap();
@@ -3054,7 +2993,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let json = issues_to_value(&build_health_codeclimate(&report, &root));
+        let json = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues[0]["check_name"], "fallow/high-cyclomatic-complexity");
         let desc = issues[0]["description"].as_str().unwrap();
@@ -3100,7 +3039,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let json = issues_to_value(&build_health_codeclimate(&report, &root));
+        let json = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues[0]["check_name"], "fallow/high-cognitive-complexity");
         let desc = issues[0]["description"].as_str().unwrap();
@@ -3143,7 +3082,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let json = issues_to_value(&build_health_codeclimate(&report, &root));
+        let json = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues[0]["check_name"], "fallow/high-crap-score");
         let desc = issues[0]["description"].as_str().unwrap();
@@ -3199,7 +3138,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let json = issues_to_value(&build_health_codeclimate(&report, &root));
+        let json = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues.len(), 1);
         assert_eq!(
@@ -3295,7 +3234,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let json = issues_to_value(&build_health_codeclimate(&report, &root));
+        let json = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues.len(), 1);
         let desc = issues[0]["description"].as_str().unwrap();
@@ -3332,7 +3271,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let json = issues_to_value(&build_health_codeclimate(&report, &root));
+        let json = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         let desc = issues[0]["description"].as_str().unwrap();
         assert!(desc.contains("3 value exports)"), "plural: {desc}");
@@ -3497,7 +3436,7 @@ mod tests {
                 used_in_workspaces: vec![root.join("packages/app")],
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let desc = output[0]["description"].as_str().unwrap();
         assert!(
             desc.contains("imported in other workspaces"),
@@ -3531,7 +3470,7 @@ mod tests {
             private_type_leaks: Severity::Error,
             ..RulesConfig::default()
         };
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let arr = output.as_array().unwrap();
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["check_name"], "fallow/private-type-leak");
@@ -3559,7 +3498,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["location"]["lines"]["begin"], 1);
     }
 
@@ -3577,7 +3516,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/test-only-dependency");
         assert_eq!(output[0]["location"]["lines"]["begin"], 1);
     }
@@ -3598,7 +3537,7 @@ mod tests {
                 kind: ReExportCycleKind::SelfLoop,
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/re-export-cycle");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("(self-loop)"), "desc: {desc}");
@@ -3616,7 +3555,7 @@ mod tests {
                 kind: ReExportCycleKind::MultiNode,
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.starts_with("Re-export cycle: "), "desc: {desc}");
         assert!(!desc.contains("(self-loop)"), "desc: {desc}");
@@ -3643,7 +3582,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/boundary-coverage");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("no configured zone"), "desc: {desc}");
@@ -3667,7 +3606,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/boundary-call-violation");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("fs.readFile"), "desc: {desc}");
@@ -3698,7 +3637,7 @@ mod tests {
                 message: None,
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/policy-violation");
         assert_eq!(output[0]["severity"], "major");
         let desc = output[0]["description"].as_str().unwrap();
@@ -3725,7 +3664,7 @@ mod tests {
                 message: Some("Use the project logger instead".to_string()),
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["severity"], "minor");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(
@@ -3755,7 +3694,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/invalid-client-export");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("metadata"), "desc: {desc}");
@@ -3779,7 +3718,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/mixed-client-server-barrel");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("./client-comp"), "desc: {desc}");
@@ -3806,7 +3745,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/misplaced-directive");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("use client"), "desc: {desc}");
@@ -3835,7 +3774,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/unrendered-component");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`Dead`"), "desc: {desc}");
@@ -3863,7 +3802,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/unused-component-prop");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`color`"), "desc: {desc}");
@@ -3891,7 +3830,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/unused-component-emit");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`close`"), "desc: {desc}");
@@ -3917,7 +3856,7 @@ mod tests {
                 col: 0,
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/unused-svelte-event");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`submit`"), "desc: {desc}");
@@ -3945,7 +3884,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/unused-component-input");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`label`"), "desc: {desc}");
@@ -3969,7 +3908,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/unused-component-output");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`changed`"), "desc: {desc}");
@@ -3996,7 +3935,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/unused-server-action");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`deleteUser`"), "desc: {desc}");
@@ -4022,7 +3961,7 @@ mod tests {
                 route_dir: None,
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/unused-load-data-key");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`postCount`"), "desc: {desc}");
@@ -4048,7 +3987,7 @@ mod tests {
                 col: 0,
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/route-collision");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("`/about`"), "desc: {desc}");
@@ -4071,7 +4010,7 @@ mod tests {
             }),
         );
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(
             output[0]["check_name"],
             "fallow/dynamic-segment-name-conflict"
@@ -4101,7 +4040,7 @@ mod tests {
             }),
         );
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(
             output[0]["check_name"],
             "fallow/unresolved-catalog-reference"
@@ -4127,7 +4066,7 @@ mod tests {
             }),
         );
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("catalog 'react17'"), "desc: {desc}");
         assert!(desc.contains("available in"), "desc: {desc}");
@@ -4159,7 +4098,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/unused-dependency-override");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("react"), "desc: {desc}");
@@ -4224,7 +4163,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let json = issues_to_value(&build_health_codeclimate(&report, &root));
+        let json = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0]["check_name"], "fallow/runtime-safe-to-delete");
@@ -4291,7 +4230,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let json = issues_to_value(&build_health_codeclimate(&report, &root));
+        let json = codeclimate_issues_to_value(&build_health_codeclimate(&report, &root));
         let issues = json.as_array().unwrap();
         let desc = issues[0]["description"].as_str().unwrap();
         assert!(desc.contains("untracked"), "desc: {desc}");
@@ -4334,7 +4273,7 @@ mod tests {
             mirrored_directories: vec![],
             stats: DuplicationStats::default(),
         };
-        let output = issues_to_value(&build_duplication_codeclimate(&report, &root));
+        let output = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
         let issues = output.as_array().unwrap();
         assert_eq!(issues.len(), 2, "one issue per clone instance");
         assert_eq!(issues[0]["check_name"], "fallow/code-duplication");
@@ -4383,7 +4322,7 @@ mod tests {
             mirrored_directories: vec![],
             stats: DuplicationStats::default(),
         };
-        let output = issues_to_value(&build_duplication_codeclimate(&report, &root));
+        let output = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
         let issues = output.as_array().unwrap();
         assert_eq!(issues.len(), 2);
         let desc0 = issues[0]["description"].as_str().unwrap();
@@ -4407,7 +4346,7 @@ mod tests {
             mirrored_directories: vec![],
             stats: DuplicationStats::default(),
         };
-        let output = issues_to_value(&build_duplication_codeclimate(&report, &root));
+        let output = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
         assert!(output.as_array().unwrap().is_empty());
     }
 
@@ -4444,7 +4383,7 @@ mod tests {
             mirrored_directories: vec![],
             stats: DuplicationStats::default(),
         };
-        let output = issues_to_value(&build_duplication_codeclimate(&report, &root));
+        let output = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
         let issues = output.as_array().unwrap();
         let fp0 = issues[0]["fingerprint"].as_str().unwrap();
         let fp1 = issues[1]["fingerprint"].as_str().unwrap();
@@ -4479,7 +4418,7 @@ mod tests {
                 },
             ));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("(cross-package)"), "desc: {desc}");
     }
@@ -4505,7 +4444,7 @@ mod tests {
                 is_re_export: true,
             }));
         let rules = RulesConfig::default();
-        let output = issues_to_value(&build_codeclimate(&results, &root, &rules));
+        let output = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
         assert_eq!(output[0]["check_name"], "fallow/unused-type");
         let desc = output[0]["description"].as_str().unwrap();
         assert!(desc.contains("Type re-export"), "desc: {desc}");

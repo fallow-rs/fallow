@@ -5,7 +5,9 @@ use std::process::ExitCode;
 
 use colored::Colorize;
 use fallow_config::OutputFormat;
-use fallow_output::{CodeClimateIssue, CombinedMeta, CombinedOutput, RootEnvelopeMode};
+use fallow_output::{
+    CodeClimateIssue, CombinedMeta, CombinedOutput, RootEnvelopeMode, codeclimate_issues_to_value,
+};
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
 use crate::check::CheckResult;
@@ -732,17 +734,13 @@ fn print_combined_codeclimate(
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "CodeClimate issue envelope contains only infallibly serializable fields"
-)]
 fn build_combined_codeclimate(
     check: Option<&CheckResult>,
     dupes: Option<&DupesResult>,
     health: Option<&HealthResult>,
 ) -> serde_json::Value {
     let all_issues = build_combined_codeclimate_issues(check, dupes, health);
-    serde_json::to_value(&all_issues).expect("CodeClimateIssue serializes infallibly")
+    codeclimate_issues_to_value(&all_issues)
 }
 
 fn build_combined_codeclimate_issues(
