@@ -24,12 +24,7 @@ use rustc_hash::FxHashSet;
 
 use crate::audit::AuditResult;
 
-pub type ReviewBriefOutput = fallow_output::ReviewBriefOutput<
-    fallow_output::FocusMap,
-    fallow_output::WeakeningSignal,
-    fallow_output::RoutingFacts,
-    crate::audit_decision_surface::DecisionSurface,
->;
+pub type ReviewBriefOutput = fallow_output::StandardReviewBriefOutput;
 
 /// A file count at or above which a changeset is classified [`RiskClass::High`].
 const RISK_HIGH_FILES: usize = 20;

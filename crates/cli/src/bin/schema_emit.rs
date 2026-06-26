@@ -25,24 +25,6 @@ use std::process::ExitCode;
 use schemars::generate::SchemaSettings;
 use serde_json::{Map, Value};
 
-use fallow_cli::audit_brief::{
-    DiffTriage, GraphFacts, ReviewBriefOutput, ReviewBriefSchemaVersion, ReviewEffort, RiskClass,
-};
-use fallow_cli::audit_walkthrough::{WalkthroughGuide, WalkthroughValidation};
-use fallow_cli::health_types::{
-    ComplexityViolation, ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary,
-    CoverageGaps, CoverageModel, CoverageTier, ExceededThreshold, FileHealthScore, FindingSeverity,
-    HealthActionsMeta, HealthScore, HealthScorePenalties, HealthSummary, HealthTrend, HotspotEntry,
-    HotspotFinding, HotspotSummary, LargeFunctionEntry, OwnershipMetrics, RecommendationCategory,
-    RefactoringTarget, RefactoringTargetFinding, RiskProfile, RuntimeCoverageReport,
-    TargetThresholds, TrendCount, UntestedExport, UntestedExportFinding, UntestedFile,
-    UntestedFileFinding, VitalSigns, VitalSignsCounts,
-};
-use fallow_cli::impact::{
-    ContainmentEvent, CrossRepoImpactReport, CrossRepoImpactSchemaVersion, CrossRepoProjectEntry,
-    CrossRepoTotals, EnabledSource, ImpactCounts, ImpactReport, ImpactReportSchemaVersion,
-    ImpactTrendDirection, ResolutionEvent, TrendSummary,
-};
 use fallow_cli::output_dupes::{
     AttributedCloneGroupFinding, CloneFamilyFinding, CloneGroupFinding, DupesReportPayload,
 };
@@ -63,32 +45,42 @@ use fallow_cli::output_envelope::{
 use fallow_cli::report::dupes_grouping::{
     AttributedCloneGroup, AttributedInstance, DuplicationGroup,
 };
-use fallow_cli::security::{
-    SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
-    SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGate, SecurityGateMode,
-    SecurityGateVerdict, SecurityOutput, SecuritySchemaVersion, SecuritySurvivor,
-    SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary,
-    SecurityUnresolvedCalleeDiagnostics, SecurityUnresolvedCalleeReasonCount,
-    SecurityUnresolvedCalleeSample, SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict,
-    SecurityVerifierVerdictStatus,
-};
-use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
+use fallow_cli::security::SecurityGateMode;
+use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus, Severity};
 use fallow_engine::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
 };
 use fallow_output::{
-    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySeverityCounts, SecuritySummary,
+    AcceptedJudgment, AgentSchema, ChangeAnchor, ComplexityViolation, ConfidenceFlag,
+    ContainmentEvent, ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary,
+    CoverageGaps, CoverageModel, CoverageTier, CrossRepoImpactReport, CrossRepoImpactSchemaVersion,
+    CrossRepoProjectEntry, CrossRepoTotals, Decision, DecisionAction, DecisionActionType,
+    DecisionCategory, DecisionSurface, DecisionSurfaceOutput, DecisionSurfaceSchemaVersion,
+    DecisionWithActions, DiffTriage, DirectionUnit, EnabledSource, ExceededThreshold,
+    FileHealthScore, FindingSeverity, FocusLabel, FocusMap, FocusScore, FocusUnit, GraphFacts,
+    HealthActionsMeta, HealthGroup, HealthReport, HealthScore, HealthScorePenalties, HealthSummary,
+    HealthTrend, HotspotEntry, HotspotFinding, HotspotSummary, ImpactCounts, ImpactReport,
+    ImpactReportSchemaVersion, ImpactTrendDirection, LargeFunctionEntry, OwnershipMetrics,
+    RecommendationCategory, RefactoringTarget, RefactoringTargetFinding, RejectedJudgment,
+    ResolutionEvent, ReviewBriefSchemaVersion, ReviewDirection, ReviewEffort, RiskClass,
+    RiskProfile, RuntimeCoverageReport, SecurityBlindSpotFile, SecurityBlindSpotGroup,
+    SecurityBlindSpotsOutput, SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary,
+    SecurityGateVerdict, SecurityReachabilityCounts, SecurityRuntimeStateCounts,
+    SecuritySchemaVersion, SecuritySeverityCounts, SecuritySummary, SecuritySurvivor,
+    SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary,
+    SecurityUnresolvedCalleeDiagnostics, SecurityUnresolvedCalleeReasonCount,
+    SecurityUnresolvedCalleeSample, SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict,
+    SecurityVerifierVerdictStatus, StandardReviewBriefOutput as ReviewBriefOutput,
+    StandardWalkthroughGuide as WalkthroughGuide, TargetThresholds, TrendCount, TrendSummary,
+    TruncationNote, UntestedExport, UntestedExportFinding, UntestedFile, UntestedFileFinding,
+    VitalSigns, VitalSignsCounts, WalkthroughValidation,
 };
-
+type SecurityGate = fallow_output::SecurityGate<SecurityGateMode>;
+type SecurityOutputConfig = fallow_output::SecurityOutputConfig<Severity>;
+type SecurityOutput = fallow_output::SecurityOutput<SecurityOutputConfig, SecurityGate>;
 type SecuritySummaryOutput =
-    fallow_output::SecuritySummaryOutput<fallow_cli::security::SecurityOutputConfig, SecurityGate>;
-use fallow_output::{
-    AcceptedJudgment, AgentSchema, ChangeAnchor, ConfidenceFlag, Decision, DecisionAction,
-    DecisionActionType, DecisionCategory, DecisionSurface, DecisionSurfaceOutput,
-    DecisionSurfaceSchemaVersion, DecisionWithActions, DirectionUnit, FocusLabel, FocusMap,
-    FocusScore, FocusUnit, RejectedJudgment, ReviewDirection, TruncationNote,
-};
+    fallow_output::SecuritySummaryOutput<SecurityOutputConfig, SecurityGate>;
 use fallow_output::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
@@ -795,13 +787,9 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<CheckGroupedOutput>();
     let _ = generator.subschema_for::<CheckGroupedEntry>();
     let _ = generator.subschema_for::<DupesOutput<DupesReportPayload, DuplicationGroup>>();
-    let _ =
-        generator.subschema_for::<HealthOutput<
-            fallow_cli::health_types::HealthReport,
-            fallow_cli::health_types::HealthGroup,
-        >>();
-    let _ = generator.subschema_for::<fallow_cli::health_types::HealthGroup>();
-    let _ = generator.subschema_for::<fallow_cli::health_types::HealthReport>();
+    let _ = generator.subschema_for::<HealthOutput<HealthReport, HealthGroup>>();
+    let _ = generator.subschema_for::<HealthGroup>();
+    let _ = generator.subschema_for::<HealthReport>();
     let _ = generator.subschema_for::<GroupByMode>();
     let _ = generator.subschema_for::<ExplainOutput>();
     let _ = generator.subschema_for::<InspectOutput>();

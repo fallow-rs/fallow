@@ -57,9 +57,9 @@ pub use audit_brief::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
     REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefOutput, ReviewBriefSchemaVersion,
     ReviewBriefSubtractSections, ReviewDeltas, ReviewEffort, ReviewUnitFact, RiskClass,
-    build_review_brief_json_output, serialize_decision_surface_json_output,
-    serialize_review_brief_json_output, serialize_walkthrough_guide_json_output,
-    serialize_walkthrough_validation_json_output,
+    StandardReviewBriefOutput, build_review_brief_json_output,
+    serialize_decision_surface_json_output, serialize_review_brief_json_output,
+    serialize_walkthrough_guide_json_output, serialize_walkthrough_validation_json_output,
 };
 pub use audit_decision_surface::{
     ALL_CATEGORIES, DECISION_SURFACE_SCHEMA_VERSION, Decision, DecisionAction, DecisionActionType,
@@ -71,8 +71,8 @@ pub use audit_focus::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUni
 pub use audit_routing::{RoutingFacts, RoutingUnit};
 pub use audit_walkthrough::{
     AcceptedJudgment, AgentJudgment, AgentSchema, AgentWalkthrough, ChangeAnchor, DirectionUnit,
-    INJECTION_NOTE, RejectedJudgment, ReviewDirection, WalkthroughGuide, WalkthroughValidation,
-    agent_schema,
+    INJECTION_NOTE, RejectedJudgment, ReviewDirection, StandardWalkthroughGuide, WalkthroughGuide,
+    WalkthroughValidation, agent_schema,
 };
 pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use check::{

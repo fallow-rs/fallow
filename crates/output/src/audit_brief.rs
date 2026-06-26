@@ -132,6 +132,15 @@ pub struct ReviewBriefOutput<Focus, Weakening, Routing, Decisions> {
     pub decisions: Decisions,
 }
 
+/// The standard audit brief payload shape used by the CLI, schema emitter,
+/// API, and agent-facing review surfaces.
+pub type StandardReviewBriefOutput = ReviewBriefOutput<
+    crate::audit_focus::FocusMap,
+    crate::audit_weakening::WeakeningSignal,
+    crate::audit_routing::RoutingFacts,
+    crate::audit_decision_surface::DecisionSurface,
+>;
+
 /// CLI-built audit subreports that are embedded in the audit brief envelope.
 ///
 /// The brief envelope and field ordering belong to `fallow-output`; the

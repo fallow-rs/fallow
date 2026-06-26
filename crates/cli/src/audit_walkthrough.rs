@@ -56,7 +56,7 @@ const UNANCHORED_REASON: &str = "unanchored-signal-id";
 /// for the weaker, region-level anchor).
 const UNKNOWN_CHANGE_ANCHOR_REASON: &str = "unknown-change-anchor";
 
-pub type WalkthroughGuide = fallow_output::WalkthroughGuide<ReviewBriefOutput>;
+pub type WalkthroughGuide = fallow_output::StandardWalkthroughGuide;
 
 /// Strip per-line leading/trailing whitespace and join added lines with `\n`, so
 /// a reflow or a whitespace-only edit does not move the content-addressed id.

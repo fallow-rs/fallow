@@ -104,6 +104,9 @@ pub struct WalkthroughGuide<Digest> {
     pub injection_note: &'static str,
 }
 
+/// The standard walkthrough guide shape emitted by `fallow review`.
+pub type StandardWalkthroughGuide = WalkthroughGuide<crate::audit_brief::StandardReviewBriefOutput>;
+
 /// The agent's returned judgment JSON.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentWalkthrough {
