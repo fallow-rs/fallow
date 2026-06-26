@@ -18,11 +18,10 @@
 //!   negligible shape treated as a call);
 //! - a `member_access` with `object == "this" && member == bar` (the output read
 //!   as a value, e.g. forwarded to a function that may emit it). Over-credit;
-//! - a typed Angular template member fact for `bar`, with legacy
-//!   `ANGULAR_TPL_SENTINEL` member accesses accepted only as an older
-//!   parse-cache fallback, which credits a template-handler emit such as
-//!   `(click)="bar.emit(...)"` (Angular templates emit outputs directly off the
-//!   bare name, with no `this.` prefix);
+//! - a typed Angular template member fact for `bar`, with legacy semantic
+//!   member accesses accepted only as an older parse-cache fallback, which
+//!   credits a template-handler emit such as `(click)="bar.emit(...)"` (Angular
+//!   templates emit outputs directly off the bare name, with no `this.` prefix);
 //! - the same template member evidence in the linked external `templateUrl`
 //!   `.html` module, reached via the `SideEffect` import edge.
 //!
@@ -150,8 +149,8 @@ fn output_is_emitted(component: &ModuleInfo, name: &str) -> bool {
 /// Build the set of output names emitted through a template handler. An Angular
 /// template emits an output off the bare name (`(click)="bar.emit(...)"`), which
 /// extraction records as typed Angular template member evidence for `bar`.
-/// Legacy `ANGULAR_TPL_SENTINEL` member accesses are accepted for older
-/// parse-cache payloads. This covers the component's own inline template plus
+/// Legacy semantic member accesses are accepted for older parse-cache payloads.
+/// This covers the component's own inline template plus
 /// every linked external `templateUrl` module. Over-credits by design.
 fn template_emitted_outputs<'a>(
     component: &'a ModuleInfo,
@@ -228,8 +227,6 @@ mod tests {
     use super::*;
     use crate::analyze::test_support::empty_module;
 
-    const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
-
     fn output(name: &str, span: u32) -> AngularOutputMember {
         AngularOutputMember {
             name: name.to_string(),
@@ -277,12 +274,9 @@ mod tests {
 
     #[test]
     fn inline_template_emit_credits_output() {
-        // Older cache payloads may carry the bare template output reference as
-        // a legacy sentinel member access; it must still credit the output as
-        // emitted.
         let component = ModuleInfo {
             angular_outputs: vec![output("changed", 10)],
-            member_accesses: vec![access(ANGULAR_TPL_SENTINEL, "changed")],
+            semantic_facts: vec![tpl_fact("changed")].into(),
             ..empty_module()
         };
         let emitted = template_emitted_outputs(&component, &[]);
@@ -292,7 +286,7 @@ mod tests {
         );
         assert!(
             !output_is_emitted(&component, "changed"),
-            "the template sentinel is not a `this.changed.emit` script call"
+            "template evidence is not a `this.changed.emit` script call"
         );
     }
 

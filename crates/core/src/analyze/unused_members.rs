@@ -2502,17 +2502,10 @@ mod tests {
         ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
         FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
         PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-        SemanticFact, SemanticFactView,
+        SemanticFact,
     };
     use oxc_span::Span;
     use std::path::PathBuf;
-
-    const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
-    const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
-    const INSTANCE_EXPORT_SENTINEL: &str = "__fallow_instance_export__:";
-    const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
-    const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
-    const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
 
     #[expect(
         clippy::cast_possible_truncation,
@@ -2690,113 +2683,6 @@ mod tests {
             .get(&ExportKey::new(FileId(2), "AdminPage"))
             .expect("fixture target class should be credited");
         assert!(credited.contains("assertGreeting"));
-    }
-
-    #[test]
-    fn legacy_playwright_fixture_sentinels_credit_fixture_member() {
-        let mut graph = build_graph(&[
-            ("/src/spec.ts", true),
-            ("/src/fixtures.ts", false),
-            ("/src/admin-page.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export_with_members("test", vec![], Some(0))];
-        graph.modules[2].set_reachable(true);
-        graph.modules[2].exports = vec![make_export_with_members(
-            "AdminPage",
-            vec![make_member("assertGreeting", MemberKind::ClassMethod)],
-            Some(0),
-        )];
-
-        let resolved_modules = vec![ResolvedModule {
-            file_id: FileId(0),
-            path: PathBuf::from("/src/spec.ts"),
-            resolved_imports: vec![
-                make_resolved_import("./fixtures", "test", "test", 1),
-                make_resolved_import("./admin-page", "AdminPage", "AdminPage", 2),
-            ],
-            member_accesses: vec![
-                MemberAccess {
-                    object: format!("{PLAYWRIGHT_FIXTURE_DEF_SENTINEL}test:adminPage"),
-                    member: "AdminPage".to_string(),
-                },
-                MemberAccess {
-                    object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}test:adminPage"),
-                    member: "assertGreeting".to_string(),
-                },
-            ],
-            ..Default::default()
-        }];
-
-        let mut accessed_members = FxHashMap::default();
-        propagate_playwright_fixture_accesses(&graph, &resolved_modules, &mut accessed_members);
-
-        let credited = accessed_members
-            .get(&ExportKey::new(FileId(2), "AdminPage"))
-            .expect("legacy fixture target class should be credited");
-        assert!(credited.contains("assertGreeting"));
-    }
-
-    #[test]
-    fn typed_playwright_fixture_facts_take_precedence_over_legacy_sentinels() {
-        let mut graph = build_graph(&[
-            ("/src/spec.ts", true),
-            ("/src/fixtures.ts", false),
-            ("/src/admin-page.ts", false),
-        ]);
-        graph.modules[1].set_reachable(true);
-        graph.modules[1].exports = vec![make_export_with_members("test", vec![], Some(0))];
-        graph.modules[2].set_reachable(true);
-        graph.modules[2].exports = vec![make_export_with_members(
-            "AdminPage",
-            vec![
-                make_member("assertGreeting", MemberKind::ClassMethod),
-                make_member("staleLegacyMember", MemberKind::ClassMethod),
-            ],
-            Some(0),
-        )];
-
-        let resolved_modules = vec![ResolvedModule {
-            file_id: FileId(0),
-            path: PathBuf::from("/src/spec.ts"),
-            resolved_imports: vec![
-                make_resolved_import("./fixtures", "test", "test", 1),
-                make_resolved_import("./admin-page", "AdminPage", "AdminPage", 2),
-            ],
-            semantic_facts: vec![
-                SemanticFact::PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact {
-                    test_name: "test".to_string(),
-                    fixture_name: "adminPage".to_string(),
-                    type_name: "AdminPage".to_string(),
-                }),
-                SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
-                    test_name: "test".to_string(),
-                    fixture_name: "adminPage".to_string(),
-                    member: "assertGreeting".to_string(),
-                }),
-            ]
-            .into(),
-            member_accesses: vec![
-                MemberAccess {
-                    object: format!("{PLAYWRIGHT_FIXTURE_DEF_SENTINEL}test:adminPage"),
-                    member: "AdminPage".to_string(),
-                },
-                MemberAccess {
-                    object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}test:adminPage"),
-                    member: "staleLegacyMember".to_string(),
-                },
-            ],
-            ..Default::default()
-        }];
-
-        let mut accessed_members = FxHashMap::default();
-        propagate_playwright_fixture_accesses(&graph, &resolved_modules, &mut accessed_members);
-
-        let credited = accessed_members
-            .get(&ExportKey::new(FileId(2), "AdminPage"))
-            .expect("typed fixture target class should be credited");
-        assert!(credited.contains("assertGreeting"));
-        assert!(!credited.contains("staleLegacyMember"));
     }
 
     #[test]
@@ -2989,10 +2875,6 @@ mod tests {
                 },
             )]
             .into(),
-            member_accesses: vec![MemberAccess {
-                object: format!("{INSTANCE_EXPORT_SENTINEL}service"),
-                member: "StaleService".to_string(),
-            }],
             ..Default::default()
         }];
 
@@ -3055,10 +2937,6 @@ mod tests {
                     },
                 )]
                 .into(),
-                member_accesses: vec![MemberAccess {
-                    object: format!("{FACTORY_CALL_SENTINEL}MyClass:getInstance"),
-                    member: "legacyData".to_string(),
-                }],
                 ..Default::default()
             },
             ResolvedModule {
@@ -3076,7 +2954,6 @@ mod tests {
             .get(&ExportKey::new(FileId(1), "MyClass"))
             .expect("factory target class should be credited");
         assert!(credited.contains("getData"));
-        assert!(!credited.contains("legacyData"));
     }
 
     #[test]
@@ -3135,12 +3012,6 @@ mod tests {
                     },
                 )]
                 .into(),
-                member_accesses: vec![MemberAccess {
-                    object: format!(
-                        "{FLUENT_CHAIN_SENTINEL}EventBuilder:create:setProcessId,setSubject"
-                    ),
-                    member: "legacyBuild".to_string(),
-                }],
                 ..Default::default()
             },
             ResolvedModule {
@@ -3158,7 +3029,6 @@ mod tests {
             .get(&ExportKey::new(FileId(1), "EventBuilder"))
             .expect("fluent target class should be credited");
         assert!(credited.contains("build"));
-        assert!(!credited.contains("legacyBuild"));
     }
 
     #[test]
@@ -3214,12 +3084,6 @@ mod tests {
                     },
                 )]
                 .into(),
-                member_accesses: vec![MemberAccess {
-                    object: format!(
-                        "{FLUENT_CHAIN_NEW_SENTINEL}OptionBuilder:addDefault,addFromCli"
-                    ),
-                    member: "legacyBuild".to_string(),
-                }],
                 ..Default::default()
             },
             ResolvedModule {
@@ -3237,7 +3101,6 @@ mod tests {
             .get(&ExportKey::new(FileId(1), "OptionBuilder"))
             .expect("fluent-new target class should be credited");
         assert!(credited.contains("build"));
-        assert!(!credited.contains("legacyBuild"));
     }
 
     fn make_module_with_class_heritage(
@@ -5160,18 +5023,5 @@ mod tests {
         );
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
-    }
-
-    #[test]
-    fn malformed_legacy_member_access_is_skip_only() {
-        let malformed = format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:");
-        let member_accesses = vec![crate::extract::MemberAccess {
-            object: malformed,
-            member: "value".to_string(),
-        }];
-
-        let view = SemanticFactView::new(&[], &member_accesses);
-        assert!(view.facts().next().is_none());
-        assert!(view.ordinary_member_accesses().next().is_none());
     }
 }

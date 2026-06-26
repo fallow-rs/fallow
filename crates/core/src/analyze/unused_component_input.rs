@@ -11,11 +11,10 @@
 //! Usage is detected by over-crediting (every ambiguous shape credits toward
 //! "used", so only false negatives can result, never false positives). An input
 //! `foo` is USED if ANY hold:
-//! - a typed Angular template member fact for `foo`, with legacy
-//!   `ANGULAR_TPL_SENTINEL` member accesses accepted only as an older
-//!   parse-cache fallback; inline templates, host bindings, and `inputs:` /
-//!   `outputs:` metadata arrays all emit this template member evidence in the
-//!   component's own module;
+//! - a typed Angular template member fact for `foo`, with legacy semantic
+//!   member accesses accepted only as an older parse-cache fallback; inline
+//!   templates, host bindings, and `inputs:` / `outputs:` metadata arrays all
+//!   emit this template member evidence in the component's own module;
 //! - the component has `has_angular_component_template_url` and the linked
 //!   external `.html` module (reached via the `SideEffect` import edge) has such
 //!   template member evidence for `foo`;
@@ -287,19 +286,10 @@ mod tests {
     use super::*;
     use crate::analyze::test_support::empty_module;
 
-    const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
-
     fn input(name: &str, span: u32) -> AngularInputMember {
         AngularInputMember {
             name: name.to_string(),
             span_start: span,
-        }
-    }
-
-    fn tpl_access(member: &str) -> MemberAccess {
-        MemberAccess {
-            object: ANGULAR_TPL_SENTINEL.to_string(),
-            member: member.to_string(),
         }
     }
 
@@ -337,7 +327,7 @@ mod tests {
     fn template_credited_input_is_used() {
         let component = ModuleInfo {
             angular_inputs: vec![input("label", 10)],
-            member_accesses: vec![tpl_access("label")],
+            semantic_facts: vec![tpl_fact("label")].into(),
             ..empty_module()
         };
         let used = input_usage_set(&component, &[]);
@@ -384,13 +374,13 @@ mod tests {
         };
         let external = ModuleInfo {
             file_id: FileId(2),
-            member_accesses: vec![tpl_access("title")],
+            semantic_facts: vec![tpl_fact("title")].into(),
             ..empty_module()
         };
         let used = input_usage_set(&component, &[&external]);
         assert!(
             used.contains("title"),
-            "a sentinel ref in the linked external template credits the input"
+            "a typed fact in the linked external template credits the input"
         );
     }
 
