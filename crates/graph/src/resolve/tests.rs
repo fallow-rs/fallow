@@ -139,7 +139,7 @@ fn make_resolved_module(
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }
 }
 

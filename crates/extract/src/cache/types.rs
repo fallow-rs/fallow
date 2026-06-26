@@ -661,7 +661,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1328);
+assert_cached_type_size!(CachedModule, 1320);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -747,7 +747,7 @@ pub struct CachedModule {
     pub class_heritage: Vec<fallow_types::extract::ClassHeritageInfo>,
     /// Exported free-function factories that provably return one class instance
     /// (`export function useApi() { return new RESTApi() }`). See #1441 Part A.
-    pub exported_factory_returns: Option<Vec<fallow_types::extract::FactoryReturnExport>>,
+    pub exported_factory_returns: Option<Box<[fallow_types::extract::FactoryReturnExport]>>,
     /// Angular `InjectionToken<Interface>` `(token, interface)` pairs (#920).
     pub injection_tokens: Vec<(String, String)>,
     /// Local type-capable declarations.

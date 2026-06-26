@@ -2816,7 +2816,7 @@ mod tests {
                 implements: implements.iter().map(ToString::to_string).collect(),
                 instance_bindings: Vec::new(),
             }],
-            exported_factory_returns: Vec::new(),
+            exported_factory_returns: Box::default(),
             injection_tokens: Vec::new(),
             local_type_declarations: vec![],
             public_signature_type_references: vec![],

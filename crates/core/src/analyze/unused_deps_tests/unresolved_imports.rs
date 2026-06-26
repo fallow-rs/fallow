@@ -44,7 +44,7 @@ fn unresolved_import_detected() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -89,7 +89,7 @@ fn ignore_unresolved_imports_filters_raw_specifier_globs() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let mut config = test_config(PathBuf::from("/project"));
@@ -154,7 +154,7 @@ fn unresolved_dynamic_import_detected_with_real_location() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -226,7 +226,7 @@ fn unresolved_platform_builtins_not_reported() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -282,7 +282,7 @@ fn unresolved_virtual_module_not_reported() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -334,7 +334,7 @@ fn unresolved_import_with_virtual_prefix_not_reported() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -393,7 +393,7 @@ fn unresolved_tanstack_start_virtual_imports_not_reported() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -474,7 +474,7 @@ fn unresolved_import_suppressed_by_generated_import_pattern() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -552,7 +552,7 @@ fn unresolved_import_suppressed_by_generated_type_import_prefix() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -610,7 +610,7 @@ fn generated_type_import_prefix_is_plugin_gated() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -660,7 +660,7 @@ fn unresolved_import_suppressed_by_inline_comment() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -719,7 +719,7 @@ fn unresolved_dynamic_import_suppressed_by_inline_comment() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -780,7 +780,7 @@ fn unresolved_import_file_level_suppression() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -853,7 +853,7 @@ fn resolved_import_not_reported_as_unresolved() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -928,7 +928,7 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));

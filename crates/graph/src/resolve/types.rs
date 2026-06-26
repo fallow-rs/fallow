@@ -165,7 +165,7 @@ pub struct ResolvedModule {
     /// Exported free-function factories that provably return one class instance.
     /// Mirrors `ModuleInfo.exported_factory_returns`; read by the cross-module
     /// factory-fn member-credit pass. See issue #1441 (Part A).
-    pub exported_factory_returns: Vec<fallow_types::extract::FactoryReturnExport>,
+    pub exported_factory_returns: Box<[fallow_types::extract::FactoryReturnExport]>,
 }
 
 impl Default for ResolvedModule {
@@ -186,7 +186,7 @@ impl Default for ResolvedModule {
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
-            exported_factory_returns: vec![],
+            exported_factory_returns: Box::default(),
         }
     }
 }

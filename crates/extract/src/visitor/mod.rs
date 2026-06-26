@@ -1464,7 +1464,7 @@ impl ModuleInfoExtractor {
             complexity: Vec::new(),
             flag_uses: Vec::new(),
             class_heritage: self.class_heritage,
-            exported_factory_returns,
+            exported_factory_returns: exported_factory_returns.into_boxed_slice(),
             injection_tokens: self.injection_tokens,
             local_type_declarations: self.local_type_declarations,
             public_signature_type_references: self.public_signature_type_references,
@@ -1558,8 +1558,11 @@ impl ModuleInfoExtractor {
         info.has_cjs_exports |= self.has_cjs_exports;
         info.has_angular_component_template_url |= self.has_angular_component_template_url;
         info.class_heritage.append(&mut self.class_heritage);
-        info.exported_factory_returns
-            .append(&mut exported_factory_returns);
+        if !exported_factory_returns.is_empty() {
+            let mut merged = std::mem::take(&mut info.exported_factory_returns).into_vec();
+            merged.append(&mut exported_factory_returns);
+            info.exported_factory_returns = merged.into_boxed_slice();
+        }
         info.injection_tokens.append(&mut self.injection_tokens);
         info.local_type_declarations
             .append(&mut self.local_type_declarations);

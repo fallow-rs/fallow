@@ -107,7 +107,7 @@ fn builtin_modules_not_reported_as_unlisted() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -168,7 +168,7 @@ fn virtual_modules_not_reported_as_unlisted() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -353,7 +353,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
-            exported_factory_returns: vec![],
+            exported_factory_returns: Box::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -382,7 +382,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
-            exported_factory_returns: vec![],
+            exported_factory_returns: Box::default(),
         },
     ];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -447,7 +447,7 @@ fn dynamic_import_unlisted_dep_has_import_site() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -926,7 +926,7 @@ fn workspace_import_case(
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
-        exported_factory_returns: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 

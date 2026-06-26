@@ -70,7 +70,7 @@ pub struct ModuleInfo {
     /// to the class export. Populated only from an all-paths-unanimous proof
     /// (else absent) to bound the cross-module over-credit blast radius. See
     /// issue #1441 (cross-module factory, Part A).
-    pub exported_factory_returns: Vec<FactoryReturnExport>,
+    pub exported_factory_returns: Box<[FactoryReturnExport]>,
     /// Angular `InjectionToken<Interface>` declarations, as
     /// `(token_export_name, interface_name)` pairs. Recorded only for
     /// `new InjectionToken<I>(...)` initializers whose `InjectionToken` is
@@ -1844,7 +1844,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1328);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1320);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -2045,7 +2045,7 @@ mod tests {
                 implements: vec!["Contract".to_string()],
                 instance_bindings: Vec::new(),
             }],
-            exported_factory_returns: Vec::new(),
+            exported_factory_returns: Box::default(),
             injection_tokens: vec![("TOKEN".to_string(), "Contract".to_string())],
             local_type_declarations: vec![LocalTypeDeclaration {
                 name: "Contract".to_string(),
@@ -3274,7 +3274,7 @@ mod tests {
             complexity: Vec::new(),
             flag_uses: Vec::new(),
             class_heritage: Vec::new(),
-            exported_factory_returns: Vec::new(),
+            exported_factory_returns: Box::default(),
             injection_tokens: Vec::new(),
             local_type_declarations: Vec::new(),
             public_signature_type_references: Vec::new(),
