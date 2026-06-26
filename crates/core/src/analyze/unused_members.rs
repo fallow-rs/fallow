@@ -11,10 +11,7 @@ use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
-use fallow_types::extract::{
-    SemanticFactView, is_legacy_template_or_semantic_member_access_object,
-    is_legacy_template_or_semantic_whole_object_use,
-};
+use fallow_types::extract::{SemanticFactView, ordinary_whole_object_uses};
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
@@ -597,15 +594,12 @@ fn build_angular_template_chain_accesses(
             {
                 return None;
             }
-            let chains: Vec<(&str, &str)> = module
-                .member_accesses
-                .iter()
-                .filter(|access| {
-                    access.object != "this"
-                        && !is_legacy_template_or_semantic_member_access_object(&access.object)
-                })
-                .map(|access| (access.object.as_str(), access.member.as_str()))
-                .collect();
+            let chains: Vec<(&str, &str)> =
+                SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+                    .ordinary_member_accesses()
+                    .filter(|access| access.object != "this")
+                    .map(|access| (access.object.as_str(), access.member.as_str()))
+                    .collect();
             if chains.is_empty() {
                 None
             } else {
@@ -1431,20 +1425,7 @@ fn propagate_accesses_through_typed_instance_bindings(
     }
 }
 
-/// Whether an access-object name is a synthetic sentinel (instance / factory /
-/// fluent-chain / Angular-template), which the typed-instance chain resolver
-/// must skip because it is handled by a dedicated propagation pass.
-fn is_typed_instance_member_sentinel(object: &str) -> bool {
-    is_legacy_template_or_semantic_member_access_object(object)
-}
-
-/// Whether a whole-object-use name is a synthetic sentinel the typed-instance
-/// chain resolver must skip (the fluent-chain sentinels never appear here).
-fn is_typed_instance_whole_object_sentinel(object: &str) -> bool {
-    is_legacy_template_or_semantic_whole_object_use(object)
-}
-
-/// Credit each non-sentinel member access in one module onto the typed-instance
+/// Credit each ordinary member access in one module onto the typed-instance
 /// chain's target export keys.
 fn propagate_typed_member_accesses(
     graph: &ModuleGraph,
@@ -1453,10 +1434,9 @@ fn propagate_typed_member_accesses(
     local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
-    for access in &resolved.member_accesses {
-        if is_typed_instance_member_sentinel(&access.object) {
-            continue;
-        }
+    for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+        .ordinary_member_accesses()
+    {
         for target_key in resolve_typed_instance_chain_targets(
             graph,
             typed_instance_targets,
@@ -1471,8 +1451,8 @@ fn propagate_typed_member_accesses(
     }
 }
 
-/// Mark each non-sentinel whole-object use in one module as whole-object-used on
-/// the typed-instance chain's target export keys.
+/// Mark each ordinary whole-object use in one module as whole-object-used on the
+/// typed-instance chain's target export keys.
 fn propagate_typed_whole_object_uses(
     graph: &ModuleGraph,
     resolved: &ResolvedModule,
@@ -1480,10 +1460,7 @@ fn propagate_typed_whole_object_uses(
     local_to_export_keys: &FxHashMap<&str, Vec<ExportKey>>,
     whole_object_used_exports: &mut FxHashSet<ExportKey>,
 ) {
-    for object_name in &resolved.whole_object_uses {
-        if is_typed_instance_whole_object_sentinel(object_name) {
-            continue;
-        }
+    for object_name in ordinary_whole_object_uses(&resolved.whole_object_uses) {
         for target_key in resolve_typed_instance_chain_targets(
             graph,
             typed_instance_targets,
@@ -2417,10 +2394,9 @@ fn collect_direct_member_accesses(resolved_modules: &[ResolvedModule]) -> Member
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        for access in &resolved.member_accesses {
-            if is_legacy_template_or_semantic_member_access_object(&access.object) {
-                continue;
-            }
+        for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+            .ordinary_member_accesses()
+        {
             if access.object == "this" {
                 self_accessed_members
                     .entry(resolved.file_id)
@@ -2471,7 +2447,8 @@ mod tests {
         ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
         FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
         PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-        SemanticFact, legacy_semantic, semantic_facts_with_legacy_member_accesses,
+        SemanticFact, is_legacy_template_or_semantic_member_access_object, legacy_semantic,
+        semantic_facts_with_legacy_member_accesses,
     };
     use oxc_span::Span;
     use std::path::PathBuf;

@@ -1791,6 +1791,12 @@ impl<'a> SemanticFactView<'a> {
         self.angular_template_member_names().next().is_some()
     }
 
+    /// Iterate ordinary source member accesses, excluding legacy synthetic
+    /// member-access sentinels that are represented by typed semantic facts.
+    pub fn ordinary_member_accesses(self) -> impl Iterator<Item = &'a MemberAccess> + 'a {
+        ordinary_member_accesses_from_parts(self.member_accesses)
+    }
+
     /// Collect instance-export binding facts.
     pub fn instance_export_bindings(self) -> Vec<InstanceExportBindingFact> {
         instance_export_binding_facts_from_parts(self.semantic_facts, self.member_accesses)
@@ -1847,6 +1853,32 @@ pub fn semantic_facts_from_parts<'a>(
             legacy_member_access_to_semantic_fact(access.object.as_str(), access.member.as_str())
                 .map(SemanticFactCompat::Owned)
         }))
+}
+
+/// Iterate ordinary source member accesses, excluding legacy synthetic
+/// member-access sentinels.
+///
+/// New extraction writes these synthetic relationships as [`SemanticFact`]
+/// values. The filtering here exists so analyzers can avoid string-prefix
+/// knowledge while still ignoring older cache payload sentinels.
+pub fn ordinary_member_accesses_from_parts(
+    member_accesses: &[MemberAccess],
+) -> impl Iterator<Item = &MemberAccess> {
+    member_accesses
+        .iter()
+        .filter(|access| !is_legacy_template_or_semantic_member_access_object(&access.object))
+}
+
+/// Iterate ordinary whole-object uses, excluding legacy synthetic whole-object
+/// sentinels.
+///
+/// This mirrors [`ordinary_member_accesses_from_parts`] for consumers that
+/// propagate whole-object usage through typed instance chains.
+pub fn ordinary_whole_object_uses(whole_object_uses: &[String]) -> impl Iterator<Item = &str> {
+    whole_object_uses
+        .iter()
+        .map(String::as_str)
+        .filter(|object| !is_legacy_template_or_semantic_whole_object_use(object))
 }
 
 /// Collect instance-export binding facts from typed facts plus cache-compatible
@@ -2922,6 +2954,40 @@ mod tests {
         )));
         assert!(!is_legacy_template_or_semantic_member_access_object("this"));
         assert!(!is_legacy_template_or_semantic_whole_object_use("this"));
+    }
+
+    #[test]
+    fn ordinary_access_helpers_hide_legacy_sentinels() {
+        let member_accesses = vec![
+            MemberAccess {
+                object: "this".to_string(),
+                member: "render".to_string(),
+            },
+            MemberAccess {
+                object: ANGULAR_TPL_SENTINEL.to_string(),
+                member: "title".to_string(),
+            },
+            MemberAccess {
+                object: format!("{FACTORY_CALL_SENTINEL}Service:create"),
+                member: "run".to_string(),
+            },
+        ];
+        let ordinary = ordinary_member_accesses_from_parts(&member_accesses)
+            .map(|access| (access.object.as_str(), access.member.as_str()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(ordinary, vec![("this", "render")]);
+
+        let whole_object_uses = vec![
+            "model".to_string(),
+            ANGULAR_TPL_SENTINEL.to_string(),
+            format!("{INSTANCE_EXPORT_SENTINEL}service"),
+        ];
+
+        assert_eq!(
+            ordinary_whole_object_uses(&whole_object_uses).collect::<Vec<_>>(),
+            vec!["model"]
+        );
     }
 
     #[test]
