@@ -13,11 +13,27 @@ pub mod editor_duplicates {
 }
 
 pub mod editor_extract {
-    pub use fallow_engine::extract::*;
+    pub use fallow_types::extract::*;
 }
 
 pub mod editor_results {
-    pub use fallow_engine::results::*;
+    pub use fallow_types::output_dead_code::{
+        BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
+        CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+        DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
+        MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+        MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
+        ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
+        TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+        UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+        UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+        UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+        UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+        UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+        UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+        UnusedSvelteEventFinding, UnusedTypeFinding,
+    };
+    pub use fallow_types::results::*;
 }
 
 pub mod editor_security {
@@ -28,7 +44,7 @@ pub mod editor_suppress {
     pub use fallow_engine::suppress::{IssueKind, is_suppressed};
 }
 
-pub type EditorAnalysisResults = fallow_engine::AnalysisResults;
+pub type EditorAnalysisResults = fallow_types::results::AnalysisResults;
 pub type EditorAnalysisSession = fallow_engine::AnalysisSession;
 pub type EditorDeadCodeAnalysisOutput = fallow_engine::DeadCodeAnalysisOutput;
 pub type EditorDuplicationReport = fallow_engine::DuplicationReport;
