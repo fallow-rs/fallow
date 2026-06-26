@@ -14,7 +14,8 @@
     )
 )]
 
-use fallow_api::{ComplexityOptions, ProgrammaticError, ProgrammaticHealthRun};
+use fallow_api::{ComplexityOptions, ProgrammaticError};
+use fallow_engine::ProgrammaticHealthRun;
 
 /// CLI-backed health runner used by embedders during the health migration.
 pub struct CliHealthRunner;

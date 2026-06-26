@@ -8,7 +8,7 @@ use fallow_config::{
 };
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
 use fallow_engine::{
-    AnalysisResults, AnalysisSession, HealthAnalysisResult, ProjectConfig, ProjectConfigOptions,
+    AnalysisResults, AnalysisSession, ProgrammaticHealthRun, ProjectConfig, ProjectConfigOptions,
 };
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckOutput, CheckOutputInput, DiffIndex, DupesOutput, DupesOutputInput,
@@ -43,30 +43,6 @@ pub struct HealthJsonReportInput<'a> {
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<&'a str>,
-}
-
-/// Health runner output consumed by the API-owned programmatic serializer.
-///
-/// The analysis payload is the typed engine result. Runtime-only presentation
-/// probes stay explicit so the API boundary, not the concrete runner, owns the
-/// final programmatic report assembly.
-pub struct ProgrammaticHealthRun {
-    pub analysis: HealthAnalysisResult,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
-    pub next_step_facts: ProgrammaticHealthNextStepFacts,
-    pub telemetry_analysis_run_id: Option<String>,
-}
-
-/// Runtime probes used by the API-owned programmatic health output assembly.
-///
-/// The runner still supplies environment and project facts while health
-/// execution is moving out of the CLI crate. The stable command strings and
-/// output ordering are owned by `fallow-output`.
-pub struct ProgrammaticHealthNextStepFacts {
-    pub suggestions_enabled: bool,
-    pub offer_setup: bool,
-    pub impact_digest: Option<fallow_output::ImpactDigestCounts>,
-    pub audit_changed: bool,
 }
 
 /// Temporary runner boundary for programmatic health while execution moves from
@@ -1612,7 +1588,7 @@ mod tests {
             .expect("test config loads");
 
             Ok(ProgrammaticHealthRun {
-                analysis: HealthAnalysisResult {
+                analysis: fallow_engine::HealthAnalysisResult {
                     report: HealthReport::default(),
                     grouping: None,
                     group_resolver: None,
@@ -1625,7 +1601,7 @@ mod tests {
                 workspace_diagnostics: vec![WorkspaceDiagnosticOutput(serde_json::json!({
                     "path": self.root.join("package.json")
                 }))],
-                next_step_facts: ProgrammaticHealthNextStepFacts {
+                next_step_facts: fallow_engine::ProgrammaticHealthNextStepFacts {
                     suggestions_enabled: true,
                     offer_setup: false,
                     impact_digest: Some(fallow_output::ImpactDigestCounts {

@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::OutputFormat;
-use fallow_engine::results::AnalysisResults;
+use fallow_engine::{
+    ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun, results::AnalysisResults,
+};
 
 use crate::check::{CheckOptions, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions};
@@ -668,7 +670,7 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
     fn run_programmatic_health(
         &self,
         options: &ComplexityOptions,
-    ) -> ProgrammaticResult<fallow_api::ProgrammaticHealthRun> {
+    ) -> ProgrammaticResult<ProgrammaticHealthRun> {
         let resolved = resolve_analysis_options(&options.analysis)?;
         resolved.install(|| {
             let health_options = build_complexity_options(&resolved, options);
@@ -676,14 +678,14 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
                 .map_err(|_| generic_analysis_error("health"))?;
             let root = &result.config.root;
             let workspace_diagnostics = workspace_diagnostics_for_programmatic_output(root);
-            let next_step_facts = fallow_api::ProgrammaticHealthNextStepFacts {
+            let next_step_facts = ProgrammaticHealthNextStepFacts {
                 suggestions_enabled: crate::report::suggestions::suggestions_enabled(),
                 offer_setup: crate::report::suggestions::setup_pointer_applicable(root),
                 impact_digest: crate::report::suggestions::due_impact_digest(root)
                     .map(crate::report::suggestions::impact_counts),
                 audit_changed: crate::report::suggestions::audit_changed_applicable(root),
             };
-            Ok(fallow_api::ProgrammaticHealthRun {
+            Ok(ProgrammaticHealthRun {
                 analysis: result.without_group_resolver(),
                 workspace_diagnostics,
                 next_step_facts,
@@ -700,7 +702,7 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
 /// `fallow-api` contracts instead of depending on CLI runner types.
 pub fn run_programmatic_health(
     options: &ComplexityOptions,
-) -> ProgrammaticResult<fallow_api::ProgrammaticHealthRun> {
+) -> ProgrammaticResult<ProgrammaticHealthRun> {
     fallow_api::ProgrammaticHealthRunner::run_programmatic_health(
         &CliProgrammaticHealthRunner,
         options,
