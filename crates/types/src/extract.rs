@@ -28,9 +28,9 @@ pub struct ModuleInfo {
     pub member_accesses: Vec<MemberAccess>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
     ///
-    /// This carries facts that used to be encoded through sentinel strings in
-    /// `member_accesses`. During migration, extractors may emit both the typed
-    /// fact and the legacy sentinel access.
+    /// This carries facts that used to be encoded through legacy sentinel
+    /// strings in `member_accesses`. New extraction writes typed facts only;
+    /// analyzers decode legacy sentinels solely for older cache payloads.
     pub semantic_facts: Box<[SemanticFact]>,
     /// Identifiers used in whole-object access patterns.
     pub whole_object_uses: Box<[String]>,
@@ -1379,76 +1379,87 @@ pub enum SemanticFact {
     DynamicCustomElementRender(DynamicCustomElementRenderFact),
 }
 
-/// Legacy member-access object used by Angular template scanners.
+/// Legacy string protocol constants kept for parse-cache compatibility.
 ///
-/// New extraction writes [`SemanticFact::AngularTemplateMemberAccess`]. The
-/// object value remains available so analysis can decode older cache entries
-/// that used `MemberAccess.object` as a string protocol.
-pub const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
+/// New extraction writes [`SemanticFact`] values directly. These constants are
+/// decode-only contracts for older cache payloads that stored semantic facts in
+/// `MemberAccess.object`.
+pub mod legacy_semantic {
+    /// Legacy member-access object used by Angular template scanners.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::AngularTemplateMemberAccess`](super::SemanticFact::AngularTemplateMemberAccess).
+    pub const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
 
-/// Legacy member-access object recorded for Angular `{ ...this }` forwarding.
-///
-/// New extraction writes [`SemanticFact::AngularThisSpread`]. The object value
-/// remains available so component member detectors can honor older cache
-/// entries that used `MemberAccess.object` as a string protocol.
-pub const ANGULAR_THIS_SPREAD_SENTINEL: &str = "__angular_this_spread__";
+    /// Legacy member-access object recorded for Angular `{ ...this }`
+    /// forwarding.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::AngularThisSpread`](super::SemanticFact::AngularThisSpread).
+    pub const ANGULAR_THIS_SPREAD_SENTINEL: &str = "__angular_this_spread__";
 
-/// Legacy member-access object prefix for exported-instance bindings.
-///
-/// New extraction writes [`SemanticFact::InstanceExportBinding`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol.
-pub const INSTANCE_EXPORT_SENTINEL: &str = "__fallow_instance_export__:";
+    /// Legacy member-access object prefix for exported-instance bindings.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::InstanceExportBinding`](super::SemanticFact::InstanceExportBinding).
+    pub const INSTANCE_EXPORT_SENTINEL: &str = "__fallow_instance_export__:";
 
-/// Legacy member-access object prefix for typed Playwright fixture definitions.
-///
-/// New extraction writes [`SemanticFact::PlaywrightFixtureDefinition`]. The
-/// prefix remains available so analysis can decode older cache entries that
-/// used `MemberAccess.object` as a string protocol.
-pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
+    /// Legacy member-access object prefix for typed Playwright fixture
+    /// definitions.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::PlaywrightFixtureDefinition`](super::SemanticFact::PlaywrightFixtureDefinition).
+    pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
 
-/// Legacy member-access object prefix for Playwright fixture wrapper aliases.
-///
-/// New extraction writes [`SemanticFact::PlaywrightFixtureAlias`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol.
-pub const PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL: &str = "__fallow_playwright_fixture_alias__:";
+    /// Legacy member-access object prefix for Playwright fixture wrapper
+    /// aliases.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::PlaywrightFixtureAlias`](super::SemanticFact::PlaywrightFixtureAlias).
+    pub const PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL: &str = "__fallow_playwright_fixture_alias__:";
 
-/// Legacy member-access object prefix for Playwright fixture member uses.
-///
-/// New extraction writes [`SemanticFact::PlaywrightFixtureUse`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol.
-pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
+    /// Legacy member-access object prefix for Playwright fixture member uses.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::PlaywrightFixtureUse`](super::SemanticFact::PlaywrightFixtureUse).
+    pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
 
-/// Legacy member-access object prefix for exported Playwright fixture type aliases.
-///
-/// New extraction writes [`SemanticFact::PlaywrightFixtureType`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol.
-pub const PLAYWRIGHT_FIXTURE_TYPE_SENTINEL: &str = "__fallow_playwright_fixture_type__:";
+    /// Legacy member-access object prefix for exported Playwright fixture type
+    /// aliases.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::PlaywrightFixtureType`](super::SemanticFact::PlaywrightFixtureType).
+    pub const PLAYWRIGHT_FIXTURE_TYPE_SENTINEL: &str = "__fallow_playwright_fixture_type__:";
 
-/// Legacy member-access object prefix for static-factory call returns.
-///
-/// New extraction writes [`SemanticFact::FactoryCallMemberAccess`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol. See issue #346.
-pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
+    /// Legacy member-access object prefix for static-factory call returns.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::FactoryCallMemberAccess`](super::SemanticFact::FactoryCallMemberAccess).
+    /// See issue #346.
+    pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
 
-/// Legacy member-access object prefix for fluent-builder chain credit.
-///
-/// New extraction writes [`SemanticFact::FluentChainMemberAccess`]. The prefix
-/// remains available so analysis can decode older cache entries that used
-/// `MemberAccess.object` as a string protocol. See issue #387.
-pub const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
+    /// Legacy member-access object prefix for fluent-builder chain credit.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::FluentChainMemberAccess`](super::SemanticFact::FluentChainMemberAccess).
+    /// See issue #387.
+    pub const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
 
-/// Legacy member-access object prefix for fluent chains rooted at a `new`
-/// expression.
-///
-/// New extraction writes [`SemanticFact::FluentChainNewMemberAccess`]. The
-/// prefix remains available so analysis can decode older cache entries that
-/// used `MemberAccess.object` as a string protocol. See issue #605.
-pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
+    /// Legacy member-access object prefix for fluent chains rooted at a `new`
+    /// expression.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::FluentChainNewMemberAccess`](super::SemanticFact::FluentChainNewMemberAccess).
+    /// See issue #605.
+    pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
+}
+
+pub use legacy_semantic::{
+    ANGULAR_THIS_SPREAD_SENTINEL, ANGULAR_TPL_SENTINEL, FACTORY_CALL_SENTINEL,
+    FLUENT_CHAIN_NEW_SENTINEL, FLUENT_CHAIN_SENTINEL, INSTANCE_EXPORT_SENTINEL,
+    PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+    PLAYWRIGHT_FIXTURE_TYPE_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL,
+};
 
 /// A semantic member-access fact decoded from older sentinel-backed parse-cache
 /// entries.

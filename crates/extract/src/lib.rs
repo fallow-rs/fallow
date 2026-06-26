@@ -62,7 +62,7 @@ pub use fallow_types::extract::{
     PLAYWRIGHT_FIXTURE_TYPE_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL, ParseResult,
     PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
     PlaywrightFixtureUseFact, PublicSignatureTypeReference, ReExportInfo, RequireCallInfo,
-    SemanticFact, VisibilityTag, compute_line_offsets,
+    SemanticFact, VisibilityTag, compute_line_offsets, legacy_semantic,
 };
 
 pub use astro::{

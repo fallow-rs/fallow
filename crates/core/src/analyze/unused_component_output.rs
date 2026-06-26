@@ -19,8 +19,8 @@
 //! - a `member_access` with `object == "this" && member == bar` (the output read
 //!   as a value, e.g. forwarded to a function that may emit it). Over-credit;
 //! - a typed Angular template member fact for `bar`, with legacy
-//!   `ANGULAR_TPL_SENTINEL` member accesses accepted as a fallback during the
-//!   migration, which credits a template-handler emit such as
+//!   `ANGULAR_TPL_SENTINEL` member accesses accepted only as an older
+//!   parse-cache fallback, which credits a template-handler emit such as
 //!   `(click)="bar.emit(...)"` (Angular templates emit outputs directly off the
 //!   bare name, with no `this.` prefix);
 //! - the same template member evidence in the linked external `templateUrl`
@@ -147,9 +147,10 @@ fn output_is_emitted(component: &ModuleInfo, name: &str) -> bool {
 
 /// Build the set of output names emitted through a template handler. An Angular
 /// template emits an output off the bare name (`(click)="bar.emit(...)"`), which
-/// the template scanner records as an `ANGULAR_TPL_SENTINEL` member access for
-/// `bar`. This covers the component's own inline template plus every linked
-/// external `templateUrl` module. Over-credits by design.
+/// extraction records as typed Angular template member evidence for `bar`.
+/// Legacy `ANGULAR_TPL_SENTINEL` member accesses are accepted for older
+/// parse-cache payloads. This covers the component's own inline template plus
+/// every linked external `templateUrl` module. Over-credits by design.
 fn template_emitted_outputs<'a>(
     component: &'a ModuleInfo,
     external_templates: &[&'a ModuleInfo],
@@ -212,8 +213,8 @@ fn component_name_for(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use fallow_types::extract::{
-        ANGULAR_TPL_SENTINEL, AngularOutputMember, AngularTemplateMemberAccessFact,
-        ClassHeritageInfo, MemberAccess, SemanticFact,
+        AngularOutputMember, AngularTemplateMemberAccessFact, ClassHeritageInfo, MemberAccess,
+        SemanticFact, legacy_semantic,
     };
     use rustc_hash::FxHashSet;
 
@@ -267,11 +268,12 @@ mod tests {
 
     #[test]
     fn inline_template_emit_credits_output() {
-        // `(click)="changed.emit(...)"` records a sentinel member access for the
-        // bare output name (no `this.`); it must credit the output as emitted.
+        // Older cache payloads may carry the bare template output reference as
+        // a legacy sentinel member access; it must still credit the output as
+        // emitted.
         let component = ModuleInfo {
             angular_outputs: vec![output("changed", 10)],
-            member_accesses: vec![access(ANGULAR_TPL_SENTINEL, "changed")],
+            member_accesses: vec![access(legacy_semantic::ANGULAR_TPL_SENTINEL, "changed")],
             ..empty_module()
         };
         let emitted = template_emitted_outputs(&component, &[]);

@@ -2491,11 +2491,10 @@ mod tests {
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_config::{ScopedUsedClassMemberRule, UsedClassMemberRule};
     use fallow_types::extract::{
-        ClassHeritageInfo, FLUENT_CHAIN_NEW_SENTINEL, FactoryCallMemberAccessFact,
-        FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, InstanceExportBindingFact,
-        PLAYWRIGHT_FIXTURE_DEF_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL,
-        PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
-        PlaywrightFixtureUseFact, SemanticFact, semantic_facts_with_legacy_member_accesses,
+        ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
+        FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
+        PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
+        SemanticFact, legacy_semantic, semantic_facts_with_legacy_member_accesses,
     };
     use oxc_span::Span;
     use std::path::PathBuf;
@@ -2703,11 +2702,17 @@ mod tests {
             ],
             member_accesses: vec![
                 MemberAccess {
-                    object: format!("{PLAYWRIGHT_FIXTURE_DEF_SENTINEL}test:adminPage"),
+                    object: format!(
+                        "{}test:adminPage",
+                        legacy_semantic::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
+                    ),
                     member: "AdminPage".to_string(),
                 },
                 MemberAccess {
-                    object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}test:adminPage"),
+                    object: format!(
+                        "{}test:adminPage",
+                        legacy_semantic::PLAYWRIGHT_FIXTURE_USE_SENTINEL
+                    ),
                     member: "assertGreeting".to_string(),
                 },
             ],
@@ -5056,7 +5061,7 @@ mod tests {
 
     #[test]
     fn malformed_legacy_member_access_is_skip_only() {
-        let malformed = format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:");
+        let malformed = format!("{}Builder:", legacy_semantic::FLUENT_CHAIN_NEW_SENTINEL);
         let member_accesses = vec![crate::extract::MemberAccess {
             object: malformed.clone(),
             member: "value".to_string(),

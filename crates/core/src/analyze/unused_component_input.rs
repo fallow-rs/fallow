@@ -12,10 +12,10 @@
 //! "used", so only false negatives can result, never false positives). An input
 //! `foo` is USED if ANY hold:
 //! - a typed Angular template member fact for `foo`, with legacy
-//!   `ANGULAR_TPL_SENTINEL` member accesses accepted as a fallback during the
-//!   migration; inline templates, host bindings, and `inputs:` / `outputs:`
-//!   metadata arrays all emit this template member evidence in the component's
-//!   own module;
+//!   `ANGULAR_TPL_SENTINEL` member accesses accepted only as an older
+//!   parse-cache fallback; inline templates, host bindings, and `inputs:` /
+//!   `outputs:` metadata arrays all emit this template member evidence in the
+//!   component's own module;
 //! - the component has `has_angular_component_template_url` and the linked
 //!   external `.html` module (reached via the `SideEffect` import edge) has such
 //!   template member evidence for `foo`;
@@ -205,8 +205,8 @@ fn external_template_modules<'a>(
         let Some(target_module) = modules_by_id.get(&target) else {
             continue;
         };
-        // The external template module carries typed template facts, with
-        // legacy sentinel member accesses kept during migration.
+        // The external template module carries typed template facts, while
+        // older parse-cache payloads may still carry legacy sentinel accesses.
         if has_angular_template_members(target_module) {
             out.push(*target_module);
         }
@@ -272,8 +272,8 @@ pub(super) fn is_js_reserved_word(name: &str) -> bool {
 mod tests {
     use fallow_types::discover::FileId;
     use fallow_types::extract::{
-        ANGULAR_TPL_SENTINEL, AngularInputMember, AngularTemplateMemberAccessFact,
-        AngularThisSpreadFact, ClassHeritageInfo, MemberAccess, SemanticFact,
+        AngularInputMember, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
+        ClassHeritageInfo, MemberAccess, SemanticFact, legacy_semantic,
     };
     use rustc_hash::FxHashSet;
 
@@ -289,7 +289,7 @@ mod tests {
 
     fn tpl_access(member: &str) -> MemberAccess {
         MemberAccess {
-            object: ANGULAR_TPL_SENTINEL.to_string(),
+            object: legacy_semantic::ANGULAR_TPL_SENTINEL.to_string(),
             member: member.to_string(),
         }
     }
