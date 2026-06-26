@@ -83,10 +83,7 @@ fn configured_sarif_level(s: Severity) -> &'static str {
     }
 }
 
-/// Build a single SARIF result object.
-///
-/// When `region` is `Some((line, col))`, a `region` block with 1-based
-/// `startLine` and `startColumn` is included in the physical location.
+#[cfg(test)]
 fn sarif_result(
     rule_id: &str,
     level: &str,
@@ -2123,10 +2120,6 @@ pub(super) fn print_sarif(results: &AnalysisResults, root: &Path, rules: &RulesC
 /// Calls `build_sarif` to produce the standard SARIF JSON, then post-processes
 /// each result to add `"properties": { "owner": "@team" }` by resolving the
 /// artifact location URI through the `OwnershipResolver`.
-#[expect(
-    clippy::expect_used,
-    reason = "grouped SARIF entries are JSON objects created by build_sarif"
-)]
 pub(super) fn print_grouped_sarif(
     results: &AnalysisResults,
     root: &Path,
@@ -2134,79 +2127,16 @@ pub(super) fn print_grouped_sarif(
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let mut sarif = build_sarif(results, root, rules);
-
-    if let Some(runs) = sarif.get_mut("runs").and_then(|r| r.as_array_mut()) {
-        for run in runs {
-            if let Some(results) = run.get_mut("results").and_then(|r| r.as_array_mut()) {
-                for result in results {
-                    let uri = result
-                        .pointer("/locations/0/physicalLocation/artifactLocation/uri")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    let decoded = uri.replace("%5B", "[").replace("%5D", "]");
-                    let owner =
-                        grouping::resolve_owner(Path::new(&decoded), Path::new(""), resolver);
-                    let props = result
-                        .as_object_mut()
-                        .expect("SARIF result should be an object")
-                        .entry("properties")
-                        .or_insert_with(|| serde_json::json!({}));
-                    props
-                        .as_object_mut()
-                        .expect("properties should be an object")
-                        .insert("owner".to_string(), serde_json::Value::String(owner));
-                }
-            }
-        }
-    }
+    fallow_api::annotate_sarif_results(&mut sarif, "owner", |uri| {
+        let decoded = uri.replace("%5B", "[").replace("%5D", "]");
+        grouping::resolve_owner(Path::new(&decoded), Path::new(""), resolver)
+    });
 
     emit_json(&sarif, "SARIF")
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "line/col numbers are bounded by source size"
-)]
 pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -> ExitCode {
-    let mut sarif_results = Vec::new();
-    let mut snippets = SourceSnippetCache::default();
-
-    for (i, group) in report.clone_groups.iter().enumerate() {
-        for instance in &group.instances {
-            let uri = relative_uri(&instance.file, root);
-            let source_snippet = snippets.line(&instance.file, instance.start_line as u32);
-            sarif_results.push(sarif_result_with_snippet(
-                "fallow/code-duplication",
-                "warning",
-                &format!(
-                    "Code clone group {} ({} lines, {} instances)",
-                    i + 1,
-                    group.line_count,
-                    group.instances.len()
-                ),
-                &uri,
-                Some((instance.start_line as u32, (instance.start_col + 1) as u32)),
-                source_snippet.as_deref(),
-            ));
-        }
-    }
-
-    let sarif = serde_json::json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "fallow",
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": [sarif_rule("fallow/code-duplication", "Duplicated code block", "warning")]
-                }
-            },
-            "results": sarif_results
-        }]
-    });
-
+    let sarif = fallow_api::build_duplication_sarif(report, root, &sarif_rule);
     emit_json(&sarif, "SARIF")
 }
 
@@ -2220,490 +2150,20 @@ pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -
 /// (`print_grouped_health_sarif`) so consumers (GitHub Code Scanning, GitLab
 /// Code Quality) can partition findings per team / package / directory
 /// without re-resolving ownership.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "line/col numbers are bounded by source size"
-)]
-#[expect(
-    clippy::expect_used,
-    reason = "duplication SARIF entries are JSON objects created by sarif_result_with_snippet"
-)]
 pub(super) fn print_grouped_duplication_sarif(
     report: &DuplicationReport,
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let mut sarif_results = Vec::new();
-    let mut snippets = SourceSnippetCache::default();
-
-    for (i, group) in report.clone_groups.iter().enumerate() {
-        let primary_owner = super::dupes_grouping::largest_owner(group, root, resolver);
-        for instance in &group.instances {
-            let uri = relative_uri(&instance.file, root);
-            let source_snippet = snippets.line(&instance.file, instance.start_line as u32);
-            let mut result = sarif_result_with_snippet(
-                "fallow/code-duplication",
-                "warning",
-                &format!(
-                    "Code clone group {} ({} lines, {} instances)",
-                    i + 1,
-                    group.line_count,
-                    group.instances.len()
-                ),
-                &uri,
-                Some((instance.start_line as u32, (instance.start_col + 1) as u32)),
-                source_snippet.as_deref(),
-            );
-            let props = result
-                .as_object_mut()
-                .expect("SARIF result should be an object")
-                .entry("properties")
-                .or_insert_with(|| serde_json::json!({}));
-            props
-                .as_object_mut()
-                .expect("properties should be an object")
-                .insert(
-                    "group".to_string(),
-                    serde_json::Value::String(primary_owner.clone()),
-                );
-            sarif_results.push(result);
-        }
-    }
-
-    let sarif = serde_json::json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "fallow",
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": [sarif_rule("fallow/code-duplication", "Duplicated code block", "warning")]
-                }
-            },
-            "results": sarif_results
-        }]
+    let sarif = fallow_api::build_grouped_duplication_sarif(report, root, &sarif_rule, |group| {
+        super::dupes_grouping::largest_owner(group, root, resolver)
     });
-
     emit_json(&sarif, "SARIF")
 }
 
 #[must_use]
 pub fn build_health_sarif(report: &fallow_output::HealthReport, root: &Path) -> serde_json::Value {
-    let mut sarif_results = Vec::new();
-    let mut snippets = SourceSnippetCache::default();
-
-    append_health_sarif_results(report, root, &mut sarif_results, &mut snippets);
-    let health_rules = health_sarif_rules();
-    health_sarif_document(&sarif_results, &health_rules)
-}
-
-fn append_health_sarif_results(
-    report: &fallow_output::HealthReport,
-    root: &Path,
-    sarif_results: &mut Vec<serde_json::Value>,
-    snippets: &mut SourceSnippetCache,
-) {
-    append_complexity_sarif_results(sarif_results, report, root, snippets);
-
-    if let Some(ref production) = report.runtime_coverage {
-        append_runtime_coverage_sarif_results(sarif_results, production, root, snippets);
-    }
-    if let Some(ref intelligence) = report.coverage_intelligence {
-        append_coverage_intelligence_sarif_results(sarif_results, intelligence, root, snippets);
-    }
-
-    append_refactoring_target_sarif_results(sarif_results, report, root);
-    append_coverage_gap_sarif_results(sarif_results, report, root, snippets);
-}
-
-fn health_sarif_rules() -> Vec<serde_json::Value> {
-    let mut rules = health_complexity_sarif_rules();
-    rules.extend(health_runtime_sarif_rules());
-    rules.extend(health_coverage_intelligence_sarif_rules());
-    rules
-}
-
-fn health_complexity_sarif_rules() -> Vec<serde_json::Value> {
-    vec![
-        sarif_rule(
-            "fallow/high-cyclomatic-complexity",
-            "Function has high cyclomatic complexity",
-            "note",
-        ),
-        sarif_rule(
-            "fallow/high-cognitive-complexity",
-            "Function has high cognitive complexity",
-            "note",
-        ),
-        sarif_rule(
-            "fallow/high-complexity",
-            "Function exceeds both complexity thresholds",
-            "note",
-        ),
-        sarif_rule(
-            "fallow/high-crap-score",
-            "Function has a high CRAP score (high complexity combined with low coverage)",
-            "warning",
-        ),
-        sarif_rule(
-            "fallow/refactoring-target",
-            "File identified as a high-priority refactoring candidate",
-            "warning",
-        ),
-    ]
-}
-
-fn health_runtime_sarif_rules() -> Vec<serde_json::Value> {
-    vec![
-        sarif_rule(
-            "fallow/untested-file",
-            "Runtime-reachable file has no test dependency path",
-            "warning",
-        ),
-        sarif_rule(
-            "fallow/untested-export",
-            "Runtime-reachable export has no test dependency path",
-            "warning",
-        ),
-        sarif_rule(
-            "fallow/runtime-safe-to-delete",
-            "Function is statically unused and was never invoked in production",
-            "warning",
-        ),
-        sarif_rule(
-            "fallow/runtime-review-required",
-            "Function is statically used but was never invoked in production",
-            "warning",
-        ),
-        sarif_rule(
-            "fallow/runtime-low-traffic",
-            "Function was invoked below the low-traffic threshold relative to total trace count",
-            "note",
-        ),
-        sarif_rule(
-            "fallow/runtime-coverage-unavailable",
-            "Runtime coverage could not be resolved for this function",
-            "note",
-        ),
-        sarif_rule(
-            "fallow/runtime-coverage",
-            "Runtime coverage finding",
-            "note",
-        ),
-    ]
-}
-
-fn health_coverage_intelligence_sarif_rules() -> Vec<serde_json::Value> {
-    vec![
-        sarif_rule(
-            "fallow/coverage-intelligence-risky-change",
-            "Changed hot path combines high CRAP and low test coverage",
-            "warning",
-        ),
-        sarif_rule(
-            "fallow/coverage-intelligence-delete",
-            "Static and runtime evidence indicate code can be deleted",
-            "warning",
-        ),
-        sarif_rule(
-            "fallow/coverage-intelligence-review",
-            "Cold reachable uncovered code needs owner review",
-            "warning",
-        ),
-        sarif_rule(
-            "fallow/coverage-intelligence-refactor",
-            "Hot covered code has high CRAP and should be refactored carefully",
-            "warning",
-        ),
-    ]
-}
-
-fn health_sarif_document(
-    sarif_results: &[serde_json::Value],
-    health_rules: &[serde_json::Value],
-) -> serde_json::Value {
-    serde_json::json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "fallow",
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": health_rules
-                }
-            },
-            "results": sarif_results
-        }]
-    })
-}
-
-fn append_complexity_sarif_results(
-    sarif_results: &mut Vec<serde_json::Value>,
-    report: &fallow_output::HealthReport,
-    root: &Path,
-    snippets: &mut SourceSnippetCache,
-) {
-    for finding in &report.findings {
-        let uri = relative_uri(&finding.path, root);
-        let (rule_id, message) = health_complexity_sarif_message(finding, report);
-        let level = match finding.severity {
-            fallow_output::FindingSeverity::Critical => "error",
-            fallow_output::FindingSeverity::High => "warning",
-            fallow_output::FindingSeverity::Moderate => "note",
-        };
-        let source_snippet = snippets.line(&finding.path, finding.line);
-        sarif_results.push(sarif_result_with_snippet(
-            rule_id,
-            level,
-            &message,
-            &uri,
-            Some((finding.line, finding.col + 1)),
-            source_snippet.as_deref(),
-        ));
-    }
-}
-
-fn health_complexity_sarif_message(
-    finding: &fallow_output::ComplexityViolation,
-    report: &fallow_output::HealthReport,
-) -> (&'static str, String) {
-    match finding.exceeded {
-        fallow_output::ExceededThreshold::Cyclomatic => (
-            "fallow/high-cyclomatic-complexity",
-            format!(
-                "'{}' has cyclomatic complexity {} (threshold: {})",
-                finding.name, finding.cyclomatic, report.summary.max_cyclomatic_threshold,
-            ),
-        ),
-        fallow_output::ExceededThreshold::Cognitive => (
-            "fallow/high-cognitive-complexity",
-            format!(
-                "'{}' has cognitive complexity {} (threshold: {})",
-                finding.name, finding.cognitive, report.summary.max_cognitive_threshold,
-            ),
-        ),
-        fallow_output::ExceededThreshold::Both => (
-            "fallow/high-complexity",
-            format!(
-                "'{}' has cyclomatic complexity {} (threshold: {}) and cognitive complexity {} (threshold: {})",
-                finding.name,
-                finding.cyclomatic,
-                report.summary.max_cyclomatic_threshold,
-                finding.cognitive,
-                report.summary.max_cognitive_threshold,
-            ),
-        ),
-        fallow_output::ExceededThreshold::Crap
-        | fallow_output::ExceededThreshold::CyclomaticCrap
-        | fallow_output::ExceededThreshold::CognitiveCrap
-        | fallow_output::ExceededThreshold::All => {
-            let crap = finding.crap.unwrap_or(0.0);
-            let coverage = finding
-                .coverage_pct
-                .map(|pct| format!(", coverage {pct:.0}%"))
-                .unwrap_or_default();
-            (
-                "fallow/high-crap-score",
-                format!(
-                    "'{}' has CRAP score {:.1} (threshold: {:.1}, cyclomatic {}{})",
-                    finding.name,
-                    crap,
-                    report.summary.max_crap_threshold,
-                    finding.cyclomatic,
-                    coverage,
-                ),
-            )
-        }
-    }
-}
-
-fn append_refactoring_target_sarif_results(
-    sarif_results: &mut Vec<serde_json::Value>,
-    report: &fallow_output::HealthReport,
-    root: &Path,
-) {
-    for target in &report.targets {
-        let uri = relative_uri(&target.path, root);
-        let message = format!(
-            "[{}] {} (priority: {:.1}, efficiency: {:.1}, effort: {}, confidence: {})",
-            target.category.label(),
-            target.recommendation,
-            target.priority,
-            target.efficiency,
-            target.effort.label(),
-            target.confidence.label(),
-        );
-        sarif_results.push(sarif_result(
-            "fallow/refactoring-target",
-            "warning",
-            &message,
-            &uri,
-            None,
-        ));
-    }
-}
-
-fn append_coverage_gap_sarif_results(
-    sarif_results: &mut Vec<serde_json::Value>,
-    report: &fallow_output::HealthReport,
-    root: &Path,
-    snippets: &mut SourceSnippetCache,
-) {
-    let Some(ref gaps) = report.coverage_gaps else {
-        return;
-    };
-    for item in &gaps.files {
-        let uri = relative_uri(&item.file.path, root);
-        let message = format!(
-            "File is runtime-reachable but has no test dependency path ({} value export{})",
-            item.file.value_export_count,
-            if item.file.value_export_count == 1 {
-                ""
-            } else {
-                "s"
-            },
-        );
-        sarif_results.push(sarif_result(
-            "fallow/untested-file",
-            "warning",
-            &message,
-            &uri,
-            None,
-        ));
-    }
-
-    for item in &gaps.exports {
-        let uri = relative_uri(&item.export.path, root);
-        let message = format!(
-            "Export '{}' is runtime-reachable but never referenced by test-reachable modules",
-            item.export.export_name
-        );
-        let source_snippet = snippets.line(&item.export.path, item.export.line);
-        sarif_results.push(sarif_result_with_snippet(
-            "fallow/untested-export",
-            "warning",
-            &message,
-            &uri,
-            Some((item.export.line, item.export.col + 1)),
-            source_snippet.as_deref(),
-        ));
-    }
-}
-
-fn append_runtime_coverage_sarif_results(
-    sarif_results: &mut Vec<serde_json::Value>,
-    production: &fallow_output::RuntimeCoverageReport,
-    root: &Path,
-    snippets: &mut SourceSnippetCache,
-) {
-    for finding in &production.findings {
-        let uri = relative_uri(&finding.path, root);
-        let rule_id = match finding.verdict {
-            fallow_output::RuntimeCoverageVerdict::SafeToDelete => "fallow/runtime-safe-to-delete",
-            fallow_output::RuntimeCoverageVerdict::ReviewRequired => {
-                "fallow/runtime-review-required"
-            }
-            fallow_output::RuntimeCoverageVerdict::LowTraffic => "fallow/runtime-low-traffic",
-            fallow_output::RuntimeCoverageVerdict::CoverageUnavailable => {
-                "fallow/runtime-coverage-unavailable"
-            }
-            fallow_output::RuntimeCoverageVerdict::Active
-            | fallow_output::RuntimeCoverageVerdict::Unknown => "fallow/runtime-coverage",
-        };
-        let level = match finding.verdict {
-            fallow_output::RuntimeCoverageVerdict::SafeToDelete
-            | fallow_output::RuntimeCoverageVerdict::ReviewRequired => "warning",
-            _ => "note",
-        };
-        let invocations_hint = finding.invocations.map_or_else(
-            || "untracked".to_owned(),
-            |hits| format!("{hits} invocations"),
-        );
-        let message = format!(
-            "'{}' runtime coverage verdict: {} ({})",
-            finding.function,
-            finding.verdict.human_label(),
-            invocations_hint,
-        );
-        let source_snippet = snippets.line(&finding.path, finding.line);
-        sarif_results.push(sarif_result_with_snippet(
-            rule_id,
-            level,
-            &message,
-            &uri,
-            Some((finding.line, 1)),
-            source_snippet.as_deref(),
-        ));
-    }
-}
-
-fn append_coverage_intelligence_sarif_results(
-    sarif_results: &mut Vec<serde_json::Value>,
-    intelligence: &fallow_output::CoverageIntelligenceReport,
-    root: &Path,
-    snippets: &mut SourceSnippetCache,
-) {
-    for finding in &intelligence.findings {
-        let rule_id = coverage_intelligence_rule_id(finding.recommendation);
-        let level = match finding.verdict {
-            fallow_output::CoverageIntelligenceVerdict::Clean
-            | fallow_output::CoverageIntelligenceVerdict::Unknown => continue,
-            _ => "warning",
-        };
-        let uri = relative_uri(&finding.path, root);
-        let identity = finding.identity.as_deref().unwrap_or("code");
-        let signals = finding
-            .signals
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        let message = format!(
-            "'{}' coverage intelligence verdict: {} ({}, signals: {})",
-            identity, finding.verdict, finding.recommendation, signals,
-        );
-        let source_snippet = snippets.line(&finding.path, finding.line);
-        let mut result = sarif_result_with_snippet(
-            rule_id,
-            level,
-            &message,
-            &uri,
-            Some((finding.line, 1)),
-            source_snippet.as_deref(),
-        );
-        result["properties"] = serde_json::json!({
-            "coverage_intelligence_id": &finding.id,
-            "verdict": finding.verdict,
-            "recommendation": finding.recommendation,
-            "confidence": finding.confidence,
-            "signals": &finding.signals,
-            "related_ids": &finding.related_ids,
-        });
-        sarif_results.push(result);
-    }
-}
-
-fn coverage_intelligence_rule_id(
-    recommendation: fallow_output::CoverageIntelligenceRecommendation,
-) -> &'static str {
-    match recommendation {
-        fallow_output::CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
-            "fallow/coverage-intelligence-risky-change"
-        }
-        fallow_output::CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
-            "fallow/coverage-intelligence-delete"
-        }
-        fallow_output::CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
-            "fallow/coverage-intelligence-review"
-        }
-        fallow_output::CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
-            "fallow/coverage-intelligence-refactor"
-        }
-    }
+    fallow_api::build_health_sarif(report, root, &sarif_rule)
 }
 
 pub(super) fn print_health_sarif(report: &fallow_output::HealthReport, root: &Path) -> ExitCode {
@@ -2721,41 +2181,16 @@ pub(super) fn print_health_sarif(report: &fallow_output::HealthReport, root: &Pa
 /// SARIF pipeline. Each finding's URI is decoded (`%5B` -> `[`, `%5D` -> `]`)
 /// before resolution, matching the dead-code behaviour for paths containing
 /// brackets like Next.js dynamic routes.
-#[expect(
-    clippy::expect_used,
-    reason = "grouped health SARIF entries are JSON objects created by build_health_sarif"
-)]
 pub(super) fn print_grouped_health_sarif(
     report: &fallow_output::HealthReport,
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
     let mut sarif = build_health_sarif(report, root);
-
-    if let Some(runs) = sarif.get_mut("runs").and_then(|r| r.as_array_mut()) {
-        for run in runs {
-            if let Some(results) = run.get_mut("results").and_then(|r| r.as_array_mut()) {
-                for result in results {
-                    let uri = result
-                        .pointer("/locations/0/physicalLocation/artifactLocation/uri")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    let decoded = uri.replace("%5B", "[").replace("%5D", "]");
-                    let group =
-                        grouping::resolve_owner(Path::new(&decoded), Path::new(""), resolver);
-                    let props = result
-                        .as_object_mut()
-                        .expect("SARIF result should be an object")
-                        .entry("properties")
-                        .or_insert_with(|| serde_json::json!({}));
-                    props
-                        .as_object_mut()
-                        .expect("properties should be an object")
-                        .insert("group".to_string(), serde_json::Value::String(group));
-                }
-            }
-        }
-    }
+    fallow_api::annotate_sarif_results(&mut sarif, "group", |uri| {
+        let decoded = uri.replace("%5B", "[").replace("%5D", "]");
+        grouping::resolve_owner(Path::new(&decoded), Path::new(""), resolver)
+    });
 
     emit_json(&sarif, "SARIF")
 }

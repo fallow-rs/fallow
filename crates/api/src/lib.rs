@@ -29,6 +29,7 @@ pub mod health_codeclimate;
 pub mod json_output;
 pub mod output_contracts;
 pub mod runtime;
+pub mod sarif_output;
 pub mod security_output;
 pub use audit_output::{AuditAttribution, AuditSummary, AuditVerdict};
 pub use dead_code_codeclimate::build_codeclimate;
@@ -68,6 +69,10 @@ pub use runtime::{
     resolve_programmatic_analysis_context, run_boundary_violations, run_circular_dependencies,
     run_complexity_with_runner, run_dead_code, run_duplication, run_health_with_runner,
     serialize_health_report_json,
+};
+pub use sarif_output::{
+    annotate_sarif_results, build_duplication_sarif, build_grouped_duplication_sarif,
+    build_health_sarif,
 };
 pub use security_output::SecurityGateMode;
 
