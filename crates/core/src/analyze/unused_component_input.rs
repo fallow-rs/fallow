@@ -38,10 +38,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{
-    ModuleInfo, angular_template_member_names, has_angular_template_members,
-    has_angular_this_spread,
-};
+use fallow_types::extract::{ModuleInfo, SemanticFactView};
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -104,8 +101,8 @@ fn collect_module_unused_component_inputs(
         return;
     }
 
-    // Collect the linked external `templateUrl` module(s) (if any) so the
-    // sentinel member accesses in the `.html` file credit the input too.
+    // Collect linked external `templateUrl` module(s) so template evidence in
+    // the `.html` file credits the input too.
     let external_templates = external_template_modules(graph, modules_by_id, node.file_id);
     let used = input_usage_set(module, &external_templates);
 
@@ -137,8 +134,8 @@ fn component_abstains_inputs(module: &ModuleInfo) -> bool {
 }
 
 /// Build the set of input names that are USED by the component, unioning the
-/// component's own member accesses (template sentinel + any `this.foo`-style
-/// access) with the sentinel member accesses of every linked external template.
+/// component's ordinary member accesses (`this.foo`-style reads) with the
+/// template member evidence of the component and linked external templates.
 ///
 /// Over-credits by design: any `member_access` whose `member` matches an input
 /// counts as a use regardless of object, so destructures and `ngOnChanges`
@@ -148,9 +145,11 @@ fn input_usage_set<'a>(
     external_templates: &[&'a ModuleInfo],
 ) -> FxHashSet<&'a str> {
     let mut used: FxHashSet<&str> = FxHashSet::default();
-    for access in &component.member_accesses {
-        // Any member access naming the input (inline template sentinel,
-        // `this.foo`, `changes.foo`, a destructured read) credits it.
+    for access in SemanticFactView::new(&component.semantic_facts, &component.member_accesses)
+        .ordinary_member_accesses()
+    {
+        // Any ordinary member access naming the input (`this.foo`,
+        // `changes.foo`, a destructured read) credits it.
         used.insert(access.member.as_str());
     }
     insert_angular_template_members(component, &mut used);
@@ -164,7 +163,10 @@ pub(super) fn insert_angular_template_members<'a>(
     module: &'a ModuleInfo,
     out: &mut FxHashSet<&'a str>,
 ) {
-    out.extend(angular_template_member_names(module));
+    out.extend(
+        SemanticFactView::new(&module.semantic_facts, &module.member_accesses)
+            .angular_template_member_names(),
+    );
 }
 
 /// Whether the component declares an `extends` heritage clause anywhere in its
@@ -181,14 +183,14 @@ fn component_has_extends(module: &ModuleInfo) -> bool {
 /// Whether the module spreads `this` into an object literal (`{ ...this }`).
 /// Every input/output is then consumed opaquely, so the whole component abstains.
 pub(super) fn component_spreads_this(module: &ModuleInfo) -> bool {
-    has_angular_this_spread(module)
+    SemanticFactView::new(&module.semantic_facts, &module.member_accesses).has_angular_this_spread()
 }
 
 /// The `.ts` modules reached from `from` by a `SideEffect`-shaped edge that hold
 /// an external Angular `templateUrl`. The component sets
 /// `has_angular_component_template_url`, and the external `.html` file is reached
 /// via a `SideEffect` import edge; we follow every outgoing edge and keep the
-/// targets whose module carries a template sentinel member access.
+/// targets whose module carries template member evidence.
 fn external_template_modules<'a>(
     graph: &ModuleGraph,
     modules_by_id: &FxHashMap<FileId, &'a ModuleInfo>,
@@ -207,7 +209,12 @@ fn external_template_modules<'a>(
         };
         // The external template module carries typed template facts, while
         // older parse-cache payloads may still carry legacy sentinel accesses.
-        if has_angular_template_members(target_module) {
+        if SemanticFactView::new(
+            &target_module.semantic_facts,
+            &target_module.member_accesses,
+        )
+        .has_angular_template_members()
+        {
             out.push(*target_module);
         }
     }

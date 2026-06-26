@@ -1606,14 +1606,7 @@ pub fn has_angular_template_members(module: &ModuleInfo) -> bool {
 /// Return true when a module spreads `this` in Angular template context.
 #[must_use]
 pub fn has_angular_this_spread(module: &ModuleInfo) -> bool {
-    module
-        .semantic_facts
-        .iter()
-        .any(|fact| matches!(fact, SemanticFact::AngularThisSpread(_)))
-        || module
-            .member_accesses
-            .iter()
-            .any(|access| is_legacy_angular_this_spread_object(&access.object))
+    SemanticFactView::new(&module.semantic_facts, &module.member_accesses).has_angular_this_spread()
 }
 
 /// Return true when a module contains a dynamic custom-element render.
@@ -1789,6 +1782,18 @@ impl<'a> SemanticFactView<'a> {
     #[must_use]
     pub fn has_angular_template_members(self) -> bool {
         self.angular_template_member_names().next().is_some()
+    }
+
+    /// Return true when a module spreads `this` in Angular template context.
+    #[must_use]
+    pub fn has_angular_this_spread(self) -> bool {
+        self.semantic_facts
+            .iter()
+            .any(|fact| matches!(fact, SemanticFact::AngularThisSpread(_)))
+            || self
+                .member_accesses
+                .iter()
+                .any(|access| is_legacy_angular_this_spread_object(&access.object))
     }
 
     /// Iterate ordinary source member accesses, excluding legacy synthetic

@@ -35,7 +35,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::{ModuleInfo, has_angular_template_members};
+use fallow_types::extract::{ModuleInfo, SemanticFactView};
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -139,10 +139,12 @@ fn component_abstains_outputs(module: &ModuleInfo) -> bool {
 /// that emits it).
 fn output_is_emitted(component: &ModuleInfo, name: &str) -> bool {
     let emit_object = format!("this.{name}");
-    component.member_accesses.iter().any(|access| {
-        (access.object == emit_object && access.member == "emit")
-            || (access.object == "this" && access.member == name)
-    })
+    SemanticFactView::new(&component.semantic_facts, &component.member_accesses)
+        .ordinary_member_accesses()
+        .any(|access| {
+            (access.object == emit_object && access.member == "emit")
+                || (access.object == "this" && access.member == name)
+        })
 }
 
 /// Build the set of output names emitted through a template handler. An Angular
@@ -167,7 +169,7 @@ fn template_emitted_outputs<'a>(
 /// an external Angular `templateUrl`. Mirrors the input detector's helper: the
 /// component sets `has_angular_component_template_url`, and the external `.html`
 /// file is reached via a `SideEffect` import edge whose target carries template
-/// sentinel member accesses.
+/// member evidence.
 fn external_template_modules<'a>(
     graph: &ModuleGraph,
     modules_by_id: &FxHashMap<FileId, &'a ModuleInfo>,
@@ -184,7 +186,12 @@ fn external_template_modules<'a>(
         let Some(target_module) = modules_by_id.get(&target) else {
             continue;
         };
-        if has_angular_template_members(target_module) {
+        if SemanticFactView::new(
+            &target_module.semantic_facts,
+            &target_module.member_accesses,
+        )
+        .has_angular_template_members()
+        {
             out.push(*target_module);
         }
     }
