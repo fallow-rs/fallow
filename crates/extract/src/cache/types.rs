@@ -587,7 +587,27 @@ use crate::MemberKind;
 /// Bumped to 188: `HookUse` now carries the enclosing `component` name, so the
 /// descriptive per-component hook summary stays exact in multi-component files.
 /// A warm cache from 187 lacks the attribution field on persisted `hook_uses`.
-pub(super) const CACHE_VERSION: u32 = 188;
+///
+/// Bumped to 189 for the extract false-positive hardening bundle:
+/// - issue #1439: Vue SFC template close tags tolerate whitespace before `>`,
+///   so previously dropped template bodies need to be re-extracted.
+/// - issue #1489: inline `useFooStore().member` receivers emit store-factory
+///   member accesses, so warm caches lack the `unused-store-member` credit.
+/// - issue #1441: same-file factory functions returning `new Class()` bind
+///   `const x = useApi()` receivers to the class, so warm caches lack the
+///   `unused-class-member` credit.
+///
+/// Bumped to 190 (issue #1441, var-return): a same-file function that returns a
+/// bare identifier (`useApi() { return api }`) whose typed local (`let api: RESTApi`)
+/// resolves to a class now promotes to a factory-return, so `const x = useApi()`
+/// credits `x.member`. A warm cache from 189 lacks the added `member_accesses`.
+///
+/// Bumped to 191 (issue #1441, cross-module Part A): exported free-function
+/// factories now persist `exported_factory_returns`, and a consumer's
+/// `const x = importedFactory()` emits a cross-module factory-fn sentinel access
+/// so `x.member` credits the class across module boundaries. A warm cache from
+/// 190 lacks both the new metadata and the added sentinel `member_accesses`.
+pub(super) const CACHE_VERSION: u32 = 191;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -641,7 +661,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1304);
+assert_cached_type_size!(CachedModule, 1328);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -662,6 +682,7 @@ assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
 assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
+assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 48);
 assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
 
 /// Cached data for a single module.
@@ -724,6 +745,9 @@ pub struct CachedModule {
     pub flag_uses: Vec<fallow_types::extract::FlagUse>,
     /// Heritage metadata for exported classes.
     pub class_heritage: Vec<fallow_types::extract::ClassHeritageInfo>,
+    /// Exported free-function factories that provably return one class instance
+    /// (`export function useApi() { return new RESTApi() }`). See #1441 Part A.
+    pub exported_factory_returns: Vec<fallow_types::extract::FactoryReturnExport>,
     /// Angular `InjectionToken<Interface>` `(token, interface)` pairs (#920).
     pub injection_tokens: Vec<(String, String)>,
     /// Local type-capable declarations.

@@ -132,6 +132,20 @@ pub const PLAYWRIGHT_FIXTURE_TYPE_SENTINEL: &str = "__fallow_playwright_fixture_
 /// See issue #346.
 pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
 
+/// Synthetic member-access object prefix for cross-module free-function factory
+/// returns.
+///
+/// `MemberAccess { object: format!("{FACTORY_FN_SENTINEL}{callee}"), member }`
+/// means a local binding was assigned from `<callee>()` where `<callee>` is an
+/// imported bare identifier and a member is accessed on the result. The analyze
+/// layer resolves `callee` through the consumer's imports to the factory's origin
+/// module, reads that module's `exported_factory_returns` to learn the returned
+/// class's local name, resolves THAT through the factory module's own imports to
+/// the class export, and credits `member` on the class. Unlike
+/// `FACTORY_CALL_SENTINEL` (which carries `callee:method` for a static-method
+/// factory), this carries only the bare callee. See issue #1441 (Part A).
+pub const FACTORY_FN_SENTINEL: &str = "__fallow_factory_fn__:";
+
 /// Synthetic member-access object prefix for fluent-builder chain credit.
 ///
 /// `MemberAccess { object: format!("{FLUENT_CHAIN_SENTINEL}{callee}:{root_method}:{chain}"), member }`

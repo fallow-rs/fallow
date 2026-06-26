@@ -83,6 +83,29 @@ pub(crate) struct FactoryCallCandidate {
     pub(crate) callee_method: String,
 }
 
+/// `const local = useApi()` where `useApi` is a same-file function whose body
+/// returns `new Class()`. Resolved against `factory_return_functions` at finalize
+/// time so `local.member` credits the constructed class. See issue #1441.
+#[derive(Debug, Clone)]
+pub(crate) struct FactoryReturnCandidate {
+    pub(crate) local_name: String,
+    pub(crate) callee_name: String,
+}
+
+/// The classified right-hand side of a module-local assignment, used to build a
+/// VALUE proof that an aliased factory's returned local really holds a class
+/// instance, not merely a type annotation. See issue #1441.
+#[derive(Debug, Clone)]
+pub(crate) enum FactoryAssignedValue {
+    /// `id = new Class()`, directly a class instance.
+    NewClass(String),
+    /// `id = callee(...)`, a class instance only if `callee` is a strict
+    /// same-file factory (resolved at finalize).
+    Call(String),
+    /// Anything else (a literal, a mock, `as any`, …), poisons the proof.
+    Other,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PendingPlaywrightFactory {
     pub(crate) test_name: String,
@@ -150,6 +173,50 @@ pub(crate) struct ModuleInfoExtractor {
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
     local_structural_functions: FxHashMap<String, LocalStructuralFunction>,
     structural_class_call_candidates: Vec<StructuralClassCallCandidate>,
+    /// Same-file functions whose body returns `new Class()`, mapped to the class
+    /// name, plus the `const x = fn()` bindings to resolve against them. See #1441.
+    factory_return_functions: FxHashMap<String, String>,
+    factory_return_candidates: Vec<FactoryReturnCandidate>,
+    /// Same-file functions whose body returns a bare identifier (e.g.
+    /// `useApi() { return api }`). Resolved against `binding_target_names` at
+    /// finalize: a typed local (`let api: RESTApi`) promotes the function to a
+    /// `factory_return_functions` entry, so `const x = useApi()` credits the
+    /// class without tracing the assignment chain. See issue #1441 (var-return).
+    factory_return_alias_functions: FxHashMap<String, String>,
+    /// Subset of factory-return functions (by local name) whose body provably
+    /// returns a SINGLE class across ALL static return paths, the all-paths
+    /// unanimity proof required before a factory may be exported as cross-module
+    /// metadata. Stricter than `factory_return_functions` (which keeps the
+    /// same-file last-return leniency). Only entries here become
+    /// `ModuleInfo.exported_factory_returns`, bounding the cross-module
+    /// over-credit blast radius. See issue #1441 (Part A).
+    strict_factory_return_functions: FxHashMap<String, String>,
+    /// Alias factory functions (by local name) whose body is eligible for STRICT
+    /// (cross-module) promotion: it returns synchronously (not async/generator)
+    /// and cannot fall through to `undefined` (terminal last statement). The
+    /// same-file (loose) alias promotion does not require this. See #1441 (A).
+    strict_alias_eligible: FxHashSet<String>,
+    /// Module-scope identifier -> classified initializer right-hand sides, from
+    /// MODULE-SCOPE declarators and MODULE-SCOPE assignment expressions
+    /// (`let api = new RESTApi()`, `api = init()` at top level). A module-scope
+    /// write runs at load and dominates any later call, usable as PROOF and
+    /// checked for poison. See #1441 (Part A).
+    module_scope_initializers: FxHashMap<String, Vec<FactoryAssignedValue>>,
+    /// Identifier -> classified right-hand sides of EVERY assignment expression
+    /// to it, in ANY scope (sibling functions, non-dominating branches, …). Used
+    /// ONLY as a POISON input for the strict alias proof: a write to the returned
+    /// module binding that is `Other`/unresolved/a conflicting class (e.g.
+    /// `poison() { api = {} as any }`) makes the strict export abstain, since it
+    /// can leave the binding holding a non-class at return time. Declarations
+    /// (which introduce a separate binding) are intentionally excluded. See #1441
+    /// (Part A).
+    identifier_write_values: FxHashMap<String, Vec<FactoryAssignedValue>>,
+    /// Alias factory function (by local name) -> classified right-hand sides of
+    /// assignments to its RETURNED identifier, collected from that function's OWN
+    /// body only (not nested functions). Ties the value-proof to the alias
+    /// function itself, so an assignment in an unrelated/sibling function does not
+    /// falsely prove it. See #1441 (Part A).
+    alias_in_body_assignments: FxHashMap<String, Vec<FactoryAssignedValue>>,
     namespace_depth: u32,
     pending_namespace_members: Vec<MemberInfo>,
     pub(crate) class_heritage: Vec<ClassHeritageInfo>,
@@ -942,6 +1009,218 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Promote `useApi() { return api }`-style functions so `const x = useApi()`
+    /// credits the class. TWO promotions with different proofs:
+    ///
+    /// - SAME-FILE (loose) `factory_return_functions`: the returned identifier
+    ///   resolves to a class in `binding_target_names` (e.g. a typed `let api:
+    ///   RESTApi`). A type annotation is acceptable here, the blast radius is one
+    ///   file. This preserves the original var-return behavior.
+    /// - CROSS-MODULE (strict) `strict_factory_return_functions`: ALSO requires a
+    ///   VALUE proof, the returned local must be assigned `new Class()` or a
+    ///   strict same-file factory (`value_prove_alias`), and the
+    ///   function must be sync + non-falling-through (`strict_alias_eligible`). A
+    ///   type annotation alone (`let api: RESTApi` assigned a mock) must NOT leak
+    ///   into cross-module credit. See #1441 (Part A).
+    fn resolve_factory_return_aliases(&mut self) {
+        if self.factory_return_alias_functions.is_empty() {
+            return;
+        }
+        let aliases = std::mem::take(&mut self.factory_return_alias_functions);
+        for (fn_name, returned_id) in aliases {
+            if self.factory_return_functions.contains_key(&fn_name) {
+                continue;
+            }
+            let Some(class_name) = self.binding_target_names.get(&returned_id) else {
+                continue;
+            };
+            if !Self::is_plain_class_binding_target(class_name) {
+                continue;
+            }
+            let class_name = class_name.clone();
+            // Cross-module strict promotion: a sync, terminal body AND a VALUE
+            // proof tied to THIS function. Done before the loose insert so a
+            // type-only binding never reaches the strict map.
+            if self.strict_alias_eligible.contains(&fn_name)
+                && let Some(proven_class) = self.value_prove_alias(&fn_name, &returned_id)
+            {
+                self.strict_factory_return_functions
+                    .insert(fn_name.clone(), proven_class);
+            }
+            self.factory_return_functions.insert(fn_name, class_name);
+        }
+    }
+
+    /// VALUE-prove the class an alias factory `fn_name` returns through its
+    /// returned identifier `returned_id`. The proof is tied to the function:
+    /// assignments to `returned_id` inside `fn_name`'s OWN body
+    /// (`alias_in_body_assignments`) plus a MODULE-SCOPE initializer of
+    /// `returned_id` (`module_scope_initializers`), never an assignment in an
+    /// unrelated/sibling function. `new Class()` proves directly; `factory()`
+    /// proves only when `factory` is a strict same-file factory. Proven ONLY with
+    /// at least one resolvable source and ALL sources agreeing on one class; any
+    /// `Other`/unresolved/conflicting source abstains. So `let api: RESTApi` with
+    /// no class-proven write is not proven. See #1441 (Part A).
+    fn value_prove_alias(&self, fn_name: &str, returned_id: &str) -> Option<String> {
+        // PROOF: dominating writes, the alias's own dominating in-body
+        // assignments and module-scope initializers. Must be unanimous on one
+        // class, with at least one source.
+        let mut class: Option<String> = None;
+        let mut saw_source = false;
+        let proof_sources = self
+            .alias_in_body_assignments
+            .get(fn_name)
+            .into_iter()
+            .flatten()
+            .chain(
+                self.module_scope_initializers
+                    .get(returned_id)
+                    .into_iter()
+                    .flatten(),
+            );
+        for value in proof_sources {
+            saw_source = true;
+            let resolved = self.resolve_factory_assigned_value(value)?;
+            match &class {
+                None => class = Some(resolved),
+                Some(existing) if *existing == resolved => {}
+                Some(_) => return None,
+            }
+        }
+        let class = if saw_source { class? } else { return None };
+
+        // POISON: ANY write to the binding (any scope, incl. sibling functions
+        // and non-dominating branches) that is `Other`/unresolved or a CONFLICTING
+        // class means the binding can hold a non-`class` value at return time
+        // (e.g. `poison() { api = {} as any }`). Abstain. A write that resolves to
+        // the same class is harmless. See #1441 (Part A).
+        let poison_sources = self
+            .identifier_write_values
+            .get(returned_id)
+            .into_iter()
+            .flatten()
+            .chain(
+                self.module_scope_initializers
+                    .get(returned_id)
+                    .into_iter()
+                    .flatten(),
+            );
+        for value in poison_sources {
+            match self.resolve_factory_assigned_value(value) {
+                Some(resolved) if resolved == class => {}
+                _ => return None,
+            }
+        }
+        Some(class)
+    }
+
+    /// Resolve a classified assignment value to the class it produces: a direct
+    /// `new Class()`, or a `factory()` call only when the callee is a strict
+    /// same-file factory. `Other` and unresolved calls yield `None`. #1441 (A).
+    fn resolve_factory_assigned_value(&self, value: &FactoryAssignedValue) -> Option<String> {
+        match value {
+            FactoryAssignedValue::NewClass(name) => Some(name.clone()),
+            FactoryAssignedValue::Call(callee) => {
+                self.strict_factory_return_functions.get(callee).cloned()
+            }
+            FactoryAssignedValue::Other => None,
+        }
+    }
+
+    /// Whether a `binding_target_names` value is a plain class name usable as a
+    /// factory-return source, i.e. NOT a synthetic sentinel (factory-call, fluent
+    /// chain, …) and NOT an object-member path (`obj.member`). Extend the sentinel
+    /// checks here as new sentinels are added (e.g. a cross-module factory-fn one).
+    /// See issue #1441.
+    fn is_plain_class_binding_target(target: &str) -> bool {
+        !target.starts_with(crate::FACTORY_CALL_SENTINEL)
+            && !target.starts_with(crate::FACTORY_FN_SENTINEL)
+            && !target.starts_with(crate::FLUENT_CHAIN_SENTINEL)
+            && !target.starts_with(crate::FLUENT_CHAIN_NEW_SENTINEL)
+            && !target.contains('.')
+    }
+
+    /// Resolve `const x = useApi()` bindings. A same-file factory whose body
+    /// returns `new Class()` binds `x` directly to the class so `x.member`
+    /// credits it. An IMPORTED factory callee instead emits a `FACTORY_FN_SENTINEL`
+    /// binding target so the analyze layer resolves the returned class across the
+    /// module boundary via `exported_factory_returns`. See issue #1441 (Part A).
+    fn resolve_factory_return_candidates(&mut self) {
+        if self.factory_return_candidates.is_empty() {
+            return;
+        }
+        let candidates = std::mem::take(&mut self.factory_return_candidates);
+        let mut sentinel_accesses: Vec<MemberAccess> = Vec::new();
+        for candidate in candidates {
+            // Same-file factory returning `new Class()`: bind the local to the
+            // class so `resolve_bound_member_accesses` credits `x.member` directly.
+            if let Some(class_name) = self.factory_return_functions.get(&candidate.callee_name) {
+                self.binding_target_names
+                    .entry(candidate.local_name)
+                    .or_insert_with(|| class_name.clone());
+                continue;
+            }
+            // Cross-module: `const x = importedFactory()`. We do NOT route through
+            // `binding_target_names` here: the Pinia store-consumption heuristic
+            // (`is_store_factory_call`) already weakly binds every imported-call
+            // local to its bare callee name, which would shadow a sentinel binding.
+            // Instead emit the factory-fn sentinel member accesses directly for the
+            // local's first-level reads. The analyze layer credits a class only
+            // when the callee resolves to a proven exported factory return; for any
+            // other callee (a real store, a plain helper) it is a harmless no-op.
+            // See issue #1441 (Part A).
+            let callee_is_imported = self
+                .imports
+                .iter()
+                .any(|import| import.local_name == candidate.callee_name);
+            if !callee_is_imported {
+                continue;
+            }
+            let sentinel = format!("{}{}", crate::FACTORY_FN_SENTINEL, candidate.callee_name);
+            for access in &self.member_accesses {
+                if access.object == candidate.local_name {
+                    sentinel_accesses.push(MemberAccess {
+                        object: sentinel.clone(),
+                        member: access.member.clone(),
+                    });
+                }
+            }
+        }
+        self.member_accesses.extend(sentinel_accesses);
+    }
+
+    /// Build the cross-module `exported_factory_returns` metadata: join the
+    /// strict (all-paths-unanimous) factory map against this module's exports, so
+    /// a `const x = useApi()` consumer can credit the returned class across the
+    /// boundary. The stored class name is the factory module's own LOCAL name,
+    /// resolved at analyze time through this module's imports to the real class
+    /// export. Only strict entries qualify, bounding over-credit. Must run after
+    /// `resolve_factory_return_aliases` has populated the strict map. See issue
+    /// #1441 (Part A).
+    fn collect_exported_factory_returns(&self) -> Vec<fallow_types::extract::FactoryReturnExport> {
+        if self.strict_factory_return_functions.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for export in &self.exports {
+            if export.is_type_only {
+                continue;
+            }
+            let local_name = match (export.local_name.as_deref(), &export.name) {
+                (Some(local), _) => local,
+                (None, ExportName::Named(name)) => name.as_str(),
+                (None, ExportName::Default) => continue,
+            };
+            if let Some(class_local_name) = self.strict_factory_return_functions.get(local_name) {
+                out.push(fallow_types::extract::FactoryReturnExport {
+                    export_name: export.name.to_string(),
+                    class_local_name: class_local_name.clone(),
+                });
+            }
+        }
+        out
+    }
+
     pub(crate) fn resolve_typed_destructure_bindings(&mut self) {
         let pending = std::mem::take(&mut self.pending_typed_destructures);
         if pending.is_empty() {
@@ -969,7 +1248,9 @@ impl ModuleInfoExtractor {
             .iter()
             .filter_map(|(binding, target_name)| {
                 let suffix = object.strip_prefix(binding.as_str())?.strip_prefix('.')?;
-                if target_name.starts_with(crate::FACTORY_CALL_SENTINEL) {
+                if target_name.starts_with(crate::FACTORY_CALL_SENTINEL)
+                    || target_name.starts_with(crate::FACTORY_FN_SENTINEL)
+                {
                     return None;
                 }
                 Some((binding.len(), format!("{target_name}.{suffix}")))
@@ -1046,7 +1327,10 @@ impl ModuleInfoExtractor {
             StructuralCallArgument::Binding(binding) => self
                 .binding_target_names
                 .get(binding.as_str())
-                .filter(|target| !target.starts_with(crate::FACTORY_CALL_SENTINEL))
+                .filter(|target| {
+                    !target.starts_with(crate::FACTORY_CALL_SENTINEL)
+                        && !target.starts_with(crate::FACTORY_FN_SENTINEL)
+                })
                 .cloned(),
         }
     }
@@ -1125,6 +1409,14 @@ impl ModuleInfoExtractor {
         self.enrich_local_class_exports();
         self.enrich_store_exports();
         self.finalize_di_key_sites();
+        // Before `record_exported_instance_bindings` / `resolve_object_binding_candidates`,
+        // which read `binding_target_names`, so a factory-return-bound local also
+        // propagates through object literals and exported-instance bindings (parity
+        // with the during-the-walk `new Class()` binding). See issue #1441.
+        // Aliases first: promote `useApi(){ return api }` to a factory-return via
+        // the typed local, so the `const x = useApi()` candidate below resolves.
+        self.resolve_factory_return_aliases();
+        self.resolve_factory_return_candidates();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
         self.resolve_factory_call_candidates();
@@ -1148,6 +1440,7 @@ impl ModuleInfoExtractor {
             unknown_kinds,
         } = parsed;
         let namespace_object_aliases = self.finalize_resolution_phase();
+        let exported_factory_returns = self.collect_exported_factory_returns();
         ModuleInfo {
             file_id,
             exports: self.exports,
@@ -1171,6 +1464,7 @@ impl ModuleInfoExtractor {
             complexity: Vec::new(),
             flag_uses: Vec::new(),
             class_heritage: self.class_heritage,
+            exported_factory_returns,
             injection_tokens: self.injection_tokens,
             local_type_declarations: self.local_type_declarations,
             public_signature_type_references: self.public_signature_type_references,
@@ -1248,6 +1542,8 @@ impl ModuleInfoExtractor {
         info: &mut ModuleInfo,
         mut namespace_object_aliases: Vec<fallow_types::extract::NamespaceObjectAlias>,
     ) {
+        // Compute before `self.exports` is drained below, the join reads exports.
+        let mut exported_factory_returns = self.collect_exported_factory_returns();
         info.imports.append(&mut self.imports);
         info.exports.append(&mut self.exports);
         info.re_exports.append(&mut self.re_exports);
@@ -1262,6 +1558,8 @@ impl ModuleInfoExtractor {
         info.has_cjs_exports |= self.has_cjs_exports;
         info.has_angular_component_template_url |= self.has_angular_component_template_url;
         info.class_heritage.append(&mut self.class_heritage);
+        info.exported_factory_returns
+            .append(&mut exported_factory_returns);
         info.injection_tokens.append(&mut self.injection_tokens);
         info.local_type_declarations
             .append(&mut self.local_type_declarations);
