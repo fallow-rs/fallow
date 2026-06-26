@@ -200,6 +200,18 @@ pub struct DeadCodeAnalysisOutput {
     pub files: Option<Vec<DiscoveredFile>>,
 }
 
+/// Typed dead-code analysis result with all reusable pipeline artifacts.
+#[derive(Debug)]
+pub struct DeadCodeAnalysisArtifacts {
+    pub results: AnalysisResults,
+    pub timings: Option<trace::PipelineTimings>,
+    pub graph: Option<graph::ModuleGraph>,
+    pub modules: Option<Vec<ModuleInfo>>,
+    pub files: Option<Vec<DiscoveredFile>>,
+    pub script_used_packages: FxHashSet<String>,
+    pub file_hashes: FxHashMap<PathBuf, u64>,
+}
+
 /// Typed project analysis result combining dead-code and duplication outputs.
 #[derive(Debug)]
 pub struct ProjectAnalysisOutput {
@@ -544,6 +556,40 @@ pub fn analyze_with_file_hashes(
         .map_err(engine_error)
 }
 
+/// Run dead-code analysis with trace timings and retained graph artifacts.
+///
+/// # Errors
+///
+/// Returns an error if file discovery, parsing, or analysis fails.
+pub fn analyze_with_trace(config: &ResolvedConfig) -> EngineResult<DeadCodeAnalysisArtifacts> {
+    #[expect(
+        deprecated,
+        reason = "fallow-engine is the typed migration boundary over the internal core backend"
+    )]
+    fallow_core::analyze_with_trace(config)
+        .map(dead_code_artifacts)
+        .map_err(engine_error)
+}
+
+/// Run dead-code analysis while retaining module and file artifacts.
+///
+/// # Errors
+///
+/// Returns an error if file discovery, parsing, or analysis fails.
+pub fn analyze_retaining_modules(
+    config: &ResolvedConfig,
+    need_complexity: bool,
+    retain_graph: bool,
+) -> EngineResult<DeadCodeAnalysisArtifacts> {
+    #[expect(
+        deprecated,
+        reason = "fallow-engine is the typed migration boundary over the internal core backend"
+    )]
+    fallow_core::analyze_retaining_modules(config, need_complexity, retain_graph)
+        .map(dead_code_artifacts)
+        .map_err(engine_error)
+}
+
 /// Run dead-code analysis with export usage and retained complexity artifacts.
 ///
 /// # Errors
@@ -563,6 +609,34 @@ pub fn analyze_with_usages_and_complexity(
             files: output.files,
         })
         .map_err(engine_error)
+}
+
+/// Build health shared parse data from retained dead-code artifacts.
+#[must_use]
+pub fn health_shared_parse_data_from_artifacts(
+    results: &AnalysisResults,
+    graph: Option<graph::ModuleGraph>,
+    modules: Option<Vec<ModuleInfo>>,
+    files: Option<Vec<DiscoveredFile>>,
+    script_used_packages: impl IntoIterator<Item = String>,
+) -> Option<HealthSharedParseData> {
+    let (Some(modules), Some(files)) = (modules, files) else {
+        return None;
+    };
+    let analysis_output = graph.map(|graph| fallow_core::AnalysisOutput {
+        results: results.clone(),
+        timings: None,
+        graph: Some(graph),
+        modules: None,
+        files: None,
+        script_used_packages: script_used_packages.into_iter().collect(),
+        file_hashes: FxHashMap::default(),
+    });
+    Some(HealthSharedParseData {
+        files,
+        modules,
+        analysis_output,
+    })
 }
 
 /// Discover source files for a resolved config, including plugin scopes.
@@ -620,6 +694,18 @@ pub fn trace_symbol_chain(
         &config.root,
         query,
     ))
+}
+
+fn dead_code_artifacts(output: fallow_core::AnalysisOutput) -> DeadCodeAnalysisArtifacts {
+    DeadCodeAnalysisArtifacts {
+        results: output.results,
+        timings: output.timings,
+        graph: output.graph,
+        modules: output.modules,
+        files: output.files,
+        script_used_packages: output.script_used_packages,
+        file_hashes: output.file_hashes,
+    }
 }
 
 /// Run duplication detection and include metadata about built-in ignored files.

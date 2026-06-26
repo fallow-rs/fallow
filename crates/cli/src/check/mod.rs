@@ -365,21 +365,17 @@ struct CheckAnalysisData {
     results: AnalysisResults,
     trace_graph: Option<fallow_engine::graph::ModuleGraph>,
     trace_timings: Option<fallow_engine::trace::PipelineTimings>,
-    retained_modules: Option<Vec<fallow_core::extract::ModuleInfo>>,
-    retained_files: Option<Vec<fallow_core::discover::DiscoveredFile>>,
+    retained_modules: Option<Vec<fallow_engine::ModuleInfo>>,
+    retained_files: Option<Vec<fallow_engine::DiscoveredFile>>,
     script_used_packages: rustc_hash::FxHashSet<String>,
 }
 
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates fallow_core::analyze* externally; the CLI still uses the workspace path dependency"
-)]
 fn run_check_analysis(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
 ) -> Result<CheckAnalysisData, ExitCode> {
     if opts.retain_modules_for_health {
-        return fallow_core::analyze_retaining_modules(config, true, true)
+        return fallow_engine::analyze_retaining_modules(config, true, true)
             .map(|output| CheckAnalysisData {
                 results: output.results,
                 trace_graph: output.graph,
@@ -392,7 +388,7 @@ fn run_check_analysis(
     }
 
     if opts.trace_opts.any_active() {
-        return fallow_core::analyze_with_trace(config)
+        return fallow_engine::analyze_with_trace(config)
             .map(|output| CheckAnalysisData {
                 results: output.results,
                 trace_graph: output.graph,
@@ -587,27 +583,17 @@ fn regression_config_path(opts: &CheckOptions<'_>) -> std::path::PathBuf {
 fn build_shared_parse_data(
     results: &AnalysisResults,
     trace_graph: Option<fallow_engine::graph::ModuleGraph>,
-    retained_modules: Option<Vec<fallow_core::extract::ModuleInfo>>,
-    retained_files: Option<Vec<fallow_core::discover::DiscoveredFile>>,
+    retained_modules: Option<Vec<fallow_engine::ModuleInfo>>,
+    retained_files: Option<Vec<fallow_engine::DiscoveredFile>>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
 ) -> Option<fallow_engine::HealthSharedParseData> {
-    let (Some(modules), Some(files)) = (retained_modules, retained_files) else {
-        return None;
-    };
-    let analysis_output = trace_graph.map(|graph| fallow_core::AnalysisOutput {
-        results: results.clone(),
-        timings: None,
-        graph: Some(graph),
-        modules: None,
-        files: None,
-        script_used_packages: script_used_packages.clone(),
-        file_hashes: rustc_hash::FxHashMap::default(),
-    });
-    Some(fallow_engine::HealthSharedParseData {
-        files,
-        modules,
-        analysis_output,
-    })
+    fallow_engine::health_shared_parse_data_from_artifacts(
+        results,
+        trace_graph,
+        retained_modules,
+        retained_files,
+        script_used_packages.iter().cloned(),
+    )
 }
 
 /// Warn on a scoped regression save, persist any configured regression
