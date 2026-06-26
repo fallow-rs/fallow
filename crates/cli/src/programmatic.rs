@@ -662,7 +662,7 @@ fn build_complexity_options<'a>(
     }
 }
 
-pub struct CliProgrammaticHealthRunner;
+struct CliProgrammaticHealthRunner;
 
 impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
     fn run_programmatic_health(
@@ -693,14 +693,28 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
     }
 }
 
+/// Run health / complexity and return the typed API health payload.
+///
+/// This is a narrow compatibility shim for the temporary
+/// `fallow-programmatic-cli` adapter. Public embedders should use
+/// `fallow-api` contracts instead of depending on CLI runner types.
+pub fn run_programmatic_health(
+    options: &ComplexityOptions,
+) -> ProgrammaticResult<fallow_api::ProgrammaticHealthRun> {
+    fallow_api::ProgrammaticHealthRunner::run_programmatic_health(
+        &CliProgrammaticHealthRunner,
+        options,
+    )
+}
+
 /// Run the health / complexity analysis and return the CLI JSON contract as a value.
 pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
-    fallow_api::compute_complexity_with_runner(options, &CliProgrammaticHealthRunner)
+    fallow_api::run_complexity_with_runner(options, &CliProgrammaticHealthRunner)?.into_json()
 }
 
 /// Alias for `compute_complexity` with a more product-oriented name.
 pub fn compute_health(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
-    fallow_api::compute_health_with_runner(options, &CliProgrammaticHealthRunner)
+    compute_complexity(options)
 }
 
 #[cfg(test)]

@@ -6038,7 +6038,7 @@ mod tests {
             })
             .collect();
         let programmatic_flags: std::collections::BTreeSet<String> =
-            fallow_cli::programmatic::COMMON_ANALYSIS_OPTION_FLAGS
+            fallow_api::COMMON_ANALYSIS_OPTION_FLAGS
                 .iter()
                 .map(|flag| (*flag).to_owned())
                 .collect();
