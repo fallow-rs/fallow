@@ -23,6 +23,7 @@ mod codeclimate;
 mod coverage_envelopes;
 mod diff;
 mod dupes;
+mod feature_flags;
 mod format;
 mod health;
 mod health_actions;
@@ -103,6 +104,12 @@ pub use fallow_types::envelope;
 pub use fallow_types::output;
 pub use fallow_types::output_dead_code;
 pub use fallow_types::output_health;
+pub use feature_flags::{
+    FeatureFlagAction, FeatureFlagActionType, FeatureFlagConfidence, FeatureFlagDeadCodeOverlap,
+    FeatureFlagFinding, FeatureFlagKind, FeatureFlagsConfidenceMeta, FeatureFlagsKindMeta,
+    FeatureFlagsMeta, FeatureFlagsMetaDetails, FeatureFlagsOutput, FeatureFlagsOutputInput,
+    build_feature_flags_output, feature_flags_meta, serialize_feature_flags_json_output,
+};
 pub use format::OutputFormat;
 pub use health::{
     HealthJsonOutputInput, HealthOutput, HealthOutputInput, build_health_output,

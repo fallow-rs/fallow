@@ -81,12 +81,8 @@ fn serialize_root_output_with_mode(
     mode: EnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let mut value = fallow_output::serialize_json_root_output(output, mode.into())?;
-    attach_telemetry_meta(&mut value);
+    fallow_output::attach_telemetry_meta(&mut value, telemetry_analysis_run_id().as_deref());
     Ok(value)
-}
-
-pub fn attach_telemetry_meta(value: &mut serde_json::Value) {
-    fallow_output::attach_telemetry_meta(value, telemetry_analysis_run_id().as_deref());
 }
 
 impl From<EnvelopeMode> for fallow_output::RootEnvelopeMode {

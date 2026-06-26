@@ -797,121 +797,26 @@ fn print_flags_json(
     elapsed: std::time::Duration,
     explain: bool,
 ) {
-    let flags_json: Vec<serde_json::Value> = flags
-        .iter()
-        .map(|flag| flag_json_value(flag, &config.root))
-        .collect();
-
-    let mut output = serde_json::json!({
-        "schema_version": crate::report::SCHEMA_VERSION,
-        "version": env!("CARGO_PKG_VERSION"),
-        "elapsed_ms": elapsed.as_millis(),
-        "feature_flags": flags_json,
-        "total_flags": flags.len(),
-    });
-
-    attach_flags_explain_meta(&mut output, explain);
-    crate::output_envelope::attach_telemetry_meta(&mut output);
+    let output =
+        fallow_output::build_feature_flags_output(fallow_output::FeatureFlagsOutputInput {
+            schema_version: crate::report::SCHEMA_VERSION,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            elapsed,
+            flags,
+            root: &config.root,
+            meta: explain.then(fallow_output::feature_flags_meta),
+        });
+    let output = fallow_output::serialize_feature_flags_json_output(
+        output,
+        crate::output_envelope::EnvelopeMode::current().into(),
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    )
+    .expect("JSON serialization should not fail");
 
     println!(
         "{}",
         serde_json::to_string_pretty(&output).expect("JSON serialization should not fail")
     );
-}
-
-fn flag_json_value(flag: &FeatureFlag, root: &Path) -> serde_json::Value {
-    let path = flag
-        .path
-        .strip_prefix(root)
-        .unwrap_or(&flag.path)
-        .to_string_lossy()
-        .replace('\\', "/");
-    let mut obj = serde_json::json!({
-        "path": path,
-        "flag_name": flag.flag_name,
-        "kind": flag_kind_json(flag.kind),
-        "confidence": flag_confidence_json(flag.confidence),
-        "line": flag.line,
-        "col": flag.col,
-        "actions": flag_json_actions(flag),
-    });
-
-    if let Some(ref sdk) = flag.sdk_name {
-        obj["sdk_name"] = serde_json::json!(sdk);
-    }
-    if !flag.guarded_dead_exports.is_empty() {
-        obj["dead_code_overlap"] = flag_dead_code_overlap_json(flag);
-    }
-
-    obj
-}
-
-fn flag_kind_json(kind: FlagKind) -> &'static str {
-    match kind {
-        FlagKind::EnvironmentVariable => "environment_variable",
-        FlagKind::SdkCall => "sdk_call",
-        FlagKind::ConfigObject => "config_object",
-    }
-}
-
-fn flag_confidence_json(confidence: FlagConfidence) -> &'static str {
-    match confidence {
-        FlagConfidence::High => "high",
-        FlagConfidence::Medium => "medium",
-        FlagConfidence::Low => "low",
-    }
-}
-
-fn flag_json_actions(flag: &FeatureFlag) -> serde_json::Value {
-    serde_json::json!([
-        {
-            "type": "investigate-flag",
-            "auto_fixable": false,
-            "description": format!("Verify whether feature flag '{}' is still active", flag.flag_name),
-        },
-        {
-            "type": "suppress-line",
-            "auto_fixable": false,
-            "description": "Suppress with an inline comment",
-            "comment": "// fallow-ignore-next-line feature-flag",
-        },
-    ])
-}
-
-fn flag_dead_code_overlap_json(flag: &FeatureFlag) -> serde_json::Value {
-    let guard_lines = flag
-        .guard_line_start
-        .and_then(|s| flag.guard_line_end.map(|e| e.saturating_sub(s) + 1))
-        .unwrap_or(0);
-
-    serde_json::json!({
-        "guarded_lines": guard_lines,
-        "dead_export_count": flag.guarded_dead_exports.len(),
-        "dead_exports": flag.guarded_dead_exports,
-    })
-}
-
-fn attach_flags_explain_meta(output: &mut serde_json::Value, explain: bool) {
-    if !explain {
-        return;
-    }
-
-    output["_meta"] = serde_json::json!({
-        "feature_flags": {
-            "description": "Feature flag patterns detected via AST analysis",
-            "kinds": {
-                "environment_variable": "process.env.FEATURE_* pattern (high confidence)",
-                "sdk_call": "Feature flag SDK function call (high confidence)",
-                "config_object": "Config object property access matching flag keywords (low confidence, heuristic)",
-            },
-            "confidence": {
-                "high": "Unambiguous pattern match (env vars, direct SDK calls)",
-                "medium": "Pattern match with some ambiguity",
-                "low": "Heuristic match (config objects), may produce false positives",
-            },
-            "docs": "https://docs.fallow.tools/cli/flags",
-        }
-    });
 }
 
 #[cfg(test)]
