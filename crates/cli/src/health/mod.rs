@@ -97,7 +97,7 @@ struct HealthScope<'a> {
     diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
     ws_roots: Option<Vec<std::path::PathBuf>>,
     group_resolver: Option<crate::report::OwnershipResolver>,
-    file_paths: rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    file_paths: rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
 }
 
 /// Validate an explicit `--churn-file` up front so a malformed import is a loud
@@ -188,20 +188,20 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
+    let files = fallow_engine::discover::discover_files_with_plugin_scopes(&config);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let cache = if config.no_cache {
         None
     } else {
-        fallow_core::cache::CacheStore::load(
+        fallow_engine::cache::CacheStore::load(
             &config.cache_dir,
             config.cache_config_hash,
-            fallow_core::resolve_cache_max_size_bytes(&config),
+            fallow_engine::resolve_cache_max_size_bytes(&config),
         )
     };
     let t = Instant::now();
-    let parse_result = fallow_core::extract::parse_all_files(&files, cache.as_ref(), true);
+    let parse_result = fallow_engine::extract::parse_all_files(&files, cache.as_ref(), true);
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
     let parse_cpu_ms = parse_result.parse_cpu_ms;
 
@@ -290,7 +290,7 @@ struct HealthCoreSectionsInput<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
     files: &'a [fallow_types::discover::DiscoveredFile],
-    modules: &'a [fallow_core::extract::ModuleInfo],
+    modules: &'a [fallow_engine::extract::ModuleInfo],
     scope: &'a HealthScope<'a>,
     pre_computed_analysis: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
 }
@@ -298,7 +298,7 @@ struct HealthCoreSectionsInput<'a> {
 struct HealthAnalysisPreludeInput<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
-    modules: &'a [fallow_core::extract::ModuleInfo],
+    modules: &'a [fallow_engine::extract::ModuleInfo],
     scope: &'a HealthScope<'a>,
     pre_computed_analysis: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
 }
@@ -306,7 +306,7 @@ struct HealthAnalysisPreludeInput<'a> {
 struct HealthScopedFindingsInput<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
-    modules: &'a [fallow_core::extract::ModuleInfo],
+    modules: &'a [fallow_engine::extract::ModuleInfo],
     scope: &'a HealthScope<'a>,
     score_output: Option<&'a scoring::FileScoreOutput>,
 }
@@ -721,7 +721,7 @@ impl CssTokenSets {
     /// `extract_apply_tokens` fast-path out on sources with no `@theme` / `@apply`,
     /// so this is near-free for non-Tailwind stylesheets.
     fn record_theme(&mut self, source: &str, rel: &str) {
-        let scan = fallow_core::extract::scan_theme_blocks(source);
+        let scan = fallow_engine::extract::scan_theme_blocks(source);
         for token in scan.tokens {
             self.theme_token_definers
                 .entry(token.name)
@@ -729,7 +729,7 @@ impl CssTokenSets {
         }
         self.theme_var_reads.extend(scan.theme_var_reads);
         self.apply_tokens
-            .extend(fallow_core::extract::extract_apply_tokens(source));
+            .extend(fallow_engine::extract::extract_apply_tokens(source));
         if source.contains("@plugin") {
             self.any_plugin_directive = true;
         }
@@ -1105,7 +1105,7 @@ fn scan_markup_tailwind_arbitrary_values(
         let Some((rel, source)) = read_markup_scan_source(file, ctx) else {
             continue;
         };
-        for arb in fallow_core::extract::scan_tailwind_arbitrary_values(&source) {
+        for arb in fallow_engine::extract::scan_tailwind_arbitrary_values(&source) {
             total_uses = total_uses.saturating_add(1);
             let entry = agg
                 .entry(arb.value)
@@ -1301,13 +1301,13 @@ fn collect_defined_css_classes(
             continue;
         };
         if has_style_blocks {
-            for style in fallow_core::extract::extract_sfc_styles(&source) {
+            for style in fallow_engine::extract::extract_sfc_styles(&source) {
                 let is_style_scss = style
                     .lang
                     .as_deref()
                     .is_some_and(|lang| matches!(lang, "scss" | "sass"));
                 for export in
-                    fallow_core::extract::extract_css_module_exports(&style.body, is_style_scss)
+                    fallow_engine::extract::extract_css_module_exports(&style.body, is_style_scss)
                 {
                     if let ExportName::Named(name) = export.name {
                         defined.insert(name);
@@ -1316,7 +1316,7 @@ fn collect_defined_css_classes(
             }
             continue;
         }
-        for export in fallow_core::extract::extract_css_module_exports(&source, is_preprocessor) {
+        for export in fallow_engine::extract::extract_css_module_exports(&source, is_preprocessor) {
             if let ExportName::Named(name) = export.name {
                 defined.insert(name);
             }
@@ -1343,7 +1343,7 @@ fn best_class_suggestion<'a>(
             if defined.len() < MIN_DEFINED_CLASS_LEN {
                 continue;
             }
-            if fallow_core::extract::is_typo_edit(token, defined)
+            if fallow_engine::extract::is_typo_edit(token, defined)
                 && best.is_none_or(|current| defined < current)
             {
                 best = Some(defined);
@@ -1387,7 +1387,7 @@ fn collect_unresolved_class_refs_in_file<'a>(
     out: &mut Vec<fallow_output::UnresolvedClassReference>,
 ) {
     use fallow_output::{CssCandidateAction, UnresolvedClassReference};
-    for token in fallow_core::extract::scan_markup_class_tokens(source).static_tokens {
+    for token in fallow_engine::extract::scan_markup_class_tokens(source).static_tokens {
         if token.value.len() < MIN_TOKEN_LEN
             || is_tailwind_shaped(&token.value)
             || defined.contains(&token.value)
@@ -1795,7 +1795,7 @@ fn collect_defined_css_classes_located(
         collect_global_scoped_classes(&source, &mut global_scoped);
         let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         let mut classes: Vec<(String, u32)> = Vec::new();
-        for export in fallow_core::extract::extract_css_module_exports(&source, is_scss) {
+        for export in fallow_engine::extract::extract_css_module_exports(&source, is_scss) {
             let ExportName::Named(name) = export.name else {
                 continue;
             };
@@ -1997,7 +1997,7 @@ fn collect_css_reference_surface_file(
     let Ok(source) = std::fs::read_to_string(path) else {
         return;
     };
-    let scan = fallow_core::extract::scan_markup_class_tokens(&source);
+    let scan = fallow_engine::extract::scan_markup_class_tokens(&source);
     for token in scan.static_tokens {
         surface.static_tokens.insert(token.value);
     }
@@ -2418,7 +2418,7 @@ fn record_scoped_unused_classes(
     summary: &mut fallow_output::CssAnalyticsSummary,
     scoped_unused: &mut Vec<fallow_output::ScopedUnusedClasses>,
 ) {
-    let classes = fallow_core::extract::scoped_unused_classes(source);
+    let classes = fallow_engine::extract::scoped_unused_classes(source);
     if classes.is_empty() {
         return;
     }
@@ -2435,7 +2435,7 @@ fn record_scoped_unused_classes(
 
 fn css_report_stylesheet_source(source: &str, is_sfc: bool) -> Option<std::borrow::Cow<'_, str>> {
     if is_sfc {
-        return fallow_core::extract::sfc_virtual_stylesheet(source).map(std::borrow::Cow::Owned);
+        return fallow_engine::extract::sfc_virtual_stylesheet(source).map(std::borrow::Cow::Owned);
     }
 
     Some(std::borrow::Cow::Borrowed(source))
@@ -2516,7 +2516,7 @@ fn walk_css_files(
         let Some(css_source) = css_report_stylesheet_source(&source, is_sfc) else {
             continue;
         };
-        let Some(analytics) = fallow_core::extract::compute_css_analytics(&css_source) else {
+        let Some(analytics) = fallow_engine::extract::compute_css_analytics(&css_source) else {
             continue;
         };
 
@@ -2684,7 +2684,7 @@ struct CollectedHealthFindings {
 struct HealthOutputContextInput<'a> {
     config: &'a ResolvedConfig,
     files: &'a [fallow_types::discover::DiscoveredFile],
-    modules: &'a [fallow_core::extract::ModuleInfo],
+    modules: &'a [fallow_engine::extract::ModuleInfo],
     scope: &'a HealthScope<'a>,
     needs_file_scores: bool,
     report_coverage_gaps: bool,
@@ -2705,8 +2705,8 @@ struct HealthOutputContext<'a> {
 struct HealthOutputBuildInput<'a> {
     config: &'a ResolvedConfig,
     files: &'a [fallow_types::discover::DiscoveredFile],
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     group_resolver: Option<&'a crate::report::OwnershipResolver>,
     needs_file_scores: bool,
     report_coverage_gaps: bool,
@@ -2942,7 +2942,7 @@ struct HealthDerivedSectionInput<'a> {
 
 struct HealthDerivedSections {
     candidate_paths: rustc_hash::FxHashSet<std::path::PathBuf>,
-    dupes_report: Option<fallow_core::duplicates::DuplicationReport>,
+    dupes_report: Option<fallow_engine::duplicates::DuplicationReport>,
     duplication_ms: f64,
     hotspots: Vec<HotspotEntry>,
     hotspot_summary: Option<HotspotSummary>,
@@ -3355,8 +3355,8 @@ struct HealthGroupingContextInput<'a> {
     group_resolver: Option<&'a crate::report::OwnershipResolver>,
     candidate_paths: &'a rustc_hash::FxHashSet<std::path::PathBuf>,
     files: &'a [fallow_types::discover::DiscoveredFile],
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     score_output: Option<&'a scoring::FileScoreOutput>,
     file_scores: &'a [FileHealthScore],
     findings: &'a [ComplexityViolation],
@@ -3465,7 +3465,7 @@ fn prepare_health_section_dupes(
     input: &HealthDerivedSectionInput<'_>,
 ) -> (
     rustc_hash::FxHashSet<std::path::PathBuf>,
-    Option<fallow_core::duplicates::DuplicationReport>,
+    Option<fallow_engine::duplicates::DuplicationReport>,
     f64,
 ) {
     prepare_health_duplication_data(
@@ -3509,7 +3509,7 @@ struct HealthTargetSectionInput<'a> {
     loaded_baseline: Option<&'a HealthBaselineData>,
     config: &'a ResolvedConfig,
     diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
-    dupes_report: Option<&'a fallow_core::duplicates::DuplicationReport>,
+    dupes_report: Option<&'a fallow_engine::duplicates::DuplicationReport>,
 }
 
 fn prepare_health_section_targets(
@@ -3591,8 +3591,8 @@ fn build_health_result(input: HealthResultInput) -> HealthResult {
 struct HealthFindingsInput<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
@@ -3692,8 +3692,8 @@ fn collect_health_findings(
 }
 
 struct HealthCrapMergeContext<'a> {
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
@@ -4017,7 +4017,7 @@ fn load_health_coverage(
 fn prepare_shared_analysis_output(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
-    modules: &[fallow_core::extract::ModuleInfo],
+    modules: &[fallow_engine::extract::ModuleInfo],
     pre_computed: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
     needed: bool,
 ) -> Result<Option<fallow_engine::DeadCodeAnalysisArtifacts>, ExitCode> {
@@ -4036,10 +4036,10 @@ fn prepare_shared_analysis_output(
 struct RuntimeCoverageAnalysisScope<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
-    modules: &'a [fallow_core::extract::ModuleInfo],
+    modules: &'a [fallow_engine::extract::ModuleInfo],
     shared_analysis_output: Option<&'a fallow_engine::DeadCodeAnalysisArtifacts>,
     istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
@@ -4426,8 +4426,8 @@ fn add_not_checked_detector(
 struct HealthRuntimeSectionsInput<'a> {
     config: &'a ResolvedConfig,
     files: &'a [fallow_types::discover::DiscoveredFile],
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
@@ -4523,8 +4523,8 @@ fn prepare_health_vital_data_from_sections(
 struct HealthAnalysisDataInput<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
@@ -4636,8 +4636,8 @@ type FileScoresAndChurn = (FileScoreResult, f64, Option<hotspots::ChurnFetchResu
 struct FileScoresAndChurnInput<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
     ignore_set: &'a globset::GlobSet,
@@ -4799,7 +4799,7 @@ struct FilteredTargetInput<'a> {
     loaded_baseline: Option<&'a HealthBaselineData>,
     config: &'a ResolvedConfig,
     diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
-    dupes_report: Option<&'a fallow_core::duplicates::DuplicationReport>,
+    dupes_report: Option<&'a fallow_engine::duplicates::DuplicationReport>,
 }
 
 fn compute_filtered_targets(
@@ -4901,7 +4901,7 @@ fn prepare_health_duplication_data(
     ignore_set: &globset::GlobSet,
 ) -> (
     rustc_hash::FxHashSet<std::path::PathBuf>,
-    Option<fallow_core::duplicates::DuplicationReport>,
+    Option<fallow_engine::duplicates::DuplicationReport>,
     f64,
 ) {
     let candidate_paths =
@@ -4916,18 +4916,18 @@ fn compute_health_duplication_report(
     config: &ResolvedConfig,
     files: &[fallow_types::discover::DiscoveredFile],
     candidate_paths: &rustc_hash::FxHashSet<std::path::PathBuf>,
-) -> (Option<fallow_core::duplicates::DuplicationReport>, f64) {
+) -> (Option<fallow_engine::duplicates::DuplicationReport>, f64) {
     let t = Instant::now();
     let dupes_report = if opts.score || opts.targets {
         let scoped_files = filter_files_to_paths(files, candidate_paths);
         Some(if opts.no_cache {
-            fallow_core::duplicates::find_duplicates(
+            fallow_engine::duplicates::find_duplicates(
                 &config.root,
                 &scoped_files,
                 &config.duplicates,
             )
         } else {
-            fallow_core::duplicates::find_duplicates_cached(
+            fallow_engine::duplicates::find_duplicates_cached(
                 &config.root,
                 &scoped_files,
                 &config.duplicates,
@@ -4949,12 +4949,12 @@ struct HealthVitalData {
 
 struct HealthVitalDataInput<'a> {
     opts: &'a HealthOptions<'a>,
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     score_output: Option<&'a scoring::FileScoreOutput>,
     file_scores_slice: &'a [FileHealthScore],
     hotspots: &'a [HotspotEntry],
-    dupes_report: Option<&'a fallow_core::duplicates::DuplicationReport>,
+    dupes_report: Option<&'a fallow_engine::duplicates::DuplicationReport>,
     candidate_paths: &'a rustc_hash::FxHashSet<std::path::PathBuf>,
     total_files: usize,
     config: &'a ResolvedConfig,
@@ -5134,7 +5134,7 @@ fn prepare_health_vital_data(
 
 fn compute_health_score_metrics(
     opts: &HealthOptions<'_>,
-    dupes_report: Option<&fallow_core::duplicates::DuplicationReport>,
+    dupes_report: Option<&fallow_engine::duplicates::DuplicationReport>,
     vital_signs: &mut fallow_output::VitalSigns,
     counts: &mut fallow_output::VitalSignsCounts,
     total_files_scoped: usize,
@@ -5151,8 +5151,8 @@ fn compute_health_score_metrics(
 #[derive(Clone, Copy)]
 struct FilteredLargeFunctionInput<'a> {
     vital_signs: &'a fallow_output::VitalSigns,
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -5293,7 +5293,7 @@ fn filter_files_to_paths(
 fn apply_duplication_metrics(
     vital_signs: &mut fallow_output::VitalSigns,
     counts: &mut fallow_output::VitalSignsCounts,
-    dupes_report: &fallow_core::duplicates::DuplicationReport,
+    dupes_report: &fallow_engine::duplicates::DuplicationReport,
 ) {
     let pct = dupes_report.stats.duplication_percentage;
     vital_signs.duplication_pct = Some((pct * 10.0).round() / 10.0);
@@ -5346,8 +5346,8 @@ type FileScoreResult = (Option<scoring::FileScoreOutput>, Option<usize>, Option<
 /// Compute file scores, applying workspace and ignore filters.
 struct FileScoreInput<'a> {
     config: &'a ResolvedConfig,
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
     ignore_set: &'a globset::GlobSet,
@@ -5534,8 +5534,8 @@ impl SubsetFilter<'_> {
 /// already reflect the subset-scoped count.
 struct VitalSignsAndCountsInput<'a> {
     score_output: Option<&'a scoring::FileScoreOutput>,
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     needs_file_scores: bool,
     file_scores_slice: &'a [FileHealthScore],
     needs_hotspots: bool,
@@ -5551,7 +5551,7 @@ fn compute_vital_signs_and_counts(
         o.analysis_snapshot
             .counts_for(input.subset, &o.analysis_counts)
     });
-    let module_filter_set: Option<rustc_hash::FxHashSet<fallow_core::discover::FileId>> =
+    let module_filter_set: Option<rustc_hash::FxHashSet<fallow_engine::discover::FileId>> =
         if input.subset.is_full() {
             None
         } else {
@@ -5694,8 +5694,8 @@ struct HealthReportAssembly {
 /// that triggers showing the risk profile line). Sorted by line count descending.
 struct LargeFunctionInput<'a> {
     vital_signs: &'a fallow_output::VitalSigns,
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     config_root: &'a std::path::Path,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -5777,8 +5777,8 @@ fn build_ignore_set(patterns: &[String]) -> globset::GlobSet {
 )]
 #[cfg(test)]
 fn collect_findings(
-    modules: &[fallow_core::extract::ModuleInfo],
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    modules: &[fallow_engine::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<fallow_engine::discover::FileId, &std::path::PathBuf>,
     config_root: &std::path::Path,
     ignore_set: &globset::GlobSet,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -5809,8 +5809,8 @@ fn collect_findings(
 }
 
 struct CollectFindingsInput<'a> {
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     config_root: &'a std::path::Path,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -5840,10 +5840,10 @@ fn collect_findings_with_resolver(
         let hook_profiles = react_hooks::build_module_hook_profiles(module);
         for (fc_idx, fc) in module.complexity.iter().enumerate() {
             total_functions += 1;
-            if fallow_core::suppress::is_suppressed(
+            if fallow_engine::suppress::is_suppressed(
                 &module.suppressions,
                 fc.line,
-                fallow_core::suppress::IssueKind::Complexity,
+                fallow_engine::suppress::IssueKind::Complexity,
             ) {
                 continue;
             }
@@ -5861,7 +5861,7 @@ fn collect_findings_with_resolver(
 
 fn collect_findings_module_path<'a>(
     input: &CollectFindingsInput<'a>,
-    module: &fallow_core::extract::ModuleInfo,
+    module: &fallow_engine::extract::ModuleInfo,
 ) -> Option<(&'a std::path::PathBuf, &'a std::path::Path)> {
     let &path = input.file_paths.get(&module.file_id)?;
     let relative = path.strip_prefix(input.config_root).unwrap_or(path);
@@ -5967,8 +5967,8 @@ fn contributions_for(
 /// populated, and the `exceeded` discriminant plus `severity` are recomputed
 /// to reflect CRAP's contribution.
 struct CrapFindingMergeInput<'a> {
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
     config_root: &'a std::path::Path,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -5996,7 +5996,7 @@ struct CrapMergeMaps<'a> {
         rustc_hash::FxHashMap<(u32, u32), fallow_output::ReactHookProfile>,
     >,
     suppressions_by_path:
-        rustc_hash::FxHashMap<&'a std::path::Path, &'a Vec<fallow_core::suppress::Suppression>>,
+        rustc_hash::FxHashMap<&'a std::path::Path, &'a Vec<fallow_engine::suppress::Suppression>>,
 }
 
 /// Process one path's per-function CRAP entries: record threshold state, skip
@@ -6098,8 +6098,8 @@ fn build_complexity_finding_index(
 }
 
 fn build_complexity_by_position<'a>(
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
 ) -> ComplexityByPosition<'a> {
     let mut complexity_by_pos: ComplexityByPosition<'a> = rustc_hash::FxHashMap::default();
     for module in modules {
@@ -6120,8 +6120,8 @@ fn build_complexity_by_position<'a>(
 /// no attributed component-scope hook are omitted; non-React modules contribute
 /// nothing.
 fn build_hook_profiles_by_position<'a>(
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<
     &'a std::path::Path,
     rustc_hash::FxHashMap<(u32, u32), fallow_output::ReactHookProfile>,
@@ -6149,9 +6149,9 @@ fn build_hook_profiles_by_position<'a>(
 }
 
 fn build_complexity_suppressions_by_path<'a>(
-    modules: &'a [fallow_core::extract::ModuleInfo],
-    file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
-) -> rustc_hash::FxHashMap<&'a std::path::Path, &'a Vec<fallow_core::suppress::Suppression>> {
+    modules: &'a [fallow_engine::extract::ModuleInfo],
+    file_paths: &'a rustc_hash::FxHashMap<fallow_engine::discover::FileId, &'a std::path::PathBuf>,
+) -> rustc_hash::FxHashMap<&'a std::path::Path, &'a Vec<fallow_engine::suppress::Suppression>> {
     modules
         .iter()
         .filter_map(|module| {
@@ -6185,14 +6185,14 @@ fn crap_is_suppressed(
     pf: &scoring::PerFunctionCrap,
     suppressions_by_path: &rustc_hash::FxHashMap<
         &std::path::Path,
-        &Vec<fallow_core::suppress::Suppression>,
+        &Vec<fallow_engine::suppress::Suppression>,
     >,
 ) -> bool {
     suppressions_by_path.get(path).is_some_and(|sups| {
-        fallow_core::suppress::is_suppressed(
+        fallow_engine::suppress::is_suppressed(
             sups,
             pf.line,
-            fallow_core::suppress::IssueKind::Complexity,
+            fallow_engine::suppress::IssueKind::Complexity,
         )
     })
 }
@@ -6788,7 +6788,7 @@ fn maybe_print_score_gate_note(result: &HealthResult, options: HealthPrintOption
 mod tests {
     use super::*;
     use fallow_config::{FallowConfig, OutputFormat};
-    use fallow_core::extract::ModuleInfo;
+    use fallow_engine::extract::ModuleInfo;
     use fallow_types::discover::FileId;
     use fallow_types::extract::FunctionComplexity;
     use rustc_hash::{FxHashMap, FxHashSet};

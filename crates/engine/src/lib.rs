@@ -42,7 +42,13 @@ pub mod extract {
         pub use fallow_core::extract::inventory::{InventoryEntry, walk_source};
     }
 
+    pub use fallow_core::extract::*;
     pub use fallow_types::extract::*;
+}
+
+/// Parse cache helpers exposed through the engine boundary.
+pub mod cache {
+    pub use fallow_core::cache::*;
 }
 
 /// Module graph types exposed through the engine boundary.
@@ -77,7 +83,7 @@ pub mod results {
 
 /// Suppression helpers exposed for editor and embedding surfaces.
 pub mod suppress {
-    pub use fallow_core::suppress::{IssueKind, is_file_suppressed, is_suppressed};
+    pub use fallow_core::suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
 }
 
 /// Changed-file helpers exposed through the engine boundary for editor and
@@ -445,6 +451,12 @@ pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResu
     fallow_core::config_for_project(root, config_path)
         .map(|(config, path)| ProjectConfig { config, path })
         .map_err(engine_error)
+}
+
+/// Resolve the parse-cache size limit for a resolved config.
+#[must_use]
+pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
+    fallow_core::resolve_cache_max_size_bytes(config)
 }
 
 fn default_project_config(root: &Path) -> ProjectConfig {
