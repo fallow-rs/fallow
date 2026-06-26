@@ -5,49 +5,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, ParseResult};
-use fallow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
+use fallow_types::results::{FeatureFlag, FlagKind};
 
 use crate::error::emit_error;
-
-/// Convert an extraction-level `FlagUse` to a result-level `FeatureFlag`.
-fn flag_use_to_feature_flag(
-    flag_use: &FlagUse,
-    module: &ModuleInfo,
-    path: &std::path::Path,
-) -> FeatureFlag {
-    let (kind, confidence) = match flag_use.kind {
-        FlagUseKind::EnvVar => (FlagKind::EnvironmentVariable, FlagConfidence::High),
-        FlagUseKind::SdkCall => (FlagKind::SdkCall, FlagConfidence::High),
-        FlagUseKind::ConfigObject => (FlagKind::ConfigObject, FlagConfidence::Low),
-    };
-
-    let (guard_line_start, guard_line_end) = if let (Some(start), Some(end)) =
-        (flag_use.guard_span_start, flag_use.guard_span_end)
-        && !module.line_offsets.is_empty()
-    {
-        let (sl, _) = fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, start);
-        let (el, _) = fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, end);
-        (Some(sl), Some(el))
-    } else {
-        (None, None)
-    };
-
-    FeatureFlag {
-        path: path.to_path_buf(),
-        flag_name: flag_use.flag_name.clone(),
-        kind,
-        confidence,
-        line: flag_use.line,
-        col: flag_use.col,
-        guard_span_start: flag_use.guard_span_start,
-        guard_span_end: flag_use.guard_span_end,
-        sdk_name: flag_use.sdk_name.clone(),
-        guard_line_start,
-        guard_line_end,
-        guarded_dead_exports: Vec::new(),
-    }
-}
 
 /// Options for the `fallow flags` subcommand.
 pub struct FlagsOptions<'a> {
@@ -73,12 +33,12 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
-    if files.is_empty() {
+    let analysis = fallow_engine::flags::analyze_feature_flags(&config);
+    if analysis.files_scanned == 0 {
         return emit_error("no files discovered", 2, opts.output);
     }
 
-    let mut flags = collect_flags_for_files(&config, &files);
+    let mut flags = analysis.flags;
     if let Err(code) = apply_flag_scopes(&mut flags, opts) {
         return code;
     }
@@ -89,8 +49,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         return code;
     }
 
-    let files_scanned = files.len();
-    print_flags_result(&flags, &config, opts, elapsed, files_scanned);
+    print_flags_result(&flags, &config, opts, elapsed, analysis.files_scanned);
 
     ExitCode::SUCCESS
 }
@@ -107,45 +66,6 @@ fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode
             quiet: opts.quiet,
         },
     )
-}
-
-fn collect_flags_for_files(
-    config: &ResolvedConfig,
-    files: &[fallow_core::discover::DiscoveredFile],
-) -> Vec<FeatureFlag> {
-    let cache_store = if config.no_cache {
-        None
-    } else {
-        fallow_core::cache::CacheStore::load(
-            &config.cache_dir,
-            config.cache_config_hash,
-            fallow_core::resolve_cache_max_size_bytes(config),
-        )
-    };
-    let parse_result = fallow_core::extract::parse_all_files(files, cache_store.as_ref(), false);
-
-    let mut flags = collect_flags_from_parse_result(config, files, &parse_result);
-    correlate_flags_with_dead_code(&mut flags, config, &parse_result);
-    flags
-}
-
-fn correlate_flags_with_dead_code(
-    flags: &mut [FeatureFlag],
-    config: &ResolvedConfig,
-    parse_result: &ParseResult,
-) {
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result and the feature_flags helpers externally; flags still uses the workspace path dependency"
-    )]
-    if let Ok(analysis_output) =
-        fallow_core::analyze_with_parse_result(config, &parse_result.modules)
-    {
-        fallow_core::analyze::feature_flags::correlate_with_dead_code(
-            flags,
-            &analysis_output.results,
-        );
-    }
 }
 
 fn apply_flag_scopes(
@@ -199,96 +119,6 @@ fn validate_flags_output(output: OutputFormat) -> Result<(), ExitCode> {
         ));
     }
     Ok(())
-}
-
-fn collect_flags_from_parse_result(
-    config: &ResolvedConfig,
-    files: &[fallow_core::discover::DiscoveredFile],
-    parse_result: &ParseResult,
-) -> Vec<FeatureFlag> {
-    let file_paths: rustc_hash::FxHashMap<_, _> = files.iter().map(|f| (f.id, &f.path)).collect();
-
-    let extra_sdk: Vec<(String, usize, String)> = config
-        .flags
-        .sdk_patterns
-        .iter()
-        .map(|p| {
-            (
-                p.function.clone(),
-                p.name_arg,
-                p.provider.clone().unwrap_or_default(),
-            )
-        })
-        .collect();
-    let has_custom_config = !extra_sdk.is_empty()
-        || !config.flags.env_prefixes.is_empty()
-        || config.flags.config_object_heuristics;
-
-    let mut flags = Vec::new();
-    for module in &parse_result.modules {
-        let Some(path) = file_paths.get(&module.file_id) else {
-            continue;
-        };
-
-        collect_builtin_flags(&mut flags, module, path);
-        if has_custom_config {
-            collect_custom_flags(&mut flags, config, module, path, &extra_sdk);
-        }
-    }
-    flags
-}
-
-fn collect_builtin_flags(flags: &mut Vec<FeatureFlag>, module: &ModuleInfo, path: &Path) {
-    let file_suppressed = fallow_core::suppress::is_file_suppressed(
-        &module.suppressions,
-        fallow_core::suppress::IssueKind::FeatureFlag,
-    );
-    for flag_use in &module.flag_uses {
-        if file_suppressed
-            || fallow_core::suppress::is_suppressed(
-                &module.suppressions,
-                flag_use.line,
-                fallow_core::suppress::IssueKind::FeatureFlag,
-            )
-        {
-            continue;
-        }
-        flags.push(flag_use_to_feature_flag(flag_use, module, path));
-    }
-}
-
-fn collect_custom_flags(
-    flags: &mut Vec<FeatureFlag>,
-    config: &ResolvedConfig,
-    module: &ModuleInfo,
-    path: &Path,
-    extra_sdk: &[(String, usize, String)],
-) {
-    let Ok(source) = std::fs::read_to_string(path) else {
-        return;
-    };
-
-    let custom_flags = fallow_core::extract::flags::extract_flags_from_source(
-        &source,
-        path,
-        extra_sdk,
-        &config.flags.env_prefixes,
-        config.flags.config_object_heuristics,
-    );
-    for flag_use in &custom_flags {
-        let already_found = module.flag_uses.iter().any(|existing| {
-            existing.line == flag_use.line && existing.flag_name == flag_use.flag_name
-        });
-        if !already_found
-            && !fallow_core::suppress::is_suppressed(
-                &module.suppressions,
-                flag_use.line,
-                fallow_core::suppress::IssueKind::FeatureFlag,
-            )
-        {
-            flags.push(flag_use_to_feature_flag(flag_use, module, path));
-        }
-    }
 }
 
 /// Print feature flag results in the requested format.
@@ -356,10 +186,10 @@ fn print_file_path(display: &str) {
 /// When `fallow flags` finds nothing, surface the configuration surface so the
 /// user can distinguish a true negative from "fallow does not recognize my SDK
 /// yet". On full defaults the hint enumerates the built-in detectors (sourced
-/// from `fallow_core::extract::flags`, never hardcoded) and points at the config
-/// knobs. When custom `flags.*` config is present, it collapses to a single
-/// terse acknowledgement so users who already found the surface are not nagged.
-/// All lines go to stderr, mirroring the empty-result line they follow.
+/// from `fallow-engine`, never hardcoded) and points at the config knobs. When
+/// custom `flags.*` config is present, it collapses to a single terse
+/// acknowledgement so users who already found the surface are not nagged. All
+/// lines go to stderr, mirroring the empty-result line they follow.
 fn print_empty_flags_hint(config: &ResolvedConfig, files_scanned: usize) {
     let custom_sdk = config.flags.sdk_patterns.len();
     let custom_env = config.flags.env_prefixes.len();
@@ -423,12 +253,12 @@ fn print_empty_flags_custom_hint(
 fn print_empty_flags_default_hint(files_scanned: usize, files_label: &str) {
     use colored::Colorize;
 
-    let env_prefixes = fallow_core::extract::flags::builtin_env_prefixes()
+    let env_prefixes = fallow_engine::flags::builtin_env_prefixes()
         .iter()
         .map(|p| format!("{p}*"))
         .collect::<Vec<_>>()
         .join(", ");
-    let providers = fallow_core::extract::flags::builtin_sdk_providers().join(", ");
+    let providers = fallow_engine::flags::builtin_sdk_providers().join(", ");
 
     eprintln!(
         "  {}",
@@ -822,6 +652,7 @@ fn print_flags_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_types::results::FlagConfidence;
     use std::path::PathBuf;
 
     /// No explicit `--config`; static so the `&Option<PathBuf>` field borrows it.

@@ -33,6 +33,7 @@ pub mod discover {
 }
 
 pub mod dead_code;
+pub mod flags;
 pub mod health;
 
 /// Extracted semantic types exposed through the engine boundary.
