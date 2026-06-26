@@ -406,7 +406,7 @@ fn misconfigured_dependency_override_key(
 /// explicitly whether the new finding type needs an audit key (add a loop)
 /// or has no key representation today (bind with underscore and document why).
 ///
-/// Sibling exhaustive sites: `fallow_core::changed_files::filter_results_by_changed_files`,
+/// Sibling exhaustive sites: `fallow_engine::changed_files::filter_results_by_changed_files`,
 /// The six dependency-related finding slices, bundled so the dependency
 /// dispatcher takes one parameter instead of six.
 #[derive(Clone, Copy)]
@@ -1144,7 +1144,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 /// retain block) or has no key representation today (bind with underscore and
 /// document why).
 ///
-/// Sibling exhaustive sites: `fallow_core::changed_files::filter_results_by_changed_files`,
+/// Sibling exhaustive sites: `fallow_engine::changed_files::filter_results_by_changed_files`,
 /// `dead_code_keys`, `retain_introduced_dead_code`.
 /// Non-exhaustive siblings the compiler will NOT flag (wire manually when a
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
@@ -2165,7 +2165,7 @@ pub(super) fn annotate_health_json(
 
 pub(super) fn annotate_dupes_json(
     json: &mut serde_json::Value,
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &fallow_engine::duplicates::DuplicationReport,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -2206,7 +2206,7 @@ pub(super) fn health_finding_key(
 }
 
 pub(super) fn dupes_keys(
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &fallow_engine::duplicates::DuplicationReport,
     root: &Path,
 ) -> FxHashSet<String> {
     report
@@ -2216,7 +2216,7 @@ pub(super) fn dupes_keys(
         .collect()
 }
 
-pub(super) fn dupe_group_key(group: &fallow_core::duplicates::CloneGroup, root: &Path) -> String {
+pub(super) fn dupe_group_key(group: &fallow_engine::duplicates::CloneGroup, root: &Path) -> String {
     let mut files: Vec<String> = group
         .instances
         .iter()
@@ -2241,8 +2241,8 @@ pub(super) fn dupe_group_key(group: &fallow_core::duplicates::CloneGroup, root: 
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport};
-    use fallow_core::extract::MemberKind;
+    use fallow_engine::duplicates::{CloneGroup, CloneInstance, DuplicationReport};
+    use fallow_engine::extract::MemberKind;
     use fallow_engine::results::{
         AnalysisResults, BoundaryCallViolation, BoundaryCallViolationFinding,
         BoundaryCoverageViolation, BoundaryCoverageViolationFinding, BoundaryViolation,
@@ -3309,7 +3309,7 @@ mod tests {
             clone_groups: groups,
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
-            stats: fallow_core::duplicates::DuplicationStats::default(),
+            stats: fallow_engine::duplicates::DuplicationStats::default(),
         }
     }
 

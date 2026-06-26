@@ -1628,13 +1628,13 @@ pub fn collect_complexity_findings(report: &fallow_output::HealthReport) -> Vec<
 /// is stable across pure relocation.
 #[must_use]
 pub fn collect_clone_findings(
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &fallow_engine::duplicates::DuplicationReport,
 ) -> Vec<CloneInput> {
     report
         .clone_groups
         .iter()
         .map(|g| CloneInput {
-            fingerprint: fallow_core::duplicates::clone_fingerprint(&g.instances),
+            fingerprint: fallow_engine::duplicates::clone_fingerprint(&g.instances),
             instance_paths: g.instances.iter().map(|i| i.file.clone()).collect(),
         })
         .collect()

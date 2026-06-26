@@ -1206,8 +1206,8 @@ fn js_ts_tokens_equivalent(path: &Path, current: &str, base: &str) -> bool {
     ) {
         return false;
     }
-    let current_tokens = fallow_core::duplicates::tokenize::tokenize_file(path, current, false);
-    let base_tokens = fallow_core::duplicates::tokenize::tokenize_file(path, base, false);
+    let current_tokens = fallow_engine::duplicates::tokenize::tokenize_file(path, current, false);
+    let base_tokens = fallow_engine::duplicates::tokenize::tokenize_file(path, base, false);
     current_tokens
         .tokens
         .iter()

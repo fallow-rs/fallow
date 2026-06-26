@@ -2,7 +2,7 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_core::duplicates::{DefaultIgnoreSkips, DuplicationReport};
+use fallow_engine::duplicates::{DefaultIgnoreSkips, DuplicationReport};
 
 use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
 use crate::check::{get_changed_files, resolve_workspace_scope};
@@ -102,15 +102,15 @@ fn parse_trace_spec(spec: &str) -> Result<(&str, usize), &'static str> {
 /// `--format json`); `FILE:LINE` resolves the clone(s) containing a source
 /// location.
 fn run_clone_trace(
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &fallow_engine::duplicates::DuplicationReport,
     root: &std::path::Path,
     trace_spec: &str,
     output: OutputFormat,
 ) -> ExitCode {
     let (trace_result, not_found) = if let Some(fp) =
-        trace_spec.strip_prefix(fallow_core::duplicates::FINGERPRINT_PREFIX)
+        trace_spec.strip_prefix(fallow_engine::duplicates::FINGERPRINT_PREFIX)
     {
-        let fingerprint = format!("{}{fp}", fallow_core::duplicates::FINGERPRINT_PREFIX);
+        let fingerprint = format!("{}{fp}", fallow_engine::duplicates::FINGERPRINT_PREFIX);
         let result = fallow_engine::trace::trace_clone_by_fingerprint(report, root, &fingerprint);
         (
             result,
@@ -176,7 +176,7 @@ fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
     threshold > 0.0 && duplication_percentage > threshold
 }
 
-use fallow_core::changed_files::filter_duplication_by_changed_files as filter_by_changed_files;
+use fallow_engine::changed_files::filter_duplication_by_changed_files as filter_by_changed_files;
 
 /// Filter a duplication report to only retain clone groups where at least one
 /// instance belongs to a file under one of the given workspace roots. Mirrors
@@ -188,7 +188,7 @@ use fallow_core::changed_files::filter_duplication_by_changed_files as filter_by
 /// reported duplication percentage reflects the scoped slice, not the whole
 /// repo.
 fn filter_by_workspaces(
-    report: &mut fallow_core::duplicates::DuplicationReport,
+    report: &mut fallow_engine::duplicates::DuplicationReport,
     ws_roots: &[std::path::PathBuf],
     root: &std::path::Path,
 ) {
@@ -198,8 +198,8 @@ fn filter_by_workspaces(
             .any(|i| ws_roots.iter().any(|r| i.file.starts_with(r)))
     });
     report.clone_families =
-        fallow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = fallow_core::duplicates::families::detect_mirrored_directories(
+        fallow_engine::duplicates::families::group_into_families(&report.clone_groups, root);
+    report.mirrored_directories = fallow_engine::duplicates::families::detect_mirrored_directories(
         &report.clone_families,
         root,
     );
@@ -217,13 +217,13 @@ fn filter_by_workspaces(
 /// Families and stats are rebuilt from the surviving groups so that the
 /// reported duplication percentage reflects the scoped slice.
 fn filter_by_diff(
-    report: &mut fallow_core::duplicates::DuplicationReport,
+    report: &mut fallow_engine::duplicates::DuplicationReport,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &std::path::Path,
 ) {
     use crate::report::ci::diff_filter::relative_to_diff_path;
 
-    let instance_overlaps = |instance: &fallow_core::duplicates::CloneInstance| -> bool {
+    let instance_overlaps = |instance: &fallow_engine::duplicates::CloneInstance| -> bool {
         let Some(rel) = relative_to_diff_path(&instance.file, root) else {
             return true;
         };
@@ -236,8 +236,8 @@ fn filter_by_diff(
         .clone_groups
         .retain(|g| g.instances.iter().any(instance_overlaps));
     report.clone_families =
-        fallow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = fallow_core::duplicates::families::detect_mirrored_directories(
+        fallow_engine::duplicates::families::group_into_families(&report.clone_groups, root);
+    report.mirrored_directories = fallow_engine::duplicates::families::detect_mirrored_directories(
         &report.clone_families,
         root,
     );
@@ -343,7 +343,7 @@ fn execute_dupes_inner(
 
     let dupes_config = build_dupes_config(opts, &config.duplicates);
     let files = pre_discovered
-        .unwrap_or_else(|| fallow_core::discover::discover_files_with_plugin_scopes(&config));
+        .unwrap_or_else(|| fallow_engine::discover::discover_files_with_plugin_scopes(&config));
 
     let changed_files_from_since = resolve_changed_since(opts);
     let effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>> =
@@ -551,8 +551,8 @@ fn apply_top(report: &mut DuplicationReport, n: usize, root: &std::path::Path) {
     });
     report.clone_groups.truncate(n);
     report.clone_families =
-        fallow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = fallow_core::duplicates::families::detect_mirrored_directories(
+        fallow_engine::duplicates::families::group_into_families(&report.clone_groups, root);
+    report.mirrored_directories = fallow_engine::duplicates::families::detect_mirrored_directories(
         &report.clone_families,
         root,
     );
@@ -843,7 +843,9 @@ mod tests {
     use super::*;
     use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
     use fallow_config::{DetectionMode, DuplicatesConfig, NormalizationConfig};
-    use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+    use fallow_engine::duplicates::{
+        CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
+    };
     use std::path::{Path, PathBuf};
 
     fn instance(file: &str, start: usize, end: usize) -> CloneInstance {
