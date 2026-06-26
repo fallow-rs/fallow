@@ -280,11 +280,11 @@ fn project_identity(root: &Path) -> ProjectIdentity {
         return found.clone();
     }
     let common = resolve_or_root(
-        fallow_core::changed_files::resolve_git_common_dir(root).ok(),
+        fallow_engine::changed_files::resolve_git_common_dir(root).ok(),
         root,
     );
     let toplevel = resolve_or_root(
-        fallow_core::changed_files::resolve_git_toplevel(root).ok(),
+        fallow_engine::changed_files::resolve_git_toplevel(root).ok(),
         root,
     );
     let identity = (

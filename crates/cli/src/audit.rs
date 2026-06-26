@@ -1881,7 +1881,7 @@ fn compute_change_anchors(
     if let Some(raw) = crate::report::ci::diff_filter::shared_diff_raw() {
         return crate::audit_walkthrough::parse_change_anchors(raw);
     }
-    fallow_core::changed_files::try_get_changed_diff(root, base_ref)
+    fallow_engine::changed_files::try_get_changed_diff(root, base_ref)
         .map(|diff| crate::audit_walkthrough::parse_change_anchors(&diff))
         .unwrap_or_default()
 }
@@ -2006,7 +2006,7 @@ fn compute_decision_surface(
 /// the blast and the union of consumed symbols as the contract. Sorted by changed
 /// file for deterministic output.
 fn aggregate_coordination_gaps(
-    gaps: &[fallow_core::graph::CoordinationGapPaths],
+    gaps: &[fallow_engine::graph::CoordinationGapPaths],
 ) -> Vec<crate::audit_decision_surface::CoordinationAnchor> {
     use crate::audit_decision_surface::CoordinationAnchor;
     let mut by_file: FxHashMap<String, (u64, FxHashSet<String>)> = FxHashMap::default();
