@@ -1,9 +1,11 @@
 //! Programmatic API contract types for fallow.
 //!
-//! Runtime execution is moving here from `fallow-cli::programmatic` one
-//! analysis at a time. This crate owns the CLI-independent option, error, and
-//! output contracts so NAPI, future Rust embedders, and the engine facade can
-//! share them without depending on the CLI crate.
+//! Runtime execution for dead-code and duplication lives here. Health output
+//! assembly is also API-owned, with the concrete runner injected while the
+//! remaining health pipeline moves out of the CLI crate. This crate owns the
+//! CLI-independent option, error, and output contracts so NAPI, future Rust
+//! embedders, and the engine facade can share them without depending on the
+//! CLI crate.
 #![cfg_attr(
     test,
     allow(
@@ -320,9 +322,9 @@ pub fn derive_complexity_run_options(options: &ComplexityOptions) -> ComplexityR
 /// Validate programmatic complexity / health inputs before invoking a concrete
 /// runner.
 ///
-/// The runner still lives in `fallow-cli` during the migration, but these
-/// option contracts belong to the API boundary because NAPI and future Rust
-/// embedders construct the same [`ComplexityOptions`] type.
+/// Concrete health runners are injected during the migration, but these option
+/// contracts belong to the API boundary because NAPI and future Rust embedders
+/// construct the same [`ComplexityOptions`] type.
 ///
 /// # Errors
 ///
