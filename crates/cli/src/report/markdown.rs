@@ -3,12 +3,9 @@ use std::borrow::Cow;
 use std::fmt::Write;
 use std::path::Path;
 
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{
-    AnalysisResults, UnresolvedCatalogReferenceFinding, UnusedCatalogEntryFinding,
-    UnusedClassMemberFinding, UnusedDependencyOverrideFinding, UnusedEnumMemberFinding,
-    UnusedExport, UnusedExportFinding, UnusedMember, UnusedStoreMemberFinding, UnusedTypeFinding,
-};
+use fallow_engine::duplicates::DuplicationReport;
+use fallow_types::output_dead_code::*;
+use fallow_types::results::{AnalysisResults, UnusedExport, UnusedMember};
 
 use super::grouping::ResultGroup;
 use super::{normalize_uri, plural, relative_path};
@@ -399,7 +396,7 @@ fn push_markdown_suppression_sections(
 }
 
 fn format_markdown_circular_dependency(
-    cycle: &fallow_core::results::CircularDependencyFinding,
+    cycle: &fallow_types::output_dead_code::CircularDependencyFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
@@ -424,13 +421,13 @@ fn format_markdown_circular_dependency(
 }
 
 fn format_markdown_re_export_cycle(
-    cycle: &fallow_core::results::ReExportCycleFinding,
+    cycle: &fallow_types::output_dead_code::ReExportCycleFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     let chain: Vec<String> = cycle.cycle.files.iter().map(|p| rel(p)).collect();
     let kind_tag = match cycle.cycle.kind {
-        fallow_core::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
-        fallow_core::results::ReExportCycleKind::MultiNode => "",
+        fallow_types::results::ReExportCycleKind::SelfLoop => " *(self-loop)*",
+        fallow_types::results::ReExportCycleKind::MultiNode => "",
     };
     vec![format!(
         "- {}{}",
@@ -444,7 +441,7 @@ fn format_markdown_re_export_cycle(
 }
 
 fn format_markdown_boundary_violation(
-    v: &fallow_core::results::BoundaryViolationFinding,
+    v: &fallow_types::output_dead_code::BoundaryViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -458,7 +455,7 @@ fn format_markdown_boundary_violation(
 }
 
 fn format_markdown_boundary_coverage(
-    v: &fallow_core::results::BoundaryCoverageViolationFinding,
+    v: &fallow_types::output_dead_code::BoundaryCoverageViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -469,7 +466,7 @@ fn format_markdown_boundary_coverage(
 }
 
 fn format_markdown_boundary_call(
-    v: &fallow_core::results::BoundaryCallViolationFinding,
+    v: &fallow_types::output_dead_code::BoundaryCallViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -483,7 +480,7 @@ fn format_markdown_boundary_call(
 }
 
 fn format_markdown_policy_violation(
-    v: &fallow_core::results::PolicyViolationFinding,
+    v: &fallow_types::output_dead_code::PolicyViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -502,7 +499,7 @@ fn format_markdown_policy_violation(
 }
 
 fn format_markdown_invalid_client_export(
-    e: &fallow_core::results::InvalidClientExportFinding,
+    e: &fallow_types::output_dead_code::InvalidClientExportFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -515,7 +512,7 @@ fn format_markdown_invalid_client_export(
 }
 
 fn format_markdown_mixed_client_server_barrel(
-    b: &fallow_core::results::MixedClientServerBarrelFinding,
+    b: &fallow_types::output_dead_code::MixedClientServerBarrelFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -528,7 +525,7 @@ fn format_markdown_mixed_client_server_barrel(
 }
 
 fn format_markdown_misplaced_directive(
-    d: &fallow_core::results::MisplacedDirectiveFinding,
+    d: &fallow_types::output_dead_code::MisplacedDirectiveFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -540,7 +537,7 @@ fn format_markdown_misplaced_directive(
 }
 
 fn format_markdown_unprovided_inject(
-    i: &fallow_core::results::UnprovidedInjectFinding,
+    i: &fallow_types::output_dead_code::UnprovidedInjectFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -553,7 +550,7 @@ fn format_markdown_unprovided_inject(
 }
 
 fn format_markdown_unrendered_component(
-    c: &fallow_core::results::UnrenderedComponentFinding,
+    c: &fallow_types::output_dead_code::UnrenderedComponentFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     // Lit: `component_name` is the registered TAG, so render it as a custom
@@ -576,7 +573,7 @@ fn format_markdown_unrendered_component(
 }
 
 fn format_markdown_unused_component_prop(
-    p: &fallow_core::results::UnusedComponentPropFinding,
+    p: &fallow_types::output_dead_code::UnusedComponentPropFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -588,7 +585,7 @@ fn format_markdown_unused_component_prop(
 }
 
 fn format_markdown_unused_component_emit(
-    e: &fallow_core::results::UnusedComponentEmitFinding,
+    e: &fallow_types::output_dead_code::UnusedComponentEmitFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -600,7 +597,7 @@ fn format_markdown_unused_component_emit(
 }
 
 fn format_markdown_unused_svelte_event(
-    e: &fallow_core::results::UnusedSvelteEventFinding,
+    e: &fallow_types::output_dead_code::UnusedSvelteEventFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -612,7 +609,7 @@ fn format_markdown_unused_svelte_event(
 }
 
 fn format_markdown_unused_component_input(
-    i: &fallow_core::results::UnusedComponentInputFinding,
+    i: &fallow_types::output_dead_code::UnusedComponentInputFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -624,7 +621,7 @@ fn format_markdown_unused_component_input(
 }
 
 fn format_markdown_unused_component_output(
-    o: &fallow_core::results::UnusedComponentOutputFinding,
+    o: &fallow_types::output_dead_code::UnusedComponentOutputFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -636,7 +633,7 @@ fn format_markdown_unused_component_output(
 }
 
 fn format_markdown_unused_server_action(
-    a: &fallow_core::results::UnusedServerActionFinding,
+    a: &fallow_types::output_dead_code::UnusedServerActionFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -648,7 +645,7 @@ fn format_markdown_unused_server_action(
 }
 
 fn format_markdown_unused_load_data_key(
-    k: &fallow_core::results::UnusedLoadDataKeyFinding,
+    k: &fallow_types::output_dead_code::UnusedLoadDataKeyFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -660,7 +657,7 @@ fn format_markdown_unused_load_data_key(
 }
 
 fn format_markdown_route_collision(
-    c: &fallow_core::results::RouteCollisionFinding,
+    c: &fallow_types::output_dead_code::RouteCollisionFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -672,7 +669,7 @@ fn format_markdown_route_collision(
 }
 
 fn format_markdown_dynamic_segment_name_conflict(
-    c: &fallow_core::results::DynamicSegmentNameConflictFinding,
+    c: &fallow_types::output_dead_code::DynamicSegmentNameConflictFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
@@ -2043,11 +2040,11 @@ fn write_metric_legend(out: &mut String, report: &fallow_output::HealthReport) {
 mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
-    use fallow_core::duplicates::{
+    use fallow_engine::duplicates::{
         CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         RefactoringKind, RefactoringSuggestion,
     };
-    use fallow_core::results::*;
+    use fallow_types::results::*;
     use std::path::PathBuf;
 
     #[test]

@@ -8,7 +8,6 @@ use std::path::Path;
 use std::process::Command;
 
 use fallow_api::DupesReportPayload;
-use fallow_core::results::AnalysisResults;
 use fallow_output::{
     CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput,
     ImpactDigestCounts, build_combined_next_steps as build_combined_next_steps_contract,
@@ -17,6 +16,7 @@ use fallow_output::{
     trace_unused_export_input,
 };
 use fallow_types::output::NextStep;
+use fallow_types::results::AnalysisResults;
 
 use fallow_output::HealthReport;
 

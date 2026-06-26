@@ -5,12 +5,10 @@ use std::time::Duration;
 
 use colored::Colorize;
 use fallow_config::{RulesConfig, Severity};
-use fallow_core::results::{
-    AnalysisResults, DuplicateExport, DuplicateExportFinding, TestOnlyDependency,
-    TestOnlyDependencyFinding, TypeOnlyDependency, TypeOnlyDependencyFinding,
-    UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
-    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
-    UnusedMember, UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+use fallow_types::output_dead_code::*;
+use fallow_types::results::{
+    AnalysisResults, DuplicateExport, TestOnlyDependency, TypeOnlyDependency, UnusedDependency,
+    UnusedExport, UnusedMember,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -1029,7 +1027,7 @@ fn push_dependency_override_sections(
 /// empty or the rule is `Off` (which already removed entries upstream).
 fn push_unused_catalog_entries_section(
     lines: &mut Vec<String>,
-    entries: &[fallow_core::results::UnusedCatalogEntryFinding],
+    entries: &[fallow_types::output_dead_code::UnusedCatalogEntryFinding],
     severity: fallow_config::Severity,
     max_items: usize,
     total_issues: usize,
@@ -1083,7 +1081,7 @@ fn push_unused_catalog_entries_section(
 
 fn push_empty_catalog_groups_section(
     lines: &mut Vec<String>,
-    groups: &[fallow_core::results::EmptyCatalogGroupFinding],
+    groups: &[fallow_types::output_dead_code::EmptyCatalogGroupFinding],
     severity: fallow_config::Severity,
     max_items: usize,
     total_issues: usize,
@@ -1130,7 +1128,7 @@ fn push_empty_catalog_groups_section(
 /// write bare `catalog:` think of it as "the catalog", not as a named one.
 fn push_unresolved_catalog_references_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_core::results::UnresolvedCatalogReferenceFinding],
+    findings: &[fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding],
     severity: fallow_config::Severity,
     max_items: usize,
     total_issues: usize,
@@ -1156,7 +1154,7 @@ fn push_unresolved_catalog_references_section(
 /// Formats one unresolved-catalog-reference finding into its headline row,
 /// detail row, and optional single-catalog suggestion.
 fn format_unresolved_catalog_reference(
-    finding: &fallow_core::results::UnresolvedCatalogReferenceFinding,
+    finding: &fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding,
     root: &Path,
 ) -> Vec<String> {
     let finding = &finding.reference;
@@ -1212,7 +1210,7 @@ fn format_unresolved_catalog_reference(
 /// conservative-static algorithm flags.
 fn push_unused_dependency_overrides_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_core::results::UnusedDependencyOverrideFinding],
+    findings: &[fallow_types::output_dead_code::UnusedDependencyOverrideFinding],
     severity: fallow_config::Severity,
     max_items: usize,
     total_issues: usize,
@@ -1268,7 +1266,7 @@ fn push_unused_dependency_overrides_section(
 /// rule defaults to error.
 fn push_misconfigured_dependency_overrides_section(
     lines: &mut Vec<String>,
-    findings: &[fallow_core::results::MisconfiguredDependencyOverrideFinding],
+    findings: &[fallow_types::output_dead_code::MisconfiguredDependencyOverrideFinding],
     severity: fallow_config::Severity,
     max_items: usize,
     total_issues: usize,
@@ -2286,7 +2284,7 @@ where
 /// Build duplicate exports grouped by file pair instead of flat list.
 fn build_duplicate_exports_section(
     lines: &mut Vec<String>,
-    items: &[fallow_core::results::DuplicateExportFinding],
+    items: &[fallow_types::output_dead_code::DuplicateExportFinding],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -2325,7 +2323,7 @@ fn build_duplicate_exports_section(
 /// Group duplicate-export findings by their first two distinct file paths,
 /// collecting the export names per pair and sorting groups by export count desc.
 fn collect_duplicate_export_pairs<'a>(
-    items: &'a [fallow_core::results::DuplicateExportFinding],
+    items: &'a [fallow_types::output_dead_code::DuplicateExportFinding],
     root: &Path,
 ) -> Vec<(String, String, Vec<&'a str>)> {
     let mut pair_groups: Vec<(String, String, Vec<&str>)> = Vec::new();
@@ -2439,8 +2437,8 @@ fn build_circular_deps_section(
 fn circular_dependency_hub_groups<'a>(
     items: &'a [fallow_types::output_dead_code::CircularDependencyFinding],
     root: &Path,
-) -> Vec<(String, Vec<&'a fallow_core::results::CircularDependency>)> {
-    let mut hub_groups: Vec<(String, Vec<&'a fallow_core::results::CircularDependency>)> =
+) -> Vec<(String, Vec<&'a fallow_types::results::CircularDependency>)> {
+    let mut hub_groups: Vec<(String, Vec<&'a fallow_types::results::CircularDependency>)> =
         Vec::new();
     let mut hub_map: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
 
@@ -2474,7 +2472,7 @@ fn circular_dependency_hub_line(hub_path: &str, cycle_count: usize) -> String {
 
 fn circular_dependency_cycle_line(
     hub_path: &str,
-    cycle: &fallow_core::results::CircularDependency,
+    cycle: &fallow_types::results::CircularDependency,
     root: &Path,
 ) -> String {
     let rel_paths: Vec<String> = cycle
@@ -2498,7 +2496,7 @@ fn circular_dependency_cycle_line(
     )
 }
 
-fn circular_type_only_tag(cycle: &fallow_core::results::CircularDependency) -> String {
+fn circular_type_only_tag(cycle: &fallow_types::results::CircularDependency) -> String {
     if cycle
         .files
         .iter()
@@ -2510,7 +2508,7 @@ fn circular_type_only_tag(cycle: &fallow_core::results::CircularDependency) -> S
     }
 }
 
-fn circular_cross_package_tag(cycle: &fallow_core::results::CircularDependency) -> String {
+fn circular_cross_package_tag(cycle: &fallow_types::results::CircularDependency) -> String {
     if cycle.is_cross_package {
         format!(" {}", "(cross-package)".dimmed())
     } else {
@@ -2547,8 +2545,8 @@ fn build_re_export_cycles_section(
             .unwrap_or_default();
         lines.push(format!("  {}", format_path(&first_path)));
         let header_line = match cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => "Self-loop (1 file):".to_string(),
-            fallow_core::results::ReExportCycleKind::MultiNode => {
+            fallow_types::results::ReExportCycleKind::SelfLoop => "Self-loop (1 file):".to_string(),
+            fallow_types::results::ReExportCycleKind::MultiNode => {
                 format!("Cycle ({} files):", cycle.files.len())
             }
         };
@@ -2558,10 +2556,10 @@ fn build_re_export_cycles_section(
             lines.push(format!("      - {}", format_path(&rel)));
         }
         let fix_hint = match cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => {
+            fallow_types::results::ReExportCycleKind::SelfLoop => {
                 "To fix: remove the `export * from './'` (or equivalent) inside this file."
             }
-            fallow_core::results::ReExportCycleKind::MultiNode => {
+            fallow_types::results::ReExportCycleKind::MultiNode => {
                 "To fix: remove one `export * from` statement on any member file."
             }
         };
@@ -2707,7 +2705,7 @@ fn build_boundary_call_violations_section(
 
 fn build_stale_suppressions_section(
     lines: &mut Vec<String>,
-    items: &[fallow_core::results::StaleSuppression],
+    items: &[fallow_types::results::StaleSuppression],
     level: Level,
     root: &Path,
     total_issues: usize,
@@ -3549,8 +3547,8 @@ mod tests {
     use super::super::{plain, strip_ansi};
     use super::*;
     use fallow_config::{RulesConfig, Severity};
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
+    use fallow_types::extract::MemberKind;
+    use fallow_types::results::*;
     use std::path::PathBuf;
 
     /// Build sample results including optional deps (extends the shared helper).
@@ -4566,7 +4564,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.unused_enum_members.push(
-            fallow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
+            fallow_types::output_dead_code::UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/types.ts"),
                 parent_name: "Status".to_string(),
                 member_name: "Unused".to_string(),
@@ -4576,7 +4574,7 @@ mod tests {
             }),
         );
         results.unused_class_members.push(
-            fallow_core::results::UnusedClassMemberFinding::with_actions(UnusedMember {
+            fallow_types::output_dead_code::UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/foo.ts"),
                 parent_name: "Foo".to_string(),
                 member_name: "bar".to_string(),

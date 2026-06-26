@@ -1,17 +1,17 @@
 use std::path::Path;
 
-use fallow_core::extract::MemberKind;
-use fallow_core::results::*;
+use fallow_types::extract::MemberKind;
 use fallow_types::output_dead_code::{
-    BoundaryViolationFinding, CircularDependencyFinding, TestOnlyDependencyFinding,
-    TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-    UnrenderedComponentFinding, UnresolvedImportFinding, UnusedClassMemberFinding,
-    UnusedComponentEmitFinding, UnusedComponentInputFinding, UnusedComponentOutputFinding,
-    UnusedComponentPropFinding, UnusedDependencyFinding, UnusedDevDependencyFinding,
-    UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
-    UnusedSvelteEventFinding, UnusedTypeFinding,
+    BoundaryViolationFinding, CircularDependencyFinding, DuplicateExportFinding,
+    TestOnlyDependencyFinding, TypeOnlyDependencyFinding, UnlistedDependencyFinding,
+    UnprovidedInjectFinding, UnrenderedComponentFinding, UnresolvedImportFinding,
+    UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+    UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
+    UnusedLoadDataKeyFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
+    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
 };
+use fallow_types::results::*;
 
 /// Build an `AnalysisResults` populated with one issue of every type.
 ///

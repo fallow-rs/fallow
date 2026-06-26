@@ -5,9 +5,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use fallow_api::{DupesReportPayload, DuplicationGroup, DuplicationGrouping};
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use fallow_engine::duplicates::DuplicationReport;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use fallow_types::results::AnalysisResults;
 
 use fallow_output::strip_root_prefix;
 
@@ -662,8 +662,6 @@ pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
 mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
     use fallow_output::{
         RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
         RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
@@ -671,6 +669,9 @@ mod tests {
         RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
         RuntimeCoverageWatermark,
     };
+    use fallow_types::extract::MemberKind;
+    use fallow_types::output_dead_code::*;
+    use fallow_types::results::*;
     use std::path::PathBuf;
     use std::time::Duration;
 

@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::WorkspaceInfo;
-use fallow_core::results::AnalysisResults;
+use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashMap;
 
 use super::relative_path;
@@ -484,7 +484,8 @@ pub fn resolve_owner(path: &Path, root: &Path, resolver: &OwnershipResolver) -> 
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use fallow_core::results::*;
+    use fallow_types::output_dead_code::*;
+    use fallow_types::results::*;
 
     use super::*;
     use crate::codeowners::CodeOwners;
@@ -1060,7 +1061,7 @@ mod tests {
             .push(UnusedOptionalDependencyFinding::with_actions(
                 UnusedDependency {
                     package_name: "fsevents".to_string(),
-                    location: fallow_core::results::DependencyLocation::OptionalDependencies,
+                    location: fallow_types::results::DependencyLocation::OptionalDependencies,
                     path: PathBuf::from("/root/package.json"),
                     line: 5,
                     used_in_workspaces: Vec::new(),
@@ -1076,11 +1077,13 @@ mod tests {
     fn group_type_only_deps() {
         let mut results = AnalysisResults::default();
         results.type_only_dependencies.push(
-            fallow_core::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-                package_name: "zod".to_string(),
-                path: PathBuf::from("/root/package.json"),
-                line: 8,
-            }),
+            fallow_types::output_dead_code::TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".to_string(),
+                    path: PathBuf::from("/root/package.json"),
+                    line: 8,
+                },
+            ),
         );
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
@@ -1092,11 +1095,13 @@ mod tests {
     fn group_test_only_deps() {
         let mut results = AnalysisResults::default();
         results.test_only_dependencies.push(
-            fallow_core::results::TestOnlyDependencyFinding::with_actions(TestOnlyDependency {
-                package_name: "vitest".to_string(),
-                path: PathBuf::from("/root/package.json"),
-                line: 10,
-            }),
+            fallow_types::output_dead_code::TestOnlyDependencyFinding::with_actions(
+                TestOnlyDependency {
+                    package_name: "vitest".to_string(),
+                    path: PathBuf::from("/root/package.json"),
+                    line: 10,
+                },
+            ),
         );
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
@@ -1108,7 +1113,7 @@ mod tests {
     fn group_unused_enum_members() {
         let mut results = AnalysisResults::default();
         results.unused_enum_members.push(
-            fallow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
+            fallow_types::output_dead_code::UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: PathBuf::from("/root/src/types.ts"),
                 parent_name: "Status".to_string(),
                 member_name: "Deprecated".to_string(),
@@ -1128,7 +1133,7 @@ mod tests {
     fn group_unused_class_members() {
         let mut results = AnalysisResults::default();
         results.unused_class_members.push(
-            fallow_core::results::UnusedClassMemberFinding::with_actions(UnusedMember {
+            fallow_types::output_dead_code::UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: PathBuf::from("/root/lib/service.ts"),
                 parent_name: "UserService".to_string(),
                 member_name: "legacyMethod".to_string(),
@@ -1149,7 +1154,7 @@ mod tests {
         let mut results = AnalysisResults::default();
         results.unresolved_imports.push(
             fallow_types::output_dead_code::UnresolvedImportFinding::with_actions(
-                fallow_core::results::UnresolvedImport {
+                fallow_types::results::UnresolvedImport {
                     path: PathBuf::from("/root/src/app.ts"),
                     specifier: "./missing".to_string(),
                     line: 1,

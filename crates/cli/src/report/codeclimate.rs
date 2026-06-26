@@ -2,12 +2,12 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::{RulesConfig, Severity};
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use fallow_engine::duplicates::DuplicationReport;
 use fallow_output::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, annotate_codeclimate_issues,
     build_codeclimate_issue, codeclimate_fingerprint_hash, codeclimate_issues_to_value,
 };
+use fallow_types::results::AnalysisResults;
 
 use super::ci::severity;
 use super::grouping::{self, OwnershipResolver};
@@ -287,7 +287,7 @@ fn push_dep_cc_issues<'a, I>(
     location_label: &str,
     severity: Severity,
 ) where
-    I: IntoIterator<Item = &'a fallow_core::results::UnusedDependency>,
+    I: IntoIterator<Item = &'a fallow_types::results::UnusedDependency>,
 {
     for dep in deps {
         let level = severity_to_codeclimate(severity);
@@ -362,7 +362,7 @@ struct UnusedExportIssuesInput<'a, I> {
 
 fn push_unused_export_issues<'a, I>(input: UnusedExportIssuesInput<'a, I>)
 where
-    I: IntoIterator<Item = &'a fallow_core::results::UnusedExport>,
+    I: IntoIterator<Item = &'a fallow_types::results::UnusedExport>,
 {
     for export in input.exports {
         let level = severity_to_codeclimate(input.severity);
@@ -429,7 +429,7 @@ fn push_private_type_leak_issues(
 
 fn push_type_only_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_core::results::TypeOnlyDependencyFinding],
+    deps: &[fallow_types::output_dead_code::TypeOnlyDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -459,7 +459,7 @@ fn push_type_only_dep_issues(
 
 fn push_test_only_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_core::results::TestOnlyDependencyFinding],
+    deps: &[fallow_types::output_dead_code::TestOnlyDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -499,7 +499,7 @@ fn push_unused_member_issues<'a, I>(
     entity_label: &str,
     severity: Severity,
 ) where
-    I: IntoIterator<Item = &'a fallow_core::results::UnusedMember>,
+    I: IntoIterator<Item = &'a fallow_types::results::UnusedMember>,
 {
     for member in members {
         let level = severity_to_codeclimate(severity);
@@ -561,7 +561,7 @@ fn push_unresolved_import_issues(
 
 fn push_unlisted_dep_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    deps: &[fallow_core::results::UnlistedDependencyFinding],
+    deps: &[fallow_types::output_dead_code::UnlistedDependencyFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -598,7 +598,7 @@ fn push_unlisted_dep_issues(
 
 fn push_duplicate_export_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    dups: &[fallow_core::results::DuplicateExportFinding],
+    dups: &[fallow_types::output_dead_code::DuplicateExportFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -693,12 +693,12 @@ fn push_re_export_cycle_issues(
         let chain: Vec<String> = cycle.files.iter().map(|f| cc_path(f, root)).collect();
         let chain_str = chain.join(":");
         let kind_token = match cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
-            fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
+            fallow_types::results::ReExportCycleKind::SelfLoop => "self-loop",
+            fallow_types::results::ReExportCycleKind::MultiNode => "multi-node",
         };
         let kind_tag = match cycle.kind {
-            fallow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-            fallow_core::results::ReExportCycleKind::MultiNode => "",
+            fallow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+            fallow_types::results::ReExportCycleKind::MultiNode => "",
         };
         let fp = fingerprint_hash(&["fallow/re-export-cycle", kind_token, &chain_str]);
         issues.push(build_codeclimate_issue(CodeClimateIssueInput {
@@ -806,7 +806,7 @@ fn push_policy_violation_issues(
     violations: &[fallow_types::output_dead_code::PolicyViolationFinding],
     root: &Path,
 ) {
-    use fallow_core::results::PolicyViolationSeverity;
+    use fallow_types::results::PolicyViolationSeverity;
 
     for entry in violations {
         let v = &entry.violation;
@@ -1333,7 +1333,7 @@ fn push_dynamic_segment_name_conflict_issues(
 
 fn push_stale_suppression_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    suppressions: &[fallow_core::results::StaleSuppression],
+    suppressions: &[fallow_types::results::StaleSuppression],
     root: &Path,
     rules: &RulesConfig,
 ) {
@@ -1369,7 +1369,7 @@ fn push_stale_suppression_issues(
 
 fn push_unused_catalog_entry_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    entries: &[fallow_core::results::UnusedCatalogEntryFinding],
+    entries: &[fallow_types::output_dead_code::UnusedCatalogEntryFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1413,7 +1413,7 @@ fn push_unused_catalog_entry_issues(
 
 fn push_unresolved_catalog_reference_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_core::results::UnresolvedCatalogReferenceFinding],
+    findings: &[fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1469,7 +1469,7 @@ fn push_unresolved_catalog_reference_issues(
 
 fn push_empty_catalog_group_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    groups: &[fallow_core::results::EmptyCatalogGroupFinding],
+    groups: &[fallow_types::output_dead_code::EmptyCatalogGroupFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1501,7 +1501,7 @@ fn push_empty_catalog_group_issues(
 
 fn push_unused_dependency_override_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_core::results::UnusedDependencyOverrideFinding],
+    findings: &[fallow_types::output_dead_code::UnusedDependencyOverrideFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -1542,7 +1542,7 @@ fn push_unused_dependency_override_issues(
 
 fn push_misconfigured_dependency_override_issues(
     issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_core::results::MisconfiguredDependencyOverrideFinding],
+    findings: &[fallow_types::output_dead_code::MisconfiguredDependencyOverrideFinding],
     root: &Path,
     severity: Severity,
 ) {
@@ -2133,7 +2133,8 @@ mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
     use fallow_config::RulesConfig;
-    use fallow_core::results::*;
+    use fallow_types::output_dead_code::*;
+    use fallow_types::results::*;
     use std::path::PathBuf;
 
     /// Compute graduated severity for health findings based on threshold ratio.
@@ -4186,7 +4187,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_one_issue_per_instance() {
-        use fallow_core::duplicates::{
+        use fallow_engine::duplicates::{
             CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         };
         let root = PathBuf::from("/project");
@@ -4231,7 +4232,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_description_includes_group_number_and_line_count() {
-        use fallow_core::duplicates::{
+        use fallow_engine::duplicates::{
             CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         };
         let root = PathBuf::from("/project");
@@ -4282,7 +4283,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_empty_report_produces_empty_array() {
-        use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
+        use fallow_engine::duplicates::{DuplicationReport, DuplicationStats};
         let root = PathBuf::from("/project");
         let report = DuplicationReport {
             clone_groups: vec![],
@@ -4296,7 +4297,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_fingerprints_are_unique_across_instances() {
-        use fallow_core::duplicates::{
+        use fallow_engine::duplicates::{
             CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         };
         let root = PathBuf::from("/project");

@@ -20,9 +20,9 @@ use std::time::Duration;
 
 use fallow_api::DuplicationGrouping;
 use fallow_config::{OutputFormat, RulesConfig, Severity};
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::AnalysisResults;
+use fallow_engine::duplicates::DuplicationReport;
 use fallow_engine::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
+use fallow_types::results::AnalysisResults;
 
 use crate::report::sink::outln;
 

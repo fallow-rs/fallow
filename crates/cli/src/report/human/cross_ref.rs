@@ -98,7 +98,7 @@ mod tests {
     use super::super::plain;
     use super::*;
     use fallow_core::cross_reference::{CombinedFinding, CrossReferenceResult, DeadCodeKind};
-    use fallow_core::duplicates::CloneInstance;
+    use fallow_engine::duplicates::CloneInstance;
     use std::path::PathBuf;
 
     #[test]

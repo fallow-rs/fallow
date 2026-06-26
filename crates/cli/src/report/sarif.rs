@@ -2,22 +2,21 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::{RulesConfig, Severity};
-use fallow_core::duplicates::DuplicationReport;
-use fallow_core::results::{
-    AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
-    CircularDependency, DuplicateExportFinding, DuplicatePropShape, DynamicSegmentNameConflict,
-    EmptyCatalogGroupFinding, InvalidClientExport, MisconfiguredDependencyOverrideFinding,
-    MisplacedDirective, MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity,
-    PrivateTypeLeak, PropDrillingChain, RouteCollision, StaleSuppression, TestOnlyDependency,
-    ThinWrapper, TypeOnlyDependency, UnlistedDependencyFinding, UnprovidedInject,
-    UnrenderedComponent, UnresolvedCatalogReferenceFinding, UnresolvedImport,
-    UnusedCatalogEntryFinding, UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput,
-    UnusedComponentProp, UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport,
-    UnusedFile, UnusedMember, UnusedServerAction, UnusedSvelteEvent,
-};
+use fallow_engine::duplicates::DuplicationReport;
 use fallow_output::{
     SarifDocumentInput, SarifResultInput, SarifRuleInput, build_sarif_document, build_sarif_result,
     build_sarif_rule,
+};
+use fallow_types::output_dead_code::*;
+use fallow_types::results::{
+    AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
+    CircularDependency, DuplicatePropShape, DynamicSegmentNameConflict, InvalidClientExport,
+    MisplacedDirective, MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity,
+    PrivateTypeLeak, PropDrillingChain, RouteCollision, StaleSuppression, TestOnlyDependency,
+    ThinWrapper, TypeOnlyDependency, UnprovidedInject, UnrenderedComponent, UnresolvedImport,
+    UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp,
+    UnusedDependency, UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
+    UnusedSvelteEvent,
 };
 use rustc_hash::FxHashMap;
 
@@ -377,7 +376,7 @@ fn sarif_circular_dep_fields(
 }
 
 fn sarif_re_export_cycle_fields(
-    cycle: &fallow_core::results::ReExportCycle,
+    cycle: &fallow_types::results::ReExportCycle,
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
@@ -385,8 +384,8 @@ fn sarif_re_export_cycle_fields(
     let first_uri = chain.first().map_or_else(String::new, Clone::clone);
     let first_path = cycle.files.first().cloned();
     let kind_tag = match cycle.kind {
-        fallow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-        fallow_core::results::ReExportCycleKind::MultiNode => "",
+        fallow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+        fallow_types::results::ReExportCycleKind::MultiNode => "",
     };
     SarifFields {
         rule_id: "fallow/re-export-cycle",
@@ -702,7 +701,7 @@ fn sarif_unused_server_action_fields(
 }
 
 fn sarif_unused_load_data_key_fields(
-    key: &fallow_core::results::UnusedLoadDataKey,
+    key: &fallow_types::results::UnusedLoadDataKey,
     root: &Path,
     level: &'static str,
 ) -> SarifFields {
@@ -2765,7 +2764,7 @@ pub(super) fn print_grouped_health_sarif(
 mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
-    use fallow_core::results::*;
+    use fallow_types::results::*;
     use std::path::PathBuf;
 
     #[test]
@@ -3761,7 +3760,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.unused_enum_members.push(
-            fallow_core::results::UnusedEnumMemberFinding::with_actions(UnusedMember {
+            fallow_types::output_dead_code::UnusedEnumMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/enums.ts"),
                 parent_name: "Color".to_string(),
                 member_name: "Purple".to_string(),
@@ -3785,7 +3784,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.unused_class_members.push(
-            fallow_core::results::UnusedClassMemberFinding::with_actions(UnusedMember {
+            fallow_types::output_dead_code::UnusedClassMemberFinding::with_actions(UnusedMember {
                 path: root.join("src/service.ts"),
                 parent_name: "API".to_string(),
                 member_name: "fetch".to_string(),
@@ -3808,7 +3807,7 @@ mod tests {
         reason = "test line/col values are trivially small"
     )]
     fn duplication_sarif_structure() {
-        use fallow_core::duplicates::*;
+        use fallow_engine::duplicates::*;
 
         let root = PathBuf::from("/project");
         let report = DuplicationReport {

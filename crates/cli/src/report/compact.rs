@@ -1,8 +1,8 @@
 use crate::report::sink::outln;
 use std::path::Path;
 
-use fallow_core::duplicates::{CloneFingerprintSet, DuplicationReport};
-use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
+use fallow_engine::duplicates::{CloneFingerprintSet, DuplicationReport};
+use fallow_types::results::{AnalysisResults, UnusedExport, UnusedMember};
 
 use super::grouping::ResultGroup;
 use super::{normalize_uri, relative_path};
@@ -18,7 +18,7 @@ fn compact_path(path: &Path, root: &Path) -> String {
 }
 
 fn compact_circular_dependency_line(
-    cycle: &fallow_core::results::CircularDependencyFinding,
+    cycle: &fallow_types::output_dead_code::CircularDependencyFinding,
     root: &Path,
 ) -> String {
     let chain: Vec<String> = cycle
@@ -47,7 +47,7 @@ fn compact_circular_dependency_line(
 }
 
 fn compact_re_export_cycle_line(
-    cycle: &fallow_core::results::ReExportCycleFinding,
+    cycle: &fallow_types::output_dead_code::ReExportCycleFinding,
     root: &Path,
 ) -> String {
     let chain: Vec<String> = cycle
@@ -58,8 +58,8 @@ fn compact_re_export_cycle_line(
         .collect();
     let first_file = chain.first().map_or_else(String::new, Clone::clone);
     let kind_tag = match cycle.cycle.kind {
-        fallow_core::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-        fallow_core::results::ReExportCycleKind::MultiNode => "",
+        fallow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
+        fallow_types::results::ReExportCycleKind::MultiNode => "",
     };
     format!(
         "re-export-cycle:{}:{}{}",
@@ -70,7 +70,7 @@ fn compact_re_export_cycle_line(
 }
 
 fn compact_boundary_violation_line(
-    item: &fallow_core::results::BoundaryViolationFinding,
+    item: &fallow_types::output_dead_code::BoundaryViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -85,7 +85,7 @@ fn compact_boundary_violation_line(
 }
 
 fn compact_boundary_coverage_line(
-    item: &fallow_core::results::BoundaryCoverageViolationFinding,
+    item: &fallow_types::output_dead_code::BoundaryCoverageViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -96,7 +96,7 @@ fn compact_boundary_coverage_line(
 }
 
 fn compact_boundary_call_line(
-    item: &fallow_core::results::BoundaryCallViolationFinding,
+    item: &fallow_types::output_dead_code::BoundaryCallViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -110,7 +110,7 @@ fn compact_boundary_call_line(
 }
 
 fn compact_stale_suppression_line(
-    item: &fallow_core::results::StaleSuppression,
+    item: &fallow_types::results::StaleSuppression,
     root: &Path,
 ) -> String {
     format!(
@@ -122,7 +122,7 @@ fn compact_stale_suppression_line(
 }
 
 fn compact_catalog_reference_line(
-    item: &fallow_core::results::UnresolvedCatalogReferenceFinding,
+    item: &fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -135,7 +135,7 @@ fn compact_catalog_reference_line(
 }
 
 fn compact_unused_override_line(
-    item: &fallow_core::results::UnusedDependencyOverrideFinding,
+    item: &fallow_types::output_dead_code::UnusedDependencyOverrideFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -148,7 +148,7 @@ fn compact_unused_override_line(
 }
 
 fn compact_misconfigured_override_line(
-    item: &fallow_core::results::MisconfiguredDependencyOverrideFinding,
+    item: &fallow_types::output_dead_code::MisconfiguredDependencyOverrideFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -914,14 +914,15 @@ pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path)
 mod tests {
     use super::*;
     use crate::report::test_helpers::sample_results;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
     use fallow_output::{
         RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
         RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport,
         RuntimeCoverageReportVerdict, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
         RuntimeCoverageVerdict,
     };
+    use fallow_types::extract::MemberKind;
+    use fallow_types::output_dead_code::*;
+    use fallow_types::results::*;
     use std::path::PathBuf;
 
     #[test]
