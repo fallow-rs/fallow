@@ -1,4 +1,5 @@
 use serde::Serialize;
+use serde_json::Value;
 
 /// Envelope emitted by `fallow --format codeclimate` and
 /// `fallow --format gitlab-codequality`. GitLab Code Quality consumes the
@@ -87,6 +88,42 @@ pub struct CodeClimateLines {
     pub begin: u32,
 }
 
+/// Serialize typed CodeClimate issues to the wire-shape JSON array.
+///
+/// Infallible: `CodeClimateIssue` contains only strings, integers, arrays, and
+/// enums serialized as fixed strings.
+#[must_use]
+#[expect(
+    clippy::expect_used,
+    reason = "CodeClimateIssue contains only infallibly serializable fields"
+)]
+pub fn codeclimate_issues_to_value(issues: &[CodeClimateIssue]) -> Value {
+    serde_json::to_value(issues).expect("CodeClimateIssue serializes infallibly")
+}
+
+/// Add a top-level string property to each serialized CodeClimate issue.
+///
+/// Grouped CLI outputs use this to attach `owner` or `group` while keeping the
+/// issue array shape and path lookup contract in `fallow-output`.
+pub fn annotate_codeclimate_issues(
+    value: &mut Value,
+    field: &'static str,
+    mut value_for_path: impl FnMut(&str) -> String,
+) {
+    if let Some(items) = value.as_array_mut() {
+        for issue in items {
+            let path = issue
+                .pointer("/location/path")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            if let Some(object) = issue.as_object_mut() {
+                object.insert(field.to_string(), Value::String(value_for_path(&path)));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,5 +154,25 @@ mod tests {
         let output = CodeClimateOutput(Vec::new());
         let value = serde_json::to_value(output).expect("CodeClimate output serializes");
         assert!(value.is_array());
+    }
+
+    #[test]
+    fn codeclimate_issues_to_value_serializes_bare_array() {
+        let value = codeclimate_issues_to_value(&[]);
+        assert!(value.is_array());
+    }
+
+    #[test]
+    fn annotate_codeclimate_issues_adds_property_from_location_path() {
+        let mut value = serde_json::json!([
+            {
+                "type": "issue",
+                "location": { "path": "src/app.ts", "lines": { "begin": 3 } }
+            }
+        ]);
+
+        annotate_codeclimate_issues(&mut value, "owner", |path| format!("team:{path}"));
+
+        assert_eq!(value[0]["owner"], "team:src/app.ts");
     }
 }

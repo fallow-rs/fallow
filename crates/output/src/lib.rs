@@ -76,7 +76,8 @@ pub use check::{
 };
 pub use codeclimate::{
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
-    CodeClimateOutput, CodeClimateSeverity,
+    CodeClimateOutput, CodeClimateSeverity, annotate_codeclimate_issues,
+    codeclimate_issues_to_value,
 };
 pub use coverage_envelopes::{
     CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,

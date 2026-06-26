@@ -252,7 +252,7 @@ fn print_results_ci_comment(
     output: OutputFormat,
 ) -> ExitCode {
     let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
-    let value = codeclimate::issues_to_value(&issues);
+    let value = fallow_output::codeclimate_issues_to_value(&issues);
     print_ci_comment_format("dead-code", &value, output).unwrap_or_else(|| {
         eprintln!("Error: badge format is only supported for the health command");
         ExitCode::from(2)
@@ -363,7 +363,7 @@ fn print_duplication_ci_comment(
     output: OutputFormat,
 ) -> ExitCode {
     let issues = codeclimate::build_duplication_codeclimate(report, root);
-    let value = codeclimate::issues_to_value(&issues);
+    let value = fallow_output::codeclimate_issues_to_value(&issues);
     print_ci_comment_format("dupes", &value, output).unwrap_or_else(|| {
         eprintln!("Error: badge format is only supported for the health command");
         ExitCode::from(2)
@@ -558,7 +558,7 @@ fn print_health_ci_comment(
     output: OutputFormat,
 ) -> ExitCode {
     let issues = codeclimate::build_health_codeclimate(report, root);
-    let value = codeclimate::issues_to_value(&issues);
+    let value = fallow_output::codeclimate_issues_to_value(&issues);
     print_ci_comment_format("health", &value, output).unwrap_or_else(|| {
         eprintln!("Error: badge format is only supported for the health command");
         ExitCode::from(2)
@@ -687,11 +687,6 @@ pub use codeclimate::build_duplication_codeclimate;
     reason = "target-dependent: used in lib, unused in bin"
 )]
 pub use codeclimate::build_health_codeclimate;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use codeclimate::issues_to_value as codeclimate_issues_to_value;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
