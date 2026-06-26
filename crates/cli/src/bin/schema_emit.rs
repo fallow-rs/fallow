@@ -26,10 +26,10 @@ use schemars::generate::SchemaSettings;
 use serde_json::{Map, Value};
 
 use fallow_api::{
-    AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneFamilyFinding,
-    CloneGroupFinding, DupesReportPayload, DuplicationGroup,
+    AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, AuditAttribution,
+    AuditSummary, AuditVerdict, CloneFamilyFinding, CloneGroupFinding, DupesReportPayload,
+    DuplicationGroup, SecurityGateMode,
 };
-use fallow_cli::security::SecurityGateMode;
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus, Severity};
 use fallow_engine::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
@@ -72,9 +72,9 @@ use fallow_output::{
     WalkthroughValidation, WorkspaceInfo,
 };
 type AuditOutput = fallow_output::AuditOutput<
-    fallow_cli::audit::AuditVerdict,
-    fallow_cli::audit::AuditSummary,
-    fallow_cli::audit::AuditAttribution,
+    AuditVerdict,
+    AuditSummary,
+    AuditAttribution,
     CheckOutput,
     DupesReportPayload,
     HealthReport,

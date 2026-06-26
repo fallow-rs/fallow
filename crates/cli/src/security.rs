@@ -40,7 +40,6 @@ use fallow_types::results::{
     SecurityUnresolvedCalleeDiagnostic, TaintConfidence,
 };
 use rustc_hash::FxHashSet;
-use serde::Serialize;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
@@ -51,22 +50,30 @@ use crate::health_types::{
 };
 use crate::load_config_for_analysis;
 
+pub use fallow_api::SecurityGateMode;
+
 const UNRESOLVED_CALLEE_SAMPLE_LIMIT: usize = 25;
 const UNRESOLVED_CALLEE_TOP_FILES_LIMIT: usize = 10;
 
-/// Gate mode for `fallow security --gate <mode>`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum SecurityGateMode {
-    /// Fail when the change introduces a NEW security-sink candidate on a changed
-    /// line (not merely a sink in a changed file). There is deliberately no `all`
-    /// mode: gating on the whole candidate backlog is the anti-feature this gate
-    /// exists to avoid.
+/// CLI parser mode for `fallow security --gate <mode>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum SecurityGateArg {
+    /// Fail when the change introduces a new security-sink candidate on a
+    /// changed line.
     New,
     /// Fail when a candidate becomes runtime-reachable from an entry point in
     /// head but the matching candidate was not runtime-reachable in base.
     NewlyReachable,
+}
+
+impl SecurityGateArg {
+    #[must_use]
+    pub const fn into_mode(self) -> SecurityGateMode {
+        match self {
+            Self::New => SecurityGateMode::New,
+            Self::NewlyReachable => SecurityGateMode::NewlyReachable,
+        }
+    }
 }
 
 pub type SecurityGate = fallow_output::SecurityGate<SecurityGateMode>;

@@ -12,6 +12,8 @@ use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
+pub use fallow_api::{AuditAttribution, AuditSummary, AuditVerdict};
+
 use crate::base_worktree::{
     BaseWorktree, git_rev_parse, git_toplevel, resolve_cache_max_age, sweep_old_reusable_caches,
 };
@@ -22,43 +24,6 @@ use crate::health::{HealthOptions, HealthResult};
 
 const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 3;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
-
-/// Verdict for the audit command.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum AuditVerdict {
-    /// No issues in changed files.
-    Pass,
-    /// Issues found, but all are warn-severity.
-    Warn,
-    /// Error-severity issues found in changed files.
-    Fail,
-}
-
-/// Per-category summary counts for the audit result.
-#[derive(Debug, Clone, serde::Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct AuditSummary {
-    pub dead_code_issues: usize,
-    pub dead_code_has_errors: bool,
-    pub complexity_findings: usize,
-    pub max_cyclomatic: Option<u16>,
-    pub duplication_clone_groups: usize,
-}
-
-/// New-vs-inherited issue counts for audit.
-#[derive(Debug, Default, Clone, serde::Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct AuditAttribution {
-    pub gate: AuditGate,
-    pub dead_code_introduced: usize,
-    pub dead_code_inherited: usize,
-    pub complexity_introduced: usize,
-    pub complexity_inherited: usize,
-    pub duplication_introduced: usize,
-    pub duplication_inherited: usize,
-}
 
 /// Full audit result containing verdict, summary, and sub-results.
 pub struct AuditResult {

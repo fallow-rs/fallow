@@ -1329,7 +1329,7 @@ enum Command {
         /// `--diff-file <path>`, or `--diff-stdin`. There is deliberately no `all`
         /// mode (gating on the full backlog is the anti-feature this gate avoids).
         #[arg(long, value_name = "MODE")]
-        gate: Option<security::SecurityGateMode>,
+        gate: Option<security::SecurityGateArg>,
         /// Include the agent-facing attack-surface inventory in JSON output.
         #[arg(long)]
         surface: bool,
@@ -3897,6 +3897,7 @@ fn dispatch_security_command(command: Command, dispatch: &DispatchContext<'_>) -
         unreachable!("security dispatcher only handles security commands");
     };
 
+    let gate = gate.map(security::SecurityGateArg::into_mode);
     let cli = dispatch.cli;
     let (output, _quiet, fail_on_issues) = dispatch.ci_defaults();
     let derived_flags = SecurityDerivedFlagState {

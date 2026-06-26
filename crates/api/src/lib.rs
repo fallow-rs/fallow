@@ -18,8 +18,11 @@ use fallow_config::EmailMode;
 use fallow_output::EffortEstimate;
 use serde::Serialize;
 
+pub mod audit_output;
 pub mod dupes_output;
 pub mod runtime;
+pub mod security_output;
+pub use audit_output::{AuditAttribution, AuditSummary, AuditVerdict};
 pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneFamilyFinding,
     CloneGroupFinding, DupesReportPayload, DuplicationGroup, DuplicationGrouping,
@@ -32,6 +35,7 @@ pub use runtime::{
     run_boundary_violations, run_circular_dependencies, run_complexity_with_runner, run_dead_code,
     run_duplication, run_health_with_runner, serialize_health_report_json,
 };
+pub use security_output::SecurityGateMode;
 
 pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "root",
