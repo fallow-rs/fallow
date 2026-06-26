@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use fallow_api::DupesReportPayload;
+use fallow_api::{DupesReportPayload, DuplicationGroup, DuplicationGrouping};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
@@ -528,7 +528,7 @@ pub fn build_duplication_json(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    let envelope: DupesOutput<DupesReportPayload, super::dupes_grouping::DuplicationGroup> =
+    let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
             schema_version: SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -569,7 +569,7 @@ pub(super) fn print_duplication_json(
 
 pub fn build_grouped_duplication_json(
     report: &DuplicationReport,
-    grouping: &super::dupes_grouping::DuplicationGrouping,
+    grouping: &DuplicationGrouping,
     root: &Path,
     elapsed: Duration,
     explain: bool,
@@ -582,7 +582,7 @@ pub fn build_grouped_duplication_json(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    let envelope: DupesOutput<DupesReportPayload, super::dupes_grouping::DuplicationGroup> =
+    let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
             schema_version: SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -630,7 +630,7 @@ fn group_by_mode_from_label(label: &str) -> GroupByMode {
 
 pub(super) fn print_grouped_duplication_json(
     report: &DuplicationReport,
-    grouping: &super::dupes_grouping::DuplicationGrouping,
+    grouping: &DuplicationGrouping,
     root: &Path,
     elapsed: Duration,
     explain: bool,

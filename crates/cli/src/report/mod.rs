@@ -18,6 +18,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use fallow_api::DuplicationGrouping;
 use fallow_config::{OutputFormat, RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
@@ -374,7 +375,7 @@ fn print_duplication_ci_comment(
 #[must_use]
 fn print_grouped_duplication_report(
     report: &DuplicationReport,
-    grouping: &dupes_grouping::DuplicationGrouping,
+    grouping: &DuplicationGrouping,
     ctx: &ReportContext<'_>,
     output: OutputFormat,
     resolver: &OwnershipResolver,
@@ -449,7 +450,7 @@ fn print_ci_comment_format(
     Some(exit)
 }
 
-fn warn_dupes_grouping_unsupported(grouping: &dupes_grouping::DuplicationGrouping, format: &str) {
+fn warn_dupes_grouping_unsupported(grouping: &DuplicationGrouping, format: &str) {
     eprintln!(
         "note: --group-by {} is not supported for {format} duplication output, falling back to \
          ungrouped output (use --format json for the full grouped envelope)",

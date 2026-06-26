@@ -47,7 +47,6 @@ mod inspect;
 mod license;
 mod list;
 mod migrate;
-mod output_dupes;
 #[cfg(any(test, feature = "schema-emit"))]
 mod output_envelope;
 mod output_runtime;

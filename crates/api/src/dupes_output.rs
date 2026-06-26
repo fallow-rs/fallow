@@ -3,8 +3,9 @@
 use std::path::PathBuf;
 
 use fallow_engine::duplicates::{
-    CloneFamily, CloneFingerprintSet, CloneGroup, DuplicationReport, DuplicationStats,
-    MirroredDirectory, RefactoringSuggestion, clone_fingerprint, dominant_identifier,
+    CloneFamily, CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport,
+    DuplicationStats, MirroredDirectory, RefactoringSuggestion, clone_fingerprint,
+    dominant_identifier, fingerprint_for_fragment,
 };
 use fallow_output::{
     CloneFamilyAction, CloneGroupAction, clone_family_actions, clone_group_actions,
@@ -12,6 +13,113 @@ use fallow_output::{
 use fallow_types::envelope::AuditIntroduced;
 use fallow_types::serde_path;
 use serde::Serialize;
+
+/// A clone instance plus its per-instance owner key.
+///
+/// Each instance carries its own `owner` field alongside the standard
+/// `CloneInstance` shape so consumers can attribute instances to resolver keys
+/// without re-resolving paths.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AttributedInstance {
+    /// The original clone instance.
+    #[serde(flatten)]
+    pub instance: CloneInstance,
+    /// Resolver key for this specific instance.
+    pub owner: String,
+}
+
+/// A clone group annotated with largest-owner attribution and per-instance
+/// owner keys.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AttributedCloneGroup {
+    /// Largest-owner attribution. Ties are resolved by the caller before this
+    /// wire DTO is built.
+    pub primary_owner: String,
+    /// Number of tokens in the clone group.
+    pub token_count: usize,
+    /// Number of source lines in the clone group.
+    pub line_count: usize,
+    /// Instances annotated with their resolver keys.
+    pub instances: Vec<AttributedInstance>,
+}
+
+impl AttributedCloneGroup {
+    /// Return the report-scoped fingerprint for this attributed group.
+    #[must_use]
+    pub fn fingerprint(&self, fingerprints: &CloneFingerprintSet) -> String {
+        let instances: Vec<_> = self
+            .instances
+            .iter()
+            .map(|instance| instance.instance.clone())
+            .collect();
+        fingerprints.fingerprint_for_parts(&instances, self.token_count, self.line_count)
+    }
+}
+
+/// Wire-shape envelope for an [`AttributedCloneGroup`] finding.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AttributedCloneGroupFinding {
+    /// The underlying attributed clone group.
+    #[serde(flatten)]
+    pub group: AttributedCloneGroup,
+    /// Stable content fingerprint, usually `dup:<8hex>`.
+    pub fingerprint: String,
+    /// Suggested next steps. Always emitted.
+    pub actions: Vec<CloneGroupAction>,
+}
+
+impl AttributedCloneGroupFinding {
+    /// Build the wrapper from an [`AttributedCloneGroup`].
+    #[allow(
+        dead_code,
+        reason = "kept for focused wrapper tests and non-report construction paths"
+    )]
+    #[must_use]
+    pub fn with_actions(group: AttributedCloneGroup) -> Self {
+        let fingerprint = group.instances.first().map_or_else(
+            || fingerprint_for_fragment(""),
+            |ai| fingerprint_for_fragment(&ai.instance.fragment),
+        );
+        Self::with_fingerprint(group, fingerprint)
+    }
+
+    /// Build the wrapper with a precomputed report-scoped fingerprint.
+    #[must_use]
+    pub fn with_fingerprint(group: AttributedCloneGroup, fingerprint: String) -> Self {
+        let actions = clone_group_actions(group.line_count, group.instances.len());
+        Self {
+            group,
+            fingerprint,
+            actions,
+        }
+    }
+}
+
+/// A single grouped duplication bucket.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DuplicationGroup {
+    /// Group label such as owner, directory, package, or section.
+    pub key: String,
+    /// Dedup-aware aggregate stats for the group.
+    pub stats: DuplicationStats,
+    /// Clone groups attributed to this bucket.
+    pub clone_groups: Vec<AttributedCloneGroupFinding>,
+    /// Clone families overlapping this bucket.
+    pub clone_families: Vec<CloneFamilyFinding>,
+}
+
+/// Wrapper carrying the resolver mode label and grouped buckets.
+#[derive(Debug, Clone, Serialize)]
+pub struct DuplicationGrouping {
+    /// Resolver mode label (`"owner"`, `"directory"`, `"package"`, `"section"`).
+    pub mode: &'static str,
+    /// One bucket per resolver key.
+    pub groups: Vec<DuplicationGroup>,
+}
 
 /// Wire-shape envelope for a clone group finding.
 #[derive(Debug, Clone, Serialize)]
@@ -210,6 +318,29 @@ mod tests {
         assert_eq!(finding.actions[0].kind, CloneGroupActionType::ExtractShared);
         assert_eq!(finding.actions[1].kind, CloneGroupActionType::SuppressLine);
         assert!(finding.introduced.is_none());
+    }
+
+    #[test]
+    fn attributed_clone_group_finding_actions_match_clone_group_shape() {
+        let attributed = AttributedCloneGroup {
+            primary_owner: "src".to_string(),
+            token_count: 100,
+            line_count: 20,
+            instances: vec![
+                AttributedInstance {
+                    instance: instance("/root/src/a.ts"),
+                    owner: "src".to_string(),
+                },
+                AttributedInstance {
+                    instance: instance("/root/src/b.ts"),
+                    owner: "src".to_string(),
+                },
+            ],
+        };
+        let finding = AttributedCloneGroupFinding::with_actions(attributed);
+        assert_eq!(finding.actions.len(), 2);
+        assert_eq!(finding.actions[0].kind, CloneGroupActionType::ExtractShared);
+        assert_eq!(finding.actions[1].kind, CloneGroupActionType::SuppressLine);
     }
 
     #[test]

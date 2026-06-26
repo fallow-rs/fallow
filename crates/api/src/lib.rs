@@ -20,7 +20,10 @@ use serde::Serialize;
 
 pub mod dupes_output;
 pub mod runtime;
-pub use dupes_output::{CloneFamilyFinding, CloneGroupFinding, DupesReportPayload};
+pub use dupes_output::{
+    AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneFamilyFinding,
+    CloneGroupFinding, DupesReportPayload, DuplicationGroup, DuplicationGrouping,
+};
 pub use runtime::{
     DeadCodeProgrammaticOutput, DuplicationProgrammaticOutput, HealthJsonReportInput,
     HealthProgrammaticOutput, ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun,

@@ -5,9 +5,7 @@ use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
 #[cfg(any(test, feature = "schema-emit"))]
 use crate::health_types::{HealthGroup, HealthReport};
 #[cfg(any(test, feature = "schema-emit"))]
-use crate::report::dupes_grouping::DuplicationGroup;
-#[cfg(any(test, feature = "schema-emit"))]
-use fallow_api::DupesReportPayload;
+use fallow_api::{DupesReportPayload, DuplicationGroup};
 use fallow_output::{
     CheckGroupedOutput, CheckOutput, CoverageAnalyzeOutput, CoverageSetupOutput, DupesOutput,
     ExplainOutput, HealthOutput, InspectOutput, ReviewEnvelopeOutput, ReviewReconcileOutput,

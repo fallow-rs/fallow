@@ -3,13 +3,14 @@ use std::path::Path;
 use std::time::Duration;
 
 use colored::Colorize;
+use fallow_api::{
+    AttributedCloneGroupFinding, AttributedInstance, DuplicationGroup, DuplicationGrouping,
+};
 use fallow_core::duplicates::{CloneFamily, CloneFingerprintSet, CloneGroup, DuplicationReport};
 
 use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, split_dir_filename, thousands,
 };
-use crate::output_dupes::AttributedCloneGroupFinding;
-use crate::report::dupes_grouping::{AttributedInstance, DuplicationGroup, DuplicationGrouping};
 
 /// Docs base URL for duplication explanations.
 pub(super) const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanations/duplication";

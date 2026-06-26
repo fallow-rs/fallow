@@ -14,18 +14,19 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use fallow_api::CloneFamilyFinding;
+use fallow_api::{
+    AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneFamilyFinding,
+    DuplicationGroup, DuplicationGrouping,
+};
 use fallow_engine::duplicates::{
     CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
 };
 use rustc_hash::FxHashSet;
-use serde::Serialize;
 
 use super::grouping::OwnershipResolver;
 use super::relative_path;
 use crate::baseline::recompute_stats;
 use crate::codeowners::UNOWNED_LABEL;
-use crate::output_dupes::AttributedCloneGroupFinding;
 
 /// Resolve the group key for a single instance file.
 fn key_for_instance(instance: &CloneInstance, root: &Path, resolver: &OwnershipResolver) -> String {
@@ -58,98 +59,6 @@ pub fn largest_owner(group: &CloneGroup, root: &Path, resolver: &OwnershipResolv
     best_key.unwrap_or_else(|| UNOWNED_LABEL.to_string())
 }
 
-/// A clone instance plus its per-instance owner key (for inline JSON / SARIF
-/// rendering).
-///
-/// Each instance carries its own `owner` field alongside the standard
-/// `CloneInstance` shape (file / start_line / end_line / start_col / end_col /
-/// fragment), so consumers can attribute instances to resolver keys without
-/// re-resolving paths.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct AttributedInstance {
-    /// The original clone instance.
-    #[serde(flatten)]
-    pub instance: CloneInstance,
-    /// Resolver key for this specific instance (per-instance, not the
-    /// group-level largest-owner).
-    pub owner: String,
-}
-
-/// A clone group annotated with its largest-owner attribution and per-instance
-/// owner keys.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct AttributedCloneGroup {
-    /// Largest-owner attribution: the resolver key with the most instances in
-    /// this clone group. Ties broken alphabetically (smallest key wins).
-    pub primary_owner: String,
-    pub token_count: usize,
-    pub line_count: usize,
-    /// Each instance carries its own `owner` field alongside the standard
-    /// CloneInstance shape.
-    pub instances: Vec<AttributedInstance>,
-}
-
-impl AttributedCloneGroup {
-    fn from_group(group: &CloneGroup, root: &Path, resolver: &OwnershipResolver) -> Self {
-        let primary_owner = largest_owner(group, root, resolver);
-        let instances = group
-            .instances
-            .iter()
-            .map(|instance| AttributedInstance {
-                owner: key_for_instance(instance, root, resolver),
-                instance: instance.clone(),
-            })
-            .collect();
-        Self {
-            primary_owner,
-            token_count: group.token_count,
-            line_count: group.line_count,
-            instances,
-        }
-    }
-
-    fn fingerprint(&self, fingerprints: &CloneFingerprintSet) -> String {
-        let instances: Vec<_> = self
-            .instances
-            .iter()
-            .map(|instance| instance.instance.clone())
-            .collect();
-        fingerprints.fingerprint_for_parts(&instances, self.token_count, self.line_count)
-    }
-}
-
-/// A single grouped duplication bucket. Per-group `stats` are dedup-aware and
-/// computed over the FULL group BEFORE any `--top` truncation.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct DuplicationGroup {
-    /// Group label (owner / directory / package / section). `(unowned)` for
-    /// files with no CODEOWNERS rule, `(no section)` for pre-section rules in
-    /// section mode.
-    pub key: String,
-    pub stats: DuplicationStats,
-    /// Clone groups attributed to this owner, each wrapped with the typed
-    /// `actions[]` array. Each group's `primary_owner` is its largest-owner
-    /// key; per-instance `owner` lets consumers see cross-bucket fan-out
-    /// without re-resolving paths.
-    pub clone_groups: Vec<AttributedCloneGroupFinding>,
-    /// Clone families overlapping this bucket, each wrapped with the typed
-    /// `actions[]` array.
-    pub clone_families: Vec<CloneFamilyFinding>,
-}
-
-/// Wrapper carrying the resolver mode label and grouped buckets.
-#[derive(Debug, Clone, Serialize)]
-pub struct DuplicationGrouping {
-    /// Resolver mode label (`"owner"`, `"directory"`, `"package"`, `"section"`).
-    pub mode: &'static str,
-    /// One bucket per resolver key, sorted most clone groups first with
-    /// `(unowned)` pinned last.
-    pub groups: Vec<DuplicationGroup>,
-}
-
 /// Build the grouped duplication payload from a project-level report.
 ///
 /// Aggregation is performed BEFORE any `--top` truncation so per-group stats
@@ -180,13 +89,35 @@ fn build_attributed_clone_buckets(
 ) -> BTreeMap<String, Vec<AttributedCloneGroup>> {
     let mut buckets: BTreeMap<String, Vec<AttributedCloneGroup>> = BTreeMap::new();
     for group in &report.clone_groups {
-        let attributed = AttributedCloneGroup::from_group(group, root, resolver);
+        let attributed = attributed_clone_group(group, root, resolver);
         buckets
             .entry(attributed.primary_owner.clone())
             .or_default()
             .push(attributed);
     }
     buckets
+}
+
+fn attributed_clone_group(
+    group: &CloneGroup,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) -> AttributedCloneGroup {
+    let primary_owner = largest_owner(group, root, resolver);
+    let instances = group
+        .instances
+        .iter()
+        .map(|instance| AttributedInstance {
+            owner: key_for_instance(instance, root, resolver),
+            instance: instance.clone(),
+        })
+        .collect();
+    AttributedCloneGroup {
+        primary_owner,
+        token_count: group.token_count,
+        line_count: group.line_count,
+        instances,
+    }
 }
 
 fn duplication_group(
