@@ -12,15 +12,7 @@ use fallow_types::extract::{
 };
 use helpers::regex_pattern_to_suffix;
 
-const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
-const ANGULAR_THIS_SPREAD_SENTINEL: &str = "__angular_this_spread__";
-const INSTANCE_EXPORT_SENTINEL: &str = "__fallow_instance_export__:";
-const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
-const PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL: &str = "__fallow_playwright_fixture_alias__:";
-const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
-const PLAYWRIGHT_FIXTURE_TYPE_SENTINEL: &str = "__fallow_playwright_fixture_type__:";
-const FLUENT_CHAIN_SENTINEL: &str = "__fallow_fluent_chain__:";
-const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
+const LEGACY_SEMANTIC_TEST_OBJECT_PREFIXES: &[&str] = &["__fallow_", "__angular_"];
 
 #[test]
 fn into_module_info_transfers_exports() {
@@ -69,10 +61,16 @@ fn angular_template_fact_members(info: &crate::ModuleInfo) -> Vec<&str> {
         .collect()
 }
 
-fn has_no_angular_template_sentinel(info: &crate::ModuleInfo) -> bool {
-    info.member_accesses
-        .iter()
-        .all(|access| access.object != ANGULAR_TPL_SENTINEL)
+fn has_no_legacy_semantic_member_accesses(info: &crate::ModuleInfo) -> bool {
+    !has_legacy_semantic_member_accesses(info)
+}
+
+fn has_legacy_semantic_member_accesses(info: &crate::ModuleInfo) -> bool {
+    info.member_accesses.iter().any(|access| {
+        LEGACY_SEMANTIC_TEST_OBJECT_PREFIXES
+            .iter()
+            .any(|prefix| access.object.starts_with(prefix))
+    })
 }
 
 fn has_playwright_fixture_use_fact(
@@ -109,6 +107,12 @@ fn has_playwright_fixture_definition_fact(
     })
 }
 
+fn has_any_playwright_fixture_definition_fact(info: &crate::ModuleInfo) -> bool {
+    info.semantic_facts
+        .iter()
+        .any(|fact| matches!(fact, SemanticFact::PlaywrightFixtureDefinition(_)))
+}
+
 fn has_playwright_fixture_alias_fact(
     info: &crate::ModuleInfo,
     test_name: &str,
@@ -121,6 +125,12 @@ fn has_playwright_fixture_alias_fact(
                 if access.test_name == test_name && access.base_name == base_name
         )
     })
+}
+
+fn has_any_playwright_fixture_alias_fact(info: &crate::ModuleInfo) -> bool {
+    info.semantic_facts
+        .iter()
+        .any(|fact| matches!(fact, SemanticFact::PlaywrightFixtureAlias(_)))
 }
 
 fn has_playwright_fixture_type_fact(
@@ -2139,10 +2149,7 @@ fn exported_instance_binding_is_recorded() {
     );
 
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(INSTANCE_EXPORT_SENTINEL)),
+        !has_legacy_semantic_member_accesses(&info),
         "exported instance binding should not emit legacy sentinel access, found: {:?}",
         info.member_accesses
     );
@@ -2597,10 +2604,7 @@ fn playwright_extend_type_alias_records_fixture_definitions() {
     );
 
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
+        !has_legacy_semantic_member_accesses(&info),
         "Playwright fixture definitions should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -2632,12 +2636,9 @@ fn non_playwright_extend_does_not_record_fixture_definitions() {
     );
 
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
-        "non-Playwright .extend<T>() should not emit Playwright fixture definitions, found: {:?}",
-        info.member_accesses
+        !has_any_playwright_fixture_definition_fact(&info),
+        "non-Playwright .extend<T>() should not emit typed Playwright fixture definitions, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -2654,10 +2655,7 @@ fn playwright_merge_tests_records_fixture_aliases() {
     );
 
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)),
+        !has_legacy_semantic_member_accesses(&info),
         "Playwright fixture aliases should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -2723,12 +2721,9 @@ fn non_playwright_merge_tests_does_not_record_fixture_aliases() {
     );
 
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)),
-        "local mergeTests should not emit Playwright fixture aliases, found: {:?}",
-        info.member_accesses
+        !has_any_playwright_fixture_alias_fact(&info),
+        "local mergeTests should not emit typed Playwright fixture aliases, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -2746,10 +2741,7 @@ fn playwright_test_callback_records_fixture_member_uses() {
     );
 
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(PLAYWRIGHT_FIXTURE_USE_SENTINEL)),
+        !has_legacy_semantic_member_accesses(&info),
         "Playwright fixture uses should not emit legacy sentinels, found: {:?}",
         info.member_accesses,
     );
@@ -2965,10 +2957,7 @@ fn playwright_fixture_type_alias_records_nested_type_bindings() {
     );
 
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)),
+        !has_legacy_semantic_member_accesses(&info),
         "Playwright fixture type aliases should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -3200,12 +3189,9 @@ fn non_playwright_helper_does_not_record_fixture_definitions() {
     );
 
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
-        "non-Playwright helper should not emit Playwright fixture definitions, found: {:?}",
-        info.member_accesses
+        !has_any_playwright_fixture_definition_fact(&info),
+        "non-Playwright helper should not emit typed Playwright fixture definitions, found: {:?}",
+        info.semantic_facts
     );
 }
 
@@ -4868,10 +4854,7 @@ fn fluent_chain_emits_typed_member_facts() {
     );
 
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(FLUENT_CHAIN_SENTINEL)),
+        !has_legacy_semantic_member_accesses(&info),
         "fluent chain should not emit legacy sentinel accesses, found: {:?}",
         info.member_accesses,
     );
@@ -4943,10 +4926,7 @@ fn new_expression_fluent_chain_emits_typed_member_facts() {
         info.member_accesses,
     );
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|a| a.object.starts_with(FLUENT_CHAIN_NEW_SENTINEL)),
+        !has_legacy_semantic_member_accesses(&info),
         "new-expression fluent chain should not emit legacy sentinel accesses, found: {:?}",
         info.member_accesses,
     );
@@ -5955,7 +5935,7 @@ fn angular_inline_template_emits_typed_member_facts() {
     assert!(fact_refs.contains(&"message"));
     assert!(fact_refs.contains(&"onClick"));
     assert!(
-        has_no_angular_template_sentinel(&info),
+        has_no_legacy_semantic_member_accesses(&info),
         "inline template should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -5979,7 +5959,7 @@ fn angular_inline_template_backtick_scanned() {
     let fact_refs = angular_template_fact_members(&info);
     assert!(fact_refs.contains(&"title"));
     assert!(
-        has_no_angular_template_sentinel(&info),
+        has_no_legacy_semantic_member_accesses(&info),
         "backtick template should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -6101,7 +6081,7 @@ fn angular_host_bindings_emit_typed_member_facts() {
     assert!(fact_refs.contains(&"onHostClick"));
     assert!(fact_refs.contains(&"customColor"));
     assert!(
-        has_no_angular_template_sentinel(&info),
+        has_no_legacy_semantic_member_accesses(&info),
         "host bindings should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -6130,7 +6110,7 @@ fn angular_host_binding_skips_keywords() {
         info.semantic_facts
     );
     assert!(
-        has_no_angular_template_sentinel(&info),
+        has_no_legacy_semantic_member_accesses(&info),
         "keyword-only host bindings should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -6160,7 +6140,7 @@ fn angular_inputs_outputs_metadata_emit_typed_member_facts() {
     assert!(refs.contains(&"id"));
     assert!(refs.contains(&"clicked"));
     assert!(
-        has_no_angular_template_sentinel(&info),
+        has_no_legacy_semantic_member_accesses(&info),
         "inputs/outputs metadata should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -6190,7 +6170,7 @@ fn angular_queries_metadata_emit_typed_member_facts() {
     assert!(refs.contains(&"header"));
     assert!(refs.contains(&"footer"));
     assert!(
-        has_no_angular_template_sentinel(&info),
+        has_no_legacy_semantic_member_accesses(&info),
         "queries metadata should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -6215,10 +6195,7 @@ fn angular_this_spread_emits_typed_abstain_fact() {
         info.semantic_facts
     );
     assert!(
-        !info
-            .member_accesses
-            .iter()
-            .any(|access| { access.object == ANGULAR_THIS_SPREAD_SENTINEL }),
+        !has_legacy_semantic_member_accesses(&info),
         "spread-this should not emit a legacy sentinel, found: {:?}",
         info.member_accesses
     );
@@ -6494,7 +6471,7 @@ fn angular_component_all_metadata_combined() {
     assert!(refs.contains(&"externalInput"));
     assert!(refs.contains(&"externalOutput"));
     assert!(
-        has_no_angular_template_sentinel(&info),
+        has_no_legacy_semantic_member_accesses(&info),
         "external template should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );

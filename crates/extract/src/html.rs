@@ -340,8 +340,6 @@ fn html_module_info(
 mod tests {
     use super::*;
 
-    const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
-
     #[test]
     fn is_html_file_html() {
         assert!(is_html_file(Path::new("index.html")));
@@ -794,10 +792,8 @@ mod tests {
             "should contain 'onButtonClick'"
         );
         assert!(
-            info.member_accesses
-                .iter()
-                .all(|access| access.object != ANGULAR_TPL_SENTINEL),
-            "Angular template refs should not emit legacy sentinels: {:?}",
+            info.member_accesses.is_empty(),
+            "Angular template refs should emit typed facts instead of member accesses: {:?}",
             info.member_accesses
         );
     }
