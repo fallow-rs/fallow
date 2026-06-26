@@ -2664,7 +2664,8 @@ mod tests {
                     fixture_name: "adminPage".to_string(),
                     member: "assertGreeting".to_string(),
                 }),
-            ],
+            ]
+            .into(),
             ..Default::default()
         }];
 
@@ -2757,7 +2758,8 @@ mod tests {
                         fixture_name: "adminPage".to_string(),
                         member: "assertGreeting".to_string(),
                     },
-                )],
+                )]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -2776,7 +2778,8 @@ mod tests {
                         fixture_name: "adminPage".to_string(),
                         type_name: "AdminPage".to_string(),
                     },
-                )],
+                )]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -2794,7 +2797,8 @@ mod tests {
                         test_name: "mergedTest".to_string(),
                         base_name: "testPrimary".to_string(),
                     },
-                )],
+                )]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -2846,7 +2850,8 @@ mod tests {
                         fixture_name: "pages.adminPage".to_string(),
                         member: "assertGreeting".to_string(),
                     }),
-                ],
+                ]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -2865,7 +2870,8 @@ mod tests {
                         fixture_name: "adminPage".to_string(),
                         type_name: "AdminPage".to_string(),
                     },
-                )],
+                )]
+                .into(),
                 ..Default::default()
             },
         ];
@@ -2896,7 +2902,8 @@ mod tests {
                     export_name: "service".to_string(),
                     target_name: "Service".to_string(),
                 },
-            )],
+            )]
+            .into(),
             ..Default::default()
         }];
 
@@ -2957,7 +2964,8 @@ mod tests {
                         callee_method: "getInstance".to_string(),
                         member: "getData".to_string(),
                     },
-                )],
+                )]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -3031,7 +3039,8 @@ mod tests {
                         chain: vec!["setProcessId".to_string(), "setSubject".to_string()],
                         member: "build".to_string(),
                     },
-                )],
+                )]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -3102,7 +3111,8 @@ mod tests {
                         chain: vec!["addDefault".to_string(), "addFromCli".to_string()],
                         member: "build".to_string(),
                     },
-                )],
+                )]
+                .into(),
                 ..Default::default()
             },
             ResolvedModule {
@@ -3136,10 +3146,10 @@ mod tests {
             dynamic_imports: vec![],
             dynamic_import_patterns: vec![],
             require_calls: vec![],
-            package_path_references: vec![],
+            package_path_references: Box::default(),
             member_accesses: vec![],
-            semantic_facts: Vec::new(),
-            whole_object_uses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             content_hash: 0,
@@ -3602,7 +3612,7 @@ mod tests {
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
-            whole_object_uses: vec!["Status".to_string()],
+            whole_object_uses: vec!["Status".to_string()].into(),
             ..Default::default()
         }];
 
@@ -4610,7 +4620,7 @@ mod tests {
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
-            whole_object_uses: vec!["S".to_string()], // aliased local name
+            whole_object_uses: vec!["S".to_string()].into(), // aliased local name
             ..Default::default()
         }];
 

@@ -479,7 +479,7 @@ mod tests {
                 file_id: FileId(0),
                 path: PathBuf::from("/project/main.ts"),
                 resolved_imports: vec![named_import_from("./barrel", "Ns", FileId(1))],
-                whole_object_uses: vec!["Ns".to_string()],
+                whole_object_uses: vec!["Ns".to_string()].into(),
                 ..Default::default()
             },
             ResolvedModule {

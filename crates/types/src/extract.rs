@@ -23,7 +23,7 @@ pub struct ModuleInfo {
     /// All `require()` calls.
     pub require_calls: Vec<RequireCallInfo>,
     /// Package names statically referenced through package path resolution.
-    pub package_path_references: Vec<String>,
+    pub package_path_references: Box<[String]>,
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Vec<MemberAccess>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
@@ -31,9 +31,9 @@ pub struct ModuleInfo {
     /// This carries facts that used to be encoded through sentinel strings in
     /// `member_accesses`. During migration, extractors may emit both the typed
     /// fact and the legacy sentinel access.
-    pub semantic_facts: Vec<SemanticFact>,
+    pub semantic_facts: Box<[SemanticFact]>,
     /// Identifiers used in whole-object access patterns.
-    pub whole_object_uses: Vec<String>,
+    pub whole_object_uses: Box<[String]>,
     /// Whether this module uses CommonJS exports.
     pub has_cjs_exports: bool,
     /// Whether this module declares an Angular component `templateUrl`.
@@ -356,8 +356,8 @@ impl ModuleInfo {
 
         Self::release_vec(&mut self.dynamic_imports);
         Self::release_vec(&mut self.require_calls);
-        Self::release_vec(&mut self.package_path_references);
-        Self::release_vec(&mut self.whole_object_uses);
+        Self::release_boxed_slice(&mut self.package_path_references);
+        Self::release_boxed_slice(&mut self.whole_object_uses);
         Self::release_vec(&mut self.unused_import_bindings);
         Self::release_vec(&mut self.type_referenced_import_bindings);
         Self::release_vec(&mut self.value_referenced_import_bindings);
@@ -367,6 +367,10 @@ impl ModuleInfo {
 
     fn release_vec<T>(values: &mut Vec<T>) {
         *values = Vec::new();
+    }
+
+    fn release_boxed_slice<T>(values: &mut Box<[T]>) {
+        *values = Box::default();
     }
 }
 
@@ -2538,7 +2542,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1328);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1304);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -2615,7 +2619,6 @@ mod tests {
     macro_rules! assert_released {
         ($values:expr) => {{
             assert!($values.is_empty());
-            assert_eq!($values.capacity(), 0);
         }};
     }
 
@@ -2741,13 +2744,12 @@ mod tests {
     #[test]
     fn angular_template_member_names_include_typed_and_legacy_facts() {
         let mut module = minimal_module_info();
-        module
-            .semantic_facts
-            .push(SemanticFact::AngularTemplateMemberAccess(
-                AngularTemplateMemberAccessFact {
-                    member: "typed".to_string(),
-                },
-            ));
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::AngularTemplateMemberAccess(AngularTemplateMemberAccessFact {
+                member: "typed".to_string(),
+            }),
+        );
         module.member_accesses.push(MemberAccess {
             object: ANGULAR_TPL_SENTINEL.to_string(),
             member: "legacy".to_string(),
@@ -2762,9 +2764,10 @@ mod tests {
     #[test]
     fn angular_this_spread_accepts_typed_and_legacy_facts() {
         let mut typed = minimal_module_info();
-        typed
-            .semantic_facts
-            .push(SemanticFact::AngularThisSpread(AngularThisSpreadFact));
+        push_semantic_fact(
+            &mut typed,
+            SemanticFact::AngularThisSpread(AngularThisSpreadFact),
+        );
         let mut legacy = minimal_module_info();
         legacy.member_accesses.push(MemberAccess {
             object: ANGULAR_THIS_SPREAD_SENTINEL.to_string(),
@@ -2838,15 +2841,14 @@ mod tests {
     #[test]
     fn semantic_fact_compat_iterator_yields_typed_and_legacy_facts() {
         let mut module = minimal_module_info();
-        module
-            .semantic_facts
-            .push(SemanticFact::FactoryCallMemberAccess(
-                FactoryCallMemberAccessFact {
-                    callee_object: "Svc".to_string(),
-                    callee_method: "make".to_string(),
-                    member: "run".to_string(),
-                },
-            ));
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::FactoryCallMemberAccess(FactoryCallMemberAccessFact {
+                callee_object: "Svc".to_string(),
+                callee_method: "make".to_string(),
+                member: "run".to_string(),
+            }),
+        );
         module.member_accesses.push(MemberAccess {
             object: format!("{INSTANCE_EXPORT_SENTINEL}exported"),
             member: "target".to_string(),
@@ -2881,16 +2883,15 @@ mod tests {
     #[test]
     fn legacy_backed_fact_helpers_collect_owned_family_facts() {
         let mut module = minimal_module_info();
-        module
-            .semantic_facts
-            .push(SemanticFact::FluentChainMemberAccess(
-                FluentChainMemberAccessFact {
-                    root_object: "Builder".to_string(),
-                    root_method: "start".to_string(),
-                    chain: vec!["next".to_string()],
-                    member: "value".to_string(),
-                },
-            ));
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::FluentChainMemberAccess(FluentChainMemberAccessFact {
+                root_object: "Builder".to_string(),
+                root_method: "start".to_string(),
+                chain: vec!["next".to_string()],
+                member: "value".to_string(),
+            }),
+        );
         module.member_accesses.push(MemberAccess {
             object: format!("{INSTANCE_EXPORT_SENTINEL}exported"),
             member: "target".to_string(),
@@ -2953,41 +2954,37 @@ mod tests {
     #[test]
     fn playwright_fixture_fact_helpers_select_each_fact_family() {
         let mut module = minimal_module_info();
-        module
-            .semantic_facts
-            .push(SemanticFact::PlaywrightFixtureUse(
-                PlaywrightFixtureUseFact {
-                    test_name: "test".to_string(),
-                    fixture_name: "page".to_string(),
-                    member: "goto".to_string(),
-                },
-            ));
-        module
-            .semantic_facts
-            .push(SemanticFact::PlaywrightFixtureDefinition(
-                PlaywrightFixtureDefinitionFact {
-                    test_name: "test".to_string(),
-                    fixture_name: "adminPage".to_string(),
-                    type_name: "AdminPage".to_string(),
-                },
-            ));
-        module
-            .semantic_facts
-            .push(SemanticFact::PlaywrightFixtureAlias(
-                PlaywrightFixtureAliasFact {
-                    test_name: "mergedTest".to_string(),
-                    base_name: "test".to_string(),
-                },
-            ));
-        module
-            .semantic_facts
-            .push(SemanticFact::PlaywrightFixtureType(
-                PlaywrightFixtureTypeFact {
-                    alias_name: "Pages".to_string(),
-                    fixture_name: "adminPage".to_string(),
-                    type_name: "AdminPage".to_string(),
-                },
-            ));
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
+                test_name: "test".to_string(),
+                fixture_name: "page".to_string(),
+                member: "goto".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact {
+                test_name: "test".to_string(),
+                fixture_name: "adminPage".to_string(),
+                type_name: "AdminPage".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureAlias(PlaywrightFixtureAliasFact {
+                test_name: "mergedTest".to_string(),
+                base_name: "test".to_string(),
+            }),
+        );
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureType(PlaywrightFixtureTypeFact {
+                alias_name: "Pages".to_string(),
+                fixture_name: "adminPage".to_string(),
+                type_name: "AdminPage".to_string(),
+            }),
+        );
 
         assert_eq!(
             playwright_fixture_use_facts(&module.semantic_facts)
@@ -3018,15 +3015,14 @@ mod tests {
     #[test]
     fn playwright_fixture_legacy_backed_helpers_collect_owned_family_facts() {
         let mut module = minimal_module_info();
-        module
-            .semantic_facts
-            .push(SemanticFact::PlaywrightFixtureUse(
-                PlaywrightFixtureUseFact {
-                    test_name: "test".to_string(),
-                    fixture_name: "typedPage".to_string(),
-                    member: "goto".to_string(),
-                },
-            ));
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
+                test_name: "test".to_string(),
+                fixture_name: "typedPage".to_string(),
+                member: "goto".to_string(),
+            }),
+        );
         module.member_accesses.push(MemberAccess {
             object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}test:legacyPage"),
             member: "click".to_string(),
@@ -3155,13 +3151,13 @@ mod tests {
                 destructured_names: Vec::new(),
                 local_name: Some("required".to_string()),
             }],
-            package_path_references: vec!["react".to_string()],
+            package_path_references: vec!["react".to_string()].into(),
             member_accesses: vec![MemberAccess {
                 object: "Status".to_string(),
                 member: "Active".to_string(),
             }],
-            semantic_facts: Vec::new(),
-            whole_object_uses: vec!["Status".to_string()],
+            semantic_facts: Box::default(),
+            whole_object_uses: vec!["Status".to_string()].into(),
             has_cjs_exports: true,
             has_angular_component_template_url: true,
             content_hash: 42,
@@ -4296,7 +4292,7 @@ mod tests {
     #[test]
     fn release_payload_derives_page_data_store_whole_use_from_page_data() {
         let mut m = minimal_module_info();
-        m.whole_object_uses = vec!["page.data".to_string()];
+        m.whole_object_uses = vec!["page.data".to_string()].into();
         m.release_resolution_payload();
         assert!(m.has_page_data_store_whole_use);
     }
@@ -4304,7 +4300,7 @@ mod tests {
     #[test]
     fn release_payload_derives_page_data_store_whole_use_from_dollar_page_data() {
         let mut m = minimal_module_info();
-        m.whole_object_uses = vec!["$page.data".to_string()];
+        m.whole_object_uses = vec!["$page.data".to_string()].into();
         m.release_resolution_payload();
         assert!(m.has_page_data_store_whole_use);
     }
@@ -4312,7 +4308,7 @@ mod tests {
     #[test]
     fn release_payload_does_not_set_page_data_store_whole_use_for_other_names() {
         let mut m = minimal_module_info();
-        m.whole_object_uses = vec!["data".to_string(), "page".to_string()];
+        m.whole_object_uses = vec!["data".to_string(), "page".to_string()].into();
         m.release_resolution_payload();
         assert!(!m.has_page_data_store_whole_use);
     }
@@ -4413,10 +4409,10 @@ mod tests {
             dynamic_imports: Vec::new(),
             dynamic_import_patterns: Vec::new(),
             require_calls: Vec::new(),
-            package_path_references: Vec::new(),
+            package_path_references: Box::default(),
             member_accesses: Vec::new(),
-            semantic_facts: Vec::new(),
-            whole_object_uses: Vec::new(),
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             content_hash: 0,
@@ -4481,14 +4477,19 @@ mod tests {
         }
     }
 
+    fn push_semantic_fact(module: &mut ModuleInfo, fact: SemanticFact) {
+        let mut facts = std::mem::take(&mut module.semantic_facts).into_vec();
+        facts.push(fact);
+        module.semantic_facts = facts.into_boxed_slice();
+    }
+
     #[test]
     fn dynamic_custom_element_render_helper_prefers_typed_fact() {
         let mut module = minimal_module_info();
-        module
-            .semantic_facts
-            .push(SemanticFact::DynamicCustomElementRender(
-                DynamicCustomElementRenderFact,
-            ));
+        push_semantic_fact(
+            &mut module,
+            SemanticFact::DynamicCustomElementRender(DynamicCustomElementRenderFact),
+        );
 
         assert!(has_dynamic_custom_element_render(&module));
     }

@@ -286,7 +286,7 @@ fn detect_dead_code_inner(
     })?;
     apply_root_kind(
         &mut output,
-        "dead_code",
+        "dead-code",
         root_envelope_mode(resolved.legacy_envelope),
     );
     let root_prefix = format!("{}/", session.root().display());
@@ -1575,7 +1575,7 @@ mod tests {
         })
         .expect("dead-code succeeds");
 
-        assert_eq!(json["kind"], "dead_code");
+        assert_eq!(json["kind"], "dead-code");
         assert_eq!(json["schema_version"], CHECK_SCHEMA_VERSION);
         assert_eq!(unused_export_names(&json), vec!["deadA", "deadB"]);
     }
@@ -1619,7 +1619,7 @@ mod tests {
         })
         .expect("dead-code succeeds");
 
-        assert_eq!(json["kind"], "dead_code");
+        assert_eq!(json["kind"], "dead-code");
         assert_eq!(
             json["_meta"]["docs"].as_str(),
             Some(fallow_output::CHECK_DOCS)
@@ -1729,7 +1729,7 @@ mod tests {
         })
         .expect("circular helper succeeds");
 
-        assert_eq!(json["kind"], "dead_code");
+        assert_eq!(json["kind"], "dead-code");
         assert_eq!(json["total_issues"], 0);
         assert!(json["circular_dependencies"].as_array().is_some());
         assert!(json["unused_exports"].as_array().is_none_or(Vec::is_empty));
@@ -1746,7 +1746,7 @@ mod tests {
         })
         .expect("boundary helper succeeds");
 
-        assert_eq!(json["kind"], "dead_code");
+        assert_eq!(json["kind"], "dead-code");
         assert_eq!(json["total_issues"], 0);
         assert!(json["boundary_violations"].as_array().is_some());
         assert!(json["unused_exports"].as_array().is_none_or(Vec::is_empty));

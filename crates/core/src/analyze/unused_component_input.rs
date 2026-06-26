@@ -342,7 +342,7 @@ mod tests {
     fn typed_template_fact_credits_input() {
         let component = ModuleInfo {
             angular_inputs: vec![input("label", 10)],
-            semantic_facts: vec![tpl_fact("label")],
+            semantic_facts: vec![tpl_fact("label")].into(),
             ..empty_module()
         };
         let used = input_usage_set(&component, &[]);
@@ -419,7 +419,7 @@ mod tests {
     fn typed_this_spread_fact_abstains_component() {
         let component = ModuleInfo {
             angular_inputs: vec![input("label", 10)],
-            semantic_facts: vec![this_spread_fact()],
+            semantic_facts: vec![this_spread_fact()].into(),
             ..empty_module()
         };
         assert!(

@@ -1349,10 +1349,10 @@ impl ModuleInfoExtractor {
             dynamic_imports: self.dynamic_imports,
             dynamic_import_patterns: self.dynamic_import_patterns,
             require_calls: self.require_calls,
-            package_path_references: self.package_path_references,
+            package_path_references: self.package_path_references.into_boxed_slice(),
             member_accesses: self.member_accesses,
-            semantic_facts: self.semantic_facts,
-            whole_object_uses: self.whole_object_uses,
+            semantic_facts: self.semantic_facts.into_boxed_slice(),
+            whole_object_uses: self.whole_object_uses.into_boxed_slice(),
             has_cjs_exports: self.has_cjs_exports,
             has_angular_component_template_url: self.has_angular_component_template_url,
             content_hash,
@@ -1449,10 +1449,14 @@ impl ModuleInfoExtractor {
         info.dynamic_import_patterns
             .append(&mut self.dynamic_import_patterns);
         info.require_calls.append(&mut self.require_calls);
-        info.package_path_references
-            .append(&mut self.package_path_references);
+        let mut package_path_references =
+            std::mem::take(&mut info.package_path_references).into_vec();
+        package_path_references.append(&mut self.package_path_references);
+        info.package_path_references = package_path_references.into_boxed_slice();
         info.member_accesses.append(&mut self.member_accesses);
-        info.whole_object_uses.append(&mut self.whole_object_uses);
+        let mut whole_object_uses = std::mem::take(&mut info.whole_object_uses).into_vec();
+        whole_object_uses.append(&mut self.whole_object_uses);
+        info.whole_object_uses = whole_object_uses.into_boxed_slice();
         info.has_cjs_exports |= self.has_cjs_exports;
         info.has_angular_component_template_url |= self.has_angular_component_template_url;
         info.class_heritage.append(&mut self.class_heritage);

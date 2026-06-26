@@ -754,14 +754,14 @@ mod tests {
         let circular = api::detect_circular_dependencies(&options).expect("circular helper");
         let boundary = api::detect_boundary_violations(&options).expect("boundary helper");
 
-        assert_eq!(circular["kind"], "dead_code");
+        assert_eq!(circular["kind"], "dead-code");
         assert_eq!(circular["total_issues"], 0);
         assert!(
             circular["unused_exports"]
                 .as_array()
                 .is_none_or(Vec::is_empty)
         );
-        assert_eq!(boundary["kind"], "dead_code");
+        assert_eq!(boundary["kind"], "dead-code");
         assert_eq!(boundary["total_issues"], 0);
         assert!(
             boundary["unused_exports"]

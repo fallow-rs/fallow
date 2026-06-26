@@ -963,7 +963,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                whole_object_uses: vec!["utils".to_string()],
+                whole_object_uses: vec!["utils".to_string()].into(),
                 ..Default::default()
             },
             ResolvedModule {

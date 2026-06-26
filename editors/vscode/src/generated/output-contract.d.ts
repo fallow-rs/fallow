@@ -317,62 +317,7 @@ export type RegressionStatus = ("pass" | "exceeded" | "skipped")
  */
 export type RegressionToleranceKind = ("absolute" | "percentage")
 /**
- * A diagnostic about a workspace-discovery candidate.
- *
- * The `message` field is a human-readable rendering derived from `kind`. It
- * always ends with a concrete next step ("fix the JSON syntax", "remove from
- * `workspaces`", "add to `ignorePatterns`") so first-time users have a path
- * forward.
- */
-export type WorkspaceDiagnostic = ({
-/**
- * Path to the directory or file that triggered the diagnostic.
- */
-path: string
-/**
- * Human-readable rendering derived from `kind` + `path`. Always ends
- * with a next-step hint.
- */
-message: string
-} & WorkspaceDiagnostic1)
-export type WorkspaceDiagnostic1 = ({
-kind: "undeclared-workspace"
-} | {
-/**
- * `serde_json` parse error text.
- */
-error: string
-kind: "malformed-package-json"
-} | {
-/**
- * The glob pattern that matched the directory.
- */
-pattern: string
-kind: "glob-matched-no-package-json"
-} | {
-/**
- * JSONC parse error text.
- */
-error: string
-kind: "malformed-tsconfig"
-} | {
-kind: "tsconfig-reference-dir-missing"
-} | {
-/**
- * On-disk size of the skipped file in bytes.
- */
-size_bytes: number
-kind: "skipped-large-file"
-} | {
-/**
- * On-disk size of the skipped file in bytes.
- */
-size_bytes: number
-kind: "skipped-minified-file"
-})
-/**
- * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
- * emitted by the legacy `build_clone_group_actions` walker.
+ * Discriminant for [`CloneGroupAction::kind`].
  */
 export type CloneGroupActionType = ("extract-shared" | "suppress-line")
 /**
@@ -653,6 +598,60 @@ export type CoverageAnalyzeSchemaVersion = "1"
  * Discovery outcome for a [`LogicalGroup`].
  */
 export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
+/**
+ * A diagnostic about a workspace-discovery candidate.
+ *
+ * The `message` field is a human-readable rendering derived from `kind`. It
+ * always ends with a concrete next step ("fix the JSON syntax", "remove from
+ * `workspaces`", "add to `ignorePatterns`") so first-time users have a path
+ * forward.
+ */
+export type WorkspaceDiagnostic = ({
+/**
+ * Path to the directory or file that triggered the diagnostic.
+ */
+path: string
+/**
+ * Human-readable rendering derived from `kind` + `path`. Always ends
+ * with a next-step hint.
+ */
+message: string
+} & WorkspaceDiagnostic1)
+export type WorkspaceDiagnostic1 = ({
+kind: "undeclared-workspace"
+} | {
+/**
+ * `serde_json` parse error text.
+ */
+error: string
+kind: "malformed-package-json"
+} | {
+/**
+ * The glob pattern that matched the directory.
+ */
+pattern: string
+kind: "glob-matched-no-package-json"
+} | {
+/**
+ * JSONC parse error text.
+ */
+error: string
+kind: "malformed-tsconfig"
+} | {
+kind: "tsconfig-reference-dir-missing"
+} | {
+/**
+ * On-disk size of the skipped file in bytes.
+ */
+size_bytes: number
+kind: "skipped-large-file"
+} | {
+/**
+ * On-disk size of the skipped file in bytes.
+ */
+size_bytes: number
+kind: "skipped-minified-file"
+})
 /**
  * Resolver mode label for grouped envelopes (dead-code, dupes, health).
  *
@@ -1299,7 +1298,7 @@ baseline_deltas?: (BaselineDeltas | null)
 baseline?: (BaselineMatch | null)
 regression?: (RegressionResult | null)
 _meta?: (Meta | null)
-workspace_diagnostics?: WorkspaceDiagnostic[]
+workspace_diagnostics?: WorkspaceDiagnosticOutput[]
 /**
  * Read-only follow-up commands computed from this run's findings, emitted
  * at the JSON root so an agent acting on the output is pointed at fallow's
@@ -3563,6 +3562,16 @@ exceeded: boolean
 reason?: (string | null)
 }
 /**
+ * Serialized workspace-discovery diagnostic surfaced on check output.
+ *
+ * The runtime diagnostic type currently lives in `fallow-config`, which is
+ * upstream of `fallow-output`. This transparent DTO keeps the wire contract in
+ * the output layer without introducing a crate cycle.
+ */
+export interface WorkspaceDiagnosticOutput {
+[k: string]: unknown
+}
+/**
  * A read-only follow-up command fallow surfaces from the current findings,
  * emitted as the top-level `next_steps` array on each command's JSON envelope.
  *
@@ -3610,15 +3619,7 @@ command: string
 reason: string
 }
 /**
- * Wire-shape payload for `fallow dupes --format json` (the body that
- * flattens into [`crate::output_envelope::DupesOutput`] and is also
- * emitted under the `dupes` / `duplication` key inside the combined and
- * audit envelopes).
- *
- * Mirrors [`DuplicationReport`] field-for-field, except `clone_groups`
- * and `clone_families` carry the typed wrapper envelopes instead of bare
- * findings, so the schema (and any TS / agent consumer) sees the typed
- * `actions[]` natively.
+ * Wire-shape payload for `fallow dupes --format json`.
  */
 export interface DupesReportPayload {
 /**
@@ -3626,13 +3627,7 @@ export interface DupesReportPayload {
  */
 clone_groups: CloneGroupFinding[]
 /**
- * Clone families, each wrapped with typed actions. Inner `groups`
- * inside each [`CloneFamilyFinding`] are themselves wrapped as
- * [`CloneGroupFinding`] entries carrying their own `actions[]` (and
- * optional audit-mode `introduced` flag), so JSON-Schema strict
- * consumers and TS consumers reading `clone_families[].groups[]` see
- * the same shape as the top-level `clone_groups[]` array (preserves
- * the issue #393 regression contract).
+ * Clone families, each wrapped with typed actions.
  */
 clone_families: CloneFamilyFinding[]
 /**
@@ -3642,10 +3637,7 @@ mirrored_directories?: MirroredDirectory[]
 stats: DuplicationStats
 }
 /**
- * Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
- * group via `#[serde(flatten)]` and carries a typed `actions` array plus
- * the optional audit-mode `introduced` flag. Replaces the legacy
- * post-pass injection in `crates/cli/src/report/json.rs::inject_dupes_actions`.
+ * Wire-shape envelope for a clone group finding.
  */
 export interface CloneGroupFinding {
 /**
@@ -3661,30 +3653,19 @@ token_count: number
  */
 line_count: number
 /**
- * Stable content fingerprint, usually `dup:<8hex>` and widened on rare
- * report collisions. Addressable via `fallow dupes --trace dup:<fp>` (and
- * the `trace_clone` MCP tool) to deep-dive this group; shown alongside
- * each group in the human listing.
+ * Stable content fingerprint, usually `dup:<8hex>`.
  */
 fingerprint: string
 /**
- * Best-effort human-readable name for the clone: the dominant repeated
- * identifier across the duplicated fragment (e.g. a shared `parseCsv`
- * function). `None` when the clone has no clear dominant name (generic or
- * tied identifiers); consumers then fall back to a file-based label. Lets
- * editors and agents label a clone by what it is rather than an opaque
- * ordinal.
+ * Best-effort human-readable name for the clone.
  */
 suggested_name?: (string | null)
 /**
- * Suggested next steps: an `extract-shared` primary and a
- * `suppress-line` secondary. Always emitted (possibly empty for
- * forward-compat).
+ * Suggested next steps.
  */
 actions: CloneGroupAction[]
 /**
- * Set by the audit pass when this clone group is introduced relative
- * to the merge-base. `None` when serialized directly from Rust.
+ * Audit-mode introduced flag, populated by audit post-processing.
  */
 introduced?: (AuditIntroduced | null)
 }
@@ -3718,17 +3699,12 @@ end_col: number
 fragment: string
 }
 /**
- * Per-action wire shape attached to each [`CloneGroupFinding`] and
- * [`AttributedCloneGroupFinding`]. Mirrors the action types previously
- * emitted by `inject_dupes_actions::build_clone_group_actions` in
- * `crates/cli/src/report/json.rs`: `extract-shared` plus `suppress-line`.
+ * Per-action wire shape attached to each clone group finding.
  */
 export interface CloneGroupAction {
 type: CloneGroupActionType
 /**
- * Whether `fallow fix` can auto-apply this action. Both variants are
- * manual today; the field is non-singleton so a future auto-applier
- * does not need a schema change.
+ * Whether `fallow fix` can auto-apply this action.
  */
 auto_fixable: boolean
 /**
@@ -3736,33 +3712,20 @@ auto_fixable: boolean
  */
 description: string
 /**
- * The inline comment to insert (e.g.,
- * `// fallow-ignore-next-line code-duplication`). Present on
- * `suppress-line`; absent on `extract-shared`.
+ * Inline comment to insert for suppression actions.
  */
 comment?: (string | null)
 }
 /**
- * Wire-shape envelope for a [`CloneFamily`] finding.
- *
- * Unlike most `*Finding` wrappers this one is NOT `#[serde(flatten)]` over
- * the bare [`CloneFamily`], because the family's nested
- * `groups: Vec<CloneGroup>` field needs to carry the typed
- * [`CloneGroupFinding`] wrapper too (so every nested clone group gets its
- * own `actions[]` array, matching the legacy post-pass behavior; see issue
- * #393 regression test). The wire shape stays byte-identical to the
- * previous post-pass output. No `introduced` field because `fallow audit`
- * attributes clone groups (not families) when running against a base ref.
+ * Wire-shape envelope for a clone family finding.
  */
 export interface CloneFamilyFinding {
 /**
- * The files involved in this family (sorted for stable output).
+ * The files involved in this family.
  */
 files: string[]
 /**
- * Clone groups belonging to this family, each wrapped with typed
- * `actions[]` so consumers that read `clone_families[].groups[]`
- * directly see the same shape as the top-level `clone_groups[]`.
+ * Clone groups belonging to this family.
  */
 groups: CloneGroupFinding[]
 /**
@@ -3778,10 +3741,7 @@ total_duplicated_tokens: number
  */
 suggestions: RefactoringSuggestion[]
 /**
- * Suggested next steps: an `extract-shared` primary, one
- * `apply-suggestion` per [`RefactoringSuggestion`] on the family, and
- * a trailing `suppress-line`. Always emitted (possibly empty for
- * forward-compat).
+ * Suggested next steps.
  */
 actions: CloneFamilyAction[]
 }
@@ -3800,17 +3760,12 @@ description: string
 estimated_savings: number
 }
 /**
- * Per-action wire shape attached to each [`CloneFamilyFinding`]. Mirrors
- * the action types previously emitted by
- * `build_clone_family_actions`: `extract-shared`, one `apply-suggestion`
- * per [`RefactoringSuggestion`] on the family, and a trailing
- * `suppress-line`.
+ * Per-action wire shape attached to each clone family finding.
  */
 export interface CloneFamilyAction {
 type: CloneFamilyActionType
 /**
- * Whether `fallow fix` can auto-apply this action. All three variants
- * are manual today.
+ * Whether `fallow fix` can auto-apply this action.
  */
 auto_fixable: boolean
 /**
@@ -3818,14 +3773,11 @@ auto_fixable: boolean
  */
 description: string
 /**
- * Additional context. Present on `extract-shared` (explaining that
- * the family's clone groups share the same files); absent otherwise.
+ * Additional context for the action.
  */
 note?: (string | null)
 /**
- * The inline comment to insert (e.g.,
- * `// fallow-ignore-next-line code-duplication`). Present on
- * `suppress-line` only.
+ * Inline comment to insert for suppression actions.
  */
 comment?: (string | null)
 }
@@ -6883,7 +6835,7 @@ css_analytics?: (CssAnalyticsReport | null)
 grouped_by?: (GroupByMode | null)
 groups?: (HealthGroup[] | null)
 _meta?: (Meta | null)
-workspace_diagnostics?: WorkspaceDiagnostic[]
+workspace_diagnostics?: WorkspaceDiagnosticOutput[]
 /**
  * Read-only follow-up commands computed from this run's findings. See
  * [`CheckOutput::next_steps`] for the contract.
@@ -6983,15 +6935,7 @@ targets?: RefactoringTargetFinding[]
 actions_meta?: (HealthActionsMeta | null)
 }
 /**
- * Wire-shape payload for `fallow dupes --format json` (the body that
- * flattens into [`crate::output_envelope::DupesOutput`] and is also
- * emitted under the `dupes` / `duplication` key inside the combined and
- * audit envelopes).
- *
- * Mirrors [`DuplicationReport`] field-for-field, except `clone_groups`
- * and `clone_families` carry the typed wrapper envelopes instead of bare
- * findings, so the schema (and any TS / agent consumer) sees the typed
- * `actions[]` natively.
+ * Wire-shape payload for `fallow dupes --format json`.
  */
 export interface DupesOutput {
 schema_version: SchemaVersion
@@ -7002,13 +6946,7 @@ elapsed_ms: ElapsedMs
  */
 clone_groups: CloneGroupFinding[]
 /**
- * Clone families, each wrapped with typed actions. Inner `groups`
- * inside each [`CloneFamilyFinding`] are themselves wrapped as
- * [`CloneGroupFinding`] entries carrying their own `actions[]` (and
- * optional audit-mode `introduced` flag), so JSON-Schema strict
- * consumers and TS consumers reading `clone_families[].groups[]` see
- * the same shape as the top-level `clone_groups[]` array (preserves
- * the issue #393 regression contract).
+ * Clone families, each wrapped with typed actions.
  */
 clone_families: CloneFamilyFinding[]
 /**
@@ -7031,7 +6969,7 @@ _meta?: (Meta | null)
  * envelope so single-command consumers see it without having to look at
  * a separate top-level field.
  */
-workspace_diagnostics?: WorkspaceDiagnostic[]
+workspace_diagnostics?: WorkspaceDiagnosticOutput[]
 /**
  * Read-only follow-up commands computed from this run's findings. See
  * [`CheckOutput::next_steps`] for the contract.
@@ -7064,11 +7002,7 @@ clone_groups: AttributedCloneGroupFinding[]
 clone_families: CloneFamilyFinding[]
 }
 /**
- * Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket
- * duplication attribution emitted under `fallow dupes --group-by`).
- * Flattens the attributed group and carries the same typed
- * `CloneGroupAction` array as [`CloneGroupFinding`]; no `introduced`
- * field because `fallow audit` does not run on grouped output.
+ * Wire-shape envelope for an [`AttributedCloneGroup`] finding.
  */
 export interface AttributedCloneGroupFinding {
 /**
@@ -7084,10 +7018,7 @@ line_count: number
  */
 instances: AttributedInstance[]
 /**
- * Stable content fingerprint, usually `dup:<8hex>` and widened on rare
- * report collisions. Addressable via `fallow dupes --trace dup:<fp>`.
- * Computed from the group's instances, so it matches the top-level
- * `clone_groups[].fingerprint` for the same clone.
+ * Stable content fingerprint, usually `dup:<8hex>`.
  */
 fingerprint: string
 /**

@@ -289,7 +289,7 @@ mod tests {
     fn typed_template_fact_credits_output() {
         let component = ModuleInfo {
             angular_outputs: vec![output("changed", 10)],
-            semantic_facts: vec![tpl_fact("changed")],
+            semantic_facts: vec![tpl_fact("changed")].into(),
             ..empty_module()
         };
         let emitted = template_emitted_outputs(&component, &[]);

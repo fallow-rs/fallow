@@ -157,9 +157,9 @@ pub struct ResolvedModule {
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<fallow_types::extract::MemberAccess>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
-    pub semantic_facts: Vec<fallow_types::extract::SemanticFact>,
+    pub semantic_facts: Box<[fallow_types::extract::SemanticFact]>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
-    pub whole_object_uses: Vec<String>,
+    pub whole_object_uses: Box<[String]>,
     /// Whether this module uses `CommonJS` exports.
     pub has_cjs_exports: bool,
     /// Whether this module declares at least one Angular `@Component({
@@ -188,8 +188,8 @@ impl Default for ResolvedModule {
             resolved_dynamic_imports: vec![],
             resolved_dynamic_patterns: vec![],
             member_accesses: vec![],
-            semantic_facts: vec![],
-            whole_object_uses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
             has_cjs_exports: false,
             has_angular_component_template_url: false,
             unused_import_bindings: FxHashSet::default(),

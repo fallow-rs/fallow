@@ -651,7 +651,11 @@ use crate::MemberKind;
 /// Bumped to 207: dynamic custom-element render abstains are now persisted as
 /// typed semantic facts, while the legacy `<dynamic>` tag sentinel remains
 /// decode-only for older caches.
-pub(super) const CACHE_VERSION: u32 = 207;
+///
+/// Bumped to 208: empty cached semantic facts are omitted from the persisted
+/// module payload. The in-memory `ModuleInfo` contract still exposes an empty
+/// vector, but warm caches from 207 carry the old eager `Vec` field shape.
+pub(super) const CACHE_VERSION: u32 = 208;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -705,7 +709,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1328);
+assert_cached_type_size!(CachedModule, 1304);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -758,13 +762,14 @@ pub struct CachedModule {
     /// `require()` specifiers.
     pub require_calls: Vec<CachedRequireCall>,
     /// Package names statically referenced through package path resolution.
-    pub package_path_references: Vec<String>,
+    pub package_path_references: Box<[String]>,
     /// Static member accesses (e.g., `Status.Active`).
     pub member_accesses: Vec<crate::MemberAccess>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
-    pub semantic_facts: Vec<fallow_types::extract::SemanticFact>,
+    /// `None` means no facts, which keeps the common warm-cache payload lean.
+    pub semantic_facts: Option<Box<[fallow_types::extract::SemanticFact]>>,
     /// Identifiers used as whole objects (Object.values, for..in, spread, etc.).
-    pub whole_object_uses: Vec<String>,
+    pub whole_object_uses: Box<[String]>,
     /// Dynamic import patterns with partial static resolution.
     pub dynamic_import_patterns: Vec<CachedDynamicImportPattern>,
     /// Whether this module uses CJS exports.
