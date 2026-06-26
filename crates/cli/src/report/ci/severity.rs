@@ -1,3 +1,4 @@
+#[cfg(test)]
 use fallow_config::Severity;
 
 #[must_use]
@@ -11,6 +12,7 @@ pub const fn sarif_level(severity: Severity) -> &'static str {
 }
 
 #[must_use]
+#[cfg(test)]
 pub const fn review_label(severity: Severity) -> &'static str {
     match severity {
         Severity::Error => "error",

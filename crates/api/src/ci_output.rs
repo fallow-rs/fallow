@@ -2,7 +2,13 @@
 
 use std::fmt::Write as _;
 
-use fallow_output::{CodeClimateIssue, CodeClimateSeverity};
+use fallow_output::{
+    CodeClimateIssue, CodeClimateSeverity, DiffIndex, GitHubReviewComment, GitHubReviewSide,
+    GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType, ReviewCheckConclusion,
+    ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
+    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, default_marker_regex,
+    default_marker_regex_flags,
+};
 use serde_json::Value;
 
 /// Supported CI review providers for generated comments.
@@ -42,6 +48,50 @@ pub struct PrCommentRenderInput<'a> {
     pub max_comments: usize,
     pub category_for_rule: &'a dyn Fn(&str) -> &'static str,
 }
+
+/// GitLab diff refs for a review-envelope position.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewGitlabDiffRefs {
+    pub base_sha: String,
+    pub start_sha: String,
+    pub head_sha: String,
+}
+
+/// Truncation signals produced while rendering a review envelope.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReviewEnvelopeTruncation {
+    pub body: bool,
+    pub comment_limit: bool,
+}
+
+/// Rendered review envelope plus side-channel signals for CLI telemetry.
+#[derive(Debug)]
+pub struct ReviewEnvelopeRenderResult {
+    pub envelope: ReviewEnvelopeOutput,
+    pub truncation: ReviewEnvelopeTruncation,
+}
+
+/// Inputs for rendering a GitHub/GitLab review envelope.
+pub struct ReviewEnvelopeRenderInput<'a> {
+    pub command: &'a str,
+    pub provider: CiProvider,
+    pub issues: &'a [CiIssue],
+    pub diff_index: Option<&'a DiffIndex>,
+    pub max_comments: usize,
+    pub gitlab_diff_refs: Option<&'a ReviewGitlabDiffRefs>,
+    pub include_guidance: bool,
+    pub suggestion_block: &'a dyn Fn(CiProvider, &CiIssue) -> Option<String>,
+    pub guidance_block: &'a dyn Fn(&CiIssue) -> Option<String>,
+}
+
+/// Marker prefix appended to every v2 review-comment body.
+pub const MARKER_PREFIX_V2: &str = "<!-- fallow-fingerprint:v2: ";
+
+/// Closing of the v2 marker, after the fingerprint string.
+pub const MARKER_SUFFIX_V2: &str = " -->";
+
+pub const MAX_COMMENT_BODY_BYTES: usize = 65_536;
+const TRUNCATION_SUFFIX: &str = "\n\n<!-- fallow-truncated -->\n> Body truncated by fallow.";
 
 #[must_use]
 pub fn issues_from_codeclimate(value: &Value) -> Vec<CiIssue> {
@@ -121,6 +171,10 @@ const fn codeclimate_severity_label(severity: CodeClimateSeverity) -> &'static s
 fn sort_ci_issues(issues: &mut [CiIssue]) {
     issues
         .sort_by(|a, b| (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint)));
+}
+
+fn fingerprint_hash(parts: &[&str]) -> String {
+    fallow_output::codeclimate_fingerprint_hash(parts)
 }
 
 #[must_use]
@@ -286,6 +340,328 @@ pub fn escape_md(value: &str) -> String {
         out.push(ch);
     }
     out.trim().to_owned()
+}
+
+/// Render a provider-specific review envelope from typed CI issues.
+#[must_use]
+pub fn render_review_envelope(input: &ReviewEnvelopeRenderInput<'_>) -> ReviewEnvelopeRenderResult {
+    let grouped = group_review_issues_by_path_line(input.issues, input.max_comments);
+
+    let comments: Vec<ReviewComment> = grouped
+        .groups
+        .iter()
+        .map(|group| {
+            render_review_comment_for_group(&ReviewCommentRenderInput {
+                provider: input.provider,
+                group,
+                gitlab_diff_refs: input.gitlab_diff_refs,
+                diff_index: input.diff_index,
+                include_guidance: input.include_guidance,
+                suggestion_block: input.suggestion_block,
+                guidance_block: input.guidance_block,
+            })
+        })
+        .collect();
+
+    let summary_text = format!(
+        "### Fallow {}\n\n{} inline finding{} selected for {} review.\n\n<!-- fallow-review -->",
+        command_title(input.command),
+        comments.len(),
+        if comments.len() == 1 { "" } else { "s" },
+        input.provider.name(),
+    );
+    let summary_fp = summary_fingerprint(&summary_text);
+    let summary_marker = format!("\n\n{MARKER_PREFIX_V2}{summary_fp}{MARKER_SUFFIX_V2}");
+    let body = format!("{summary_text}{summary_marker}");
+    let summary = ReviewEnvelopeSummary {
+        body: body.clone(),
+        fingerprint: summary_fp,
+    };
+
+    let truncation = ReviewEnvelopeTruncation {
+        body: comments.iter().any(review_comment_truncated),
+        comment_limit: grouped.truncated,
+    };
+
+    ReviewEnvelopeRenderResult {
+        envelope: build_review_envelope_output(
+            input.provider,
+            body,
+            summary,
+            comments,
+            input.issues,
+        ),
+        truncation,
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct GroupedReviewIssues<'a> {
+    pub groups: Vec<Vec<&'a CiIssue>>,
+    pub truncated: bool,
+}
+
+/// Group consecutive same-(path, line) issues. Input is already sorted by
+/// `(path, line, fingerprint)` so a single linear pass collects runs.
+#[must_use]
+pub fn group_review_issues_by_path_line(
+    issues: &[CiIssue],
+    max_groups: usize,
+) -> GroupedReviewIssues<'_> {
+    if max_groups == 0 {
+        return GroupedReviewIssues {
+            groups: Vec::new(),
+            truncated: !issues.is_empty(),
+        };
+    }
+    let mut groups: Vec<Vec<&CiIssue>> = Vec::with_capacity(max_groups.min(issues.len()));
+    let mut current: Vec<&CiIssue> = Vec::new();
+    let mut current_key: Option<(&str, u64)> = None;
+    for issue in issues {
+        let key = (issue.path.as_str(), issue.line);
+        if Some(key) != current_key {
+            if !current.is_empty() {
+                groups.push(std::mem::take(&mut current));
+                if groups.len() == max_groups {
+                    return GroupedReviewIssues {
+                        groups,
+                        truncated: true,
+                    };
+                }
+            }
+            current_key = Some(key);
+        }
+        current.push(issue);
+    }
+    if !current.is_empty() && groups.len() < max_groups {
+        groups.push(current);
+    }
+    GroupedReviewIssues {
+        groups,
+        truncated: false,
+    }
+}
+
+fn review_comment_truncated(comment: &ReviewComment) -> bool {
+    match comment {
+        ReviewComment::GitHub(comment) => comment.truncated,
+        ReviewComment::GitLab(comment) => comment.truncated,
+    }
+}
+
+pub struct ReviewCommentRenderInput<'a, 'group> {
+    pub provider: CiProvider,
+    pub group: &'a [&'group CiIssue],
+    pub gitlab_diff_refs: Option<&'a ReviewGitlabDiffRefs>,
+    pub diff_index: Option<&'a DiffIndex>,
+    pub include_guidance: bool,
+    pub suggestion_block: &'a dyn Fn(CiProvider, &CiIssue) -> Option<String>,
+    pub guidance_block: &'a dyn Fn(&CiIssue) -> Option<String>,
+}
+
+/// Render one comment from a group of issues sharing the same `(path, line)`.
+#[must_use]
+pub fn render_review_comment_for_group(input: &ReviewCommentRenderInput<'_, '_>) -> ReviewComment {
+    assert!(
+        !input.group.is_empty(),
+        "group_review_issues_by_path_line never yields empty"
+    );
+    let representative = input.group[0];
+    let fingerprint = if input.group.len() == 1 {
+        representative.fingerprint.clone()
+    } else {
+        let constituents: Vec<&str> = input.group.iter().map(|i| i.fingerprint.as_str()).collect();
+        composite_fingerprint(&constituents)
+    };
+
+    let content = build_merged_comment_content(input);
+    let marker_line = format!("\n\n{MARKER_PREFIX_V2}{fingerprint}{MARKER_SUFFIX_V2}");
+    let (body, truncated) = cap_body_with_marker(&content, &marker_line);
+
+    build_review_comment(ReviewCommentInput {
+        provider: input.provider,
+        representative,
+        gitlab_diff_refs: input.gitlab_diff_refs,
+        diff_index: input.diff_index,
+        body,
+        fingerprint,
+        truncated,
+    })
+}
+
+#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
+fn build_merged_comment_content(input: &ReviewCommentRenderInput<'_, '_>) -> String {
+    let mut content = String::new();
+    for (index, issue) in input.group.iter().enumerate() {
+        let label = review_label_from_codeclimate(&issue.severity);
+        if index > 0 {
+            content.push_str("\n\n");
+        }
+        write!(
+            content,
+            "**{}** `{}`: {}",
+            label,
+            escape_md(&issue.rule_id),
+            escape_md(&issue.description)
+        )
+        .expect("write to String is infallible");
+        if let Some(suggestion) = (input.suggestion_block)(input.provider, issue) {
+            content.push_str(&suggestion);
+        }
+        if input.include_guidance
+            && let Some(guidance) = (input.guidance_block)(issue)
+        {
+            content.push_str(&guidance);
+        }
+    }
+    content
+}
+
+struct ReviewCommentInput<'a> {
+    provider: CiProvider,
+    representative: &'a CiIssue,
+    gitlab_diff_refs: Option<&'a ReviewGitlabDiffRefs>,
+    diff_index: Option<&'a DiffIndex>,
+    body: String,
+    fingerprint: String,
+    truncated: bool,
+}
+
+fn build_review_comment(input: ReviewCommentInput<'_>) -> ReviewComment {
+    let ReviewCommentInput {
+        provider,
+        representative,
+        gitlab_diff_refs,
+        diff_index,
+        body,
+        fingerprint,
+        truncated,
+    } = input;
+    match provider {
+        CiProvider::Github => ReviewComment::GitHub(GitHubReviewComment {
+            path: representative.path.clone(),
+            line: u32::try_from(representative.line).unwrap_or(u32::MAX),
+            side: GitHubReviewSide::Right,
+            body,
+            fingerprint,
+            truncated,
+        }),
+        CiProvider::Gitlab => {
+            let new_path = representative.path.clone();
+            let old_path = diff_index
+                .and_then(|di| di.old_path_for(&new_path))
+                .map_or_else(|| new_path.clone(), str::to_owned);
+            let position = GitLabReviewPosition {
+                base_sha: gitlab_diff_refs.map(|r| r.base_sha.clone()),
+                start_sha: gitlab_diff_refs.map(|r| r.start_sha.clone()),
+                head_sha: gitlab_diff_refs.map(|r| r.head_sha.clone()),
+                position_type: GitLabReviewPositionType::Text,
+                old_path,
+                new_path,
+                new_line: u32::try_from(representative.line).unwrap_or(u32::MAX),
+            };
+            ReviewComment::GitLab(GitLabReviewComment {
+                body,
+                position,
+                fingerprint,
+                truncated,
+            })
+        }
+    }
+}
+
+#[must_use]
+pub fn cap_body_with_marker(content: &str, marker_line: &str) -> (String, bool) {
+    let intact_len = content.len() + marker_line.len();
+    if intact_len <= MAX_COMMENT_BODY_BYTES {
+        let mut out = String::with_capacity(intact_len);
+        out.push_str(content);
+        out.push_str(marker_line);
+        return (out, false);
+    }
+    let reserved = marker_line.len() + TRUNCATION_SUFFIX.len();
+    let budget = MAX_COMMENT_BODY_BYTES.saturating_sub(reserved);
+    let mut cut = budget.min(content.len());
+    while cut > 0 && !content.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let mut out = String::with_capacity(MAX_COMMENT_BODY_BYTES);
+    out.push_str(&content[..cut]);
+    out.push_str(TRUNCATION_SUFFIX);
+    out.push_str(marker_line);
+    (out, true)
+}
+
+#[must_use]
+pub const fn review_label_from_codeclimate(severity_name: &str) -> &'static str {
+    match severity_name.as_bytes() {
+        b"major" | b"critical" | b"blocker" => "error",
+        _ => "warn",
+    }
+}
+
+#[must_use]
+pub fn github_check_conclusion(issues: &[CiIssue]) -> ReviewCheckConclusion {
+    if issues
+        .iter()
+        .any(|issue| matches!(issue.severity.as_str(), "major" | "critical" | "blocker"))
+    {
+        ReviewCheckConclusion::Failure
+    } else if issues.is_empty() {
+        ReviewCheckConclusion::Success
+    } else {
+        ReviewCheckConclusion::Neutral
+    }
+}
+
+fn build_review_envelope_output(
+    provider: CiProvider,
+    body: String,
+    summary: ReviewEnvelopeSummary,
+    comments: Vec<ReviewComment>,
+    issues: &[CiIssue],
+) -> ReviewEnvelopeOutput {
+    match provider {
+        CiProvider::Github => ReviewEnvelopeOutput {
+            event: Some(ReviewEnvelopeEvent::Comment),
+            body,
+            summary,
+            comments,
+            marker_regex: default_marker_regex(),
+            marker_regex_flags: default_marker_regex_flags(),
+            meta: ReviewEnvelopeMeta {
+                schema: ReviewEnvelopeSchema::V2,
+                provider: ReviewProvider::Github,
+                check_conclusion: Some(github_check_conclusion(issues)),
+            },
+        },
+        CiProvider::Gitlab => ReviewEnvelopeOutput {
+            event: None,
+            body,
+            summary,
+            comments,
+            marker_regex: default_marker_regex(),
+            marker_regex_flags: default_marker_regex_flags(),
+            meta: ReviewEnvelopeMeta {
+                schema: ReviewEnvelopeSchema::V2,
+                provider: ReviewProvider::Gitlab,
+                check_conclusion: None,
+            },
+        },
+    }
+}
+
+#[must_use]
+pub fn summary_fingerprint(body: &str) -> String {
+    fingerprint_hash(&[body])
+}
+
+#[must_use]
+pub fn composite_fingerprint(constituents: &[&str]) -> String {
+    let mut sorted: Vec<&str> = constituents.to_vec();
+    sorted.sort_unstable();
+    let joined = sorted.join(":");
+    format!("merged:{}", fingerprint_hash(&[joined.as_str()]))
 }
 
 #[cfg(test)]

@@ -37,9 +37,14 @@ pub mod sarif_output;
 pub mod security_output;
 pub use audit_output::{AuditAttribution, AuditSummary, AuditVerdict};
 pub use ci_output::{
-    CiIssue, CiProvider, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput, command_title, escape_md,
-    is_project_level_rule, issues_from_codeclimate, issues_from_codeclimate_issues,
-    render_pr_comment, summary_label,
+    CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
+    MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput, ReviewCommentRenderInput,
+    ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult, ReviewEnvelopeTruncation,
+    ReviewGitlabDiffRefs, cap_body_with_marker, command_title, composite_fingerprint, escape_md,
+    github_check_conclusion, group_review_issues_by_path_line, is_project_level_rule,
+    issues_from_codeclimate, issues_from_codeclimate_issues, render_pr_comment,
+    render_review_comment_for_group, render_review_envelope, review_label_from_codeclimate,
+    summary_fingerprint, summary_label,
 };
 pub use compact_output::{
     build_compact_lines, build_duplication_compact_lines, build_grouped_compact_lines,
