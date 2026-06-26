@@ -94,9 +94,10 @@ pub use ci_output::{
     summary_fingerprint, summary_label,
 };
 pub use codeclimate::{
-    CodeClimateIssue, CodeClimateIssueInput, CodeClimateIssueKind, CodeClimateLines,
-    CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, annotate_codeclimate_issues,
-    build_codeclimate_issue, codeclimate_fingerprint_hash, codeclimate_issues_to_value,
+    CodeClimateAnnotationField, CodeClimateIssue, CodeClimateIssueInput, CodeClimateIssueKind,
+    CodeClimateLines, CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity,
+    annotate_codeclimate_issues, build_codeclimate_issue, codeclimate_fingerprint_hash,
+    codeclimate_issues_to_value,
 };
 pub use coverage_envelopes::{
     CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,

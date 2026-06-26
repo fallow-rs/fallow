@@ -218,6 +218,8 @@ mod tests {
                         begin: u32::try_from(index + 1).expect("small fixture index"),
                     },
                 },
+                owner: None,
+                group: None,
             })
             .collect::<Vec<_>>();
         let value = serde_json::to_value(&typed).expect("typed fixture serializes");

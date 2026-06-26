@@ -5279,6 +5279,12 @@
         },
         "location": {
           "$ref": "#/definitions/CodeClimateLocation"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "group": {
+          "type": "string"
         }
       },
       "required": [

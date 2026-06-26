@@ -6,7 +6,8 @@ use fallow_config::RulesConfig;
 use fallow_config::Severity;
 use fallow_engine::duplicates::DuplicationReport;
 use fallow_output::{
-    CodeClimateIssue, HealthReport, annotate_codeclimate_issues, codeclimate_issues_to_value,
+    CodeClimateAnnotationField, CodeClimateIssue, HealthReport, annotate_codeclimate_issues,
+    codeclimate_issues_to_value,
 };
 #[cfg(test)]
 use fallow_output::{CodeClimateSeverity, codeclimate_fingerprint_hash};
@@ -140,8 +141,8 @@ pub(super) fn print_codeclimate(
 
 /// Print CodeClimate output with owner properties added to each issue.
 ///
-/// Calls `build_codeclimate` to produce the standard CodeClimate JSON array,
-/// then post-processes each entry to add `"owner": "@team"` by resolving the
+/// Calls `build_codeclimate` to produce the standard CodeClimate issues, then
+/// annotates each entry with `"owner": "@team"` by resolving the
 /// issue's location path through the `OwnershipResolver`.
 pub(super) fn print_grouped_codeclimate(
     results: &AnalysisResults,
@@ -149,11 +150,11 @@ pub(super) fn print_grouped_codeclimate(
     rules: &RulesConfig,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let issues = build_codeclimate(results, root, rules);
-    let mut value = codeclimate_issues_to_value(&issues);
-    annotate_codeclimate_issues(&mut value, "owner", |path| {
+    let mut issues = build_codeclimate(results, root, rules);
+    annotate_codeclimate_issues(&mut issues, CodeClimateAnnotationField::Owner, |path| {
         grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
     });
+    let value = codeclimate_issues_to_value(&issues);
 
     emit_json(&value, "CodeClimate")
 }
@@ -184,11 +185,11 @@ pub(super) fn print_grouped_health_codeclimate(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let issues = build_health_codeclimate(report, root);
-    let mut value = codeclimate_issues_to_value(&issues);
-    annotate_codeclimate_issues(&mut value, "group", |path| {
+    let mut issues = build_health_codeclimate(report, root);
+    annotate_codeclimate_issues(&mut issues, CodeClimateAnnotationField::Group, |path| {
         grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
     });
+    let value = codeclimate_issues_to_value(&issues);
 
     emit_json(&value, "CodeClimate")
 }
@@ -222,8 +223,7 @@ pub(super) fn print_grouped_duplication_codeclimate(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let issues = build_duplication_codeclimate(report, root);
-    let mut value = codeclimate_issues_to_value(&issues);
+    let mut issues = build_duplication_codeclimate(report, root);
 
     use rustc_hash::FxHashMap;
     let mut path_to_owner: FxHashMap<String, String> = FxHashMap::default();
@@ -235,12 +235,13 @@ pub(super) fn print_grouped_duplication_codeclimate(
         }
     }
 
-    annotate_codeclimate_issues(&mut value, "group", |path| {
+    annotate_codeclimate_issues(&mut issues, CodeClimateAnnotationField::Group, |path| {
         path_to_owner
             .get(path)
             .cloned()
             .unwrap_or_else(|| crate::codeowners::UNOWNED_LABEL.to_string())
     });
+    let value = codeclimate_issues_to_value(&issues);
 
     emit_json(&value, "CodeClimate")
 }

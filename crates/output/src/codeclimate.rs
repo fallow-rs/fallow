@@ -29,6 +29,13 @@ pub struct CodeClimateIssue {
     pub severity: CodeClimateSeverity,
     pub fingerprint: String,
     pub location: CodeClimateLocation,
+    /// Optional owner attribution used by grouped dead-code output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// Optional grouping attribution used by grouped health and duplication
+    /// output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 /// Discriminator value for [`CodeClimateIssue::kind`].
@@ -103,6 +110,16 @@ pub struct CodeClimateIssueInput<'a> {
     pub fingerprint: &'a str,
 }
 
+/// Optional grouped CodeClimate annotation field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeClimateAnnotationField {
+    /// Dead-code grouped output uses the top-level `owner` property.
+    Owner,
+    /// Health and duplication grouped output use the top-level `group`
+    /// property.
+    Group,
+}
+
 /// Compute a deterministic fingerprint hash from key fields.
 ///
 /// Uses FNV-1a (64-bit) for guaranteed cross-version stability. `DefaultHasher`
@@ -137,6 +154,8 @@ pub fn build_codeclimate_issue(input: CodeClimateIssueInput<'_>) -> CodeClimateI
                 begin: input.begin_line.unwrap_or(1),
             },
         },
+        owner: None,
+        group: None,
     }
 }
 
@@ -153,25 +172,20 @@ pub fn codeclimate_issues_to_value(issues: &[CodeClimateIssue]) -> Value {
     serde_json::to_value(issues).expect("CodeClimateIssue serializes infallibly")
 }
 
-/// Add a top-level string property to each serialized CodeClimate issue.
+/// Add a top-level grouped property to each typed CodeClimate issue.
 ///
 /// Grouped CLI outputs use this to attach `owner` or `group` while keeping the
 /// issue array shape and path lookup contract in `fallow-output`.
 pub fn annotate_codeclimate_issues(
-    value: &mut Value,
-    field: &'static str,
+    issues: &mut [CodeClimateIssue],
+    field: CodeClimateAnnotationField,
     mut value_for_path: impl FnMut(&str) -> String,
 ) {
-    if let Some(items) = value.as_array_mut() {
-        for issue in items {
-            let path = issue
-                .pointer("/location/path")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            if let Some(object) = issue.as_object_mut() {
-                object.insert(field.to_string(), Value::String(value_for_path(&path)));
-            }
+    for issue in issues {
+        let value = value_for_path(&issue.location.path);
+        match field {
+            CodeClimateAnnotationField::Owner => issue.owner = Some(value),
+            CodeClimateAnnotationField::Group => issue.group = Some(value),
         }
     }
 }
@@ -235,16 +249,43 @@ mod tests {
     }
 
     #[test]
-    fn annotate_codeclimate_issues_adds_property_from_location_path() {
-        let mut value = serde_json::json!([
-            {
-                "type": "issue",
-                "location": { "path": "src/app.ts", "lines": { "begin": 3 } }
-            }
-        ]);
+    fn annotate_codeclimate_issues_adds_owner_from_location_path() {
+        let mut issues = vec![build_codeclimate_issue(CodeClimateIssueInput {
+            check_name: "fallow/test",
+            description: "description",
+            category: "Bug Risk",
+            severity: CodeClimateSeverity::Minor,
+            fingerprint: "abc123",
+            path: "src/app.ts",
+            begin_line: Some(3),
+        })];
 
-        annotate_codeclimate_issues(&mut value, "owner", |path| format!("team:{path}"));
+        annotate_codeclimate_issues(&mut issues, CodeClimateAnnotationField::Owner, |path| {
+            format!("team:{path}")
+        });
+        let value = codeclimate_issues_to_value(&issues);
 
         assert_eq!(value[0]["owner"], "team:src/app.ts");
+    }
+
+    #[test]
+    fn annotate_codeclimate_issues_adds_group_from_location_path() {
+        let mut issues = vec![build_codeclimate_issue(CodeClimateIssueInput {
+            check_name: "fallow/test",
+            description: "description",
+            category: "Bug Risk",
+            severity: CodeClimateSeverity::Minor,
+            fingerprint: "abc123",
+            path: "src/app.ts",
+            begin_line: Some(3),
+        })];
+
+        annotate_codeclimate_issues(&mut issues, CodeClimateAnnotationField::Group, |path| {
+            format!("group:{path}")
+        });
+        let value = codeclimate_issues_to_value(&issues);
+
+        assert_eq!(value[0]["group"], "group:src/app.ts");
+        assert!(value[0].get("owner").is_none());
     }
 }

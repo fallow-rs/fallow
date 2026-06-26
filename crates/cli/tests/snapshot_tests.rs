@@ -3279,7 +3279,7 @@ fn grouped_duplication_codeclimate_directory_snapshot() {
     let root = PathBuf::from("/project");
     let report = sample_grouped_duplication_report(&root);
     let resolver = fallow_cli::report::OwnershipResolver::Directory;
-    let mut value = codeclimate_issues_to_value(&build_duplication_codeclimate(&report, &root));
+    let mut issues = build_duplication_codeclimate(&report, &root);
     let mut path_to_owner = rustc_hash::FxHashMap::<String, String>::default();
     for group in &report.clone_groups {
         let owner = fallow_cli::report::dupes_grouping::largest_owner(group, &root, &resolver);
@@ -3293,23 +3293,17 @@ fn grouped_duplication_codeclimate_directory_snapshot() {
             path_to_owner.insert(rel, owner.clone());
         }
     }
-    if let Some(arr) = value.as_array_mut() {
-        for issue in arr {
-            let path = issue
-                .pointer("/location/path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let group = path_to_owner
-                .get(&path)
+    fallow_output::annotate_codeclimate_issues(
+        &mut issues,
+        fallow_output::CodeClimateAnnotationField::Group,
+        |path| {
+            path_to_owner
+                .get(path)
                 .cloned()
-                .unwrap_or_else(|| "(unowned)".to_string());
-            issue
-                .as_object_mut()
-                .expect("issue object")
-                .insert("group".to_string(), serde_json::Value::String(group));
-        }
-    }
+                .unwrap_or_else(|| "(unowned)".to_string())
+        },
+    );
+    let value = codeclimate_issues_to_value(&issues);
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("grouped_duplication_codeclimate_directory", json_str);
 }

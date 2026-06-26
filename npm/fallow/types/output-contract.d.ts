@@ -9090,6 +9090,8 @@ categories: string[]
 severity: CodeClimateSeverity
 fingerprint: string
 location: CodeClimateLocation
+owner?: string
+group?: string
 }
 /**
  * Location block inside [`CodeClimateIssue::location`].
