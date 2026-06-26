@@ -12,8 +12,8 @@ use fallow_engine::{
 };
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckOutput, CheckOutputInput, DiffIndex, DupesOutput, DupesOutputInput,
-    GroupByMode, HealthGroup, HealthJsonOutputInput, HealthOutputInput, HealthReport,
-    MAX_DIFF_BYTES, RootEnvelopeMode, WorkspaceDiagnosticOutput, build_check_output,
+    GroupByMode, HealthGroup, HealthGrouping, HealthJsonOutputInput, HealthOutputInput,
+    HealthReport, MAX_DIFF_BYTES, RootEnvelopeMode, WorkspaceDiagnosticOutput, build_check_output,
     build_dupes_output, check_meta, health_meta, relative_to_diff_path,
     serialize_check_json_output, serialize_dupes_json_output, strip_root_prefix,
 };
@@ -177,6 +177,65 @@ impl DuplicationProgrammaticOutput {
     }
 }
 
+/// Typed programmatic health / complexity output before JSON serialization.
+#[derive(Debug, Clone)]
+pub struct HealthProgrammaticOutput {
+    pub report: HealthReport,
+    pub grouping: Option<HealthGrouping>,
+    pub root: PathBuf,
+    pub elapsed: std::time::Duration,
+    pub explain: bool,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub next_steps: Vec<NextStep>,
+    pub envelope_mode: RootEnvelopeMode,
+    pub telemetry_analysis_run_id: Option<String>,
+}
+
+impl HealthProgrammaticOutput {
+    /// Serialize the typed programmatic result into the stable JSON contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error if the health output contract cannot be
+    /// serialized.
+    pub fn into_json(self) -> ProgrammaticResult<serde_json::Value> {
+        let Self {
+            report,
+            grouping,
+            root,
+            elapsed,
+            explain,
+            workspace_diagnostics,
+            next_steps,
+            envelope_mode,
+            telemetry_analysis_run_id,
+        } = self;
+        let (grouped_by, groups) = grouping.map_or((None, None), |grouping| {
+            (
+                group_by_mode_from_label(grouping.mode),
+                Some(grouping.groups),
+            )
+        });
+        serialize_health_report_json(HealthJsonReportInput {
+            report,
+            root: &root,
+            elapsed,
+            explain,
+            grouped_by,
+            groups,
+            workspace_diagnostics,
+            next_steps,
+            envelope_mode,
+            telemetry_analysis_run_id: telemetry_analysis_run_id.as_deref(),
+        })
+        .map_err(|err| {
+            ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
+                .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
+                .with_context("health")
+        })
+    }
+}
+
 /// Run duplication analysis and return the JSON output contract.
 ///
 /// This is the first runtime path owned by `fallow-api` instead of the CLI
@@ -330,36 +389,51 @@ pub fn compute_complexity_with_runner(
     options: &ComplexityOptions,
     runner: &impl ProgrammaticHealthRunner,
 ) -> ProgrammaticResult<serde_json::Value> {
+    run_complexity_with_runner(options, runner)?.into_json()
+}
+
+/// Run programmatic health / complexity and return typed API output.
+///
+/// The concrete runner is injected while the health implementation is still
+/// being migrated out of the CLI crate. Runner-owned responsibilities are
+/// limited to typed analysis plus runtime facts; this API crate owns the final
+/// programmatic report assembly.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error for invalid options or runner
+/// failures.
+pub fn run_complexity_with_runner(
+    options: &ComplexityOptions,
+    runner: &impl ProgrammaticHealthRunner,
+) -> ProgrammaticResult<HealthProgrammaticOutput> {
     crate::validate_complexity_options(options)?;
-    let result = runner.run_programmatic_health(options)?;
-    let root = result.analysis.config.root.clone();
+    let ProgrammaticHealthRun {
+        analysis,
+        workspace_diagnostics,
+        next_step_facts,
+        telemetry_analysis_run_id,
+    } = runner.run_programmatic_health(options)?;
+    let root = analysis.config.root.clone();
     let next_steps =
         fallow_output::build_health_next_steps(fallow_output::build_health_next_steps_input(
-            &result.analysis.report,
-            result.next_step_facts.suggestions_enabled,
-            result.next_step_facts.offer_setup,
-            result.next_step_facts.impact_digest,
-            result.next_step_facts.audit_changed,
+            &analysis.report,
+            next_step_facts.suggestions_enabled,
+            next_step_facts.offer_setup,
+            next_step_facts.impact_digest,
+            next_step_facts.audit_changed,
         ));
-    let telemetry_analysis_run_id = result.telemetry_analysis_run_id;
-    let output = serialize_health_report_json(HealthJsonReportInput {
-        report: result.analysis.report,
-        root: &root,
-        elapsed: result.analysis.elapsed,
+    Ok(HealthProgrammaticOutput {
+        report: analysis.report,
+        grouping: analysis.grouping,
+        root,
+        elapsed: analysis.elapsed,
         explain: options.analysis.explain,
-        grouped_by: None,
-        groups: None,
-        workspace_diagnostics: result.workspace_diagnostics,
+        workspace_diagnostics,
         next_steps,
         envelope_mode: root_envelope_mode(options.analysis.legacy_envelope),
-        telemetry_analysis_run_id: telemetry_analysis_run_id.as_deref(),
+        telemetry_analysis_run_id,
     })
-    .map_err(|err| {
-        ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
-            .with_context("health")
-    })?;
-    Ok(output)
 }
 
 /// Alias for [`compute_complexity_with_runner`] with a product-oriented name.
@@ -371,7 +445,29 @@ pub fn compute_health_with_runner(
     options: &ComplexityOptions,
     runner: &impl ProgrammaticHealthRunner,
 ) -> ProgrammaticResult<serde_json::Value> {
-    compute_complexity_with_runner(options, runner)
+    run_health_with_runner(options, runner)?.into_json()
+}
+
+/// Alias for [`run_complexity_with_runner`] with a product-oriented name.
+///
+/// # Errors
+///
+/// Returns the same structured errors as [`run_complexity_with_runner`].
+pub fn run_health_with_runner(
+    options: &ComplexityOptions,
+    runner: &impl ProgrammaticHealthRunner,
+) -> ProgrammaticResult<HealthProgrammaticOutput> {
+    run_complexity_with_runner(options, runner)
+}
+
+fn group_by_mode_from_label(label: &str) -> Option<GroupByMode> {
+    match label {
+        "owner" => Some(GroupByMode::Owner),
+        "directory" => Some(GroupByMode::Directory),
+        "package" => Some(GroupByMode::Package),
+        "section" => Some(GroupByMode::Section),
+        _ => None,
+    }
 }
 
 fn detect_dead_code_inner(

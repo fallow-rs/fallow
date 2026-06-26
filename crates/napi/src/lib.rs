@@ -543,7 +543,7 @@ pub fn compute_complexity(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::compute_complexity_with_runner(&options, &CliHealthRunner)
+        api::run_complexity_with_runner(&options, &CliHealthRunner)?.into_json()
     })))
 }
 
@@ -553,7 +553,7 @@ pub fn compute_health(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::compute_health_with_runner(&options, &CliHealthRunner)
+        api::run_health_with_runner(&options, &CliHealthRunner)?.into_json()
     })))
 }
 
@@ -1056,7 +1056,8 @@ mod tests {
         })
         .expect("health options should map");
 
-        let json = api::compute_health_with_runner(&options, &CliHealthRunner)
+        let json = api::run_health_with_runner(&options, &CliHealthRunner)
+            .and_then(api::HealthProgrammaticOutput::into_json)
             .expect("health should run through API runner boundary");
 
         assert_eq!(json["kind"], "health");
