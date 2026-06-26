@@ -15,9 +15,15 @@ use fallow_core::results::{
     UnusedComponentProp, UnusedDependency, UnusedDependencyOverrideFinding, UnusedExport,
     UnusedFile, UnusedMember, UnusedServerAction, UnusedSvelteEvent,
 };
+use fallow_output::{
+    SarifDocumentInput, SarifResultInput, SarifRuleInput, build_sarif_document, build_sarif_result,
+    build_sarif_rule,
+};
 use rustc_hash::FxHashMap;
 
-use super::ci::{fingerprint, severity};
+#[cfg(test)]
+use super::ci::fingerprint;
+use super::ci::severity;
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, relative_uri};
 use crate::explain;
@@ -100,34 +106,13 @@ fn sarif_result_with_snippet(
     region: Option<(u32, u32)>,
     snippet: Option<&str>,
 ) -> serde_json::Value {
-    let mut physical_location = serde_json::json!({
-        "artifactLocation": { "uri": uri }
-    });
-    if let Some((line, col)) = region {
-        physical_location["region"] = serde_json::json!({
-            "startLine": line,
-            "startColumn": col
-        });
-    }
-    let line = region.map_or_else(String::new, |(line, _)| line.to_string());
-    let col = region.map_or_else(String::new, |(_, col)| col.to_string());
-    let normalized_snippet = snippet
-        .map(fingerprint::normalize_snippet)
-        .filter(|snippet| !snippet.is_empty());
-    let partial_fingerprint = normalized_snippet.as_ref().map_or_else(
-        || fingerprint::fingerprint_hash(&[rule_id, uri, &line, &col]),
-        |snippet| fingerprint::finding_fingerprint(rule_id, uri, snippet),
-    );
-    let partial_fingerprint_ghas = partial_fingerprint.clone();
-    serde_json::json!({
-        "ruleId": rule_id,
-        "level": level,
-        "message": { "text": message },
-        "locations": [{ "physicalLocation": physical_location }],
-        "partialFingerprints": {
-            fingerprint::FINGERPRINT_KEY: partial_fingerprint,
-            fingerprint::GHAS_FINGERPRINT_KEY: partial_fingerprint_ghas
-        }
+    build_sarif_result(SarifResultInput {
+        rule_id,
+        level,
+        message,
+        uri,
+        region,
+        snippet,
     })
 }
 
@@ -163,24 +148,17 @@ fn push_sarif_results<T>(
 /// Build a SARIF rule definition with optional `fullDescription` and `helpUri`
 /// sourced from the centralized explain module.
 fn sarif_rule(id: &str, fallback_short: &str, level: &str) -> serde_json::Value {
-    explain::rule_by_id(id).map_or_else(
-        || {
-            serde_json::json!({
-                "id": id,
-                "shortDescription": { "text": fallback_short },
-                "defaultConfiguration": { "level": level }
-            })
-        },
-        |def| {
-            serde_json::json!({
-                "id": id,
-                "shortDescription": { "text": def.short },
-                "fullDescription": { "text": def.full },
-                "helpUri": explain::rule_docs_url(def),
-                "defaultConfiguration": { "level": level }
-            })
-        },
-    )
+    let def = explain::rule_by_id(id);
+    let short_description = def.map_or(fallback_short, |def| def.short);
+    let full_description = def.map(|def| def.full);
+    let help_uri = def.map(explain::rule_docs_url);
+    build_sarif_rule(SarifRuleInput {
+        id,
+        short_description,
+        level,
+        full_description,
+        help_uri: help_uri.as_deref(),
+    })
 }
 
 /// Extract SARIF fields for an unused export or type export.
@@ -1456,20 +1434,10 @@ fn sarif_document(
     sarif_results: &[serde_json::Value],
     sarif_rules: &[serde_json::Value],
 ) -> serde_json::Value {
-    serde_json::json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "fallow",
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
-                    "rules": sarif_rules
-                }
-            },
-            "results": sarif_results
-        }]
+    build_sarif_document(SarifDocumentInput {
+        results: sarif_results,
+        rules: sarif_rules,
+        tool_version: env!("CARGO_PKG_VERSION"),
     })
 }
 

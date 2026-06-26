@@ -5,11 +5,11 @@ use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_output::{
-    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
-    CodeClimateSeverity, annotate_codeclimate_issues, codeclimate_issues_to_value,
+    CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, annotate_codeclimate_issues,
+    build_codeclimate_issue, codeclimate_fingerprint_hash, codeclimate_issues_to_value,
 };
 
-use super::ci::{fingerprint, severity};
+use super::ci::severity;
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, normalize_uri, relative_path};
 use fallow_output::{
@@ -30,54 +30,8 @@ fn cc_path(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
 }
 
-/// Compute a deterministic fingerprint hash from key fields.
-///
-/// Uses FNV-1a (64-bit) for guaranteed cross-version stability.
-/// `DefaultHasher` is explicitly not specified across Rust versions.
 fn fingerprint_hash(parts: &[&str]) -> String {
-    fingerprint::fingerprint_hash(parts)
-}
-
-/// Build a single CodeClimate issue. Wire shape is locked by the
-/// [`CodeClimateIssue`] typed envelope (and the schema drift gate);
-/// changes to the wire must flow through that struct.
-/// The fields of one Code Climate issue, bundled so `cc_issue` takes a single
-/// descriptor instead of seven positional parameters.
-#[derive(Clone, Copy)]
-struct CcIssue<'a> {
-    check_name: &'a str,
-    description: &'a str,
-    severity: CodeClimateSeverity,
-    category: &'a str,
-    path: &'a str,
-    begin_line: Option<u32>,
-    fingerprint: &'a str,
-}
-
-fn cc_issue(issue: CcIssue<'_>) -> CodeClimateIssue {
-    let CcIssue {
-        check_name,
-        description,
-        severity,
-        category,
-        path,
-        begin_line,
-        fingerprint,
-    } = issue;
-    CodeClimateIssue {
-        kind: CodeClimateIssueKind::Issue,
-        check_name: check_name.to_string(),
-        description: description.to_string(),
-        categories: vec![category.to_string()],
-        severity,
-        fingerprint: fingerprint.to_string(),
-        location: CodeClimateLocation {
-            path: path.to_string(),
-            lines: CodeClimateLines {
-                begin: begin_line.unwrap_or(1),
-            },
-        },
-    }
+    codeclimate_fingerprint_hash(parts)
 }
 
 fn coverage_intelligence_check_name(
@@ -112,7 +66,7 @@ impl HealthCodeClimateContext<'_> {
         let check_name = complexity_check_name(finding);
         let line_str = finding.line.to_string();
         let fp = fingerprint_hash(&[check_name, &path, &line_str, &finding.name]);
-        cc_issue(CcIssue {
+        build_codeclimate_issue(CodeClimateIssueInput {
             check_name,
             description: &self.complexity_description(finding),
             severity: health_finding_severity(finding.severity),
@@ -173,7 +127,7 @@ impl HealthCodeClimateContext<'_> {
             &finding.line.to_string(),
             &finding.function,
         ]);
-        cc_issue(CcIssue {
+        build_codeclimate_issue(CodeClimateIssueInput {
             check_name,
             description: &description,
             severity: runtime_coverage_severity(finding.verdict),
@@ -203,7 +157,7 @@ impl HealthCodeClimateContext<'_> {
             identity,
             &finding.id,
         ]);
-        Some(cc_issue(CcIssue {
+        Some(build_codeclimate_issue(CodeClimateIssueInput {
             check_name,
             description: &description,
             severity,
@@ -226,7 +180,7 @@ impl HealthCodeClimateContext<'_> {
             },
         );
         let fp = fingerprint_hash(&["fallow/untested-file", &path]);
-        cc_issue(CcIssue {
+        build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/untested-file",
             description: &description,
             severity: CodeClimateSeverity::Minor,
@@ -250,7 +204,7 @@ impl HealthCodeClimateContext<'_> {
             &line_str,
             &item.export.export_name,
         ]);
-        cc_issue(CcIssue {
+        build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/untested-export",
             description: &description,
             severity: CodeClimateSeverity::Minor,
@@ -351,7 +305,7 @@ fn push_dep_cc_issues<'a, I>(
                 .join(", ");
             format!("; imported in other workspaces: {workspaces}")
         };
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: rule_id,
             description: &format!(
                 "Package '{}' is in {location_label} but never imported{workspace_context}",
@@ -379,7 +333,7 @@ fn push_unused_file_issues(
     for entry in files {
         let path = cc_path(&entry.file.path, root);
         let fp = fingerprint_hash(&["fallow/unused-file", &path]);
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-file",
             description: "File is not reachable from any entry point",
             severity: level,
@@ -420,18 +374,20 @@ where
         };
         let line_str = export.line.to_string();
         let fp = fingerprint_hash(&[input.rule_id, &path, &line_str, &export.export_name]);
-        input.issues.push(cc_issue(CcIssue {
-            check_name: input.rule_id,
-            description: &format!(
-                "{kind} '{}' is never imported by other modules",
-                export.export_name
-            ),
-            severity: level,
-            category: "Bug Risk",
-            path: &path,
-            begin_line: Some(export.line),
-            fingerprint: &fp,
-        }));
+        input
+            .issues
+            .push(build_codeclimate_issue(CodeClimateIssueInput {
+                check_name: input.rule_id,
+                description: &format!(
+                    "{kind} '{}' is never imported by other modules",
+                    export.export_name
+                ),
+                severity: level,
+                category: "Bug Risk",
+                path: &path,
+                begin_line: Some(export.line),
+                fingerprint: &fp,
+            }));
     }
 }
 
@@ -456,7 +412,7 @@ fn push_private_type_leak_issues(
             &leak.export_name,
             &leak.type_name,
         ]);
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/private-type-leak",
             description: &format!(
                 "Export '{}' references private type '{}'",
@@ -486,7 +442,7 @@ fn push_type_only_dep_issues(
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
         let fp = fingerprint_hash(&["fallow/type-only-dependency", &dep.package_name]);
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/type-only-dependency",
             description: &format!(
                 "Package '{}' is only imported via type-only imports (consider moving to devDependencies)",
@@ -516,7 +472,7 @@ fn push_test_only_dep_issues(
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
         let fp = fingerprint_hash(&["fallow/test-only-dependency", &dep.package_name]);
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/test-only-dependency",
             description: &format!(
                 "Package '{}' is only imported by test files (consider moving to devDependencies)",
@@ -556,7 +512,7 @@ fn push_unused_member_issues<'a, I>(
             &member.parent_name,
             &member.member_name,
         ]);
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: rule_id,
             description: &format!(
                 "{entity_label} member '{}.{}' is never referenced",
@@ -591,7 +547,7 @@ fn push_unresolved_import_issues(
             &line_str,
             &import.specifier,
         ]);
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unresolved-import",
             description: &format!("Import '{}' could not be resolved", import.specifier),
             severity: level,
@@ -624,7 +580,7 @@ fn push_unlisted_dep_issues(
                 &line_str,
                 &dep.package_name,
             ]);
-            issues.push(cc_issue(CcIssue {
+            issues.push(build_codeclimate_issue(CodeClimateIssueInput {
                 check_name: "fallow/unlisted-dependency",
                 description: &format!(
                     "Package '{}' is imported but not listed in package.json",
@@ -661,7 +617,7 @@ fn push_duplicate_export_issues(
                 &line_str,
                 &dup.export_name,
             ]);
-            issues.push(cc_issue(CcIssue {
+            issues.push(build_codeclimate_issue(CodeClimateIssueInput {
                 check_name: "fallow/duplicate-export",
                 description: &format!("Export '{}' appears in multiple modules", dup.export_name),
                 severity: level,
@@ -698,7 +654,7 @@ fn push_circular_dep_issues(
         } else {
             None
         };
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/circular-dependency",
             description: &format!(
                 "Circular dependency{}: {}",
@@ -745,7 +701,7 @@ fn push_re_export_cycle_issues(
             fallow_core::results::ReExportCycleKind::MultiNode => "",
         };
         let fp = fingerprint_hash(&["fallow/re-export-cycle", kind_token, &chain_str]);
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/re-export-cycle",
             description: &format!("Re-export cycle{}: {}", kind_tag, chain.join(" <-> ")),
             severity: level,
@@ -773,7 +729,7 @@ fn push_boundary_violation_issues(
         let to = cc_path(&v.to_path, root);
         let fp = fingerprint_hash(&["fallow/boundary-violation", &path, &to]);
         let line = if v.line > 0 { Some(v.line) } else { None };
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/boundary-violation",
             description: &format!(
                 "Boundary violation: {} -> {} ({} -> {})",
@@ -803,7 +759,7 @@ fn push_boundary_coverage_issues(
         let path = cc_path(&v.path, root);
         let fp = fingerprint_hash(&["fallow/boundary-coverage", &path]);
         let line = if v.line > 0 { Some(v.line) } else { None };
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/boundary-coverage",
             description: &format!("Boundary coverage: {path} matches no configured zone"),
             severity: level,
@@ -830,7 +786,7 @@ fn push_boundary_call_issues(
         let path = cc_path(&v.path, root);
         let fp = fingerprint_hash(&["fallow/boundary-call-violation", &path, &v.callee]);
         let line = if v.line > 0 { Some(v.line) } else { None };
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/boundary-call-violation",
             description: &format!(
                 "Boundary call: `{}` matches forbidden pattern `{}` in zone '{}'",
@@ -872,7 +828,7 @@ fn push_policy_violation_issues(
             ),
             None => format!("Policy violation: `{}` is banned by `{rule}`", v.matched),
         };
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/policy-violation",
             description: &message,
             severity: level,
@@ -903,7 +859,7 @@ fn push_invalid_client_export_issues(
             "Export `{}` is not allowed in a \"{}\" file (Next.js server-only / route-config name)",
             e.export_name, e.directive
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/invalid-client-export",
             description: &message,
             severity: level,
@@ -939,7 +895,7 @@ fn push_mixed_client_server_barrel_issues(
             "Barrel re-exports both a \"use client\" module (`{}`) and a server-only module (`{}`); one import drags the other's directive across the boundary",
             b.client_origin, b.server_origin
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/mixed-client-server-barrel",
             description: &message,
             severity: level,
@@ -975,7 +931,7 @@ fn push_misplaced_directive_issues(
             "Directive `\"{}\"` is not in the leading position, so the RSC bundler ignores it; move it to the top of the file",
             d.directive
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/misplaced-directive",
             description: &message,
             severity: level,
@@ -1011,7 +967,7 @@ fn push_unprovided_inject_issues(
             "inject(`{}`) has no matching provide(`{}`) in this project; at runtime it returns undefined (provide the key or remove this inject)",
             i.key_name, i.key_name
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unprovided-inject",
             description: &message,
             severity: level,
@@ -1047,7 +1003,7 @@ fn push_unrendered_component_issues(
             "component `{}` is reachable but rendered nowhere in this project (render it somewhere or remove it)",
             c.component_name
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unrendered-component",
             description: &message,
             severity: level,
@@ -1083,7 +1039,7 @@ fn push_unused_component_prop_issues(
             "prop `{}` is declared but referenced nowhere in component `{}` (remove it or use it)",
             p.prop_name, p.component_name
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-component-prop",
             description: &message,
             severity: level,
@@ -1119,7 +1075,7 @@ fn push_unused_component_emit_issues(
             "emit `{}` is declared but emitted nowhere in component `{}` (remove it or emit it)",
             e.emit_name, e.component_name
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-component-emit",
             description: &message,
             severity: level,
@@ -1155,7 +1111,7 @@ fn push_unused_svelte_event_issues(
             "event `{}` is dispatched by component `{}` but listened to nowhere in the project (remove it or listen for it)",
             e.event_name, e.component_name
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-svelte-event",
             description: &message,
             severity: level,
@@ -1191,7 +1147,7 @@ fn push_unused_component_input_issues(
             "input `{}` is declared but referenced nowhere in component `{}` (remove it or use it)",
             i.input_name, i.component_name
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-component-input",
             description: &message,
             severity: level,
@@ -1227,7 +1183,7 @@ fn push_unused_component_output_issues(
             "output `{}` is declared but emitted nowhere in component `{}` (remove it or emit it)",
             o.output_name, o.component_name
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-component-output",
             description: &message,
             severity: level,
@@ -1263,7 +1219,7 @@ fn push_unused_server_action_issues(
             "server action `{}` is exported from a \"use server\" file but no code in this project references it (wire it to a consumer or remove it)",
             a.action_name
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-server-action",
             description: &message,
             severity: level,
@@ -1299,7 +1255,7 @@ fn push_unused_load_data_key_issues(
             "load() return key `{}` is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>); delete the key or wire a consumer",
             k.key_name
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-load-data-key",
             description: &message,
             severity: level,
@@ -1331,7 +1287,7 @@ fn push_route_collision_issues(
             c.url,
             c.conflicting_paths.len()
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/route-collision",
             description: &message,
             severity: level,
@@ -1363,7 +1319,7 @@ fn push_dynamic_segment_name_conflict_issues(
             c.position,
             c.conflicting_segments.join(", ")
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/dynamic-segment-name-conflict",
             description: &message,
             severity: level,
@@ -1399,7 +1355,7 @@ fn push_stale_suppression_issues(
             "fallow/stale-suppression"
         };
         let fp = fingerprint_hash(&[check_name, &path, &line_str]);
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name,
             description: &s.display_message(),
             severity: level,
@@ -1443,7 +1399,7 @@ fn push_unused_catalog_entry_issues(
                 entry.entry_name, entry.catalog_name
             )
         };
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-catalog-entry",
             description: &description,
             severity: level,
@@ -1499,7 +1455,7 @@ fn push_unresolved_catalog_reference_issues(
                 finding.available_in_catalogs.join(", ")
             );
         }
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unresolved-catalog-reference",
             description: &description,
             severity: level,
@@ -1531,7 +1487,7 @@ fn push_empty_catalog_group_issues(
             &line_str,
             &group.catalog_name,
         ]);
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/empty-catalog-group",
             description: &format!("Catalog group '{}' has no entries", group.catalog_name),
             severity: level,
@@ -1572,7 +1528,7 @@ fn push_unused_dependency_override_issues(
             use std::fmt::Write as _;
             let _ = write!(description, " ({hint})");
         }
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/unused-dependency-override",
             description: &description,
             severity: level,
@@ -1611,7 +1567,7 @@ fn push_misconfigured_dependency_override_issues(
             finding.raw_value,
             finding.reason.describe(),
         );
-        issues.push(cc_issue(CcIssue {
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
             check_name: "fallow/misconfigured-dependency-override",
             description: &description,
             severity: level,
@@ -2109,7 +2065,7 @@ pub fn build_duplication_codeclimate(
                 &line_count_str,
                 &fragment_prefix,
             ]);
-            issues.push(cc_issue(CcIssue {
+            issues.push(build_codeclimate_issue(CodeClimateIssueInput {
                 check_name: "fallow/code-duplication",
                 description: &format!(
                     "Code clone group {} ({} lines, {} instances)",

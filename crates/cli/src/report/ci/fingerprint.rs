@@ -1,38 +1,17 @@
 /// Fingerprint key used in SARIF partialFingerprints and other CI formats.
-pub const FINGERPRINT_KEY: &str = "tools.fallow.fingerprint/v1";
-
-/// Conventional SARIF key consumed by GitHub Code Scanning.
-pub const GHAS_FINGERPRINT_KEY: &str = "primaryLocationLineHash/v1";
-
-#[must_use]
-pub fn normalize_snippet(snippet: &str) -> String {
-    snippet
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
+#[cfg(test)]
+pub const FINGERPRINT_KEY: &str = fallow_output::SARIF_FINGERPRINT_KEY;
 
 /// Compute a deterministic fingerprint hash from key fields.
 #[must_use]
 pub fn fingerprint_hash(parts: &[&str]) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV offset basis
-    for part in parts {
-        for byte in part.bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0100_0000_01b3); // FNV prime
-        }
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
+    fallow_output::codeclimate_fingerprint_hash(parts)
 }
 
+#[cfg(test)]
 #[must_use]
 pub fn finding_fingerprint(rule_id: &str, path: &str, snippet: &str) -> String {
-    let normalized = normalize_snippet(snippet);
-    fingerprint_hash(&[rule_id, path, &normalized])
+    fallow_output::sarif_finding_fingerprint(rule_id, path, snippet)
 }
 
 /// Stable fingerprint for the review envelope's top-level summary block.

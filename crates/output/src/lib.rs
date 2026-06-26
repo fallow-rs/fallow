@@ -50,6 +50,7 @@ mod next_steps;
 mod report_contract;
 mod review_envelopes;
 mod root_envelopes;
+mod sarif;
 mod security;
 mod trace_envelopes;
 
@@ -82,9 +83,9 @@ pub use check::{
     serialize_check_json_output, workspace_diagnostics_output,
 };
 pub use codeclimate::{
-    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
-    CodeClimateOutput, CodeClimateSeverity, annotate_codeclimate_issues,
-    codeclimate_issues_to_value,
+    CodeClimateIssue, CodeClimateIssueInput, CodeClimateIssueKind, CodeClimateLines,
+    CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, annotate_codeclimate_issues,
+    build_codeclimate_issue, codeclimate_fingerprint_hash, codeclimate_issues_to_value,
 };
 pub use coverage_envelopes::{
     CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,
@@ -227,6 +228,11 @@ pub use root_envelopes::{
     AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, FallowOutput, RootEnvelopeMode,
     apply_root_kind, attach_telemetry_meta, remove_root_kind, serialize_audit_json_output,
     serialize_combined_json_output, serialize_json_root_output, serialize_named_json_output,
+};
+pub use sarif::{
+    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifResultInput,
+    SarifRuleInput, build_sarif_document, build_sarif_result, build_sarif_rule,
+    normalize_sarif_snippet, sarif_finding_fingerprint,
 };
 pub use security::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,

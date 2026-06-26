@@ -88,6 +88,58 @@ pub struct CodeClimateLines {
     pub begin: u32,
 }
 
+/// Fields needed to build one CodeClimate issue.
+///
+/// Callers decide what should be reported. This crate owns how that decision is
+/// shaped into the stable CodeClimate / GitLab Code Quality wire contract.
+#[derive(Debug, Clone, Copy)]
+pub struct CodeClimateIssueInput<'a> {
+    pub check_name: &'a str,
+    pub description: &'a str,
+    pub severity: CodeClimateSeverity,
+    pub category: &'a str,
+    pub path: &'a str,
+    pub begin_line: Option<u32>,
+    pub fingerprint: &'a str,
+}
+
+/// Compute a deterministic fingerprint hash from key fields.
+///
+/// Uses FNV-1a (64-bit) for guaranteed cross-version stability. `DefaultHasher`
+/// is intentionally not used because it is not specified across Rust versions.
+#[must_use]
+pub fn codeclimate_fingerprint_hash(parts: &[&str]) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for part in parts {
+        for byte in part.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0100_0000_01b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// Build a single CodeClimate issue from a stable contract descriptor.
+#[must_use]
+pub fn build_codeclimate_issue(input: CodeClimateIssueInput<'_>) -> CodeClimateIssue {
+    CodeClimateIssue {
+        kind: CodeClimateIssueKind::Issue,
+        check_name: input.check_name.to_string(),
+        description: input.description.to_string(),
+        categories: vec![input.category.to_string()],
+        severity: input.severity,
+        fingerprint: input.fingerprint.to_string(),
+        location: CodeClimateLocation {
+            path: input.path.to_string(),
+            lines: CodeClimateLines {
+                begin: input.begin_line.unwrap_or(1),
+            },
+        },
+    }
+}
+
 /// Serialize typed CodeClimate issues to the wire-shape JSON array.
 ///
 /// Infallible: `CodeClimateIssue` contains only strings, integers, arrays, and
@@ -130,18 +182,15 @@ mod tests {
 
     #[test]
     fn codeclimate_issue_serializes_spec_shape() {
-        let issue = CodeClimateIssue {
-            kind: CodeClimateIssueKind::Issue,
-            check_name: "fallow/test".to_string(),
-            description: "description".to_string(),
-            categories: vec!["Bug Risk".to_string()],
+        let issue = build_codeclimate_issue(CodeClimateIssueInput {
+            check_name: "fallow/test",
+            description: "description",
+            category: "Bug Risk",
             severity: CodeClimateSeverity::Major,
-            fingerprint: "abc123".to_string(),
-            location: CodeClimateLocation {
-                path: "src/app.ts".to_string(),
-                lines: CodeClimateLines { begin: 7 },
-            },
-        };
+            fingerprint: "abc123",
+            path: "src/app.ts",
+            begin_line: Some(7),
+        });
 
         let value = serde_json::to_value(issue).expect("CodeClimate issue serializes");
         assert_eq!(value["type"], "issue");
@@ -160,6 +209,29 @@ mod tests {
     fn codeclimate_issues_to_value_serializes_bare_array() {
         let value = codeclimate_issues_to_value(&[]);
         assert!(value.is_array());
+    }
+
+    #[test]
+    fn build_codeclimate_issue_defaults_missing_line_to_one() {
+        let issue = build_codeclimate_issue(CodeClimateIssueInput {
+            check_name: "fallow/test",
+            description: "description",
+            category: "Bug Risk",
+            severity: CodeClimateSeverity::Minor,
+            fingerprint: "abc123",
+            path: "src/app.ts",
+            begin_line: None,
+        });
+
+        assert_eq!(issue.location.lines.begin, 1);
+    }
+
+    #[test]
+    fn codeclimate_fingerprint_parts_are_separated() {
+        assert_ne!(
+            codeclimate_fingerprint_hash(&["ab", "c"]),
+            codeclimate_fingerprint_hash(&["a", "bc"])
+        );
     }
 
     #[test]
