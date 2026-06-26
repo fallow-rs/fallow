@@ -147,6 +147,101 @@ fn pinia_credits_inline_store_call_member_access() {
 }
 
 #[test]
+fn pinia_credits_object_wrapped_typed_param_member_access() {
+    // `props: { store: CounterStore }` then `props.store.member`: the store reaches
+    // the access through a typed param, never bound from a `useStore()` call. The
+    // param-type alias must resolve to the factory so the member is credited.
+    // Regression for issue #1489 case 2.
+    let info = parse(
+        "import { useCounterStore } from './store'\n\
+         type CounterStore = ReturnType<typeof useCounterStore>\n\
+         export function f(props: { store: CounterStore }) {\n\
+           return props.store.viaTypedParam()\n\
+         }",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "viaTypedParam".to_string())),
+        "props.store.member on a typed store param should credit the factory: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_credits_object_wrapped_typed_param_destructure() {
+    // `const { member } = props.store` on a typed store param must credit the
+    // destructured member on the factory. Regression for issue #1489 case 2.
+    let info = parse(
+        "import { useCounterStore } from './store'\n\
+         type CounterStore = ReturnType<typeof useCounterStore>\n\
+         export function f(props: { store: CounterStore }) {\n\
+           const { viaParamDestructure } = props.store\n\
+           return viaParamDestructure.value\n\
+         }",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&(
+            "useCounterStore".to_string(),
+            "viaParamDestructure".to_string()
+        )),
+        "destructure of a typed store param should credit the factory: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_credits_direct_typed_param_member_access() {
+    // `(store: CounterStore) { store.member }`: the store IS the param (not wrapped
+    // in an object), credited on the factory through the alias. Issue #1489 case 2.
+    let info = parse(
+        "import { useCounterStore } from './store'\n\
+         type CounterStore = ReturnType<typeof useCounterStore>\n\
+         export function f(store: CounterStore) {\n\
+           return store.viaTypedParam()\n\
+         }",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "viaTypedParam".to_string())),
+        "a direct store-typed param should credit member access on the factory: {accesses:?}"
+    );
+}
+
+#[test]
+fn pinia_credits_inline_return_type_param_without_alias() {
+    // The inline `ReturnType<typeof useCounterStore>` annotation (no `type` alias)
+    // must resolve to the factory exactly like the aliased form. Issue #1489 case 2.
+    let info = parse(
+        "import { useCounterStore } from './store'\n\
+         export function f(store: ReturnType<typeof useCounterStore>) {\n\
+           return store.viaTypedParam()\n\
+         }",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("useCounterStore".to_string(), "viaTypedParam".to_string())),
+        "an inline ReturnType<typeof useStore> param should credit the member: {accesses:?}"
+    );
+}
+
+#[test]
+fn typed_param_non_store_does_not_credit_store_member() {
+    // A param typed as a NON-store alias must NOT credit a member on any store
+    // factory, so the typed-param path can never mask a real unused member.
+    let info = parse(
+        "import { makeThing } from './lib'\n\
+         type Thing = ReturnType<typeof makeThing>\n\
+         export function f(props: { store: Thing }) {\n\
+           return props.store.viaTypedParam()\n\
+         }",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        !accesses.contains(&("makeThing".to_string(), "viaTypedParam".to_string())),
+        "a non-store typed param must not credit a member on the factory: {accesses:?}"
+    );
+}
+
+#[test]
 fn pinia_credits_auto_imported_inline_store_call_member() {
     // Nuxt auto-import: `useCounterStore` follows the `use<Name>Store` convention
     // with no explicit import, so the inline path credits `.count` by name alone.

@@ -607,7 +607,12 @@ use crate::MemberKind;
 /// `const x = importedFactory()` emits a cross-module factory-fn sentinel access
 /// so `x.member` credits the class across module boundaries. A warm cache from
 /// 190 lacks both the new metadata and the added sentinel `member_accesses`.
-pub(super) const CACHE_VERSION: u32 = 191;
+///
+/// Bumped to 192 (issue #1489 Case 2): a param typed as a Pinia store
+/// (`ReturnType<typeof useFooStore>`, inline or aliased) now binds to the store
+/// factory, so `props.store.member` / `const { m } = props.store` emit factory
+/// `member_accesses` a 191 warm cache lacks.
+pub(super) const CACHE_VERSION: u32 = 192;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

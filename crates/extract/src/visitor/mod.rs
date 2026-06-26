@@ -371,6 +371,13 @@ pub(crate) struct ModuleInfoExtractor {
     /// / `storeToRefs(s)`) so it never fires on a plain `new`-instance or object
     /// binding, keeping class-member detection drift-free. Working state only.
     store_instance_locals: FxHashSet<String>,
+    /// Local type aliases of the form `type X = ReturnType<typeof useFooStore>`
+    /// mapped to the store factory name (`X -> useFooStore`). Lets a param typed
+    /// as the store (`(s: X)` or `(props: { store: X })`) bind to the factory so
+    /// `s.member` / `props.store.member` credit the store member through the
+    /// existing `binding_target_names` remap (issue #1489 Case 2). Working state
+    /// only; never persisted.
+    type_alias_store_factory: FxHashMap<String, String>,
     /// SvelteKit `load()` return-object keys harvested from a `load` export.
     /// Basename-gated to page-load producers in `parse.rs` (cleared for any
     /// non-`+page.{ts,server.ts,js,server.js}` file). Consumed by the

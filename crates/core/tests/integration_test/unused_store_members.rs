@@ -181,3 +181,29 @@ fn dep_gate_suppresses_without_pinia() {
         "store-member detection must be gated on a declared pinia dependency: {members:?}"
     );
 }
+
+#[test]
+fn credits_typed_param_store_members_and_flags_dead_ones() {
+    // Issue #1489 case 2: a store reaches the access through a param typed
+    // `ReturnType<typeof useCounterStore>` (object-wrapped `props.store.member`
+    // and `const { m } = props.store`). Both must be credited, while a genuinely
+    // unused member on the same store still flags (non-vacuous control).
+    let root = fixture_path("pinia-typed-param-store-member");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let names: Vec<String> = store_members(&results, &root)
+        .into_iter()
+        .map(|(_, m)| m)
+        .collect();
+
+    for credited in ["viaTypedParam", "viaParamDestructure"] {
+        assert!(
+            !names.contains(&credited.to_string()),
+            "{credited} consumed through a typed store param must be credited: {names:?}"
+        );
+    }
+    assert!(
+        names.contains(&"deadMember".to_string()),
+        "deadMember is never accessed and must still flag: {names:?}"
+    );
+}
