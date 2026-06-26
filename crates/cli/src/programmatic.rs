@@ -1,24 +1,28 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::OutputFormat;
-use fallow_engine::{
-    ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun, results::AnalysisResults,
-};
+use fallow_engine::{ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun};
 
+#[cfg(test)]
 use crate::check::{CheckOptions, IssueFilters, TraceOptions};
+#[cfg(test)]
 use crate::dupes::{DupesMode, DupesOptions};
 use crate::health::HealthOptions;
+#[cfg(test)]
 use crate::report::build_duplication_json;
 use crate::report::ci::diff_filter::{DiffIndex, LoadedDiff, MAX_DIFF_BYTES};
+#[cfg(test)]
+use fallow_engine::results::AnalysisResults;
 
-pub use fallow_api::{
-    AnalysisOptions, COMMON_ANALYSIS_OPTION_FLAGS, ComplexityOptions, ComplexitySort,
-    DeadCodeFilters, DeadCodeOptions, DuplicationMode, DuplicationOptions, OwnershipEmailMode,
-    ProgrammaticError, TargetEffort, derive_complexity_options, derive_complexity_run_options,
+use fallow_api::{
+    AnalysisOptions, ComplexityOptions, ProgrammaticError, derive_complexity_run_options,
 };
+#[cfg(test)]
+use fallow_api::{DeadCodeFilters, DeadCodeOptions, DuplicationMode, DuplicationOptions};
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
+#[cfg(test)]
 const fn duplication_mode_to_cli(mode: DuplicationMode) -> DupesMode {
     match mode {
         DuplicationMode::Strict => DupesMode::Strict,
@@ -40,6 +44,7 @@ struct ResolvedAnalysisOptions {
     workspace: Option<Vec<String>>,
     changed_workspaces: Option<String>,
     explain: bool,
+    #[cfg(test)]
     legacy_envelope: bool,
 }
 
@@ -73,6 +78,7 @@ fn resolve_analysis_options(
         workspace: options.workspace.clone(),
         changed_workspaces: options.changed_workspaces.clone(),
         explain: options.explain,
+        #[cfg(test)]
         legacy_envelope: options.legacy_envelope,
     })
 }
@@ -230,6 +236,7 @@ fn load_explicit_diff_file(path: &Path, root: &Path) -> ProgrammaticResult<Loade
     })
 }
 
+#[cfg(test)]
 fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     if let serde_json::Value::Object(map) = output {
         let telemetry = map
@@ -244,6 +251,7 @@ fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     }
 }
 
+#[cfg(test)]
 fn apply_programmatic_envelope_options(
     output: &mut serde_json::Value,
     resolved: &ResolvedAnalysisOptions,
@@ -261,6 +269,7 @@ fn workspace_diagnostics_for_programmatic_output(
     ))
 }
 
+#[cfg(test)]
 fn build_dead_code_json(
     results: &AnalysisResults,
     root: &Path,
@@ -288,6 +297,7 @@ fn build_dead_code_json(
     Ok(output)
 }
 
+#[cfg(test)]
 fn to_issue_filters(filters: &DeadCodeFilters) -> IssueFilters {
     IssueFilters {
         unused_files: filters.unused_files,
@@ -350,6 +360,7 @@ fn generic_analysis_error(command: &str) -> ProgrammaticError {
         ))
 }
 
+#[cfg(test)]
 fn build_check_options<'a>(
     resolved: &'a ResolvedAnalysisOptions,
     options: &'a DeadCodeOptions,
@@ -397,6 +408,7 @@ fn build_check_options<'a>(
     }
 }
 
+#[cfg(test)]
 fn filter_for_circular_dependencies(results: &AnalysisResults) -> AnalysisResults {
     let mut filtered = results.clone();
     filtered.unused_files.clear();
@@ -431,6 +443,7 @@ fn filter_for_circular_dependencies(results: &AnalysisResults) -> AnalysisResult
     filtered
 }
 
+#[cfg(test)]
 fn filter_for_boundary_violations(results: &AnalysisResults) -> AnalysisResults {
     let mut filtered = results.clone();
     filtered.unused_files.clear();
@@ -463,7 +476,8 @@ fn filter_for_boundary_violations(results: &AnalysisResults) -> AnalysisResults 
 }
 
 /// Run the dead-code analysis and return the CLI JSON contract as a value.
-pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_json::Value> {
+#[cfg(test)]
+fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_json::Value> {
     let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| {
         let filters = to_issue_filters(&options.filters);
@@ -491,7 +505,8 @@ pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_j
 
 /// Run the circular-dependency analysis and return the standard dead-code JSON envelope
 /// filtered down to the `circular_dependencies` category.
-pub fn detect_circular_dependencies(
+#[cfg(test)]
+fn detect_circular_dependencies(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<serde_json::Value> {
     let resolved = resolve_analysis_options(&options.analysis)?;
@@ -523,9 +538,8 @@ pub fn detect_circular_dependencies(
 /// Run the boundary-violation analysis and return the standard dead-code JSON envelope
 /// filtered down to the boundary family: `boundary_violations`,
 /// `boundary_coverage_violations`, and `boundary_call_violations`.
-pub fn detect_boundary_violations(
-    options: &DeadCodeOptions,
-) -> ProgrammaticResult<serde_json::Value> {
+#[cfg(test)]
+fn detect_boundary_violations(options: &DeadCodeOptions) -> ProgrammaticResult<serde_json::Value> {
     let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| {
         let filters = to_issue_filters(&options.filters);
@@ -553,7 +567,8 @@ pub fn detect_boundary_violations(
 }
 
 /// Run the duplication analysis and return the CLI JSON contract as a value.
-pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<serde_json::Value> {
+#[cfg(test)]
+fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<serde_json::Value> {
     let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| {
         let dupes_options = DupesOptions {
@@ -710,12 +725,14 @@ pub fn run_programmatic_health(
 }
 
 /// Run the health / complexity analysis and return the CLI JSON contract as a value.
-pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
+#[cfg(test)]
+fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
     fallow_api::run_complexity_with_runner(options, &CliProgrammaticHealthRunner)?.into_json()
 }
 
 /// Alias for `compute_complexity` with a more product-oriented name.
-pub fn compute_health(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
+#[cfg(test)]
+fn compute_health(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
     compute_complexity(options)
 }
 

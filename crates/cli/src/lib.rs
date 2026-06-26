@@ -143,7 +143,7 @@ mod telemetry;
 pub mod output_envelope;
 pub(crate) mod output_runtime;
 
-/// Programmatic Rust API reused by the NAPI bindings.
+/// Temporary CLI-backed runner bridge for programmatic health execution.
 pub mod programmatic;
 
 /// Cross-platform path classification helpers (POSIX-style root + Windows
