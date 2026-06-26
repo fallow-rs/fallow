@@ -2,11 +2,9 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use colored::Colorize;
-use fallow_api::DupesReportPayload;
+use fallow_api::{AuditJsonHeaderInput, AuditJsonOutputInput, DupesReportPayload};
 use fallow_config::{AuditGate, OutputFormat};
-use fallow_output::{
-    AuditCommand, AuditOutput, CodeClimateIssue, RootEnvelopeMode, codeclimate_issues_to_value,
-};
+use fallow_output::{CodeClimateIssue, codeclimate_issues_to_value};
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
 use crate::error::emit_error;
@@ -358,29 +356,15 @@ fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, Ex
         .map(|health| build_audit_health_json(result, health))
         .transpose()?;
 
-    let output = AuditOutput {
-        schema_version: SchemaVersion(crate::report::SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        command: AuditCommand::Audit,
-        verdict: result.verdict,
-        changed_files_count: changed_files_count_for_output(result.changed_files_count),
-        base_ref: result.base_ref.clone(),
-        base_description: result.base_description.clone(),
-        head_sha: result.head_sha.clone(),
-        elapsed_ms: ElapsedMs(elapsed_ms_for_output(result.elapsed)),
-        base_snapshot_skipped: result.performance.then_some(result.base_snapshot_skipped),
-        summary: result.summary.clone(),
-        attribution: result.attribution.clone(),
-        meta: None,
-        dead_code,
-        duplication,
-        complexity,
-        next_steps: audit_next_steps(result),
-    };
-
-    fallow_output::serialize_audit_json_output(
-        output,
-        RootEnvelopeMode::Tagged,
+    fallow_api::serialize_audit_json(
+        AuditJsonOutputInput {
+            header: audit_json_header_input(result),
+            dead_code,
+            duplication,
+            complexity,
+            next_steps: audit_next_steps(result),
+        },
+        fallow_output::RootEnvelopeMode::Tagged,
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .map_err(|err| {
@@ -400,61 +384,30 @@ fn changed_files_count_for_output(changed_files_count: usize) -> u32 {
     u32::try_from(changed_files_count).unwrap_or(u32::MAX)
 }
 
+fn audit_json_header_input(result: &AuditResult) -> AuditJsonHeaderInput {
+    AuditJsonHeaderInput {
+        schema_version: SchemaVersion(crate::report::SCHEMA_VERSION),
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        verdict: result.verdict,
+        changed_files_count: changed_files_count_for_output(result.changed_files_count),
+        base_ref: result.base_ref.clone(),
+        base_description: result.base_description.clone(),
+        head_sha: result.head_sha.clone(),
+        elapsed_ms: ElapsedMs(elapsed_ms_for_output(result.elapsed)),
+        base_snapshot_skipped: result.performance.then_some(result.base_snapshot_skipped),
+        summary: result.summary.clone(),
+        attribution: result.attribution.clone(),
+    }
+}
+
 pub fn insert_audit_json_header(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     result: &AuditResult,
 ) {
-    obj.insert(
-        "schema_version".into(),
-        serde_json::Value::Number(crate::report::SCHEMA_VERSION.into()),
-    );
-    obj.insert(
-        "version".into(),
-        serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()),
-    );
-    obj.insert(
-        "command".into(),
-        serde_json::Value::String("audit".to_string()),
-    );
-    obj.insert(
-        "verdict".into(),
-        serde_json::to_value(result.verdict).unwrap_or(serde_json::Value::Null),
-    );
-    obj.insert(
-        "changed_files_count".into(),
-        serde_json::Value::Number(result.changed_files_count.into()),
-    );
-    obj.insert(
-        "base_ref".into(),
-        serde_json::Value::String(result.base_ref.clone()),
-    );
-    if let Some(ref description) = result.base_description {
-        obj.insert(
-            "base_description".into(),
-            serde_json::Value::String(description.clone()),
-        );
-    }
-    if let Some(ref sha) = result.head_sha {
-        obj.insert("head_sha".into(), serde_json::Value::String(sha.clone()));
-    }
-    obj.insert(
-        "elapsed_ms".into(),
-        serde_json::Value::Number(serde_json::Number::from(elapsed_ms_for_output(
-            result.elapsed,
-        ))),
-    );
-    if result.performance {
-        obj.insert(
-            "base_snapshot_skipped".into(),
-            serde_json::Value::Bool(result.base_snapshot_skipped),
-        );
-    }
-
-    if let Ok(summary_val) = serde_json::to_value(&result.summary) {
-        obj.insert("summary".into(), summary_val);
-    }
-    if let Ok(attribution_val) = serde_json::to_value(&result.attribution) {
-        obj.insert("attribution".into(), attribution_val);
+    if let Ok(serde_json::Value::Object(header)) =
+        fallow_api::build_audit_header_json(audit_json_header_input(result))
+    {
+        obj.extend(header);
     }
 }
 

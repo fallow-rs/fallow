@@ -50,7 +50,10 @@ pub mod ci_output {
         render_review_envelope, review_label_from_codeclimate, summary_fingerprint, summary_label,
     };
 }
-pub use audit_output::{AuditAttribution, AuditSummary, AuditVerdict};
+pub use audit_output::{
+    AuditAttribution, AuditJsonHeaderInput, AuditJsonOutputInput, AuditSummary, AuditVerdict,
+    build_audit_header_json, serialize_audit_json,
+};
 pub use ci_output::{
     CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
     MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput, ReviewCommentRenderInput,
