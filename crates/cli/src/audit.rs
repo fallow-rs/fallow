@@ -2648,7 +2648,7 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
                 .as_ref()
                 .map(|d| crate::impact::collect_clone_findings(&d.report))
                 .unwrap_or_default();
-            let empty_supps: Vec<fallow_core::results::ActiveSuppression> = Vec::new();
+            let empty_supps: Vec<fallow_engine::results::ActiveSuppression> = Vec::new();
             let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
                 c.results.active_suppressions.as_slice()
             });

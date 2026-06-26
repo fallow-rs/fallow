@@ -1,3 +1,9 @@
+use fallow_engine::{
+    discover::FileId,
+    extract::ModuleInfo,
+    graph::{ModuleGraph, ModuleNode},
+    suppress,
+};
 use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
 
 pub(super) struct CoverageGapData {
@@ -34,9 +40,9 @@ fn is_excluded_coverage_extension(path: &std::path::Path) -> bool {
 }
 
 /// Whether the module opted out of coverage-gap reporting via a file suppression.
-fn module_is_coverage_suppressed(module: Option<&fallow_core::extract::ModuleInfo>) -> bool {
+fn module_is_coverage_suppressed(module: Option<&ModuleInfo>) -> bool {
     module.is_some_and(|m| {
-        fallow_core::suppress::is_file_suppressed(
+        suppress::is_file_suppressed(
             &m.suppressions,
             fallow_types::suppress::IssueKind::CoverageGaps,
         )
@@ -47,9 +53,9 @@ fn module_is_coverage_suppressed(module: Option<&fallow_core::extract::ModuleInf
 /// reference and not already flagged unused) to `exports`.
 fn collect_untested_exports(
     exports: &mut Vec<UntestedExport>,
-    graph: &fallow_core::graph::ModuleGraph,
-    node: &fallow_core::graph::ModuleNode,
-    module: &fallow_core::extract::ModuleInfo,
+    graph: &ModuleGraph,
+    node: &ModuleNode,
+    module: &ModuleInfo,
     path: &std::path::Path,
     unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
 ) {
@@ -93,12 +99,9 @@ struct CoverageGapScan {
 
 /// Walk runtime-reachable modules, collecting untested files and exports.
 fn scan_runtime_files(
-    graph: &fallow_core::graph::ModuleGraph,
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    module_by_id: &rustc_hash::FxHashMap<
-        fallow_core::discover::FileId,
-        &fallow_core::extract::ModuleInfo,
-    >,
+    graph: &ModuleGraph,
+    file_paths: &rustc_hash::FxHashMap<FileId, &std::path::PathBuf>,
+    module_by_id: &rustc_hash::FxHashMap<FileId, &ModuleInfo>,
     unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
 ) -> CoverageGapScan {
     let mut scan = CoverageGapScan {
@@ -194,12 +197,9 @@ fn build_coverage_gap_data(scan: CoverageGapScan, root: &std::path::Path) -> Cov
 }
 
 pub(super) fn compute_coverage_gaps(
-    graph: &fallow_core::graph::ModuleGraph,
-    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
-    module_by_id: &rustc_hash::FxHashMap<
-        fallow_core::discover::FileId,
-        &fallow_core::extract::ModuleInfo,
-    >,
+    graph: &ModuleGraph,
+    file_paths: &rustc_hash::FxHashMap<FileId, &std::path::PathBuf>,
+    module_by_id: &rustc_hash::FxHashMap<FileId, &ModuleInfo>,
     unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
     root: &std::path::Path,
 ) -> CoverageGapData {

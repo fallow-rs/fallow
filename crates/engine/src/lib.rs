@@ -72,7 +72,7 @@ pub mod results {
 
 /// Suppression helpers exposed for editor and embedding surfaces.
 pub mod suppress {
-    pub use fallow_core::suppress::{IssueKind, is_suppressed};
+    pub use fallow_core::suppress::{IssueKind, is_file_suppressed, is_suppressed};
 }
 
 /// Changed-file helpers exposed through the engine boundary for editor and
