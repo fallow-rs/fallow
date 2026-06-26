@@ -5,7 +5,8 @@ use fallow_types::output::NextStep;
 use serde::Serialize;
 
 use crate::{
-    GroupByMode, RootEnvelopeMode, WorkspaceDiagnosticOutput, apply_root_kind, strip_root_prefix,
+    GroupByMode, RootEnvelopeMode, WorkspaceDiagnosticOutput, apply_root_kind,
+    attach_telemetry_meta, strip_root_prefix,
 };
 
 /// Envelope emitted by `fallow health --format json`.
@@ -57,6 +58,7 @@ pub struct HealthJsonOutputInput<'a, Report, Group> {
     pub output: HealthOutputInput<Report, Group>,
     pub root_prefix: Option<&'a str>,
     pub envelope_mode: RootEnvelopeMode,
+    pub analysis_run_id: Option<&'a str>,
 }
 
 /// Build a health JSON envelope from caller-owned report data.
@@ -100,6 +102,7 @@ where
     if let Some(root_prefix) = input.root_prefix {
         strip_root_prefix(&mut output, root_prefix);
     }
+    attach_telemetry_meta(&mut output, input.analysis_run_id);
     Ok(output)
 }
 
@@ -123,11 +126,16 @@ mod tests {
             },
             root_prefix: Some("/repo/"),
             envelope_mode: RootEnvelopeMode::Tagged,
+            analysis_run_id: Some("run-health"),
         })
         .expect("health output should serialize");
 
         assert_eq!(output["kind"], "health");
         assert_eq!(output["findings"][0]["path"], "src/a.ts");
+        assert_eq!(
+            output["_meta"]["telemetry"]["analysis_run_id"],
+            "run-health"
+        );
     }
 
     #[test]
@@ -146,6 +154,7 @@ mod tests {
             },
             root_prefix: None,
             envelope_mode: RootEnvelopeMode::Legacy,
+            analysis_run_id: None,
         })
         .expect("health output should serialize");
 

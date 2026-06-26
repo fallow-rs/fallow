@@ -434,7 +434,7 @@ pub fn build_health_json(
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut output = fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
+    let output = fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
         report: report.clone(),
         root,
         elapsed,
@@ -451,8 +451,8 @@ pub fn build_health_json(
             ),
         ),
         envelope_mode: EnvelopeMode::current().into(),
+        telemetry_analysis_run_id: crate::output_envelope::telemetry_analysis_run_id().as_deref(),
     })?;
-    crate::output_envelope::attach_telemetry_meta(&mut output);
     Ok(output)
 }
 
@@ -480,6 +480,7 @@ pub fn build_grouped_health_json(
             ),
         ),
         envelope_mode: EnvelopeMode::current().into(),
+        telemetry_analysis_run_id: crate::output_envelope::telemetry_analysis_run_id().as_deref(),
     })
 }
 

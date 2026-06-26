@@ -337,7 +337,6 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
         Err(code) => return code,
     };
     report::harmonize_multi_kind_suppress_line_actions(&mut output);
-    crate::output_envelope::attach_telemetry_meta(&mut output);
     report::emit_json(&output, "audit")
 }
 
@@ -378,7 +377,12 @@ fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, Ex
         next_steps: audit_next_steps(result),
     };
 
-    fallow_output::serialize_audit_json_output(output, RootEnvelopeMode::Tagged).map_err(|err| {
+    fallow_output::serialize_audit_json_output(
+        output,
+        RootEnvelopeMode::Tagged,
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    )
+    .map_err(|err| {
         emit_error(
             &format!("JSON serialization error: {err}"),
             2,

@@ -494,8 +494,12 @@ fn build_combined_json_output(
         next_steps,
     };
 
-    fallow_output::serialize_combined_json_output(output, RootEnvelopeMode::Tagged)
-        .map_err(|err| json_output_error(&err))
+    fallow_output::serialize_combined_json_output(
+        output,
+        RootEnvelopeMode::Tagged,
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    )
+    .map_err(|err| json_output_error(&err))
 }
 
 fn elapsed_ms_for_output(elapsed: std::time::Duration) -> u64 {
@@ -514,7 +518,7 @@ fn combined_json_root(elapsed: std::time::Duration) -> Result<serde_json::Value,
         health: None,
         next_steps: Vec::new(),
     };
-    fallow_output::serialize_combined_json_output(envelope, RootEnvelopeMode::Tagged)
+    fallow_output::serialize_combined_json_output(envelope, RootEnvelopeMode::Tagged, None)
         .map_err(|err| json_output_error(&err))
 }
 
@@ -584,7 +588,6 @@ fn combined_meta_for_output(
 
 fn emit_combined_json_output(mut output: serde_json::Value) -> ExitCode {
     report::harmonize_multi_kind_suppress_line_actions(&mut output);
-    crate::output_envelope::attach_telemetry_meta(&mut output);
 
     match serde_json::to_string_pretty(&output) {
         Ok(json) => {

@@ -78,6 +78,7 @@ pub fn serialize_audit_json_output<
 >(
     output: AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Complexity>,
     mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error>
 where
     Verdict: Serialize,
@@ -89,6 +90,7 @@ where
 {
     let mut value = serde_json::to_value(output)?;
     apply_root_kind(&mut value, "audit", mode);
+    attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
 
@@ -102,6 +104,7 @@ where
 pub fn serialize_combined_json_output<Check, Dupes, Health>(
     output: CombinedOutput<Check, Dupes, Health>,
     mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
 ) -> Result<serde_json::Value, serde_json::Error>
 where
     Check: Serialize,
@@ -110,6 +113,7 @@ where
 {
     let mut value = serde_json::to_value(output)?;
     apply_root_kind(&mut value, "combined", mode);
+    attach_telemetry_meta(&mut value, analysis_run_id);
     Ok(value)
 }
 
@@ -493,12 +497,14 @@ mod tests {
                 next_steps: Vec::new(),
             },
             RootEnvelopeMode::Tagged,
+            Some("run-audit"),
         )
         .expect("audit output should serialize");
 
         assert_eq!(value["kind"], "audit");
         assert_eq!(value["command"], "audit");
         assert_eq!(value["dead_code"]["summary"]["total_issues"], 0);
+        assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-audit");
     }
 
     #[test]
@@ -515,10 +521,15 @@ mod tests {
                 next_steps: Vec::new(),
             },
             RootEnvelopeMode::Tagged,
+            Some("run-combined"),
         )
         .expect("combined output should serialize");
 
         assert_eq!(value["kind"], "combined");
         assert_eq!(value["check"]["summary"]["total_issues"], 0);
+        assert_eq!(
+            value["_meta"]["telemetry"]["analysis_run_id"],
+            "run-combined"
+        );
     }
 }

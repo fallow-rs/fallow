@@ -41,6 +41,7 @@ pub struct HealthJsonReportInput<'a> {
     pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
+    pub telemetry_analysis_run_id: Option<&'a str>,
 }
 
 /// Health runner output consumed by the API-owned programmatic serializer.
@@ -184,6 +185,7 @@ pub fn serialize_health_report_json(
         },
         root_prefix: Some(&root_prefix),
         envelope_mode: input.envelope_mode,
+        analysis_run_id: input.telemetry_analysis_run_id,
     })
 }
 
@@ -213,7 +215,8 @@ pub fn compute_complexity_with_runner(
             result.next_step_facts.impact_digest,
             result.next_step_facts.audit_changed,
         ));
-    let mut output = serialize_health_report_json(HealthJsonReportInput {
+    let telemetry_analysis_run_id = result.telemetry_analysis_run_id;
+    let output = serialize_health_report_json(HealthJsonReportInput {
         report: result.analysis.report,
         root: &root,
         elapsed: result.analysis.elapsed,
@@ -223,13 +226,13 @@ pub fn compute_complexity_with_runner(
         workspace_diagnostics: result.workspace_diagnostics,
         next_steps,
         envelope_mode: root_envelope_mode(options.analysis.legacy_envelope),
+        telemetry_analysis_run_id: telemetry_analysis_run_id.as_deref(),
     })
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
             .with_code("FALLOW_SERIALIZE_HEALTH_REPORT")
             .with_context("health")
     })?;
-    fallow_output::attach_telemetry_meta(&mut output, result.telemetry_analysis_run_id.as_deref());
     Ok(output)
 }
 
@@ -1454,12 +1457,17 @@ mod tests {
                 reason: "inspect health details".to_string(),
             }],
             envelope_mode: RootEnvelopeMode::Tagged,
+            telemetry_analysis_run_id: Some("run-api-health"),
         })
         .expect("health JSON serializes");
 
         assert_eq!(json["kind"], "health");
         assert_eq!(json["schema_version"], HEALTH_SCHEMA_VERSION);
         assert!(json["_meta"].is_object());
+        assert_eq!(
+            json["_meta"]["telemetry"]["analysis_run_id"],
+            "run-api-health"
+        );
         assert_eq!(json["workspace_diagnostics"][0]["path"], "package.json");
         assert_eq!(json["next_steps"][0]["id"], "inspect-health");
     }
@@ -1476,6 +1484,7 @@ mod tests {
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
             envelope_mode: RootEnvelopeMode::Legacy,
+            telemetry_analysis_run_id: None,
         })
         .expect("health JSON serializes");
 
