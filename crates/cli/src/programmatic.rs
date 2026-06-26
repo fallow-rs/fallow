@@ -251,12 +251,6 @@ fn apply_programmatic_envelope_options(
     }
 }
 
-fn programmatic_root_envelope_mode(
-    resolved: &ResolvedAnalysisOptions,
-) -> fallow_output::RootEnvelopeMode {
-    fallow_output::RootEnvelopeMode::from_legacy(resolved.legacy_envelope)
-}
-
 fn workspace_diagnostics_for_programmatic_output(
     root: &Path,
 ) -> Vec<fallow_output::WorkspaceDiagnosticOutput> {
@@ -682,21 +676,17 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
                 .map_err(|_| generic_analysis_error("health"))?;
             let root = &result.config.root;
             let workspace_diagnostics = workspace_diagnostics_for_programmatic_output(root);
-            let next_steps = fallow_output::build_health_next_steps(
-                fallow_output::build_health_next_steps_input(
-                    &result.report,
-                    crate::report::suggestions::suggestions_enabled(),
-                    crate::report::suggestions::setup_pointer_applicable(root),
-                    crate::report::suggestions::due_impact_digest(root)
-                        .map(crate::report::suggestions::impact_counts),
-                    crate::report::suggestions::audit_changed_applicable(root),
-                ),
-            );
+            let next_step_facts = fallow_api::ProgrammaticHealthNextStepFacts {
+                suggestions_enabled: crate::report::suggestions::suggestions_enabled(),
+                offer_setup: crate::report::suggestions::setup_pointer_applicable(root),
+                impact_digest: crate::report::suggestions::due_impact_digest(root)
+                    .map(crate::report::suggestions::impact_counts),
+                audit_changed: crate::report::suggestions::audit_changed_applicable(root),
+            };
             Ok(fallow_api::ProgrammaticHealthRun {
                 analysis: result.without_group_resolver(),
                 workspace_diagnostics,
-                next_steps,
-                envelope_mode: programmatic_root_envelope_mode(&resolved),
+                next_step_facts,
                 telemetry_analysis_run_id: crate::output_envelope::telemetry_analysis_run_id(),
             })
         })
