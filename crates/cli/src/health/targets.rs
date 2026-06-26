@@ -312,9 +312,9 @@ fn push_runtime_target_factors(
                 h.score,
                 h.commits,
                 match h.trend {
-                    fallow_core::churn::ChurnTrend::Accelerating => "accelerating",
-                    fallow_core::churn::ChurnTrend::Cooling => "cooling",
-                    fallow_core::churn::ChurnTrend::Stable => "stable",
+                    fallow_engine::churn::ChurnTrend::Accelerating => "accelerating",
+                    fallow_engine::churn::ChurnTrend::Cooling => "cooling",
+                    fallow_engine::churn::ChurnTrend::Stable => "stable",
                 }
             ),
         });
@@ -410,7 +410,7 @@ fn match_churn_complexity(
 ) -> Option<(RecommendationCategory, String)> {
     let h = hotspot?;
     if h.score < 50.0
-        || !matches!(h.trend, fallow_core::churn::ChurnTrend::Accelerating)
+        || !matches!(h.trend, fallow_engine::churn::ChurnTrend::Accelerating)
         || score.complexity_density <= 0.5
     {
         return None;
@@ -1344,7 +1344,7 @@ mod tests {
             lines_deleted: 100,
             complexity_density: 0.8,
             fan_in: 5,
-            trend: fallow_core::churn::ChurnTrend::Accelerating,
+            trend: fallow_engine::churn::ChurnTrend::Accelerating,
             ownership: None,
             is_test_path: false,
         };
@@ -1598,7 +1598,7 @@ mod tests {
             lines_deleted: 100,
             complexity_density: 0.8,
             fan_in: 10,
-            trend: fallow_core::churn::ChurnTrend::Accelerating,
+            trend: fallow_engine::churn::ChurnTrend::Accelerating,
             ownership: None,
             is_test_path: false,
         };
@@ -1670,7 +1670,7 @@ mod tests {
             lines_deleted: 50,
             complexity_density: 0.5,
             fan_in: 15,
-            trend: fallow_core::churn::ChurnTrend::Stable,
+            trend: fallow_engine::churn::ChurnTrend::Stable,
             ownership: None,
             is_test_path: false,
         }];

@@ -3112,7 +3112,7 @@ mod tests {
                     lines_deleted: 200,
                     complexity_density: 1.2,
                     fan_in: 10,
-                    trend: fallow_core::churn::ChurnTrend::Accelerating,
+                    trend: fallow_engine::churn::ChurnTrend::Accelerating,
                     ownership: None,
                     is_test_path: false,
                 }
@@ -3337,7 +3337,7 @@ mod tests {
                     lines_deleted: 50,
                     complexity_density: 0.5,
                     fan_in: 3,
-                    trend: fallow_core::churn::ChurnTrend::Stable,
+                    trend: fallow_engine::churn::ChurnTrend::Stable,
                     ownership: None,
                     is_test_path: false,
                 }
@@ -4135,7 +4135,7 @@ mod tests {
                     lines_deleted: 80,
                     complexity_density: 0.7,
                     fan_in: 8,
-                    trend: fallow_core::churn::ChurnTrend::Accelerating,
+                    trend: fallow_engine::churn::ChurnTrend::Accelerating,
                     ownership: None,
                     is_test_path: false,
                 }
@@ -4205,7 +4205,7 @@ mod tests {
                     lines_deleted: 40,
                     complexity_density: 0.4,
                     fan_in: 2,
-                    trend: fallow_core::churn::ChurnTrend::Cooling,
+                    trend: fallow_engine::churn::ChurnTrend::Cooling,
                     ownership: None,
                     is_test_path: false,
                 }
@@ -4283,7 +4283,7 @@ mod tests {
                     lines_deleted: 100,
                     complexity_density: 0.6,
                     fan_in: 5,
-                    trend: fallow_core::churn::ChurnTrend::Stable,
+                    trend: fallow_engine::churn::ChurnTrend::Stable,
                     ownership: Some(OwnershipMetrics {
                         bus_factor: 1,
                         contributor_count: 2,

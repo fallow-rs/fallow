@@ -131,7 +131,7 @@ fn validate_churn_file(opts: &HealthOptions<'_>) -> Result<(), ExitCode> {
         && (opts.hotspots || opts.targets)
     {
         let resolved = scoring::resolve_relative_to_root(churn_file, Some(opts.root));
-        fallow_core::churn::analyze_churn_from_file(&resolved, opts.root)
+        fallow_engine::churn::analyze_churn_from_file(&resolved, opts.root)
             .map_err(|e| emit_error(&e, 2, opts.output))?;
     }
     Ok(())
@@ -7589,7 +7589,7 @@ mod tests {
                 lines_deleted: 500,
                 complexity_density: 0.4,
                 fan_in: 5,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: fallow_engine::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             },
@@ -7602,7 +7602,7 @@ mod tests {
                 lines_deleted: 500,
                 complexity_density: 0.4,
                 fan_in: 5,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: fallow_engine::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             },
