@@ -33,7 +33,7 @@
 //! components are summed. No runtime field, no runtime read, no runtime gate here:
 //! free mode is the complete surface.
 
-use fallow_core::graph::FocusFileFactsPaths;
+use fallow_engine::graph::FocusFileFactsPaths;
 pub use fallow_output::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
 
 /// A unit's score at or above this threshold is labeled [`FocusLabel::ReviewHere`];

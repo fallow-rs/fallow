@@ -1401,7 +1401,7 @@ fn compute_brief_impact_closure(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
-) -> Option<fallow_core::graph::ImpactClosurePaths> {
+) -> Option<fallow_engine::graph::ImpactClosurePaths> {
     let graph = check
         .shared_parse
         .as_ref()
@@ -1444,7 +1444,7 @@ fn compute_brief_partition_order(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
-) -> Option<fallow_core::graph::PartitionOrderPaths> {
+) -> Option<fallow_engine::graph::PartitionOrderPaths> {
     let graph = check
         .shared_parse
         .as_ref()
@@ -1579,7 +1579,7 @@ fn compute_brief_focus_facts(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
-) -> Option<Vec<fallow_core::graph::FocusFileFactsPaths>> {
+) -> Option<Vec<fallow_engine::graph::FocusFileFactsPaths>> {
     let graph = check
         .shared_parse
         .as_ref()
