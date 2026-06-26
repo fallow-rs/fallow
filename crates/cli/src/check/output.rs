@@ -83,7 +83,7 @@ pub(super) fn handle_trace_output(
 
 /// Write SARIF output to a file if `--sarif-file` was specified.
 pub fn write_sarif_file(
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     config: &ResolvedConfig,
     sarif_path: &std::path::Path,
     quiet: bool,
@@ -124,7 +124,7 @@ pub fn write_sarif_file(
 /// Run duplication cross-reference and print combined findings.
 pub fn run_cross_reference(
     config: &ResolvedConfig,
-    unfiltered_results: &fallow_core::results::AnalysisResults,
+    unfiltered_results: &fallow_engine::results::AnalysisResults,
     quiet: bool,
 ) {
     let files = fallow_engine::discover::discover_files_with_plugin_scopes(config);
@@ -251,7 +251,7 @@ mod tests {
 
     #[test]
     fn write_sarif_file_creates_output() {
-        let results = fallow_core::results::AnalysisResults::default();
+        let results = fallow_engine::results::AnalysisResults::default();
         let config = make_resolved_config();
 
         let dir = tempfile::tempdir().expect("create temp dir");
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn write_sarif_file_creates_parent_directories() {
-        let results = fallow_core::results::AnalysisResults::default();
+        let results = fallow_engine::results::AnalysisResults::default();
         let config = make_resolved_config();
 
         let dir = tempfile::tempdir().expect("create temp dir");
