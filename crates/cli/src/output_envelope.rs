@@ -6,9 +6,13 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(any(test, feature = "schema-emit"))]
 use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
+#[cfg(any(test, feature = "schema-emit"))]
 use crate::health_types::{HealthGroup, HealthReport};
+#[cfg(any(test, feature = "schema-emit"))]
 use crate::output_dupes::DupesReportPayload;
+#[cfg(any(test, feature = "schema-emit"))]
 use crate::report::dupes_grouping::DuplicationGroup;
 #[allow(
     unused_imports,
@@ -72,10 +76,6 @@ pub fn telemetry_analysis_run_id() -> Option<String> {
         .and_then(|id| id.clone())
 }
 
-pub fn serialize_root_output(output: FallowOutput) -> Result<serde_json::Value, serde_json::Error> {
-    serialize_root_output_with_mode(output, EnvelopeMode::current())
-}
-
 pub fn serialize_named_root_output<T: Serialize>(
     output: T,
     kind: &'static str,
@@ -93,7 +93,8 @@ pub fn serialize_named_root_output_without_telemetry<T: Serialize>(
     fallow_output::serialize_named_json_output(output, kind, EnvelopeMode::current().into())
 }
 
-pub fn serialize_root_output_with_mode(
+#[cfg(test)]
+fn serialize_root_output_with_mode(
     output: FallowOutput,
     mode: EnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
@@ -114,6 +115,7 @@ impl From<EnvelopeMode> for fallow_output::RootEnvelopeMode {
         }
     }
 }
+#[cfg(any(test, feature = "schema-emit"))]
 pub type AuditOutput = fallow_output::AuditOutput<
     AuditVerdict,
     AuditSummary,
@@ -123,9 +125,11 @@ pub type AuditOutput = fallow_output::AuditOutput<
     HealthReport,
 >;
 
+#[cfg(any(test, feature = "schema-emit"))]
 pub type CombinedOutput =
     fallow_output::CombinedOutput<CheckOutput, DupesReportPayload, HealthReport>;
 
+#[cfg(any(test, feature = "schema-emit"))]
 pub type ListBoundariesOutput = fallow_output::ListBoundariesOutput<
     fallow_config::LogicalGroupStatus,
     fallow_config::AuthoredRule,
@@ -151,6 +155,7 @@ pub type BoundariesListLogicalGroup = fallow_output::BoundariesListLogicalGroup<
     fallow_config::AuthoredRule,
 >;
 
+#[cfg(any(test, feature = "schema-emit"))]
 #[allow(
     clippy::type_complexity,
     reason = "concrete CLI alias fills every generic payload slot in the shared root output contract"
@@ -178,7 +183,7 @@ pub type FallowOutput = fallow_output::FallowOutput<
     CheckOutput,
     CombinedOutput,
     crate::audit_brief::ReviewBriefOutput,
-    crate::audit_decision_surface::DecisionSurfaceOutput,
+    fallow_output::DecisionSurfaceOutput,
     crate::audit_walkthrough::WalkthroughGuide,
     crate::audit_walkthrough::WalkthroughValidation,
 >;

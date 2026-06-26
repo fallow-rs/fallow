@@ -39,8 +39,7 @@
 //! never emitted is REJECTED. The agent proposes; the graph disposes.
 
 pub use fallow_output::{
-    Decision, DecisionCategory, DecisionSurface, DecisionSurfaceOutput, TruncationNote,
-    build_decision_surface_output,
+    Decision, DecisionCategory, DecisionSurface, TruncationNote, build_decision_surface_output,
 };
 use xxhash_rust::xxh3::xxh3_64;
 
