@@ -24,7 +24,7 @@ use crate::{
 /// files in the group, so they answer "what is the health of workspace X" in
 /// a single invocation. `files_analyzed` and `functions_above_threshold`
 /// summarise the subset for parity with the project-level
-/// [`HealthSummary`].
+/// project-level health summary.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthGroup {
@@ -60,33 +60,28 @@ pub struct HealthGroup {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
     /// Findings restricted to files in this group. Each entry is the typed
-    /// [`HealthFinding`] wrapper around a
-    /// [`ComplexityViolation`](ComplexityViolation)
-    /// payload.
+    /// [`HealthFinding`] wrapper around a complexity payload.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub findings: Vec<HealthFinding>,
     /// File scores restricted to files in this group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,
     /// Hotspots restricted to files in this group. Each entry is the typed
-    /// [`HotspotFinding`] wrapper around a
-    /// [`HotspotEntry`](HotspotEntry) payload.
+    /// [`HotspotFinding`] wrapper around a hotspot payload.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<HotspotFinding>,
     /// Large functions in files belonging to this group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub large_functions: Vec<LargeFunctionEntry>,
     /// Refactoring targets in files belonging to this group. Each entry is
-    /// the typed [`RefactoringTargetFinding`] wrapper around a
-    /// [`RefactoringTarget`](RefactoringTarget)
-    /// payload.
+    /// the typed [`RefactoringTargetFinding`] wrapper around a refactoring
+    /// target payload.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<RefactoringTargetFinding>,
     /// Auditable breadcrumb recording why `suppress-line` action hints
     /// were omitted from this group's findings. Mirrors the project-level
     /// `HealthReport.actions_meta`; populated at construction time when the
-    /// per-group [`HealthActionContext`](HealthActionContext)
-    /// suppresses inline hints.
+    /// per-group action context suppresses inline hints.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions_meta: Option<HealthActionsMeta>,
 }

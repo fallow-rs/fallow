@@ -76,9 +76,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "filesystem metadata is blocked by Miri isolation")]
     fn source_fingerprint_from_metadata_sets_size() {
-        let exe = std::env::current_exe().expect("current executable");
-        let metadata = std::fs::metadata(exe).expect("metadata");
+        let metadata = std::fs::metadata(".").expect("metadata");
 
         let fingerprint = SourceFingerprint::from_metadata(&metadata);
 
