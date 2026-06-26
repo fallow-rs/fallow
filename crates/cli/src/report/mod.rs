@@ -159,10 +159,7 @@ fn relative_uri(path: &Path, root: &Path) -> String {
 /// SARIF validation warnings (e.g., Next.js dynamic routes like `[slug]`).
 #[must_use]
 pub fn normalize_uri(path_str: &str) -> String {
-    path_str
-        .replace('\\', "/")
-        .replace('[', "%5B")
-        .replace(']', "%5D")
+    fallow_output::normalize_uri(path_str)
 }
 
 /// Severity level for human-readable output.

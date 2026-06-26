@@ -198,7 +198,7 @@ pub use issue_contract::{
     CODECLIMATE_RESULT_CODES, IssueOutputContract, TsAliasMeta, check_meta, dead_code_docs_url,
     issue_output_contract_by_code, issue_output_contracts, rule_docs_url,
 };
-pub use json_paths::strip_root_prefix;
+pub use json_paths::{normalize_uri, strip_root_prefix};
 pub use list_envelopes::{
     BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone, BoundariesListing,
     ListBoundariesOutput, WorkspaceInfo, WorkspacesOutput, serialize_list_boundaries_json_output,

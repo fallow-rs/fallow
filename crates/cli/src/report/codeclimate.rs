@@ -2035,54 +2035,11 @@ pub(super) fn print_grouped_health_codeclimate(
 
 /// Build CodeClimate JSON array from duplication analysis results.
 #[must_use]
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "line numbers are bounded by source size"
-)]
 pub fn build_duplication_codeclimate(
     report: &DuplicationReport,
     root: &Path,
 ) -> Vec<CodeClimateIssue> {
-    let mut issues = Vec::new();
-
-    for (i, group) in report.clone_groups.iter().enumerate() {
-        let token_str = group.token_count.to_string();
-        let line_count_str = group.line_count.to_string();
-        let fragment_prefix: String = group
-            .instances
-            .first()
-            .map(|inst| inst.fragment.chars().take(64).collect())
-            .unwrap_or_default();
-
-        for instance in &group.instances {
-            let path = cc_path(&instance.file, root);
-            let start_str = instance.start_line.to_string();
-            let fp = fingerprint_hash(&[
-                "fallow/code-duplication",
-                &path,
-                &start_str,
-                &token_str,
-                &line_count_str,
-                &fragment_prefix,
-            ]);
-            issues.push(build_codeclimate_issue(CodeClimateIssueInput {
-                check_name: "fallow/code-duplication",
-                description: &format!(
-                    "Code clone group {} ({} lines, {} instances)",
-                    i + 1,
-                    group.line_count,
-                    group.instances.len()
-                ),
-                severity: CodeClimateSeverity::Minor,
-                category: "Duplication",
-                path: &path,
-                begin_line: Some(instance.start_line as u32),
-                fingerprint: &fp,
-            }));
-        }
-    }
-
-    issues
+    fallow_api::build_duplication_codeclimate(report, root)
 }
 
 /// Print duplication analysis results in CodeClimate format.

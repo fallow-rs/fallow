@@ -31,6 +31,7 @@ pub use audit_output::{AuditAttribution, AuditSummary, AuditVerdict};
 pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneFamilyFinding,
     CloneGroupFinding, DupesReportPayload, DuplicationGroup, DuplicationGrouping,
+    build_duplication_codeclimate,
 };
 pub use editor::{
     ChangedFilesError, EditorAnalysisOutput, EditorAnalysisResults, EditorAnalysisSession,

@@ -1,6 +1,6 @@
 //! Shared duplication JSON payload contracts for programmatic consumers.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use fallow_engine::duplicates::{
     CloneFamily, CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport,
@@ -8,7 +8,9 @@ use fallow_engine::duplicates::{
     dominant_identifier, fingerprint_for_fragment,
 };
 use fallow_output::{
-    CloneFamilyAction, CloneGroupAction, clone_family_actions, clone_group_actions,
+    CloneFamilyAction, CloneGroupAction, CodeClimateIssue, CodeClimateIssueInput,
+    CodeClimateSeverity, clone_family_actions, clone_group_actions, codeclimate_fingerprint_hash,
+    normalize_uri,
 };
 use fallow_types::envelope::AuditIntroduced;
 use fallow_types::serde_path;
@@ -281,8 +283,78 @@ impl DupesReportPayload {
     }
 }
 
+/// Build CodeClimate issues from duplication analysis results.
+///
+/// `fallow-output` owns the CodeClimate wire DTOs. This API layer combines
+/// those DTOs with the engine-owned duplication report so CLI and future
+/// embedders can share the same issue construction policy.
+#[must_use]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "line numbers are bounded by source size"
+)]
+pub fn build_duplication_codeclimate(
+    report: &DuplicationReport,
+    root: &Path,
+) -> Vec<CodeClimateIssue> {
+    let mut issues = Vec::new();
+
+    for (i, group) in report.clone_groups.iter().enumerate() {
+        let token_str = group.token_count.to_string();
+        let line_count_str = group.line_count.to_string();
+        let fragment_prefix: String = group
+            .instances
+            .first()
+            .map(|inst| inst.fragment.chars().take(64).collect())
+            .unwrap_or_default();
+
+        for instance in &group.instances {
+            let path = codeclimate_path(&instance.file, root);
+            let start_str = instance.start_line.to_string();
+            let fp = codeclimate_fingerprint_hash(&[
+                "fallow/code-duplication",
+                &path,
+                &start_str,
+                &token_str,
+                &line_count_str,
+                &fragment_prefix,
+            ]);
+            issues.push(fallow_output::build_codeclimate_issue(
+                CodeClimateIssueInput {
+                    check_name: "fallow/code-duplication",
+                    description: &format!(
+                        "Code clone group {} ({} lines, {} instances)",
+                        i + 1,
+                        group.line_count,
+                        group.instances.len()
+                    ),
+                    severity: CodeClimateSeverity::Minor,
+                    category: "Duplication",
+                    path: &path,
+                    begin_line: Some(instance.start_line as u32),
+                    fingerprint: &fp,
+                },
+            ));
+        }
+    }
+
+    issues
+}
+
+fn codeclimate_path(path: &Path, root: &Path) -> String {
+    normalize_uri(
+        &path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .display()
+            .to_string(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use fallow_engine::duplicates::{
         CloneInstance, DuplicationStats, RefactoringKind, RefactoringSuggestion,
     };
@@ -471,5 +543,36 @@ mod tests {
             assert_eq!(finding.actions.len(), 2);
         }
         assert_eq!(payload.clone_families[0].actions.len(), 2);
+    }
+
+    #[test]
+    fn duplication_codeclimate_uses_relative_normalized_paths() {
+        let report = DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances: vec![CloneInstance {
+                    file: PathBuf::from("/root/app/[id]/page.tsx"),
+                    start_line: 4,
+                    end_line: 8,
+                    start_col: 0,
+                    end_col: 0,
+                    fragment: "const duplicate = 1;".to_string(),
+                }],
+                token_count: 42,
+                line_count: 5,
+            }],
+            clone_families: Vec::new(),
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats::default(),
+        };
+
+        let issues = build_duplication_codeclimate(&report, Path::new("/root"));
+
+        assert_eq!(issues.len(), 1);
+        let issue = &issues[0];
+        assert_eq!(issue.check_name, "fallow/code-duplication");
+        assert_eq!(issue.location.path, "app/%5Bid%5D/page.tsx");
+        assert_eq!(issue.location.lines.begin, 4);
+        assert_eq!(issue.categories, vec!["Duplication"]);
+        assert!(issue.description.contains("Code clone group 1"));
     }
 }

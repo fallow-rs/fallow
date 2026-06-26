@@ -38,6 +38,17 @@ fn strip_root_prefix_from_string(value: &mut String, prefix: &str) {
 }
 
 fn normalize_output_path(path: &str) -> String {
+    normalize_uri(path)
+}
+
+/// Normalize a path string to a valid URI: forward slashes and percent-encoded
+/// brackets.
+///
+/// Brackets (`[`, `]`) are not valid in URI path segments per RFC 3986 and
+/// cause SARIF / CodeClimate validation warnings for framework routes such as
+/// Next.js dynamic segments.
+#[must_use]
+pub fn normalize_uri(path: &str) -> String {
     path.replace('\\', "/")
         .replace('[', "%5B")
         .replace(']', "%5D")
@@ -123,5 +134,13 @@ mod tests {
         strip_root_prefix(&mut value, "/project/");
 
         assert_eq!(value, json!("src/index.ts"));
+    }
+
+    #[test]
+    fn normalize_uri_rewrites_backslashes_and_brackets() {
+        assert_eq!(
+            normalize_uri("app\\[lang]\\posts\\[id].tsx"),
+            "app/%5Blang%5D/posts/%5Bid%5D.tsx"
+        );
     }
 }
