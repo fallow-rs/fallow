@@ -167,7 +167,8 @@ pub use health_vital_signs::{
 pub use impact::{
     ContainmentEvent, CrossRepoImpactReport, CrossRepoImpactSchemaVersion, CrossRepoProjectEntry,
     CrossRepoTotals, EnabledSource, ImpactCounts, ImpactReport, ImpactReportSchemaVersion,
-    ImpactTrendDirection, ResolutionEvent, TrendSummary,
+    ImpactTrendDirection, ResolutionEvent, TrendSummary, serialize_cross_repo_impact_json_output,
+    serialize_impact_json_output,
 };
 pub use inspect_envelopes::{
     ExplainOutput, InspectEvidence, InspectEvidenceScope, InspectEvidenceSection,
