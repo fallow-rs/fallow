@@ -2,6 +2,7 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use colored::Colorize;
+use fallow_api::DupesReportPayload;
 use fallow_config::{AuditGate, OutputFormat};
 use fallow_output::{
     AuditCommand, AuditOutput, CodeClimateIssue, RootEnvelopeMode, codeclimate_issues_to_value,
@@ -510,7 +511,7 @@ fn build_audit_duplication_json(
     result: &AuditResult,
     dupes: &crate::dupes::DupesResult,
 ) -> Result<serde_json::Value, ExitCode> {
-    let payload = crate::output_dupes::DupesReportPayload::from_report(&dupes.report);
+    let payload = DupesReportPayload::from_report(&dupes.report);
     match serde_json::to_value(&payload) {
         Ok(mut json) => {
             let root_prefix = format!("{}/", dupes.config.root.display());

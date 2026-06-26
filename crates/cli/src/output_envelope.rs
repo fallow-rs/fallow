@@ -11,9 +11,9 @@ use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
 #[cfg(any(test, feature = "schema-emit"))]
 use crate::health_types::{HealthGroup, HealthReport};
 #[cfg(any(test, feature = "schema-emit"))]
-use crate::output_dupes::DupesReportPayload;
-#[cfg(any(test, feature = "schema-emit"))]
 use crate::report::dupes_grouping::DuplicationGroup;
+#[cfg(any(test, feature = "schema-emit"))]
+use fallow_api::DupesReportPayload;
 #[allow(
     unused_imports,
     reason = "compatibility re-export while CLI output contracts move to fallow-output"

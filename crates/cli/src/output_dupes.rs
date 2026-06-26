@@ -1,20 +1,14 @@
 //! CLI-specific duplication output wrappers.
 //!
-//! The shared clone group, clone family, and report payload contracts live in
-//! `fallow-api`. This module keeps only the grouped-output attribution wrapper
-//! because it depends on CLI grouping types.
+//! Duplication payload contracts live in `fallow-api`; this module keeps only
+//! the grouped-output attribution wrapper because it depends on CLI grouping
+//! types.
 
 use fallow_engine::duplicates::fingerprint_for_fragment;
 use fallow_output::{CloneGroupAction, clone_group_actions};
 use serde::Serialize;
 
 use crate::report::dupes_grouping::AttributedCloneGroup;
-
-#[allow(
-    unused_imports,
-    reason = "compatibility re-export while dupes payload contracts move to fallow-api"
-)]
-pub use fallow_api::{CloneFamilyFinding, CloneGroupFinding, DupesReportPayload};
 
 /// Wire-shape envelope for an [`AttributedCloneGroup`] finding.
 #[derive(Debug, Clone, Serialize)]

@@ -4,6 +4,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use fallow_api::DupesReportPayload;
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
@@ -11,7 +12,6 @@ use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_output::strip_root_prefix;
 
 use super::emit_json;
-use crate::output_dupes::DupesReportPayload;
 use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutput,
     DupesOutputInput, EnvelopeMode, GroupByMode, WorkspaceDiagnosticOutput,

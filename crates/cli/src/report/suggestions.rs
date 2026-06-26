@@ -7,6 +7,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use fallow_api::DupesReportPayload;
 use fallow_core::results::AnalysisResults;
 use fallow_output::{
     CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput, HealthNextStepsInput,
@@ -18,7 +19,6 @@ use fallow_output::{
 use fallow_types::output::NextStep;
 
 use crate::health_types::HealthReport;
-use crate::output_dupes::DupesReportPayload;
 
 /// `FALLOW_SUGGESTIONS=off` (or `0`/`false`/`no`/`disabled`) disables next-steps
 /// entirely. Default on. This is the documented escape hatch for CI consumers

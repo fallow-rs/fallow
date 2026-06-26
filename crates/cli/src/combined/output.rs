@@ -4,6 +4,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use colored::Colorize;
+use fallow_api::DupesReportPayload;
 use fallow_config::OutputFormat;
 use fallow_output::{
     CodeClimateIssue, CombinedMeta, CombinedOutput, RootEnvelopeMode, codeclimate_issues_to_value,
@@ -212,8 +213,7 @@ fn print_combined_hints(
     );
     println!();
 
-    let dupes_payload = dupes_result
-        .map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
+    let dupes_payload = dupes_result.map(|result| DupesReportPayload::from_report(&result.report));
     if let Some(step) = crate::report::suggestions::top_combined_next_step(
         check_result.map(|result| &result.results),
         dupes_payload.as_ref(),
@@ -467,7 +467,7 @@ fn build_combined_json_output(
 
     let dupes_payload = input
         .dupes_result
-        .map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
+        .map(|result| DupesReportPayload::from_report(&result.report));
     let dupes = build_combined_dupes_json(dupes_payload.as_ref(), input.root)?;
     let health = build_combined_health_json(input.health_result, &root_prefix)?;
     let next_steps = combined_next_steps(
@@ -523,7 +523,7 @@ fn combined_json_root(elapsed: std::time::Duration) -> Result<serde_json::Value,
 }
 
 fn build_combined_dupes_json(
-    dupes_payload: Option<&crate::output_dupes::DupesReportPayload>,
+    dupes_payload: Option<&DupesReportPayload>,
     root: &std::path::Path,
 ) -> Result<Option<serde_json::Value>, ExitCode> {
     let root_prefix = format!("{}/", root.display());
@@ -559,7 +559,7 @@ fn build_combined_health_json(
 
 fn combined_next_steps(
     check: Option<&CheckResult>,
-    dupes_payload: Option<&crate::output_dupes::DupesReportPayload>,
+    dupes_payload: Option<&DupesReportPayload>,
     health: Option<&HealthResult>,
     root: &std::path::Path,
 ) -> Vec<fallow_types::output::NextStep> {

@@ -14,6 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use fallow_api::CloneFamilyFinding;
 use fallow_engine::duplicates::{
     CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
 };
@@ -24,7 +25,7 @@ use super::grouping::OwnershipResolver;
 use super::relative_path;
 use crate::baseline::recompute_stats;
 use crate::codeowners::UNOWNED_LABEL;
-use crate::output_dupes::{AttributedCloneGroupFinding, CloneFamilyFinding};
+use crate::output_dupes::AttributedCloneGroupFinding;
 
 /// Resolve the group key for a single instance file.
 fn key_for_instance(instance: &CloneInstance, root: &Path, resolver: &OwnershipResolver) -> String {

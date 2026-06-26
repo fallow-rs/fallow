@@ -25,9 +25,8 @@ use std::process::ExitCode;
 use schemars::generate::SchemaSettings;
 use serde_json::{Map, Value};
 
-use fallow_cli::output_dupes::{
-    AttributedCloneGroupFinding, CloneFamilyFinding, CloneGroupFinding, DupesReportPayload,
-};
+use fallow_api::{CloneFamilyFinding, CloneGroupFinding, DupesReportPayload};
+use fallow_cli::output_dupes::AttributedCloneGroupFinding;
 use fallow_cli::report::dupes_grouping::{
     AttributedCloneGroup, AttributedInstance, DuplicationGroup,
 };
