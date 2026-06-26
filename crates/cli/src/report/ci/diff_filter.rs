@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 pub use fallow_output::{DiffIndex, MAX_DIFF_BYTES, parse_new_hunk_start, relative_to_diff_path};
 
-use fallow_api::CiIssue;
+use fallow_output::CiIssue;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiffFilterMode {
@@ -353,7 +353,7 @@ where
 
     let (project_level, diff_relevant): (Vec<CiIssue>, Vec<CiIssue>) = issues
         .into_iter()
-        .partition(|issue| fallow_api::is_project_level_rule(&issue.rule_id));
+        .partition(|issue| fallow_output::is_project_level_rule(&issue.rule_id));
     let mut kept = source_filter(diff_relevant);
     kept.extend(project_level);
     kept.sort_by(|a, b| (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint)));

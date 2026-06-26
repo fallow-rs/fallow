@@ -19,6 +19,7 @@ mod audit_routing;
 mod audit_walkthrough;
 mod audit_weakening;
 mod check;
+mod ci_output;
 mod codeclimate;
 mod coverage_envelopes;
 mod diff;
@@ -81,6 +82,16 @@ pub use check::{
     GroupByMode, WorkspaceDiagnosticOutput, apply_config_fixable_to_duplicate_exports,
     build_check_output, build_check_summary, serialize_check_grouped_json_output,
     serialize_check_json_output, workspace_diagnostics_output,
+};
+pub use ci_output::{
+    CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
+    MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput, ReviewCommentRenderInput,
+    ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult, ReviewEnvelopeTruncation,
+    ReviewGitlabDiffRefs, cap_body_with_marker, command_title, composite_fingerprint, escape_md,
+    github_check_conclusion, group_review_issues_by_path_line, is_project_level_rule,
+    issues_from_codeclimate, issues_from_codeclimate_issues, render_pr_comment,
+    render_review_comment_for_group, render_review_envelope, review_label_from_codeclimate,
+    summary_fingerprint, summary_label,
 };
 pub use codeclimate::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateIssueKind, CodeClimateLines,

@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use fallow_output::{
+use crate::{
     CodeClimateIssue, CodeClimateSeverity, DiffIndex, GitHubReviewComment, GitHubReviewSide,
     GitLabReviewComment, GitLabReviewPosition, GitLabReviewPositionType, ReviewCheckConclusion,
     ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
@@ -174,7 +174,7 @@ fn sort_ci_issues(issues: &mut [CiIssue]) {
 }
 
 fn fingerprint_hash(parts: &[&str]) -> String {
-    fallow_output::codeclimate_fingerprint_hash(parts)
+    crate::codeclimate_fingerprint_hash(parts)
 }
 
 #[must_use]
@@ -667,7 +667,7 @@ pub fn composite_fingerprint(constituents: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_output::{CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation};
+    use crate::{CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation};
 
     fn category_for_rule(rule_id: &str) -> &'static str {
         match rule_id {

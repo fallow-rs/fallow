@@ -76,6 +76,7 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   { code: "boundary-violation", label: "Boundary Violations" },
   { code: "policy-violation", label: "Policy Violations" },
   { code: "stale-suppression", label: "Stale Suppressions" },
+  { code: "missing-suppression-reason", label: "Missing Suppression Reasons" },
   { code: "unused-catalog-entry", label: "Unused Catalog Entries" },
   { code: "empty-catalog-group", label: "Empty Catalog Groups" },
   {

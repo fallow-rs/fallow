@@ -5,11 +5,11 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
-pub use fallow_api::{
+pub use fallow_output::{
     CiIssue, CiProvider as Provider, issues_from_codeclimate, issues_from_codeclimate_issues,
 };
 #[cfg(test)]
-use fallow_api::{escape_md, is_project_level_rule};
+use fallow_output::{escape_md, is_project_level_rule};
 
 /// Workspace name, set once by `main()` when the binary is invoked with
 /// `--workspace <name>`. Read by `sticky_marker_id` to auto-suffix the
@@ -66,7 +66,7 @@ fn short_hex_hash(value: &str) -> String {
 
 #[must_use]
 pub fn render_pr_comment(command: &str, provider: Provider, issues: &[CiIssue]) -> String {
-    fallow_api::render_pr_comment(&fallow_api::PrCommentRenderInput {
+    fallow_output::render_pr_comment(&fallow_output::PrCommentRenderInput {
         command,
         provider,
         issues,
@@ -294,12 +294,15 @@ mod tests {
     #[test]
     fn summary_label_foreshadows_truncation() {
         assert_eq!(
-            fallow_api::summary_label("Duplication", 160, 50),
+            fallow_output::summary_label("Duplication", 160, 50),
             "Duplication (160, showing 50)"
         );
-        assert_eq!(fallow_api::summary_label("Health", 12, 50), "Health (12)");
         assert_eq!(
-            fallow_api::summary_label("Dependencies", 50, 50),
+            fallow_output::summary_label("Health", 12, 50),
+            "Health (12)"
+        );
+        assert_eq!(
+            fallow_output::summary_label("Dependencies", 50, 50),
             "Dependencies (50)"
         );
     }
@@ -330,7 +333,7 @@ mod tests {
 
     #[test]
     fn is_project_level_rule_covers_config_anchored_dependency_findings() {
-        for rule_id in fallow_api::PROJECT_LEVEL_RULE_IDS {
+        for rule_id in fallow_output::PROJECT_LEVEL_RULE_IDS {
             assert!(
                 is_project_level_rule(rule_id),
                 "{rule_id} must be project-level"
@@ -363,7 +366,7 @@ mod tests {
 
     #[test]
     fn project_level_rule_ids_each_register_in_explain_registry() {
-        for rule_id in fallow_api::PROJECT_LEVEL_RULE_IDS {
+        for rule_id in fallow_output::PROJECT_LEVEL_RULE_IDS {
             assert!(
                 crate::explain::rule_by_id(rule_id).is_some(),
                 "{rule_id} listed in PROJECT_LEVEL_RULE_IDS but not in explain registry"

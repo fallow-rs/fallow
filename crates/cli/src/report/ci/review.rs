@@ -5,11 +5,11 @@ use serde_json::Value;
 
 use super::diff_filter::DiffIndex;
 use crate::report::emit_json;
-use fallow_api::{
-    CiIssue, CiProvider as Provider, ReviewEnvelopeRenderInput, ReviewEnvelopeTruncation,
-    ReviewGitlabDiffRefs as GitlabDiffRefs, issues_from_codeclimate_issues,
+use fallow_output::{
+    CiIssue, CiProvider as Provider, ReviewEnvelopeOutput, ReviewEnvelopeRenderInput,
+    ReviewEnvelopeTruncation, ReviewGitlabDiffRefs as GitlabDiffRefs,
+    issues_from_codeclimate_issues,
 };
-use fallow_output::ReviewEnvelopeOutput;
 
 #[must_use]
 pub fn render_review_envelope(
@@ -45,7 +45,7 @@ pub fn render_review_envelope_with_diff(
         .flatten();
     let include_guidance = review_guidance_enabled();
 
-    let rendered = fallow_api::render_review_envelope(&ReviewEnvelopeRenderInput {
+    let rendered = fallow_output::render_review_envelope(&ReviewEnvelopeRenderInput {
         command,
         provider,
         issues,
@@ -168,7 +168,7 @@ fn render_merged_comment(
     diff_index: Option<&DiffIndex>,
     include_guidance: bool,
 ) -> fallow_output::ReviewComment {
-    fallow_api::render_review_comment_for_group(&fallow_api::ReviewCommentRenderInput {
+    fallow_output::render_review_comment_for_group(&fallow_output::ReviewCommentRenderInput {
         provider,
         group,
         gitlab_diff_refs,
@@ -183,14 +183,14 @@ fn render_merged_comment(
 fn group_by_path_line(
     issues: &[CiIssue],
     max_groups: usize,
-) -> fallow_api::GroupedReviewIssues<'_> {
-    fallow_api::group_review_issues_by_path_line(issues, max_groups)
+) -> fallow_output::GroupedReviewIssues<'_> {
+    fallow_output::group_review_issues_by_path_line(issues, max_groups)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_api::{MARKER_PREFIX_V2, MARKER_SUFFIX_V2, MAX_COMMENT_BODY_BYTES};
+    use fallow_output::{MARKER_PREFIX_V2, MARKER_SUFFIX_V2, MAX_COMMENT_BODY_BYTES};
     use fallow_output::{MARKER_REGEX_V2, ReviewComment};
 
     fn to_value(envelope: &ReviewEnvelopeOutput) -> Value {

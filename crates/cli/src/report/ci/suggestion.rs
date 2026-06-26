@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use fallow_api::{CiIssue, CiProvider as Provider};
+use fallow_output::{CiIssue, CiProvider as Provider};
 
 #[must_use]
 pub fn suggestion_block(provider: Provider, issue: &CiIssue) -> Option<String> {
