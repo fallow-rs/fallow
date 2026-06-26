@@ -8,7 +8,7 @@
 )]
 
 use fallow_api as api;
-use fallow_programmatic_cli as cli_health;
+use fallow_programmatic_cli::CliHealthRunner;
 use napi::bindgen_prelude::{AsyncTask, JsObjectValue, ToNapiValue, Unknown};
 use napi::{Env, ScopedTask, Status};
 use napi_derive::napi;
@@ -543,7 +543,7 @@ pub fn compute_complexity(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        cli_health::compute_complexity(&options)
+        api::compute_complexity_with_runner(&options, &CliHealthRunner)
     })))
 }
 
@@ -553,7 +553,7 @@ pub fn compute_health(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        cli_health::compute_health(&options)
+        api::compute_health_with_runner(&options, &CliHealthRunner)
     })))
 }
 
@@ -1042,6 +1042,26 @@ mod tests {
             .as_ref()
             .expect("programmatic error should be retained for reject");
         assert_eq!(stored.code.as_deref(), Some("FALLOW_TEST_FAILURE"));
+    }
+
+    #[test]
+    fn compute_health_uses_api_runner_boundary() {
+        let project = tiny_dead_code_project();
+        let options = api::ComplexityOptions::try_from(ComplexityOptions {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            threads: Some(1),
+            score: Some(true),
+            ..ComplexityOptions::default()
+        })
+        .expect("health options should map");
+
+        let json = api::compute_health_with_runner(&options, &CliHealthRunner)
+            .expect("health should run through API runner boundary");
+
+        assert_eq!(json["kind"], "health");
+        assert_eq!(json["schema_version"], 7);
+        assert!(json.get("health_score").is_some());
     }
 
     fn tiny_dead_code_project() -> tempfile::TempDir {
