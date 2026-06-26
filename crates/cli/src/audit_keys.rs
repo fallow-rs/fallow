@@ -2140,7 +2140,7 @@ fn annotate_dependency_override_json(
 
 pub(super) fn annotate_health_json(
     json: &mut serde_json::Value,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -2185,10 +2185,7 @@ pub(super) fn annotate_dupes_json(
     }
 }
 
-pub(super) fn health_keys(
-    report: &crate::health_types::HealthReport,
-    root: &Path,
-) -> FxHashSet<String> {
+pub(super) fn health_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashSet<String> {
     report
         .findings
         .iter()
@@ -2197,7 +2194,7 @@ pub(super) fn health_keys(
 }
 
 pub(super) fn health_finding_key(
-    finding: &crate::health_types::ComplexityViolation,
+    finding: &fallow_output::ComplexityViolation,
     root: &Path,
 ) -> String {
     format!(
@@ -2275,7 +2272,7 @@ mod tests {
     use rustc_hash::FxHashSet;
     use serde_json::json;
 
-    use crate::health_types::{
+    use fallow_output::{
         ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
     };
 

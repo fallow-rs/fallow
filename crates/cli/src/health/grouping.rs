@@ -15,13 +15,13 @@ use super::{
     SubsetFilter, VitalSignsAndCountsInput, apply_duplication_metrics,
     compute_vital_signs_and_counts,
 };
-use crate::health_types::{
+use crate::report::OwnershipResolver;
+use crate::vital_signs;
+use fallow_output::{
     ComplexityViolation, FileHealthScore, HealthActionsMeta, HealthFinding, HealthGroup,
     HealthGrouping, HotspotEntry, HotspotFinding, LargeFunctionEntry, RefactoringTarget,
     RefactoringTargetFinding, VitalSigns, VitalSignsCounts, summarize_coverage_source_consistency,
 };
-use crate::report::OwnershipResolver;
-use crate::vital_signs;
 
 /// Bucket of file paths sharing a resolver key.
 struct GroupBucket {
@@ -45,7 +45,7 @@ pub(super) struct HealthGroupingInput<'a> {
     pub needs_file_scores: bool,
     pub needs_hotspots: bool,
     pub show_vital_signs: bool,
-    pub action_ctx: &'a crate::health_types::HealthActionContext,
+    pub action_ctx: &'a fallow_output::HealthActionContext,
 }
 
 /// Build [`HealthGrouping`] for the resolved `--group-by` mode.

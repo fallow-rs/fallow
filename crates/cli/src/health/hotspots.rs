@@ -1,5 +1,5 @@
 use crate::error::emit_error;
-use crate::health_types::{FileHealthScore, HotspotEntry, HotspotSummary};
+use fallow_output::{FileHealthScore, HotspotEntry, HotspotSummary};
 
 use super::HealthOptions;
 use super::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};

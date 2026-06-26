@@ -1648,30 +1648,26 @@ enum HealthFindingDimension {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct HealthFindingCategory {
     dimension: HealthFindingDimension,
-    severity: crate::health_types::FindingSeverity,
+    severity: fallow_output::FindingSeverity,
 }
 
 impl HealthFindingCategory {
     const fn key(self) -> &'static str {
         match (self.dimension, self.severity) {
-            (
-                HealthFindingDimension::Complexity,
-                crate::health_types::FindingSeverity::Moderate,
-            ) => "complexity_moderate",
-            (HealthFindingDimension::Complexity, crate::health_types::FindingSeverity::High) => {
+            (HealthFindingDimension::Complexity, fallow_output::FindingSeverity::Moderate) => {
+                "complexity_moderate"
+            }
+            (HealthFindingDimension::Complexity, fallow_output::FindingSeverity::High) => {
                 "complexity_high"
             }
-            (
-                HealthFindingDimension::Complexity,
-                crate::health_types::FindingSeverity::Critical,
-            ) => "complexity_critical",
-            (HealthFindingDimension::Crap, crate::health_types::FindingSeverity::Moderate) => {
+            (HealthFindingDimension::Complexity, fallow_output::FindingSeverity::Critical) => {
+                "complexity_critical"
+            }
+            (HealthFindingDimension::Crap, fallow_output::FindingSeverity::Moderate) => {
                 "crap_moderate"
             }
-            (HealthFindingDimension::Crap, crate::health_types::FindingSeverity::High) => {
-                "crap_high"
-            }
-            (HealthFindingDimension::Crap, crate::health_types::FindingSeverity::Critical) => {
+            (HealthFindingDimension::Crap, fallow_output::FindingSeverity::High) => "crap_high",
+            (HealthFindingDimension::Crap, fallow_output::FindingSeverity::Critical) => {
                 "crap_critical"
             }
         }
@@ -1686,9 +1682,9 @@ const HEALTH_FINDING_DIMENSIONS: [HealthFindingDimension; 2] = [
 impl HealthBaselineData {
     /// Build a health baseline from findings and targets.
     pub fn from_findings(
-        findings: &[crate::health_types::ComplexityViolation],
-        runtime_coverage_findings: &[crate::health_types::RuntimeCoverageFinding],
-        targets: &[crate::health_types::RefactoringTarget],
+        findings: &[fallow_output::ComplexityViolation],
+        runtime_coverage_findings: &[fallow_output::RuntimeCoverageFinding],
+        targets: &[fallow_output::RefactoringTarget],
         root: &Path,
     ) -> Self {
         Self {
@@ -1723,7 +1719,7 @@ impl HealthBaselineData {
 
     pub fn overlap_entry_count(
         &self,
-        findings: &[crate::health_types::ComplexityViolation],
+        findings: &[fallow_output::ComplexityViolation],
         root: &Path,
     ) -> usize {
         if !self.finding_counts.is_empty() {
@@ -1742,7 +1738,7 @@ impl HealthBaselineData {
 }
 
 /// Generate a stable key for a refactoring target: `relative_path:category`.
-fn target_baseline_key(target: &crate::health_types::RefactoringTarget, root: &Path) -> String {
+fn target_baseline_key(target: &fallow_output::RefactoringTarget, root: &Path) -> String {
     format!(
         "{}:{}",
         relative_path(&target.path, root),
@@ -1751,7 +1747,7 @@ fn target_baseline_key(target: &crate::health_types::RefactoringTarget, root: &P
 }
 
 /// Generate a stable key for a health finding.
-fn health_finding_key(finding: &crate::health_types::ComplexityViolation, root: &Path) -> String {
+fn health_finding_key(finding: &fallow_output::ComplexityViolation, root: &Path) -> String {
     format!(
         "{}:{}:{}",
         relative_path(&finding.path, root),
@@ -1761,7 +1757,7 @@ fn health_finding_key(finding: &crate::health_types::ComplexityViolation, root: 
 }
 
 fn health_finding_counts(
-    findings: &[crate::health_types::ComplexityViolation],
+    findings: &[fallow_output::ComplexityViolation],
     root: &Path,
 ) -> HealthFindingCountMap {
     let mut counts = BTreeMap::new();
@@ -1779,7 +1775,7 @@ fn health_finding_counts(
 }
 
 fn health_finding_categories(
-    finding: &crate::health_types::ComplexityViolation,
+    finding: &fallow_output::ComplexityViolation,
 ) -> [Option<HealthFindingCategory>; 2] {
     let complexity_category = HealthFindingCategory {
         dimension: HealthFindingDimension::Complexity,
@@ -1798,11 +1794,11 @@ fn health_finding_categories(
     ]
 }
 
-fn severity_index(severity: crate::health_types::FindingSeverity) -> usize {
+fn severity_index(severity: fallow_output::FindingSeverity) -> usize {
     match severity {
-        crate::health_types::FindingSeverity::Moderate => 0,
-        crate::health_types::FindingSeverity::High => 1,
-        crate::health_types::FindingSeverity::Critical => 2,
+        fallow_output::FindingSeverity::Moderate => 0,
+        fallow_output::FindingSeverity::High => 1,
+        fallow_output::FindingSeverity::Critical => 2,
     }
 }
 
@@ -1812,9 +1808,9 @@ fn severity_counts_for_dimension(
 ) -> [usize; 3] {
     let mut counts = [0; 3];
     for severity in [
-        crate::health_types::FindingSeverity::Moderate,
-        crate::health_types::FindingSeverity::High,
-        crate::health_types::FindingSeverity::Critical,
+        fallow_output::FindingSeverity::Moderate,
+        fallow_output::FindingSeverity::High,
+        fallow_output::FindingSeverity::Critical,
     ] {
         let category = HealthFindingCategory {
             dimension,
@@ -1865,9 +1861,9 @@ fn health_overflow_categories(
             let overflow = overflowing_severities(current, baseline);
 
             for severity in [
-                crate::health_types::FindingSeverity::Moderate,
-                crate::health_types::FindingSeverity::High,
-                crate::health_types::FindingSeverity::Critical,
+                fallow_output::FindingSeverity::Moderate,
+                fallow_output::FindingSeverity::High,
+                fallow_output::FindingSeverity::Critical,
             ] {
                 if overflow[severity_index(severity)] {
                     overflow_categories.insert(
@@ -1915,7 +1911,7 @@ fn health_overlap_entry_count(
 }
 
 fn runtime_coverage_finding_key(
-    finding: &crate::health_types::RuntimeCoverageFinding,
+    finding: &fallow_output::RuntimeCoverageFinding,
     _root: &Path,
 ) -> String {
     finding
@@ -1931,7 +1927,7 @@ fn runtime_coverage_finding_key(
 /// line-sensitive `runtime_coverage_finding_key` for suppression. The NUL
 /// separator avoids collisions with paths/names that contain `:`.
 fn runtime_coverage_source_hash_key(
-    finding: &crate::health_types::RuntimeCoverageFinding,
+    finding: &fallow_output::RuntimeCoverageFinding,
     root: &Path,
 ) -> Option<String> {
     finding.source_hash.as_deref().map(|hash| {
@@ -1946,10 +1942,10 @@ fn runtime_coverage_source_hash_key(
 
 /// Filter health findings to only include those not present in the baseline.
 pub fn filter_new_health_findings(
-    mut findings: Vec<crate::health_types::ComplexityViolation>,
+    mut findings: Vec<fallow_output::ComplexityViolation>,
     baseline: &HealthBaselineData,
     root: &Path,
-) -> Vec<crate::health_types::ComplexityViolation> {
+) -> Vec<fallow_output::ComplexityViolation> {
     if !baseline.finding_counts.is_empty() {
         let current_counts = health_finding_counts(&findings, root);
         let overflow_categories =
@@ -1975,10 +1971,10 @@ pub fn filter_new_health_findings(
 }
 
 pub fn filter_new_runtime_coverage_findings(
-    mut findings: Vec<crate::health_types::RuntimeCoverageFinding>,
+    mut findings: Vec<fallow_output::RuntimeCoverageFinding>,
     baseline: &HealthBaselineData,
     root: &Path,
-) -> Vec<crate::health_types::RuntimeCoverageFinding> {
+) -> Vec<fallow_output::RuntimeCoverageFinding> {
     let baseline_keys: FxHashSet<&str> = baseline
         .runtime_coverage_findings
         .iter()
@@ -2004,10 +2000,10 @@ pub fn filter_new_runtime_coverage_findings(
 
 /// Filter refactoring targets to only include those not present in the baseline.
 pub fn filter_new_health_targets(
-    mut targets: Vec<crate::health_types::RefactoringTarget>,
+    mut targets: Vec<fallow_output::RefactoringTarget>,
     baseline: &HealthBaselineData,
     root: &Path,
-) -> Vec<crate::health_types::RefactoringTarget> {
+) -> Vec<fallow_output::RefactoringTarget> {
     let baseline_keys: FxHashSet<&str> = baseline.target_keys.iter().map(String::as_str).collect();
     targets.retain(|t| {
         let key = target_baseline_key(t, root);
@@ -2609,13 +2605,13 @@ mod tests {
         root: &Path,
         name: &str,
         line: u32,
-    ) -> crate::health_types::ComplexityViolation {
+    ) -> fallow_output::ComplexityViolation {
         make_health_finding_with(
             root,
             name,
             line,
-            crate::health_types::ExceededThreshold::Both,
-            crate::health_types::FindingSeverity::High,
+            fallow_output::ExceededThreshold::Both,
+            fallow_output::FindingSeverity::High,
         )
     }
 
@@ -2623,10 +2619,10 @@ mod tests {
         root: &Path,
         name: &str,
         line: u32,
-        exceeded: crate::health_types::ExceededThreshold,
-        severity: crate::health_types::FindingSeverity,
-    ) -> crate::health_types::ComplexityViolation {
-        crate::health_types::ComplexityViolation {
+        exceeded: fallow_output::ExceededThreshold,
+        severity: fallow_output::FindingSeverity,
+    ) -> fallow_output::ComplexityViolation {
+        fallow_output::ComplexityViolation {
             path: root.join("src/utils.ts"),
             name: name.to_string(),
             line,
@@ -2746,8 +2742,8 @@ mod tests {
                 &root,
                 "parseExpression",
                 42,
-                crate::health_types::ExceededThreshold::Crap,
-                crate::health_types::FindingSeverity::High,
+                fallow_output::ExceededThreshold::Crap,
+                fallow_output::FindingSeverity::High,
             )],
             &[],
             &[],
@@ -2759,8 +2755,8 @@ mod tests {
                     &root,
                     "parseExpression",
                     43,
-                    crate::health_types::ExceededThreshold::Crap,
-                    crate::health_types::FindingSeverity::High,
+                    fallow_output::ExceededThreshold::Crap,
+                    fallow_output::FindingSeverity::High,
                 ),
                 make_health_finding(&root, "newComplexityOnlyFunction", 100),
             ],
@@ -2779,8 +2775,8 @@ mod tests {
                 &root,
                 "parseExpression",
                 42,
-                crate::health_types::ExceededThreshold::Both,
-                crate::health_types::FindingSeverity::Critical,
+                fallow_output::ExceededThreshold::Both,
+                fallow_output::FindingSeverity::Critical,
             )],
             &[],
             &[],
@@ -2791,8 +2787,8 @@ mod tests {
                 &root,
                 "parseExpression",
                 42,
-                crate::health_types::ExceededThreshold::Both,
-                crate::health_types::FindingSeverity::High,
+                fallow_output::ExceededThreshold::Both,
+                fallow_output::FindingSeverity::High,
             )],
             &baseline,
             &root,
@@ -2808,8 +2804,8 @@ mod tests {
                 &root,
                 "parseExpression",
                 42,
-                crate::health_types::ExceededThreshold::Both,
-                crate::health_types::FindingSeverity::High,
+                fallow_output::ExceededThreshold::Both,
+                fallow_output::FindingSeverity::High,
             )],
             &[],
             &[],
@@ -2820,8 +2816,8 @@ mod tests {
                 &root,
                 "parseExpression",
                 42,
-                crate::health_types::ExceededThreshold::Both,
-                crate::health_types::FindingSeverity::Critical,
+                fallow_output::ExceededThreshold::Both,
+                fallow_output::FindingSeverity::Critical,
             )],
             &baseline,
             &root,
@@ -2830,7 +2826,7 @@ mod tests {
         assert_eq!(filtered[0].name, "parseExpression");
         assert!(matches!(
             filtered[0].severity,
-            crate::health_types::FindingSeverity::Critical
+            fallow_output::FindingSeverity::Critical
         ));
     }
 
@@ -3199,25 +3195,25 @@ mod tests {
     fn health_targets_baseline_filters_known() {
         let root = PathBuf::from("/project");
         let targets = vec![
-            crate::health_types::RefactoringTarget {
+            fallow_output::RefactoringTarget {
                 path: root.join("src/complex.ts"),
                 priority: 80.0,
                 efficiency: 40.0,
                 recommendation: "Split file".to_string(),
-                category: crate::health_types::RecommendationCategory::SplitHighImpact,
-                effort: crate::health_types::EffortEstimate::Medium,
-                confidence: crate::health_types::Confidence::Medium,
+                category: fallow_output::RecommendationCategory::SplitHighImpact,
+                effort: fallow_output::EffortEstimate::Medium,
+                confidence: fallow_output::Confidence::Medium,
                 factors: vec![],
                 evidence: None,
             },
-            crate::health_types::RefactoringTarget {
+            fallow_output::RefactoringTarget {
                 path: root.join("src/new-issue.ts"),
                 priority: 60.0,
                 efficiency: 30.0,
                 recommendation: "Extract function".to_string(),
-                category: crate::health_types::RecommendationCategory::ExtractComplexFunctions,
-                effort: crate::health_types::EffortEstimate::Low,
-                confidence: crate::health_types::Confidence::High,
+                category: fallow_output::RecommendationCategory::ExtractComplexFunctions,
+                effort: fallow_output::EffortEstimate::Low,
+                confidence: fallow_output::Confidence::High,
                 factors: vec![],
                 evidence: None,
             },
@@ -3478,18 +3474,18 @@ mod tests {
         stable_id: Option<&str>,
         line: u32,
         source_hash: Option<&str>,
-    ) -> crate::health_types::RuntimeCoverageFinding {
-        crate::health_types::RuntimeCoverageFinding {
+    ) -> fallow_output::RuntimeCoverageFinding {
+        fallow_output::RuntimeCoverageFinding {
             id: id.to_owned(),
             stable_id: stable_id.map(str::to_owned),
             source_hash: source_hash.map(str::to_owned),
             path: PathBuf::from("src/a.ts"),
             function: "alpha".to_owned(),
             line,
-            verdict: crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
+            verdict: fallow_output::RuntimeCoverageVerdict::ReviewRequired,
             invocations: Some(0),
-            confidence: crate::health_types::RuntimeCoverageConfidence::Medium,
-            evidence: crate::health_types::RuntimeCoverageEvidence {
+            confidence: fallow_output::RuntimeCoverageConfidence::Medium,
+            evidence: fallow_output::RuntimeCoverageEvidence {
                 static_status: "used".to_owned(),
                 test_coverage: "not_covered".to_owned(),
                 v8_tracking: "tracked".to_owned(),

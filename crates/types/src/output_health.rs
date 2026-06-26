@@ -5,7 +5,7 @@
 //! the CLI crate, including `actions[]` arrays and refactoring target
 //! evidence. The JSON emission path constructs action entries through typed
 //! wrappers (for example `UntestedFileFinding` in
-//! `crates/cli/src/health_types/coverage.rs`) and serializes them via serde;
+//! `crates/output/src/health_coverage_gaps.rs`) and serializes them via serde;
 //! the schemars derive renders matching shapes in `docs/output-schema.json`.
 //!
 //! Whenever a new action variant or optional field is added, update the
@@ -101,7 +101,7 @@ pub struct CloneSiblingEvidence {
 /// `comment` plus `placement`, and the coverage-leaning actions
 /// (`add-tests`, `increase-coverage`) carry only `note`.
 ///
-/// [`ComplexityViolation`]: ../../fallow-cli/src/health_types/scores.rs
+/// [`ComplexityViolation`]: ../../fallow-output/src/health_scores.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthFindingAction {
@@ -210,7 +210,7 @@ pub enum HealthFindingActionType {
 /// `ownership-drift`) are appended only when `--ownership` is active AND
 /// the corresponding signal fires for the hotspot.
 ///
-/// [`HotspotEntry`]: ../../fallow-cli/src/health_types/scores.rs
+/// [`HotspotEntry`]: ../../fallow-output/src/health_scores.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HotspotAction {
@@ -286,7 +286,7 @@ pub enum HotspotActionHeuristic {
 /// the target's `evidence.complex_functions` back to the matching
 /// `ComplexityViolation` and read placement from THAT action instead.
 ///
-/// [`RefactoringTarget`]: ../../fallow-cli/src/health_types/targets.rs
+/// [`RefactoringTarget`]: ../../fallow-output/src/health_targets.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RefactoringTargetAction {
@@ -302,7 +302,7 @@ pub struct RefactoringTargetAction {
     pub description: String,
     /// Recommendation category for `apply-refactoring` actions. Mirrors
     /// the parent target's
-    /// [`category`](../../fallow-cli/src/health_types/targets.rs.html)
+    /// [`category`](../../fallow-output/src/health_targets.rs.html)
     /// field so consumers can route on the action alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
@@ -332,7 +332,7 @@ pub enum RefactoringTargetActionType {
 /// struct shape; the field that is populated (`note` for `add-tests`,
 /// `comment` for `suppress-file`) depends on the `kind`.
 ///
-/// [`UntestedFile`]: ../../fallow-cli/src/health_types/coverage.rs
+/// [`UntestedFile`]: ../../fallow-output/src/health_coverage_gaps.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedFileAction {
@@ -377,7 +377,7 @@ pub enum UntestedFileActionType {
 /// `add-test-import` reflects that a test-reachable reference chain, not
 /// just any test coverage, is what closes the gap.
 ///
-/// [`UntestedExport`]: ../../fallow-cli/src/health_types/coverage.rs
+/// [`UntestedExport`]: ../../fallow-output/src/health_coverage_gaps.rs
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedExportAction {

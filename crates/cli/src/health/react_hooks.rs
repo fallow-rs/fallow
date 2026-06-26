@@ -15,8 +15,8 @@
 //! severity is introduced; the profile rides the existing complexity finding
 //! alongside `react_hook_count` / `react_prop_count`.
 
-use crate::health_types::ReactHookProfile;
 use fallow_core::extract::ModuleInfo;
+use fallow_output::ReactHookProfile;
 use fallow_types::extract::{FunctionComplexity, HookUse, HookUseKind};
 
 /// Accumulator mirroring [`ReactHookProfile`] but always present per frame; the

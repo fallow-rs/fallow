@@ -28,15 +28,15 @@ use url::Url;
 
 use crate::error::emit_error;
 use crate::health::scoring::IstanbulCoverage;
-use crate::health_types::{
+use crate::license::verifying_key;
+use fallow_engine::RuntimeCoverageOptions;
+use fallow_output::{
     RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
     RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
     RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
     RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
     RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
-use crate::license::verifying_key;
-use fallow_engine::RuntimeCoverageOptions;
 
 /// Ed25519 public key used to verify the fallow-cov sidecar binary at every
 /// spawn. Intentionally SEPARATE from the license-signing pubkey at
@@ -1965,22 +1965,20 @@ fn map_runtime_hot_paths(entries: Vec<ProtocolHotPath>) -> Vec<RuntimeCoverageHo
 
 fn map_runtime_blast_radius(
     entries: Vec<ProtocolBlastRadiusEntry>,
-) -> Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry> {
+) -> Vec<fallow_output::RuntimeCoverageBlastRadiusEntry> {
     let mut blast_radius = entries
         .into_iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
-                id: entry.id,
-                stable_id: entry.identity.map(|identity| identity.stable_id),
-                file: PathBuf::from(entry.file),
-                function: entry.function,
-                line: entry.line,
-                caller_count: entry.caller_count,
-                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
-                deploys_touched: entry.deploys_touched,
-                risk_band: map_risk_band(entry.risk_band),
-            },
-        )
+        .map(|entry| fallow_output::RuntimeCoverageBlastRadiusEntry {
+            id: entry.id,
+            stable_id: entry.identity.map(|identity| identity.stable_id),
+            file: PathBuf::from(entry.file),
+            function: entry.function,
+            line: entry.line,
+            caller_count: entry.caller_count,
+            caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
+            deploys_touched: entry.deploys_touched,
+            risk_band: map_risk_band(entry.risk_band),
+        })
         .collect::<Vec<_>>();
     blast_radius.sort_by(|left, right| {
         risk_band_rank(right.risk_band)
@@ -1999,23 +1997,21 @@ fn map_runtime_blast_radius(
 
 fn map_runtime_importance(
     entries: Vec<ProtocolImportanceEntry>,
-) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+) -> Vec<fallow_output::RuntimeCoverageImportanceEntry> {
     let mut importance = entries
         .into_iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
-                id: entry.id,
-                stable_id: entry.identity.map(|identity| identity.stable_id),
-                file: PathBuf::from(entry.file),
-                function: entry.function,
-                line: entry.line,
-                invocations: entry.invocations,
-                cyclomatic: entry.cyclomatic,
-                owner_count: entry.owner_count,
-                importance_score: entry.importance_score,
-                reason: entry.reason,
-            },
-        )
+        .map(|entry| fallow_output::RuntimeCoverageImportanceEntry {
+            id: entry.id,
+            stable_id: entry.identity.map(|identity| identity.stable_id),
+            file: PathBuf::from(entry.file),
+            function: entry.function,
+            line: entry.line,
+            invocations: entry.invocations,
+            cyclomatic: entry.cyclomatic,
+            owner_count: entry.owner_count,
+            importance_score: entry.importance_score,
+            reason: entry.reason,
+        })
         .collect::<Vec<_>>();
     importance.sort_by(|left, right| {
         right
@@ -2105,10 +2101,8 @@ fn map_watermark(watermark: &Watermark) -> RuntimeCoverageWatermark {
     }
 }
 
-fn map_capture_quality(
-    quality: &CaptureQuality,
-) -> crate::health_types::RuntimeCoverageCaptureQuality {
-    crate::health_types::RuntimeCoverageCaptureQuality {
+fn map_capture_quality(quality: &CaptureQuality) -> fallow_output::RuntimeCoverageCaptureQuality {
+    fallow_output::RuntimeCoverageCaptureQuality {
         window_seconds: quality.window_seconds,
         instances_observed: quality.instances_observed,
         lazy_parse_warning: quality.lazy_parse_warning,
@@ -3039,7 +3033,7 @@ mod tests {
         assert_eq!(report.findings[0].line, 8);
         assert_eq!(
             report.findings[0].verdict,
-            crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
+            fallow_output::RuntimeCoverageVerdict::ReviewRequired,
         );
         assert_eq!(report.findings[0].evidence.static_status, "used");
         assert_eq!(report.hot_paths[0].id, "fallow:hot:def67890");

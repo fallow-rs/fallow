@@ -125,7 +125,6 @@ pub mod explain;
 )]
 mod health;
 /// Health / complexity analysis report types.
-pub mod health_types;
 #[allow(
     dead_code,
     unused_imports,

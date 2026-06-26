@@ -60,7 +60,7 @@ impl<'a> RuntimeCoverageFilterContext<'a> {
 }
 
 pub(super) fn apply_runtime_coverage_filters(
-    report: &mut crate::health_types::RuntimeCoverageReport,
+    report: &mut fallow_output::RuntimeCoverageReport,
     ctx: &RuntimeCoverageFilterContext<'_>,
 ) {
     if let Some(baseline) = ctx.baseline {
@@ -82,7 +82,7 @@ pub(super) fn apply_runtime_coverage_filters(
 }
 
 fn retain_hot_paths_in_change_scope(
-    report: &mut crate::health_types::RuntimeCoverageReport,
+    report: &mut fallow_output::RuntimeCoverageReport,
     ctx: &RuntimeCoverageFilterContext<'_>,
 ) -> bool {
     if !ctx.has_change_scope() {
@@ -132,24 +132,24 @@ pub(super) fn relative_to_root(path: &Path, root: &Path) -> Option<String> {
 }
 
 fn refresh_runtime_coverage_verdict(
-    report: &mut crate::health_types::RuntimeCoverageReport,
+    report: &mut fallow_output::RuntimeCoverageReport,
     pr_context: bool,
 ) {
     let has_cold_signal = report.findings.iter().any(|finding| {
         matches!(
             finding.verdict,
-            crate::health_types::RuntimeCoverageVerdict::SafeToDelete
-                | crate::health_types::RuntimeCoverageVerdict::ReviewRequired
-                | crate::health_types::RuntimeCoverageVerdict::LowTraffic
+            fallow_output::RuntimeCoverageVerdict::SafeToDelete
+                | fallow_output::RuntimeCoverageVerdict::ReviewRequired
+                | fallow_output::RuntimeCoverageVerdict::LowTraffic
         )
     });
     let has_changed_hot_path = pr_context && !report.hot_paths.is_empty();
     let has_license_grace = matches!(
         report.verdict,
-        crate::health_types::RuntimeCoverageReportVerdict::LicenseExpiredGrace
+        fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace
     ) || matches!(
         report.watermark,
-        Some(crate::health_types::RuntimeCoverageWatermark::LicenseExpiredGrace)
+        Some(fallow_output::RuntimeCoverageWatermark::LicenseExpiredGrace)
     );
 
     report.signals =
@@ -167,16 +167,16 @@ fn build_runtime_coverage_signals(
     has_license_grace: bool,
     has_cold_signal: bool,
     has_changed_hot_path: bool,
-) -> Vec<crate::health_types::RuntimeCoverageSignal> {
+) -> Vec<fallow_output::RuntimeCoverageSignal> {
     let mut signals = Vec::new();
     if has_license_grace {
-        signals.push(crate::health_types::RuntimeCoverageSignal::LicenseExpiredGrace);
+        signals.push(fallow_output::RuntimeCoverageSignal::LicenseExpiredGrace);
     }
     if has_cold_signal {
-        signals.push(crate::health_types::RuntimeCoverageSignal::ColdCodeDetected);
+        signals.push(fallow_output::RuntimeCoverageSignal::ColdCodeDetected);
     }
     if has_changed_hot_path {
-        signals.push(crate::health_types::RuntimeCoverageSignal::HotPathTouched);
+        signals.push(fallow_output::RuntimeCoverageSignal::HotPathTouched);
     }
     signals
 }
@@ -186,24 +186,24 @@ fn pick_primary_verdict(
     has_cold_signal: bool,
     has_changed_hot_path: bool,
     pr_context: bool,
-) -> crate::health_types::RuntimeCoverageReportVerdict {
+) -> fallow_output::RuntimeCoverageReportVerdict {
     if has_license_grace {
-        return crate::health_types::RuntimeCoverageReportVerdict::LicenseExpiredGrace;
+        return fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace;
     }
     if pr_context {
         if has_changed_hot_path {
-            return crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched;
+            return fallow_output::RuntimeCoverageReportVerdict::HotPathTouched;
         }
         if has_cold_signal {
-            return crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected;
+            return fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected;
         }
     } else {
         if has_cold_signal {
-            return crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected;
+            return fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected;
         }
         if has_changed_hot_path {
-            return crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched;
+            return fallow_output::RuntimeCoverageReportVerdict::HotPathTouched;
         }
     }
-    crate::health_types::RuntimeCoverageReportVerdict::Clean
+    fallow_output::RuntimeCoverageReportVerdict::Clean
 }

@@ -466,7 +466,7 @@ pub const DEFAULT_CRAP_CRITICAL: f64 = 100.0;
 /// the finding was triggered by complexity thresholds only).
 #[expect(
     clippy::too_many_arguments,
-    reason = "public library API (re-exported via crate::health_types for napi/embedders); the metric values and their high/critical threshold pairs are a stable positional contract that bundling would break"
+    reason = "public library API for napi/embedders; the metric values and their high/critical threshold pairs are a stable positional contract that bundling would break"
 )]
 pub fn compute_finding_severity(
     cognitive: u16,

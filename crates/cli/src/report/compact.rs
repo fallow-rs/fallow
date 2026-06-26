@@ -541,7 +541,7 @@ pub(super) fn print_grouped_compact(groups: &[ResultGroup], root: &Path) {
     }
 }
 
-pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, root: &Path) {
+pub(super) fn print_health_compact(report: &fallow_output::HealthReport, root: &Path) {
     print_health_score_compact(report);
     print_vital_signs_compact(report);
     print_health_findings_compact(&report.findings, root);
@@ -555,14 +555,14 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
 }
 
 fn print_threshold_overrides_compact(
-    entries: &[crate::health_types::ThresholdOverrideState],
+    entries: &[fallow_output::ThresholdOverrideState],
     root: &Path,
 ) {
     for entry in entries {
         let status = match entry.status {
-            crate::health_types::ThresholdOverrideStatus::Active => "active",
-            crate::health_types::ThresholdOverrideStatus::Stale => "stale",
-            crate::health_types::ThresholdOverrideStatus::NoMatch => "no_match",
+            fallow_output::ThresholdOverrideStatus::Active => "active",
+            fallow_output::ThresholdOverrideStatus::Stale => "stale",
+            fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
         };
         let target = entry.path.as_ref().map_or_else(
             || "no-match".to_string(),
@@ -593,13 +593,13 @@ fn print_threshold_overrides_compact(
     }
 }
 
-fn print_health_score_compact(report: &crate::health_types::HealthReport) {
+fn print_health_score_compact(report: &fallow_output::HealthReport) {
     if let Some(ref hs) = report.health_score {
         outln!("health-score:{:.1}:{}", hs.score, hs.grade);
     }
 }
 
-fn print_vital_signs_compact(report: &crate::health_types::HealthReport) {
+fn print_vital_signs_compact(report: &fallow_output::HealthReport) {
     if let Some(ref vs) = report.vital_signs {
         let mut parts = Vec::new();
         if vs.total_loc > 0 {
@@ -633,13 +633,13 @@ fn health_compact_path(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
 }
 
-fn print_health_findings_compact(findings: &[crate::health_types::HealthFinding], root: &Path) {
+fn print_health_findings_compact(findings: &[fallow_output::HealthFinding], root: &Path) {
     for finding in findings {
         let relative = health_compact_path(&finding.path, root);
         let severity = match finding.severity {
-            crate::health_types::FindingSeverity::Critical => "critical",
-            crate::health_types::FindingSeverity::High => "high",
-            crate::health_types::FindingSeverity::Moderate => "moderate",
+            fallow_output::FindingSeverity::Critical => "critical",
+            fallow_output::FindingSeverity::High => "high",
+            fallow_output::FindingSeverity::Moderate => "moderate",
         };
         let crap_suffix = match finding.crap {
             Some(crap) => {
@@ -664,7 +664,7 @@ fn print_health_findings_compact(findings: &[crate::health_types::HealthFinding]
     }
 }
 
-fn print_file_scores_compact(scores: &[crate::health_types::FileHealthScore], root: &Path) {
+fn print_file_scores_compact(scores: &[fallow_output::FileHealthScore], root: &Path) {
     for score in scores {
         let relative = health_compact_path(&score.path, root);
         outln!(
@@ -681,7 +681,7 @@ fn print_file_scores_compact(scores: &[crate::health_types::FileHealthScore], ro
     }
 }
 
-fn print_coverage_gaps_compact(report: &crate::health_types::HealthReport, root: &Path) {
+fn print_coverage_gaps_compact(report: &fallow_output::HealthReport, root: &Path) {
     if let Some(ref gaps) = report.coverage_gaps {
         outln!(
             "coverage-gap-summary:runtime_files={},covered_files={},file_coverage_pct={:.1},untested_files={},untested_exports={}",
@@ -711,7 +711,7 @@ fn print_coverage_gaps_compact(report: &crate::health_types::HealthReport, root:
     }
 }
 
-fn print_runtime_sections_compact(report: &crate::health_types::HealthReport, root: &Path) {
+fn print_runtime_sections_compact(report: &fallow_output::HealthReport, root: &Path) {
     if let Some(ref production) = report.runtime_coverage {
         for line in build_runtime_coverage_compact_lines(production, root) {
             outln!("{line}");
@@ -724,7 +724,7 @@ fn print_runtime_sections_compact(report: &crate::health_types::HealthReport, ro
     }
 }
 
-fn compact_ownership_suffix(ownership: Option<&crate::health_types::OwnershipMetrics>) -> String {
+fn compact_ownership_suffix(ownership: Option<&fallow_output::OwnershipMetrics>) -> String {
     ownership.map_or_else(String::new, |o| {
         let mut parts = vec![
             format!("bus={}", o.bus_factor),
@@ -739,10 +739,10 @@ fn compact_ownership_suffix(ownership: Option<&crate::health_types::OwnershipMet
             parts.push(format!("unowned={unowned}"));
         }
         let state = match o.ownership_state {
-            crate::health_types::OwnershipState::Active => "active",
-            crate::health_types::OwnershipState::Unowned => "unowned",
-            crate::health_types::OwnershipState::DeclaredInactive => "declared_inactive",
-            crate::health_types::OwnershipState::Drifting => "drifting",
+            fallow_output::OwnershipState::Active => "active",
+            fallow_output::OwnershipState::Unowned => "unowned",
+            fallow_output::OwnershipState::DeclaredInactive => "declared_inactive",
+            fallow_output::OwnershipState::Drifting => "drifting",
         };
         parts.push(format!("ownership_state={state}"));
         if o.drift {
@@ -752,7 +752,7 @@ fn compact_ownership_suffix(ownership: Option<&crate::health_types::OwnershipMet
     })
 }
 
-fn print_hotspots_compact(hotspots: &[crate::health_types::HotspotFinding], root: &Path) {
+fn print_hotspots_compact(hotspots: &[fallow_output::HotspotFinding], root: &Path) {
     for entry in hotspots {
         let relative = health_compact_path(&entry.path, root);
         let ownership_suffix = compact_ownership_suffix(entry.ownership.as_ref());
@@ -770,7 +770,7 @@ fn print_hotspots_compact(hotspots: &[crate::health_types::HotspotFinding], root
     }
 }
 
-fn print_health_trend_compact(report: &crate::health_types::HealthReport) {
+fn print_health_trend_compact(report: &fallow_output::HealthReport) {
     if let Some(ref trend) = report.health_trend {
         outln!(
             "trend:overall:direction={}",
@@ -790,7 +790,7 @@ fn print_health_trend_compact(report: &crate::health_types::HealthReport) {
 }
 
 fn print_refactoring_targets_compact(
-    targets: &[crate::health_types::RefactoringTargetFinding],
+    targets: &[fallow_output::RefactoringTargetFinding],
     root: &Path,
 ) {
     for target in targets {
@@ -812,7 +812,7 @@ fn print_refactoring_targets_compact(
 }
 
 fn build_runtime_coverage_compact_lines(
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
     root: &Path,
 ) -> Vec<String> {
     let mut lines = vec![format!(
@@ -853,7 +853,7 @@ fn build_runtime_coverage_compact_lines(
 }
 
 fn build_coverage_intelligence_compact_lines(
-    intelligence: &crate::health_types::CoverageIntelligenceReport,
+    intelligence: &fallow_output::CoverageIntelligenceReport,
     root: &Path,
 ) -> Vec<String> {
     let mut lines = vec![format!(
@@ -913,15 +913,15 @@ pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::health_types::{
+    use crate::report::test_helpers::sample_results;
+    use fallow_core::extract::MemberKind;
+    use fallow_core::results::*;
+    use fallow_output::{
         RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
         RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport,
         RuntimeCoverageReportVerdict, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
         RuntimeCoverageVerdict,
     };
-    use crate::report::test_helpers::sample_results;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
     use std::path::PathBuf;
 
     #[test]
@@ -970,7 +970,7 @@ mod tests {
     #[test]
     fn compact_health_includes_runtime_coverage_lines() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
@@ -1050,7 +1050,7 @@ mod tests {
 
     #[test]
     fn compact_health_includes_coverage_intelligence_lines() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceAction, CoverageIntelligenceConfidence,
             CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
             CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,

@@ -12,7 +12,7 @@ use fallow_output::{
 use super::ci::{fingerprint, severity};
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, normalize_uri, relative_path};
-use crate::health_types::{
+use fallow_output::{
     ComplexityViolation, CoverageIntelligenceFinding, ExceededThreshold, HealthReport,
     RuntimeCoverageFinding, UntestedExportFinding, UntestedFileFinding,
 };
@@ -81,19 +81,19 @@ fn cc_issue(issue: CcIssue<'_>) -> CodeClimateIssue {
 }
 
 fn coverage_intelligence_check_name(
-    recommendation: crate::health_types::CoverageIntelligenceRecommendation,
+    recommendation: fallow_output::CoverageIntelligenceRecommendation,
 ) -> &'static str {
     match recommendation {
-        crate::health_types::CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
+        fallow_output::CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
             "fallow/coverage-intelligence-risky-change"
         }
-        crate::health_types::CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
+        fallow_output::CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
             "fallow/coverage-intelligence-delete"
         }
-        crate::health_types::CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
+        fallow_output::CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
             "fallow/coverage-intelligence-review"
         }
-        crate::health_types::CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
+        fallow_output::CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
             "fallow/coverage-intelligence-refactor"
         }
     }
@@ -274,59 +274,53 @@ const fn complexity_check_name(finding: &ComplexityViolation) -> &'static str {
     }
 }
 
-const fn health_finding_severity(
-    severity: crate::health_types::FindingSeverity,
-) -> CodeClimateSeverity {
+const fn health_finding_severity(severity: fallow_output::FindingSeverity) -> CodeClimateSeverity {
     match severity {
-        crate::health_types::FindingSeverity::Critical => CodeClimateSeverity::Critical,
-        crate::health_types::FindingSeverity::High => CodeClimateSeverity::Major,
-        crate::health_types::FindingSeverity::Moderate => CodeClimateSeverity::Minor,
+        fallow_output::FindingSeverity::Critical => CodeClimateSeverity::Critical,
+        fallow_output::FindingSeverity::High => CodeClimateSeverity::Major,
+        fallow_output::FindingSeverity::Moderate => CodeClimateSeverity::Minor,
     }
 }
 
 const fn runtime_coverage_check_name(
-    verdict: crate::health_types::RuntimeCoverageVerdict,
+    verdict: fallow_output::RuntimeCoverageVerdict,
 ) -> &'static str {
     match verdict {
-        crate::health_types::RuntimeCoverageVerdict::SafeToDelete => {
-            "fallow/runtime-safe-to-delete"
-        }
-        crate::health_types::RuntimeCoverageVerdict::ReviewRequired => {
-            "fallow/runtime-review-required"
-        }
-        crate::health_types::RuntimeCoverageVerdict::LowTraffic => "fallow/runtime-low-traffic",
-        crate::health_types::RuntimeCoverageVerdict::CoverageUnavailable => {
+        fallow_output::RuntimeCoverageVerdict::SafeToDelete => "fallow/runtime-safe-to-delete",
+        fallow_output::RuntimeCoverageVerdict::ReviewRequired => "fallow/runtime-review-required",
+        fallow_output::RuntimeCoverageVerdict::LowTraffic => "fallow/runtime-low-traffic",
+        fallow_output::RuntimeCoverageVerdict::CoverageUnavailable => {
             "fallow/runtime-coverage-unavailable"
         }
-        crate::health_types::RuntimeCoverageVerdict::Active
-        | crate::health_types::RuntimeCoverageVerdict::Unknown => "fallow/runtime-coverage",
+        fallow_output::RuntimeCoverageVerdict::Active
+        | fallow_output::RuntimeCoverageVerdict::Unknown => "fallow/runtime-coverage",
     }
 }
 
 const fn runtime_coverage_severity(
-    verdict: crate::health_types::RuntimeCoverageVerdict,
+    verdict: fallow_output::RuntimeCoverageVerdict,
 ) -> CodeClimateSeverity {
     match verdict {
-        crate::health_types::RuntimeCoverageVerdict::SafeToDelete => CodeClimateSeverity::Critical,
-        crate::health_types::RuntimeCoverageVerdict::ReviewRequired => CodeClimateSeverity::Major,
+        fallow_output::RuntimeCoverageVerdict::SafeToDelete => CodeClimateSeverity::Critical,
+        fallow_output::RuntimeCoverageVerdict::ReviewRequired => CodeClimateSeverity::Major,
         _ => CodeClimateSeverity::Minor,
     }
 }
 
 const fn coverage_intelligence_severity(
-    verdict: crate::health_types::CoverageIntelligenceVerdict,
+    verdict: fallow_output::CoverageIntelligenceVerdict,
 ) -> Option<CodeClimateSeverity> {
     match verdict {
-        crate::health_types::CoverageIntelligenceVerdict::RiskyChangeDetected
-        | crate::health_types::CoverageIntelligenceVerdict::HighConfidenceDelete => {
+        fallow_output::CoverageIntelligenceVerdict::RiskyChangeDetected
+        | fallow_output::CoverageIntelligenceVerdict::HighConfidenceDelete => {
             Some(CodeClimateSeverity::Major)
         }
-        crate::health_types::CoverageIntelligenceVerdict::ReviewRequired
-        | crate::health_types::CoverageIntelligenceVerdict::RefactorCarefully => {
+        fallow_output::CoverageIntelligenceVerdict::ReviewRequired
+        | fallow_output::CoverageIntelligenceVerdict::RefactorCarefully => {
             Some(CodeClimateSeverity::Minor)
         }
-        crate::health_types::CoverageIntelligenceVerdict::Clean
-        | crate::health_types::CoverageIntelligenceVerdict::Unknown => None,
+        fallow_output::CoverageIntelligenceVerdict::Clean
+        | fallow_output::CoverageIntelligenceVerdict::Unknown => None,
     }
 }
 
@@ -2689,7 +2683,7 @@ mod tests {
 
     #[test]
     fn health_codeclimate_includes_coverage_gaps() {
-        use crate::health_types::*;
+        use fallow_output::*;
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
@@ -2744,7 +2738,7 @@ mod tests {
 
     #[test]
     fn health_codeclimate_includes_coverage_intelligence_issue() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceAction, CoverageIntelligenceConfidence,
             CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
             CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
@@ -2811,7 +2805,7 @@ mod tests {
 
     #[test]
     fn health_codeclimate_skips_summary_only_coverage_intelligence() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceReport, CoverageIntelligenceSchemaVersion,
             CoverageIntelligenceSummary, CoverageIntelligenceVerdict, HealthReport,
         };
@@ -2836,9 +2830,7 @@ mod tests {
 
     #[test]
     fn health_codeclimate_crap_only_uses_crap_check_name() {
-        use crate::health_types::{
-            ComplexityViolation, FindingSeverity, HealthReport, HealthSummary,
-        };
+        use fallow_output::{ComplexityViolation, FindingSeverity, HealthReport, HealthSummary};
         let root = PathBuf::from("/project");
         let report = HealthReport {
             findings: vec![
@@ -2855,7 +2847,7 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Crap,
+                    exceeded: fallow_output::ExceededThreshold::Crap,
                     severity: FindingSeverity::High,
                     crap: Some(60.0),
                     coverage_pct: Some(25.0),
@@ -2891,7 +2883,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_check_name_review_before_changing() {
-        use crate::health_types::CoverageIntelligenceRecommendation;
+        use fallow_output::CoverageIntelligenceRecommendation;
         assert_eq!(
             coverage_intelligence_check_name(
                 CoverageIntelligenceRecommendation::ReviewBeforeChanging
@@ -2902,7 +2894,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_check_name_refactor_carefully() {
-        use crate::health_types::CoverageIntelligenceRecommendation;
+        use fallow_output::CoverageIntelligenceRecommendation;
         assert_eq!(
             coverage_intelligence_check_name(
                 CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior
@@ -2917,9 +2909,9 @@ mod tests {
 
     #[test]
     fn complexity_description_both_threshold_exceeded() {
-        use crate::health_types::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+        use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
                 ComplexityViolation {
                     path: root.join("src/fn.ts"),
@@ -2960,9 +2952,9 @@ mod tests {
 
     #[test]
     fn complexity_description_cyclomatic_only() {
-        use crate::health_types::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+        use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
                 ComplexityViolation {
                     path: root.join("src/fn.ts"),
@@ -3006,9 +2998,9 @@ mod tests {
 
     #[test]
     fn complexity_description_cognitive_only() {
-        use crate::health_types::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+        use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
                 ComplexityViolation {
                     path: root.join("src/fn.ts"),
@@ -3049,9 +3041,9 @@ mod tests {
 
     #[test]
     fn complexity_description_all_threshold_crap_no_coverage() {
-        use crate::health_types::{ComplexityViolation, ExceededThreshold, FindingSeverity};
+        use fallow_output::{ComplexityViolation, ExceededThreshold, FindingSeverity};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
                 ComplexityViolation {
                     path: root.join("src/fn.ts"),
@@ -3099,7 +3091,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_issue_none_identity_uses_code_label() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceAction, CoverageIntelligenceConfidence,
             CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
             CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
@@ -3107,7 +3099,7 @@ mod tests {
             CoverageIntelligenceSummary, CoverageIntelligenceVerdict,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             coverage_intelligence: Some(CoverageIntelligenceReport {
                 schema_version: CoverageIntelligenceSchemaVersion::V1,
                 verdict: CoverageIntelligenceVerdict::ReviewRequired,
@@ -3158,7 +3150,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_clean_verdict_emits_no_issue() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceAction, CoverageIntelligenceConfidence,
             CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
             CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
@@ -3166,7 +3158,7 @@ mod tests {
             CoverageIntelligenceSummary, CoverageIntelligenceVerdict,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             coverage_intelligence: Some(CoverageIntelligenceReport {
                 schema_version: CoverageIntelligenceSchemaVersion::V1,
                 verdict: CoverageIntelligenceVerdict::Clean,
@@ -3210,11 +3202,9 @@ mod tests {
 
     #[test]
     fn untested_file_singular_export_count() {
-        use crate::health_types::{
-            CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding,
-        };
+        use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             coverage_gaps: Some(CoverageGaps {
                 summary: CoverageGapSummary {
                     runtime_files: 1,
@@ -3247,11 +3237,9 @@ mod tests {
 
     #[test]
     fn untested_file_plural_export_count() {
-        use crate::health_types::{
-            CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding,
-        };
+        use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             coverage_gaps: Some(CoverageGaps {
                 summary: CoverageGapSummary {
                     runtime_files: 1,
@@ -3283,7 +3271,7 @@ mod tests {
 
     #[test]
     fn health_finding_severity_critical_maps_to_critical() {
-        use crate::health_types::FindingSeverity;
+        use fallow_output::FindingSeverity;
         assert_eq!(
             health_finding_severity(FindingSeverity::Critical),
             CodeClimateSeverity::Critical
@@ -3292,7 +3280,7 @@ mod tests {
 
     #[test]
     fn health_finding_severity_moderate_maps_to_minor() {
-        use crate::health_types::FindingSeverity;
+        use fallow_output::FindingSeverity;
         assert_eq!(
             health_finding_severity(FindingSeverity::Moderate),
             CodeClimateSeverity::Minor
@@ -3305,7 +3293,7 @@ mod tests {
 
     #[test]
     fn runtime_coverage_check_name_safe_to_delete() {
-        use crate::health_types::RuntimeCoverageVerdict;
+        use fallow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_check_name(RuntimeCoverageVerdict::SafeToDelete),
             "fallow/runtime-safe-to-delete"
@@ -3314,7 +3302,7 @@ mod tests {
 
     #[test]
     fn runtime_coverage_check_name_low_traffic() {
-        use crate::health_types::RuntimeCoverageVerdict;
+        use fallow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_check_name(RuntimeCoverageVerdict::LowTraffic),
             "fallow/runtime-low-traffic"
@@ -3323,7 +3311,7 @@ mod tests {
 
     #[test]
     fn runtime_coverage_check_name_coverage_unavailable() {
-        use crate::health_types::RuntimeCoverageVerdict;
+        use fallow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_check_name(RuntimeCoverageVerdict::CoverageUnavailable),
             "fallow/runtime-coverage-unavailable"
@@ -3332,7 +3320,7 @@ mod tests {
 
     #[test]
     fn runtime_coverage_check_name_active_and_unknown_use_generic() {
-        use crate::health_types::RuntimeCoverageVerdict;
+        use fallow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_check_name(RuntimeCoverageVerdict::Active),
             "fallow/runtime-coverage"
@@ -3349,7 +3337,7 @@ mod tests {
 
     #[test]
     fn runtime_coverage_severity_safe_to_delete_is_critical() {
-        use crate::health_types::RuntimeCoverageVerdict;
+        use fallow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_severity(RuntimeCoverageVerdict::SafeToDelete),
             CodeClimateSeverity::Critical
@@ -3358,7 +3346,7 @@ mod tests {
 
     #[test]
     fn runtime_coverage_severity_review_required_is_major() {
-        use crate::health_types::RuntimeCoverageVerdict;
+        use fallow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_severity(RuntimeCoverageVerdict::ReviewRequired),
             CodeClimateSeverity::Major
@@ -3367,7 +3355,7 @@ mod tests {
 
     #[test]
     fn runtime_coverage_severity_other_verdicts_are_minor() {
-        use crate::health_types::RuntimeCoverageVerdict;
+        use fallow_output::RuntimeCoverageVerdict;
         assert_eq!(
             runtime_coverage_severity(RuntimeCoverageVerdict::LowTraffic),
             CodeClimateSeverity::Minor
@@ -3384,7 +3372,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_severity_review_required_is_minor() {
-        use crate::health_types::CoverageIntelligenceVerdict;
+        use fallow_output::CoverageIntelligenceVerdict;
         assert_eq!(
             coverage_intelligence_severity(CoverageIntelligenceVerdict::ReviewRequired),
             Some(CodeClimateSeverity::Minor)
@@ -3393,7 +3381,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_severity_refactor_carefully_is_minor() {
-        use crate::health_types::CoverageIntelligenceVerdict;
+        use fallow_output::CoverageIntelligenceVerdict;
         assert_eq!(
             coverage_intelligence_severity(CoverageIntelligenceVerdict::RefactorCarefully),
             Some(CodeClimateSeverity::Minor)
@@ -3402,7 +3390,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_severity_clean_is_none() {
-        use crate::health_types::CoverageIntelligenceVerdict;
+        use fallow_output::CoverageIntelligenceVerdict;
         assert_eq!(
             coverage_intelligence_severity(CoverageIntelligenceVerdict::Clean),
             None
@@ -3411,7 +3399,7 @@ mod tests {
 
     #[test]
     fn coverage_intelligence_severity_unknown_is_none() {
-        use crate::health_types::CoverageIntelligenceVerdict;
+        use fallow_output::CoverageIntelligenceVerdict;
         assert_eq!(
             coverage_intelligence_severity(CoverageIntelligenceVerdict::Unknown),
             None
@@ -4111,13 +4099,13 @@ mod tests {
 
     #[test]
     fn health_codeclimate_runtime_safe_to_delete_maps_to_critical_severity() {
-        use crate::health_types::{
+        use fallow_output::{
             RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
             RuntimeCoverageFinding, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
             RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
@@ -4178,13 +4166,13 @@ mod tests {
 
     #[test]
     fn health_codeclimate_runtime_finding_with_none_invocations_shows_untracked() {
-        use crate::health_types::{
+        use fallow_output::{
             RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
             RuntimeCoverageFinding, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
             RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,

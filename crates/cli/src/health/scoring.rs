@@ -1,4 +1,4 @@
-use crate::health_types::{DirectCallerEvidence, DirectCallerSymbolEvidence, FileHealthScore};
+use fallow_output::{DirectCallerEvidence, DirectCallerSymbolEvidence, FileHealthScore};
 
 use super::coverage_gaps::compute_coverage_gaps;
 pub(super) use super::coverage_gaps::{CoverageGapData, build_coverage_summary};
@@ -292,14 +292,14 @@ pub(super) struct PerFunctionCrap {
     /// Bucketed coverage tier used to drive action selection in JSON output.
     /// Populated for both Istanbul-matched and estimated CRAP rows so the
     /// action builder does not need to recompute reachability state.
-    pub coverage_tier: crate::health_types::CoverageTier,
+    pub coverage_tier: fallow_output::CoverageTier,
     /// Provenance of `coverage_tier` and `crap`. `Istanbul` for direct fnMap
     /// matches, `Estimated` for graph-based fallbacks against the finding's
     /// own file, `EstimatedComponentInherited` for the template-inherit path
     /// that reaches the owning Angular `.component.ts` through the inverse
     /// `templateUrl` edge. Threaded into `ComplexityViolation.coverage_source` by
     /// `merge_crap_findings`.
-    pub coverage_source: crate::health_types::CoverageSource,
+    pub coverage_source: fallow_output::CoverageSource,
 }
 
 /// Istanbul CRAP result: CRAP scores plus match statistics.
@@ -383,8 +383,8 @@ fn crap_for_function(
 ) -> (
     f64,
     Option<f64>,
-    crate::health_types::CoverageTier,
-    crate::health_types::CoverageSource,
+    fallow_output::CoverageTier,
+    fallow_output::CoverageSource,
 ) {
     let cc = f64::from(f.cyclomatic);
     let lookup = file_coverage.and_then(|fc| fc.lookup(f.name.as_str(), f.line, f.col));
@@ -393,23 +393,23 @@ fn crap_for_function(
         return (
             crap_formula(cc, cov_pct),
             Some(cov_pct),
-            crate::health_types::CoverageTier::from_pct(cov_pct),
-            crate::health_types::CoverageSource::Istanbul,
+            fallow_output::CoverageTier::from_pct(cov_pct),
+            fallow_output::CoverageSource::Istanbul,
         );
     }
     if is_test_reachable {
         return (
             cc,
             None,
-            crate::health_types::CoverageTier::from_pct(INDIRECT_TEST_COVERAGE_ESTIMATE),
-            crate::health_types::CoverageSource::Estimated,
+            fallow_output::CoverageTier::from_pct(INDIRECT_TEST_COVERAGE_ESTIMATE),
+            fallow_output::CoverageSource::Estimated,
         );
     }
     (
         cc * cc + cc,
         None,
-        crate::health_types::CoverageTier::None,
-        crate::health_types::CoverageSource::Estimated,
+        fallow_output::CoverageTier::None,
+        fallow_output::CoverageSource::Estimated,
     )
 }
 
@@ -443,7 +443,7 @@ fn compute_crap_scores_estimated(
     complexity: &[fallow_types::extract::FunctionComplexity],
     test_referenced_exports: &rustc_hash::FxHashSet<String>,
     is_test_reachable: bool,
-    coverage_source: crate::health_types::CoverageSource,
+    coverage_source: fallow_output::CoverageSource,
 ) -> EstimatedCrapResult {
     if complexity.is_empty() {
         return EstimatedCrapResult {
@@ -475,7 +475,7 @@ fn compute_crap_scores_estimated(
             col: f.col,
             crap: crap_rounded,
             coverage_pct: None,
-            coverage_tier: crate::health_types::CoverageTier::from_pct(estimated_coverage),
+            coverage_tier: fallow_output::CoverageTier::from_pct(estimated_coverage),
             coverage_source,
         });
     }
@@ -1082,7 +1082,7 @@ pub(super) fn compute_maintainability_index(
     fan_out: usize,
     lines: u32,
 ) -> f64 {
-    let dampening = (f64::from(lines) / crate::health_types::MI_DENSITY_MIN_LINES).min(1.0);
+    let dampening = (f64::from(lines) / fallow_output::MI_DENSITY_MIN_LINES).min(1.0);
     let fan_out_penalty = ((fan_out as f64).ln_1p() * 4.0).min(15.0);
     #[expect(
         clippy::suboptimal_flops,
@@ -1573,7 +1573,7 @@ fn compute_template_inherited_crap(
         &module.complexity,
         &inherit_ctx.test_referenced_exports,
         inherit_ctx.is_test_reachable,
-        crate::health_types::CoverageSource::EstimatedComponentInherited,
+        fallow_output::CoverageSource::EstimatedComponentInherited,
     ))
 }
 
@@ -1600,7 +1600,7 @@ fn compute_static_file_crap(
         &module.complexity,
         &test_refs,
         is_test_reachable,
-        crate::health_types::CoverageSource::Estimated,
+        fallow_output::CoverageSource::Estimated,
     ))
 }
 
@@ -4183,7 +4183,7 @@ mod tests {
             &funcs,
             &refs,
             true,
-            crate::health_types::CoverageSource::Estimated,
+            fallow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max - 10.3).abs() < 0.1);
@@ -4198,7 +4198,7 @@ mod tests {
             &funcs,
             &refs,
             true,
-            crate::health_types::CoverageSource::Estimated,
+            fallow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max - 31.6).abs() < 0.1);
@@ -4213,7 +4213,7 @@ mod tests {
             &funcs,
             &refs,
             false,
-            crate::health_types::CoverageSource::Estimated,
+            fallow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max - 30.0).abs() < f64::EPSILON);
@@ -4229,7 +4229,7 @@ mod tests {
             &funcs,
             &refs,
             true,
-            crate::health_types::CoverageSource::Estimated,
+            fallow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!(max < 3.0);
@@ -4243,7 +4243,7 @@ mod tests {
             &[],
             &refs,
             true,
-            crate::health_types::CoverageSource::Estimated,
+            fallow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max).abs() < f64::EPSILON);
@@ -4720,7 +4720,7 @@ mod tests {
             &funcs,
             &refs,
             true,
-            crate::health_types::CoverageSource::Estimated,
+            fallow_output::CoverageSource::Estimated,
         );
         let (max, above) = (result.max_crap, result.above_threshold);
         assert!(max > 10.0);

@@ -18,7 +18,7 @@ use fallow_output::{
 };
 use fallow_types::output::NextStep;
 
-use crate::health_types::HealthReport;
+use fallow_output::HealthReport;
 
 /// `FALLOW_SUGGESTIONS=off` (or `0`/`false`/`no`/`disabled`) disables next-steps
 /// entirely. Default on. This is the documented escape hatch for CI consumers
@@ -305,13 +305,13 @@ pub fn top_combined_next_step(
 mod tests {
     use std::path::PathBuf;
 
-    use crate::health_types::{
-        ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
-    };
     use fallow_engine::duplicates::{
         CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
     };
     use fallow_output::build_health_next_steps as build_health_next_steps_contract;
+    use fallow_output::{
+        ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
+    };
     use fallow_types::output_dead_code::UnusedExportFinding;
     use fallow_types::results::{AnalysisResults, UnusedExport};
 

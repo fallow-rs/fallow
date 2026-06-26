@@ -5,7 +5,7 @@
 use crate::report::sink::outln;
 use std::process::ExitCode;
 
-use crate::health_types::HealthReport;
+use fallow_output::HealthReport;
 
 /// Escape a string for safe interpolation in XML attributes and element content.
 fn xml_escape(s: &str) -> String {
@@ -293,7 +293,7 @@ mod tests {
     }
 
     fn empty_report() -> HealthReport {
-        use crate::health_types::HealthSummary;
+        use fallow_output::HealthSummary;
 
         HealthReport {
             summary: HealthSummary {
@@ -313,9 +313,7 @@ mod tests {
 
     #[test]
     fn print_health_badge_with_score() {
-        use crate::health_types::{
-            HEALTH_SCORE_FORMULA_VERSION, HealthScore, HealthScorePenalties,
-        };
+        use fallow_output::{HEALTH_SCORE_FORMULA_VERSION, HealthScore, HealthScorePenalties};
 
         let mut report = empty_report();
         report.health_score = Some(HealthScore {

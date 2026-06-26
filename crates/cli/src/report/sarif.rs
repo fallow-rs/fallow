@@ -2323,10 +2323,7 @@ pub(super) fn print_grouped_duplication_sarif(
 }
 
 #[must_use]
-pub fn build_health_sarif(
-    report: &crate::health_types::HealthReport,
-    root: &Path,
-) -> serde_json::Value {
+pub fn build_health_sarif(report: &fallow_output::HealthReport, root: &Path) -> serde_json::Value {
     let mut sarif_results = Vec::new();
     let mut snippets = SourceSnippetCache::default();
 
@@ -2336,7 +2333,7 @@ pub fn build_health_sarif(
 }
 
 fn append_health_sarif_results(
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
     sarif_results: &mut Vec<serde_json::Value>,
     snippets: &mut SourceSnippetCache,
@@ -2479,7 +2476,7 @@ fn health_sarif_document(
 
 fn append_complexity_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
     snippets: &mut SourceSnippetCache,
 ) {
@@ -2487,9 +2484,9 @@ fn append_complexity_sarif_results(
         let uri = relative_uri(&finding.path, root);
         let (rule_id, message) = health_complexity_sarif_message(finding, report);
         let level = match finding.severity {
-            crate::health_types::FindingSeverity::Critical => "error",
-            crate::health_types::FindingSeverity::High => "warning",
-            crate::health_types::FindingSeverity::Moderate => "note",
+            fallow_output::FindingSeverity::Critical => "error",
+            fallow_output::FindingSeverity::High => "warning",
+            fallow_output::FindingSeverity::Moderate => "note",
         };
         let source_snippet = snippets.line(&finding.path, finding.line);
         sarif_results.push(sarif_result_with_snippet(
@@ -2504,25 +2501,25 @@ fn append_complexity_sarif_results(
 }
 
 fn health_complexity_sarif_message(
-    finding: &crate::health_types::ComplexityViolation,
-    report: &crate::health_types::HealthReport,
+    finding: &fallow_output::ComplexityViolation,
+    report: &fallow_output::HealthReport,
 ) -> (&'static str, String) {
     match finding.exceeded {
-        crate::health_types::ExceededThreshold::Cyclomatic => (
+        fallow_output::ExceededThreshold::Cyclomatic => (
             "fallow/high-cyclomatic-complexity",
             format!(
                 "'{}' has cyclomatic complexity {} (threshold: {})",
                 finding.name, finding.cyclomatic, report.summary.max_cyclomatic_threshold,
             ),
         ),
-        crate::health_types::ExceededThreshold::Cognitive => (
+        fallow_output::ExceededThreshold::Cognitive => (
             "fallow/high-cognitive-complexity",
             format!(
                 "'{}' has cognitive complexity {} (threshold: {})",
                 finding.name, finding.cognitive, report.summary.max_cognitive_threshold,
             ),
         ),
-        crate::health_types::ExceededThreshold::Both => (
+        fallow_output::ExceededThreshold::Both => (
             "fallow/high-complexity",
             format!(
                 "'{}' has cyclomatic complexity {} (threshold: {}) and cognitive complexity {} (threshold: {})",
@@ -2533,10 +2530,10 @@ fn health_complexity_sarif_message(
                 report.summary.max_cognitive_threshold,
             ),
         ),
-        crate::health_types::ExceededThreshold::Crap
-        | crate::health_types::ExceededThreshold::CyclomaticCrap
-        | crate::health_types::ExceededThreshold::CognitiveCrap
-        | crate::health_types::ExceededThreshold::All => {
+        fallow_output::ExceededThreshold::Crap
+        | fallow_output::ExceededThreshold::CyclomaticCrap
+        | fallow_output::ExceededThreshold::CognitiveCrap
+        | fallow_output::ExceededThreshold::All => {
             let crap = finding.crap.unwrap_or(0.0);
             let coverage = finding
                 .coverage_pct
@@ -2559,7 +2556,7 @@ fn health_complexity_sarif_message(
 
 fn append_refactoring_target_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
 ) {
     for target in &report.targets {
@@ -2585,7 +2582,7 @@ fn append_refactoring_target_sarif_results(
 
 fn append_coverage_gap_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
     snippets: &mut SourceSnippetCache,
 ) {
@@ -2632,29 +2629,27 @@ fn append_coverage_gap_sarif_results(
 
 fn append_runtime_coverage_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
     root: &Path,
     snippets: &mut SourceSnippetCache,
 ) {
     for finding in &production.findings {
         let uri = relative_uri(&finding.path, root);
         let rule_id = match finding.verdict {
-            crate::health_types::RuntimeCoverageVerdict::SafeToDelete => {
-                "fallow/runtime-safe-to-delete"
-            }
-            crate::health_types::RuntimeCoverageVerdict::ReviewRequired => {
+            fallow_output::RuntimeCoverageVerdict::SafeToDelete => "fallow/runtime-safe-to-delete",
+            fallow_output::RuntimeCoverageVerdict::ReviewRequired => {
                 "fallow/runtime-review-required"
             }
-            crate::health_types::RuntimeCoverageVerdict::LowTraffic => "fallow/runtime-low-traffic",
-            crate::health_types::RuntimeCoverageVerdict::CoverageUnavailable => {
+            fallow_output::RuntimeCoverageVerdict::LowTraffic => "fallow/runtime-low-traffic",
+            fallow_output::RuntimeCoverageVerdict::CoverageUnavailable => {
                 "fallow/runtime-coverage-unavailable"
             }
-            crate::health_types::RuntimeCoverageVerdict::Active
-            | crate::health_types::RuntimeCoverageVerdict::Unknown => "fallow/runtime-coverage",
+            fallow_output::RuntimeCoverageVerdict::Active
+            | fallow_output::RuntimeCoverageVerdict::Unknown => "fallow/runtime-coverage",
         };
         let level = match finding.verdict {
-            crate::health_types::RuntimeCoverageVerdict::SafeToDelete
-            | crate::health_types::RuntimeCoverageVerdict::ReviewRequired => "warning",
+            fallow_output::RuntimeCoverageVerdict::SafeToDelete
+            | fallow_output::RuntimeCoverageVerdict::ReviewRequired => "warning",
             _ => "note",
         };
         let invocations_hint = finding.invocations.map_or_else(
@@ -2681,15 +2676,15 @@ fn append_runtime_coverage_sarif_results(
 
 fn append_coverage_intelligence_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    intelligence: &crate::health_types::CoverageIntelligenceReport,
+    intelligence: &fallow_output::CoverageIntelligenceReport,
     root: &Path,
     snippets: &mut SourceSnippetCache,
 ) {
     for finding in &intelligence.findings {
         let rule_id = coverage_intelligence_rule_id(finding.recommendation);
         let level = match finding.verdict {
-            crate::health_types::CoverageIntelligenceVerdict::Clean
-            | crate::health_types::CoverageIntelligenceVerdict::Unknown => continue,
+            fallow_output::CoverageIntelligenceVerdict::Clean
+            | fallow_output::CoverageIntelligenceVerdict::Unknown => continue,
             _ => "warning",
         };
         let uri = relative_uri(&finding.path, root);
@@ -2726,28 +2721,25 @@ fn append_coverage_intelligence_sarif_results(
 }
 
 fn coverage_intelligence_rule_id(
-    recommendation: crate::health_types::CoverageIntelligenceRecommendation,
+    recommendation: fallow_output::CoverageIntelligenceRecommendation,
 ) -> &'static str {
     match recommendation {
-        crate::health_types::CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
+        fallow_output::CoverageIntelligenceRecommendation::AddTestOrSplitBeforeMerge => {
             "fallow/coverage-intelligence-risky-change"
         }
-        crate::health_types::CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
+        fallow_output::CoverageIntelligenceRecommendation::DeleteAfterConfirmingOwner => {
             "fallow/coverage-intelligence-delete"
         }
-        crate::health_types::CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
+        fallow_output::CoverageIntelligenceRecommendation::ReviewBeforeChanging => {
             "fallow/coverage-intelligence-review"
         }
-        crate::health_types::CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
+        fallow_output::CoverageIntelligenceRecommendation::RefactorCarefullyKeepBehavior => {
             "fallow/coverage-intelligence-refactor"
         }
     }
 }
 
-pub(super) fn print_health_sarif(
-    report: &crate::health_types::HealthReport,
-    root: &Path,
-) -> ExitCode {
+pub(super) fn print_health_sarif(report: &fallow_output::HealthReport, root: &Path) -> ExitCode {
     let sarif = build_health_sarif(report, root);
     emit_json(&sarif, "SARIF")
 }
@@ -2767,7 +2759,7 @@ pub(super) fn print_health_sarif(
     reason = "grouped health SARIF entries are JSON objects created by build_health_sarif"
 )]
 pub(super) fn print_grouped_health_sarif(
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
@@ -3231,8 +3223,8 @@ mod tests {
     #[test]
     fn health_sarif_empty_no_results() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
-            summary: crate::health_types::HealthSummary {
+        let report = fallow_output::HealthReport {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 ..Default::default()
@@ -3251,7 +3243,7 @@ mod tests {
 
     #[test]
     fn health_sarif_coverage_intelligence_preserves_structured_properties() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceAction, CoverageIntelligenceConfidence,
             CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
             CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
@@ -3321,9 +3313,9 @@ mod tests {
     #[test]
     fn health_sarif_cyclomatic_only() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/utils.ts"),
                     name: "parseExpression".to_string(),
                     line: 42,
@@ -3336,8 +3328,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Cyclomatic,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3350,7 +3342,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 functions_above_threshold: 1,
@@ -3380,9 +3372,9 @@ mod tests {
     #[test]
     fn health_sarif_cognitive_only() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/api.ts"),
                     name: "handleRequest".to_string(),
                     line: 10,
@@ -3395,8 +3387,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Cognitive,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Cognitive,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3409,7 +3401,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 3,
                 functions_analyzed: 10,
                 functions_above_threshold: 1,
@@ -3433,9 +3425,9 @@ mod tests {
     #[test]
     fn health_sarif_both_thresholds() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/complex.ts"),
                     name: "doEverything".to_string(),
                     line: 1,
@@ -3448,8 +3440,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3462,7 +3454,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -3481,9 +3473,9 @@ mod tests {
     #[test]
     fn health_sarif_crap_only_emits_crap_rule() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/untested.ts"),
                     name: "risky".to_string(),
                     line: 8,
@@ -3496,8 +3488,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Crap,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Crap,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: Some(82.2),
                     coverage_pct: Some(12.0),
                     coverage_tier: None,
@@ -3510,7 +3502,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -3529,9 +3521,9 @@ mod tests {
     #[test]
     fn health_sarif_cyclomatic_crap_uses_crap_rule() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/hot.ts"),
                     name: "branchy".to_string(),
                     line: 1,
@@ -3544,8 +3536,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::CyclomaticCrap,
-                    severity: crate::health_types::FindingSeverity::Critical,
+                    exceeded: fallow_output::ExceededThreshold::CyclomaticCrap,
+                    severity: fallow_output::FindingSeverity::Critical,
                     crap: Some(182.0),
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3558,7 +3550,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -4010,7 +4002,7 @@ mod tests {
 
     #[test]
     fn health_sarif_includes_refactoring_targets() {
-        use crate::health_types::*;
+        use fallow_output::*;
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
@@ -4049,7 +4041,7 @@ mod tests {
 
     #[test]
     fn health_sarif_includes_coverage_gaps() {
-        use crate::health_types::*;
+        use fallow_output::*;
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
@@ -4114,7 +4106,7 @@ mod tests {
     #[test]
     fn health_sarif_rules_have_full_descriptions() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport::default();
+        let report = fallow_output::HealthReport::default();
         let sarif = build_health_sarif(&report, &root);
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
@@ -4868,9 +4860,9 @@ mod tests {
     #[test]
     fn health_sarif_critical_severity_maps_to_error_level() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/behemoth.ts"),
                     name: "doAll".to_string(),
                     line: 1,
@@ -4883,8 +4875,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::Critical,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::Critical,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -4897,7 +4889,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -4913,9 +4905,9 @@ mod tests {
     #[test]
     fn health_sarif_moderate_severity_maps_to_note_level() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/mild.ts"),
                     name: "parseArgs".to_string(),
                     line: 5,
@@ -4928,8 +4920,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
-                    severity: crate::health_types::FindingSeverity::Moderate,
+                    exceeded: fallow_output::ExceededThreshold::Cyclomatic,
+                    severity: fallow_output::FindingSeverity::Moderate,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -4942,7 +4934,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -4958,9 +4950,9 @@ mod tests {
     #[test]
     fn health_sarif_crap_no_coverage_omits_coverage_phrase() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/risky.ts"),
                     name: "fragile".to_string(),
                     line: 1,
@@ -4973,8 +4965,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::CognitiveCrap,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::CognitiveCrap,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: Some(60.0),
                     coverage_pct: None,
                     coverage_tier: None,
@@ -4987,7 +4979,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -5009,9 +5001,9 @@ mod tests {
     #[test]
     fn health_sarif_all_exceeded_threshold_uses_crap_rule() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/monster.ts"),
                     name: "giant".to_string(),
                     line: 1,
@@ -5024,8 +5016,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::All,
-                    severity: crate::health_types::FindingSeverity::Critical,
+                    exceeded: fallow_output::ExceededThreshold::All,
+                    severity: fallow_output::FindingSeverity::Critical,
                     crap: Some(200.0),
                     coverage_pct: Some(5.0),
                     coverage_tier: None,
@@ -5038,7 +5030,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -5056,17 +5048,17 @@ mod tests {
     // --- Runtime coverage SARIF (lines 2601-2679) ---
     #[test]
     fn health_sarif_runtime_coverage_safe_to_delete() {
-        use crate::health_types::{
+        use fallow_output::{
             RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
             RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
             RuntimeCoverageVerdict,
         };
 
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
-            summary: crate::health_types::HealthSummary::default(),
+        let report = fallow_output::HealthReport {
+            summary: fallow_output::HealthSummary::default(),
             runtime_coverage: Some(RuntimeCoverageReport {
-                schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+                schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
                 signals: vec![],
                 summary: RuntimeCoverageSummary::default(),
@@ -5113,17 +5105,17 @@ mod tests {
 
     #[test]
     fn health_sarif_runtime_coverage_review_required() {
-        use crate::health_types::{
+        use fallow_output::{
             RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
             RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
             RuntimeCoverageVerdict,
         };
 
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
-            summary: crate::health_types::HealthSummary::default(),
+        let report = fallow_output::HealthReport {
+            summary: fallow_output::HealthSummary::default(),
             runtime_coverage: Some(RuntimeCoverageReport {
-                schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+                schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
                 signals: vec![],
                 summary: RuntimeCoverageSummary::default(),
@@ -5166,17 +5158,17 @@ mod tests {
 
     #[test]
     fn health_sarif_runtime_coverage_low_traffic_verdict() {
-        use crate::health_types::{
+        use fallow_output::{
             RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
             RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
             RuntimeCoverageVerdict,
         };
 
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
-            summary: crate::health_types::HealthSummary::default(),
+        let report = fallow_output::HealthReport {
+            summary: fallow_output::HealthSummary::default(),
             runtime_coverage: Some(RuntimeCoverageReport {
-                schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+                schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::Unknown,
                 signals: vec![],
                 summary: RuntimeCoverageSummary::default(),
@@ -5217,17 +5209,17 @@ mod tests {
 
     #[test]
     fn health_sarif_runtime_coverage_unavailable_verdict() {
-        use crate::health_types::{
+        use fallow_output::{
             RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
             RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
             RuntimeCoverageVerdict,
         };
 
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
-            summary: crate::health_types::HealthSummary::default(),
+        let report = fallow_output::HealthReport {
+            summary: fallow_output::HealthSummary::default(),
             runtime_coverage: Some(RuntimeCoverageReport {
-                schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+                schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::Unknown,
                 signals: vec![],
                 summary: RuntimeCoverageSummary::default(),
@@ -5267,17 +5259,17 @@ mod tests {
 
     #[test]
     fn health_sarif_runtime_active_verdict_maps_to_generic_rule() {
-        use crate::health_types::{
+        use fallow_output::{
             RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
             RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
             RuntimeCoverageVerdict,
         };
 
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
-            summary: crate::health_types::HealthSummary::default(),
+        let report = fallow_output::HealthReport {
+            summary: fallow_output::HealthSummary::default(),
             runtime_coverage: Some(RuntimeCoverageReport {
-                schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+                schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::Clean,
                 signals: vec![],
                 summary: RuntimeCoverageSummary::default(),
@@ -5318,7 +5310,7 @@ mod tests {
     // --- Coverage intelligence: clean/unknown verdicts skip (lines 2691-2692) ---
     #[test]
     fn health_sarif_coverage_intelligence_clean_verdict_skipped() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceConfidence, CoverageIntelligenceEvidence,
             CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
             CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
@@ -5363,7 +5355,7 @@ mod tests {
     // Coverage intelligence rule-id variants (lines 2728-2745)
     #[test]
     fn health_sarif_coverage_intelligence_risky_change_rule_id() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceConfidence, CoverageIntelligenceEvidence,
             CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
             CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
@@ -5404,7 +5396,7 @@ mod tests {
 
     #[test]
     fn health_sarif_coverage_intelligence_review_rule_id() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceConfidence, CoverageIntelligenceEvidence,
             CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
             CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
@@ -5445,7 +5437,7 @@ mod tests {
 
     #[test]
     fn health_sarif_coverage_intelligence_refactor_rule_id() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceConfidence, CoverageIntelligenceEvidence,
             CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
             CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
@@ -5491,9 +5483,9 @@ mod tests {
         use crate::report::grouping::OwnershipResolver;
 
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/utils.ts"),
                     name: "parseExpr".to_string(),
                     line: 10,
@@ -5506,8 +5498,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Cyclomatic,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -5520,7 +5512,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -5569,7 +5561,7 @@ mod tests {
     // --- Coverage gap plural/singular branches (lines 2599-2603) ---
     #[test]
     fn health_sarif_coverage_gap_single_export_singular_message() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageGapSummary, CoverageGaps, HealthReport, HealthSummary, UntestedFile,
             UntestedFileFinding,
         };
@@ -5612,7 +5604,7 @@ mod tests {
 
     #[test]
     fn health_sarif_coverage_gap_plural_exports_message() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageGapSummary, CoverageGaps, HealthReport, HealthSummary, UntestedFile,
             UntestedFileFinding,
         };

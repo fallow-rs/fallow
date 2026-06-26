@@ -1051,13 +1051,13 @@ fn write_duplication_families(out: &mut String, report: &DuplicationReport, root
     }
 }
 
-pub(super) fn print_health_markdown(report: &crate::health_types::HealthReport, root: &Path) {
+pub(super) fn print_health_markdown(report: &fallow_output::HealthReport, root: &Path) {
     outln!("{}", build_health_markdown(report, root));
 }
 
 /// Build markdown output for health (complexity) results.
 #[must_use]
-pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &Path) -> String {
+pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) -> String {
     let mut out = String::new();
 
     if let Some(ref hs) = report.health_score {
@@ -1108,7 +1108,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
 /// Render the opt-in `## CSS Health` markdown section (present only with
 /// `--css`): a summary of structural metrics, value sprawl, and candidate counts
 /// plus a bounded list of the most actionable located candidates.
-fn write_css_analytics_section(out: &mut String, report: &crate::health_types::HealthReport) {
+fn write_css_analytics_section(out: &mut String, report: &fallow_output::HealthReport) {
     let Some(ref css) = report.css_analytics else {
         return;
     };
@@ -1156,7 +1156,7 @@ fn write_css_analytics_section(out: &mut String, report: &crate::health_types::H
     out.push('\n');
 }
 
-fn write_css_candidate_details(out: &mut String, css: &crate::health_types::CssAnalyticsReport) {
+fn write_css_candidate_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
     write_css_keyframe_details(out, css);
     write_css_tailwind_details(out, css);
     write_css_class_candidate_details(out, css);
@@ -1164,7 +1164,7 @@ fn write_css_candidate_details(out: &mut String, css: &crate::health_types::CssA
     write_css_font_size_mix_details(out, css);
 }
 
-fn write_css_keyframe_details(out: &mut String, css: &crate::health_types::CssAnalyticsReport) {
+fn write_css_keyframe_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
     if !css.undefined_keyframes.is_empty() {
         let named: Vec<String> = css
             .undefined_keyframes
@@ -1180,7 +1180,7 @@ fn write_css_keyframe_details(out: &mut String, css: &crate::health_types::CssAn
     }
 }
 
-fn write_css_tailwind_details(out: &mut String, css: &crate::health_types::CssAnalyticsReport) {
+fn write_css_tailwind_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
     if !css.tailwind_arbitrary_values.is_empty() {
         let named: Vec<String> = css
             .tailwind_arbitrary_values
@@ -1192,10 +1192,7 @@ fn write_css_tailwind_details(out: &mut String, css: &crate::health_types::CssAn
     }
 }
 
-fn write_css_class_candidate_details(
-    out: &mut String,
-    css: &crate::health_types::CssAnalyticsReport,
-) {
+fn write_css_class_candidate_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
     if !css.unresolved_class_references.is_empty() {
         let named: Vec<String> = css
             .unresolved_class_references
@@ -1229,10 +1226,7 @@ fn write_css_class_candidate_details(
     }
 }
 
-fn write_css_font_candidate_details(
-    out: &mut String,
-    css: &crate::health_types::CssAnalyticsReport,
-) {
+fn write_css_font_candidate_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
     if !css.unused_font_faces.is_empty() {
         let named: Vec<String> = css
             .unused_font_faces
@@ -1261,10 +1255,7 @@ fn write_css_font_candidate_details(
     }
 }
 
-fn write_css_font_size_mix_details(
-    out: &mut String,
-    css: &crate::health_types::CssAnalyticsReport,
-) {
+fn write_css_font_size_mix_details(out: &mut String, css: &fallow_output::CssAnalyticsReport) {
     if let Some(mix) = &css.font_size_unit_mix {
         let breakdown: Vec<String> = mix
             .notations
@@ -1282,7 +1273,7 @@ fn write_css_font_size_mix_details(
 
 fn write_coverage_intelligence_section(
     out: &mut String,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
 ) {
     let Some(ref intelligence) = report.coverage_intelligence else {
@@ -1324,7 +1315,7 @@ fn write_coverage_intelligence_section(
 /// Write one coverage-intelligence finding row.
 fn write_coverage_intelligence_row(
     out: &mut String,
-    finding: &crate::health_types::CoverageIntelligenceFinding,
+    finding: &fallow_output::CoverageIntelligenceFinding,
     root: &Path,
 ) {
     let path = escape_backticks(&normalize_uri(
@@ -1356,7 +1347,7 @@ fn write_coverage_intelligence_row(
 
 fn write_runtime_coverage_section(
     out: &mut String,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
 ) {
     let Some(ref production) = report.runtime_coverage else {
@@ -1373,7 +1364,7 @@ fn write_runtime_coverage_section(
 /// Write the runtime-coverage summary header and capture-quality lines.
 fn write_runtime_coverage_summary(
     out: &mut String,
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
 ) {
     let _ = writeln!(
         out,
@@ -1406,7 +1397,7 @@ fn write_runtime_coverage_summary(
 /// Write the runtime-coverage per-finding table.
 fn write_runtime_coverage_findings(
     out: &mut String,
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
     root: &Path,
 ) {
     if production.findings.is_empty() {
@@ -1438,7 +1429,7 @@ fn write_runtime_coverage_findings(
 /// Write the runtime-coverage hot-paths table.
 fn write_runtime_coverage_hot_paths(
     out: &mut String,
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
     root: &Path,
 ) {
     if production.hot_paths.is_empty() {
@@ -1464,7 +1455,7 @@ fn write_runtime_coverage_hot_paths(
 }
 
 /// Write the trend comparison table to the output.
-fn write_trend_section(out: &mut String, report: &crate::health_types::HealthReport) {
+fn write_trend_section(out: &mut String, report: &fallow_output::HealthReport) {
     let Some(ref trend) = report.health_trend else {
         return;
     };
@@ -1512,7 +1503,7 @@ fn write_trend_section(out: &mut String, report: &crate::health_types::HealthRep
 }
 
 /// Write one trend metric row with unit-aware value and delta formatting.
-fn write_trend_metric_row(out: &mut String, m: &crate::health_types::TrendMetric) {
+fn write_trend_metric_row(out: &mut String, m: &fallow_output::TrendMetric) {
     let fmt_val = |v: f64| -> String {
         if m.unit == "%" {
             format!("{v:.1}%")
@@ -1544,7 +1535,7 @@ fn write_trend_metric_row(out: &mut String, m: &crate::health_types::TrendMetric
 }
 
 /// Write the vital signs summary table to the output.
-fn write_vital_signs_section(out: &mut String, report: &crate::health_types::HealthReport) {
+fn write_vital_signs_section(out: &mut String, report: &fallow_output::HealthReport) {
     let Some(ref vs) = report.vital_signs else {
         return;
     };
@@ -1582,11 +1573,7 @@ fn write_vital_signs_section(out: &mut String, report: &crate::health_types::Hea
 }
 
 /// Write the complexity findings table to the output.
-fn write_findings_section(
-    out: &mut String,
-    report: &crate::health_types::HealthReport,
-    root: &Path,
-) {
+fn write_findings_section(out: &mut String, report: &fallow_output::HealthReport, root: &Path) {
     if report.findings.is_empty() {
         return;
     }
@@ -1618,7 +1605,7 @@ fn write_findings_section(
 /// Write the heading line for the complexity findings section.
 fn write_findings_heading(
     out: &mut String,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     has_synthetic: bool,
 ) {
     let count = report.summary.functions_above_threshold;
@@ -1652,8 +1639,8 @@ fn write_findings_table_header(out: &mut String, has_synthetic: bool) {
 /// Write one complexity finding row, including threshold-breach markers.
 fn write_findings_row(
     out: &mut String,
-    finding: &crate::health_types::HealthFinding,
-    report: &crate::health_types::HealthReport,
+    finding: &fallow_output::HealthFinding,
+    report: &fallow_output::HealthReport,
     root: &Path,
 ) {
     let file_str = escape_backticks(&normalize_uri(
@@ -1662,7 +1649,7 @@ fn write_findings_row(
     let thresholds =
         finding
             .effective_thresholds
-            .unwrap_or(crate::health_types::HealthEffectiveThresholds {
+            .unwrap_or(fallow_output::HealthEffectiveThresholds {
                 max_cyclomatic: report.summary.max_cyclomatic_threshold,
                 max_cognitive: report.summary.max_cognitive_threshold,
                 max_crap: report.summary.max_crap_threshold,
@@ -1678,9 +1665,9 @@ fn write_findings_row(
         ""
     };
     let severity_label = match finding.severity {
-        crate::health_types::FindingSeverity::Critical => "critical",
-        crate::health_types::FindingSeverity::High => "high",
-        crate::health_types::FindingSeverity::Moderate => "moderate",
+        fallow_output::FindingSeverity::Critical => "critical",
+        fallow_output::FindingSeverity::High => "high",
+        fallow_output::FindingSeverity::Moderate => "moderate",
     };
     let crap_cell = match finding.crap {
         Some(crap) => {
@@ -1706,7 +1693,7 @@ fn write_findings_row(
 
 fn write_threshold_overrides_section(
     out: &mut String,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
 ) {
     if report.threshold_overrides.is_empty() {
@@ -1720,9 +1707,9 @@ fn write_threshold_overrides_section(
     out.push_str("|---------:|:-------|:-------|:--------|\n");
     for entry in &report.threshold_overrides {
         let status = match entry.status {
-            crate::health_types::ThresholdOverrideStatus::Active => "active",
-            crate::health_types::ThresholdOverrideStatus::Stale => "stale",
-            crate::health_types::ThresholdOverrideStatus::NoMatch => "no_match",
+            fallow_output::ThresholdOverrideStatus::Active => "active",
+            fallow_output::ThresholdOverrideStatus::Stale => "stale",
+            fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
         };
         let target = entry.path.as_ref().map_or_else(
             || "<no matching file or function>".to_string(),
@@ -1758,11 +1745,7 @@ fn write_threshold_overrides_section(
 }
 
 /// Write the file health scores table to the output.
-fn write_file_scores_section(
-    out: &mut String,
-    report: &crate::health_types::HealthReport,
-    root: &Path,
-) {
+fn write_file_scores_section(out: &mut String, report: &fallow_output::HealthReport, root: &Path) {
     if report.file_scores.is_empty() {
         return;
     }
@@ -1803,7 +1786,7 @@ fn write_file_scores_section(
 
 fn write_coverage_gaps_section(
     out: &mut String,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
 ) {
     let Some(ref gaps) = report.coverage_gaps else {
@@ -1863,7 +1846,7 @@ fn write_coverage_gaps_section(
 /// owner, notes) for the markdown hotspots table. Cells fall back to an
 /// en-dash (U+2013) when ownership data is missing for an entry.
 fn ownership_md_cells(
-    ownership: Option<&crate::health_types::OwnershipMetrics>,
+    ownership: Option<&fallow_output::OwnershipMetrics>,
 ) -> (String, String, String, String) {
     let Some(o) = ownership else {
         let dash = "\u{2013}".to_string();
@@ -1883,7 +1866,7 @@ fn ownership_md_cells(
     if o.unowned == Some(true) {
         notes.push("**unowned**");
     }
-    if o.ownership_state == crate::health_types::OwnershipState::DeclaredInactive {
+    if o.ownership_state == fallow_output::OwnershipState::DeclaredInactive {
         notes.push("declared owner inactive");
     }
     if o.drift {
@@ -1897,11 +1880,7 @@ fn ownership_md_cells(
     (bus, top, owner, notes_str)
 }
 
-fn write_hotspots_section(
-    out: &mut String,
-    report: &crate::health_types::HealthReport,
-    root: &Path,
-) {
+fn write_hotspots_section(out: &mut String, report: &fallow_output::HealthReport, root: &Path) {
     if report.hotspots.is_empty() {
         return;
     }
@@ -1956,7 +1935,7 @@ fn write_hotspots_table_header(out: &mut String, any_ownership: bool) {
 /// Write one hotspot row, including ownership cells when the table is widened.
 fn write_hotspots_row(
     out: &mut String,
-    entry: &crate::health_types::HotspotFinding,
+    entry: &fallow_output::HotspotFinding,
     any_ownership: bool,
     root: &Path,
 ) {
@@ -1990,11 +1969,7 @@ fn write_hotspots_row(
 }
 
 /// Write the refactoring targets table to the output.
-fn write_targets_section(
-    out: &mut String,
-    report: &crate::health_types::HealthReport,
-    root: &Path,
-) {
+fn write_targets_section(out: &mut String, report: &fallow_output::HealthReport, root: &Path) {
     if report.targets.is_empty() {
         return;
     }
@@ -2019,7 +1994,7 @@ fn write_targets_section(
 }
 
 /// Write the metric legend collapsible section to the output.
-fn write_metric_legend(out: &mut String, report: &crate::health_types::HealthReport) {
+fn write_metric_legend(out: &mut String, report: &fallow_output::HealthReport) {
     let has_scores = !report.file_scores.is_empty();
     let has_coverage = report.coverage_gaps.is_some();
     let has_hotspots = !report.hotspots.is_empty();
@@ -2389,8 +2364,8 @@ mod tests {
     #[test]
     fn health_markdown_empty_no_findings() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
-            summary: crate::health_types::HealthSummary {
+        let report = fallow_output::HealthReport {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 ..Default::default()
@@ -2405,9 +2380,9 @@ mod tests {
     #[test]
     fn health_markdown_table_format() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/utils.ts"),
                     name: "parseExpression".to_string(),
                     line: 42,
@@ -2420,8 +2395,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -2434,7 +2409,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 functions_above_threshold: 1,
@@ -2456,9 +2431,9 @@ mod tests {
     #[test]
     fn health_markdown_labels_template_complexity_entries() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/Card.vue"),
                     name: "<template>".to_string(),
                     line: 1,
@@ -2471,8 +2446,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Cognitive,
-                    severity: crate::health_types::FindingSeverity::Moderate,
+                    exceeded: fallow_output::ExceededThreshold::Cognitive,
+                    severity: fallow_output::FindingSeverity::Moderate,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -2485,7 +2460,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -2501,7 +2476,7 @@ mod tests {
 
     #[test]
     fn health_markdown_includes_coverage_intelligence_and_ambiguity_summary() {
-        use crate::health_types::{
+        use fallow_output::{
             CoverageIntelligenceAction, CoverageIntelligenceConfidence,
             CoverageIntelligenceEvidence, CoverageIntelligenceFinding,
             CoverageIntelligenceMatchConfidence, CoverageIntelligenceRecommendation,
@@ -2572,9 +2547,9 @@ mod tests {
     #[test]
     fn health_markdown_crap_column_shows_score_and_marker() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/risky.ts"),
                     name: "branchy".to_string(),
                     line: 1,
@@ -2587,8 +2562,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::CyclomaticCrap,
-                    severity: crate::health_types::FindingSeverity::Critical,
+                    exceeded: fallow_output::ExceededThreshold::CyclomaticCrap,
+                    severity: fallow_output::FindingSeverity::Critical,
                     crap: Some(182.0),
                     coverage_pct: None,
                     coverage_tier: None,
@@ -2601,7 +2576,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -2627,9 +2602,9 @@ mod tests {
     #[test]
     fn health_markdown_no_marker_when_below_threshold() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/utils.ts"),
                     name: "helper".to_string(),
                     line: 10,
@@ -2642,8 +2617,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Cognitive,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Cognitive,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -2656,7 +2631,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 functions_above_threshold: 1,
@@ -2671,7 +2646,7 @@ mod tests {
 
     #[test]
     fn health_markdown_with_targets() {
-        use crate::health_types::*;
+        use fallow_output::*;
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
@@ -2687,8 +2662,8 @@ mod tests {
                     efficiency: 27.5,
                     recommendation: "Split high-impact file".into(),
                     category: RecommendationCategory::SplitHighImpact,
-                    effort: crate::health_types::EffortEstimate::High,
-                    confidence: crate::health_types::Confidence::Medium,
+                    effort: fallow_output::EffortEstimate::High,
+                    confidence: fallow_output::Confidence::Medium,
                     factors: vec![ContributingFactor {
                         metric: "fan_in",
                         value: 25.0,
@@ -2704,8 +2679,8 @@ mod tests {
                     efficiency: 45.0,
                     recommendation: "Remove 5 unused exports".into(),
                     category: RecommendationCategory::RemoveDeadCode,
-                    effort: crate::health_types::EffortEstimate::Low,
-                    confidence: crate::health_types::Confidence::High,
+                    effort: fallow_output::EffortEstimate::Low,
+                    confidence: fallow_output::Confidence::High,
                     factors: vec![],
                     evidence: None,
                 }
@@ -2733,7 +2708,7 @@ mod tests {
 
     #[test]
     fn health_markdown_with_coverage_gaps() {
-        use crate::health_types::*;
+        use fallow_output::*;
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
@@ -2935,13 +2910,13 @@ mod tests {
     #[test]
     fn health_markdown_vital_signs_table() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
-            summary: crate::health_types::HealthSummary {
+        let report = fallow_output::HealthReport {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 ..Default::default()
             },
-            vital_signs: Some(crate::health_types::VitalSigns {
+            vital_signs: Some(fallow_output::VitalSigns {
                 avg_cyclomatic: 3.5,
                 p90_cyclomatic: 12,
                 dead_file_pct: Some(5.0),
@@ -2959,7 +2934,7 @@ mod tests {
                 total_loc: 15_200,
                 ..Default::default()
             }),
-            hotspot_summary: Some(crate::health_types::HotspotSummary {
+            hotspot_summary: Some(fallow_output::HotspotSummary {
                 since: "6 months".to_string(),
                 min_commits: 3,
                 files_analyzed: 50,
@@ -2985,8 +2960,8 @@ mod tests {
     #[test]
     fn health_markdown_hotspots_without_summary_omits_window() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
-            vital_signs: Some(crate::health_types::VitalSigns {
+        let report = fallow_output::HealthReport {
+            vital_signs: Some(fallow_output::VitalSigns {
                 avg_cyclomatic: 2.0,
                 p90_cyclomatic: 5,
                 hotspot_count: Some(0),
@@ -3004,9 +2979,9 @@ mod tests {
     #[test]
     fn health_markdown_file_scores_table() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/dummy.ts"),
                     name: "fn".to_string(),
                     line: 1,
@@ -3019,8 +2994,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3033,7 +3008,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 10,
                 functions_above_threshold: 1,
@@ -3041,7 +3016,7 @@ mod tests {
                 average_maintainability: Some(65.0),
                 ..Default::default()
             },
-            file_scores: vec![crate::health_types::FileHealthScore {
+            file_scores: vec![fallow_output::FileHealthScore {
                 path: root.join("src/utils.ts"),
                 fan_in: 5,
                 fan_out: 3,
@@ -3067,9 +3042,9 @@ mod tests {
     #[test]
     fn health_markdown_hotspots_table() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/dummy.ts"),
                     name: "fn".to_string(),
                     line: 1,
@@ -3082,8 +3057,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3096,14 +3071,14 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 10,
                 functions_above_threshold: 1,
                 ..Default::default()
             },
             hotspots: vec![
-                crate::health_types::HotspotEntry {
+                fallow_output::HotspotEntry {
                     path: root.join("src/hot.ts"),
                     score: 85.0,
                     commits: 42,
@@ -3118,7 +3093,7 @@ mod tests {
                 }
                 .into(),
             ],
-            hotspot_summary: Some(crate::health_types::HotspotSummary {
+            hotspot_summary: Some(fallow_output::HotspotSummary {
                 since: "6 months".to_string(),
                 min_commits: 3,
                 files_analyzed: 50,
@@ -3136,9 +3111,9 @@ mod tests {
     #[test]
     fn health_markdown_metric_legend_with_scores() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/x.ts"),
                     name: "f".to_string(),
                     line: 1,
@@ -3151,8 +3126,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3165,7 +3140,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -3173,7 +3148,7 @@ mod tests {
                 average_maintainability: Some(70.0),
                 ..Default::default()
             },
-            file_scores: vec![crate::health_types::FileHealthScore {
+            file_scores: vec![fallow_output::FileHealthScore {
                 path: root.join("src/x.ts"),
                 fan_in: 1,
                 fan_out: 1,
@@ -3199,9 +3174,9 @@ mod tests {
     #[test]
     fn health_markdown_truncated_findings_shown_count() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/x.ts"),
                     name: "f".to_string(),
                     line: 1,
@@ -3214,8 +3189,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3228,7 +3203,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 functions_above_threshold: 5, // 5 total but only 1 shown
@@ -3292,9 +3267,9 @@ mod tests {
     #[test]
     fn health_markdown_hotspots_no_excluded_message() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/x.ts"),
                     name: "f".to_string(),
                     line: 1,
@@ -3307,8 +3282,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3321,14 +3296,14 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 10,
                 functions_above_threshold: 1,
                 ..Default::default()
             },
             hotspots: vec![
-                crate::health_types::HotspotEntry {
+                fallow_output::HotspotEntry {
                     path: root.join("src/hot.ts"),
                     score: 50.0,
                     commits: 10,
@@ -3343,7 +3318,7 @@ mod tests {
                 }
                 .into(),
             ],
-            hotspot_summary: Some(crate::health_types::HotspotSummary {
+            hotspot_summary: Some(fallow_output::HotspotSummary {
                 since: "6 months".to_string(),
                 min_commits: 3,
                 files_analyzed: 50,
@@ -3696,9 +3671,9 @@ mod tests {
 
     #[test]
     fn health_markdown_vital_signs_all_optional_fields() {
-        use crate::health_types::{HotspotSummary, VitalSigns};
+        use fallow_output::{HotspotSummary, VitalSigns};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             vital_signs: Some(VitalSigns {
                 dead_file_pct: Some(2.5),
                 dead_export_pct: Some(10.0),
@@ -3735,7 +3710,7 @@ mod tests {
                 files_excluded: 0,
                 shallow_clone: false,
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 80,
                 ..Default::default()
@@ -3756,9 +3731,9 @@ mod tests {
 
     #[test]
     fn health_markdown_vital_signs_hotspot_without_summary() {
-        use crate::health_types::VitalSigns;
+        use fallow_output::VitalSigns;
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             vital_signs: Some(VitalSigns {
                 avg_cyclomatic: 2.0,
                 p90_cyclomatic: 5,
@@ -3789,7 +3764,7 @@ mod tests {
                 top_render_fan_in: Vec::new(),
             }),
             hotspot_summary: None,
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 ..Default::default()
@@ -3808,9 +3783,9 @@ mod tests {
 
     #[test]
     fn health_markdown_health_score_header() {
-        use crate::health_types::{HealthScore, HealthScorePenalties};
+        use fallow_output::{HealthScore, HealthScorePenalties};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             health_score: Some(HealthScore {
                 formula_version: 2,
                 score: 82.0,
@@ -3830,7 +3805,7 @@ mod tests {
                     prop_drilling: None,
                 },
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 ..Default::default()
@@ -3847,14 +3822,14 @@ mod tests {
 
     #[test]
     fn health_markdown_threshold_overrides_active() {
-        use crate::health_types::{
+        use fallow_output::{
             HealthConfiguredThresholds, HealthEffectiveThresholds, ThresholdOverrideMetrics,
             ThresholdOverrideState, ThresholdOverrideStatus,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/complex.ts"),
                     name: "bigFn".to_string(),
                     line: 10,
@@ -3867,8 +3842,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3881,7 +3856,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 2,
                 functions_analyzed: 5,
                 functions_above_threshold: 1,
@@ -3922,14 +3897,14 @@ mod tests {
 
     #[test]
     fn health_markdown_threshold_overrides_stale_no_match() {
-        use crate::health_types::{
+        use fallow_output::{
             HealthConfiguredThresholds, HealthEffectiveThresholds, ThresholdOverrideState,
             ThresholdOverrideStatus,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/x.ts"),
                     name: "fn1".to_string(),
                     line: 1,
@@ -3942,8 +3917,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -3956,7 +3931,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 3,
                 functions_above_threshold: 1,
@@ -4016,9 +3991,9 @@ mod tests {
 
     #[test]
     fn health_markdown_file_scores_section() {
-        use crate::health_types::FileHealthScore;
+        use fallow_output::FileHealthScore;
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             file_scores: vec![FileHealthScore {
                 path: root.join("src/util.ts"),
                 fan_in: 5,
@@ -4033,7 +4008,7 @@ mod tests {
                 crap_max: 22.5,
                 crap_above_threshold: 1,
             }],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 average_maintainability: Some(71.0),
@@ -4057,9 +4032,9 @@ mod tests {
 
     #[test]
     fn health_markdown_coverage_gaps_empty_files_and_exports() {
-        use crate::health_types::{CoverageGapSummary, CoverageGaps};
+        use fallow_output::{CoverageGapSummary, CoverageGaps};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             coverage_gaps: Some(CoverageGaps {
                 summary: CoverageGapSummary {
                     runtime_files: 5,
@@ -4071,7 +4046,7 @@ mod tests {
                 files: vec![],
                 exports: vec![],
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 ..Default::default()
@@ -4090,9 +4065,9 @@ mod tests {
     #[test]
     fn health_markdown_hotspots_without_ownership() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/x.ts"),
                     name: "hotFn".to_string(),
                     line: 5,
@@ -4105,8 +4080,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -4119,14 +4094,14 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 10,
                 functions_above_threshold: 1,
                 ..Default::default()
             },
             hotspots: vec![
-                crate::health_types::HotspotEntry {
+                fallow_output::HotspotEntry {
                     path: root.join("src/hot.ts"),
                     score: 75.0,
                     commits: 20,
@@ -4160,9 +4135,9 @@ mod tests {
     #[test]
     fn health_markdown_hotspots_with_summary_since_and_excluded() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/z.ts"),
                     name: "g".to_string(),
                     line: 1,
@@ -4175,8 +4150,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -4189,14 +4164,14 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 10,
                 functions_above_threshold: 1,
                 ..Default::default()
             },
             hotspots: vec![
-                crate::health_types::HotspotEntry {
+                fallow_output::HotspotEntry {
                     path: root.join("src/churn.ts"),
                     score: 60.0,
                     commits: 15,
@@ -4211,7 +4186,7 @@ mod tests {
                 }
                 .into(),
             ],
-            hotspot_summary: Some(crate::health_types::HotspotSummary {
+            hotspot_summary: Some(fallow_output::HotspotSummary {
                 since: "12 months".to_string(),
                 min_commits: 5,
                 files_analyzed: 100,
@@ -4234,13 +4209,13 @@ mod tests {
 
     #[test]
     fn health_markdown_hotspots_with_ownership() {
-        use crate::health_types::{
+        use fallow_output::{
             ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/owned.ts"),
                     name: "fn2".to_string(),
                     line: 1,
@@ -4253,8 +4228,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -4267,14 +4242,14 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 2,
                 functions_analyzed: 4,
                 functions_above_threshold: 1,
                 ..Default::default()
             },
             hotspots: vec![
-                crate::health_types::HotspotEntry {
+                fallow_output::HotspotEntry {
                     path: root.join("src/owned.ts"),
                     score: 80.0,
                     commits: 25,
@@ -4322,9 +4297,9 @@ mod tests {
 
     #[test]
     fn health_markdown_trend_section() {
-        use crate::health_types::{HealthTrend, TrendDirection, TrendMetric, TrendPoint};
+        use fallow_output::{HealthTrend, TrendDirection, TrendMetric, TrendPoint};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             health_trend: Some(HealthTrend {
                 compared_to: TrendPoint {
                     timestamp: "2026-05-01T00:00:00Z".to_string(),
@@ -4348,7 +4323,7 @@ mod tests {
                 snapshots_loaded: 3,
                 overall_direction: TrendDirection::Improving,
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 ..Default::default()
@@ -4366,9 +4341,9 @@ mod tests {
 
     #[test]
     fn health_markdown_trend_single_snapshot_singular() {
-        use crate::health_types::{HealthTrend, TrendDirection, TrendPoint};
+        use fallow_output::{HealthTrend, TrendDirection, TrendPoint};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             health_trend: Some(HealthTrend {
                 compared_to: TrendPoint {
                     timestamp: "2026-06-01T12:00:00Z".to_string(),
@@ -4382,7 +4357,7 @@ mod tests {
                 snapshots_loaded: 1,
                 overall_direction: TrendDirection::Stable,
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 2,
                 functions_analyzed: 5,
                 ..Default::default()
@@ -4400,9 +4375,9 @@ mod tests {
 
     #[test]
     fn health_markdown_trend_metric_percent_unit() {
-        use crate::health_types::{HealthTrend, TrendDirection, TrendMetric, TrendPoint};
+        use fallow_output::{HealthTrend, TrendDirection, TrendMetric, TrendPoint};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             health_trend: Some(HealthTrend {
                 compared_to: TrendPoint {
                     timestamp: "2026-04-01T00:00:00Z".to_string(),
@@ -4426,7 +4401,7 @@ mod tests {
                 snapshots_loaded: 2,
                 overall_direction: TrendDirection::Improving,
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 ..Default::default()
@@ -4446,12 +4421,12 @@ mod tests {
 
     #[test]
     fn health_markdown_runtime_coverage_with_watermark() {
-        use crate::health_types::{
+        use fallow_output::{
             RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSchemaVersion,
             RuntimeCoverageSummary, RuntimeCoverageWatermark,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::Clean,
@@ -4474,7 +4449,7 @@ mod tests {
                 watermark: Some(RuntimeCoverageWatermark::TrialExpired),
                 warnings: vec![],
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 30,
                 ..Default::default()
@@ -4492,12 +4467,12 @@ mod tests {
 
     #[test]
     fn health_markdown_runtime_coverage_hot_paths() {
-        use crate::health_types::{
+        use fallow_output::{
             RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
             RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::HotPathTouched,
@@ -4530,7 +4505,7 @@ mod tests {
                 watermark: None,
                 warnings: vec![],
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 ..Default::default()
@@ -4551,9 +4526,9 @@ mod tests {
 
     #[test]
     fn health_markdown_css_analytics_basic() {
-        use crate::health_types::{CssAnalyticsReport, CssAnalyticsSummary};
+        use fallow_output::{CssAnalyticsReport, CssAnalyticsSummary};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             css_analytics: Some(CssAnalyticsReport {
                 files: vec![],
                 summary: CssAnalyticsSummary {
@@ -4601,7 +4576,7 @@ mod tests {
                 unused_theme_tokens: vec![],
                 font_size_unit_mix: None,
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 ..Default::default()
@@ -4617,12 +4592,12 @@ mod tests {
 
     #[test]
     fn health_markdown_css_analytics_undefined_keyframes() {
-        use crate::health_types::{
+        use fallow_output::{
             CssAnalyticsReport, CssAnalyticsSummary, CssCandidateAction, CssCandidateActionType,
             UndefinedKeyframes,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             css_analytics: Some(CssAnalyticsReport {
                 files: vec![],
                 summary: CssAnalyticsSummary {
@@ -4679,7 +4654,7 @@ mod tests {
                 unused_theme_tokens: vec![],
                 font_size_unit_mix: None,
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 2,
                 functions_analyzed: 5,
                 ..Default::default()
@@ -4693,12 +4668,12 @@ mod tests {
 
     #[test]
     fn health_markdown_css_analytics_tailwind_and_class_candidates() {
-        use crate::health_types::{
+        use fallow_output::{
             CssAnalyticsReport, CssAnalyticsSummary, CssCandidateAction, CssCandidateActionType,
             TailwindArbitraryValue, UnreferencedCssClass, UnresolvedClassReference,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             css_analytics: Some(CssAnalyticsReport {
                 files: vec![],
                 summary: CssAnalyticsSummary {
@@ -4768,7 +4743,7 @@ mod tests {
                 unused_theme_tokens: vec![],
                 font_size_unit_mix: None,
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 2,
                 functions_analyzed: 5,
                 ..Default::default()
@@ -4786,12 +4761,12 @@ mod tests {
 
     #[test]
     fn health_markdown_css_analytics_font_candidates() {
-        use crate::health_types::{
+        use fallow_output::{
             CssAnalyticsReport, CssAnalyticsSummary, CssCandidateAction, CssCandidateActionType,
             CssNotationConsistency, CssNotationCount, UnusedFontFace, UnusedThemeToken,
         };
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             css_analytics: Some(CssAnalyticsReport {
                 files: vec![],
                 summary: CssAnalyticsSummary {
@@ -4867,7 +4842,7 @@ mod tests {
                     actions: vec![],
                 }),
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 2,
                 functions_analyzed: 5,
                 ..Default::default()
@@ -4890,9 +4865,9 @@ mod tests {
 
     #[test]
     fn health_markdown_metric_legend_shown_when_relevant() {
-        use crate::health_types::FileHealthScore;
+        use fallow_output::FileHealthScore;
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             file_scores: vec![FileHealthScore {
                 path: root.join("src/x.ts"),
                 fan_in: 1,
@@ -4907,7 +4882,7 @@ mod tests {
                 crap_max: 5.0,
                 crap_above_threshold: 0,
             }],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 2,
                 ..Default::default()
@@ -4923,9 +4898,9 @@ mod tests {
     #[test]
     fn health_markdown_metric_legend_not_shown_without_sections() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/y.ts"),
                     name: "noLegend".to_string(),
                     line: 1,
@@ -4938,8 +4913,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -4952,7 +4927,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
@@ -4972,11 +4947,9 @@ mod tests {
 
     #[test]
     fn health_markdown_coverage_gaps_files_section_singular() {
-        use crate::health_types::{
-            CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding,
-        };
+        use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedFile, UntestedFileFinding};
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             coverage_gaps: Some(CoverageGaps {
                 summary: CoverageGapSummary {
                     runtime_files: 1,
@@ -4994,7 +4967,7 @@ mod tests {
                 )],
                 exports: vec![],
             }),
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 2,
                 functions_analyzed: 5,
                 ..Default::default()
@@ -5015,9 +4988,9 @@ mod tests {
     #[test]
     fn health_markdown_findings_subset_shown() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/big.ts"),
                     name: "bigFn".to_string(),
                     line: 5,
@@ -5030,8 +5003,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Both,
-                    severity: crate::health_types::FindingSeverity::High,
+                    exceeded: fallow_output::ExceededThreshold::Both,
+                    severity: fallow_output::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -5044,7 +5017,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 2,
                 functions_analyzed: 10,
                 // total > shown triggers the "(N shown)" suffix
@@ -5113,9 +5086,9 @@ mod tests {
     #[test]
     fn health_markdown_component_rollup_entry_label() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             findings: vec![
-                crate::health_types::ComplexityViolation {
+                fallow_output::ComplexityViolation {
                     path: root.join("src/Card.vue"),
                     name: "<component>".to_string(),
                     line: 1,
@@ -5128,8 +5101,8 @@ mod tests {
                     react_jsx_max_depth: 0,
                     react_prop_count: 0,
                     react_hook_profile: None,
-                    exceeded: crate::health_types::ExceededThreshold::Cognitive,
-                    severity: crate::health_types::FindingSeverity::Moderate,
+                    exceeded: fallow_output::ExceededThreshold::Cognitive,
+                    severity: fallow_output::FindingSeverity::Moderate,
                     crap: None,
                     coverage_pct: None,
                     coverage_tier: None,
@@ -5142,7 +5115,7 @@ mod tests {
                 }
                 .into(),
             ],
-            summary: crate::health_types::HealthSummary {
+            summary: fallow_output::HealthSummary {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,

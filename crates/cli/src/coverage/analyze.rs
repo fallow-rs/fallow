@@ -17,7 +17,7 @@ use crate::coverage::cloud_client::{
 };
 use crate::error::emit_error;
 use crate::health::HealthOptions;
-use crate::health_types::{
+use fallow_output::{
     RuntimeCoverageAction, RuntimeCoverageCaptureQuality, RuntimeCoverageConfidence,
     RuntimeCoverageDataSource, RuntimeCoverageEvidence, RuntimeCoverageFinding,
     RuntimeCoverageHotPath, RuntimeCoverageMessage, RuntimeCoverageReport,
@@ -598,11 +598,8 @@ fn merge_cloud_snapshot(
 struct CloudMergeEntries {
     findings: Vec<RuntimeCoverageFinding>,
     hot_paths: Vec<RuntimeCoverageHotPath>,
-    synthesized_blast_radius: Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry>,
-    synthesized_importance: Vec<(
-        crate::health_types::RuntimeCoverageImportanceEntry,
-        Option<u32>,
-    )>,
+    synthesized_blast_radius: Vec<fallow_output::RuntimeCoverageBlastRadiusEntry>,
+    synthesized_importance: Vec<(fallow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
     unmatched_cloud_functions: usize,
 }
 
@@ -657,59 +654,50 @@ fn collect_called_cloud_function(
 
 fn cloud_blast_radius_entries(
     snapshot: &CloudRuntimeContext,
-    synthesized: Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry>,
-) -> Vec<crate::health_types::RuntimeCoverageBlastRadiusEntry> {
+    synthesized: Vec<fallow_output::RuntimeCoverageBlastRadiusEntry>,
+) -> Vec<fallow_output::RuntimeCoverageBlastRadiusEntry> {
     if snapshot.blast_radius.is_empty() {
         return synthesized;
     }
     snapshot
         .blast_radius
         .iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
-                id: entry.id.clone(),
-                stable_id: entry.stable_id.clone(),
-                file: PathBuf::from(&entry.file),
-                function: entry.function.clone(),
-                line: entry.line,
-                caller_count: entry.caller_count.unwrap_or(0),
-                caller_count_weighted_by_traffic: entry
-                    .caller_count_weighted_by_traffic
-                    .unwrap_or(0),
-                deploys_touched: entry.deploys_touched,
-                risk_band: map_cloud_risk_band(entry.risk_band),
-            },
-        )
+        .map(|entry| fallow_output::RuntimeCoverageBlastRadiusEntry {
+            id: entry.id.clone(),
+            stable_id: entry.stable_id.clone(),
+            file: PathBuf::from(&entry.file),
+            function: entry.function.clone(),
+            line: entry.line,
+            caller_count: entry.caller_count.unwrap_or(0),
+            caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic.unwrap_or(0),
+            deploys_touched: entry.deploys_touched,
+            risk_band: map_cloud_risk_band(entry.risk_band),
+        })
         .collect()
 }
 
 fn cloud_importance_entries(
     snapshot: &CloudRuntimeContext,
-    synthesized: Vec<(
-        crate::health_types::RuntimeCoverageImportanceEntry,
-        Option<u32>,
-    )>,
-) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+    synthesized: Vec<(fallow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
+) -> Vec<fallow_output::RuntimeCoverageImportanceEntry> {
     if snapshot.importance.is_empty() {
         return rank_importance(synthesized);
     }
     snapshot
         .importance
         .iter()
-        .map(
-            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
-                id: entry.id.clone(),
-                stable_id: entry.stable_id.clone(),
-                file: PathBuf::from(&entry.file),
-                function: entry.function.clone(),
-                line: entry.line,
-                invocations: entry.invocations,
-                cyclomatic: entry.cyclomatic.unwrap_or(0),
-                owner_count: entry.owner_count.unwrap_or(0),
-                importance_score: entry.importance_score,
-                reason: entry.reason.clone(),
-            },
-        )
+        .map(|entry| fallow_output::RuntimeCoverageImportanceEntry {
+            id: entry.id.clone(),
+            stable_id: entry.stable_id.clone(),
+            file: PathBuf::from(&entry.file),
+            function: entry.function.clone(),
+            line: entry.line,
+            invocations: entry.invocations,
+            cyclomatic: entry.cyclomatic.unwrap_or(0),
+            owner_count: entry.owner_count.unwrap_or(0),
+            importance_score: entry.importance_score,
+            reason: entry.reason.clone(),
+        })
         .collect()
 }
 
@@ -731,9 +719,9 @@ fn cloud_blast_radius(
     local: &StaticFunctionInfo,
     invocations: u64,
     function: &CloudRuntimeFunction,
-) -> crate::health_types::RuntimeCoverageBlastRadiusEntry {
+) -> fallow_output::RuntimeCoverageBlastRadiusEntry {
     let weighted = invocations.saturating_mul(u64::from(local.caller_count));
-    crate::health_types::RuntimeCoverageBlastRadiusEntry {
+    fallow_output::RuntimeCoverageBlastRadiusEntry {
         id: stable_runtime_id("blast", &local.path, &local.name, local.start_line),
         stable_id: Some(local.stable_id.clone()),
         file: local.path.clone(),
@@ -749,13 +737,10 @@ fn cloud_blast_radius(
 fn cloud_importance(
     local: &StaticFunctionInfo,
     invocations: u64,
-) -> (
-    crate::health_types::RuntimeCoverageImportanceEntry,
-    Option<u32>,
-) {
+) -> (fallow_output::RuntimeCoverageImportanceEntry, Option<u32>) {
     let owner_count = local.owner_count.unwrap_or(0);
     (
-        crate::health_types::RuntimeCoverageImportanceEntry {
+        fallow_output::RuntimeCoverageImportanceEntry {
             id: stable_runtime_id("importance", &local.path, &local.name, local.start_line),
             stable_id: Some(local.stable_id.clone()),
             file: local.path.clone(),
@@ -805,11 +790,8 @@ fn cloud_finding(
 }
 
 fn rank_importance(
-    entries: Vec<(
-        crate::health_types::RuntimeCoverageImportanceEntry,
-        Option<u32>,
-    )>,
-) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+    entries: Vec<(fallow_output::RuntimeCoverageImportanceEntry, Option<u32>)>,
+) -> Vec<fallow_output::RuntimeCoverageImportanceEntry> {
     let max_log = entries
         .iter()
         .map(|(entry, _)| (entry.invocations as f64).ln_1p())
@@ -1359,7 +1341,7 @@ fn print_runtime_importance(report: &RuntimeCoverageReport, display_limit: usize
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::health_types::{RuntimeCoverageBlastRadiusEntry, RuntimeCoverageImportanceEntry};
+    use fallow_output::{RuntimeCoverageBlastRadiusEntry, RuntimeCoverageImportanceEntry};
 
     #[test]
     fn api_key_alone_does_not_enable_cloud_source() {

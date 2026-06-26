@@ -1,4 +1,4 @@
-use crate::health_types::{
+use fallow_output::{
     COGNITIVE_EXTRACTION_THRESHOLD, CloneSiblingEvidence, Confidence, ContributingFactor,
     DirectCallerEvidence, EffortEstimate, EvidenceFunction, FileHealthScore, HotspotEntry,
     RecommendationCategory, RefactoringTarget, TargetEvidence, TargetThresholds,
@@ -1000,7 +1000,7 @@ mod tests {
             path.clone(),
             vec![DirectCallerEvidence {
                 path: caller_path.clone(),
-                symbols: vec![crate::health_types::DirectCallerSymbolEvidence {
+                symbols: vec![fallow_output::DirectCallerSymbolEvidence {
                     imported: "foo".into(),
                     local: "fooAlias".into(),
                     type_only: false,

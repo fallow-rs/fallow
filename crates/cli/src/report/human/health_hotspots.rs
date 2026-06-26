@@ -6,11 +6,11 @@ use super::{plural, relative_path, split_dir_filename};
 
 const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
 
-fn render_ownership_summary(report: &crate::health_types::HealthReport) -> Option<String> {
+fn render_ownership_summary(report: &fallow_output::HealthReport) -> Option<String> {
     if report.hotspots.len() < 2 {
         return None;
     }
-    let with_ownership: Vec<&crate::health_types::OwnershipMetrics> = report
+    let with_ownership: Vec<&fallow_output::OwnershipMetrics> = report
         .hotspots
         .iter()
         .filter_map(|h| h.ownership.as_ref())
@@ -71,7 +71,7 @@ fn handle_matches_owner(identifier: &str, declared_owner: &str) -> bool {
 }
 
 fn render_ownership_line(
-    ownership: &crate::health_types::OwnershipMetrics,
+    ownership: &fallow_output::OwnershipMetrics,
     trend: fallow_engine::churn::ChurnTrend,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -126,7 +126,7 @@ fn render_ownership_line(
         parts.push("unowned".red().to_string());
     }
 
-    if ownership.ownership_state == crate::health_types::OwnershipState::DeclaredInactive {
+    if ownership.ownership_state == fallow_output::OwnershipState::DeclaredInactive {
         parts.push("declared owner inactive".yellow().to_string());
     }
 
@@ -139,7 +139,7 @@ fn render_ownership_line(
 
 pub(super) fn render_hotspots(
     lines: &mut Vec<String>,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
 ) {
     if report.hotspots.is_empty() {
@@ -160,7 +160,7 @@ pub(super) fn render_hotspots(
     push_hotspots_footer(lines, report);
 }
 
-fn push_hotspots_header(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+fn push_hotspots_header(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
     let header = report.hotspot_summary.as_ref().map_or_else(
         || format!("Hotspots ({} files)", report.hotspots.len()),
         |summary| {
@@ -175,11 +175,7 @@ fn push_hotspots_header(lines: &mut Vec<String>, report: &crate::health_types::H
     lines.push(String::new());
 }
 
-fn push_hotspot_row(
-    lines: &mut Vec<String>,
-    entry: &crate::health_types::HotspotEntry,
-    root: &Path,
-) {
+fn push_hotspot_row(lines: &mut Vec<String>, entry: &fallow_output::HotspotEntry, root: &Path) {
     let file_str = relative_path(&entry.path, root).display().to_string();
     let (dir, filename) = split_dir_filename(&file_str);
     lines.push(format!(
@@ -242,7 +238,7 @@ fn hotspot_test_tag(is_test_path: bool) -> String {
     }
 }
 
-fn push_hotspots_footer(lines: &mut Vec<String>, report: &crate::health_types::HealthReport) {
+fn push_hotspots_footer(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
     push_hotspots_excluded_line(lines, report);
     if hotspots_have_history_only_ownership(report) {
         lines.push(format!(
@@ -258,10 +254,7 @@ fn push_hotspots_footer(lines: &mut Vec<String>, report: &crate::health_types::H
     lines.push(String::new());
 }
 
-fn push_hotspots_excluded_line(
-    lines: &mut Vec<String>,
-    report: &crate::health_types::HealthReport,
-) {
+fn push_hotspots_excluded_line(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
     let Some(summary) = report.hotspot_summary.as_ref() else {
         return;
     };
@@ -281,7 +274,7 @@ fn push_hotspots_excluded_line(
     lines.push(String::new());
 }
 
-fn hotspots_have_history_only_ownership(report: &crate::health_types::HealthReport) -> bool {
+fn hotspots_have_history_only_ownership(report: &fallow_output::HealthReport) -> bool {
     let any_ownership = report.hotspots.iter().any(|h| h.ownership.is_some());
     let no_codeowners_anywhere = report
         .hotspots
@@ -299,7 +292,7 @@ mod tests {
 
     use super::super::plain;
     use super::*;
-    use crate::health_types::{
+    use fallow_output::{
         ContributorEntry, ContributorIdentifierFormat, HealthReport, HotspotEntry, HotspotFinding,
         HotspotSummary, OwnershipMetrics, OwnershipState,
     };

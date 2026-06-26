@@ -161,7 +161,7 @@ fn route_one(
 
 #[cfg(test)]
 mod tests {
-    use crate::health_types::{
+    use fallow_output::{
         ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
     };
 

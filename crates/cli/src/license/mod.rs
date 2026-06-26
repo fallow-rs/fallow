@@ -1,6 +1,6 @@
 //! `fallow license` subcommand: activate, status, refresh, deactivate.
 //!
-//! All entry points are dispatched from [`run`]. Network-bound flows
+//! All entry points are dispatched from `run`. Network-bound flows
 //! (`refresh`, `activate --trial`) fetch a JWT from `api.fallow.cloud` and
 //! then pass it through the same offline verifier used by the local activation
 //! path. Local flows (`activate <jwt>`, `status`, `deactivate`) are fully
@@ -8,7 +8,7 @@
 //!
 //! # Public key
 //!
-//! The Ed25519 verification key is compiled in at [`PUBLIC_KEY_BYTES`].
+//! The Ed25519 verification key is compiled in at `PUBLIC_KEY_BYTES`.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};

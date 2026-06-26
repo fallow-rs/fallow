@@ -45,10 +45,10 @@ use xxhash_rust::xxh3::xxh3_64;
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
 use crate::error::emit_error;
 use crate::health::HealthOptions;
-use crate::health_types::{
+use crate::load_config_for_analysis;
+use fallow_output::{
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageVerdict,
 };
-use crate::load_config_for_analysis;
 
 pub use fallow_api::SecurityGateMode;
 

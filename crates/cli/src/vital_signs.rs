@@ -11,7 +11,7 @@ use fallow_engine::git_env::clear_ambient_git_env;
 /// Number of seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;
 
-use crate::health_types::{
+use fallow_output::{
     DEFAULT_CYCLOMATIC_CRITICAL, FileHealthScore, HEALTH_SCORE_FORMULA_VERSION,
     HOTSPOT_SCORE_THRESHOLD, HealthScore, HealthScorePenalties, HealthTrend, HotspotEntry,
     RiskProfile, SNAPSHOT_SCHEMA_VERSION, TrendCount, TrendDirection, TrendMetric, TrendPoint,
@@ -636,7 +636,7 @@ pub fn build_snapshot(
     root: &Path,
     shallow_clone: bool,
     health_score: Option<&HealthScore>,
-    coverage_model: Option<crate::health_types::CoverageModel>,
+    coverage_model: Option<fallow_output::CoverageModel>,
 ) -> VitalSignsSnapshot {
     let now = chrono_timestamp();
 

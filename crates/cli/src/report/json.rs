@@ -429,7 +429,7 @@ fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
 }
 
 pub fn build_health_json(
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
     elapsed: Duration,
     explain: bool,
@@ -457,8 +457,8 @@ pub fn build_health_json(
 }
 
 pub fn build_grouped_health_json(
-    report: &crate::health_types::HealthReport,
-    grouping: &crate::health_types::HealthGrouping,
+    report: &fallow_output::HealthReport,
+    grouping: &fallow_output::HealthGrouping,
     root: &Path,
     elapsed: Duration,
     explain: bool,
@@ -485,7 +485,7 @@ pub fn build_grouped_health_json(
 }
 
 pub(super) fn print_health_json(
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
     elapsed: Duration,
     explain: bool,
@@ -500,8 +500,8 @@ pub(super) fn print_health_json(
 }
 
 pub(super) fn print_grouped_health_json(
-    report: &crate::health_types::HealthReport,
-    grouping: &crate::health_types::HealthGrouping,
+    report: &fallow_output::HealthReport,
+    grouping: &fallow_output::HealthGrouping,
     root: &Path,
     elapsed: Duration,
     explain: bool,
@@ -661,16 +661,16 @@ pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::health_types::{
+    use crate::report::test_helpers::sample_results;
+    use fallow_core::extract::MemberKind;
+    use fallow_core::results::*;
+    use fallow_output::{
         RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
         RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
         RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
         RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
         RuntimeCoverageWatermark,
     };
-    use crate::report::test_helpers::sample_results;
-    use fallow_core::extract::MemberKind;
-    use fallow_core::results::*;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -722,7 +722,7 @@ mod tests {
     )]
     fn health_json_includes_runtime_coverage_with_relative_paths_and_actions() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
+        let report = fallow_output::HealthReport {
             runtime_coverage: Some(RuntimeCoverageReport {
                 schema_version: RuntimeCoverageSchemaVersion::V1,
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
@@ -738,7 +738,7 @@ mod tests {
                     trace_count: 2_847_291,
                     period_days: 30,
                     deployments_seen: 14,
-                    capture_quality: Some(crate::health_types::RuntimeCoverageCaptureQuality {
+                    capture_quality: Some(fallow_output::RuntimeCoverageCaptureQuality {
                         window_seconds: 720,
                         instances_observed: 1,
                         lazy_parse_warning: true,
@@ -793,8 +793,8 @@ mod tests {
         };
 
         let envelope: fallow_output::HealthOutput<
-            crate::health_types::HealthReport,
-            crate::health_types::HealthGroup,
+            fallow_output::HealthReport,
+            fallow_output::HealthGroup,
         > = fallow_output::HealthOutput {
             schema_version: SchemaVersion(SCHEMA_VERSION),
             version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
@@ -847,9 +847,9 @@ mod tests {
     #[test]
     fn grouped_health_json_uses_api_contract_for_group_paths() {
         let root = PathBuf::from("/project");
-        let grouping = crate::health_types::HealthGrouping {
+        let grouping = fallow_output::HealthGrouping {
             mode: "package",
-            groups: vec![crate::health_types::HealthGroup {
+            groups: vec![fallow_output::HealthGroup {
                 key: "app".to_string(),
                 owners: None,
                 files_analyzed: 1,
@@ -860,7 +860,7 @@ mod tests {
                 findings: Vec::new(),
                 file_scores: Vec::new(),
                 hotspots: Vec::new(),
-                large_functions: vec![crate::health_types::LargeFunctionEntry {
+                large_functions: vec![fallow_output::LargeFunctionEntry {
                     path: root.join("src/large.ts"),
                     name: "large".to_string(),
                     line: 12,
@@ -872,7 +872,7 @@ mod tests {
         };
 
         let output = build_grouped_health_json(
-            &crate::health_types::HealthReport::default(),
+            &fallow_output::HealthReport::default(),
             &grouping,
             &root,
             Duration::ZERO,
@@ -2194,7 +2194,7 @@ mod tests {
     /// the JSON post-pass into the typed wrapper.
     fn build_actions_for_finding_json(
         finding_json: serde_json::Value,
-        opts: crate::health_types::HealthActionOptions,
+        opts: fallow_output::HealthActionOptions,
         max_cyclomatic_threshold: u16,
         max_cognitive_threshold: u16,
         max_crap_threshold: f64,
@@ -2211,14 +2211,14 @@ mod tests {
                 .or_insert(serde_json::Value::String("moderate".to_string()));
         }
         let violation = synthesize_complexity_violation(&value);
-        let ctx = crate::health_types::HealthActionContext {
+        let ctx = fallow_output::HealthActionContext {
             opts,
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
             crap_refactor_band: 5,
         };
-        let finding = crate::health_types::HealthFinding::with_actions(violation, &ctx);
+        let finding = fallow_output::HealthFinding::with_actions(violation, &ctx);
         let serialized = serde_json::to_value(&finding).expect("serialize HealthFinding");
         serialized["actions"]
             .as_array()
@@ -2232,10 +2232,8 @@ mod tests {
     /// shape.
     fn synthesize_complexity_violation(
         value: &serde_json::Value,
-    ) -> crate::health_types::ComplexityViolation {
-        use crate::health_types::{
-            CoverageSource, CoverageTier, ExceededThreshold, FindingSeverity,
-        };
+    ) -> fallow_output::ComplexityViolation {
+        use fallow_output::{CoverageSource, CoverageTier, ExceededThreshold, FindingSeverity};
         let exceeded = match value["exceeded"].as_str().unwrap_or("crap") {
             "cyclomatic" => ExceededThreshold::Cyclomatic,
             "cognitive" => ExceededThreshold::Cognitive,
@@ -2271,7 +2269,7 @@ mod tests {
                     "estimated_component_inherited" => CoverageSource::EstimatedComponentInherited,
                     other => panic!("unknown coverage_source label: {other}"),
                 });
-        crate::health_types::ComplexityViolation {
+        fallow_output::ComplexityViolation {
             path: std::path::PathBuf::from(value["path"].as_str().unwrap_or("src/x.ts")),
             name: value["name"].as_str().unwrap_or("fn").to_string(),
             line: u32::try_from(value["line"].as_u64().unwrap_or(0)).unwrap_or(0),
@@ -2291,7 +2289,7 @@ mod tests {
                     u16::try_from(p.get(key).and_then(serde_json::Value::as_u64).unwrap_or(0))
                         .unwrap_or(0)
                 };
-                crate::health_types::ReactHookProfile {
+                fallow_output::ReactHookProfile {
                     state: read_u16("state"),
                     effect: read_u16("effect"),
                     memo: read_u16("memo"),
@@ -2315,7 +2313,7 @@ mod tests {
                 .map(std::path::PathBuf::from),
             component_rollup: value.get("component_rollup").and_then(|v| {
                 let map = v.as_object()?;
-                Some(crate::health_types::ComponentRollup {
+                Some(fallow_output::ComponentRollup {
                     component: map.get("component")?.as_str()?.to_string(),
                     class_worst_function: map.get("class_worst_function")?.as_str()?.to_string(),
                     class_cyclomatic: u16::try_from(map.get("class_cyclomatic")?.as_u64()?).ok()?,
@@ -2346,7 +2344,7 @@ mod tests {
                 "line_count": 150,
                 "exceeded": "both"
             }),
-            crate::health_types::HealthActionOptions::default(),
+            fallow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2381,7 +2379,7 @@ mod tests {
                 "line_count": 150,
                 "exceeded": "both"
             }),
-            crate::health_types::HealthActionOptions::default(),
+            fallow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2403,7 +2401,7 @@ mod tests {
                 "line_count": 40,
                 "exceeded": "both"
             }),
-            crate::health_types::HealthActionOptions::default(),
+            fallow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2431,7 +2429,7 @@ mod tests {
                 "line_count": 40,
                 "exceeded": "both"
             }),
-            crate::health_types::HealthActionOptions::default(),
+            fallow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2513,7 +2511,7 @@ mod tests {
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
-            crate::health_types::HealthActionOptions::default(),
+            fallow_output::HealthActionOptions::default(),
         )
     }
 
@@ -2531,15 +2529,15 @@ mod tests {
         max_cyclomatic_threshold: u16,
         max_cognitive_threshold: u16,
         max_crap_threshold: f64,
-        action_opts: crate::health_types::HealthActionOptions,
+        action_opts: fallow_output::HealthActionOptions,
     ) -> serde_json::Value {
         let tier = coverage_tier.map(|t| match t {
-            "none" => crate::health_types::CoverageTier::None,
-            "partial" => crate::health_types::CoverageTier::Partial,
-            "high" => crate::health_types::CoverageTier::High,
+            "none" => fallow_output::CoverageTier::None,
+            "partial" => fallow_output::CoverageTier::Partial,
+            "high" => fallow_output::CoverageTier::High,
             other => panic!("unknown coverage tier label: {other}"),
         });
-        let violation = crate::health_types::ComplexityViolation {
+        let violation = fallow_output::ComplexityViolation {
             path: std::path::PathBuf::from("src/risk.ts"),
             name: "computeScore".to_string(),
             line: 12,
@@ -2552,8 +2550,8 @@ mod tests {
             react_jsx_max_depth: 0,
             react_prop_count: 0,
             react_hook_profile: None,
-            exceeded: crate::health_types::ExceededThreshold::Crap,
-            severity: crate::health_types::FindingSeverity::Moderate,
+            exceeded: fallow_output::ExceededThreshold::Crap,
+            severity: fallow_output::FindingSeverity::Moderate,
             crap: Some(35.5),
             coverage_pct: None,
             coverage_tier: tier,
@@ -2564,14 +2562,14 @@ mod tests {
             effective_thresholds: None,
             threshold_source: None,
         };
-        let ctx = crate::health_types::HealthActionContext {
+        let ctx = fallow_output::HealthActionContext {
             opts: action_opts,
             max_cyclomatic_threshold,
             max_cognitive_threshold,
             max_crap_threshold,
             crap_refactor_band: 5,
         };
-        let finding = crate::health_types::HealthFinding::with_actions(violation, &ctx);
+        let finding = fallow_output::HealthFinding::with_actions(violation, &ctx);
         let actions_meta = if action_opts.omit_suppress_line {
             Some(serde_json::json!({
                 "suppression_hints_omitted": true,
@@ -2715,7 +2713,7 @@ mod tests {
 
     #[test]
     fn crap_only_secondary_refactor_respects_configured_band() {
-        let violation = crate::health_types::ComplexityViolation {
+        let violation = fallow_output::ComplexityViolation {
             path: std::path::PathBuf::from("src/risk.ts"),
             name: "computeScore".to_string(),
             line: 12,
@@ -2728,11 +2726,11 @@ mod tests {
             react_jsx_max_depth: 0,
             react_prop_count: 0,
             react_hook_profile: None,
-            exceeded: crate::health_types::ExceededThreshold::Crap,
-            severity: crate::health_types::FindingSeverity::Moderate,
+            exceeded: fallow_output::ExceededThreshold::Crap,
+            severity: fallow_output::FindingSeverity::Moderate,
             crap: Some(35.5),
             coverage_pct: None,
-            coverage_tier: Some(crate::health_types::CoverageTier::None),
+            coverage_tier: Some(fallow_output::CoverageTier::None),
             coverage_source: None,
             inherited_from: None,
             component_rollup: None,
@@ -2740,21 +2738,20 @@ mod tests {
             effective_thresholds: None,
             threshold_source: None,
         };
-        let narrow_ctx = crate::health_types::HealthActionContext {
-            opts: crate::health_types::HealthActionOptions::default(),
+        let narrow_ctx = fallow_output::HealthActionContext {
+            opts: fallow_output::HealthActionOptions::default(),
             max_cyclomatic_threshold: 20,
             max_cognitive_threshold: 15,
             max_crap_threshold: 30.0,
             crap_refactor_band: 5,
         };
-        let wide_ctx = crate::health_types::HealthActionContext {
+        let wide_ctx = fallow_output::HealthActionContext {
             crap_refactor_band: 6,
             ..narrow_ctx
         };
 
-        let narrow_actions =
-            crate::health_types::build_health_finding_actions(&violation, &narrow_ctx);
-        let wide_actions = crate::health_types::build_health_finding_actions(&violation, &wide_ctx);
+        let narrow_actions = fallow_output::build_health_finding_actions(&violation, &narrow_ctx);
+        let wide_actions = fallow_output::build_health_finding_actions(&violation, &wide_ctx);
 
         assert!(
             !narrow_actions.iter().any(|a| {
@@ -2789,7 +2786,7 @@ mod tests {
                 "line_count": 80,
                 "exceeded": "cyclomatic",
             }),
-            crate::health_types::HealthActionOptions::default(),
+            fallow_output::HealthActionOptions::default(),
             20,
             15,
             30.0,
@@ -2817,7 +2814,7 @@ mod tests {
             20,
             15,
             30.0,
-            crate::health_types::HealthActionOptions {
+            fallow_output::HealthActionOptions {
                 omit_suppress_line: true,
                 omit_reason: Some("baseline-active"),
             },
@@ -2844,7 +2841,7 @@ mod tests {
             20,
             15,
             30.0,
-            crate::health_types::HealthActionOptions {
+            fallow_output::HealthActionOptions {
                 omit_suppress_line: true,
                 omit_reason: Some("config-disabled"),
             },
@@ -2902,7 +2899,7 @@ mod tests {
             }
             let actions = build_actions_for_finding_json(
                 finding,
-                crate::health_types::HealthActionOptions::default(),
+                fallow_output::HealthActionOptions::default(),
                 max,
                 15,
                 30.0,

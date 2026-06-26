@@ -40,7 +40,6 @@ mod explain;
 mod fix;
 mod flags;
 mod health;
-mod health_types;
 mod impact;
 mod init;
 mod inspect;
@@ -2059,11 +2058,11 @@ pub enum EffortFilter {
 
 impl EffortFilter {
     /// Convert to the corresponding `EffortEstimate` for comparison.
-    const fn to_estimate(self) -> health_types::EffortEstimate {
+    const fn to_estimate(self) -> fallow_output::EffortEstimate {
         match self {
-            Self::Low => health_types::EffortEstimate::Low,
-            Self::Medium => health_types::EffortEstimate::Medium,
-            Self::High => health_types::EffortEstimate::High,
+            Self::Low => fallow_output::EffortEstimate::Low,
+            Self::Medium => fallow_output::EffortEstimate::Medium,
+            Self::High => fallow_output::EffortEstimate::High,
         }
     }
 }
@@ -2078,11 +2077,11 @@ pub enum HealthSeverityCli {
 
 impl HealthSeverityCli {
     /// Convert to the typed health output severity.
-    const fn to_health_severity(self) -> health_types::FindingSeverity {
+    const fn to_health_severity(self) -> fallow_output::FindingSeverity {
         match self {
-            Self::Moderate => health_types::FindingSeverity::Moderate,
-            Self::High => health_types::FindingSeverity::High,
-            Self::Critical => health_types::FindingSeverity::Critical,
+            Self::Moderate => fallow_output::FindingSeverity::Moderate,
+            Self::High => fallow_output::FindingSeverity::High,
+            Self::Critical => fallow_output::FindingSeverity::Critical,
         }
     }
 }
@@ -5469,7 +5468,7 @@ struct HealthDispatchArgs<'a> {
     effort: Option<EffortFilter>,
     score: bool,
     min_score: Option<f64>,
-    min_severity: Option<health_types::FindingSeverity>,
+    min_severity: Option<fallow_output::FindingSeverity>,
     report_only: bool,
     since: Option<&'a str>,
     min_commits: Option<u32>,
@@ -5545,7 +5544,7 @@ fn path_from_env(name: &str) -> Option<PathBuf> {
 fn validate_health_report_only_gate(
     report_only: bool,
     min_score: Option<f64>,
-    min_severity: Option<health_types::FindingSeverity>,
+    min_severity: Option<fallow_output::FindingSeverity>,
     output: fallow_config::OutputFormat,
 ) -> Result<(), ExitCode> {
     if report_only && (min_score.is_some() || min_severity.is_some()) {

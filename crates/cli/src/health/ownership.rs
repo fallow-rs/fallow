@@ -43,7 +43,7 @@ use fallow_config::EmailMode;
 use fallow_engine::churn::{AuthorContribution, FileChurn};
 
 use crate::codeowners::CodeOwners;
-use crate::health_types::{
+use fallow_output::{
     ContributorEntry, ContributorIdentifierFormat, OwnershipMetrics, OwnershipState,
 };
 

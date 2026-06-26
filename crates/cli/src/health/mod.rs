@@ -21,9 +21,9 @@ use fallow_engine::{HealthExecutionOptions, HealthGateOptions, HealthSharedParse
 use crate::baseline::{HealthBaselineData, filter_new_health_findings, filter_new_health_targets};
 use crate::check::{get_changed_files, resolve_workspace_scope};
 use crate::error::emit_error;
-pub use crate::health_types::*;
 use crate::report;
 use crate::vital_signs;
+pub use fallow_output::*;
 
 use assembly::assemble_health_report;
 use hotspots::compute_hotspots;
@@ -485,7 +485,7 @@ struct HealthScanCtx<'a> {
 
 struct HealthReportSideEffectsInput<'a> {
     opts: &'a HealthOptions<'a>,
-    report: &'a mut crate::health_types::HealthReport,
+    report: &'a mut fallow_output::HealthReport,
     files: &'a [fallow_types::discover::DiscoveredFile],
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
@@ -625,9 +625,9 @@ impl CssTokenSets {
     /// savings descending (then first occurrence path).
     fn group_duplicate_blocks(
         &self,
-        summary: &mut crate::health_types::CssAnalyticsSummary,
-    ) -> Vec<crate::health_types::CssDuplicateBlock> {
-        use crate::health_types::{CssBlockOccurrence, CssCandidateAction, CssDuplicateBlock};
+        summary: &mut fallow_output::CssAnalyticsSummary,
+    ) -> Vec<fallow_output::CssDuplicateBlock> {
+        use fallow_output::{CssBlockOccurrence, CssCandidateAction, CssDuplicateBlock};
 
         let mut groups: Vec<CssDuplicateBlock> = self
             .declaration_blocks
@@ -755,9 +755,9 @@ impl CssTokenSets {
     /// summary counts and returns the located list sorted by (kind, path, name).
     fn group_unused_at_rules(
         &self,
-        summary: &mut crate::health_types::CssAnalyticsSummary,
-    ) -> Vec<crate::health_types::UnusedAtRule> {
-        use crate::health_types::{CssCandidateAction, UnusedAtRule, UnusedAtRuleKind};
+        summary: &mut fallow_output::CssAnalyticsSummary,
+    ) -> Vec<fallow_output::UnusedAtRule> {
+        use fallow_output::{CssCandidateAction, UnusedAtRule, UnusedAtRuleKind};
 
         let mut out: Vec<UnusedAtRule> = Vec::new();
         for name in self
@@ -801,12 +801,12 @@ impl CssTokenSets {
     /// undefined (`undefined`).
     fn finalize(
         &self,
-        summary: &mut crate::health_types::CssAnalyticsSummary,
+        summary: &mut fallow_output::CssAnalyticsSummary,
     ) -> (
-        Vec<crate::health_types::UnreferencedKeyframes>,
-        Vec<crate::health_types::UndefinedKeyframes>,
+        Vec<fallow_output::UnreferencedKeyframes>,
+        Vec<fallow_output::UndefinedKeyframes>,
     ) {
-        use crate::health_types::{CssCandidateAction, UndefinedKeyframes, UnreferencedKeyframes};
+        use fallow_output::{CssCandidateAction, UndefinedKeyframes, UnreferencedKeyframes};
 
         summary.unique_colors = saturate_len(self.colors.len());
         summary.unique_font_sizes = saturate_len(self.font_sizes.len());
@@ -874,9 +874,9 @@ impl CssTokenSets {
     /// set the summary count.
     fn unused_font_faces(
         &self,
-        summary: &mut crate::health_types::CssAnalyticsSummary,
-    ) -> Vec<crate::health_types::UnusedFontFace> {
-        use crate::health_types::{CssCandidateAction, UnusedFontFace};
+        summary: &mut fallow_output::CssAnalyticsSummary,
+    ) -> Vec<fallow_output::UnusedFontFace> {
+        use fallow_output::{CssCandidateAction, UnusedFontFace};
         // CSS font-family names are case-insensitive (CSS Fonts Level 4 4.2.1),
         // unlike `@keyframes` custom-ident names (case-sensitive, via
         // `locate_keyframe_diff`), so match case-insensitively while keeping the
@@ -912,9 +912,9 @@ impl CssTokenSets {
     /// user-zoom accessibility). Advisory only, never gated.
     fn font_size_unit_mix(
         &self,
-        summary: &mut crate::health_types::CssAnalyticsSummary,
-    ) -> Option<crate::health_types::CssNotationConsistency> {
-        use crate::health_types::{CssCandidateAction, CssNotationConsistency, CssNotationCount};
+        summary: &mut fallow_output::CssAnalyticsSummary,
+    ) -> Option<fallow_output::CssNotationConsistency> {
+        use fallow_output::{CssCandidateAction, CssNotationConsistency, CssNotationCount};
 
         let mut counts: rustc_hash::FxHashMap<&'static str, u32> = rustc_hash::FxHashMap::default();
         for value in &self.font_sizes {
@@ -1022,7 +1022,7 @@ fn saturate_len(len: usize) -> u32 {
 
 /// `(first path, first line)` sort key for a duplicate block; occurrences are
 /// pre-sorted, so the first is the lexicographic minimum.
-fn occurrence_sort_key(block: &crate::health_types::CssDuplicateBlock) -> (&str, u32) {
+fn occurrence_sort_key(block: &fallow_output::CssDuplicateBlock) -> (&str, u32) {
     block
         .occurrences
         .first()
@@ -1102,11 +1102,11 @@ fn read_markup_scan_source(
 fn scan_markup_tailwind_arbitrary_values(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
-    summary: &mut crate::health_types::CssAnalyticsSummary,
-) -> Vec<crate::health_types::TailwindArbitraryValue> {
+    summary: &mut fallow_output::CssAnalyticsSummary,
+) -> Vec<fallow_output::TailwindArbitraryValue> {
     let HealthScanCtx { config, .. } = ctx;
 
-    use crate::health_types::TailwindArbitraryValue;
+    use fallow_output::TailwindArbitraryValue;
 
     if !project_uses_tailwind(&config.root) {
         return Vec::new();
@@ -1134,7 +1134,9 @@ fn scan_markup_tailwind_arbitrary_values(
     let mut out: Vec<TailwindArbitraryValue> = agg
         .into_iter()
         .map(|(value, (count, path, line))| TailwindArbitraryValue {
-            actions: vec![crate::health_types::CssCandidateAction::replace_arbitrary_value(&value)],
+            actions: vec![fallow_output::CssCandidateAction::replace_arbitrary_value(
+                &value,
+            )],
             value,
             count,
             path,
@@ -1397,9 +1399,9 @@ fn collect_unresolved_class_refs_in_file<'a>(
     defined: &rustc_hash::FxHashSet<String>,
     by_len: &'a rustc_hash::FxHashMap<usize, Vec<&'a str>>,
     seen: &mut rustc_hash::FxHashSet<(String, u32, String)>,
-    out: &mut Vec<crate::health_types::UnresolvedClassReference>,
+    out: &mut Vec<fallow_output::UnresolvedClassReference>,
 ) {
-    use crate::health_types::{CssCandidateAction, UnresolvedClassReference};
+    use fallow_output::{CssCandidateAction, UnresolvedClassReference};
     for token in fallow_core::extract::scan_markup_class_tokens(source).static_tokens {
         if token.value.len() < MIN_TOKEN_LEN
             || is_tailwind_shaped(&token.value)
@@ -1436,13 +1438,13 @@ fn collect_unresolved_class_refs_in_file<'a>(
 fn scan_unresolved_class_references(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
-    summary: &mut crate::health_types::CssAnalyticsSummary,
-) -> Vec<crate::health_types::UnresolvedClassReference> {
+    summary: &mut fallow_output::CssAnalyticsSummary,
+) -> Vec<fallow_output::UnresolvedClassReference> {
     let HealthScanCtx {
         config, ignore_set, ..
     } = ctx;
 
-    use crate::health_types::UnresolvedClassReference;
+    use fallow_output::UnresolvedClassReference;
 
     // Abstain on preprocessor-dominant projects. lightningcss parses `.scss` /
     // `.sass` / `.less` source textually but cannot expand loops / mixins, so a
@@ -1533,7 +1535,7 @@ fn mask_font_face_blocks(lower_source: &str) -> String {
 /// `.scss` theme, a canvas/JS `fontFamily` assignment, an inline style), so it
 /// is NOT dead.
 fn font_families_referenced_in_source(
-    candidates: &[crate::health_types::UnusedFontFace],
+    candidates: &[fallow_output::UnusedFontFace],
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
@@ -1901,8 +1903,8 @@ fn published_css_paths(config: &ResolvedConfig) -> rustc_hash::FxHashSet<String>
 fn scan_unreferenced_css_classes(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
-    summary: &mut crate::health_types::CssAnalyticsSummary,
-) -> Vec<crate::health_types::UnreferencedCssClass> {
+    summary: &mut fallow_output::CssAnalyticsSummary,
+) -> Vec<fallow_output::UnreferencedCssClass> {
     let HealthScanCtx {
         config,
         ignore_set,
@@ -1910,7 +1912,7 @@ fn scan_unreferenced_css_classes(
         ws_roots,
     } = ctx;
 
-    use crate::health_types::UnreferencedCssClass;
+    use fallow_output::UnreferencedCssClass;
 
     // Partial scope cannot prove a global class dead.
     if changed_files.is_some() || ws_roots.is_some() {
@@ -2022,14 +2024,14 @@ fn collect_css_reference_surface_file(
 }
 
 fn push_unreferenced_css_class_candidates(
-    out: &mut Vec<crate::health_types::UnreferencedCssClass>,
+    out: &mut Vec<fallow_output::UnreferencedCssClass>,
     rel: &str,
     classes: Vec<(String, u32)>,
     published: &rustc_hash::FxHashSet<String>,
     dependency_prefixes: &rustc_hash::FxHashSet<String>,
     reference_surface: &CssReferenceSurface,
 ) {
-    use crate::health_types::{CssCandidateAction, UnreferencedCssClass};
+    use fallow_output::{CssCandidateAction, UnreferencedCssClass};
 
     if published.contains(rel)
         || !classes
@@ -2179,7 +2181,7 @@ struct UnusedThemeTokenScanInput<'a> {
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
-    summary: &'a mut crate::health_types::CssAnalyticsSummary,
+    summary: &'a mut fallow_output::CssAnalyticsSummary,
 }
 
 /// A classified `@theme` token candidate (namespace + name + definition site)
@@ -2258,8 +2260,8 @@ fn collect_theme_var_reads(tokens: &CssTokenSets) -> rustc_hash::FxHashSet<Strin
 
 fn scan_unused_theme_tokens(
     input: &mut UnusedThemeTokenScanInput<'_>,
-) -> Vec<crate::health_types::UnusedThemeToken> {
-    use crate::health_types::{CssCandidateAction, UnusedThemeToken};
+) -> Vec<fallow_output::UnusedThemeToken> {
+    use fallow_output::{CssCandidateAction, UnusedThemeToken};
 
     // Partial scope cannot prove a token dead.
     if input.changed_files.is_some() || input.ws_roots.is_some() {
@@ -2320,10 +2322,10 @@ fn scan_unused_theme_tokens(
 /// The markup / source-derived CSS candidate lists, gathered in one pass-set so
 /// the orchestrator stays a thin assembler.
 struct MarkupCssCandidates {
-    tailwind_arbitrary_values: Vec<crate::health_types::TailwindArbitraryValue>,
-    unresolved_class_references: Vec<crate::health_types::UnresolvedClassReference>,
-    unreferenced_css_classes: Vec<crate::health_types::UnreferencedCssClass>,
-    unused_theme_tokens: Vec<crate::health_types::UnusedThemeToken>,
+    tailwind_arbitrary_values: Vec<fallow_output::TailwindArbitraryValue>,
+    unresolved_class_references: Vec<fallow_output::UnresolvedClassReference>,
+    unreferenced_css_classes: Vec<fallow_output::UnreferencedCssClass>,
+    unused_theme_tokens: Vec<fallow_output::UnusedThemeToken>,
 }
 
 /// Run the markup / source-scanning CSS candidates (Tailwind arbitrary values,
@@ -2337,7 +2339,7 @@ struct MarkupCssCandidateInput<'a> {
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
-    summary: &'a mut crate::health_types::CssAnalyticsSummary,
+    summary: &'a mut fallow_output::CssAnalyticsSummary,
 }
 
 fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> MarkupCssCandidates {
@@ -2428,8 +2430,8 @@ fn css_report_scan_target<'a>(
 fn record_scoped_unused_classes(
     source: &str,
     relative: &std::path::Path,
-    summary: &mut crate::health_types::CssAnalyticsSummary,
-    scoped_unused: &mut Vec<crate::health_types::ScopedUnusedClasses>,
+    summary: &mut fallow_output::CssAnalyticsSummary,
+    scoped_unused: &mut Vec<fallow_output::ScopedUnusedClasses>,
 ) {
     let classes = fallow_core::extract::scoped_unused_classes(source);
     if classes.is_empty() {
@@ -2439,10 +2441,10 @@ fn record_scoped_unused_classes(
     summary.scoped_unused_classes = summary
         .scoped_unused_classes
         .saturating_add(u32::try_from(classes.len()).unwrap_or(u32::MAX));
-    scoped_unused.push(crate::health_types::ScopedUnusedClasses {
+    scoped_unused.push(fallow_output::ScopedUnusedClasses {
         path: relative.to_string_lossy().replace('\\', "/"),
         classes,
-        actions: vec![crate::health_types::CssCandidateAction::verify_scoped_classes()],
+        actions: vec![fallow_output::CssCandidateAction::verify_scoped_classes()],
     });
 }
 
@@ -2455,7 +2457,7 @@ fn css_report_stylesheet_source(source: &str, is_sfc: bool) -> Option<std::borro
 }
 
 fn record_css_analytics_summary(
-    summary: &mut crate::health_types::CssAnalyticsSummary,
+    summary: &mut fallow_output::CssAnalyticsSummary,
     analytics: &fallow_types::extract::CssAnalytics,
 ) {
     summary.files_analyzed = summary.files_analyzed.saturating_add(1);
@@ -2478,21 +2480,21 @@ fn record_css_analytics_summary(
 /// The per-file CSS walk accumulator: structural file reports, the project-wide
 /// token sets, scoped SFC unused-class findings, and the running summary.
 struct CssWalkAccum {
-    file_reports: Vec<crate::health_types::CssFileAnalytics>,
-    summary: crate::health_types::CssAnalyticsSummary,
-    scoped_unused: Vec<crate::health_types::ScopedUnusedClasses>,
+    file_reports: Vec<fallow_output::CssFileAnalytics>,
+    summary: fallow_output::CssAnalyticsSummary,
+    scoped_unused: Vec<fallow_output::ScopedUnusedClasses>,
     tokens: CssTokenSets,
 }
 
 /// The finalized whole-project token metrics (keyframes, duplicate blocks, unused
 /// at-rules, font-size unit mix, unused font faces) derived after the file walk.
 struct CssTokenMetrics {
-    unreferenced_keyframes: Vec<crate::health_types::UnreferencedKeyframes>,
-    undefined_keyframes: Vec<crate::health_types::UndefinedKeyframes>,
-    duplicate_declaration_blocks: Vec<crate::health_types::CssDuplicateBlock>,
-    unused_at_rules: Vec<crate::health_types::UnusedAtRule>,
-    font_size_unit_mix: Option<crate::health_types::CssNotationConsistency>,
-    unused_font_faces: Vec<crate::health_types::UnusedFontFace>,
+    unreferenced_keyframes: Vec<fallow_output::UnreferencedKeyframes>,
+    undefined_keyframes: Vec<fallow_output::UndefinedKeyframes>,
+    duplicate_declaration_blocks: Vec<fallow_output::CssDuplicateBlock>,
+    unused_at_rules: Vec<fallow_output::UnusedAtRule>,
+    font_size_unit_mix: Option<fallow_output::CssNotationConsistency>,
+    unused_font_faces: Vec<fallow_output::UnusedFontFace>,
 }
 
 /// Walk every in-scope stylesheet / SFC, accumulating structural metrics, the
@@ -2501,7 +2503,7 @@ fn walk_css_files(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
 ) -> CssWalkAccum {
-    use crate::health_types::{CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses};
+    use fallow_output::{CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses};
 
     let mut file_reports = Vec::new();
     let mut summary = CssAnalyticsSummary::default();
@@ -2558,7 +2560,7 @@ fn walk_css_files(
 /// token metrics and prune unused `@font-face` families referenced elsewhere.
 fn finalize_css_token_metrics(
     tokens: &mut CssTokenSets,
-    summary: &mut crate::health_types::CssAnalyticsSummary,
+    summary: &mut fallow_output::CssAnalyticsSummary,
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
     ignore_set: &globset::GlobSet,
@@ -2603,7 +2605,7 @@ fn finalize_css_token_metrics(
 fn compute_css_analytics_report(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
-) -> Option<crate::health_types::CssAnalyticsReport> {
+) -> Option<fallow_output::CssAnalyticsReport> {
     let HealthScanCtx {
         config,
         ignore_set,
@@ -2638,8 +2640,8 @@ fn assemble_css_report(
     walk: CssWalkAccum,
     metrics: CssTokenMetrics,
     candidates: MarkupCssCandidates,
-) -> Option<crate::health_types::CssAnalyticsReport> {
-    use crate::health_types::CssAnalyticsReport;
+) -> Option<fallow_output::CssAnalyticsReport> {
+    use fallow_output::CssAnalyticsReport;
 
     let candidates_empty = candidates.tailwind_arbitrary_values.is_empty()
         && candidates.unresolved_class_references.is_empty()
@@ -2676,7 +2678,7 @@ struct HealthCoverageSettings {
 
 struct HealthFindingsData {
     findings: Vec<ComplexityViolation>,
-    threshold_overrides: Vec<crate::health_types::ThresholdOverrideState>,
+    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
     files_analyzed: usize,
     total_functions: usize,
     complexity_ms: f64,
@@ -2724,7 +2726,7 @@ struct HealthOutputBuildInput<'a> {
     needs_file_scores: bool,
     report_coverage_gaps: bool,
     has_istanbul_coverage: bool,
-    threshold_overrides: Vec<crate::health_types::ThresholdOverrideState>,
+    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
     max_cyclomatic: u16,
     max_cognitive: u16,
     max_crap: f64,
@@ -2746,15 +2748,15 @@ struct HealthOutputSectionInput {
 }
 
 struct HealthOutputParts {
-    report: crate::health_types::HealthReport,
-    grouping: Option<crate::health_types::HealthGrouping>,
-    timings: Option<crate::health_types::HealthTimings>,
+    report: fallow_output::HealthReport,
+    grouping: Option<fallow_output::HealthGrouping>,
+    timings: Option<fallow_output::HealthTimings>,
     coverage_gaps_has_findings: bool,
 }
 
 struct HealthOutputSupportingParts {
-    grouping: Option<crate::health_types::HealthGrouping>,
-    timings: Option<crate::health_types::HealthTimings>,
+    grouping: Option<fallow_output::HealthGrouping>,
+    timings: Option<fallow_output::HealthTimings>,
 }
 
 fn prepare_health_output_context(input: HealthOutputContextInput<'_>) -> HealthOutputContext<'_> {
@@ -2865,7 +2867,7 @@ fn build_health_report_pipeline_input(
     vital_data: HealthVitalData,
     derived_sections: HealthDerivedSections,
     findings: Vec<ComplexityViolation>,
-    framework_health: Option<crate::health_types::FrameworkHealthDiagnostics>,
+    framework_health: Option<fallow_output::FrameworkHealthDiagnostics>,
 ) -> HealthReportPipelineInput {
     HealthReportPipelineInput {
         report_coverage_gaps: build.report_coverage_gaps,
@@ -2899,7 +2901,7 @@ struct HealthSupportingPartsInput<'a> {
     derived_sections: &'a HealthDerivedSections,
     vital_data: &'a HealthVitalData,
     findings: &'a [ComplexityViolation],
-    action_ctx: &'a crate::health_types::HealthActionContext,
+    action_ctx: &'a fallow_output::HealthActionContext,
 }
 
 fn build_health_supporting_parts(
@@ -2919,7 +2921,7 @@ fn build_health_supporting_parts(
 
 fn build_health_output_grouping(
     input: &HealthSupportingPartsInput<'_>,
-) -> Option<crate::health_types::HealthGrouping> {
+) -> Option<fallow_output::HealthGrouping> {
     let file_scores = health_file_scores_slice(input.analysis_data.score_output.as_ref());
     build_health_grouping_from_context(HealthGroupingContextInput {
         opts: input.opts,
@@ -2961,14 +2963,14 @@ struct HealthDerivedSections {
     hotspot_summary: Option<HotspotSummary>,
     hotspots_ms: f64,
     targets: Vec<RefactoringTarget>,
-    target_thresholds: Option<crate::health_types::TargetThresholds>,
+    target_thresholds: Option<fallow_output::TargetThresholds>,
     targets_ms: f64,
 }
 
 struct HealthReportPipelineInput {
     report_coverage_gaps: bool,
     findings: Vec<ComplexityViolation>,
-    threshold_overrides: Vec<crate::health_types::ThresholdOverrideState>,
+    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
     files_analyzed: usize,
     total_functions: usize,
     total_above_threshold: usize,
@@ -2980,9 +2982,9 @@ struct HealthReportPipelineInput {
     hotspots: Vec<HotspotEntry>,
     hotspot_summary: Option<HotspotSummary>,
     targets: Vec<RefactoringTarget>,
-    target_thresholds: Option<crate::health_types::TargetThresholds>,
+    target_thresholds: Option<fallow_output::TargetThresholds>,
     has_istanbul_coverage: bool,
-    framework_health: Option<crate::health_types::FrameworkHealthDiagnostics>,
+    framework_health: Option<fallow_output::FrameworkHealthDiagnostics>,
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
@@ -2990,9 +2992,9 @@ struct HealthReportPipelineInput {
 
 fn build_health_report_from_pipeline(
     opts: &HealthOptions<'_>,
-    action_ctx: &crate::health_types::HealthActionContext,
+    action_ctx: &fallow_output::HealthActionContext,
     input: HealthReportPipelineInput,
-) -> crate::health_types::HealthReport {
+) -> fallow_output::HealthReport {
     assemble_health_report(
         opts,
         action_ctx,
@@ -3036,7 +3038,7 @@ struct GlobalHealthThresholds {
 
 #[derive(Debug, Clone, Copy)]
 struct AppliedHealthThresholds {
-    effective: crate::health_types::HealthEffectiveThresholds,
+    effective: fallow_output::HealthEffectiveThresholds,
     override_index: Option<usize>,
 }
 
@@ -3044,13 +3046,13 @@ struct CompiledThresholdOverride {
     index: usize,
     matchers: globset::GlobSet,
     functions: Vec<String>,
-    configured: crate::health_types::HealthConfiguredThresholds,
+    configured: fallow_output::HealthConfiguredThresholds,
     reason: Option<String>,
 }
 
 struct ThresholdOverrideMatch<'a> {
     entry: &'a CompiledThresholdOverride,
-    effective: crate::health_types::HealthEffectiveThresholds,
+    effective: fallow_output::HealthEffectiveThresholds,
 }
 
 struct ThresholdOverrideResolver {
@@ -3080,7 +3082,7 @@ impl ThresholdOverrideResolver {
                         .build()
                         .unwrap_or_else(|_| globset::GlobSet::empty()),
                     functions: override_entry.functions.clone(),
-                    configured: crate::health_types::HealthConfiguredThresholds {
+                    configured: fallow_output::HealthConfiguredThresholds {
                         max_cyclomatic: override_entry.max_cyclomatic,
                         max_cognitive: override_entry.max_cognitive,
                         max_crap: override_entry.max_crap,
@@ -3098,7 +3100,7 @@ impl ThresholdOverrideResolver {
         relative: &std::path::Path,
         function: &str,
     ) -> (AppliedHealthThresholds, Vec<ThresholdOverrideMatch<'_>>) {
-        let mut effective = crate::health_types::HealthEffectiveThresholds {
+        let mut effective = fallow_output::HealthEffectiveThresholds {
             max_cyclomatic: self.global.cyclomatic,
             max_cognitive: self.global.cognitive,
             max_crap: self.global.crap,
@@ -3168,7 +3170,7 @@ struct MeasuredThresholdMetrics {
 struct ThresholdOverrideStateTracker {
     matched_indexes: rustc_hash::FxHashSet<usize>,
     seen: rustc_hash::FxHashSet<ThresholdOverrideStateKey>,
-    states: Vec<crate::health_types::ThresholdOverrideState>,
+    states: Vec<fallow_output::ThresholdOverrideState>,
 }
 
 impl ThresholdOverrideStateTracker {
@@ -3205,9 +3207,9 @@ impl ThresholdOverrideStateTracker {
                     .max_cognitive
                     .is_some_and(|threshold| cognitive > threshold);
             let status = if global_exceeded && !local_exceeded {
-                crate::health_types::ThresholdOverrideStatus::Active
+                fallow_output::ThresholdOverrideStatus::Active
             } else if !global_exceeded {
-                crate::health_types::ThresholdOverrideStatus::Stale
+                fallow_output::ThresholdOverrideStatus::Stale
             } else {
                 continue;
             };
@@ -3218,7 +3220,7 @@ impl ThresholdOverrideStateTracker {
                 function: Some(function.to_string()),
                 configured_thresholds: configured,
                 effective_thresholds: matched.effective,
-                metrics: Some(crate::health_types::ThresholdOverrideMetrics {
+                metrics: Some(fallow_output::ThresholdOverrideMetrics {
                     cyclomatic,
                     cognitive,
                     crap: None,
@@ -3243,9 +3245,9 @@ impl ThresholdOverrideStateTracker {
                 continue;
             };
             let status = if metrics.crap >= global.crap && metrics.crap < max_crap {
-                crate::health_types::ThresholdOverrideStatus::Active
+                fallow_output::ThresholdOverrideStatus::Active
             } else if metrics.crap < global.crap {
-                crate::health_types::ThresholdOverrideStatus::Stale
+                fallow_output::ThresholdOverrideStatus::Stale
             } else {
                 continue;
             };
@@ -3256,7 +3258,7 @@ impl ThresholdOverrideStateTracker {
                 function: Some(function.to_string()),
                 configured_thresholds: matched.entry.configured,
                 effective_thresholds: matched.effective,
-                metrics: Some(crate::health_types::ThresholdOverrideMetrics {
+                metrics: Some(fallow_output::ThresholdOverrideMetrics {
                     cyclomatic: metrics.cyclomatic,
                     cognitive: metrics.cognitive,
                     crap: Some(metrics.crap),
@@ -3276,12 +3278,12 @@ impl ThresholdOverrideStateTracker {
                 continue;
             }
             self.push_state(ThresholdOverrideStateInput {
-                status: crate::health_types::ThresholdOverrideStatus::NoMatch,
+                status: fallow_output::ThresholdOverrideStatus::NoMatch,
                 override_index: entry.index,
                 path: None,
                 function: None,
                 configured_thresholds: entry.configured,
-                effective_thresholds: crate::health_types::HealthEffectiveThresholds {
+                effective_thresholds: fallow_output::HealthEffectiveThresholds {
                     max_cyclomatic: entry
                         .configured
                         .max_cyclomatic
@@ -3299,7 +3301,7 @@ impl ThresholdOverrideStateTracker {
         }
     }
 
-    fn into_states(mut self) -> Vec<crate::health_types::ThresholdOverrideState> {
+    fn into_states(mut self) -> Vec<fallow_output::ThresholdOverrideState> {
         self.states.sort_by(|a, b| {
             a.override_index
                 .cmp(&b.override_index)
@@ -3311,9 +3313,9 @@ impl ThresholdOverrideStateTracker {
 
     fn push_state(&mut self, input: ThresholdOverrideStateInput) {
         let status_key = match input.status {
-            crate::health_types::ThresholdOverrideStatus::Active => "active",
-            crate::health_types::ThresholdOverrideStatus::Stale => "stale",
-            crate::health_types::ThresholdOverrideStatus::NoMatch => "no_match",
+            fallow_output::ThresholdOverrideStatus::Active => "active",
+            fallow_output::ThresholdOverrideStatus::Stale => "stale",
+            fallow_output::ThresholdOverrideStatus::NoMatch => "no_match",
         };
         let key = ThresholdOverrideStateKey {
             status: status_key,
@@ -3325,17 +3327,16 @@ impl ThresholdOverrideStateTracker {
         if !self.seen.insert(key) {
             return;
         }
-        self.states
-            .push(crate::health_types::ThresholdOverrideState {
-                status: input.status,
-                override_index: input.override_index,
-                path: input.path,
-                function: input.function,
-                configured_thresholds: input.configured_thresholds,
-                effective_thresholds: input.effective_thresholds,
-                metrics: input.metrics,
-                reason: input.reason,
-            });
+        self.states.push(fallow_output::ThresholdOverrideState {
+            status: input.status,
+            override_index: input.override_index,
+            path: input.path,
+            function: input.function,
+            configured_thresholds: input.configured_thresholds,
+            effective_thresholds: input.effective_thresholds,
+            metrics: input.metrics,
+            reason: input.reason,
+        });
     }
 }
 
@@ -3351,13 +3352,13 @@ struct ComplexityFunctionContext<'a> {
 }
 
 struct ThresholdOverrideStateInput {
-    status: crate::health_types::ThresholdOverrideStatus,
+    status: fallow_output::ThresholdOverrideStatus,
     override_index: usize,
     path: Option<std::path::PathBuf>,
     function: Option<String>,
-    configured_thresholds: crate::health_types::HealthConfiguredThresholds,
-    effective_thresholds: crate::health_types::HealthEffectiveThresholds,
-    metrics: Option<crate::health_types::ThresholdOverrideMetrics>,
+    configured_thresholds: fallow_output::HealthConfiguredThresholds,
+    effective_thresholds: fallow_output::HealthEffectiveThresholds,
+    metrics: Option<fallow_output::ThresholdOverrideMetrics>,
     reason: Option<String>,
     dimension: ThresholdOverrideDimension,
 }
@@ -3378,12 +3379,12 @@ struct HealthGroupingContextInput<'a> {
     vital_data: &'a HealthVitalData,
     targets: &'a [RefactoringTarget],
     needs_file_scores: bool,
-    action_ctx: &'a crate::health_types::HealthActionContext,
+    action_ctx: &'a fallow_output::HealthActionContext,
 }
 
 fn build_health_grouping_from_context(
     input: HealthGroupingContextInput<'_>,
-) -> Option<crate::health_types::HealthGrouping> {
+) -> Option<fallow_output::HealthGrouping> {
     build_optional_health_grouping_opt(
         input.group_resolver,
         &input.config.root,
@@ -3568,11 +3569,11 @@ struct HealthTimingBaseInput {
 
 struct HealthResultInput {
     config: ResolvedConfig,
-    report: crate::health_types::HealthReport,
-    grouping: Option<crate::health_types::HealthGrouping>,
+    report: fallow_output::HealthReport,
+    grouping: Option<fallow_output::HealthGrouping>,
     group_resolver: Option<crate::report::OwnershipResolver>,
     elapsed: Duration,
-    timings: Option<crate::health_types::HealthTimings>,
+    timings: Option<fallow_output::HealthTimings>,
     coverage_gaps_has_findings: bool,
     should_fail_on_coverage_gaps: bool,
 }
@@ -3880,11 +3881,11 @@ fn build_optional_health_grouping_opt(
     ))
 }
 
-fn active_health_coverage_model(has_istanbul_coverage: bool) -> crate::health_types::CoverageModel {
+fn active_health_coverage_model(has_istanbul_coverage: bool) -> fallow_output::CoverageModel {
     if has_istanbul_coverage {
-        crate::health_types::CoverageModel::Istanbul
+        fallow_output::CoverageModel::Istanbul
     } else {
-        crate::health_types::CoverageModel::StaticEstimated
+        fallow_output::CoverageModel::StaticEstimated
     }
 }
 
@@ -3906,22 +3907,22 @@ fn build_health_action_context(
     max_cyclomatic: u16,
     max_cognitive: u16,
     max_crap: f64,
-) -> crate::health_types::HealthActionContext {
+) -> fallow_output::HealthActionContext {
     let baseline_active = opts.baseline.is_some() || opts.save_baseline.is_some();
     let action_opts = if baseline_active {
-        crate::health_types::HealthActionOptions {
+        fallow_output::HealthActionOptions {
             omit_suppress_line: true,
             omit_reason: Some("baseline-active"),
         }
     } else if !config.health.suggest_inline_suppression {
-        crate::health_types::HealthActionOptions {
+        fallow_output::HealthActionOptions {
             omit_suppress_line: true,
             omit_reason: Some("config-disabled"),
         }
     } else {
-        crate::health_types::HealthActionOptions::default()
+        fallow_output::HealthActionOptions::default()
     };
-    crate::health_types::HealthActionContext {
+    fallow_output::HealthActionContext {
         opts: action_opts,
         max_cyclomatic_threshold: max_cyclomatic,
         max_cognitive_threshold: max_cognitive,
@@ -4061,7 +4062,7 @@ struct RuntimeCoverageAnalysisScope<'a> {
 
 fn analyze_runtime_coverage(
     input: RuntimeCoverageAnalysisScope<'_>,
-) -> Result<Option<crate::health_types::RuntimeCoverageReport>, ExitCode> {
+) -> Result<Option<fallow_output::RuntimeCoverageReport>, ExitCode> {
     let Some(ref production_options) = input.opts.runtime_coverage else {
         return Ok(None);
     };
@@ -4093,7 +4094,7 @@ fn analyze_runtime_coverage(
 }
 
 struct HealthAnalysisData {
-    runtime_coverage: Option<crate::health_types::RuntimeCoverageReport>,
+    runtime_coverage: Option<fallow_output::RuntimeCoverageReport>,
     score_output: Option<scoring::FileScoreOutput>,
     files_scored: Option<usize>,
     average_maintainability: Option<f64>,
@@ -4112,7 +4113,7 @@ struct FrameworkHealthFacts {
 fn build_framework_health_diagnostics(
     config: &ResolvedConfig,
     facts: Option<FrameworkHealthFacts>,
-) -> Option<crate::health_types::FrameworkHealthDiagnostics> {
+) -> Option<fallow_output::FrameworkHealthDiagnostics> {
     let facts = facts?;
     let detected_frameworks = detect_frameworks(config);
     if detected_frameworks.is_empty() {
@@ -4128,7 +4129,7 @@ fn build_framework_health_diagnostics(
         return None;
     }
 
-    Some(crate::health_types::FrameworkHealthDiagnostics {
+    Some(fallow_output::FrameworkHealthDiagnostics {
         detected_frameworks,
         detectors,
     })
@@ -4173,7 +4174,7 @@ fn detect_frameworks(config: &ResolvedConfig) -> Vec<String> {
 }
 
 fn add_framework_detectors(
-    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &fallow_config::RulesConfig,
     facts: FrameworkHealthFacts,
@@ -4191,7 +4192,7 @@ fn add_framework_detectors(
 }
 
 fn add_angular_detectors(
-    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &fallow_config::RulesConfig,
 ) {
@@ -4222,7 +4223,7 @@ fn add_angular_detectors(
 }
 
 fn add_next_detectors(
-    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &fallow_config::RulesConfig,
 ) {
@@ -4265,7 +4266,7 @@ fn add_next_detectors(
 }
 
 fn add_nuxt_detectors(
-    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &fallow_config::RulesConfig,
 ) {
@@ -4296,7 +4297,7 @@ fn add_nuxt_detectors(
 }
 
 fn add_vue_detectors(
-    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &fallow_config::RulesConfig,
 ) {
@@ -4327,7 +4328,7 @@ fn add_vue_detectors(
 }
 
 fn add_react_detectors(
-    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &fallow_config::RulesConfig,
 ) {
@@ -4348,7 +4349,7 @@ fn add_react_detectors(
 }
 
 fn add_svelte_detectors(
-    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &fallow_config::RulesConfig,
 ) {
@@ -4379,16 +4380,16 @@ fn add_svelte_detectors(
 }
 
 fn add_sveltekit_detectors(
-    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
     framework: &str,
     rules: &fallow_config::RulesConfig,
     facts: FrameworkHealthFacts,
 ) {
     if facts.unused_load_data_keys_global_abstain && rules.unused_load_data_keys != Severity::Off {
-        detectors.push(crate::health_types::FrameworkHealthDetector {
+        detectors.push(fallow_output::FrameworkHealthDetector {
             id: "unused-load-data-key".to_string(),
             framework: framework.to_string(),
-            status: crate::health_types::FrameworkHealthDetectorStatus::Abstained,
+            status: fallow_output::FrameworkHealthDetectorStatus::Abstained,
             reason: Some("unused_load_data_keys_global_abstain".to_string()),
         });
     } else {
@@ -4402,23 +4403,20 @@ fn add_sveltekit_detectors(
 }
 
 fn add_detector(
-    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
     framework: &str,
     id: &str,
     severity: Severity,
 ) {
     let (status, reason) = if severity == Severity::Off {
         (
-            crate::health_types::FrameworkHealthDetectorStatus::DisabledByConfig,
+            fallow_output::FrameworkHealthDetectorStatus::DisabledByConfig,
             Some("disabled_by_config".to_string()),
         )
     } else {
-        (
-            crate::health_types::FrameworkHealthDetectorStatus::Active,
-            None,
-        )
+        (fallow_output::FrameworkHealthDetectorStatus::Active, None)
     };
-    detectors.push(crate::health_types::FrameworkHealthDetector {
+    detectors.push(fallow_output::FrameworkHealthDetector {
         id: id.to_string(),
         framework: framework.to_string(),
         status,
@@ -4427,15 +4425,15 @@ fn add_detector(
 }
 
 fn add_not_checked_detector(
-    detectors: &mut Vec<crate::health_types::FrameworkHealthDetector>,
+    detectors: &mut Vec<fallow_output::FrameworkHealthDetector>,
     framework: &str,
     id: &str,
     reason: &str,
 ) {
-    detectors.push(crate::health_types::FrameworkHealthDetector {
+    detectors.push(fallow_output::FrameworkHealthDetector {
         id: id.to_string(),
         framework: framework.to_string(),
-        status: crate::health_types::FrameworkHealthDetectorStatus::NotChecked,
+        status: fallow_output::FrameworkHealthDetectorStatus::NotChecked,
         reason: Some(reason.to_string()),
     });
 }
@@ -4837,7 +4835,7 @@ fn compute_filtered_targets(
 fn filter_runtime_coverage_report(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
-    report: Option<&mut crate::health_types::RuntimeCoverageReport>,
+    report: Option<&mut fallow_output::RuntimeCoverageReport>,
     loaded_baseline: Option<&HealthBaselineData>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     diff_index: Option<&crate::report::ci::diff_filter::DiffIndex>,
@@ -4856,7 +4854,7 @@ fn save_health_baseline_if_requested(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
     findings: &[ComplexityViolation],
-    runtime_coverage: Option<&crate::health_types::RuntimeCoverageReport>,
+    runtime_coverage: Option<&fallow_output::RuntimeCoverageReport>,
     targets: &[RefactoringTarget],
 ) -> Result<(), ExitCode> {
     if let Some(save_path) = opts.save_baseline {
@@ -4876,7 +4874,7 @@ fn save_health_baseline_if_requested(
 
 struct HealthRuntimeFinalizeInput<'a> {
     config: &'a ResolvedConfig,
-    runtime_coverage: &'a mut Option<crate::health_types::RuntimeCoverageReport>,
+    runtime_coverage: &'a mut Option<fallow_output::RuntimeCoverageReport>,
     findings: &'a [ComplexityViolation],
     targets: &'a [RefactoringTarget],
     loaded_baseline: Option<&'a HealthBaselineData>,
@@ -4958,10 +4956,10 @@ fn compute_health_duplication_report(
 }
 
 struct HealthVitalData {
-    vital_signs: crate::health_types::VitalSigns,
+    vital_signs: fallow_output::VitalSigns,
     health_score: Option<HealthScore>,
-    health_trend: Option<crate::health_types::HealthTrend>,
-    large_functions: Vec<crate::health_types::LargeFunctionEntry>,
+    health_trend: Option<fallow_output::HealthTrend>,
+    large_functions: Vec<fallow_output::LargeFunctionEntry>,
 }
 
 struct HealthVitalDataInput<'a> {
@@ -4989,7 +4987,7 @@ struct HealthVitalDataInput<'a> {
 /// surfaced via FileScoreOutput); only populated when the opt-in `prop-drilling`
 /// rule emitted chains, so the small capped penalty stays dormant by default.
 fn apply_prop_drilling_metrics(
-    vital_signs: &mut crate::health_types::VitalSigns,
+    vital_signs: &mut fallow_output::VitalSigns,
     score_output: &scoring::FileScoreOutput,
 ) {
     if score_output.prop_drilling_chains.is_empty() {
@@ -5009,7 +5007,7 @@ fn apply_prop_drilling_metrics(
 /// are precomputed in core and ride on FileScoreOutput; non-React runs leave the
 /// fields `None` (skip_serializing_if), so the JSON contract is unchanged.
 fn apply_render_fan_in_metrics(
-    vital_signs: &mut crate::health_types::VitalSigns,
+    vital_signs: &mut fallow_output::VitalSigns,
     score_output: &scoring::FileScoreOutput,
     config: &ResolvedConfig,
 ) {
@@ -5047,7 +5045,7 @@ fn apply_render_fan_in_metrics(
     vital_signs.top_render_fan_in = top
         .into_iter()
         .take(MAX_TOP_RENDER_FAN_IN)
-        .map(|c| crate::health_types::RenderFanInTopComponent {
+        .map(|c| fallow_output::RenderFanInTopComponent {
             component: c.component.clone(),
             path: c
                 .file
@@ -5066,10 +5064,7 @@ fn compute_scoped_vital_signs(
     input: &HealthVitalDataInput<'_>,
     total_files_scoped: usize,
     project_subset: &SubsetFilter<'_>,
-) -> (
-    crate::health_types::VitalSigns,
-    crate::health_types::VitalSignsCounts,
-) {
+) -> (fallow_output::VitalSigns, fallow_output::VitalSignsCounts) {
     let vital_signs_input = VitalSignsAndCountsInput {
         score_output: input.score_output,
         modules: input.modules,
@@ -5093,8 +5088,8 @@ fn compute_scoped_vital_signs(
 /// Persist the health snapshot when `--save-snapshot` was requested.
 fn maybe_save_health_snapshot(
     input: &HealthVitalDataInput<'_>,
-    vital_signs: &crate::health_types::VitalSigns,
-    counts: &crate::health_types::VitalSignsCounts,
+    vital_signs: &fallow_output::VitalSigns,
+    counts: &fallow_output::VitalSignsCounts,
     health_score: Option<&HealthScore>,
 ) -> Result<(), ExitCode> {
     if let Some(ref snapshot_path) = input.opts.save_snapshot {
@@ -5155,8 +5150,8 @@ fn prepare_health_vital_data(
 fn compute_health_score_metrics(
     opts: &HealthOptions<'_>,
     dupes_report: Option<&fallow_core::duplicates::DuplicationReport>,
-    vital_signs: &mut crate::health_types::VitalSigns,
-    counts: &mut crate::health_types::VitalSignsCounts,
+    vital_signs: &mut fallow_output::VitalSigns,
+    counts: &mut fallow_output::VitalSignsCounts,
     total_files_scoped: usize,
 ) -> Option<HealthScore> {
     if opts.score
@@ -5170,7 +5165,7 @@ fn compute_health_score_metrics(
 
 #[derive(Clone, Copy)]
 struct FilteredLargeFunctionInput<'a> {
-    vital_signs: &'a crate::health_types::VitalSigns,
+    vital_signs: &'a fallow_output::VitalSigns,
     modules: &'a [fallow_core::extract::ModuleInfo],
     file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
     config: &'a ResolvedConfig,
@@ -5182,7 +5177,7 @@ struct FilteredLargeFunctionInput<'a> {
 
 fn collect_filtered_large_functions(
     input: FilteredLargeFunctionInput<'_>,
-) -> Vec<crate::health_types::LargeFunctionEntry> {
+) -> Vec<fallow_output::LargeFunctionEntry> {
     let large_input = LargeFunctionInput {
         vital_signs: input.vital_signs,
         modules: input.modules,
@@ -5234,7 +5229,7 @@ fn filter_complexity_findings_by_diff(
 /// only signal the diff carries. Paths outside `root` are RETAINED for
 /// the same reason as [`filter_complexity_findings_by_diff`].
 fn filter_hotspots_by_diff(
-    hotspots: &mut Vec<crate::health_types::HotspotEntry>,
+    hotspots: &mut Vec<fallow_output::HotspotEntry>,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &std::path::Path,
 ) {
@@ -5251,7 +5246,7 @@ fn filter_hotspots_by_diff(
 /// evidence rows could turn a multi-function recommendation into a
 /// confusing zero-evidence entry.
 fn filter_refactoring_targets_by_diff(
-    targets: &mut Vec<crate::health_types::RefactoringTarget>,
+    targets: &mut Vec<fallow_output::RefactoringTarget>,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &std::path::Path,
 ) {
@@ -5265,7 +5260,7 @@ fn filter_refactoring_targets_by_diff(
 /// line in the supplied diff. Same range semantics as
 /// [`filter_complexity_findings_by_diff`].
 fn filter_large_functions_by_diff(
-    entries: &mut Vec<crate::health_types::LargeFunctionEntry>,
+    entries: &mut Vec<fallow_output::LargeFunctionEntry>,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &std::path::Path,
 ) {
@@ -5311,8 +5306,8 @@ fn filter_files_to_paths(
 }
 
 fn apply_duplication_metrics(
-    vital_signs: &mut crate::health_types::VitalSigns,
-    counts: &mut crate::health_types::VitalSignsCounts,
+    vital_signs: &mut fallow_output::VitalSigns,
+    counts: &mut fallow_output::VitalSignsCounts,
     dupes_report: &fallow_core::duplicates::DuplicationReport,
 ) {
     let pct = dupes_report.stats.duplication_percentage;
@@ -5566,10 +5561,7 @@ struct VitalSignsAndCountsInput<'a> {
 
 fn compute_vital_signs_and_counts(
     input: &VitalSignsAndCountsInput<'_>,
-) -> (
-    crate::health_types::VitalSigns,
-    crate::health_types::VitalSignsCounts,
-) {
+) -> (fallow_output::VitalSigns, fallow_output::VitalSignsCounts) {
     let analysis_counts = input.score_output.map(|o| {
         o.analysis_snapshot
             .counts_for(input.subset, &o.analysis_counts)
@@ -5618,11 +5610,11 @@ fn compute_vital_signs_and_counts(
 struct SnapshotInput<'a> {
     opts: &'a HealthOptions<'a>,
     snapshot_path: &'a std::path::Path,
-    vital_signs: &'a crate::health_types::VitalSigns,
-    counts: &'a crate::health_types::VitalSignsCounts,
-    hotspot_summary: Option<&'a crate::health_types::HotspotSummary>,
-    health_score: Option<&'a crate::health_types::HealthScore>,
-    coverage_model: Option<crate::health_types::CoverageModel>,
+    vital_signs: &'a fallow_output::VitalSigns,
+    counts: &'a fallow_output::VitalSignsCounts,
+    hotspot_summary: Option<&'a fallow_output::HotspotSummary>,
+    health_score: Option<&'a fallow_output::HealthScore>,
+    coverage_model: Option<fallow_output::CoverageModel>,
 }
 
 fn save_snapshot(input: SnapshotInput<'_>) -> Result<(), ExitCode> {
@@ -5654,10 +5646,10 @@ fn save_snapshot(input: SnapshotInput<'_>) -> Result<(), ExitCode> {
 /// Compute health trend from historical snapshots if requested.
 fn compute_health_trend(
     opts: &HealthOptions<'_>,
-    vital_signs: &crate::health_types::VitalSigns,
-    counts: &crate::health_types::VitalSignsCounts,
-    health_score: Option<&crate::health_types::HealthScore>,
-) -> Option<crate::health_types::HealthTrend> {
+    vital_signs: &fallow_output::VitalSigns,
+    counts: &fallow_output::VitalSignsCounts,
+    health_score: Option<&fallow_output::HealthScore>,
+) -> Option<fallow_output::HealthTrend> {
     if !opts.trend {
         return None;
     }
@@ -5685,7 +5677,7 @@ fn compute_health_trend(
 struct HealthReportAssembly {
     report_coverage_gaps: bool,
     findings: Vec<ComplexityViolation>,
-    threshold_overrides: Vec<crate::health_types::ThresholdOverrideState>,
+    threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
     files_analyzed: usize,
     total_functions: usize,
     total_above_threshold: usize,
@@ -5694,17 +5686,17 @@ struct HealthReportAssembly {
     max_crap: f64,
     files_scored: Option<usize>,
     average_maintainability: Option<f64>,
-    vital_signs: crate::health_types::VitalSigns,
-    health_score: Option<crate::health_types::HealthScore>,
+    vital_signs: fallow_output::VitalSigns,
+    health_score: Option<fallow_output::HealthScore>,
     score_output: Option<scoring::FileScoreOutput>,
     hotspots: Vec<HotspotEntry>,
-    hotspot_summary: Option<crate::health_types::HotspotSummary>,
+    hotspot_summary: Option<fallow_output::HotspotSummary>,
     targets: Vec<RefactoringTarget>,
     target_thresholds: Option<TargetThresholds>,
-    health_trend: Option<crate::health_types::HealthTrend>,
+    health_trend: Option<fallow_output::HealthTrend>,
     has_istanbul_coverage: bool,
-    runtime_coverage: Option<crate::health_types::RuntimeCoverageReport>,
-    framework_health: Option<crate::health_types::FrameworkHealthDiagnostics>,
+    runtime_coverage: Option<fallow_output::RuntimeCoverageReport>,
+    framework_health: Option<fallow_output::FrameworkHealthDiagnostics>,
     large_functions: Vec<LargeFunctionEntry>,
     sev_critical: usize,
     sev_high: usize,
@@ -5716,7 +5708,7 @@ struct HealthReportAssembly {
 /// Only populated when `very_high_risk >= 3%` in the unit size profile (same threshold
 /// that triggers showing the risk profile line). Sorted by line count descending.
 struct LargeFunctionInput<'a> {
-    vital_signs: &'a crate::health_types::VitalSigns,
+    vital_signs: &'a fallow_output::VitalSigns,
     modules: &'a [fallow_core::extract::ModuleInfo],
     file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
     config_root: &'a std::path::Path,
@@ -5909,7 +5901,7 @@ fn collect_complexity_finding(
     path: &std::path::Path,
     relative: &std::path::Path,
     fc: &fallow_types::extract::FunctionComplexity,
-    react_hook_profile: Option<crate::health_types::ReactHookProfile>,
+    react_hook_profile: Option<fallow_output::ReactHookProfile>,
 ) -> Option<ComplexityViolation> {
     let (applied_thresholds, matched_overrides) =
         input.threshold_resolver.resolve(relative, &fc.name);
@@ -5964,7 +5956,7 @@ fn collect_complexity_finding(
             .map(|_| applied_thresholds.effective),
         threshold_source: applied_thresholds
             .override_index
-            .map(|_| crate::health_types::ThresholdSource::Override),
+            .map(|_| fallow_output::ThresholdSource::Override),
     })
 }
 
@@ -6016,7 +6008,7 @@ struct CrapMergeMaps<'a> {
     complexity_by_pos: ComplexityByPosition<'a>,
     hook_profiles_by_pos: rustc_hash::FxHashMap<
         &'a std::path::Path,
-        rustc_hash::FxHashMap<(u32, u32), crate::health_types::ReactHookProfile>,
+        rustc_hash::FxHashMap<(u32, u32), fallow_output::ReactHookProfile>,
     >,
     suppressions_by_path:
         rustc_hash::FxHashMap<&'a std::path::Path, &'a Vec<fallow_core::suppress::Suppression>>,
@@ -6147,11 +6139,11 @@ fn build_hook_profiles_by_position<'a>(
     file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<
     &'a std::path::Path,
-    rustc_hash::FxHashMap<(u32, u32), crate::health_types::ReactHookProfile>,
+    rustc_hash::FxHashMap<(u32, u32), fallow_output::ReactHookProfile>,
 > {
     let mut by_pos: rustc_hash::FxHashMap<
         &'a std::path::Path,
-        rustc_hash::FxHashMap<(u32, u32), crate::health_types::ReactHookProfile>,
+        rustc_hash::FxHashMap<(u32, u32), fallow_output::ReactHookProfile>,
     > = rustc_hash::FxHashMap::default();
     for module in modules {
         let Some(&path) = file_paths.get(&module.file_id) else {
@@ -6238,7 +6230,7 @@ fn merge_existing_crap_finding(
     finding.exceeded = ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, true);
     if applied_thresholds.override_index.is_some() {
         finding.effective_thresholds = Some(applied_thresholds.effective);
-        finding.threshold_source = Some(crate::health_types::ThresholdSource::Override);
+        finding.threshold_source = Some(fallow_output::ThresholdSource::Override);
     }
     finding.severity = compute_finding_severity(
         finding.cognitive,
@@ -6255,7 +6247,7 @@ fn new_crap_finding(
     path: &std::path::Path,
     pf: &scoring::PerFunctionCrap,
     fc: &fallow_types::extract::FunctionComplexity,
-    hook_profile: Option<crate::health_types::ReactHookProfile>,
+    hook_profile: Option<fallow_output::ReactHookProfile>,
     input: &CrapFindingMergeInput<'_>,
     applied_thresholds: AppliedHealthThresholds,
 ) -> ComplexityViolation {
@@ -6300,7 +6292,7 @@ fn new_crap_finding(
             .map(|_| applied_thresholds.effective),
         threshold_source: applied_thresholds
             .override_index
-            .map(|_| crate::health_types::ThresholdSource::Override),
+            .map(|_| fallow_output::ThresholdSource::Override),
     }
 }
 
@@ -6338,14 +6330,14 @@ fn new_crap_finding(
 /// to its owning class, which is out of scope for the first cut). Fallow
 /// emits a single rollup per owner per pass.
 ///
-/// `[`ComponentRollup`]`: crate::health_types::ComponentRollup
+/// `[`ComponentRollup`]`: fallow_output::ComponentRollup
 fn append_component_rollup_findings(
-    findings: &mut Vec<crate::health_types::ComplexityViolation>,
+    findings: &mut Vec<fallow_output::ComplexityViolation>,
     template_owner_lookup: Option<&rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>>,
     max_cyclomatic: u16,
     max_cognitive: u16,
 ) {
-    use crate::health_types::ComplexityViolation;
+    use fallow_output::ComplexityViolation;
 
     let mut by_owner: rustc_hash::FxHashMap<std::path::PathBuf, (Vec<usize>, Vec<usize>)> =
         rustc_hash::FxHashMap::default();
@@ -6386,7 +6378,7 @@ fn append_component_rollup_findings(
 }
 
 fn component_template_owner(
-    finding: &crate::health_types::ComplexityViolation,
+    finding: &fallow_output::ComplexityViolation,
     template_owner_lookup: Option<&rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>>,
 ) -> Option<std::path::PathBuf> {
     let ext = finding
@@ -6403,7 +6395,7 @@ fn component_template_owner(
     }
 }
 
-fn is_component_class_finding(finding: &crate::health_types::ComplexityViolation) -> bool {
+fn is_component_class_finding(finding: &fallow_output::ComplexityViolation) -> bool {
     finding.name != "<component>"
         && finding
             .path
@@ -6430,17 +6422,17 @@ struct ComponentRollupTotals {
 /// totals, the worst class frame, and its template frame.
 fn make_component_rollup_violation(
     owner: std::path::PathBuf,
-    worst: &crate::health_types::ComplexityViolation,
-    template: &crate::health_types::ComplexityViolation,
+    worst: &fallow_output::ComplexityViolation,
+    template: &fallow_output::ComplexityViolation,
     totals: &ComponentRollupTotals,
-) -> crate::health_types::ComplexityViolation {
-    use crate::health_types::{ComponentRollup, ExceededThreshold};
+) -> fallow_output::ComplexityViolation {
+    use fallow_output::{ComponentRollup, ExceededThreshold};
 
     let component = owner.file_stem().map_or_else(
         || "<unknown-component>".to_string(),
         |stem| stem.to_string_lossy().into_owned(),
     );
-    crate::health_types::ComplexityViolation {
+    fallow_output::ComplexityViolation {
         path: owner,
         name: "<component>".to_string(),
         line: worst.line,
@@ -6489,11 +6481,11 @@ fn make_component_rollup_violation(
 
 fn build_component_rollup(
     owner: std::path::PathBuf,
-    worst: &crate::health_types::ComplexityViolation,
-    template: &crate::health_types::ComplexityViolation,
+    worst: &fallow_output::ComplexityViolation,
+    template: &fallow_output::ComplexityViolation,
     max_cyclomatic: u16,
     max_cognitive: u16,
-) -> Option<crate::health_types::ComplexityViolation> {
+) -> Option<fallow_output::ComplexityViolation> {
     let rollup_cyc = worst.cyclomatic.saturating_add(template.cyclomatic);
     let rollup_cog = worst.cognitive.saturating_add(template.cognitive);
     let exceeds_cyclomatic = rollup_cyc > max_cyclomatic;
@@ -6522,13 +6514,13 @@ fn build_component_rollup(
 /// `estimated_component_inherited` also carries `inherited_from`, and vice
 /// versa.
 fn inherited_from_for(
-    source: crate::health_types::CoverageSource,
+    source: fallow_output::CoverageSource,
     template_path: &std::path::Path,
     template_inherit_provenance: &rustc_hash::FxHashMap<std::path::PathBuf, std::path::PathBuf>,
 ) -> Option<std::path::PathBuf> {
     if matches!(
         source,
-        crate::health_types::CoverageSource::EstimatedComponentInherited
+        fallow_output::CoverageSource::EstimatedComponentInherited
     ) {
         template_inherit_provenance.get(template_path).cloned()
     } else {
@@ -6539,7 +6531,7 @@ fn inherited_from_for(
 struct HealthBaselineSaveInput<'a> {
     save_path: &'a std::path::Path,
     findings: &'a [ComplexityViolation],
-    runtime_coverage_findings: &'a [crate::health_types::RuntimeCoverageFinding],
+    runtime_coverage_findings: &'a [fallow_output::RuntimeCoverageFinding],
     targets: &'a [RefactoringTarget],
     config_root: &'a std::path::Path,
     quiet: bool,
@@ -6779,12 +6771,12 @@ fn has_failing_runtime_coverage(result: &HealthResult) -> bool {
         .is_some_and(|report| report.findings.iter().any(is_failing_runtime_coverage))
 }
 
-fn is_failing_runtime_coverage(finding: &crate::health_types::RuntimeCoverageFinding) -> bool {
+fn is_failing_runtime_coverage(finding: &fallow_output::RuntimeCoverageFinding) -> bool {
     matches!(
         finding.verdict,
-        crate::health_types::RuntimeCoverageVerdict::SafeToDelete
-            | crate::health_types::RuntimeCoverageVerdict::ReviewRequired
-            | crate::health_types::RuntimeCoverageVerdict::LowTraffic
+        fallow_output::RuntimeCoverageVerdict::SafeToDelete
+            | fallow_output::RuntimeCoverageVerdict::ReviewRequired
+            | fallow_output::RuntimeCoverageVerdict::LowTraffic
     )
 }
 
@@ -7037,7 +7029,7 @@ mod tests {
         assert_eq!(states.len(), 1);
         assert!(matches!(
             states[0].status,
-            crate::health_types::ThresholdOverrideStatus::Active
+            fallow_output::ThresholdOverrideStatus::Active
         ));
     }
 
@@ -7077,7 +7069,7 @@ mod tests {
         assert_eq!(findings[0].effective_thresholds.unwrap().max_cyclomatic, 30);
         assert!(matches!(
             findings[0].threshold_source,
-            Some(crate::health_types::ThresholdSource::Override)
+            Some(fallow_output::ThresholdSource::Override)
         ));
     }
 
@@ -7118,7 +7110,7 @@ mod tests {
         assert_eq!(states.len(), 1);
         assert!(matches!(
             states[0].status,
-            crate::health_types::ThresholdOverrideStatus::Stale
+            fallow_output::ThresholdOverrideStatus::Stale
         ));
     }
 
@@ -7142,7 +7134,7 @@ mod tests {
         assert_eq!(states.len(), 1);
         assert!(matches!(
             states[0].status,
-            crate::health_types::ThresholdOverrideStatus::NoMatch
+            fallow_output::ThresholdOverrideStatus::NoMatch
         ));
     }
 
@@ -7570,7 +7562,7 @@ mod tests {
 
     #[test]
     fn filter_hotspots_by_diff_uses_file_level_membership() {
-        use crate::health_types::HotspotEntry;
+        use fallow_output::HotspotEntry;
         let mut hotspots = vec![
             HotspotEntry {
                 path: PathBuf::from("/project/src/touched.ts"),
@@ -7613,7 +7605,7 @@ mod tests {
 
     #[test]
     fn filter_large_functions_by_diff_uses_range_overlap() {
-        use crate::health_types::LargeFunctionEntry;
+        use fallow_output::LargeFunctionEntry;
         let mut entries = vec![
             LargeFunctionEntry {
                 path: PathBuf::from("/project/src/a.ts"),
@@ -7777,16 +7769,16 @@ mod tests {
                     col: inner.col,
                     crap: 56.0,
                     coverage_pct: None,
-                    coverage_tier: crate::health_types::CoverageTier::None,
-                    coverage_source: crate::health_types::CoverageSource::Estimated,
+                    coverage_tier: fallow_output::CoverageTier::None,
+                    coverage_source: fallow_output::CoverageSource::Estimated,
                 },
                 scoring::PerFunctionCrap {
                     line: outer.line,
                     col: outer.col,
                     crap: 2.0,
                     coverage_pct: None,
-                    coverage_tier: crate::health_types::CoverageTier::None,
-                    coverage_source: crate::health_types::CoverageSource::Estimated,
+                    coverage_tier: fallow_output::CoverageTier::None,
+                    coverage_source: fallow_output::CoverageSource::Estimated,
                 },
             ],
         );
@@ -7883,16 +7875,16 @@ mod tests {
                     col: inner.col,
                     crap: 2.0,
                     coverage_pct: None,
-                    coverage_tier: crate::health_types::CoverageTier::None,
-                    coverage_source: crate::health_types::CoverageSource::Estimated,
+                    coverage_tier: fallow_output::CoverageTier::None,
+                    coverage_source: fallow_output::CoverageSource::Estimated,
                 },
                 scoring::PerFunctionCrap {
                     line: outer.line,
                     col: outer.col,
                     crap: 72.0,
                     coverage_pct: None,
-                    coverage_tier: crate::health_types::CoverageTier::None,
-                    coverage_source: crate::health_types::CoverageSource::Estimated,
+                    coverage_tier: fallow_output::CoverageTier::None,
+                    coverage_source: fallow_output::CoverageSource::Estimated,
                 },
             ],
         );
@@ -7927,7 +7919,7 @@ mod tests {
         hit: usize,
         unhit: usize,
         untracked: usize,
-    ) -> crate::health_types::RuntimeCoverageSummary {
+    ) -> fallow_output::RuntimeCoverageSummary {
         #[expect(
             clippy::cast_precision_loss,
             reason = "test fixture totals are tiny, f64 precision is fine"
@@ -7937,8 +7929,8 @@ mod tests {
         } else {
             (hit as f64 / tracked as f64) * 100.0
         };
-        crate::health_types::RuntimeCoverageSummary {
-            data_source: crate::health_types::RuntimeCoverageDataSource::Local,
+        fallow_output::RuntimeCoverageSummary {
+            data_source: fallow_output::RuntimeCoverageDataSource::Local,
             last_received_at: None,
             functions_tracked: tracked,
             functions_hit: hit,
@@ -7956,8 +7948,8 @@ mod tests {
         static_status: &str,
         test_coverage: &str,
         v8_tracking: &str,
-    ) -> crate::health_types::RuntimeCoverageEvidence {
-        crate::health_types::RuntimeCoverageEvidence {
+    ) -> fallow_output::RuntimeCoverageEvidence {
+        fallow_output::RuntimeCoverageEvidence {
             static_status: static_status.to_owned(),
             test_coverage: test_coverage.to_owned(),
             v8_tracking: v8_tracking.to_owned(),
@@ -7995,54 +7987,54 @@ mod tests {
             runtime_coverage_source_hashes: vec![],
             target_keys: vec![],
         };
-        let mut report = crate::health_types::RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
-            verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
+        let mut report = fallow_output::RuntimeCoverageReport {
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: Vec::new(),
             summary: fx_summary(3, 0, 2, 1),
             findings: vec![
-                crate::health_types::RuntimeCoverageFinding {
+                fallow_output::RuntimeCoverageFinding {
                     id: "fallow:prod:aaaaaaaa".to_owned(),
                     stable_id: None,
                     path: PathBuf::from("/project/src/a.ts"),
                     function: "alpha".to_owned(),
                     line: 10,
-                    verdict: crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
+                    verdict: fallow_output::RuntimeCoverageVerdict::ReviewRequired,
                     invocations: Some(0),
-                    confidence: crate::health_types::RuntimeCoverageConfidence::Medium,
+                    confidence: fallow_output::RuntimeCoverageConfidence::Medium,
                     evidence: fx_evidence("used", "not_covered", "tracked"),
                     actions: vec![],
                     source_hash: None,
                 },
-                crate::health_types::RuntimeCoverageFinding {
+                fallow_output::RuntimeCoverageFinding {
                     id: "fallow:prod:bbbbbbbb".to_owned(),
                     stable_id: None,
                     path: PathBuf::from("/project/src/b.ts"),
                     function: "beta".to_owned(),
                     line: 20,
-                    verdict: crate::health_types::RuntimeCoverageVerdict::CoverageUnavailable,
+                    verdict: fallow_output::RuntimeCoverageVerdict::CoverageUnavailable,
                     invocations: None,
-                    confidence: crate::health_types::RuntimeCoverageConfidence::None,
+                    confidence: fallow_output::RuntimeCoverageConfidence::None,
                     evidence: fx_evidence("used", "not_covered", "untracked"),
                     actions: vec![],
                     source_hash: None,
                 },
-                crate::health_types::RuntimeCoverageFinding {
+                fallow_output::RuntimeCoverageFinding {
                     id: "fallow:prod:cccccccc".to_owned(),
                     stable_id: None,
                     path: PathBuf::from("/project/src/c.ts"),
                     function: "gamma".to_owned(),
                     line: 30,
-                    verdict: crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
+                    verdict: fallow_output::RuntimeCoverageVerdict::ReviewRequired,
                     invocations: Some(0),
-                    confidence: crate::health_types::RuntimeCoverageConfidence::Medium,
+                    confidence: fallow_output::RuntimeCoverageConfidence::Medium,
                     evidence: fx_evidence("used", "not_covered", "tracked"),
                     actions: vec![],
                     source_hash: None,
                 },
             ],
             hot_paths: vec![
-                crate::health_types::RuntimeCoverageHotPath {
+                fallow_output::RuntimeCoverageHotPath {
                     id: "fallow:hot:11111111".to_owned(),
                     stable_id: None,
                     path: PathBuf::from("/project/src/hot-a.ts"),
@@ -8053,7 +8045,7 @@ mod tests {
                     percentile: 99,
                     actions: vec![],
                 },
-                crate::health_types::RuntimeCoverageHotPath {
+                fallow_output::RuntimeCoverageHotPath {
                     id: "fallow:hot:22222222".to_owned(),
                     stable_id: None,
                     path: PathBuf::from("/project/src/hot-b.ts"),
@@ -8082,7 +8074,7 @@ mod tests {
         assert_eq!(report.findings[0].function, "gamma");
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected
+            fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected
         );
         assert_eq!(report.summary.functions_tracked, 3);
         assert_eq!(report.summary.functions_hit, 0);
@@ -8103,20 +8095,20 @@ mod tests {
             runtime_coverage_source_hashes: vec![],
             target_keys: vec![],
         };
-        let mut report = crate::health_types::RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
-            verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
+        let mut report = fallow_output::RuntimeCoverageReport {
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: Vec::new(),
             summary: fx_summary(2, 1, 1, 0),
-            findings: vec![crate::health_types::RuntimeCoverageFinding {
+            findings: vec![fallow_output::RuntimeCoverageFinding {
                 id: "fallow:prod:aaaaaaaa".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/a.ts"),
                 function: "alpha".to_owned(),
                 line: 10,
-                verdict: crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
+                verdict: fallow_output::RuntimeCoverageVerdict::ReviewRequired,
                 invocations: Some(0),
-                confidence: crate::health_types::RuntimeCoverageConfidence::Medium,
+                confidence: fallow_output::RuntimeCoverageConfidence::Medium,
                 evidence: fx_evidence("used", "not_covered", "tracked"),
                 actions: vec![],
                 source_hash: None,
@@ -8136,7 +8128,7 @@ mod tests {
         assert!(report.findings.is_empty());
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::Clean
+            fallow_output::RuntimeCoverageReportVerdict::Clean
         );
         assert_eq!(report.summary.functions_tracked, 2);
         assert_eq!(report.summary.functions_hit, 1);
@@ -8150,13 +8142,13 @@ mod tests {
         let root = Path::new("/project");
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/hot.ts"));
-        let mut report = crate::health_types::RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
-            verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
+        let mut report = fallow_output::RuntimeCoverageReport {
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: fx_summary(2, 2, 0, 0),
             findings: vec![],
-            hot_paths: vec![crate::health_types::RuntimeCoverageHotPath {
+            hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
                 id: "fallow:hot:33333333".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/hot.ts"),
@@ -8180,7 +8172,7 @@ mod tests {
 
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched
+            fallow_output::RuntimeCoverageReportVerdict::HotPathTouched
         );
     }
 
@@ -8189,13 +8181,13 @@ mod tests {
         let root = Path::new("/project");
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/other.ts"));
-        let mut report = crate::health_types::RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
-            verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
+        let mut report = fallow_output::RuntimeCoverageReport {
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: fx_summary(2, 2, 0, 0),
             findings: vec![],
-            hot_paths: vec![crate::health_types::RuntimeCoverageHotPath {
+            hot_paths: vec![fallow_output::RuntimeCoverageHotPath {
                 id: "fallow:hot:44444444".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/hot.ts"),
@@ -8220,16 +8212,16 @@ mod tests {
         assert!(report.hot_paths.is_empty());
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::Clean
+            fallow_output::RuntimeCoverageReportVerdict::Clean
         );
     }
 
     fn fx_runtime_coverage_report_with_hot_paths(
-        hot_paths: Vec<crate::health_types::RuntimeCoverageHotPath>,
-    ) -> crate::health_types::RuntimeCoverageReport {
-        crate::health_types::RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
-            verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
+        hot_paths: Vec<fallow_output::RuntimeCoverageHotPath>,
+    ) -> fallow_output::RuntimeCoverageReport {
+        fallow_output::RuntimeCoverageReport {
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: fx_summary(2, 2, 0, 0),
             findings: vec![],
@@ -8246,8 +8238,8 @@ mod tests {
         path: &str,
         line: u32,
         end_line: u32,
-    ) -> crate::health_types::RuntimeCoverageHotPath {
-        crate::health_types::RuntimeCoverageHotPath {
+    ) -> fallow_output::RuntimeCoverageHotPath {
+        fallow_output::RuntimeCoverageHotPath {
             id: id.to_owned(),
             stable_id: None,
             path: PathBuf::from(path),
@@ -8285,7 +8277,7 @@ mod tests {
         assert_eq!(report.hot_paths.len(), 1);
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched
+            fallow_output::RuntimeCoverageReportVerdict::HotPathTouched
         );
     }
 
@@ -8314,7 +8306,7 @@ mod tests {
         assert!(report.hot_paths.is_empty());
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::Clean
+            fallow_output::RuntimeCoverageReportVerdict::Clean
         );
     }
 
@@ -8343,7 +8335,7 @@ mod tests {
         assert_eq!(report.hot_paths.len(), 1);
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched
+            fallow_output::RuntimeCoverageReportVerdict::HotPathTouched
         );
     }
 
@@ -8401,7 +8393,7 @@ mod tests {
         assert!(report.hot_paths.is_empty());
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::Clean
+            fallow_output::RuntimeCoverageReportVerdict::Clean
         );
     }
 
@@ -8434,7 +8426,7 @@ mod tests {
         assert_eq!(report.hot_paths.len(), 1);
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched
+            fallow_output::RuntimeCoverageReportVerdict::HotPathTouched
         );
     }
 
@@ -8443,20 +8435,20 @@ mod tests {
         let root = Path::new("/project");
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/hot.ts"));
-        let mut report = crate::health_types::RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
-            verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
+        let mut report = fallow_output::RuntimeCoverageReport {
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
             signals: Vec::new(),
             summary: fx_summary(2, 1, 1, 0),
-            findings: vec![crate::health_types::RuntimeCoverageFinding {
+            findings: vec![fallow_output::RuntimeCoverageFinding {
                 id: "fallow:prod:cold0001".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/cold.ts"),
                 function: "coldFn".to_owned(),
                 line: 4,
-                verdict: crate::health_types::RuntimeCoverageVerdict::SafeToDelete,
+                verdict: fallow_output::RuntimeCoverageVerdict::SafeToDelete,
                 invocations: Some(0),
-                confidence: crate::health_types::RuntimeCoverageConfidence::High,
+                confidence: fallow_output::RuntimeCoverageConfidence::High,
                 evidence: fx_evidence("unused", "not_covered", "tracked"),
                 actions: vec![],
                 source_hash: None,
@@ -8475,13 +8467,13 @@ mod tests {
 
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched
+            fallow_output::RuntimeCoverageReportVerdict::HotPathTouched
         );
         assert_eq!(
             report.signals,
             vec![
-                crate::health_types::RuntimeCoverageSignal::ColdCodeDetected,
-                crate::health_types::RuntimeCoverageSignal::HotPathTouched,
+                fallow_output::RuntimeCoverageSignal::ColdCodeDetected,
+                fallow_output::RuntimeCoverageSignal::HotPathTouched,
             ]
         );
     }
@@ -8489,20 +8481,20 @@ mod tests {
     #[test]
     fn runtime_coverage_standalone_keeps_cold_code_primary_above_unchanged_hot_paths() {
         let root = Path::new("/project");
-        let mut report = crate::health_types::RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
-            verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
+        let mut report = fallow_output::RuntimeCoverageReport {
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            verdict: fallow_output::RuntimeCoverageReportVerdict::Clean,
             signals: Vec::new(),
             summary: fx_summary(2, 1, 1, 0),
-            findings: vec![crate::health_types::RuntimeCoverageFinding {
+            findings: vec![fallow_output::RuntimeCoverageFinding {
                 id: "fallow:prod:cold0002".to_owned(),
                 stable_id: None,
                 path: PathBuf::from("/project/src/cold.ts"),
                 function: "coldFn".to_owned(),
                 line: 4,
-                verdict: crate::health_types::RuntimeCoverageVerdict::SafeToDelete,
+                verdict: fallow_output::RuntimeCoverageVerdict::SafeToDelete,
                 invocations: Some(0),
-                confidence: crate::health_types::RuntimeCoverageConfidence::High,
+                confidence: fallow_output::RuntimeCoverageConfidence::High,
                 evidence: fx_evidence("unused", "not_covered", "tracked"),
                 actions: vec![],
                 source_hash: None,
@@ -8518,11 +8510,11 @@ mod tests {
 
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected
+            fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected
         );
         assert_eq!(
             report.signals,
-            vec![crate::health_types::RuntimeCoverageSignal::ColdCodeDetected]
+            vec![fallow_output::RuntimeCoverageSignal::ColdCodeDetected]
         );
         assert_eq!(report.hot_paths.len(), 1);
     }
@@ -8532,16 +8524,16 @@ mod tests {
         let root = Path::new("/project");
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/hot.ts"));
-        let mut report = crate::health_types::RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
-            verdict: crate::health_types::RuntimeCoverageReportVerdict::LicenseExpiredGrace,
+        let mut report = fallow_output::RuntimeCoverageReport {
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+            verdict: fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace,
             signals: Vec::new(),
             summary: fx_summary(2, 1, 1, 0),
             findings: vec![],
             hot_paths: vec![fx_hot_path("fallow:hot:0d0d0d0d", "src/hot.ts", 7, 24)],
             blast_radius: vec![],
             importance: vec![],
-            watermark: Some(crate::health_types::RuntimeCoverageWatermark::LicenseExpiredGrace),
+            watermark: Some(fallow_output::RuntimeCoverageWatermark::LicenseExpiredGrace),
             warnings: vec![],
         };
 
@@ -8552,17 +8544,17 @@ mod tests {
 
         assert_eq!(
             report.verdict,
-            crate::health_types::RuntimeCoverageReportVerdict::LicenseExpiredGrace
+            fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace
         );
         assert!(
             report
                 .signals
-                .contains(&crate::health_types::RuntimeCoverageSignal::LicenseExpiredGrace)
+                .contains(&fallow_output::RuntimeCoverageSignal::LicenseExpiredGrace)
         );
         assert!(
             report
                 .signals
-                .contains(&crate::health_types::RuntimeCoverageSignal::HotPathTouched)
+                .contains(&fallow_output::RuntimeCoverageSignal::HotPathTouched)
         );
     }
 
@@ -8623,21 +8615,21 @@ mod tests {
 
     fn fx_low_traffic_runtime_result() -> HealthResult {
         HealthResult {
-            report: crate::health_types::HealthReport {
-                runtime_coverage: Some(crate::health_types::RuntimeCoverageReport {
-                    schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
-                    verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
+            report: fallow_output::HealthReport {
+                runtime_coverage: Some(fallow_output::RuntimeCoverageReport {
+                    schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
+                    verdict: fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected,
                     signals: Vec::new(),
                     summary: fx_summary(1, 0, 1, 0),
-                    findings: vec![crate::health_types::RuntimeCoverageFinding {
+                    findings: vec![fallow_output::RuntimeCoverageFinding {
                         id: "fallow:prod:lowtraffic".to_owned(),
                         stable_id: None,
                         path: PathBuf::from("/project/src/cold.ts"),
                         function: "coldPath".to_owned(),
                         line: 14,
-                        verdict: crate::health_types::RuntimeCoverageVerdict::LowTraffic,
+                        verdict: fallow_output::RuntimeCoverageVerdict::LowTraffic,
                         invocations: Some(1),
-                        confidence: crate::health_types::RuntimeCoverageConfidence::Low,
+                        confidence: fallow_output::RuntimeCoverageConfidence::Low,
                         evidence: fx_evidence("used", "not_covered", "tracked"),
                         actions: vec![],
                         source_hash: None,
@@ -8648,7 +8640,7 @@ mod tests {
                     watermark: None,
                     warnings: vec![],
                 }),
-                ..crate::health_types::HealthReport::default()
+                ..fallow_output::HealthReport::default()
             },
             grouping: None,
             group_resolver: None,
@@ -8681,12 +8673,12 @@ mod tests {
         );
     }
 
-    fn fx_health_score(score: f64, grade: &'static str) -> crate::health_types::HealthScore {
-        crate::health_types::HealthScore {
+    fn fx_health_score(score: f64, grade: &'static str) -> fallow_output::HealthScore {
+        fallow_output::HealthScore {
             formula_version: 2,
             score,
             grade,
-            penalties: crate::health_types::HealthScorePenalties {
+            penalties: fallow_output::HealthScorePenalties {
                 dead_files: None,
                 dead_exports: None,
                 complexity: 0.0,
@@ -8704,14 +8696,14 @@ mod tests {
     }
 
     fn fx_gate_result(
-        findings: Vec<crate::health_types::HealthFinding>,
-        score: Option<crate::health_types::HealthScore>,
+        findings: Vec<fallow_output::HealthFinding>,
+        score: Option<fallow_output::HealthScore>,
     ) -> HealthResult {
         HealthResult {
-            report: crate::health_types::HealthReport {
+            report: fallow_output::HealthReport {
                 findings,
                 health_score: score,
-                ..crate::health_types::HealthReport::default()
+                ..fallow_output::HealthReport::default()
             },
             grouping: None,
             group_resolver: None,
@@ -8723,11 +8715,11 @@ mod tests {
         }
     }
 
-    fn moderate_finding() -> crate::health_types::HealthFinding {
+    fn moderate_finding() -> fallow_output::HealthFinding {
         make_finding("moderate", ExceededThreshold::Cyclomatic).into()
     }
 
-    fn critical_finding() -> crate::health_types::HealthFinding {
+    fn critical_finding() -> fallow_output::HealthFinding {
         let mut v = make_finding("critical", ExceededThreshold::All);
         v.severity = FindingSeverity::Critical;
         v.into()

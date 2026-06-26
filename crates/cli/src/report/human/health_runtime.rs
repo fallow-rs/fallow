@@ -6,7 +6,7 @@ use super::{MAX_FLAT_ITEMS, format_path, health::format_window, relative_path, t
 
 pub(super) fn render_runtime_coverage(
     lines: &mut Vec<String>,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
 ) {
     let Some(ref production) = report.runtime_coverage else {
@@ -24,16 +24,14 @@ pub(super) fn render_runtime_coverage(
 
 fn render_runtime_summary(
     lines: &mut Vec<String>,
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
 ) {
     let verdict = match production.verdict {
-        crate::health_types::RuntimeCoverageReportVerdict::Clean => "clean",
-        crate::health_types::RuntimeCoverageReportVerdict::HotPathTouched => "hot path touched",
-        crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected => "cold code detected",
-        crate::health_types::RuntimeCoverageReportVerdict::LicenseExpiredGrace => {
-            "license expired grace"
-        }
-        crate::health_types::RuntimeCoverageReportVerdict::Unknown => "unknown",
+        fallow_output::RuntimeCoverageReportVerdict::Clean => "clean",
+        fallow_output::RuntimeCoverageReportVerdict::HotPathTouched => "hot path touched",
+        fallow_output::RuntimeCoverageReportVerdict::ColdCodeDetected => "cold code detected",
+        fallow_output::RuntimeCoverageReportVerdict::LicenseExpiredGrace => "license expired grace",
+        fallow_output::RuntimeCoverageReportVerdict::Unknown => "unknown",
     };
     lines.push(format!(
         "{} {} {}",
@@ -69,7 +67,7 @@ fn render_runtime_summary(
     }
     if matches!(
         production.watermark,
-        Some(crate::health_types::RuntimeCoverageWatermark::LicenseExpiredGrace)
+        Some(fallow_output::RuntimeCoverageWatermark::LicenseExpiredGrace)
     ) {
         lines.push(
             "  license expired grace active; refresh with `fallow license refresh`".to_owned(),
@@ -79,7 +77,7 @@ fn render_runtime_summary(
 
 fn render_runtime_findings(
     lines: &mut Vec<String>,
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
     root: &Path,
 ) {
     let shown_findings = production.findings.len().min(MAX_FLAT_ITEMS);
@@ -107,7 +105,7 @@ fn render_runtime_findings(
 
 fn render_runtime_hot_paths(
     lines: &mut Vec<String>,
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
     root: &Path,
 ) {
     if !production.hot_paths.is_empty() {
@@ -127,7 +125,7 @@ fn render_runtime_hot_paths(
 
 fn render_runtime_warnings(
     lines: &mut Vec<String>,
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
 ) {
     for warning in &production.warnings {
         lines.push(format!("  warning [{}]: {}", warning.code, warning.message));
@@ -136,7 +134,7 @@ fn render_runtime_warnings(
 
 fn render_capture_quality_warning(
     lines: &mut Vec<String>,
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
 ) {
     let Some(ref quality) = production.summary.capture_quality else {
         return;
@@ -167,7 +165,7 @@ fn render_capture_quality_warning(
 
 fn render_upgrade_prompt(
     lines: &mut Vec<String>,
-    production: &crate::health_types::RuntimeCoverageReport,
+    production: &fallow_output::RuntimeCoverageReport,
 ) {
     let Some(ref quality) = production.summary.capture_quality else {
         return;

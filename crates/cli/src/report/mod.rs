@@ -476,8 +476,8 @@ fn warn_dupes_grouping_unsupported(grouping: &DuplicationGrouping, format: &str)
 ///   richer grouped envelope.
 #[must_use]
 pub fn print_health_report(
-    report: &crate::health_types::HealthReport,
-    grouping: Option<&crate::health_types::HealthGrouping>,
+    report: &fallow_output::HealthReport,
+    grouping: Option<&fallow_output::HealthGrouping>,
     group_resolver: Option<&grouping::OwnershipResolver>,
     ctx: &ReportContext<'_>,
     output: OutputFormat,
@@ -530,8 +530,8 @@ pub fn print_health_report(
 
 /// Render the human-format health report, including the per-group summary block.
 fn print_health_human_report(
-    report: &crate::health_types::HealthReport,
-    grouping: Option<&crate::health_types::HealthGrouping>,
+    report: &fallow_output::HealthReport,
+    grouping: Option<&fallow_output::HealthGrouping>,
     ctx: &ReportContext<'_>,
 ) {
     if ctx.summary {
@@ -554,7 +554,7 @@ fn print_health_human_report(
 
 /// Render the CI comment / review fallback arms for health results.
 fn print_health_ci_comment(
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
     output: OutputFormat,
 ) -> ExitCode {
@@ -566,7 +566,7 @@ fn print_health_ci_comment(
     })
 }
 
-fn warn_grouping_unsupported(grouping: Option<&crate::health_types::HealthGrouping>, format: &str) {
+fn warn_grouping_unsupported(grouping: Option<&fallow_output::HealthGrouping>, format: &str) {
     if let Some(g) = grouping {
         eprintln!(
             "note: --group-by {} is not supported for {format} output, falling back to \
@@ -660,10 +660,7 @@ pub fn print_performance(timings: &PipelineTimings, format: OutputFormat) {
 
 /// Print health pipeline performance timings.
 /// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
-pub fn print_health_performance(
-    timings: &crate::health_types::HealthTimings,
-    format: OutputFormat,
-) {
+pub fn print_health_performance(timings: &fallow_output::HealthTimings, format: OutputFormat) {
     match format {
         OutputFormat::Json => match serde_json::to_string_pretty(timings) {
             Ok(json) => eprintln!("{json}"),

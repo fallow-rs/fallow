@@ -1,4 +1,4 @@
-use crate::health_types::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
+use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
 
 pub(super) struct CoverageGapData {
     pub report: CoverageGaps,
@@ -169,13 +169,13 @@ fn build_coverage_gap_data(scan: CoverageGapScan, root: &std::path::Path) -> Cov
 
     let untested_file_count = files.len();
     let untested_export_count = exports.len();
-    let wrapped_files: Vec<crate::health_types::UntestedFileFinding> = files
+    let wrapped_files: Vec<fallow_output::UntestedFileFinding> = files
         .into_iter()
-        .map(|file| crate::health_types::UntestedFileFinding::with_actions(file, root))
+        .map(|file| fallow_output::UntestedFileFinding::with_actions(file, root))
         .collect();
-    let wrapped_exports: Vec<crate::health_types::UntestedExportFinding> = exports
+    let wrapped_exports: Vec<fallow_output::UntestedExportFinding> = exports
         .into_iter()
-        .map(|export| crate::health_types::UntestedExportFinding::with_actions(export, root))
+        .map(|export| fallow_output::UntestedExportFinding::with_actions(export, root))
         .collect();
 
     CoverageGapData {

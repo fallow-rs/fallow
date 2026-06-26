@@ -7,7 +7,6 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fallow_cli::health_types::*;
 use fallow_cli::report::{
     build_codeclimate, build_compact_lines, build_duplication_codeclimate,
     build_duplication_markdown, build_grouped_duplication_json, build_health_codeclimate,
@@ -23,6 +22,7 @@ use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, Dupl
 use fallow_core::extract::MemberKind;
 use fallow_core::results::*;
 use fallow_output::codeclimate_issues_to_value;
+use fallow_output::*;
 
 /// Build sample `AnalysisResults` with one issue of each type for consistent snapshots.
 #[expect(
@@ -2426,15 +2426,15 @@ fn markdown_workspace_dep_snapshot() {
 
 /// Build a minimal health report with one finding for snapshot tests.
 fn sample_health_report(root: &Path) -> HealthReport {
-    let action_ctx = fallow_cli::health_types::HealthActionContext {
-        opts: fallow_cli::health_types::HealthActionOptions::default(),
+    let action_ctx = fallow_output::HealthActionContext {
+        opts: fallow_output::HealthActionOptions::default(),
         max_cyclomatic_threshold: 20,
         max_cognitive_threshold: 15,
         max_crap_threshold: 30.0,
         crap_refactor_band: 5,
     };
     HealthReport {
-        findings: vec![fallow_cli::health_types::HealthFinding::with_actions(
+        findings: vec![fallow_output::HealthFinding::with_actions(
             ComplexityViolation {
                 path: root.join("src/complex.ts"),
                 name: "processData".to_string(),

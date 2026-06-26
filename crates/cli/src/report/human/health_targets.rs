@@ -6,7 +6,7 @@ use super::{MAX_FLAT_ITEMS, relative_path, split_dir_filename};
 
 const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
 
-fn render_direct_import_symbol(symbol: &crate::health_types::DirectCallerSymbolEvidence) -> String {
+fn render_direct_import_symbol(symbol: &fallow_output::DirectCallerSymbolEvidence) -> String {
     let imported = if symbol.imported == "side-effect" {
         "side effect"
     } else {
@@ -22,7 +22,7 @@ fn render_direct_import_symbol(symbol: &crate::health_types::DirectCallerSymbolE
 
 pub(super) fn render_refactoring_targets(
     lines: &mut Vec<String>,
-    report: &crate::health_types::HealthReport,
+    report: &fallow_output::HealthReport,
     root: &Path,
 ) {
     if report.targets.is_empty() {
@@ -48,10 +48,7 @@ pub(super) fn render_refactoring_targets(
     lines.push(String::new());
 }
 
-fn push_refactoring_targets_header(
-    lines: &mut Vec<String>,
-    report: &crate::health_types::HealthReport,
-) {
+fn push_refactoring_targets_header(lines: &mut Vec<String>, report: &fallow_output::HealthReport) {
     lines.push(format!(
         "{} {}",
         "\u{25cf}".cyan(),
@@ -70,18 +67,18 @@ fn push_refactoring_targets_header(
     lines.push(String::new());
 }
 
-fn refactoring_effort_summary(targets: &[crate::health_types::RefactoringTargetFinding]) -> String {
+fn refactoring_effort_summary(targets: &[fallow_output::RefactoringTargetFinding]) -> String {
     let low = targets
         .iter()
-        .filter(|t| matches!(t.effort, crate::health_types::EffortEstimate::Low))
+        .filter(|t| matches!(t.effort, fallow_output::EffortEstimate::Low))
         .count();
     let medium = targets
         .iter()
-        .filter(|t| matches!(t.effort, crate::health_types::EffortEstimate::Medium))
+        .filter(|t| matches!(t.effort, fallow_output::EffortEstimate::Medium))
         .count();
     let high = targets
         .iter()
-        .filter(|t| matches!(t.effort, crate::health_types::EffortEstimate::High))
+        .filter(|t| matches!(t.effort, fallow_output::EffortEstimate::High))
         .count();
     let mut effort_parts = Vec::new();
     if low > 0 {
@@ -98,7 +95,7 @@ fn refactoring_effort_summary(targets: &[crate::health_types::RefactoringTargetF
 
 fn push_refactoring_target_row(
     lines: &mut Vec<String>,
-    target: &crate::health_types::RefactoringTarget,
+    target: &fallow_output::RefactoringTarget,
     root: &Path,
 ) {
     let file_str = relative_path(&target.path, root).display().to_string();
@@ -131,21 +128,21 @@ fn target_efficiency_colored(efficiency: f64) -> String {
     }
 }
 
-fn target_effort_colored(effort: &crate::health_types::EffortEstimate) -> String {
+fn target_effort_colored(effort: &fallow_output::EffortEstimate) -> String {
     let label = effort.label();
     match effort {
-        crate::health_types::EffortEstimate::Low => label.green().to_string(),
-        crate::health_types::EffortEstimate::Medium => label.yellow().to_string(),
-        crate::health_types::EffortEstimate::High => label.red().to_string(),
+        fallow_output::EffortEstimate::Low => label.green().to_string(),
+        fallow_output::EffortEstimate::Medium => label.yellow().to_string(),
+        fallow_output::EffortEstimate::High => label.red().to_string(),
     }
 }
 
-fn target_confidence_colored(confidence: &crate::health_types::Confidence) -> String {
+fn target_confidence_colored(confidence: &fallow_output::Confidence) -> String {
     let label = confidence.label();
     match confidence {
-        crate::health_types::Confidence::High => label.green().to_string(),
-        crate::health_types::Confidence::Medium => label.yellow().to_string(),
-        crate::health_types::Confidence::Low => label.dimmed().to_string(),
+        fallow_output::Confidence::High => label.green().to_string(),
+        fallow_output::Confidence::Medium => label.yellow().to_string(),
+        fallow_output::Confidence::Low => label.dimmed().to_string(),
     }
 }
 
@@ -174,7 +171,7 @@ fn push_refactoring_targets_overflow(lines: &mut Vec<String>, target_count: usiz
 
 fn render_target_evidence(
     lines: &mut Vec<String>,
-    target: &crate::health_types::RefactoringTarget,
+    target: &fallow_output::RefactoringTarget,
     root: &Path,
 ) {
     let Some(evidence) = &target.evidence else {

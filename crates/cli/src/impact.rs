@@ -1611,9 +1611,7 @@ fn collect_catalog_findings(
 /// from a health report. The function name is line-independent, so a function
 /// moving within its file keeps the same identity.
 #[must_use]
-pub fn collect_complexity_findings(
-    report: &crate::health_types::HealthReport,
-) -> Vec<FindingInput> {
+pub fn collect_complexity_findings(report: &fallow_output::HealthReport) -> Vec<FindingInput> {
     report
         .findings
         .iter()

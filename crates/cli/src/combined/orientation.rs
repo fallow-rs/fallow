@@ -71,7 +71,7 @@ impl OrientationHeader<'_> {
         }
     }
 
-    fn vital_sign_parts(vs: &crate::health_types::VitalSigns) -> Vec<String> {
+    fn vital_sign_parts(vs: &fallow_output::VitalSigns) -> Vec<String> {
         let mut parts = Vec::new();
         Self::push_dead_code_parts(vs, &mut parts);
         Self::push_maintainability_part(vs, &mut parts);
@@ -79,7 +79,7 @@ impl OrientationHeader<'_> {
         parts
     }
 
-    fn push_dead_code_parts(vs: &crate::health_types::VitalSigns, parts: &mut Vec<String>) {
+    fn push_dead_code_parts(vs: &fallow_output::VitalSigns, parts: &mut Vec<String>) {
         if let Some(dfp) = vs.dead_file_pct {
             if let Some(ref c) = vs.counts {
                 parts.push(format!(
@@ -102,7 +102,7 @@ impl OrientationHeader<'_> {
         }
     }
 
-    fn push_maintainability_part(vs: &crate::health_types::VitalSigns, parts: &mut Vec<String>) {
+    fn push_maintainability_part(vs: &fallow_output::VitalSigns, parts: &mut Vec<String>) {
         if let Some(mi) = vs.maintainability_avg {
             let label = if mi >= 85.0 {
                 "good"
@@ -115,7 +115,7 @@ impl OrientationHeader<'_> {
         }
     }
 
-    fn push_risk_parts(vs: &crate::health_types::VitalSigns, parts: &mut Vec<String>) {
+    fn push_risk_parts(vs: &fallow_output::VitalSigns, parts: &mut Vec<String>) {
         if let Some(hc) = vs.hotspot_count
             && hc > 0
         {

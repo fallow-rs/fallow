@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use xxhash_rust::xxh3::xxh3_64;
 
-use crate::health_types::{
+use fallow_output::{
     CoverageGaps, CoverageIntelligenceAction, CoverageIntelligenceConfidence,
     CoverageIntelligenceEvidence, CoverageIntelligenceFinding, CoverageIntelligenceMatchConfidence,
     CoverageIntelligenceRecommendation, CoverageIntelligenceReport,
@@ -93,7 +93,7 @@ fn build_risky_change_findings(
 fn build_risky_finding_evidence(
     report: &HealthReport,
     root: &Path,
-    hot_path: &crate::health_types::RuntimeCoverageHotPath,
+    hot_path: &fallow_output::RuntimeCoverageHotPath,
     matched: &MatchedComplexity<'_>,
 ) -> CoverageIntelligenceEvidence {
     CoverageIntelligenceEvidence {
@@ -116,7 +116,7 @@ fn build_risky_finding_evidence(
 fn risky_finding_for_hot_path(
     report: &HealthReport,
     root: &Path,
-    hot_path: &crate::health_types::RuntimeCoverageHotPath,
+    hot_path: &fallow_output::RuntimeCoverageHotPath,
     skipped_ambiguous_matches: &mut usize,
 ) -> Option<CoverageIntelligenceFinding> {
     let matched = match_complexity(
@@ -647,7 +647,7 @@ fn normalize_path(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::health_types::{
+    use fallow_output::{
         ComplexityViolation, ContributorEntry, ContributorIdentifierFormat, CoverageGapSummary,
         CoverageGaps, ExceededThreshold, FindingSeverity, HealthSummary, HotspotEntry,
         OwnershipMetrics, RuntimeCoverageEvidence, RuntimeCoverageHotPath,
@@ -897,9 +897,9 @@ mod tests {
 
     fn runtime_with_hot(path: &str, function: &str, line: u32) -> RuntimeCoverageReport {
         let mut report = RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::HotPathTouched,
-            signals: vec![crate::health_types::RuntimeCoverageSignal::HotPathTouched],
+            signals: vec![fallow_output::RuntimeCoverageSignal::HotPathTouched],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![],
             hot_paths: vec![RuntimeCoverageHotPath {
@@ -924,9 +924,9 @@ mod tests {
 
     fn runtime_with_cold_delete(path: &str, function: &str, line: u32) -> RuntimeCoverageReport {
         RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
-            signals: vec![crate::health_types::RuntimeCoverageSignal::ColdCodeDetected],
+            signals: vec![fallow_output::RuntimeCoverageSignal::ColdCodeDetected],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![RuntimeCoverageFinding {
                 id: "fallow:prod:deadbeef".to_owned(),
@@ -937,7 +937,7 @@ mod tests {
                 line,
                 verdict: RuntimeCoverageVerdict::SafeToDelete,
                 invocations: Some(0),
-                confidence: crate::health_types::RuntimeCoverageConfidence::High,
+                confidence: fallow_output::RuntimeCoverageConfidence::High,
                 evidence: RuntimeCoverageEvidence {
                     static_status: "unused".to_owned(),
                     test_coverage: "not_covered".to_owned(),
@@ -962,9 +962,9 @@ mod tests {
         line: u32,
     ) -> RuntimeCoverageReport {
         RuntimeCoverageReport {
-            schema_version: crate::health_types::RuntimeCoverageSchemaVersion::V1,
+            schema_version: fallow_output::RuntimeCoverageSchemaVersion::V1,
             verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
-            signals: vec![crate::health_types::RuntimeCoverageSignal::ColdCodeDetected],
+            signals: vec![fallow_output::RuntimeCoverageSignal::ColdCodeDetected],
             summary: RuntimeCoverageSummary::default(),
             findings: vec![RuntimeCoverageFinding {
                 id: "fallow:prod:review001".to_owned(),
@@ -975,7 +975,7 @@ mod tests {
                 line,
                 verdict: RuntimeCoverageVerdict::ReviewRequired,
                 invocations: Some(0),
-                confidence: crate::health_types::RuntimeCoverageConfidence::Medium,
+                confidence: fallow_output::RuntimeCoverageConfidence::Medium,
                 evidence: RuntimeCoverageEvidence {
                     static_status: "used".to_owned(),
                     test_coverage: "not_covered".to_owned(),
