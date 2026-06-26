@@ -1171,36 +1171,25 @@ fn print_runtime_json(
     elapsed: std::time::Duration,
     explain: bool,
 ) -> ExitCode {
-    use crate::output_envelope::{
-        CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion,
-        serialize_named_root_output_without_telemetry,
-    };
-    use fallow_types::envelope::{ElapsedMs, ToolVersion};
-
     debug_assert_eq!(
         RUNTIME_COVERAGE_SCHEMA_VERSION, "1",
         "the schema-version enum has one variant serialized as \"1\"; bump CoverageAnalyzeSchemaVersion if the constant moves"
     );
 
-    let envelope = CoverageAnalyzeOutput {
-        schema_version: CoverageAnalyzeSchemaVersion::V1,
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        runtime_coverage: report.clone(),
-        meta: None,
+    let envelope =
+        fallow_output::build_coverage_analyze_output(report, elapsed, env!("CARGO_PKG_VERSION"));
+    let output = match fallow_output::serialize_coverage_analyze_json_output(
+        envelope,
+        crate::output_envelope::EnvelopeMode::current().into(),
+        explain.then(crate::explain::coverage_analyze_meta),
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    ) {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!("Error: failed to serialize runtime coverage report: {err}");
+            return ExitCode::from(2);
+        }
     };
-    let mut output =
-        match serialize_named_root_output_without_telemetry(envelope, "coverage-analyze") {
-            Ok(value) => value,
-            Err(err) => {
-                eprintln!("Error: failed to serialize runtime coverage report: {err}");
-                return ExitCode::from(2);
-            }
-        };
-    if explain && let Some(map) = output.as_object_mut() {
-        map.insert("_meta".to_owned(), crate::explain::coverage_analyze_meta());
-    }
-    crate::output_envelope::attach_telemetry_meta(&mut output);
     crate::report::emit_json(&output, "runtime coverage JSON")
 }
 
