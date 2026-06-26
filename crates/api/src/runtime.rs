@@ -11,10 +11,11 @@ use fallow_engine::{
     AnalysisResults, AnalysisSession, HealthAnalysisResult, ProjectConfig, ProjectConfigOptions,
 };
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CheckOutputInput, DiffIndex, DupesOutput, DupesOutputInput, GroupByMode,
-    HealthGroup, HealthJsonOutputInput, HealthOutputInput, HealthReport, MAX_DIFF_BYTES,
-    RootEnvelopeMode, WorkspaceDiagnosticOutput, apply_root_kind, build_check_output,
-    build_dupes_output, check_meta, health_meta, relative_to_diff_path, strip_root_prefix,
+    CHECK_SCHEMA_VERSION, CheckOutput, CheckOutputInput, DiffIndex, DupesOutput, DupesOutputInput,
+    GroupByMode, HealthGroup, HealthJsonOutputInput, HealthOutputInput, HealthReport,
+    MAX_DIFF_BYTES, RootEnvelopeMode, WorkspaceDiagnosticOutput, build_check_output,
+    build_dupes_output, check_meta, health_meta, relative_to_diff_path,
+    serialize_check_json_output, serialize_dupes_json_output, strip_root_prefix,
 };
 use fallow_types::{output::NextStep, path_util::is_absolute_path_any_platform};
 use globset::Glob;
@@ -96,6 +97,86 @@ struct ResolvedAnalysisOptions {
     legacy_envelope: bool,
 }
 
+/// Typed programmatic dead-code output before JSON serialization.
+///
+/// This is the API boundary embedders should use when they need access to the
+/// typed engine/output result. The `detect_*` helpers remain as JSON
+/// compatibility shims over this type.
+#[derive(Debug, Clone)]
+pub struct DeadCodeProgrammaticOutput {
+    pub output: CheckOutput,
+    pub root: PathBuf,
+    pub envelope_mode: RootEnvelopeMode,
+    pub telemetry_analysis_run_id: Option<String>,
+}
+
+impl DeadCodeProgrammaticOutput {
+    /// Serialize the typed programmatic result into the stable JSON contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error if the output contract cannot be serialized.
+    pub fn into_json(self) -> ProgrammaticResult<serde_json::Value> {
+        let Self {
+            output,
+            root,
+            envelope_mode,
+            telemetry_analysis_run_id,
+        } = self;
+        let mut json = serialize_check_json_output(
+            output,
+            envelope_mode,
+            telemetry_analysis_run_id.as_deref(),
+        )
+        .map_err(|err| {
+            ProgrammaticError::new(format!("failed to serialize dead-code report: {err}"), 2)
+                .with_code("FALLOW_SERIALIZE_DEAD_CODE_REPORT")
+                .with_context("dead-code")
+        })?;
+        let root_prefix = format!("{}/", root.display());
+        strip_root_prefix(&mut json, &root_prefix);
+        Ok(json)
+    }
+}
+
+/// Typed programmatic duplication output before JSON serialization.
+#[derive(Debug, Clone)]
+pub struct DuplicationProgrammaticOutput {
+    pub output: DupesOutput<DupesReportPayload, serde_json::Value>,
+    pub root: PathBuf,
+    pub envelope_mode: RootEnvelopeMode,
+    pub telemetry_analysis_run_id: Option<String>,
+}
+
+impl DuplicationProgrammaticOutput {
+    /// Serialize the typed programmatic result into the stable JSON contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns a structured error if the output contract cannot be serialized.
+    pub fn into_json(self) -> ProgrammaticResult<serde_json::Value> {
+        let Self {
+            output,
+            root,
+            envelope_mode,
+            telemetry_analysis_run_id,
+        } = self;
+        let mut json = serialize_dupes_json_output(
+            output,
+            envelope_mode,
+            telemetry_analysis_run_id.as_deref(),
+        )
+        .map_err(|err| {
+            ProgrammaticError::new(format!("failed to serialize duplication report: {err}"), 2)
+                .with_code("FALLOW_SERIALIZE_DUPLICATION_REPORT")
+                .with_context("dupes")
+        })?;
+        let root_prefix = format!("{}/", root.display());
+        strip_root_prefix(&mut json, &root_prefix);
+        Ok(json)
+    }
+}
+
 /// Run duplication analysis and return the JSON output contract.
 ///
 /// This is the first runtime path owned by `fallow-api` instead of the CLI
@@ -107,6 +188,18 @@ struct ResolvedAnalysisOptions {
 /// Returns a structured programmatic error for invalid options, config load
 /// failures, git changed-file failures, or serialization failures.
 pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<serde_json::Value> {
+    run_duplication(options)?.into_json()
+}
+
+/// Run duplication analysis and return typed API output before serialization.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error for invalid options, config load
+/// failures, or git changed-file failures.
+pub fn run_duplication(
+    options: &DuplicationOptions,
+) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| detect_duplication_inner(options, &resolved))
 }
@@ -123,6 +216,17 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
 /// options, config load failures, analysis failures, git changed-file failures,
 /// or serialization failures.
 pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_json::Value> {
+    run_dead_code(options)?.into_json()
+}
+
+/// Run dead-code analysis and return typed API output before serialization.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error for unsupported options, invalid
+/// options, config load failures, analysis failures, or git changed-file
+/// failures.
+pub fn run_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| detect_dead_code_inner(options, &resolved, |_| {}))
 }
@@ -138,6 +242,17 @@ pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_j
 pub fn detect_circular_dependencies(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<serde_json::Value> {
+    run_circular_dependencies(options)?.into_json()
+}
+
+/// Run circular-dependency analysis and return typed API output before JSON.
+///
+/// # Errors
+///
+/// Returns the same structured errors as [`run_dead_code`].
+pub fn run_circular_dependencies(
+    options: &DeadCodeOptions,
+) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| detect_dead_code_inner(options, &resolved, keep_circular_dependencies))
 }
@@ -154,6 +269,17 @@ pub fn detect_circular_dependencies(
 pub fn detect_boundary_violations(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<serde_json::Value> {
+    run_boundary_violations(options)?.into_json()
+}
+
+/// Run boundary-family analysis and return typed API output before JSON.
+///
+/// # Errors
+///
+/// Returns the same structured errors as [`run_dead_code`].
+pub fn run_boundary_violations(
+    options: &DeadCodeOptions,
+) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let resolved = resolve_analysis_options(&options.analysis)?;
     resolved.install(|| detect_dead_code_inner(options, &resolved, keep_boundary_violations))
 }
@@ -252,7 +378,7 @@ fn detect_dead_code_inner(
     options: &DeadCodeOptions,
     resolved: &ResolvedAnalysisOptions,
     post_filter: impl FnOnce(&mut AnalysisResults),
-) -> ProgrammaticResult<serde_json::Value> {
+) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let start = Instant::now();
     let session = load_dead_code_session(options, resolved)?;
     let analysis = session.analyze_dead_code().map_err(|err| {
@@ -266,7 +392,7 @@ fn detect_dead_code_inner(
     apply_dead_code_filters(&options.filters, &mut results);
     post_filter(&mut results);
 
-    let envelope = build_check_output(CheckOutputInput {
+    let output = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
         elapsed: start.elapsed(),
@@ -279,19 +405,12 @@ fn detect_dead_code_inner(
         workspace_diagnostics: Vec::new(),
         next_steps: Vec::new(),
     });
-    let mut output = serde_json::to_value(envelope).map_err(|err| {
-        ProgrammaticError::new(format!("failed to serialize dead-code report: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_DEAD_CODE_REPORT")
-            .with_context("dead-code")
-    })?;
-    apply_root_kind(
-        &mut output,
-        "dead-code",
-        root_envelope_mode(resolved.legacy_envelope),
-    );
-    let root_prefix = format!("{}/", session.root().display());
-    strip_root_prefix(&mut output, &root_prefix);
-    Ok(output)
+    Ok(DeadCodeProgrammaticOutput {
+        output,
+        root: session.root().to_path_buf(),
+        envelope_mode: root_envelope_mode(resolved.legacy_envelope),
+        telemetry_analysis_run_id: None,
+    })
 }
 
 fn keep_circular_dependencies(results: &mut AnalysisResults) {
@@ -723,7 +842,7 @@ fn apply_dead_code_catalog_filters(filters: &DeadCodeFilters, results: &mut Anal
 fn detect_duplication_inner(
     options: &DuplicationOptions,
     resolved: &ResolvedAnalysisOptions,
-) -> ProgrammaticResult<serde_json::Value> {
+) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let start = Instant::now();
     let session = load_duplication_session(options, resolved)?;
     let dupes_config = build_dupes_config(options, &session.config().duplicates);
@@ -751,7 +870,7 @@ fn detect_duplication_inner(
     }
 
     let payload = DupesReportPayload::from_report(&report);
-    let envelope: DupesOutput<DupesReportPayload, serde_json::Value> =
+    let output: DupesOutput<DupesReportPayload, serde_json::Value> =
         build_dupes_output(DupesOutputInput {
             schema_version: SCHEMA_VERSION,
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -764,19 +883,12 @@ fn detect_duplication_inner(
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
         });
-    let mut output = serde_json::to_value(envelope).map_err(|err| {
-        ProgrammaticError::new(format!("failed to serialize duplication report: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_DUPLICATION_REPORT")
-            .with_context("dupes")
-    })?;
-    apply_root_kind(
-        &mut output,
-        "dupes",
-        root_envelope_mode(resolved.legacy_envelope),
-    );
-    let root_prefix = format!("{}/", session.root().display());
-    strip_root_prefix(&mut output, &root_prefix);
-    Ok(output)
+    Ok(DuplicationProgrammaticOutput {
+        output,
+        root: session.root().to_path_buf(),
+        envelope_mode: root_envelope_mode(resolved.legacy_envelope),
+        telemetry_analysis_run_id: None,
+    })
 }
 
 fn load_duplication_session(
@@ -1542,6 +1654,29 @@ mod tests {
     }
 
     #[test]
+    fn run_duplication_returns_typed_output_before_json() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        std::fs::write(root.join("src/a.ts"), "export const a = 1;\n").expect("file");
+
+        let run = run_duplication(&DuplicationOptions {
+            analysis: analysis_at(root),
+            ..DuplicationOptions::default()
+        })
+        .expect("duplication succeeds");
+
+        assert_eq!(run.output.schema_version.0, SCHEMA_VERSION);
+        assert_eq!(run.root, root);
+        assert_eq!(run.envelope_mode, RootEnvelopeMode::Tagged);
+
+        let json = run
+            .into_json()
+            .expect("typed duplication output serializes");
+        assert_eq!(json["kind"], "dupes");
+    }
+
+    #[test]
     fn detect_duplication_legacy_envelope_removes_root_kind() {
         let project = tempfile::tempdir().expect("temp dir");
         let root = project.path();
@@ -1578,6 +1713,48 @@ mod tests {
         assert_eq!(json["kind"], "dead-code");
         assert_eq!(json["schema_version"], CHECK_SCHEMA_VERSION);
         assert_eq!(unused_export_names(&json), vec!["deadA", "deadB"]);
+    }
+
+    #[test]
+    fn run_dead_code_returns_typed_output_before_json() {
+        let project = dead_code_project();
+        let root = project.path();
+
+        let run = run_dead_code(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            filters: DeadCodeFilters {
+                unused_exports: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+
+        assert_eq!(run.output.schema_version.0, CHECK_SCHEMA_VERSION);
+        assert_eq!(run.output.results.unused_exports.len(), 2);
+        assert_eq!(run.root, root);
+        assert_eq!(run.envelope_mode, RootEnvelopeMode::Tagged);
+
+        let json = run.into_json().expect("typed dead-code output serializes");
+        assert_eq!(unused_export_names(&json), vec!["deadA", "deadB"]);
+    }
+
+    #[test]
+    fn run_dead_code_family_helpers_return_typed_filtered_output() {
+        let project = dead_code_project();
+        let root = project.path();
+        let options = DeadCodeOptions {
+            analysis: analysis_at(root),
+            ..DeadCodeOptions::default()
+        };
+
+        let circular = run_circular_dependencies(&options).expect("circular helper");
+        let boundary = run_boundary_violations(&options).expect("boundary helper");
+
+        assert!(circular.output.results.unused_exports.is_empty());
+        assert!(boundary.output.results.unused_exports.is_empty());
+        assert_eq!(circular.output.total_issues, 0);
+        assert_eq!(boundary.output.total_issues, 0);
     }
 
     #[test]

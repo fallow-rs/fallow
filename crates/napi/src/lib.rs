@@ -503,7 +503,7 @@ pub fn detect_dead_code(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::detect_dead_code(&options)
+        api::run_dead_code(&options)?.into_json()
     })))
 }
 
@@ -513,7 +513,7 @@ pub fn detect_circular_dependencies(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::detect_circular_dependencies(&options)
+        api::run_circular_dependencies(&options)?.into_json()
     })))
 }
 
@@ -523,7 +523,7 @@ pub fn detect_boundary_violations(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::detect_boundary_violations(&options)
+        api::run_boundary_violations(&options)?.into_json()
     })))
 }
 
@@ -533,7 +533,7 @@ pub fn detect_duplication(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DuplicationOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::detect_duplication(&options)
+        api::run_duplication(&options)?.into_json()
     })))
 }
 
