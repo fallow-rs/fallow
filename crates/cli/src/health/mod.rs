@@ -99,7 +99,7 @@ struct HealthPipelineInput {
     files: Vec<fallow_types::discover::DiscoveredFile>,
     modules: Vec<fallow_types::extract::ModuleInfo>,
     timings: HealthPipelineTimings,
-    pre_computed_analysis: Option<fallow_core::AnalysisOutput>,
+    pre_computed_analysis: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
 }
 
 struct HealthScope<'a> {
@@ -307,7 +307,7 @@ struct HealthCoreSectionsInput<'a> {
     files: &'a [fallow_types::discover::DiscoveredFile],
     modules: &'a [fallow_core::extract::ModuleInfo],
     scope: &'a HealthScope<'a>,
-    pre_computed_analysis: Option<fallow_core::AnalysisOutput>,
+    pre_computed_analysis: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
 }
 
 struct HealthAnalysisPreludeInput<'a> {
@@ -315,7 +315,7 @@ struct HealthAnalysisPreludeInput<'a> {
     config: &'a ResolvedConfig,
     modules: &'a [fallow_core::extract::ModuleInfo],
     scope: &'a HealthScope<'a>,
-    pre_computed_analysis: Option<fallow_core::AnalysisOutput>,
+    pre_computed_analysis: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
 }
 
 struct HealthScopedFindingsInput<'a> {
@@ -4028,24 +4028,20 @@ fn load_health_coverage(
     .ok())
 }
 
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; health still uses the workspace path dependency"
-)]
 fn prepare_shared_analysis_output(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
     modules: &[fallow_core::extract::ModuleInfo],
-    pre_computed: Option<fallow_core::AnalysisOutput>,
+    pre_computed: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
     needed: bool,
-) -> Result<Option<fallow_core::AnalysisOutput>, ExitCode> {
+) -> Result<Option<fallow_engine::DeadCodeAnalysisArtifacts>, ExitCode> {
     if !needed {
         return Ok(None);
     }
     if let Some(pre) = pre_computed {
         return Ok(Some(pre));
     }
-    fallow_core::analyze_with_parse_result(config, modules)
+    fallow_engine::analyze_with_parse_result(config, modules)
         .map(Some)
         .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, opts.output))
 }
@@ -4055,7 +4051,7 @@ struct RuntimeCoverageAnalysisScope<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
     modules: &'a [fallow_core::extract::ModuleInfo],
-    shared_analysis_output: Option<&'a fallow_core::AnalysisOutput>,
+    shared_analysis_output: Option<&'a fallow_engine::DeadCodeAnalysisArtifacts>,
     istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     file_paths: &'a rustc_hash::FxHashMap<fallow_core::discover::FileId, &'a std::path::PathBuf>,
     ignore_set: &'a globset::GlobSet,
@@ -4550,7 +4546,7 @@ struct HealthAnalysisDataInput<'a> {
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
     istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
-    pre_computed_analysis: Option<fallow_core::AnalysisOutput>,
+    pre_computed_analysis: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
     needs_file_scores: bool,
 }
 
@@ -4610,7 +4606,7 @@ fn prepare_health_analysis_data(
 }
 
 struct PreparedSharedHealthAnalysis {
-    output: Option<fallow_core::AnalysisOutput>,
+    output: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
     framework_health_facts: Option<FrameworkHealthFacts>,
 }
 
@@ -4618,7 +4614,7 @@ impl PreparedSharedHealthAnalysis {
     fn take_for_file_scores(
         &mut self,
         needs_file_scores: bool,
-    ) -> Option<fallow_core::AnalysisOutput> {
+    ) -> Option<fallow_engine::DeadCodeAnalysisArtifacts> {
         if needs_file_scores {
             self.output.take()
         } else {
@@ -4668,7 +4664,7 @@ struct FileScoresAndChurnInput<'a> {
 
 fn compute_file_scores_and_churn(
     input: FileScoresAndChurnInput<'_>,
-    precomputed_for_scores: Option<fallow_core::AnalysisOutput>,
+    precomputed_for_scores: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
 ) -> Result<FileScoresAndChurn, ExitCode> {
     let needs_churn = input.opts.hotspots || input.opts.targets;
     if input.needs_file_scores && needs_churn {
@@ -5377,18 +5373,14 @@ struct FileScoreInput<'a> {
     ignore_set: &'a globset::GlobSet,
     output: OutputFormat,
     istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
-    pre_computed: Option<fallow_core::AnalysisOutput>,
+    pre_computed: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
 }
 
 fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreResult, ExitCode> {
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; health still uses the workspace path dependency"
-    )]
     let analysis_output = if let Some(pre) = input.pre_computed {
         pre
     } else {
-        fallow_core::analyze_with_parse_result(input.config, input.modules)
+        fallow_engine::analyze_with_parse_result(input.config, input.modules)
             .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, input.output))?
     };
     match compute_file_scores(

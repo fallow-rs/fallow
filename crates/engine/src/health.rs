@@ -378,7 +378,7 @@ pub struct HealthSharedParseData {
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
     pub modules: Vec<fallow_types::extract::ModuleInfo>,
     /// Full analysis output (graph + results) for file scoring.
-    pub analysis_output: Option<fallow_core::AnalysisOutput>,
+    pub analysis_output: Option<crate::DeadCodeAnalysisArtifacts>,
 }
 
 /// Typed health analysis result shared by CLI, API, NAPI, and future embedders.

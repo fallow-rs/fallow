@@ -392,11 +392,7 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
         )
     };
     let parse_result = fallow_core::extract::parse_all_files(&files, cache.as_ref(), true);
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; the CLI still uses the workspace path dependency"
-    )]
-    let analysis_output = fallow_core::analyze_with_parse_result(&config, &parse_result.modules)
+    let analysis_output = fallow_engine::analyze_with_parse_result(&config, &parse_result.modules)
         .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
     let codeowners =
@@ -413,7 +409,7 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
 fn build_index_from_analysis(
     root: &Path,
     modules: &[fallow_types::extract::ModuleInfo],
-    analysis_output: &fallow_core::AnalysisOutput,
+    analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts,
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
     codeowners: Option<&crate::codeowners::CodeOwners>,
 ) -> StaticIndex {
@@ -454,7 +450,7 @@ struct UnusedStaticSets {
 }
 
 impl UnusedStaticSets {
-    fn from_analysis(analysis_output: &fallow_core::AnalysisOutput) -> Self {
+    fn from_analysis(analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts) -> Self {
         let files: FxHashSet<PathBuf> = analysis_output
             .results
             .unused_files

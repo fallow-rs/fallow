@@ -55,10 +55,12 @@ pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str, mode: 
     if mode == RootEnvelopeMode::Tagged
         && let serde_json::Value::Object(map) = value
     {
+        let existing = std::mem::take(map);
         map.insert(
             "kind".to_string(),
             serde_json::Value::String(kind.to_string()),
         );
+        map.extend(existing);
     }
 }
 

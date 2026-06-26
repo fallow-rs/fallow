@@ -1047,21 +1047,17 @@ struct SecurityAnalysisState {
     results: AnalysisResults,
     modules: Option<Vec<ModuleInfo>>,
     files: Option<Vec<DiscoveredFile>>,
-    analysis_output: Option<fallow_core::AnalysisOutput>,
+    analysis_output: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
 }
 
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates fallow_core::analyze APIs externally; the CLI uses the workspace path dependency"
-)]
 fn analyze_security_candidates(
     opts: &SecurityOptions<'_>,
     config: &fallow_config::ResolvedConfig,
 ) -> Result<SecurityAnalysisState, ExitCode> {
     if opts.runtime_coverage.is_none() {
-        return fallow_core::analyze(config)
-            .map(|results| SecurityAnalysisState {
-                results,
+        return fallow_engine::analyze(config)
+            .map(|analysis| SecurityAnalysisState {
+                results: analysis.results,
                 modules: None,
                 files: None,
                 analysis_output: None,
@@ -1069,7 +1065,7 @@ fn analyze_security_candidates(
             .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output));
     }
 
-    fallow_core::analyze_retaining_modules(config, true, true)
+    fallow_engine::analyze_retaining_modules(config, true, true)
         .map(|mut output| {
             let modules = output.modules.take();
             let files = output.files.take();
@@ -1106,7 +1102,7 @@ fn analyze_security_runtime(
     path: &Path,
     modules: Vec<ModuleInfo>,
     files: Vec<DiscoveredFile>,
-    analysis_output: fallow_core::AnalysisOutput,
+    analysis_output: fallow_engine::DeadCodeAnalysisArtifacts,
 ) -> Result<Option<RuntimeCoverageReport>, ExitCode> {
     let runtime_coverage = crate::health::coverage::prepare_options(
         path,
@@ -4202,10 +4198,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(
-        deprecated,
-        reason = "CLI fixture test uses the same workspace path dependency boundary as `run`"
-    )]
     fn source_reachability_fixture_marks_cross_module_sink() {
         let root = source_reachability_fixture_root();
         let mut config = load_config_for_analysis(
@@ -4223,8 +4215,9 @@ mod tests {
         .expect("fixture config loads");
         config.rules.security_sink = Severity::Warn;
 
-        let results = fallow_core::analyze(&config).expect("fixture analyzes");
-        let finding = results
+        let analysis = fallow_engine::analyze(&config).expect("fixture analyzes");
+        let finding = analysis
+            .results
             .security_findings
             .iter()
             .find(|finding| finding.path.ends_with("src/runner.ts"))

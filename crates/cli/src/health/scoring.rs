@@ -1169,7 +1169,7 @@ pub(super) fn compute_file_scores(
     modules: &[fallow_core::extract::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    analysis_output: fallow_core::AnalysisOutput,
+    analysis_output: fallow_engine::DeadCodeAnalysisArtifacts,
     istanbul_coverage: Option<&IstanbulCoverage>,
     root: &std::path::Path,
 ) -> Result<FileScoreOutput, String> {
@@ -2717,7 +2717,7 @@ mod tests {
         let modules: Vec<fallow_core::extract::ModuleInfo> = vec![];
         let file_paths = rustc_hash::FxHashMap::default();
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
@@ -2749,7 +2749,7 @@ mod tests {
         let modules: Vec<fallow_core::extract::ModuleInfo> = vec![];
         let file_paths = rustc_hash::FxHashMap::default();
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: None,
@@ -2827,7 +2827,7 @@ mod tests {
         > = rustc_hash::FxHashMap::default();
         file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
@@ -2884,7 +2884,7 @@ mod tests {
         > = rustc_hash::FxHashMap::default();
         file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
@@ -2988,7 +2988,7 @@ mod tests {
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(path_b);
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
@@ -3089,7 +3089,7 @@ mod tests {
         file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
         file_paths.insert(fallow_core::discover::FileId(1), &files[1].path);
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
@@ -3175,7 +3175,7 @@ mod tests {
             ),
         );
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
             graph: Some(graph),
@@ -3292,7 +3292,7 @@ mod tests {
         > = rustc_hash::FxHashMap::default();
         file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
@@ -3418,7 +3418,7 @@ mod tests {
             ),
         );
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
             graph: Some(graph),
@@ -3580,7 +3580,7 @@ mod tests {
             ),
         );
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
             graph: Some(graph),
@@ -3728,7 +3728,7 @@ mod tests {
             );
         }
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
             graph: Some(graph),
@@ -3790,7 +3790,7 @@ mod tests {
         let file_paths: rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf> =
             rustc_hash::FxHashMap::default();
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
@@ -3854,7 +3854,7 @@ mod tests {
         > = rustc_hash::FxHashMap::default();
         file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
@@ -3955,7 +3955,7 @@ mod tests {
         > = rustc_hash::FxHashMap::default();
         file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
@@ -4019,7 +4019,7 @@ mod tests {
         > = rustc_hash::FxHashMap::default();
         file_paths.insert(fallow_core::discover::FileId(0), &files[0].path);
 
-        let output = fallow_core::AnalysisOutput {
+        let output = fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(graph),
