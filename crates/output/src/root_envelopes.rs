@@ -41,6 +41,37 @@ pub fn serialize_json_root_output<T: Serialize>(
     Ok(value)
 }
 
+/// Serialize a typed `fallow audit --format json` envelope with the standard
+/// root discriminator policy.
+///
+/// # Errors
+///
+/// Returns a serde error when the provided envelope cannot be converted to a
+/// JSON value.
+pub fn serialize_audit_json_output<
+    Verdict,
+    Summary,
+    Attribution,
+    DeadCode,
+    Duplication,
+    Complexity,
+>(
+    output: AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Complexity>,
+    mode: RootEnvelopeMode,
+) -> Result<serde_json::Value, serde_json::Error>
+where
+    Verdict: Serialize,
+    Summary: Serialize,
+    Attribution: Serialize,
+    DeadCode: Serialize,
+    Duplication: Serialize,
+    Complexity: Serialize,
+{
+    let mut value = serde_json::to_value(output)?;
+    apply_root_kind(&mut value, "audit", mode);
+    Ok(value)
+}
+
 /// Remove only the document-root discriminator. Nested objects may carry their
 /// own meaningful `kind` fields, so this intentionally does not recurse.
 pub fn remove_root_kind(value: &mut serde_json::Value) {
@@ -296,6 +327,7 @@ pub enum FallowOutput<
 
 #[cfg(test)]
 mod tests {
+    use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
     use serde_json::json;
 
     use super::*;
@@ -379,5 +411,36 @@ mod tests {
 
         assert!(value.get("kind").is_none());
         assert_eq!(value["schema_version"], 1);
+    }
+
+    #[test]
+    fn serialize_audit_json_output_applies_audit_kind() {
+        let value = serialize_audit_json_output(
+            AuditOutput {
+                schema_version: SchemaVersion(7),
+                version: ToolVersion("1.2.3".to_string()),
+                command: AuditCommand::Audit,
+                verdict: "pass",
+                changed_files_count: 2,
+                base_ref: "origin/main".to_string(),
+                base_description: Some("merge-base with origin/main".to_string()),
+                head_sha: Some("abc123".to_string()),
+                elapsed_ms: ElapsedMs(42),
+                base_snapshot_skipped: Some(false),
+                summary: json!({ "dead_code_issues": 0 }),
+                attribution: json!({ "gate": "new_only" }),
+                meta: None,
+                dead_code: Some(json!({ "summary": { "total_issues": 0 } })),
+                duplication: None::<serde_json::Value>,
+                complexity: None::<serde_json::Value>,
+                next_steps: Vec::new(),
+            },
+            RootEnvelopeMode::Tagged,
+        )
+        .expect("audit output should serialize");
+
+        assert_eq!(value["kind"], "audit");
+        assert_eq!(value["command"], "audit");
+        assert_eq!(value["dead_code"]["summary"]["total_issues"], 0);
     }
 }
