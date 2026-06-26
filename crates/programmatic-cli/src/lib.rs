@@ -1,9 +1,9 @@
-//! Temporary programmatic bridge for CLI-backed runtime paths.
+//! Temporary programmatic runner bridge for CLI-backed health execution.
 //!
-//! `fallow-api` owns the public programmatic contracts. Most NAPI calls now use
-//! the API runtime directly. Health still needs the CLI implementation until
-//! the health execution pipeline finishes moving behind typed engine results, so
-//! this crate keeps that dependency explicit and removable.
+//! `fallow-api` owns the public programmatic contracts and serialization.
+//! Health execution still needs the CLI implementation until the health
+//! pipeline finishes moving behind typed engine results, so this crate exposes
+//! only the removable runner adapter.
 
 #![cfg_attr(not(test), deny(clippy::disallowed_methods))]
 
@@ -19,26 +19,4 @@ impl fallow_api::ProgrammaticHealthRunner for CliHealthRunner {
     ) -> Result<ProgrammaticHealthRun, ProgrammaticError> {
         fallow_cli::programmatic::CliProgrammaticHealthRunner.run_programmatic_health(options)
     }
-}
-
-/// Run complexity analysis through the temporary CLI-backed health bridge.
-///
-/// # Errors
-///
-/// Returns structured programmatic errors from option validation, analysis, or
-/// JSON serialization.
-pub fn compute_complexity(
-    options: &ComplexityOptions,
-) -> Result<serde_json::Value, ProgrammaticError> {
-    fallow_api::compute_complexity_with_runner(options, &CliHealthRunner)
-}
-
-/// Run health analysis through the temporary CLI-backed health bridge.
-///
-/// # Errors
-///
-/// Returns structured programmatic errors from option validation, analysis, or
-/// JSON serialization.
-pub fn compute_health(options: &ComplexityOptions) -> Result<serde_json::Value, ProgrammaticError> {
-    fallow_api::compute_health_with_runner(options, &CliHealthRunner)
 }

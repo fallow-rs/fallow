@@ -1266,7 +1266,6 @@ version = "2.102.0"
 dependencies = [
  "fallow-api",
  "fallow-cli",
- "serde_json",
 ]
 
 [[package]]
