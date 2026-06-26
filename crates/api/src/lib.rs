@@ -23,6 +23,7 @@ use serde::Serialize;
 pub mod audit_output;
 pub mod dupes_output;
 pub mod editor;
+pub mod grouped_output;
 pub mod output_contracts;
 pub mod runtime;
 pub mod security_output;
@@ -36,6 +37,10 @@ pub use editor::{
     EditorDeadCodeAnalysisOutput, EditorDuplicationReport, EditorProjectAnalysisOutput,
     editor_duplicates, editor_extract, editor_results, editor_security, editor_suppress,
     resolve_git_toplevel, try_get_changed_files_with_toplevel,
+};
+pub use grouped_output::{
+    ResultGroup, UNOWNED_GROUP_LABEL, build_duplication_grouping_with, group_analysis_results_with,
+    largest_clone_group_owner_with,
 };
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListing, CombinedOutput, FallowOutput,

@@ -11,27 +11,13 @@
 //! introduce, since `DuplicationReport::sort()` already orders instances
 //! deterministically by file path then line.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
-use fallow_api::{
-    AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneFamilyFinding,
-    DuplicationGroup, DuplicationGrouping,
-};
-use fallow_engine::duplicates::{
-    CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
-};
-use rustc_hash::FxHashSet;
+use fallow_api::DuplicationGrouping;
+use fallow_engine::duplicates::{CloneGroup, DuplicationReport};
 
 use super::grouping::OwnershipResolver;
 use super::relative_path;
-use crate::baseline::recompute_stats;
-use crate::codeowners::UNOWNED_LABEL;
-
-/// Resolve the group key for a single instance file.
-fn key_for_instance(instance: &CloneInstance, root: &Path, resolver: &OwnershipResolver) -> String {
-    resolver.resolve(relative_path(&instance.file, root))
-}
 
 /// Pick the largest owner for a clone group: most instances wins, ties broken
 /// alphabetically (smallest key wins).
@@ -40,23 +26,9 @@ fn key_for_instance(instance: &CloneInstance, root: &Path, resolver: &OwnershipR
 /// to reach the running maximum wins, which means equal counts resolve to the
 /// alphabetically-smallest key.
 pub fn largest_owner(group: &CloneGroup, root: &Path, resolver: &OwnershipResolver) -> String {
-    let mut counts: BTreeMap<String, u32> = BTreeMap::new();
-    for instance in &group.instances {
-        let key = key_for_instance(instance, root, resolver);
-        *counts.entry(key).or_insert(0) += 1;
-    }
-    if counts.is_empty() {
-        return UNOWNED_LABEL.to_string();
-    }
-    let mut best_key: Option<String> = None;
-    let mut best_count: u32 = 0;
-    for (key, count) in counts {
-        if best_key.is_none() || count > best_count {
-            best_count = count;
-            best_key = Some(key);
-        }
-    }
-    best_key.unwrap_or_else(|| UNOWNED_LABEL.to_string())
+    fallow_api::largest_clone_group_owner_with(group, |path| {
+        resolver.resolve(relative_path(path, root))
+    })
 }
 
 /// Build the grouped duplication payload from a project-level report.
@@ -68,154 +40,9 @@ pub fn build_duplication_grouping(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> DuplicationGrouping {
-    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
-    let buckets = build_attributed_clone_buckets(report, root, resolver);
-    let mut groups: Vec<DuplicationGroup> = buckets
-        .into_iter()
-        .map(|(key, groups)| duplication_group(key, groups, report, &fingerprints))
-        .collect();
-    sort_duplication_groups(&mut groups);
-
-    DuplicationGrouping {
-        mode: resolver.mode_label(),
-        groups,
-    }
-}
-
-fn build_attributed_clone_buckets(
-    report: &DuplicationReport,
-    root: &Path,
-    resolver: &OwnershipResolver,
-) -> BTreeMap<String, Vec<AttributedCloneGroup>> {
-    let mut buckets: BTreeMap<String, Vec<AttributedCloneGroup>> = BTreeMap::new();
-    for group in &report.clone_groups {
-        let attributed = attributed_clone_group(group, root, resolver);
-        buckets
-            .entry(attributed.primary_owner.clone())
-            .or_default()
-            .push(attributed);
-    }
-    buckets
-}
-
-fn attributed_clone_group(
-    group: &CloneGroup,
-    root: &Path,
-    resolver: &OwnershipResolver,
-) -> AttributedCloneGroup {
-    let primary_owner = largest_owner(group, root, resolver);
-    let instances = group
-        .instances
-        .iter()
-        .map(|instance| AttributedInstance {
-            owner: key_for_instance(instance, root, resolver),
-            instance: instance.clone(),
-        })
-        .collect();
-    AttributedCloneGroup {
-        primary_owner,
-        token_count: group.token_count,
-        line_count: group.line_count,
-        instances,
-    }
-}
-
-fn duplication_group(
-    key: String,
-    attributed_groups: Vec<AttributedCloneGroup>,
-    report: &DuplicationReport,
-    fingerprints: &CloneFingerprintSet,
-) -> DuplicationGroup {
-    let mut subset = duplication_subset_report(&attributed_groups, report);
-    subset.stats = recompute_stats(&subset);
-    let clone_families = clone_families_for_bucket(&attributed_groups, report, fingerprints);
-    let clone_groups = attributed_groups
-        .into_iter()
-        .map(|group| {
-            let fingerprint = group.fingerprint(fingerprints);
-            AttributedCloneGroupFinding::with_fingerprint(group, fingerprint)
-        })
-        .collect();
-
-    DuplicationGroup {
-        key,
-        stats: subset.stats,
-        clone_groups,
-        clone_families,
-    }
-}
-
-fn duplication_subset_report(
-    attributed_groups: &[AttributedCloneGroup],
-    report: &DuplicationReport,
-) -> DuplicationReport {
-    DuplicationReport {
-        clone_groups: attributed_groups
-            .iter()
-            .map(|group| CloneGroup {
-                instances: group
-                    .instances
-                    .iter()
-                    .map(|instance| instance.instance.clone())
-                    .collect(),
-                token_count: group.token_count,
-                line_count: group.line_count,
-            })
-            .collect(),
-        clone_families: Vec::new(),
-        mirrored_directories: Vec::new(),
-        stats: DuplicationStats {
-            total_files: report.stats.total_files,
-            files_with_clones: 0,
-            total_lines: report.stats.total_lines,
-            duplicated_lines: 0,
-            total_tokens: report.stats.total_tokens,
-            duplicated_tokens: 0,
-            clone_groups: 0,
-            clone_instances: 0,
-            duplication_percentage: 0.0,
-            clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
-        },
-    }
-}
-
-fn clone_families_for_bucket(
-    attributed_groups: &[AttributedCloneGroup],
-    report: &DuplicationReport,
-    fingerprints: &CloneFingerprintSet,
-) -> Vec<CloneFamilyFinding> {
-    let bucket_files: FxHashSet<&Path> = attributed_groups
-        .iter()
-        .flat_map(|group| group.instances.iter().map(|i| i.instance.file.as_path()))
-        .collect();
-
-    report
-        .clone_families
-        .iter()
-        .filter(|family| {
-            family
-                .files
-                .iter()
-                .any(|path| bucket_files.contains(path.as_path()))
-        })
-        .map(|family| CloneFamilyFinding::with_fingerprints(family.clone(), fingerprints))
-        .collect()
-}
-
-fn sort_duplication_groups(groups: &mut [DuplicationGroup]) {
-    groups.sort_by(|a, b| {
-        let a_unowned = a.key == UNOWNED_LABEL;
-        let b_unowned = b.key == UNOWNED_LABEL;
-        match (a_unowned, b_unowned) {
-            (true, false) => std::cmp::Ordering::Greater,
-            (false, true) => std::cmp::Ordering::Less,
-            _ => b
-                .clone_groups
-                .len()
-                .cmp(&a.clone_groups.len())
-                .then_with(|| a.key.cmp(&b.key)),
-        }
-    });
+    fallow_api::build_duplication_grouping_with(report, resolver.mode_label(), |path| {
+        resolver.resolve(relative_path(path, root))
+    })
 }
 
 #[cfg(test)]
@@ -225,7 +52,7 @@ mod tests {
     use fallow_engine::duplicates::{CloneInstance, DuplicationStats};
 
     use super::*;
-    use crate::codeowners::CodeOwners;
+    use crate::codeowners::{CodeOwners, UNOWNED_LABEL};
 
     fn instance(path: &str, start: usize, end: usize) -> CloneInstance {
         CloneInstance {
