@@ -152,6 +152,11 @@ pub struct HealthExecutionOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
+    /// Include per-decision-point complexity contributions in typed findings.
+    ///
+    /// This changes the produced health result shape, so it belongs to the
+    /// runner input contract rather than CLI rendering options.
+    pub complexity_breakdown: bool,
     pub thresholds: HealthThresholdOverrides,
     pub top: Option<usize>,
     pub sort: HealthSort,
@@ -540,6 +545,7 @@ mod tests {
             no_cache: true,
             threads: 2,
             quiet: true,
+            complexity_breakdown: true,
             thresholds: HealthThresholdOverrides::default(),
             top: Some(5),
             sort: HealthSort::Cognitive,

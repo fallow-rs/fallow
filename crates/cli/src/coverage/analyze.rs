@@ -198,8 +198,8 @@ fn local_health_options<'a>(
             performance: false,
             runtime_coverage: Some(runtime_coverage),
             churn_file: None,
+            complexity_breakdown: false,
         },
-        complexity_breakdown: false,
         group_by: None,
     }
 }

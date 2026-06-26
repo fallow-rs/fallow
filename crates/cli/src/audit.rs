@@ -2601,8 +2601,8 @@ fn build_audit_health_options<'a>(
             performance: opts.performance,
             runtime_coverage,
             churn_file: None,
+            complexity_breakdown: false,
         },
-        complexity_breakdown: false,
         group_by: opts.group_by,
     }
 }

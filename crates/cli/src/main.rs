@@ -5716,8 +5716,8 @@ fn run_health_dispatch(
             performance: cli.performance,
             runtime_coverage: run.runtime_coverage,
             churn_file: cli.churn_file.as_deref(),
+            complexity_breakdown: args.complexity_breakdown,
         },
-        complexity_breakdown: args.complexity_breakdown,
         group_by: cli.group_by,
     })
 }

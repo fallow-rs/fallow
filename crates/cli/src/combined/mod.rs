@@ -420,8 +420,8 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
             performance: opts.performance,
             runtime_coverage: None,
             churn_file: opts.churn_file,
+            complexity_breakdown: false,
         },
-        complexity_breakdown: false,
         group_by: opts.group_by,
     }
 }

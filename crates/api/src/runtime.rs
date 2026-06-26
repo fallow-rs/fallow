@@ -79,6 +79,7 @@ pub fn derive_programmatic_health_execution_options<'a>(
         no_cache: resolved.no_cache(),
         threads: resolved.threads(),
         quiet: true,
+        complexity_breakdown: false,
         thresholds: run.thresholds,
         top: run.top,
         sort: run.sort,
@@ -1792,6 +1793,7 @@ mod tests {
         assert!(execution.no_cache);
         assert_eq!(execution.threads, 2);
         assert!(execution.quiet);
+        assert!(!execution.complexity_breakdown);
         assert_eq!(execution.thresholds.max_cyclomatic, Some(12));
         assert_eq!(execution.top, Some(5));
         assert!(execution.production);

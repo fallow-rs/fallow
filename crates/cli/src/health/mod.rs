@@ -56,10 +56,6 @@ impl From<SortBy> for HealthSort {
 
 pub struct HealthOptions<'a> {
     pub execution: HealthExecutionOptions<'a>,
-    /// Include the per-decision-point complexity breakdown (`contributions[]`)
-    /// on each complexity finding in JSON output. Drives the VS Code inline
-    /// editor breakdown; off by default to keep CI/default output lean.
-    pub complexity_breakdown: bool,
     pub group_by: Option<crate::GroupBy>,
 }
 

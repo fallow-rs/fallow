@@ -46,7 +46,6 @@ fn build_complexity_options<'a>(
 ) -> HealthOptions<'a> {
     HealthOptions {
         execution: derive_programmatic_health_execution_options(resolved, options),
-        complexity_breakdown: false,
         group_by: None,
     }
 }
