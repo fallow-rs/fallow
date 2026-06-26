@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use ls_types::{CodeLens, Command, Position, Range, Uri};
+use serde::Serialize;
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 
@@ -88,6 +89,24 @@ fn build_code_lenses_for_test(
         file_path,
         document_uri,
     ))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ReferenceCommandPosition {
+    line: u32,
+    character: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ReferenceCommandRange {
+    start: ReferenceCommandPosition,
+    end: ReferenceCommandPosition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ReferenceLocationPayload {
+    uri: String,
+    range: ReferenceCommandRange,
 }
 
 /// Build the DESCRIPTIVE per-component React summary lenses for a file: one lens
@@ -219,7 +238,7 @@ fn export_usage_code_lens(
         line,
         character: usage.col,
     };
-    let ref_locations: Vec<serde_json::Value> = usage
+    let ref_locations: Vec<ReferenceLocationPayload> = usage
         .reference_locations
         .iter()
         .filter_map(reference_location_payload)
@@ -243,22 +262,26 @@ fn export_usage_code_lens(
 
 fn reference_location_payload(
     loc: &fallow_api::editor_results::ReferenceLocation,
-) -> Option<serde_json::Value> {
+) -> Option<ReferenceLocationPayload> {
     let uri = Uri::from_file_path(&loc.path)?;
     let ref_line = loc.line.saturating_sub(1);
-    Some(serde_json::json!({
-        "uri": uri.as_str(),
-        "range": {
-            "start": { "line": ref_line, "character": loc.col },
-            "end": { "line": ref_line, "character": loc.col }
-        }
-    }))
+    let position = ReferenceCommandPosition {
+        line: ref_line,
+        character: loc.col,
+    };
+    Some(ReferenceLocationPayload {
+        uri: uri.as_str().to_string(),
+        range: ReferenceCommandRange {
+            start: position.clone(),
+            end: position,
+        },
+    })
 }
 
 fn reference_command(
     document_uri: &Uri,
     export_position: Position,
-    ref_locations: &[serde_json::Value],
+    ref_locations: &[ReferenceLocationPayload],
 ) -> (String, Option<Vec<serde_json::Value>>) {
     if ref_locations.is_empty() {
         return ("fallow.noop".to_string(), None);
@@ -266,15 +289,24 @@ fn reference_command(
 
     (
         "fallow.showReferences".to_string(),
-        Some(vec![
-            serde_json::json!(document_uri.as_str()),
-            serde_json::json!({
-                "line": export_position.line,
-                "character": export_position.character,
-            }),
-            serde_json::json!(ref_locations),
-        ]),
+        reference_command_arguments(document_uri, export_position, ref_locations),
     )
+}
+
+fn reference_command_arguments(
+    document_uri: &Uri,
+    export_position: Position,
+    ref_locations: &[ReferenceLocationPayload],
+) -> Option<Vec<serde_json::Value>> {
+    let export_position = ReferenceCommandPosition {
+        line: export_position.line,
+        character: export_position.character,
+    };
+    Some(vec![
+        serde_json::to_value(document_uri.as_str()).ok()?,
+        serde_json::to_value(export_position).ok()?,
+        serde_json::to_value(ref_locations).ok()?,
+    ])
 }
 
 fn complexity_code_lenses(
