@@ -21,7 +21,7 @@ use plan::{CapturedHashes, CommitOutcome, FixPlan, SkippedFile};
 fn run_analyze(
     config: &fallow_config::ResolvedConfig,
     output: OutputFormat,
-) -> Result<(fallow_core::results::AnalysisResults, CapturedHashes), ExitCode> {
+) -> Result<(fallow_engine::results::AnalysisResults, CapturedHashes), ExitCode> {
     #[expect(
         deprecated,
         reason = "ADR-008 deprecates fallow_core::analyze_with_file_hashes externally; the CLI still uses the workspace path dependency"
@@ -142,7 +142,7 @@ fn finalize_fix_run(
 fn apply_all_fixes(
     opts: &FixOptions<'_>,
     config: &fallow_config::ResolvedConfig,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     file_hashes: &CapturedHashes,
     plan: &mut FixPlan,
     fixes: &mut Vec<serde_json::Value>,
@@ -227,7 +227,7 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
 
 struct FixApplicationInput<'a> {
     root: &'a Path,
-    results: &'a fallow_core::results::AnalysisResults,
+    results: &'a fallow_engine::results::AnalysisResults,
     file_hashes: &'a CapturedHashes,
     plan: &'a mut FixPlan,
     output: OutputFormat,
@@ -236,7 +236,7 @@ struct FixApplicationInput<'a> {
 }
 
 fn apply_unused_export_fixes(input: &mut FixApplicationInput<'_>) {
-    let mut exports_by_file: FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedExport>> =
+    let mut exports_by_file: FxHashMap<PathBuf, Vec<&fallow_engine::results::UnusedExport>> =
         FxHashMap::default();
     for finding in &input.results.unused_exports {
         exports_by_file
@@ -266,7 +266,7 @@ fn apply_unused_enum_member_fixes(input: &mut FixApplicationInput<'_>) {
     if input.results.unused_enum_members.is_empty() {
         return;
     }
-    let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&fallow_core::results::UnusedMember>> =
+    let mut enum_members_by_file: FxHashMap<PathBuf, Vec<&fallow_engine::results::UnusedMember>> =
         FxHashMap::default();
     for finding in &input.results.unused_enum_members {
         enum_members_by_file
@@ -322,7 +322,7 @@ struct CatalogFixTotals {
 
 struct CatalogFixRequest<'a> {
     root: &'a Path,
-    results: &'a fallow_core::results::AnalysisResults,
+    results: &'a fallow_engine::results::AnalysisResults,
     file_hashes: &'a CapturedHashes,
     plan: &'a mut FixPlan,
     delete_preceding_comments: CatalogPrecedingCommentPolicy,

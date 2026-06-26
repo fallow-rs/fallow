@@ -23,7 +23,7 @@
 use std::path::Path;
 
 use fallow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
-use fallow_core::results::{
+use fallow_engine::results::{
     EmptyCatalogGroup, EmptyCatalogGroupFinding, UnusedCatalogEntry, UnusedCatalogEntryFinding,
 };
 
