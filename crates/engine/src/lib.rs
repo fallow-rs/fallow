@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use fallow_config::{
     DuplicatesConfig, FallowConfig, OutputFormat, ProductionAnalysis, ResolvedConfig,
 };
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Duplication result types exposed through the engine boundary.
 pub mod duplicates {
@@ -183,6 +183,13 @@ pub struct ProjectConfigOptions {
 #[derive(Debug)]
 pub struct DeadCodeAnalysis {
     pub results: AnalysisResults,
+}
+
+/// Typed dead-code analysis result with per-file source hashes.
+#[derive(Debug)]
+pub struct DeadCodeAnalysisWithHashes {
+    pub results: AnalysisResults,
+    pub file_hashes: FxHashMap<PathBuf, u64>,
 }
 
 /// Typed dead-code analysis result with retained parser artifacts.
@@ -487,6 +494,21 @@ fn joined_config_errors(label: &str, errors: &[impl ToString]) -> EngineError {
     EngineError::new(format!("{label}:\n  - {joined}"))
 }
 
+/// Run dead-code analysis for a resolved config.
+///
+/// # Errors
+///
+/// Returns an error if file discovery, parsing, or analysis fails.
+pub fn analyze(config: &ResolvedConfig) -> EngineResult<DeadCodeAnalysis> {
+    #[expect(
+        deprecated,
+        reason = "fallow-engine is the typed migration boundary over the internal core backend"
+    )]
+    fallow_core::analyze(config)
+        .map(|results| DeadCodeAnalysis { results })
+        .map_err(engine_error)
+}
+
 /// Run dead-code analysis with export usage collection for a resolved config.
 ///
 /// # Errors
@@ -499,6 +521,26 @@ pub fn analyze_with_usages(config: &ResolvedConfig) -> EngineResult<DeadCodeAnal
     )]
     fallow_core::analyze_with_usages(config)
         .map(|results| DeadCodeAnalysis { results })
+        .map_err(engine_error)
+}
+
+/// Run dead-code analysis with source hashes for drift-sensitive fixers.
+///
+/// # Errors
+///
+/// Returns an error if file discovery, parsing, or analysis fails.
+pub fn analyze_with_file_hashes(
+    config: &ResolvedConfig,
+) -> EngineResult<DeadCodeAnalysisWithHashes> {
+    #[expect(
+        deprecated,
+        reason = "fallow-engine is the typed migration boundary over the internal core backend"
+    )]
+    fallow_core::analyze_with_file_hashes(config)
+        .map(|output| DeadCodeAnalysisWithHashes {
+            results: output.results,
+            file_hashes: output.file_hashes,
+        })
         .map_err(engine_error)
 }
 

@@ -22,11 +22,7 @@ fn run_analyze(
     config: &fallow_config::ResolvedConfig,
     output: OutputFormat,
 ) -> Result<(fallow_engine::results::AnalysisResults, CapturedHashes), ExitCode> {
-    #[expect(
-        deprecated,
-        reason = "ADR-008 deprecates fallow_core::analyze_with_file_hashes externally; the CLI still uses the workspace path dependency"
-    )]
-    let output_struct = fallow_core::analyze_with_file_hashes(config)
+    let output_struct = fallow_engine::analyze_with_file_hashes(config)
         .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
     Ok((output_struct.results, output_struct.file_hashes))
 }
