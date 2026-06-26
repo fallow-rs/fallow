@@ -1,6 +1,7 @@
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
+use fallow_engine::{discover, plugins};
 
 use crate::output_envelope::{WorkspaceInfo, WorkspacesOutput};
 use crate::report::format_display_path;
@@ -24,9 +25,9 @@ pub struct ListOptions<'a> {
 /// JSON / human renderers.
 struct ListData {
     show_all: bool,
-    plugin_result: Option<fallow_core::plugins::AggregatedPluginResult>,
-    discovered: Option<Vec<fallow_core::discover::DiscoveredFile>>,
-    entry_points: Option<Vec<fallow_core::discover::EntryPoint>>,
+    plugin_result: Option<plugins::AggregatedPluginResult>,
+    discovered: Option<Vec<discover::DiscoveredFile>>,
+    entry_points: Option<Vec<discover::EntryPoint>>,
     boundary_data: Option<BoundaryData>,
     workspace_data: Option<WorkspaceData>,
 }
@@ -88,9 +89,7 @@ fn collect_list_data(
     let need_plugin_result = opts.plugins || opts.entry_points || show_all;
     let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
     let discovered = if need_files || need_plugin_result {
-        Some(fallow_core::discover::discover_files_with_plugin_scopes(
-            config,
-        ))
+        Some(discover::discover_files_with_plugin_scopes(config))
     } else {
         None
     };
@@ -127,22 +126,21 @@ fn collect_list_entry_points(
     opts: &ListOptions<'_>,
     config: &fallow_config::ResolvedConfig,
     show_all: bool,
-    discovered: Option<&[fallow_types::discover::DiscoveredFile]>,
-    plugin_result: Option<&fallow_core::plugins::AggregatedPluginResult>,
-) -> Option<Vec<fallow_core::discover::EntryPoint>> {
+    discovered: Option<&[discover::DiscoveredFile]>,
+    plugin_result: Option<&plugins::AggregatedPluginResult>,
+) -> Option<Vec<discover::EntryPoint>> {
     if !(opts.entry_points || show_all) {
         return None;
     }
     let disc = discovered?;
-    let mut entries = fallow_core::discover::discover_entry_points(config, disc);
+    let mut entries = discover::discover_entry_points(config, disc);
     let workspaces = fallow_config::discover_workspaces(opts.root);
     for ws in &workspaces {
-        let ws_entries =
-            fallow_core::discover::discover_workspace_entry_points(&ws.root, config, disc);
+        let ws_entries = discover::discover_workspace_entry_points(&ws.root, config, disc);
         entries.extend(ws_entries);
     }
     if let Some(pr) = plugin_result {
-        let plugin_entries = fallow_core::discover::discover_plugin_entry_points(pr, config, disc);
+        let plugin_entries = discover::discover_plugin_entry_points(pr, config, disc);
         entries.extend(plugin_entries);
     }
     Some(entries)
@@ -221,8 +219,8 @@ fn collect_plugin_result(
     opts: &ListOptions<'_>,
     config: &fallow_config::ResolvedConfig,
     show_all: bool,
-    discovered: Option<&[fallow_core::discover::DiscoveredFile]>,
-) -> Result<Option<fallow_core::plugins::AggregatedPluginResult>, ExitCode> {
+    discovered: Option<&[discover::DiscoveredFile]>,
+) -> Result<Option<plugins::AggregatedPluginResult>, ExitCode> {
     if !(opts.plugins || opts.entry_points || show_all) {
         return Ok(None);
     }
@@ -230,12 +228,12 @@ fn collect_plugin_result(
     let disc = match discovered {
         Some(discovered) => discovered,
         None => {
-            fallback_discovered = fallow_core::discover::discover_files_with_plugin_scopes(config);
+            fallback_discovered = discover::discover_files_with_plugin_scopes(config);
             &fallback_discovered
         }
     };
     let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
-    let registry = fallow_core::plugins::PluginRegistry::new(config.external_plugins.clone());
+    let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
     let mut result = run_package_plugins(
         &registry,
         &opts.root.join("package.json"),
@@ -249,12 +247,12 @@ fn collect_plugin_result(
 }
 
 fn run_package_plugins(
-    registry: &fallow_core::plugins::PluginRegistry,
+    registry: &plugins::PluginRegistry,
     package_path: &std::path::Path,
     root: &std::path::Path,
     file_paths: &[std::path::PathBuf],
     output: OutputFormat,
-) -> Result<Option<fallow_core::plugins::AggregatedPluginResult>, ExitCode> {
+) -> Result<Option<plugins::AggregatedPluginResult>, ExitCode> {
     let Ok(pkg) = fallow_config::PackageJson::load(package_path) else {
         return Ok(None);
     };
@@ -262,16 +260,16 @@ fn run_package_plugins(
         .try_run(&pkg, root, file_paths)
         .map(Some)
         .map_err(|errors| {
-            let message = fallow_core::plugins::registry::format_plugin_regex_errors(&errors);
+            let message = plugins::registry::format_plugin_regex_errors(&errors);
             crate::error::emit_error(&message, 2, output)
         })
 }
 
 fn merge_workspace_plugins(
     opts: &ListOptions<'_>,
-    registry: &fallow_core::plugins::PluginRegistry,
+    registry: &plugins::PluginRegistry,
     file_paths: &[std::path::PathBuf],
-    result: &mut fallow_core::plugins::AggregatedPluginResult,
+    result: &mut plugins::AggregatedPluginResult,
 ) -> Result<(), ExitCode> {
     for ws in &fallow_config::discover_workspaces(opts.root) {
         let Some(ws_result) = run_package_plugins(
@@ -297,9 +295,9 @@ fn merge_workspace_plugins(
 struct ListJsonInput<'a> {
     opts: &'a ListOptions<'a>,
     show_all: bool,
-    plugin_result: Option<&'a fallow_core::plugins::AggregatedPluginResult>,
-    discovered: Option<&'a [fallow_core::discover::DiscoveredFile]>,
-    entry_points: Option<&'a [fallow_core::discover::EntryPoint]>,
+    plugin_result: Option<&'a plugins::AggregatedPluginResult>,
+    discovered: Option<&'a [discover::DiscoveredFile]>,
+    entry_points: Option<&'a [discover::EntryPoint]>,
     boundary_data: Option<&'a BoundaryData>,
     workspace_data: Option<&'a WorkspaceData>,
 }
@@ -380,7 +378,7 @@ fn build_list_json_map(input: &ListJsonInput<'_>) -> serde_json::Map<String, ser
 /// Insert the `entry_point_count` + `entry_points` keys into the list JSON map.
 fn insert_entry_points_json(
     result: &mut serde_json::Map<String, serde_json::Value>,
-    entries: &[fallow_core::discover::EntryPoint],
+    entries: &[discover::EntryPoint],
     root: &std::path::Path,
 ) {
     let eps: Vec<serde_json::Value> = entries
@@ -438,9 +436,9 @@ fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> Works
 struct ListHumanInput<'a> {
     opts: &'a ListOptions<'a>,
     show_all: bool,
-    plugin_result: Option<&'a fallow_core::plugins::AggregatedPluginResult>,
-    discovered: Option<&'a [fallow_core::discover::DiscoveredFile]>,
-    entry_points: Option<&'a [fallow_core::discover::EntryPoint]>,
+    plugin_result: Option<&'a plugins::AggregatedPluginResult>,
+    discovered: Option<&'a [discover::DiscoveredFile]>,
+    entry_points: Option<&'a [discover::EntryPoint]>,
     boundary_data: Option<&'a BoundaryData>,
     workspace_data: Option<&'a WorkspaceData>,
 }
@@ -599,7 +597,7 @@ struct LogicalGroupInfo {
 
 fn compute_boundary_data(
     config: &fallow_config::ResolvedConfig,
-    discovered: Option<&[fallow_core::discover::DiscoveredFile]>,
+    discovered: Option<&[discover::DiscoveredFile]>,
 ) -> BoundaryData {
     let boundaries = &config.boundaries;
 
@@ -626,7 +624,7 @@ fn compute_boundary_data(
 
 fn build_boundary_zones(
     config: &fallow_config::ResolvedConfig,
-    discovered: Option<&[fallow_core::discover::DiscoveredFile]>,
+    discovered: Option<&[discover::DiscoveredFile]>,
 ) -> Vec<ZoneInfo> {
     config
         .boundaries
@@ -642,7 +640,7 @@ fn build_boundary_zones(
 
 fn count_boundary_zone_files(
     config: &fallow_config::ResolvedConfig,
-    discovered: Option<&[fallow_core::discover::DiscoveredFile]>,
+    discovered: Option<&[discover::DiscoveredFile]>,
     zone_name: &str,
 ) -> usize {
     discovered.map_or(0, |files| {
