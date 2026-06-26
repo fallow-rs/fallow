@@ -687,7 +687,7 @@ impl fallow_api::ProgrammaticHealthRunner for CliProgrammaticHealthRunner {
                 analysis: result.without_group_resolver(),
                 workspace_diagnostics,
                 next_step_facts,
-                telemetry_analysis_run_id: crate::output_envelope::telemetry_analysis_run_id(),
+                telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id(),
             })
         })
     }

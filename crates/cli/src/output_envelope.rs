@@ -1,10 +1,4 @@
-//! Typed envelope structs for the JSON output contract.
-//!
-//! This module is the schema-side source of truth for fallow's top-level JSON
-//! envelopes.
-
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+//! Schema-side aliases for fallow's top-level JSON output contract.
 
 #[cfg(any(test, feature = "schema-emit"))]
 use crate::audit::{AuditAttribution, AuditSummary, AuditVerdict};
@@ -32,66 +26,23 @@ pub use fallow_output::{
     InspectTargetDescriptor, MARKER_REGEX_FLAGS_V2, MARKER_REGEX_V2, ReviewCheckConclusion,
     ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
     ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput,
-    ReviewReconcileSchema, WorkspaceDiagnosticOutput, WorkspaceInfo,
+    ReviewReconcileSchema, RootEnvelopeMode, WorkspaceDiagnosticOutput, WorkspaceInfo,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_check_summary,
     build_dupes_output, build_health_output, default_marker_regex, default_marker_regex_flags,
     is_false,
 };
 
-static LEGACY_ENVELOPE: AtomicBool = AtomicBool::new(false);
-static TELEMETRY_ANALYSIS_RUN_ID: Mutex<Option<String>> = Mutex::new(None);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EnvelopeMode {
-    Tagged,
-    Legacy,
-}
-
-impl EnvelopeMode {
-    #[must_use]
-    pub fn current() -> Self {
-        if LEGACY_ENVELOPE.load(Ordering::Relaxed) {
-            Self::Legacy
-        } else {
-            Self::Tagged
-        }
-    }
-}
-
-pub fn set_legacy_envelope(enabled: bool) {
-    LEGACY_ENVELOPE.store(enabled, Ordering::Relaxed);
-}
-
-pub fn set_telemetry_analysis_run_id(run_id: Option<String>) {
-    if let Ok(mut current) = TELEMETRY_ANALYSIS_RUN_ID.lock() {
-        *current = run_id;
-    }
-}
-
-pub fn telemetry_analysis_run_id() -> Option<String> {
-    TELEMETRY_ANALYSIS_RUN_ID
-        .lock()
-        .ok()
-        .and_then(|id| id.clone())
-}
-
 #[cfg(test)]
 fn serialize_root_output_with_mode(
     output: FallowOutput,
-    mode: EnvelopeMode,
+    mode: RootEnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = fallow_output::serialize_json_root_output(output, mode.into())?;
-    fallow_output::attach_telemetry_meta(&mut value, telemetry_analysis_run_id().as_deref());
+    let mut value = fallow_output::serialize_json_root_output(output, mode)?;
+    fallow_output::attach_telemetry_meta(
+        &mut value,
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    );
     Ok(value)
-}
-
-impl From<EnvelopeMode> for fallow_output::RootEnvelopeMode {
-    fn from(mode: EnvelopeMode) -> Self {
-        match mode {
-            EnvelopeMode::Tagged => Self::Tagged,
-            EnvelopeMode::Legacy => Self::Legacy,
-        }
-    }
 }
 #[cfg(any(test, feature = "schema-emit"))]
 pub type AuditOutput = fallow_output::AuditOutput<
@@ -113,6 +64,7 @@ pub type ListBoundariesOutput = fallow_output::ListBoundariesOutput<
     fallow_config::AuthoredRule,
 >;
 
+#[cfg(any(test, feature = "schema-emit"))]
 pub type WorkspacesOutput = fallow_output::WorkspacesOutput<fallow_config::WorkspaceDiagnostic>;
 
 #[allow(
@@ -186,14 +138,14 @@ mod tests {
             let lock = TEST_TELEMETRY_RUN_ID_LOCK
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            set_telemetry_analysis_run_id(run_id.map(str::to_owned));
+            crate::output_runtime::set_telemetry_analysis_run_id(run_id.map(str::to_owned));
             Self { _lock: lock }
         }
     }
 
     impl Drop for TelemetryRunIdGuard {
         fn drop(&mut self) {
-            set_telemetry_analysis_run_id(None);
+            crate::output_runtime::set_telemetry_analysis_run_id(None);
         }
     }
 
@@ -215,7 +167,7 @@ mod tests {
         let _guard = TelemetryRunIdGuard::set(None);
         let value = serialize_root_output_with_mode(
             FallowOutput::Combined(combined_output()),
-            EnvelopeMode::Tagged,
+            RootEnvelopeMode::Tagged,
         )
         .expect("combined root should serialize");
 
@@ -228,7 +180,7 @@ mod tests {
         let _guard = TelemetryRunIdGuard::set(None);
         let value = serialize_root_output_with_mode(
             FallowOutput::Combined(combined_output()),
-            EnvelopeMode::Legacy,
+            RootEnvelopeMode::Legacy,
         )
         .expect("combined root should serialize");
 
@@ -250,7 +202,7 @@ mod tests {
         let _guard = TelemetryRunIdGuard::set(Some("run_test123"));
         let value = serialize_root_output_with_mode(
             FallowOutput::Combined(combined_output()),
-            EnvelopeMode::Tagged,
+            RootEnvelopeMode::Tagged,
         )
         .expect("combined root should serialize");
 
@@ -274,9 +226,11 @@ mod tests {
         });
 
         let _guard = TelemetryRunIdGuard::set(Some("run_test123"));
-        let value =
-            serialize_root_output_with_mode(FallowOutput::Combined(output), EnvelopeMode::Tagged)
-                .expect("combined root should serialize");
+        let value = serialize_root_output_with_mode(
+            FallowOutput::Combined(output),
+            RootEnvelopeMode::Tagged,
+        )
+        .expect("combined root should serialize");
 
         assert_eq!(
             value["_meta"]["check"]["docs"].as_str(),

@@ -5,13 +5,13 @@ use fallow_config::OutputFormat;
 use serde_json::{Value, json};
 
 use crate::error::emit_error;
-use crate::output_envelope::{
+use crate::report;
+use crate::report::sink::outln;
+use fallow_output::{
     InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
     InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
     InspectTargetDescriptor,
 };
-use crate::report;
-use crate::report::sink::outln;
 
 #[derive(Clone)]
 pub enum InspectTarget {
@@ -292,8 +292,8 @@ fn emit_inspect_bundle(bundle: InspectOutput, opts: &InspectOptions<'_>) -> Exit
         OutputFormat::Json => {
             let value = match fallow_output::serialize_inspect_json_output(
                 bundle,
-                crate::output_envelope::EnvelopeMode::current().into(),
-                crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+                crate::output_runtime::current_root_envelope_mode(),
+                crate::output_runtime::telemetry_analysis_run_id().as_deref(),
             ) {
                 Ok(value) => value,
                 Err(err) => {

@@ -3,9 +3,11 @@ use std::process::ExitCode;
 use fallow_config::OutputFormat;
 use fallow_engine::{discover, plugins};
 
-use crate::output_envelope::{WorkspaceInfo, WorkspacesOutput};
 use crate::report::format_display_path;
 use crate::runtime_support::{LoadConfigArgs, load_config};
+use fallow_output::{WorkspaceInfo, WorkspacesOutput};
+
+type CliWorkspacesOutput = WorkspacesOutput<fallow_config::WorkspaceDiagnostic>;
 
 pub struct ListOptions<'a> {
     pub root: &'a std::path::Path,
@@ -316,7 +318,7 @@ fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
     let output = if has_boundaries {
         match fallow_output::serialize_list_boundaries_json_output(
             output,
-            crate::output_envelope::EnvelopeMode::current().into(),
+            crate::output_runtime::current_root_envelope_mode(),
         ) {
             Ok(value) => value,
             Err(err) => {
@@ -327,7 +329,7 @@ fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
     } else if workspace_only {
         match fallow_output::serialize_list_workspaces_json_output(
             output,
-            crate::output_envelope::EnvelopeMode::current().into(),
+            crate::output_runtime::current_root_envelope_mode(),
         ) {
             Ok(value) => value,
             Err(err) => {
@@ -432,7 +434,7 @@ fn insert_workspace_json(
     }
 }
 
-fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> WorkspacesOutput {
+fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> CliWorkspacesOutput {
     let workspaces = ws
         .workspaces
         .iter()

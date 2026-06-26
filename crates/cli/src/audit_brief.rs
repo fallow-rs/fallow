@@ -379,8 +379,8 @@ fn print_brief_json(result: &AuditResult) -> ExitCode {
         Ok(output) => {
             let Ok(output) = fallow_output::serialize_review_brief_json_output(
                 output,
-                crate::output_envelope::EnvelopeMode::current().into(),
-                crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+                crate::output_runtime::current_root_envelope_mode(),
+                crate::output_runtime::telemetry_analysis_run_id().as_deref(),
             ) else {
                 return ExitCode::SUCCESS;
             };
@@ -705,8 +705,8 @@ pub fn print_decision_surface_result(result: &AuditResult, quiet: bool) -> ExitC
             let output = crate::audit_decision_surface::build_decision_surface_output(&surface);
             match fallow_output::serialize_decision_surface_json_output(
                 output,
-                crate::output_envelope::EnvelopeMode::current().into(),
-                crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+                crate::output_runtime::current_root_envelope_mode(),
+                crate::output_runtime::telemetry_analysis_run_id().as_deref(),
             ) {
                 Ok(value) => {
                     let _ = crate::report::emit_json(&value, "decision-surface");
@@ -735,8 +735,8 @@ pub fn print_walkthrough_guide_result(result: &AuditResult) -> ExitCode {
     let guide = crate::audit_walkthrough::build_guide_from_result(result);
     if let Ok(value) = fallow_output::serialize_walkthrough_guide_json_output(
         guide,
-        crate::output_envelope::EnvelopeMode::current().into(),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         let _ = crate::report::emit_json(&value, "review-walkthrough-guide");
     }
@@ -768,8 +768,8 @@ pub fn print_walkthrough_file_result(result: &AuditResult, path: &std::path::Pat
     );
     if let Ok(value) = fallow_output::serialize_walkthrough_validation_json_output(
         validation,
-        crate::output_envelope::EnvelopeMode::current().into(),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         let _ = crate::report::emit_json(&value, "review-walkthrough-validation");
     }
@@ -845,8 +845,8 @@ mod tests {
         let result = audit_result(AuditVerdict::Fail, OutputFormat::Json);
         let value = fallow_output::serialize_review_brief_json_output(
             build_brief_json(&result).expect("brief json must build"),
-            crate::output_envelope::EnvelopeMode::current().into(),
-            crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+            crate::output_runtime::current_root_envelope_mode(),
+            crate::output_runtime::telemetry_analysis_run_id().as_deref(),
         )
         .expect("brief json must serialize");
 

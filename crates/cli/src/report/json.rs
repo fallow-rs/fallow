@@ -12,12 +12,12 @@ use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_output::strip_root_prefix;
 
 use super::emit_json;
-use crate::output_envelope::{
+use crate::report::grouping::{OwnershipResolver, ResultGroup};
+use fallow_output::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutput,
-    DupesOutputInput, EnvelopeMode, GroupByMode, WorkspaceDiagnosticOutput,
+    DupesOutputInput, GroupByMode, WorkspaceDiagnosticOutput,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
 };
-use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
 pub(super) struct PrintJsonInput<'a> {
     pub(super) results: &'a AnalysisResults,
@@ -121,8 +121,8 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
 
     let mut output = match fallow_output::serialize_check_grouped_json_output(
         envelope,
-        EnvelopeMode::current().into(),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         Ok(value) => value,
         Err(e) => {
@@ -190,8 +190,8 @@ fn build_json_with_config_fixable_and_meta(
     );
     let mut output = fallow_output::serialize_check_json_output(
         envelope,
-        EnvelopeMode::current().into(),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )?;
     postprocess_check_json(&mut output, root);
     Ok(output)
@@ -450,8 +450,8 @@ pub fn build_health_json(
                 crate::report::suggestions::due_impact_digest(root),
             ),
         ),
-        envelope_mode: EnvelopeMode::current().into(),
-        telemetry_analysis_run_id: crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })?;
     Ok(output)
 }
@@ -479,8 +479,8 @@ pub fn build_grouped_health_json(
                 crate::report::suggestions::due_impact_digest(root),
             ),
         ),
-        envelope_mode: EnvelopeMode::current().into(),
-        telemetry_analysis_run_id: crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
 }
 
@@ -543,8 +543,8 @@ pub fn build_duplication_json(
         });
     let mut output = fallow_output::serialize_dupes_json_output(
         envelope,
-        EnvelopeMode::current().into(),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
@@ -597,8 +597,8 @@ pub fn build_grouped_duplication_json(
         });
     let mut output = fallow_output::serialize_dupes_json_output(
         envelope,
-        EnvelopeMode::current().into(),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )?;
     strip_root_prefix(&mut output, &root_prefix);
 
@@ -792,10 +792,10 @@ mod tests {
             ..Default::default()
         };
 
-        let envelope: crate::output_envelope::HealthOutput<
+        let envelope: fallow_output::HealthOutput<
             crate::health_types::HealthReport,
             crate::health_types::HealthGroup,
-        > = crate::output_envelope::HealthOutput {
+        > = fallow_output::HealthOutput {
             schema_version: SchemaVersion(SCHEMA_VERSION),
             version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
             elapsed_ms: ElapsedMs(7),

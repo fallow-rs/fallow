@@ -861,7 +861,7 @@ pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
     let guide = rule_guide(rule);
     match output {
         OutputFormat::Json => {
-            let envelope = crate::output_envelope::ExplainOutput {
+            let envelope = fallow_output::ExplainOutput {
                 id: rule.id.to_string(),
                 name: rule.name.to_string(),
                 summary: rule.short.to_string(),
@@ -872,8 +872,8 @@ pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
             };
             match fallow_output::serialize_explain_json_output(
                 envelope,
-                crate::output_envelope::EnvelopeMode::current().into(),
-                crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+                crate::output_runtime::current_root_envelope_mode(),
+                crate::output_runtime::telemetry_analysis_run_id().as_deref(),
             ) {
                 Ok(value) => crate::report::emit_json(&value, "explain"),
                 Err(e) => {

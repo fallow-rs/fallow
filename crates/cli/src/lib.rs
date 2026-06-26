@@ -147,6 +147,7 @@ mod telemetry;
 /// than in `fallow-types` because the body fields reach into `fallow-core`
 /// and into this crate's own `health_types`.
 pub mod output_envelope;
+pub(crate) mod output_runtime;
 
 /// Programmatic Rust API reused by the NAPI bindings.
 pub mod programmatic;

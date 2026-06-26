@@ -497,7 +497,7 @@ fn build_combined_json_output(
     fallow_output::serialize_combined_json_output(
         output,
         RootEnvelopeMode::Tagged,
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .map_err(|err| json_output_error(&err))
 }

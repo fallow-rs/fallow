@@ -2066,8 +2066,8 @@ fn render_human_footer(out: &mut String, report: &ImpactReport) {
 pub fn render_json(report: &ImpactReport) -> String {
     let value = fallow_output::serialize_impact_json_output(
         report.clone(),
-        crate::output_envelope::EnvelopeMode::current().into(),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .unwrap_or_else(|_| serde_json::json!({"error":"failed to serialize impact report"}));
     serde_json::to_string_pretty(&value)
@@ -2204,8 +2204,8 @@ fn render_markdown_footer(out: &mut String, report: &ImpactReport) {
 pub fn render_cross_repo_json(report: &CrossRepoImpactReport) -> String {
     let value = fallow_output::serialize_cross_repo_impact_json_output(
         report.clone(),
-        crate::output_envelope::EnvelopeMode::current().into(),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .unwrap_or_else(
         |_| serde_json::json!({"error":"failed to serialize cross-repo impact report"}),

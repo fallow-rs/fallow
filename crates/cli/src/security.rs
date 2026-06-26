@@ -1616,8 +1616,8 @@ fn relativize(path: &Path, root: &Path) -> PathBuf {
 pub fn render_json(output: &SecurityOutput) -> String {
     let Ok(value) = fallow_output::serialize_security_json_output(
         output.clone(),
-        crate::output_envelope::EnvelopeMode::current().into(),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) else {
         return "{\"error\":\"failed to serialize security output\"}".to_owned();
     };
@@ -1630,7 +1630,7 @@ pub fn render_json(output: &SecurityOutput) -> String {
 pub fn render_json_summary(output: &SecurityOutput) -> String {
     let Ok(value) = fallow_output::serialize_security_summary_json_output(
         output,
-        crate::output_envelope::EnvelopeMode::current().into(),
+        crate::output_runtime::current_root_envelope_mode(),
         None,
     ) else {
         return "{\"error\":\"failed to serialize security summary output\"}".to_owned();
@@ -1654,7 +1654,7 @@ fn render_survivors_output(
 pub fn render_survivors_json(output: &SecuritySurvivorsOutput) -> String {
     let Ok(value) = fallow_output::serialize_security_survivors_json_output(
         output.clone(),
-        crate::output_envelope::EnvelopeMode::current().into(),
+        crate::output_runtime::current_root_envelope_mode(),
     ) else {
         return "{\"error\":\"failed to serialize security survivors output\"}".to_owned();
     };
@@ -1855,7 +1855,7 @@ fn render_blind_spots_output(
 pub fn render_blind_spots_json(output: &SecurityBlindSpotsOutput) -> String {
     let Ok(value) = fallow_output::serialize_security_blind_spots_json_output(
         output.clone(),
-        crate::output_envelope::EnvelopeMode::current().into(),
+        crate::output_runtime::current_root_envelope_mode(),
     ) else {
         return "{\"error\":\"failed to serialize security blind-spots output\"}".to_owned();
     };

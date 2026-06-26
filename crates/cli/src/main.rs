@@ -49,6 +49,7 @@ mod list;
 mod migrate;
 mod output_dupes;
 mod output_envelope;
+mod output_runtime;
 mod path_util;
 mod rayon_pool;
 mod regression;
@@ -2841,7 +2842,7 @@ fn parse_cli_args() -> Result<(Cli, FormatConfig), ExitCode> {
     {
         *brief = true;
     }
-    output_envelope::set_legacy_envelope(cli.legacy_envelope);
+    output_runtime::set_legacy_envelope(cli.legacy_envelope);
     runtime_support::set_max_file_size_override(cli.max_file_size);
 
     if let Some(workspaces) = cli.workspace.as_ref()
@@ -3068,7 +3069,7 @@ fn start_telemetry_run(cli: &Cli, fmt: &FormatConfig) -> TelemetryRun {
         start: std::time::Instant::now(),
         context: telemetry_context_for_command(cli, cli.command.as_ref(), fmt.output),
     };
-    output_envelope::set_telemetry_analysis_run_id(
+    output_runtime::set_telemetry_analysis_run_id(
         matches!(fmt.output, fallow_config::OutputFormat::Json)
             .then(telemetry::new_analysis_run_id),
     );

@@ -114,8 +114,8 @@ fn emit_trace(trace: SymbolChainTrace, opts: &TraceChainOptions<'_>) -> ExitCode
         OutputFormat::Json => {
             let value = match fallow_output::serialize_trace_json_output(
                 trace,
-                crate::output_envelope::EnvelopeMode::current().into(),
-                crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+                crate::output_runtime::current_root_envelope_mode(),
+                crate::output_runtime::telemetry_analysis_run_id().as_deref(),
             ) {
                 Ok(value) => value,
                 Err(err) => {

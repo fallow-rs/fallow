@@ -1186,9 +1186,9 @@ fn print_runtime_json(
         fallow_output::build_coverage_analyze_output(report, elapsed, env!("CARGO_PKG_VERSION"));
     let output = match fallow_output::serialize_coverage_analyze_json_output(
         envelope,
-        crate::output_envelope::EnvelopeMode::current().into(),
+        crate::output_runtime::current_root_envelope_mode(),
         explain.then(crate::explain::coverage_analyze_meta),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     ) {
         Ok(value) => value,
         Err(err) => {

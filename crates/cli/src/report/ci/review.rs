@@ -9,13 +9,13 @@ use super::pr_comment::{
     CiIssue, Provider, command_title, escape_md, issues_from_codeclimate_issues,
 };
 use super::severity;
-use crate::output_envelope::{
+use crate::report::emit_json;
+use fallow_output::{
     GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
     GitLabReviewPositionType, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
     ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewEnvelopeSummary,
     ReviewProvider, default_marker_regex, default_marker_regex_flags,
 };
-use crate::report::emit_json;
 
 /// Conservative body-size floor across the two supported review providers.
 /// GitLab accepts ~1,000,000 chars per `Note#note` validation (see
@@ -30,7 +30,7 @@ use crate::report::emit_json;
 const MAX_COMMENT_BODY_BYTES: usize = 65_536;
 
 /// Marker prefix appended to every v2 review-comment body. Mirrored by
-/// [`crate::output_envelope::MARKER_REGEX_V2`]; both must change together
+/// [`fallow_output::MARKER_REGEX_V2`]; both must change together
 /// because consumers extract the fingerprint by running the regex over a
 /// body whose marker line uses this prefix. The `:v2:` namespace prevents
 /// collision with v1 historical markers and reduces user-paste spoofing
@@ -210,8 +210,8 @@ fn print_review_envelope_from_ci_issues(
     let envelope = render_review_envelope(command, provider, issues);
     let value = fallow_output::serialize_review_envelope_json_output(
         envelope,
-        crate::output_envelope::EnvelopeMode::current().into(),
-        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+        crate::output_runtime::current_root_envelope_mode(),
+        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .expect("ReviewEnvelopeOutput serializes infallibly");
     emit_json(&value, "review envelope")
@@ -493,7 +493,7 @@ fn github_check_conclusion(issues: &[CiIssue]) -> ReviewCheckConclusion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::output_envelope::MARKER_REGEX_V2;
+    use fallow_output::MARKER_REGEX_V2;
 
     fn to_value(envelope: &ReviewEnvelopeOutput) -> Value {
         serde_json::to_value(envelope).expect("ReviewEnvelopeOutput serializes infallibly")
