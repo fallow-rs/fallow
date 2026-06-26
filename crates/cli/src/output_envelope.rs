@@ -8,29 +8,12 @@ use crate::health_types::{HealthGroup, HealthReport};
 use crate::report::dupes_grouping::DuplicationGroup;
 #[cfg(any(test, feature = "schema-emit"))]
 use fallow_api::DupesReportPayload;
-#[allow(
-    unused_imports,
-    reason = "compatibility re-export while CLI output contracts move to fallow-output"
-)]
-pub use fallow_output::{
-    AuditCommand, BoundariesListRule, BoundariesListZone, CheckGroupedEntry, CheckGroupedOutput,
-    CheckOutput, CheckOutputInput, CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines,
-    CodeClimateLocation, CodeClimateOutput, CodeClimateSeverity, CombinedMeta,
-    CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,
-    CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
-    CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet, DupesOutput,
-    DupesOutputInput, ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
-    GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput, HealthOutputInput,
-    InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
-    InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
-    InspectTargetDescriptor, MARKER_REGEX_FLAGS_V2, MARKER_REGEX_V2, ReviewCheckConclusion,
-    ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
-    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput,
-    ReviewReconcileSchema, RootEnvelopeMode, WorkspaceDiagnosticOutput, WorkspaceInfo,
-    apply_config_fixable_to_duplicate_exports, build_check_output, build_check_summary,
-    build_dupes_output, build_health_output, default_marker_regex, default_marker_regex_flags,
-    is_false,
+use fallow_output::{
+    CheckGroupedOutput, CheckOutput, CoverageAnalyzeOutput, CoverageSetupOutput, DupesOutput,
+    ExplainOutput, HealthOutput, InspectOutput, ReviewEnvelopeOutput, ReviewReconcileOutput,
 };
+#[cfg(test)]
+use fallow_output::{CombinedMeta, RootEnvelopeMode};
 
 #[cfg(test)]
 fn serialize_root_output_with_mode(

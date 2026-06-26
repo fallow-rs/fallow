@@ -143,9 +143,8 @@ pub mod output_dupes;
 )]
 mod telemetry;
 
-/// Typed envelope structs for the JSON output contract. Live here rather
-/// than in `fallow-types` because the body fields reach into `fallow-core`
-/// and into this crate's own `health_types`.
+/// Schema/test-only aliases for the JSON output contract.
+#[cfg(any(test, feature = "schema-emit"))]
 pub mod output_envelope;
 pub(crate) mod output_runtime;
 
