@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`unused-store-members` no longer false-flags a Pinia store member used
+  through a typed parameter.** A store passed as a param typed
+  `ReturnType<typeof useFooStore>` (inline or via a local `type` alias) and read
+  as `store.member`, `props.store.member`, or `const { member } = props.store`
+  is now credited, so it is not reported as unused. Resolution is gated on the
+  `use<Name>Store` naming convention, so a non-store `ReturnType<typeof ...>`
+  param never masks a genuinely unused member.
+  (Refs [#1489](https://github.com/fallow-rs/fallow/issues/1489))
+
 - **`ignorePatterns` now accepts a leading `./`.** Entries such as
   `./src/generated/**` now match the same project-root-relative files as
   `src/generated/**`, instead of silently leaving those files in the analysis.
