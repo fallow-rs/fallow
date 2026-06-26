@@ -606,45 +606,27 @@ fn build_combined_check_json(
     result: &CheckResult,
     config_fixable: bool,
 ) -> Result<serde_json::Value, ExitCode> {
-    let mut json = report::build_check_json_payload_with_config_fixable(
+    let baseline_deltas = result.baseline_deltas.as_ref().map(|deltas| {
+        report::build_baseline_deltas_output(
+            deltas.total_delta,
+            deltas
+                .per_category
+                .iter()
+                .map(|(cat, delta)| (cat.as_str(), delta.current, delta.baseline, delta.delta)),
+        )
+    });
+    report::build_check_json_payload_with_config_fixable_and_extras(
         &result.results,
         &result.config.root,
         result.elapsed,
         config_fixable,
+        report::check_json_extras(
+            result.regression.as_ref(),
+            baseline_deltas,
+            result.baseline_matched,
+        ),
     )
-    .map_err(|error| json_output_error(&error))?;
-    attach_combined_check_extras(&mut json, result);
-    Ok(json)
-}
-
-fn attach_combined_check_extras(json: &mut serde_json::Value, result: &CheckResult) {
-    let serde_json::Value::Object(map) = json else {
-        return;
-    };
-    if let Some(ref outcome) = result.regression {
-        map.insert("regression".to_string(), outcome.to_json());
-    }
-    if let Some(ref deltas) = result.baseline_deltas {
-        map.insert(
-            "baseline_deltas".to_string(),
-            report::build_baseline_deltas_json(
-                deltas.total_delta,
-                deltas
-                    .per_category
-                    .iter()
-                    .map(|(cat, delta)| (cat.as_str(), delta.current, delta.baseline, delta.delta)),
-            ),
-        );
-    }
-    if let Some((entries, matched)) = result.baseline_matched {
-        map.insert(
-            "baseline".to_string(),
-            serde_json::json!({
-                "entries": entries,
-                "matched": matched,
-            }),
-        );
-    }
+    .map_err(|error| json_output_error(&error))
 }
 
 fn json_output_error(error: &serde_json::Error) -> ExitCode {

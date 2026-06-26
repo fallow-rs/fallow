@@ -83,7 +83,7 @@ pub use grouped_output::{
 };
 pub use health_codeclimate::build_health_codeclimate;
 pub use json_output::{
-    CheckJsonOutputInput, CheckJsonPayloadInput, DuplicationJsonOutputInput,
+    CheckJsonExtraOutputs, CheckJsonOutputInput, CheckJsonPayloadInput, DuplicationJsonOutputInput,
     GroupedCheckJsonOutputInput, GroupedDuplicationJsonOutputInput,
     harmonize_multi_kind_suppress_line_actions, serialize_check_json, serialize_check_json_payload,
     serialize_duplication_json, serialize_grouped_check_json, serialize_grouped_duplication_json,

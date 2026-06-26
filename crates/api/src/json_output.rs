@@ -11,7 +11,9 @@ use fallow_output::{
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
     strip_root_prefix,
 };
-use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
+use fallow_types::envelope::{
+    BaselineDeltas, BaselineMatch, ElapsedMs, Meta, RegressionResult, SchemaVersion, ToolVersion,
+};
 use fallow_types::output::NextStep;
 use fallow_types::results::AnalysisResults;
 
@@ -26,6 +28,7 @@ pub struct CheckJsonOutputInput<'a> {
     pub elapsed: Duration,
     pub config_fixable: bool,
     pub meta: Option<Meta>,
+    pub extras: CheckJsonExtraOutputs,
     pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
@@ -38,7 +41,29 @@ pub struct CheckJsonPayloadInput<'a> {
     pub root: &'a Path,
     pub elapsed: Duration,
     pub config_fixable: bool,
+    pub extras: CheckJsonExtraOutputs,
     pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+}
+
+/// Optional root sections for dead-code JSON envelopes.
+///
+/// These fields are part of the output contract, but they are computed by
+/// caller-specific workflows such as baseline and regression gates.
+#[derive(Debug, Clone, Default)]
+pub struct CheckJsonExtraOutputs {
+    pub baseline_deltas: Option<BaselineDeltas>,
+    pub baseline: Option<BaselineMatch>,
+    pub regression: Option<RegressionResult>,
+}
+
+struct CheckJsonEnvelopeInput<'a> {
+    results: &'a AnalysisResults,
+    elapsed: Duration,
+    config_fixable: bool,
+    meta: Option<Meta>,
+    extras: CheckJsonExtraOutputs,
+    workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    next_steps: Vec<NextStep>,
 }
 
 /// Inputs for grouped dead-code JSON output assembly.
@@ -88,14 +113,15 @@ pub struct GroupedDuplicationJsonOutputInput<'a> {
 pub fn serialize_check_json(
     input: CheckJsonOutputInput<'_>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let envelope = build_check_json_envelope(
-        input.results,
-        input.elapsed,
-        input.config_fixable,
-        input.meta,
-        input.workspace_diagnostics,
-        input.next_steps,
-    );
+    let envelope = build_check_json_envelope(CheckJsonEnvelopeInput {
+        results: input.results,
+        elapsed: input.elapsed,
+        config_fixable: input.config_fixable,
+        meta: input.meta,
+        extras: input.extras,
+        workspace_diagnostics: input.workspace_diagnostics,
+        next_steps: input.next_steps,
+    });
     let mut output = fallow_output::serialize_check_json_output(
         envelope,
         input.envelope_mode,
@@ -113,14 +139,15 @@ pub fn serialize_check_json(
 pub fn serialize_check_json_payload(
     input: CheckJsonPayloadInput<'_>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let envelope = build_check_json_envelope(
-        input.results,
-        input.elapsed,
-        input.config_fixable,
-        None,
-        input.workspace_diagnostics,
-        Vec::new(),
-    );
+    let envelope = build_check_json_envelope(CheckJsonEnvelopeInput {
+        results: input.results,
+        elapsed: input.elapsed,
+        config_fixable: input.config_fixable,
+        meta: None,
+        extras: input.extras,
+        workspace_diagnostics: input.workspace_diagnostics,
+        next_steps: Vec::new(),
+    });
     let mut output = serde_json::to_value(envelope)?;
     postprocess_check_json(&mut output, input.root);
     Ok(output)
@@ -258,24 +285,21 @@ pub fn serialize_grouped_duplication_json(
     Ok(output)
 }
 
-fn build_check_json_envelope(
-    results: &AnalysisResults,
-    elapsed: Duration,
-    config_fixable: bool,
-    meta: Option<Meta>,
-    workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
-    next_steps: Vec<NextStep>,
-) -> CheckOutput {
-    build_check_output(CheckOutputInput {
+fn build_check_json_envelope(input: CheckJsonEnvelopeInput<'_>) -> CheckOutput {
+    let mut output = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
-        elapsed,
-        results: results.clone(),
-        config_fixable,
-        meta,
-        workspace_diagnostics,
-        next_steps,
-    })
+        elapsed: input.elapsed,
+        results: input.results.clone(),
+        config_fixable: input.config_fixable,
+        meta: input.meta,
+        workspace_diagnostics: input.workspace_diagnostics,
+        next_steps: input.next_steps,
+    });
+    output.baseline_deltas = input.extras.baseline_deltas;
+    output.baseline = input.extras.baseline;
+    output.regression = input.extras.regression;
+    output
 }
 
 fn postprocess_check_json(output: &mut serde_json::Value, root: &Path) {

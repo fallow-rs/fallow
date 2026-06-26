@@ -4,8 +4,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use fallow_api::{
-    CheckJsonOutputInput, CheckJsonPayloadInput, DupesReportPayload, DuplicationGrouping,
-    DuplicationJsonOutputInput, GroupedCheckJsonOutputInput, GroupedDuplicationJsonOutputInput,
+    CheckJsonExtraOutputs, CheckJsonOutputInput, CheckJsonPayloadInput, DupesReportPayload,
+    DuplicationGrouping, DuplicationJsonOutputInput, GroupedCheckJsonOutputInput,
+    GroupedDuplicationJsonOutputInput,
 };
 use fallow_engine::duplicates::DuplicationReport;
 #[cfg(test)]
@@ -14,6 +15,10 @@ use fallow_types::results::AnalysisResults;
 
 #[cfg(test)]
 use fallow_output::strip_root_prefix;
+use fallow_types::envelope::{
+    BaselineCategoryDelta, BaselineDeltas, BaselineMatch, RegressionResult, RegressionStatus,
+    RegressionToleranceKind,
+};
 
 use super::emit_json;
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
@@ -37,32 +42,15 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
     let regression = input.regression;
     let baseline_matched = input.baseline_matched;
     let config_fixable = input.config_fixable;
-    match build_json_with_config_fixable_and_meta(
+    match build_json_with_config_fixable_meta_and_extras(
         results,
         root,
         elapsed,
         config_fixable,
         explain.then(fallow_output::check_meta),
+        check_json_extras(regression, None, baseline_matched),
     ) {
-        Ok(mut output) => {
-            if let Some(outcome) = regression
-                && let serde_json::Value::Object(ref mut map) = output
-            {
-                map.insert("regression".to_string(), outcome.to_json());
-            }
-            if let Some((entries, matched)) = baseline_matched
-                && let serde_json::Value::Object(ref mut map) = output
-            {
-                map.insert(
-                    "baseline".to_string(),
-                    serde_json::json!({
-                        "entries": entries,
-                        "matched": matched,
-                    }),
-                );
-            }
-            emit_json(&output, "JSON")
-        }
+        Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize results: {e}");
             ExitCode::from(2)
@@ -148,12 +136,31 @@ fn build_json_with_config_fixable_and_meta(
     config_fixable: bool,
     meta: Option<fallow_types::envelope::Meta>,
 ) -> Result<serde_json::Value, serde_json::Error> {
+    build_json_with_config_fixable_meta_and_extras(
+        results,
+        root,
+        elapsed,
+        config_fixable,
+        meta,
+        CheckJsonExtraOutputs::default(),
+    )
+}
+
+pub fn build_json_with_config_fixable_meta_and_extras(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    config_fixable: bool,
+    meta: Option<fallow_types::envelope::Meta>,
+    extras: CheckJsonExtraOutputs,
+) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_check_json(CheckJsonOutputInput {
         results,
         root,
         elapsed,
         config_fixable,
         meta,
+        extras,
         workspace_diagnostics: workspace_diagnostics_for_output(root),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
             results,
@@ -172,11 +179,28 @@ pub fn build_check_json_payload_with_config_fixable(
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
+    build_check_json_payload_with_config_fixable_and_extras(
+        results,
+        root,
+        elapsed,
+        config_fixable,
+        CheckJsonExtraOutputs::default(),
+    )
+}
+
+pub fn build_check_json_payload_with_config_fixable_and_extras(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    config_fixable: bool,
+    extras: CheckJsonExtraOutputs,
+) -> Result<serde_json::Value, serde_json::Error> {
     fallow_api::serialize_check_json_payload(CheckJsonPayloadInput {
         results,
         root,
         elapsed,
         config_fixable,
+        extras,
         workspace_diagnostics: workspace_diagnostics_for_output(root),
     })
 }
@@ -195,25 +219,97 @@ pub(crate) fn harmonize_multi_kind_suppress_line_actions(output: &mut serde_json
     fallow_api::harmonize_multi_kind_suppress_line_actions(output);
 }
 
-pub fn build_baseline_deltas_json<'a>(
+pub fn check_json_extras(
+    regression: Option<&crate::regression::RegressionOutcome>,
+    baseline_deltas: Option<BaselineDeltas>,
+    baseline_matched: Option<(usize, usize)>,
+) -> CheckJsonExtraOutputs {
+    CheckJsonExtraOutputs {
+        regression: regression.map(regression_output),
+        baseline_deltas,
+        baseline: baseline_matched.map(|(entries, matched)| BaselineMatch { entries, matched }),
+    }
+}
+
+#[must_use]
+pub fn regression_output(outcome: &crate::regression::RegressionOutcome) -> RegressionResult {
+    match outcome {
+        crate::regression::RegressionOutcome::Pass {
+            baseline_total,
+            current_total,
+        } => {
+            let baseline_total = *baseline_total as i64;
+            let current_total = *current_total as i64;
+            RegressionResult {
+                status: RegressionStatus::Pass,
+                baseline_total: Some(baseline_total),
+                current_total: Some(current_total),
+                delta: Some(current_total - baseline_total),
+                tolerance: None,
+                tolerance_kind: None,
+                exceeded: false,
+                reason: None,
+            }
+        }
+        crate::regression::RegressionOutcome::Exceeded {
+            baseline_total,
+            current_total,
+            tolerance,
+            ..
+        } => {
+            let baseline_total = *baseline_total as i64;
+            let current_total = *current_total as i64;
+            let (tolerance, tolerance_kind) = match tolerance {
+                crate::regression::Tolerance::Percentage(percent) => {
+                    (*percent, RegressionToleranceKind::Percentage)
+                }
+                crate::regression::Tolerance::Absolute(count) => {
+                    (*count as f64, RegressionToleranceKind::Absolute)
+                }
+            };
+            RegressionResult {
+                status: RegressionStatus::Exceeded,
+                baseline_total: Some(baseline_total),
+                current_total: Some(current_total),
+                delta: Some(current_total - baseline_total),
+                tolerance: Some(tolerance),
+                tolerance_kind: Some(tolerance_kind),
+                exceeded: true,
+                reason: None,
+            }
+        }
+        crate::regression::RegressionOutcome::Skipped { reason } => RegressionResult {
+            status: RegressionStatus::Skipped,
+            baseline_total: None,
+            current_total: None,
+            delta: None,
+            tolerance: None,
+            tolerance_kind: None,
+            exceeded: false,
+            reason: Some((*reason).to_string()),
+        },
+    }
+}
+
+pub fn build_baseline_deltas_output<'a>(
     total_delta: i64,
     per_category: impl Iterator<Item = (&'a str, usize, usize, i64)>,
-) -> serde_json::Value {
-    let mut per_cat = serde_json::Map::new();
-    for (cat, current, baseline, delta) in per_category {
-        per_cat.insert(
-            cat.to_string(),
-            serde_json::json!({
-                "current": current,
-                "baseline": baseline,
-                "delta": delta,
-            }),
-        );
+) -> BaselineDeltas {
+    BaselineDeltas {
+        total_delta,
+        per_category: per_category
+            .map(|(category, current, baseline, delta)| {
+                (
+                    category.to_string(),
+                    BaselineCategoryDelta {
+                        current,
+                        baseline,
+                        delta,
+                    },
+                )
+            })
+            .collect(),
     }
-    serde_json::json!({
-        "total_delta": total_delta,
-        "per_category": per_cat
-    })
 }
 
 /// Insert a `_meta` key into a JSON object value.
@@ -441,6 +537,43 @@ mod tests {
     use fallow_types::results::*;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    #[test]
+    fn typed_regression_output_matches_legacy_json_shape() {
+        let outcome = crate::regression::RegressionOutcome::Exceeded {
+            baseline_total: 10,
+            current_total: 13,
+            tolerance: crate::regression::Tolerance::Absolute(2),
+            type_deltas: Vec::new(),
+        };
+
+        assert_eq!(
+            serde_json::to_value(regression_output(&outcome)).expect("regression serializes"),
+            outcome.to_json()
+        );
+    }
+
+    #[test]
+    fn typed_baseline_deltas_output_matches_legacy_json_shape() {
+        let typed = build_baseline_deltas_output(
+            2,
+            [("unused_exports", 4_usize, 2_usize, 2_i64)].into_iter(),
+        );
+
+        assert_eq!(
+            serde_json::to_value(typed).expect("baseline deltas serialize"),
+            serde_json::json!({
+                "total_delta": 2,
+                "per_category": {
+                    "unused_exports": {
+                        "current": 4,
+                        "baseline": 2,
+                        "delta": 2
+                    }
+                }
+            })
+        );
+    }
 
     #[test]
     fn json_output_has_metadata_fields() {
