@@ -1,5 +1,6 @@
 //! Impact report output contracts.
 
+use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 use fallow_types::envelope::Meta;
 use serde::{Deserialize, Serialize};
 
@@ -172,4 +173,103 @@ pub struct CrossRepoImpactReport {
     pub unreadable_count: usize,
     pub totals: CrossRepoTotals,
     pub projects: Vec<CrossRepoProjectEntry>,
+}
+
+/// Serialize the `fallow impact --format json` envelope.
+///
+/// # Errors
+///
+/// Returns a serde error when the report cannot be converted to JSON.
+pub fn serialize_impact_json_output(
+    report: ImpactReport,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serialize_named_json_output(report, "impact", mode)?;
+    attach_telemetry_meta(&mut value, analysis_run_id);
+    Ok(value)
+}
+
+/// Serialize the `fallow impact --all --format json` envelope.
+///
+/// # Errors
+///
+/// Returns a serde error when the report cannot be converted to JSON.
+pub fn serialize_cross_repo_impact_json_output(
+    report: CrossRepoImpactReport,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serialize_named_json_output(report, "impact-cross-repo", mode)?;
+    attach_telemetry_meta(&mut value, analysis_run_id);
+    Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn impact_report() -> ImpactReport {
+        ImpactReport {
+            schema_version: ImpactReportSchemaVersion::V1,
+            enabled: true,
+            enabled_source: EnabledSource::Project,
+            record_count: 0,
+            meta: None,
+            first_recorded: None,
+            latest_git_sha: None,
+            surfacing: None,
+            trend: None,
+            project_surfacing: None,
+            project_trend: None,
+            containment_count: 0,
+            recent_containment: Vec::new(),
+            resolved_total: 0,
+            suppressed_total: 0,
+            recent_resolved: Vec::new(),
+            attribution_active: false,
+            onboarding_declined: false,
+            explicit_decision: true,
+        }
+    }
+
+    #[test]
+    fn impact_json_output_uses_named_root_contract() {
+        let value =
+            serialize_impact_json_output(impact_report(), RootEnvelopeMode::Tagged, Some("run-1"))
+                .expect("impact report should serialize");
+
+        assert_eq!(value["kind"], "impact");
+        assert_eq!(value["schema_version"], "1");
+        assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-1");
+    }
+
+    #[test]
+    fn cross_repo_impact_json_output_uses_named_root_contract() {
+        let report = CrossRepoImpactReport {
+            schema_version: CrossRepoImpactSchemaVersion::V1,
+            project_count: 1,
+            tracked_count: 1,
+            unreadable_count: 0,
+            totals: CrossRepoTotals::default(),
+            projects: vec![CrossRepoProjectEntry {
+                project_key: "demo".to_string(),
+                label: None,
+                last_recorded: None,
+                report: impact_report(),
+            }],
+        };
+
+        let value = serialize_cross_repo_impact_json_output(
+            report,
+            RootEnvelopeMode::Tagged,
+            Some("run-2"),
+        )
+        .expect("cross-repo impact report should serialize");
+
+        assert_eq!(value["kind"], "impact-cross-repo");
+        assert_eq!(value["schema_version"], "1");
+        assert_eq!(value["project_count"], 1);
+        assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-2");
+    }
 }
