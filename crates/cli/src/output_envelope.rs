@@ -1,14 +1,7 @@
 //! Schema-side aliases for fallow's top-level JSON output contract.
 
-#[cfg(any(test, feature = "schema-emit"))]
-use fallow_api::{
-    AuditAttribution, AuditSummary, AuditVerdict, DupesReportPayload, DuplicationGroup,
-};
-use fallow_output::{
-    CheckGroupedOutput, CheckOutput, CoverageAnalyzeOutput, CoverageSetupOutput, DupesOutput,
-    ExplainOutput, HealthGroup, HealthOutput, HealthReport, ImpactReport, InspectOutput,
-    ReviewEnvelopeOutput, ReviewReconcileOutput,
-};
+#[cfg(test)]
+use fallow_api::{CombinedOutput, FallowOutput};
 #[cfg(test)]
 use fallow_output::{CombinedMeta, RootEnvelopeMode};
 
@@ -24,93 +17,6 @@ fn serialize_root_output_with_mode(
     );
     Ok(value)
 }
-#[cfg(any(test, feature = "schema-emit"))]
-pub type AuditOutput = fallow_output::AuditOutput<
-    AuditVerdict,
-    AuditSummary,
-    AuditAttribution,
-    CheckOutput,
-    DupesReportPayload,
-    HealthReport,
->;
-
-#[cfg(any(test, feature = "schema-emit"))]
-pub type CombinedOutput =
-    fallow_output::CombinedOutput<CheckOutput, DupesReportPayload, HealthReport>;
-
-#[cfg(any(test, feature = "schema-emit"))]
-pub type ListBoundariesOutput = fallow_output::ListBoundariesOutput<
-    fallow_config::LogicalGroupStatus,
-    fallow_config::AuthoredRule,
->;
-
-#[cfg(any(test, feature = "schema-emit"))]
-pub type WorkspacesOutput = fallow_output::WorkspacesOutput<fallow_config::WorkspaceDiagnostic>;
-
-#[cfg(any(test, feature = "schema-emit"))]
-pub type SecurityGate = fallow_output::SecurityGate<fallow_api::SecurityGateMode>;
-
-#[cfg(any(test, feature = "schema-emit"))]
-pub type SecurityOutputConfig = fallow_output::SecurityOutputConfig<fallow_config::Severity>;
-
-#[cfg(any(test, feature = "schema-emit"))]
-pub type SecuritySummaryOutput =
-    fallow_output::SecuritySummaryOutput<SecurityOutputConfig, SecurityGate>;
-
-#[cfg(any(test, feature = "schema-emit"))]
-pub type SecurityOutput = fallow_output::SecurityOutput<SecurityOutputConfig, SecurityGate>;
-
-#[allow(
-    dead_code,
-    reason = "schema compatibility alias for the concrete fallow-config boundary contract"
-)]
-pub type BoundariesListing = fallow_output::BoundariesListing<
-    fallow_config::LogicalGroupStatus,
-    fallow_config::AuthoredRule,
->;
-
-#[allow(
-    dead_code,
-    reason = "schema compatibility alias for the concrete fallow-config boundary contract"
-)]
-pub type BoundariesListLogicalGroup = fallow_output::BoundariesListLogicalGroup<
-    fallow_config::LogicalGroupStatus,
-    fallow_config::AuthoredRule,
->;
-
-#[cfg(any(test, feature = "schema-emit"))]
-#[allow(
-    clippy::type_complexity,
-    reason = "concrete CLI alias fills every generic payload slot in the shared root output contract"
-)]
-pub type FallowOutput = fallow_output::FallowOutput<
-    AuditOutput,
-    ExplainOutput,
-    InspectOutput,
-    fallow_engine::trace_chain::SymbolChainTrace,
-    ReviewEnvelopeOutput,
-    ReviewReconcileOutput,
-    CoverageSetupOutput,
-    CoverageAnalyzeOutput,
-    ListBoundariesOutput,
-    WorkspacesOutput,
-    HealthOutput<HealthReport, HealthGroup>,
-    DupesOutput<DupesReportPayload, DuplicationGroup>,
-    CheckGroupedOutput,
-    ImpactReport,
-    fallow_output::CrossRepoImpactReport,
-    SecuritySummaryOutput,
-    SecurityOutput,
-    fallow_output::SecuritySurvivorsOutput,
-    fallow_output::SecurityBlindSpotsOutput,
-    CheckOutput,
-    CombinedOutput,
-    fallow_output::StandardReviewBriefOutput,
-    fallow_output::DecisionSurfaceOutput,
-    fallow_output::StandardWalkthroughGuide,
-    fallow_output::WalkthroughValidation,
->;
-
 #[cfg(test)]
 mod tests {
     use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};

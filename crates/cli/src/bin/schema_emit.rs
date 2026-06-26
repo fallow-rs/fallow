@@ -26,11 +26,12 @@ use schemars::generate::SchemaSettings;
 use serde_json::{Map, Value};
 
 use fallow_api::{
-    AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, AuditAttribution,
-    AuditSummary, AuditVerdict, CloneFamilyFinding, CloneGroupFinding, DupesReportPayload,
-    DuplicationGroup, SecurityGateMode,
+    AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, AuditOutput,
+    BoundariesListLogicalGroup, BoundariesListing, CloneFamilyFinding, CloneGroupFinding,
+    CombinedOutput, DupesReportPayload, DuplicationGroup, FallowOutput, ListBoundariesOutput,
+    SecurityGate, SecurityGateMode, SecurityOutput, SecuritySummaryOutput, WorkspacesOutput,
 };
-use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus, Severity};
+use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_engine::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
@@ -71,52 +72,6 @@ use fallow_output::{
     UntestedExportFinding, UntestedFile, UntestedFileFinding, VitalSigns, VitalSignsCounts,
     WalkthroughValidation, WorkspaceInfo,
 };
-type AuditOutput = fallow_output::AuditOutput<
-    AuditVerdict,
-    AuditSummary,
-    AuditAttribution,
-    CheckOutput,
-    DupesReportPayload,
-    HealthReport,
->;
-type CombinedOutput = fallow_output::CombinedOutput<CheckOutput, DupesReportPayload, HealthReport>;
-type ListBoundariesOutput = fallow_output::ListBoundariesOutput<LogicalGroupStatus, AuthoredRule>;
-type WorkspacesOutput = fallow_output::WorkspacesOutput<fallow_config::WorkspaceDiagnostic>;
-type BoundariesListing = fallow_output::BoundariesListing<LogicalGroupStatus, AuthoredRule>;
-type BoundariesListLogicalGroup =
-    fallow_output::BoundariesListLogicalGroup<LogicalGroupStatus, AuthoredRule>;
-type FallowOutput = fallow_output::FallowOutput<
-    AuditOutput,
-    ExplainOutput,
-    InspectOutput,
-    fallow_engine::trace_chain::SymbolChainTrace,
-    ReviewEnvelopeOutput,
-    ReviewReconcileOutput,
-    CoverageSetupOutput,
-    CoverageAnalyzeOutput,
-    ListBoundariesOutput,
-    WorkspacesOutput,
-    HealthOutput<HealthReport, HealthGroup>,
-    DupesOutput<DupesReportPayload, DuplicationGroup>,
-    CheckGroupedOutput,
-    ImpactReport,
-    CrossRepoImpactReport,
-    SecuritySummaryOutput,
-    SecurityOutput,
-    SecuritySurvivorsOutput,
-    SecurityBlindSpotsOutput,
-    CheckOutput,
-    CombinedOutput,
-    ReviewBriefOutput,
-    DecisionSurfaceOutput,
-    WalkthroughGuide,
-    WalkthroughValidation,
->;
-type SecurityGate = fallow_output::SecurityGate<SecurityGateMode>;
-type SecurityOutputConfig = fallow_output::SecurityOutputConfig<Severity>;
-type SecurityOutput = fallow_output::SecurityOutput<SecurityOutputConfig, SecurityGate>;
-type SecuritySummaryOutput =
-    fallow_output::SecuritySummaryOutput<SecurityOutputConfig, SecurityGate>;
 use fallow_output::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,

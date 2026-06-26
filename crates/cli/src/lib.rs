@@ -138,8 +138,8 @@ mod license;
 )]
 mod telemetry;
 
-/// Schema/test-only aliases for the JSON output contract.
-#[cfg(any(test, feature = "schema-emit"))]
+/// Test-only coverage for the JSON output contract aliases.
+#[cfg(test)]
 pub mod output_envelope;
 pub(crate) mod output_runtime;
 

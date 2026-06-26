@@ -46,7 +46,7 @@ mod inspect;
 mod license;
 mod list;
 mod migrate;
-#[cfg(any(test, feature = "schema-emit"))]
+#[cfg(test)]
 mod output_envelope;
 mod output_runtime;
 mod path_util;
