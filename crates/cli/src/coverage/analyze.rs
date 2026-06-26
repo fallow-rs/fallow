@@ -381,25 +381,31 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
         },
         fallow_config::ProductionAnalysis::Health,
     )?;
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
-    let cache = if config.no_cache {
-        None
-    } else {
-        fallow_core::cache::CacheStore::load(
-            &config.cache_dir,
-            config.cache_config_hash,
-            fallow_core::resolve_cache_max_size_bytes(&config),
-        )
-    };
-    let parse_result = fallow_core::extract::parse_all_files(&files, cache.as_ref(), true);
-    let analysis_output = fallow_engine::analyze_with_parse_result(&config, &parse_result.modules)
+    let session = fallow_engine::AnalysisSession::from_resolved_config(config);
+    let analysis_output = session
+        .analyze_dead_code_with_artifacts(true, true)
         .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
+    let Some(modules) = analysis_output.modules.as_deref() else {
+        return Err(emit_error(
+            "analysis failed: engine did not retain parsed modules",
+            2,
+            ctx.output,
+        ));
+    };
+    let Some(files) = analysis_output.files.as_deref() else {
+        return Err(emit_error(
+            "analysis failed: engine did not retain discovered files",
+            2,
+            ctx.output,
+        ));
+    };
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
     let codeowners =
-        crate::codeowners::CodeOwners::load(&config.root, config.codeowners.as_deref()).ok();
+        crate::codeowners::CodeOwners::load(session.root(), session.config().codeowners.as_deref())
+            .ok();
     Ok(build_index_from_analysis(
-        &config.root,
-        &parse_result.modules,
+        session.root(),
+        modules,
         &analysis_output,
         &file_paths,
         codeowners.as_ref(),

@@ -285,6 +285,13 @@ impl AnalysisSession {
         }
     }
 
+    /// Build a session from a resolved config when the caller already owns
+    /// command-specific config loading.
+    #[must_use]
+    pub fn from_resolved_config(config: ResolvedConfig) -> Self {
+        Self::from_config(ProjectConfig { config, path: None })
+    }
+
     /// Resolved project root.
     #[must_use]
     pub fn root(&self) -> &Path {
@@ -325,6 +332,19 @@ impl AnalysisSession {
     /// Returns an error if parsing or analysis fails.
     pub fn analyze_dead_code_with_complexity(&self) -> EngineResult<DeadCodeAnalysisOutput> {
         analyze_with_usages_and_complexity(&self.config)
+    }
+
+    /// Run dead-code analysis with retained modules, discovered files and graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parsing or analysis fails.
+    pub fn analyze_dead_code_with_artifacts(
+        &self,
+        need_complexity: bool,
+        retain_graph: bool,
+    ) -> EngineResult<DeadCodeAnalysisArtifacts> {
+        analyze_retaining_modules(&self.config, need_complexity, retain_graph)
     }
 
     /// Run duplication detection using the session's discovered files.
@@ -854,6 +874,30 @@ mod tests {
         assert!(analysis.dead_code.modules.is_some());
         assert!(analysis.dead_code.files.is_some());
         assert!(!analysis.duplication.clone_groups.is_empty());
+    }
+
+    #[test]
+    fn analysis_session_returns_retained_artifacts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(
+            src.join("index.ts"),
+            "export function used() { return 1; }\nused();\n",
+        )
+        .expect("source file");
+
+        let config = config_for_project(temp.path(), None)
+            .expect("config")
+            .config;
+        let session = AnalysisSession::from_resolved_config(config);
+        let artifacts = session
+            .analyze_dead_code_with_artifacts(true, true)
+            .expect("analysis succeeds");
+
+        assert!(artifacts.graph.is_some());
+        assert!(artifacts.modules.is_some_and(|modules| !modules.is_empty()));
+        assert!(artifacts.files.is_some_and(|files| !files.is_empty()));
     }
 
     #[test]
