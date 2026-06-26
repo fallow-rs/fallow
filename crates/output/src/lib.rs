@@ -84,6 +84,8 @@ pub use coverage_envelopes::{
     CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, CoverageSetupFileToEdit,
     CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
     CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet,
+    build_coverage_analyze_output, serialize_coverage_analyze_json_output,
+    serialize_coverage_setup_json_output,
 };
 pub use diff::{
     DiffIndex, MAX_ADDED_LINES, MAX_DIFF_BYTES, parse_new_hunk_start, relative_to_diff_path,
