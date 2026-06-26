@@ -72,6 +72,27 @@ where
     Ok(value)
 }
 
+/// Serialize a typed bare `fallow --format json` combined envelope with the
+/// standard root discriminator policy.
+///
+/// # Errors
+///
+/// Returns a serde error when the provided envelope cannot be converted to a
+/// JSON value.
+pub fn serialize_combined_json_output<Check, Dupes, Health>(
+    output: CombinedOutput<Check, Dupes, Health>,
+    mode: RootEnvelopeMode,
+) -> Result<serde_json::Value, serde_json::Error>
+where
+    Check: Serialize,
+    Dupes: Serialize,
+    Health: Serialize,
+{
+    let mut value = serde_json::to_value(output)?;
+    apply_root_kind(&mut value, "combined", mode);
+    Ok(value)
+}
+
 /// Remove only the document-root discriminator. Nested objects may carry their
 /// own meaningful `kind` fields, so this intentionally does not recurse.
 pub fn remove_root_kind(value: &mut serde_json::Value) {
@@ -442,5 +463,26 @@ mod tests {
         assert_eq!(value["kind"], "audit");
         assert_eq!(value["command"], "audit");
         assert_eq!(value["dead_code"]["summary"]["total_issues"], 0);
+    }
+
+    #[test]
+    fn serialize_combined_json_output_applies_combined_kind() {
+        let value = serialize_combined_json_output(
+            CombinedOutput {
+                schema_version: SchemaVersion(7),
+                version: ToolVersion("1.2.3".to_string()),
+                elapsed_ms: ElapsedMs(42),
+                meta: None,
+                check: Some(json!({ "summary": { "total_issues": 0 } })),
+                dupes: None::<serde_json::Value>,
+                health: None::<serde_json::Value>,
+                next_steps: Vec::new(),
+            },
+            RootEnvelopeMode::Tagged,
+        )
+        .expect("combined output should serialize");
+
+        assert_eq!(value["kind"], "combined");
+        assert_eq!(value["check"]["summary"]["total_issues"], 0);
     }
 }

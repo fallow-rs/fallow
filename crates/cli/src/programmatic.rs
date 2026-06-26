@@ -280,7 +280,12 @@ fn build_dead_code_json(
                     .with_context("dead-code")
             })?;
     if explain {
-        insert_meta(&mut output, crate::explain::check_meta());
+        let meta = serde_json::to_value(fallow_output::check_meta()).map_err(|err| {
+            ProgrammaticError::new(format!("failed to serialize dead-code metadata: {err}"), 2)
+                .with_code("FALLOW_SERIALIZE_DEAD_CODE_META")
+                .with_context("dead-code")
+        })?;
+        insert_meta(&mut output, meta);
     }
     // `build_dead_code_json` is only called after options have been resolved;
     // callers apply the root-envelope compatibility setting at the boundary.

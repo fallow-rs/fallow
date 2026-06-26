@@ -5,7 +5,8 @@ use std::process::ExitCode;
 
 use colored::Colorize;
 use fallow_config::OutputFormat;
-use fallow_output::CodeClimateIssue;
+use fallow_output::{CodeClimateIssue, CombinedMeta, CombinedOutput, RootEnvelopeMode};
+use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
 use crate::check::CheckResult;
 use crate::dupes::DupesResult;
@@ -445,172 +446,141 @@ struct CombinedJsonPrintInput<'a> {
 }
 
 fn print_combined_json(input: CombinedJsonPrintInput<'_>) -> ExitCode {
-    let mut combined = match combined_json_root(input.elapsed) {
-        Ok(combined) => combined,
+    let output = match build_combined_json_output(input) {
+        Ok(output) => output,
         Err(code) => return code,
     };
+    emit_combined_json_output(output)
+}
+
+fn build_combined_json_output(
+    input: CombinedJsonPrintInput<'_>,
+) -> Result<serde_json::Value, ExitCode> {
     let root_prefix = format!("{}/", input.root.display());
 
-    if let Some(result) = input.check_result
-        && let Err(code) = insert_combined_check_json(&mut combined, result, input.config_fixable)
-    {
-        return code;
-    }
+    let check = input
+        .check_result
+        .map(|result| build_combined_check_json(result, input.config_fixable))
+        .transpose()?;
 
     let dupes_payload = input
         .dupes_result
         .map(|result| crate::output_dupes::DupesReportPayload::from_report(&result.report));
-    if let Err(code) = insert_combined_dupes_json(&mut combined, dupes_payload.as_ref(), input.root)
-    {
-        return code;
-    }
-    if let Err(code) = insert_combined_health_json(&mut combined, input.health_result, &root_prefix)
-    {
-        return code;
-    }
-    if let Err(code) = insert_combined_next_steps(
-        &mut combined,
+    let dupes = build_combined_dupes_json(dupes_payload.as_ref(), input.root)?;
+    let health = build_combined_health_json(input.health_result, &root_prefix)?;
+    let next_steps = combined_next_steps(
         input.check_result,
         dupes_payload.as_ref(),
         input.health_result,
         input.root,
-    ) {
-        return code;
-    }
+    );
 
-    emit_combined_json_output(
-        combined,
-        input.check_result,
-        input.dupes_result,
-        input.health_result,
-        input.explain,
-    )
+    let output = CombinedOutput {
+        schema_version: SchemaVersion(crate::report::SCHEMA_VERSION),
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        elapsed_ms: ElapsedMs(elapsed_ms_for_output(input.elapsed)),
+        meta: input.explain.then(|| {
+            combined_meta_for_output(
+                input.check_result.is_some(),
+                input.dupes_result.is_some(),
+                input.health_result.is_some(),
+            )
+        }),
+        check,
+        dupes,
+        health,
+        next_steps,
+    };
+
+    fallow_output::serialize_combined_json_output(output, RootEnvelopeMode::Tagged)
+        .map_err(|err| json_output_error(&err))
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "elapsed milliseconds won't exceed u64::MAX"
-)]
-fn combined_json_root(
-    elapsed: std::time::Duration,
-) -> Result<serde_json::Map<String, serde_json::Value>, ExitCode> {
-    let envelope = crate::output_envelope::CombinedOutput {
+fn elapsed_ms_for_output(elapsed: std::time::Duration) -> u64 {
+    u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+}
+
+#[cfg(test)]
+fn combined_json_root(elapsed: std::time::Duration) -> Result<serde_json::Value, ExitCode> {
+    let envelope = CombinedOutput::<serde_json::Value, serde_json::Value, serde_json::Value> {
         schema_version: fallow_types::envelope::SchemaVersion(crate::report::SCHEMA_VERSION),
         version: fallow_types::envelope::ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: fallow_types::envelope::ElapsedMs(elapsed.as_millis() as u64),
+        elapsed_ms: fallow_types::envelope::ElapsedMs(elapsed_ms_for_output(elapsed)),
         meta: None,
         check: None,
         dupes: None,
         health: None,
-        // Aggregated and injected into the map below, after the sub-blocks.
         next_steps: Vec::new(),
     };
-    match crate::output_envelope::serialize_root_output(
-        crate::output_envelope::FallowOutput::Combined(envelope),
-    ) {
-        Ok(serde_json::Value::Object(map)) => Ok(map),
-        Ok(_) => unreachable!("CombinedOutput serializes as a JSON object"),
-        Err(e) => Err(emit_error(
-            &format!("JSON serialization error: {e}"),
-            2,
-            OutputFormat::Json,
-        )),
-    }
+    fallow_output::serialize_combined_json_output(envelope, RootEnvelopeMode::Tagged)
+        .map_err(|err| json_output_error(&err))
 }
 
-fn insert_combined_dupes_json(
-    combined: &mut serde_json::Map<String, serde_json::Value>,
+fn build_combined_dupes_json(
     dupes_payload: Option<&crate::output_dupes::DupesReportPayload>,
     root: &std::path::Path,
-) -> Result<(), ExitCode> {
+) -> Result<Option<serde_json::Value>, ExitCode> {
     let root_prefix = format!("{}/", root.display());
     if let Some(payload) = dupes_payload {
         match serde_json::to_value(payload) {
             Ok(mut json) => {
                 report::strip_root_prefix(&mut json, &root_prefix);
-                combined.insert("dupes".into(), json);
+                Ok(Some(json))
             }
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("JSON serialization error: {e}"),
-                    2,
-                    OutputFormat::Json,
-                ));
-            }
+            Err(e) => Err(json_output_error(&e)),
         }
+    } else {
+        Ok(None)
     }
-    Ok(())
 }
 
-fn insert_combined_health_json(
-    combined: &mut serde_json::Map<String, serde_json::Value>,
+fn build_combined_health_json(
     health: Option<&HealthResult>,
     root_prefix: &str,
-) -> Result<(), ExitCode> {
+) -> Result<Option<serde_json::Value>, ExitCode> {
     if let Some(result) = health {
         match serde_json::to_value(&result.report) {
             Ok(mut json) => {
                 report::strip_root_prefix(&mut json, root_prefix);
-                combined.insert("health".into(), json);
+                Ok(Some(json))
             }
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("JSON serialization error: {e}"),
-                    2,
-                    OutputFormat::Json,
-                ));
-            }
+            Err(e) => Err(json_output_error(&e)),
         }
+    } else {
+        Ok(None)
     }
-    Ok(())
 }
 
-fn insert_combined_next_steps(
-    combined: &mut serde_json::Map<String, serde_json::Value>,
+fn combined_next_steps(
     check: Option<&CheckResult>,
     dupes_payload: Option<&crate::output_dupes::DupesReportPayload>,
     health: Option<&HealthResult>,
     root: &std::path::Path,
-) -> Result<(), ExitCode> {
-    let next_steps = crate::report::suggestions::build_combined_next_steps(
+) -> Vec<fallow_types::output::NextStep> {
+    crate::report::suggestions::build_combined_next_steps(
         check.map(|result| &result.results),
         dupes_payload,
         health.map(|result| &result.report),
         root,
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
-    );
-    if !next_steps.is_empty() {
-        match serde_json::to_value(&next_steps) {
-            Ok(value) => {
-                combined.insert("next_steps".into(), value);
-            }
-            Err(e) => {
-                return Err(emit_error(
-                    &format!("JSON serialization error: {e}"),
-                    2,
-                    OutputFormat::Json,
-                ));
-            }
-        }
-    }
-    Ok(())
+    )
 }
 
-fn emit_combined_json_output(
-    combined: serde_json::Map<String, serde_json::Value>,
-    check: Option<&CheckResult>,
-    dupes: Option<&DupesResult>,
-    health: Option<&HealthResult>,
-    explain: bool,
-) -> ExitCode {
-    let mut output = serde_json::Value::Object(combined);
-    if explain && let serde_json::Value::Object(ref mut map) = output {
-        map.insert(
-            "_meta".to_string(),
-            crate::explain::combined_meta(check.is_some(), dupes.is_some(), health.is_some()),
-        );
+fn combined_meta_for_output(
+    include_check: bool,
+    include_dupes: bool,
+    include_health: bool,
+) -> CombinedMeta {
+    CombinedMeta {
+        check: include_check.then(fallow_output::check_meta),
+        dupes: include_dupes.then(fallow_output::dupes_meta),
+        health: include_health.then(fallow_output::health_meta),
+        telemetry: None,
     }
+}
+
+fn emit_combined_json_output(mut output: serde_json::Value) -> ExitCode {
     report::harmonize_multi_kind_suppress_line_actions(&mut output);
     crate::output_envelope::attach_telemetry_meta(&mut output);
 
@@ -627,11 +597,10 @@ fn emit_combined_json_output(
     }
 }
 
-fn insert_combined_check_json(
-    combined: &mut serde_json::Map<String, serde_json::Value>,
+fn build_combined_check_json(
     result: &CheckResult,
     config_fixable: bool,
-) -> Result<(), ExitCode> {
+) -> Result<serde_json::Value, ExitCode> {
     let mut json = report::build_check_json_payload_with_config_fixable(
         &result.results,
         &result.config.root,
@@ -640,8 +609,7 @@ fn insert_combined_check_json(
     )
     .map_err(|error| json_output_error(&error))?;
     attach_combined_check_extras(&mut json, result);
-    combined.insert("check".into(), json);
-    Ok(())
+    Ok(json)
 }
 
 fn attach_combined_check_extras(json: &mut serde_json::Value, result: &CheckResult) {
@@ -820,9 +788,9 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        build_combined_codeclimate, combined_json_root, combined_machine_success,
-        emit_combined_json_output, exit_code_to_u8, insert_combined_dupes_json,
-        insert_combined_health_json, print_combined_codeclimate, print_combined_sarif,
+        build_combined_codeclimate, build_combined_dupes_json, build_combined_health_json,
+        combined_json_root, combined_machine_success, emit_combined_json_output, exit_code_to_u8,
+        print_combined_codeclimate, print_combined_sarif,
     };
 
     #[test]
@@ -879,22 +847,19 @@ mod tests {
 
     #[test]
     fn insert_empty_optional_sections_leaves_combined_map_unchanged() {
-        let mut combined = serde_json::Map::new();
-        insert_combined_dupes_json(&mut combined, None, std::path::Path::new("."))
+        let dupes = build_combined_dupes_json(None, std::path::Path::new("."))
             .expect("empty dupes section should serialize");
-        insert_combined_health_json(&mut combined, None, ".")
-            .expect("empty health section should serialize");
+        let health =
+            build_combined_health_json(None, ".").expect("empty health section should serialize");
 
-        assert!(combined.is_empty());
+        assert!(dupes.is_none());
+        assert!(health.is_none());
     }
 
     #[test]
     fn emit_combined_json_output_can_attach_empty_meta() {
         let combined = combined_json_root(Duration::ZERO).expect("combined JSON root");
 
-        assert_eq!(
-            emit_combined_json_output(combined, None, None, None, true),
-            ExitCode::SUCCESS
-        );
+        assert_eq!(emit_combined_json_output(combined), ExitCode::SUCCESS);
     }
 }

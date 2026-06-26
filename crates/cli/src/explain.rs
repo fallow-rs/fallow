@@ -8,22 +8,9 @@ use std::process::ExitCode;
 
 use colored::Colorize;
 use fallow_config::OutputFormat;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 const DOCS_BASE: &str = "https://docs.fallow.tools";
-
-/// Docs URL for the dead-code (check) command.
-pub const CHECK_DOCS: &str = "https://docs.fallow.tools/cli/dead-code";
-
-/// `_meta` description for the per-finding `actions[]` array shared across
-/// `check`, `health`, and `dupes` JSON output.
-const ACTIONS_FIELD_DEFINITION: &str = "Per-finding fix and suppression suggestions. Each entry carries a `type` discriminant (kebab-case) plus a per-action `auto_fixable` bool. Consumers dispatch on `type` to choose the remediation and filter on `auto_fixable` of each individual entry.";
-
-/// `_meta` description for the per-action `auto_fixable` bool. Calls out the
-/// per-finding (not per-action-type) evaluation rule and the currently active
-/// per-instance flips so agents know to branch on the field value of EACH
-/// finding's action, not on the action `type` alone.
-const ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION: &str = "Evaluated PER FINDING, not per action type. The same `type` may carry `auto_fixable: true` on one finding and `auto_fixable: false` on another when per-instance guards in the `fallow fix` applier discriminate. Filter on this bool of each individual action, not on `type` alone. Current per-instance flips: (1) `remove-catalog-entry` is `true` only when the finding's `hardcoded_consumers` array is empty (else fallow fix skips the entry to avoid breaking `pnpm install`); (2) the primary dependency action flips between `remove-dependency` (`auto_fixable: true`) and `move-dependency` (`auto_fixable: false`) based on `used_in_workspaces`; (3) `add-to-config` for `ignoreExports` is `true` when fallow fix can safely apply the action, which means EITHER a fallow config file already exists OR no config exists and the working directory is NOT inside a monorepo subpackage (the applier then creates `.fallowrc.json` using `fallow init`'s framework-aware scaffolding and layers the new rules on top); `false` inside a monorepo subpackage with no workspace-root config because the applier refuses to fragment per-package configs; (4) `update-catalog-reference` is always `false` today (catalog-switching applier not yet wired). All `suppress-line` and `suppress-file` actions are uniformly `false`.";
 
 /// Rule definition for SARIF `fullDescription` and JSON `_meta`.
 pub struct RuleDef {
@@ -1267,68 +1254,6 @@ pub const SECURITY_RULES: &[RuleDef] = &[
     ),
 ];
 
-/// Build the `_meta` object for `fallow dead-code --format json --explain`.
-#[must_use]
-pub fn check_meta() -> Value {
-    let rules: Value = CHECK_RULES
-        .iter()
-        .map(|r| {
-            (
-                r.id.replace("fallow/", ""),
-                json!({
-                    "name": r.name,
-                    "description": r.full,
-                    "docs": rule_docs_url(r)
-                }),
-            )
-        })
-        .collect::<serde_json::Map<String, Value>>()
-        .into();
-
-    json!({
-        "docs": CHECK_DOCS,
-        "rules": rules,
-        "field_definitions": {
-            "actions[]": ACTIONS_FIELD_DEFINITION,
-            "actions[].auto_fixable": ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION
-        }
-    })
-}
-
-/// Build the sectioned `_meta` object for bare `fallow --format json --explain`.
-#[must_use]
-pub fn combined_meta(include_check: bool, include_dupes: bool, include_health: bool) -> Value {
-    let mut sections = serde_json::Map::new();
-    if include_check {
-        sections.insert("check".to_string(), check_meta());
-    }
-    if include_dupes {
-        sections.insert("dupes".to_string(), dupes_meta());
-    }
-    if include_health {
-        sections.insert("health".to_string(), health_meta());
-    }
-    Value::Object(sections)
-}
-
-/// Build the `_meta` object for `fallow health --format json --explain`.
-#[must_use]
-pub fn health_meta() -> Value {
-    match serde_json::to_value(fallow_output::health_meta()) {
-        Ok(value) => value,
-        Err(_) => json!({}),
-    }
-}
-
-/// Build the `_meta` object for `fallow dupes --format json --explain`.
-#[must_use]
-pub fn dupes_meta() -> Value {
-    match serde_json::to_value(fallow_output::dupes_meta()) {
-        Ok(value) => value,
-        Err(_) => json!({}),
-    }
-}
-
 /// Build the `_meta` object for `fallow security --format json --explain`.
 #[must_use]
 pub fn security_meta() -> fallow_types::envelope::Meta {
@@ -1357,6 +1282,23 @@ pub fn coverage_analyze_meta() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn meta_value(meta: fallow_types::envelope::Meta) -> Value {
+        serde_json::to_value(meta).expect("metadata should serialize")
+    }
+
+    fn check_meta() -> Value {
+        meta_value(fallow_output::check_meta())
+    }
+
+    fn health_meta() -> Value {
+        meta_value(fallow_output::health_meta())
+    }
+
+    fn dupes_meta() -> Value {
+        meta_value(fallow_output::dupes_meta())
+    }
 
     #[test]
     fn rule_by_id_finds_check_rule() {
@@ -1497,11 +1439,11 @@ mod tests {
             let defs = meta["field_definitions"].as_object().unwrap();
             assert_eq!(
                 defs["actions[]"].as_str().unwrap(),
-                ACTIONS_FIELD_DEFINITION,
+                fallow_output::ACTIONS_FIELD_DEFINITION,
             );
             assert_eq!(
                 defs["actions[].auto_fixable"].as_str().unwrap(),
-                ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION,
+                fallow_output::ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION,
             );
         }
     }
@@ -1864,8 +1806,8 @@ mod tests {
 
     #[test]
     fn check_docs_url_valid() {
-        assert!(CHECK_DOCS.starts_with("https://"));
-        assert!(CHECK_DOCS.contains("dead-code"));
+        assert!(fallow_output::CHECK_DOCS.starts_with("https://"));
+        assert!(fallow_output::CHECK_DOCS.contains("dead-code"));
     }
 
     #[test]
@@ -1883,7 +1825,7 @@ mod tests {
     #[test]
     fn check_meta_docs_url_matches_constant() {
         let meta = check_meta();
-        assert_eq!(meta["docs"].as_str().unwrap(), CHECK_DOCS);
+        assert_eq!(meta["docs"].as_str().unwrap(), fallow_output::CHECK_DOCS);
     }
 
     #[test]
