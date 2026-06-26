@@ -688,6 +688,21 @@ pub use codeclimate::build_health_codeclimate;
 )]
 pub use fallow_api::build_compact_lines;
 #[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use fallow_api::build_duplication_markdown;
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use fallow_api::build_health_markdown;
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use fallow_api::build_markdown;
+#[allow(
     clippy::redundant_pub_crate,
     reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
 )]
@@ -723,21 +738,6 @@ pub(crate) use json::harmonize_multi_kind_suppress_line_actions;
     reason = "target-dependent: used in lib, unused in bin"
 )]
 pub use json::{build_json, build_json_with_config_fixable};
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use markdown::build_duplication_markdown;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use markdown::build_health_markdown;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use markdown::build_markdown;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"

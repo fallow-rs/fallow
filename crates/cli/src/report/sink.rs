@@ -1,12 +1,12 @@
 //! Ambient output sink for the report layer.
 //!
-//! By default the `outln!` / `out!` macros write report CONTENT to stdout, so
-//! the CLI behaves exactly as it always has. When the user passes
+//! By default the `outln!` macro writes report CONTENT to stdout, so the CLI
+//! behaves exactly as it always has. When the user passes
 //! `--output-file <PATH>`, `main` opens the file and calls [`set_file_sink`]
-//! once before dispatch; from then on every `outln!` / `out!` lands in the file
-//! instead of stdout. The sink is process-global and ambient, so no command
-//! `Options` struct needs to thread the path through, and the programmatic /
-//! NAPI consumers (which call the `build_*` helpers and never the `print_*`
+//! once before dispatch; from then on every `outln!` lands in the file instead
+//! of stdout. The sink is process-global and ambient, so no command `Options`
+//! struct needs to thread the path through, and the programmatic / NAPI
+//! consumers (which call the `build_*` helpers and never the `print_*`
 //! dispatch) are unaffected because they never set the sink.
 //!
 //! Progress, errors, and the "Report written to `<path>`" confirmation stay on
@@ -98,27 +98,6 @@ pub fn write_fmt_line(args: fmt::Arguments<'_>) {
     }
 }
 
-/// Write report content without a trailing newline. Backs the `out!` macro.
-pub fn write_fmt_str(args: fmt::Arguments<'_>) {
-    let mut inner = lock();
-    if inner.error.is_some() {
-        return;
-    }
-    if inner.file.is_some() {
-        inner.wrote = true;
-    }
-    let result = match inner.file.as_mut() {
-        Some(writer) => write!(writer, "{args}"),
-        None => {
-            let _ = write!(io::stdout(), "{args}");
-            Ok(())
-        }
-    };
-    if let Err(error) = result {
-        inner.error = Some(error);
-    }
-}
-
 /// Write a line of report content to the sink. Drop-in replacement for
 /// `println!` on report CONTENT (not progress / errors / interactive chrome).
 macro_rules! outln {
@@ -130,15 +109,7 @@ macro_rules! outln {
     };
 }
 
-/// Write report content without a trailing newline. Drop-in replacement for
-/// `print!` on report content.
-macro_rules! out {
-    ($($arg:tt)*) => {
-        $crate::report::sink::write_fmt_str(::std::format_args!($($arg)*))
-    };
-}
-
-pub(crate) use {out, outln};
+pub(crate) use outln;
 
 #[cfg(test)]
 mod tests {
@@ -169,7 +140,6 @@ mod tests {
         assert!(is_redirected());
 
         outln!("line one");
-        out!("partial ");
         outln!("end");
         flush().expect("flush ok");
 
@@ -178,7 +148,7 @@ mod tests {
             .expect("open")
             .read_to_string(&mut contents)
             .expect("read");
-        assert_eq!(contents, "line one\npartial end\n");
+        assert_eq!(contents, "line one\nend\n");
         assert!(!contents.contains('\u{1b}'), "no ANSI escapes in file");
 
         reset();
