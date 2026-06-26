@@ -983,8 +983,8 @@ fn index_dead_code_signals(
 /// Index the value exports of one graph node, including test-referenced ones.
 fn index_node_exports(
     index: &mut StaticSignalIndex,
-    graph: &fallow_core::graph::ModuleGraph,
-    node: &fallow_core::graph::ModuleNode,
+    graph: &fallow_engine::graph::ModuleGraph,
+    node: &fallow_engine::graph::ModuleNode,
     module: Option<&fallow_types::extract::ModuleInfo>,
     path: &Path,
 ) {
@@ -1014,7 +1014,7 @@ fn index_node_exports(
                 graph
                     .modules
                     .get(reference.from_file.0 as usize)
-                    .is_some_and(fallow_core::graph::ModuleNode::is_test_reachable)
+                    .is_some_and(fallow_engine::graph::ModuleNode::is_test_reachable)
             });
             if has_test_ref {
                 index
@@ -2151,7 +2151,7 @@ mod tests {
 
     fn empty_analysis_output() -> fallow_engine::DeadCodeAnalysisArtifacts {
         fallow_engine::DeadCodeAnalysisArtifacts {
-            results: fallow_core::results::AnalysisResults::default(),
+            results: fallow_engine::results::AnalysisResults::default(),
             timings: None,
             graph: None,
             modules: None,
@@ -3117,8 +3117,8 @@ mod tests {
 
         let config =
             FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None);
-        let files = fallow_core::discover::discover_files(&config);
-        let parse_result = fallow_core::extract::parse_all_files(&files, None, true);
+        let files = fallow_engine::discover::discover_files(&config);
+        let parse_result = fallow_engine::extract::parse_all_files(&files, None, true);
         let modules = parse_result.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
         let analysis_output = fallow_engine::analyze_with_parse_result(&config, &modules)
@@ -3248,8 +3248,8 @@ mod tests {
 
         let config =
             FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None);
-        let files = fallow_core::discover::discover_files(&config);
-        let parse_result = fallow_core::extract::parse_all_files(&files, None, true);
+        let files = fallow_engine::discover::discover_files(&config);
+        let parse_result = fallow_engine::extract::parse_all_files(&files, None, true);
         let modules = parse_result.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
         let analysis_output = empty_analysis_output();

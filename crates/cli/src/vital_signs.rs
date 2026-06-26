@@ -23,13 +23,13 @@ use fallow_output::{
 /// Fields are `Option` because not all pipelines run in every health invocation.
 pub struct VitalSignsInput<'a> {
     /// All parsed modules (always available).
-    pub modules: &'a [fallow_core::extract::ModuleInfo],
+    pub modules: &'a [fallow_engine::extract::ModuleInfo],
     /// Optional file-id allowlist used to restrict per-module aggregates
     /// (cyclomatic distribution, total LOC, unit profiles) to a subset.
     /// Used by `--workspace` and `--group-by` to scope project-wide metrics
     /// to a single workspace package without re-parsing.
     /// `None` includes every module in `modules`.
-    pub module_filter: Option<&'a rustc_hash::FxHashSet<fallow_core::discover::FileId>>,
+    pub module_filter: Option<&'a rustc_hash::FxHashSet<fallow_engine::discover::FileId>>,
     /// File health scores (available when file_scores/hotspots/targets are computed).
     pub file_scores: Option<&'a [FileHealthScore]>,
     /// Hotspot entries (available when hotspots are computed).
@@ -45,7 +45,9 @@ pub struct VitalSignsInput<'a> {
 
 impl<'a> VitalSignsInput<'a> {
     /// Iterate the modules selected by `module_filter`.
-    fn selected_modules(&self) -> impl Iterator<Item = &'a fallow_core::extract::ModuleInfo> + '_ {
+    fn selected_modules(
+        &self,
+    ) -> impl Iterator<Item = &'a fallow_engine::extract::ModuleInfo> + '_ {
         let filter = self.module_filter;
         self.modules
             .iter()
@@ -382,7 +384,7 @@ fn compute_interfacing_risk_profile(param_counts: &[u8]) -> RiskProfile {
 ///
 /// The component-graph analogue (render fan-in concentration:
 /// `p95_render_fan_in` / `render_fan_in_high_pct` / `max_render_fan_in`) is
-/// computed in core (`fallow_core::analyze::render_fan_in`), which has the
+/// computed in core (`fallow_engine::render_fan_in`), which has the
 /// resolved-module graph the CLI lacks. It mirrors this helper verbatim (p95 +
 /// `high_pct` over the per-component distinct-parents distribution, reusing the
 /// same `max(p95, 10)` floor) and is assigned onto `VitalSigns` in
@@ -1109,9 +1111,9 @@ impl RoundTo for f64 {
 mod tests {
     use super::*;
 
-    fn make_module(id: u32, cyclomatic: u16) -> fallow_core::extract::ModuleInfo {
-        fallow_core::extract::ModuleInfo {
-            file_id: fallow_core::discover::FileId(id),
+    fn make_module(id: u32, cyclomatic: u16) -> fallow_engine::extract::ModuleInfo {
+        fallow_engine::extract::ModuleInfo {
+            file_id: fallow_engine::discover::FileId(id),
             exports: Vec::new(),
             imports: Vec::new(),
             re_exports: Vec::new(),
@@ -1203,7 +1205,7 @@ mod tests {
         clippy::cast_possible_truncation,
         reason = "test values are trivially small"
     )]
-    fn make_modules() -> Vec<fallow_core::extract::ModuleInfo> {
+    fn make_modules() -> Vec<fallow_engine::extract::ModuleInfo> {
         (0..10)
             .map(|i| make_module(i, (i as u16 + 1) * 2))
             .collect()
