@@ -325,7 +325,7 @@ fn push_clone_group_lines(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{CloneInstance, RefactoringKind, RefactoringSuggestion};
+    use fallow_engine::duplicates::{CloneInstance, RefactoringKind, RefactoringSuggestion};
     use fallow_engine::trace::{
         CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
         TracedCloneGroup, TracedExport, TracedReExport,

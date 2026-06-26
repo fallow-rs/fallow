@@ -74,7 +74,7 @@ use fallow_cli::security::{
     SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
 };
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
-use fallow_core::duplicates::{
+use fallow_engine::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
 };

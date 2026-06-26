@@ -14,7 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use fallow_core::duplicates::{
+use fallow_engine::duplicates::{
     CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
 };
 use rustc_hash::FxHashSet;
@@ -290,7 +290,7 @@ fn sort_duplication_groups(groups: &mut [DuplicationGroup]) {
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_core::duplicates::{CloneInstance, DuplicationStats};
+    use fallow_engine::duplicates::{CloneInstance, DuplicationStats};
 
     use super::*;
     use crate::codeowners::CodeOwners;
