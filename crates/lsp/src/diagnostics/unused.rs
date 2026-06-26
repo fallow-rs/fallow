@@ -17,13 +17,14 @@ pub fn push_export_diagnostics(
     for (exports, code, anchor, msg_prefix) in [
         (
             Box::new(exports_iter)
-                as Box<dyn Iterator<Item = &fallow_engine::results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
             "unused-export",
             "unused-exports",
             "Export" as &str,
         ),
         (
-            Box::new(types_iter) as Box<dyn Iterator<Item = &fallow_engine::results::UnusedExport>>,
+            Box::new(types_iter)
+                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
             "unused-type",
             "unused-types",
             "Type export",
@@ -44,7 +45,7 @@ pub fn push_export_diagnostics(
 )]
 fn push_unused_export_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    export: &fallow_engine::results::UnusedExport,
+    export: &fallow_api::editor_results::UnusedExport,
     code: &str,
     anchor: &str,
     msg_prefix: &str,
@@ -169,7 +170,8 @@ pub fn push_dep_diagnostics(
     package_json_uri: Option<&Uri>,
     root: &std::path::Path,
 ) {
-    type DepIter<'a> = Box<dyn Iterator<Item = &'a fallow_engine::results::UnusedDependency> + 'a>;
+    type DepIter<'a> =
+        Box<dyn Iterator<Item = &'a fallow_api::editor_results::UnusedDependency> + 'a>;
     let groups: [(DepIter<'_>, &str, &str, &str); 3] = [
         (
             Box::new(results.unused_dependencies.iter().map(|f| &f.dep)),
@@ -211,7 +213,7 @@ pub fn push_dep_diagnostics(
 /// Push one full-line WARNING diagnostic for an unused dependency group entry.
 fn push_unused_dependency_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    dep: &fallow_engine::results::UnusedDependency,
+    dep: &fallow_api::editor_results::UnusedDependency,
     code: &str,
     anchor: &str,
     msg_prefix: &str,
@@ -325,7 +327,7 @@ fn push_unused_catalog_entry_diagnostics(
     }
 }
 
-fn unused_catalog_entry_message(entry: &fallow_engine::results::UnusedCatalogEntry) -> String {
+fn unused_catalog_entry_message(entry: &fallow_api::editor_results::UnusedCatalogEntry) -> String {
     if entry.catalog_name == "default" {
         format!(
             "Unused catalog entry: '{}' is not referenced by any workspace package",
@@ -519,19 +521,22 @@ pub fn push_member_diagnostics(
     let store_iter = results.unused_store_members.iter().map(|f| &f.member);
     for (members, code, anchor, kind_label) in [
         (
-            Box::new(enum_iter) as Box<dyn Iterator<Item = &fallow_engine::results::UnusedMember>>,
+            Box::new(enum_iter)
+                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
             "unused-enum-member",
             "unused-enum-members",
             "Enum member" as &str,
         ),
         (
-            Box::new(class_iter) as Box<dyn Iterator<Item = &fallow_engine::results::UnusedMember>>,
+            Box::new(class_iter)
+                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
             "unused-class-member",
             "unused-class-members",
             "Class member",
         ),
         (
-            Box::new(store_iter) as Box<dyn Iterator<Item = &fallow_engine::results::UnusedMember>>,
+            Box::new(store_iter)
+                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
             "unused-store-member",
             "unused-store-members",
             "Store member",
@@ -555,7 +560,7 @@ pub fn push_member_diagnostics(
 /// Push one HINT diagnostic for an unused enum / class / store member.
 fn push_unused_member_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    member: &fallow_engine::results::UnusedMember,
+    member: &fallow_api::editor_results::UnusedMember,
     code: &str,
     anchor: &str,
     kind_label: &str,
@@ -882,9 +887,9 @@ fn push_unused_server_action_diagnostics(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_engine::duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_engine::extract::MemberKind;
-    use fallow_engine::results::{
+    use fallow_api::editor_duplicates::{DuplicationReport, DuplicationStats};
+    use fallow_api::editor_extract::MemberKind;
+    use fallow_api::editor_results::{
         AnalysisResults, DependencyLocation, EmptyCatalogGroup, EmptyCatalogGroupFinding,
         ImportSite, TestOnlyDependency, TestOnlyDependencyFinding, TypeOnlyDependency,
         TypeOnlyDependencyFinding, UnlistedDependency, UnlistedDependencyFinding,
@@ -1545,7 +1550,7 @@ mod tests {
 
     #[test]
     fn unused_dependency_override_produces_warning_diagnostic_with_absolute_uri() {
-        use fallow_engine::results::{
+        use fallow_api::editor_results::{
             DependencyOverrideSource, UnusedDependencyOverride, UnusedDependencyOverrideFinding,
         };
 
@@ -1596,7 +1601,7 @@ mod tests {
 
     #[test]
     fn misconfigured_dependency_override_produces_error_diagnostic() {
-        use fallow_engine::results::{
+        use fallow_api::editor_results::{
             DependencyOverrideMisconfigReason, DependencyOverrideSource,
             MisconfiguredDependencyOverride, MisconfiguredDependencyOverrideFinding,
         };

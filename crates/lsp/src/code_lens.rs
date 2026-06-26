@@ -104,7 +104,7 @@ fn react_component_code_lenses(results: &AnalysisResults, file_path: &Path) -> V
         .collect()
 }
 
-fn react_component_code_lens(intel: &fallow_engine::results::ReactComponentIntel) -> CodeLens {
+fn react_component_code_lens(intel: &fallow_api::editor_results::ReactComponentIntel) -> CodeLens {
     let position = Position {
         line: intel.anchor_line.saturating_sub(1),
         character: intel.anchor_col,
@@ -129,7 +129,7 @@ fn react_component_code_lens(intel: &fallow_engine::results::ReactComponentIntel
 /// honored (`1 prop`, `1 parent`). A component with no render sites, no props,
 /// and no hooks falls back to a bare `component` label so the lens is never
 /// empty.
-fn react_component_lens_title(intel: &fallow_engine::results::ReactComponentIntel) -> String {
+fn react_component_lens_title(intel: &fallow_api::editor_results::ReactComponentIntel) -> String {
     let mut segments: Vec<String> = Vec::new();
 
     if intel.render_sites > 0 {
@@ -152,7 +152,7 @@ fn react_component_lens_title(intel: &fallow_engine::results::ReactComponentInte
 
 /// Build the `N hooks (a state, b effect, ...)` segment, or `None` when the
 /// component uses no hooks. Each kind sub-count is omitted when zero.
-fn react_hook_segment(hooks: &fallow_engine::results::ReactHookSummary) -> Option<String> {
+fn react_hook_segment(hooks: &fallow_api::editor_results::ReactHookSummary) -> Option<String> {
     let total = u32::from(hooks.state)
         + u32::from(hooks.effect)
         + u32::from(hooks.memo)
@@ -206,7 +206,7 @@ fn export_usage_code_lenses(
 }
 
 fn export_usage_code_lens(
-    usage: &fallow_engine::results::ExportUsage,
+    usage: &fallow_api::editor_results::ExportUsage,
     document_uri: &Uri,
 ) -> CodeLens {
     let line = usage.line.saturating_sub(1);
@@ -242,7 +242,7 @@ fn export_usage_code_lens(
 }
 
 fn reference_location_payload(
-    loc: &fallow_engine::results::ReferenceLocation,
+    loc: &fallow_api::editor_results::ReferenceLocation,
 ) -> Option<serde_json::Value> {
     let uri = Uri::from_file_path(&loc.path)?;
     let ref_line = loc.line.saturating_sub(1);
@@ -318,7 +318,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_engine::results::{
+    use fallow_api::editor_results::{
         ExportUsage, ReactComponentIntel, ReactHookSummary, ReactPropIntel, ReferenceLocation,
     };
 

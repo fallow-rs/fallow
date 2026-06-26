@@ -160,11 +160,12 @@ pub fn build_remove_export_actions(input: RemoveExportActionInput<'_>) -> Vec<Co
     for (exports, msg_prefix) in [
         (
             Box::new(exports_iter)
-                as Box<dyn Iterator<Item = &fallow_engine::results::UnusedExport>>,
+                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
             "Export",
         ),
         (
-            Box::new(types_iter) as Box<dyn Iterator<Item = &fallow_engine::results::UnusedExport>>,
+            Box::new(types_iter)
+                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
             "Type export",
         ),
     ] {
@@ -206,7 +207,7 @@ fn build_remove_export_actions_for_test(
     reason = "identifier/indent lengths are bounded by source size"
 )]
 fn remove_export_action(
-    export: &fallow_engine::results::UnusedExport,
+    export: &fallow_api::editor_results::UnusedExport,
     msg_prefix: &str,
     file_path: &Path,
     uri: &Uri,
@@ -250,7 +251,7 @@ fn remove_export_action(
 }
 
 fn remove_export_span(
-    export: &fallow_engine::results::UnusedExport,
+    export: &fallow_api::editor_results::UnusedExport,
     file_path: &Path,
     cursor_range: &Range,
     file_lines: &[&str],
@@ -290,7 +291,7 @@ fn export_prefix_to_remove(trimmed: &str) -> Option<&'static str> {
     reason = "identifier lengths are bounded by source size"
 )]
 fn remove_export_diagnostic(
-    export: &fallow_engine::results::UnusedExport,
+    export: &fallow_api::editor_results::UnusedExport,
     msg_prefix: &str,
     export_line: u32,
 ) -> Diagnostic {
@@ -414,7 +415,7 @@ fn build_remove_catalog_entry_actions_for_test(
 }
 
 fn catalog_entry_delete_span(
-    entry: &fallow_engine::results::UnusedCatalogEntry,
+    entry: &fallow_api::editor_results::UnusedCatalogEntry,
     root: &Path,
     uri: &Uri,
     cursor_range: &Range,
@@ -457,7 +458,7 @@ fn catalog_entry_delete_span(
     reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
 )]
 fn remove_catalog_entry_action(
-    entry: &fallow_engine::results::UnusedCatalogEntry,
+    entry: &fallow_api::editor_results::UnusedCatalogEntry,
     uri: &Uri,
     file_lines: &[&str],
     entry_line: u32,
@@ -505,7 +506,7 @@ fn remove_catalog_entry_action(
 
 /// Build the `unused-catalog-entry` diagnostic linked to the removal action.
 fn catalog_entry_diagnostic(
-    entry: &fallow_engine::results::UnusedCatalogEntry,
+    entry: &fallow_api::editor_results::UnusedCatalogEntry,
     entry_line: u32,
 ) -> Diagnostic {
     Diagnostic {
@@ -528,7 +529,7 @@ fn catalog_entry_diagnostic(
     }
 }
 
-fn catalog_entry_action_title(entry: &fallow_engine::results::UnusedCatalogEntry) -> String {
+fn catalog_entry_action_title(entry: &fallow_api::editor_results::UnusedCatalogEntry) -> String {
     if entry.catalog_name == "default" {
         format!("Remove unused catalog entry `{}`", entry.entry_name)
     } else {
@@ -539,7 +540,9 @@ fn catalog_entry_action_title(entry: &fallow_engine::results::UnusedCatalogEntry
     }
 }
 
-fn catalog_entry_diagnostic_message(entry: &fallow_engine::results::UnusedCatalogEntry) -> String {
+fn catalog_entry_diagnostic_message(
+    entry: &fallow_api::editor_results::UnusedCatalogEntry,
+) -> String {
     if entry.catalog_name == "default" {
         format!(
             "Unused catalog entry: '{}' is not referenced by any workspace package",
@@ -648,7 +651,7 @@ fn build_remove_empty_catalog_group_actions_for_test(
 /// Validate that an empty-catalog-group finding still anchors to a matching
 /// header line within the cursor range, returning the 0-based line to delete.
 fn empty_catalog_group_delete_line(
-    group: &fallow_engine::results::EmptyCatalogGroup,
+    group: &fallow_api::editor_results::EmptyCatalogGroup,
     root: &Path,
     uri: &Uri,
     cursor_range: &Range,
@@ -684,7 +687,7 @@ fn empty_catalog_group_delete_line(
     reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by ls-types"
 )]
 fn remove_empty_catalog_group_action(
-    group: &fallow_engine::results::EmptyCatalogGroup,
+    group: &fallow_api::editor_results::EmptyCatalogGroup,
     uri: &Uri,
     group_line: u32,
 ) -> CodeActionOrCommand {
@@ -997,7 +1000,9 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use fallow_engine::results::{UnusedExport, UnusedFile, UnusedFileFinding, UnusedTypeFinding};
+    use fallow_api::editor_results::{
+        UnusedExport, UnusedFile, UnusedFileFinding, UnusedTypeFinding,
+    };
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -1025,8 +1030,8 @@ mod tests {
         name: &str,
         line: u32,
         col: u32,
-    ) -> fallow_engine::results::UnusedExportFinding {
-        fallow_engine::results::UnusedExportFinding::with_actions(UnusedExport {
+    ) -> fallow_api::editor_results::UnusedExportFinding {
+        fallow_api::editor_results::UnusedExportFinding::with_actions(UnusedExport {
             path: path.to_path_buf(),
             export_name: name.to_string(),
             is_type_only: false,
@@ -1627,7 +1632,7 @@ mod tests {
         assert!(delete_ca.title.contains("Delete"));
     }
 
-    use fallow_engine::results::{UnusedCatalogEntry, UnusedCatalogEntryFinding};
+    use fallow_api::editor_results::{UnusedCatalogEntry, UnusedCatalogEntryFinding};
 
     fn make_catalog_entry(
         name: &str,
@@ -2086,7 +2091,7 @@ mod tests {
         assert_eq!(compute_catalog_deletion_end(&lines, 1), 4);
     }
 
-    use fallow_engine::results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
+    use fallow_api::editor_results::{EmptyCatalogGroup, EmptyCatalogGroupFinding};
 
     fn make_empty_group(name: &str, line: u32) -> EmptyCatalogGroupFinding {
         make_empty_group_in_file(name, PathBuf::from("pnpm-workspace.yaml"), line)

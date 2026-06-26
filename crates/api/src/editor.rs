@@ -8,6 +8,26 @@ pub use fallow_engine::changed_files::{
     ChangedFilesError, resolve_git_toplevel, try_get_changed_files_with_toplevel,
 };
 
+pub mod editor_duplicates {
+    pub use fallow_engine::duplicates::*;
+}
+
+pub mod editor_extract {
+    pub use fallow_engine::extract::*;
+}
+
+pub mod editor_results {
+    pub use fallow_engine::results::*;
+}
+
+pub mod editor_security {
+    pub use fallow_engine::security::security_catalogue_title;
+}
+
+pub mod editor_suppress {
+    pub use fallow_engine::suppress::{IssueKind, is_suppressed};
+}
+
 pub type EditorAnalysisResults = fallow_engine::AnalysisResults;
 pub type EditorAnalysisSession = fallow_engine::AnalysisSession;
 pub type EditorDeadCodeAnalysisOutput = fallow_engine::DeadCodeAnalysisOutput;

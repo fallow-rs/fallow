@@ -95,8 +95,8 @@ pub fn push_duplication_diagnostics(
 )]
 fn push_duplication_instance_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
-    group: &fallow_engine::duplicates::CloneGroup,
-    instance: &fallow_engine::duplicates::CloneInstance,
+    group: &fallow_api::editor_duplicates::CloneGroup,
+    instance: &fallow_api::editor_duplicates::CloneInstance,
 ) {
     let Some(inst_uri) = Uri::from_file_path(&instance.file) else {
         return;
@@ -146,8 +146,8 @@ fn push_duplication_instance_diagnostic(
     reason = "line/col numbers are bounded by source size"
 )]
 fn duplication_related_info(
-    group: &fallow_engine::duplicates::CloneGroup,
-    instance: &fallow_engine::duplicates::CloneInstance,
+    group: &fallow_api::editor_duplicates::CloneGroup,
+    instance: &fallow_api::editor_duplicates::CloneInstance,
 ) -> Vec<DiagnosticRelatedInformation> {
     group
         .instances
@@ -216,10 +216,10 @@ pub fn push_stale_suppression_diagnostics(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_engine::duplicates::{
+    use fallow_api::editor_duplicates::{
         CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
     };
-    use fallow_engine::results::{
+    use fallow_api::editor_results::{
         AnalysisResults, DuplicateExport, DuplicateExportFinding, DuplicateLocation, UnusedExport,
         UnusedExportFinding, UnusedTypeFinding,
     };
@@ -479,16 +479,16 @@ mod tests {
             }));
         results
             .unused_files
-            .push(fallow_engine::results::UnusedFileFinding::with_actions(
-                fallow_engine::results::UnusedFile { path: path.clone() },
+            .push(fallow_api::editor_results::UnusedFileFinding::with_actions(
+                fallow_api::editor_results::UnusedFile { path: path.clone() },
             ));
         results.unused_enum_members.push(
-            fallow_engine::results::UnusedEnumMemberFinding::with_actions(
-                fallow_engine::results::UnusedMember {
+            fallow_api::editor_results::UnusedEnumMemberFinding::with_actions(
+                fallow_api::editor_results::UnusedMember {
                     path: path.clone(),
                     parent_name: "E".to_string(),
                     member_name: "A".to_string(),
-                    kind: fallow_engine::extract::MemberKind::EnumMember,
+                    kind: fallow_api::editor_extract::MemberKind::EnumMember,
                     line: 3,
                     col: 0,
                 },

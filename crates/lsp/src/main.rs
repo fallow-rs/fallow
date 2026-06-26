@@ -561,10 +561,10 @@ fn collect_inline_complexity(
         }
 
         for function in &module.complexity {
-            if fallow_engine::suppress::is_suppressed(
+            if fallow_api::editor_suppress::is_suppressed(
                 &module.suppressions,
                 function.line,
-                fallow_engine::suppress::IssueKind::Complexity,
+                fallow_api::editor_suppress::IssueKind::Complexity,
             ) {
                 continue;
             }
@@ -1597,8 +1597,8 @@ fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) 
 mod tests {
     use super::*;
 
-    use fallow_engine::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
-    use fallow_engine::results::{
+    use fallow_api::editor_duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use fallow_api::editor_results::{
         BoundaryViolation, BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
         ExportUsage, SecuritySeverity, TestOnlyDependency, TestOnlyDependencyFinding,
         TypeOnlyDependency, UnlistedDependency, UnlistedDependencyFinding,
@@ -1691,8 +1691,8 @@ mod tests {
                 col: 0,
             })],
             boundary_coverage_violations: vec![
-                fallow_engine::results::BoundaryCoverageViolationFinding::with_actions(
-                    fallow_engine::results::BoundaryCoverageViolation {
+                fallow_api::editor_results::BoundaryCoverageViolationFinding::with_actions(
+                    fallow_api::editor_results::BoundaryCoverageViolation {
                         path: "/unzoned.ts".into(),
                         line: 2,
                         col: 0,
@@ -1700,8 +1700,8 @@ mod tests {
                 ),
             ],
             boundary_call_violations: vec![
-                fallow_engine::results::BoundaryCallViolationFinding::with_actions(
-                    fallow_engine::results::BoundaryCallViolation {
+                fallow_api::editor_results::BoundaryCallViolationFinding::with_actions(
+                    fallow_api::editor_results::BoundaryCallViolation {
                         path: "/domain.ts".into(),
                         line: 3,
                         col: 0,
@@ -2606,8 +2606,8 @@ export function choose(value: number): string {
                 path: "/a.ts".into(),
             }));
         source_a.unresolved_imports.push(
-            fallow_engine::results::UnresolvedImportFinding::with_actions(
-                fallow_engine::results::UnresolvedImport {
+            fallow_api::editor_results::UnresolvedImportFinding::with_actions(
+                fallow_api::editor_results::UnresolvedImport {
                     path: "/a.ts".into(),
                     specifier: "./missing".to_string(),
                     line: 1,
@@ -2662,7 +2662,7 @@ export function choose(value: number): string {
 
     fn merge_test_unused_dependency(
         package_name: &str,
-        location: fallow_engine::results::DependencyLocation,
+        location: fallow_api::editor_results::DependencyLocation,
         line: u32,
     ) -> UnusedDependency {
         UnusedDependency {
@@ -2677,7 +2677,7 @@ export function choose(value: number): string {
     fn merge_test_unused_member(
         parent_name: &str,
         member_name: &str,
-        kind: fallow_engine::extract::MemberKind,
+        kind: fallow_api::editor_extract::MemberKind,
         line: u32,
     ) -> UnusedMember {
         UnusedMember {
@@ -2708,21 +2708,21 @@ export function choose(value: number): string {
             unused_dependencies: vec![UnusedDependencyFinding::with_actions(
                 merge_test_unused_dependency(
                     "dep",
-                    fallow_engine::results::DependencyLocation::Dependencies,
+                    fallow_api::editor_results::DependencyLocation::Dependencies,
                     3,
                 ),
             )],
             unused_dev_dependencies: vec![UnusedDevDependencyFinding::with_actions(
                 merge_test_unused_dependency(
                     "dev-dep",
-                    fallow_engine::results::DependencyLocation::DevDependencies,
+                    fallow_api::editor_results::DependencyLocation::DevDependencies,
                     4,
                 ),
             )],
             unused_optional_dependencies: vec![UnusedOptionalDependencyFinding::with_actions(
                 merge_test_unused_dependency(
                     "opt-dep",
-                    fallow_engine::results::DependencyLocation::OptionalDependencies,
+                    fallow_api::editor_results::DependencyLocation::OptionalDependencies,
                     5,
                 ),
             )],
@@ -2730,7 +2730,7 @@ export function choose(value: number): string {
                 merge_test_unused_member(
                     "E",
                     "A",
-                    fallow_engine::extract::MemberKind::EnumMember,
+                    fallow_api::editor_extract::MemberKind::EnumMember,
                     6,
                 ),
             )],
@@ -2738,7 +2738,7 @@ export function choose(value: number): string {
                 merge_test_unused_member(
                     "C",
                     "m",
-                    fallow_engine::extract::MemberKind::ClassMethod,
+                    fallow_api::editor_extract::MemberKind::ClassMethod,
                     7,
                 ),
             )],
@@ -2746,13 +2746,13 @@ export function choose(value: number): string {
                 merge_test_unused_member(
                     "S",
                     "a",
-                    fallow_engine::extract::MemberKind::StoreMember,
+                    fallow_api::editor_extract::MemberKind::StoreMember,
                     7,
                 ),
             )],
             unresolved_imports: vec![
-                fallow_engine::results::UnresolvedImportFinding::with_actions(
-                    fallow_engine::results::UnresolvedImport {
+                fallow_api::editor_results::UnresolvedImportFinding::with_actions(
+                    fallow_api::editor_results::UnresolvedImport {
                         path: "/f.ts".into(),
                         specifier: "./gone".to_string(),
                         line: 8,
@@ -2768,15 +2768,15 @@ export function choose(value: number): string {
                 },
             )],
             duplicate_exports: vec![
-                fallow_engine::results::DuplicateExportFinding::with_actions(
-                    fallow_engine::results::DuplicateExport {
+                fallow_api::editor_results::DuplicateExportFinding::with_actions(
+                    fallow_api::editor_results::DuplicateExport {
                         export_name: "dup".to_string(),
                         locations: vec![],
                     },
                 ),
             ],
             type_only_dependencies: vec![
-                fallow_engine::results::TypeOnlyDependencyFinding::with_actions(
+                fallow_api::editor_results::TypeOnlyDependencyFinding::with_actions(
                     TypeOnlyDependency {
                         package_name: "type-only".to_string(),
                         path: "/pkg.json".into(),
@@ -2811,8 +2811,8 @@ export function choose(value: number): string {
                 col: 0,
             })],
             boundary_coverage_violations: vec![
-                fallow_engine::results::BoundaryCoverageViolationFinding::with_actions(
-                    fallow_engine::results::BoundaryCoverageViolation {
+                fallow_api::editor_results::BoundaryCoverageViolationFinding::with_actions(
+                    fallow_api::editor_results::BoundaryCoverageViolation {
                         path: "/unzoned.ts".into(),
                         line: 13,
                         col: 0,
@@ -2820,8 +2820,8 @@ export function choose(value: number): string {
                 ),
             ],
             boundary_call_violations: vec![
-                fallow_engine::results::BoundaryCallViolationFinding::with_actions(
-                    fallow_engine::results::BoundaryCallViolation {
+                fallow_api::editor_results::BoundaryCallViolationFinding::with_actions(
+                    fallow_api::editor_results::BoundaryCallViolation {
                         path: "/zoned.ts".into(),
                         line: 14,
                         col: 0,
@@ -2832,16 +2832,16 @@ export function choose(value: number): string {
                 ),
             ],
             policy_violations: vec![
-                fallow_engine::results::PolicyViolationFinding::with_actions(
-                    fallow_engine::results::PolicyViolation {
+                fallow_api::editor_results::PolicyViolationFinding::with_actions(
+                    fallow_api::editor_results::PolicyViolation {
                         path: "/zoned.ts".into(),
                         line: 15,
                         col: 0,
                         pack: "team-policy".to_string(),
                         rule_id: "no-console".to_string(),
-                        kind: fallow_engine::results::PolicyRuleKind::BannedCall,
+                        kind: fallow_api::editor_results::PolicyRuleKind::BannedCall,
                         matched: "console.log".to_string(),
-                        severity: fallow_engine::results::PolicyViolationSeverity::Warn,
+                        severity: fallow_api::editor_results::PolicyViolationSeverity::Warn,
                         message: None,
                     },
                 ),
@@ -2855,8 +2855,8 @@ export function choose(value: number): string {
                 reference_locations: vec![],
             }],
             private_type_leaks: vec![
-                fallow_engine::results::PrivateTypeLeakFinding::with_actions(
-                    fallow_engine::results::PrivateTypeLeak {
+                fallow_api::editor_results::PrivateTypeLeakFinding::with_actions(
+                    fallow_api::editor_results::PrivateTypeLeak {
                         path: "/f.ts".into(),
                         export_name: "pub_fn".to_string(),
                         type_name: "Secret".to_string(),
@@ -2866,28 +2866,28 @@ export function choose(value: number): string {
                     },
                 ),
             ],
-            re_export_cycles: vec![fallow_engine::results::ReExportCycleFinding::with_actions(
-                fallow_engine::results::ReExportCycle {
+            re_export_cycles: vec![fallow_api::editor_results::ReExportCycleFinding::with_actions(
+                fallow_api::editor_results::ReExportCycle {
                     files: vec!["/barrel.ts".into()],
-                    kind: fallow_engine::results::ReExportCycleKind::SelfLoop,
+                    kind: fallow_api::editor_results::ReExportCycleKind::SelfLoop,
                 },
             )],
-            stale_suppressions: vec![fallow_engine::results::StaleSuppression {
+            stale_suppressions: vec![fallow_api::editor_results::StaleSuppression {
                 path: "/f.ts".into(),
                 line: 15,
                 col: 0,
-                origin: fallow_engine::results::SuppressionOrigin::Comment {
+                origin: fallow_api::editor_results::SuppressionOrigin::Comment {
                     issue_kind: None,
                     reason: None,
                     is_file_level: false,
                     kind_known: true,
                 },
                 missing_reason: false,
-                actions: fallow_engine::results::StaleSuppression::actions_for(false),
+                actions: fallow_api::editor_results::StaleSuppression::actions_for(false),
             }],
             unused_catalog_entries: vec![
-                fallow_engine::results::UnusedCatalogEntryFinding::with_actions(
-                    fallow_engine::results::UnusedCatalogEntry {
+                fallow_api::editor_results::UnusedCatalogEntryFinding::with_actions(
+                    fallow_api::editor_results::UnusedCatalogEntry {
                         entry_name: "react".to_string(),
                         catalog_name: "default".to_string(),
                         path: "/pnpm-workspace.yaml".into(),
@@ -2897,8 +2897,8 @@ export function choose(value: number): string {
                 ),
             ],
             empty_catalog_groups: vec![
-                fallow_engine::results::EmptyCatalogGroupFinding::with_actions(
-                    fallow_engine::results::EmptyCatalogGroup {
+                fallow_api::editor_results::EmptyCatalogGroupFinding::with_actions(
+                    fallow_api::editor_results::EmptyCatalogGroup {
                         catalog_name: "ui".to_string(),
                         path: "/pnpm-workspace.yaml".into(),
                         line: 17,
@@ -2906,8 +2906,8 @@ export function choose(value: number): string {
                 ),
             ],
             unresolved_catalog_references: vec![
-                fallow_engine::results::UnresolvedCatalogReferenceFinding::with_actions(
-                    fallow_engine::results::UnresolvedCatalogReference {
+                fallow_api::editor_results::UnresolvedCatalogReferenceFinding::with_actions(
+                    fallow_api::editor_results::UnresolvedCatalogReference {
                         entry_name: "vue".to_string(),
                         catalog_name: "default".to_string(),
                         path: "/pkg.json".into(),
@@ -2917,14 +2917,14 @@ export function choose(value: number): string {
                 ),
             ],
             unused_dependency_overrides: vec![
-                fallow_engine::results::UnusedDependencyOverrideFinding::with_actions(
-                    fallow_engine::results::UnusedDependencyOverride {
+                fallow_api::editor_results::UnusedDependencyOverrideFinding::with_actions(
+                    fallow_api::editor_results::UnusedDependencyOverride {
                         raw_key: "react".to_string(),
                         target_package: "react".to_string(),
                         parent_package: None,
                         version_constraint: None,
                         version_range: "18".to_string(),
-                        source: fallow_engine::results::DependencyOverrideSource::PnpmWorkspaceYaml,
+                        source: fallow_api::editor_results::DependencyOverrideSource::PnpmWorkspaceYaml,
                         path: "/pnpm-workspace.yaml".into(),
                         line: 19,
                         hint: None,
@@ -2932,22 +2932,22 @@ export function choose(value: number): string {
                 ),
             ],
             misconfigured_dependency_overrides: vec![
-                fallow_engine::results::MisconfiguredDependencyOverrideFinding::with_actions(
-                    fallow_engine::results::MisconfiguredDependencyOverride {
+                fallow_api::editor_results::MisconfiguredDependencyOverrideFinding::with_actions(
+                    fallow_api::editor_results::MisconfiguredDependencyOverride {
                         raw_key: "bad>".to_string(),
                         target_package: None,
                         raw_value: String::new(),
                         reason:
-                            fallow_engine::results::DependencyOverrideMisconfigReason::EmptyValue,
-                        source: fallow_engine::results::DependencyOverrideSource::PnpmPackageJson,
+                            fallow_api::editor_results::DependencyOverrideMisconfigReason::EmptyValue,
+                        source: fallow_api::editor_results::DependencyOverrideSource::PnpmPackageJson,
                         path: "/pkg.json".into(),
                         line: 20,
                     },
                 ),
             ],
             invalid_client_exports: vec![
-                fallow_engine::results::InvalidClientExportFinding::with_actions(
-                    fallow_engine::results::InvalidClientExport {
+                fallow_api::editor_results::InvalidClientExportFinding::with_actions(
+                    fallow_api::editor_results::InvalidClientExport {
                         path: "/app/page.tsx".into(),
                         export_name: "metadata".to_string(),
                         directive: "use client".to_string(),
@@ -2957,8 +2957,8 @@ export function choose(value: number): string {
                 ),
             ],
             mixed_client_server_barrels: vec![
-                fallow_engine::results::MixedClientServerBarrelFinding::with_actions(
-                    fallow_engine::results::MixedClientServerBarrel {
+                fallow_api::editor_results::MixedClientServerBarrelFinding::with_actions(
+                    fallow_api::editor_results::MixedClientServerBarrel {
                         path: "/app/components/index.ts".into(),
                         client_origin: "./Button".to_string(),
                         server_origin: "./fetchUser".to_string(),
@@ -2968,8 +2968,8 @@ export function choose(value: number): string {
                 ),
             ],
             misplaced_directives: vec![
-                fallow_engine::results::MisplacedDirectiveFinding::with_actions(
-                    fallow_engine::results::MisplacedDirective {
+                fallow_api::editor_results::MisplacedDirectiveFinding::with_actions(
+                    fallow_api::editor_results::MisplacedDirective {
                         path: "/app/widget.tsx".into(),
                         directive: "use client".to_string(),
                         line: 24,
@@ -2990,8 +2990,8 @@ export function choose(value: number): string {
             prop_drilling_chains: vec![],
             thin_wrappers: vec![],
             duplicate_prop_shapes: vec![],
-            route_collisions: vec![fallow_engine::results::RouteCollisionFinding::with_actions(
-                fallow_engine::results::RouteCollision {
+            route_collisions: vec![fallow_api::editor_results::RouteCollisionFinding::with_actions(
+                fallow_api::editor_results::RouteCollision {
                     path: "/app/(a)/about/page.tsx".into(),
                     url: "/about".to_string(),
                     conflicting_paths: vec!["/app/(b)/about/page.tsx".into()],
@@ -3000,8 +3000,8 @@ export function choose(value: number): string {
                 },
             )],
             dynamic_segment_name_conflicts: vec![
-                fallow_engine::results::DynamicSegmentNameConflictFinding::with_actions(
-                    fallow_engine::results::DynamicSegmentNameConflict {
+                fallow_api::editor_results::DynamicSegmentNameConflictFinding::with_actions(
+                    fallow_api::editor_results::DynamicSegmentNameConflict {
                         path: "/app/shop/[id]/page.tsx".into(),
                         position: "/shop".to_string(),
                         conflicting_segments: vec!["[id]".to_string(), "[slug]".to_string()],
@@ -3013,11 +3013,11 @@ export function choose(value: number): string {
             ],
             suppression_count: 1,
             active_suppressions: Vec::new(),
-            feature_flags: vec![fallow_engine::results::FeatureFlag {
+            feature_flags: vec![fallow_api::editor_results::FeatureFlag {
                 path: "/f.ts".into(),
                 flag_name: "ENABLE_X".to_string(),
-                kind: fallow_engine::results::FlagKind::EnvironmentVariable,
-                confidence: fallow_engine::results::FlagConfidence::High,
+                kind: fallow_api::editor_results::FlagKind::EnvironmentVariable,
+                confidence: fallow_api::editor_results::FlagConfidence::High,
                 line: 21,
                 col: 0,
                 guard_span_start: None,
@@ -3027,16 +3027,16 @@ export function choose(value: number): string {
                 guard_line_end: None,
                 guarded_dead_exports: vec![],
             }],
-            entry_point_summary: Some(fallow_engine::results::EntryPointSummary {
+            entry_point_summary: Some(fallow_api::editor_results::EntryPointSummary {
                 total: 0,
                 by_source: vec![],
             }),
-            security_findings: vec![fallow_engine::results::SecurityFinding {
+            security_findings: vec![fallow_api::editor_results::SecurityFinding {
                 finding_id: String::new(),
-                candidate: fallow_engine::results::SecurityCandidate::default(),
+                candidate: fallow_api::editor_results::SecurityCandidate::default(),
                 taint_flow: None,
                 attack_surface: None,
-                kind: fallow_engine::results::SecurityFindingKind::ClientServerLeak,
+                kind: fallow_api::editor_results::SecurityFindingKind::ClientServerLeak,
                 category: None,
                 cwe: None,
                 path: "/client.tsx".into(),
@@ -3055,17 +3055,17 @@ export function choose(value: number): string {
             security_unresolved_edge_files: 2,
             security_unresolved_callee_sites: 0,
             security_unresolved_callee_diagnostics: vec![
-                fallow_engine::results::SecurityUnresolvedCalleeDiagnostic {
+                fallow_api::editor_results::SecurityUnresolvedCalleeDiagnostic {
                     path: "/client.tsx".into(),
                     line: 2,
                     col: 0,
-                    reason: fallow_engine::extract::SkippedSecurityCalleeReason::DynamicDispatch,
+                    reason: fallow_api::editor_extract::SkippedSecurityCalleeReason::DynamicDispatch,
                     expression_kind:
-                        fallow_engine::extract::SkippedSecurityCalleeExpressionKind::Other,
+                        fallow_api::editor_extract::SkippedSecurityCalleeExpressionKind::Other,
                 },
             ],
-            render_fan_in: Some(fallow_engine::results::RenderFanInMetric {
-                per_component: vec![fallow_engine::results::RenderFanInComponent {
+            render_fan_in: Some(fallow_api::editor_results::RenderFanInMetric {
+                per_component: vec![fallow_api::editor_results::RenderFanInComponent {
                     file: "/Button.tsx".into(),
                     component: "Button".to_string(),
                     render_sites: 6,
@@ -3075,7 +3075,7 @@ export function choose(value: number): string {
                 high_pct: Some(0.0),
                 max_distinct_parents: Some(3),
             }),
-            react_component_intel: vec![fallow_engine::results::ReactComponentIntel {
+            react_component_intel: vec![fallow_api::editor_results::ReactComponentIntel {
                 path: "/Button.tsx".into(),
                 component_name: "Button".to_string(),
                 anchor_line: 1,
@@ -3083,7 +3083,7 @@ export function choose(value: number): string {
                 render_sites: 6,
                 distinct_parents: 3,
                 prop_count: 1,
-                hooks: fallow_engine::results::ReactHookSummary::default(),
+                hooks: fallow_api::editor_results::ReactHookSummary::default(),
                 props: Vec::new(),
             }],
         }
@@ -3942,12 +3942,12 @@ export function choose(value: number): string {
         install_document(backend, &uri, 1, "doRender();").await;
         let snapshot = snapshot_for(&uri, 1);
 
-        let finding = fallow_engine::results::SecurityFinding {
+        let finding = fallow_api::editor_results::SecurityFinding {
             finding_id: String::new(),
-            candidate: fallow_engine::results::SecurityCandidate::default(),
+            candidate: fallow_api::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
-            kind: fallow_engine::results::SecurityFindingKind::TaintedSink,
+            kind: fallow_api::editor_results::SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),
             path: std::path::PathBuf::from("/render.ts"),

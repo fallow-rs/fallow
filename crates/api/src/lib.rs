@@ -31,6 +31,7 @@ pub use dupes_output::{
 pub use editor::{
     ChangedFilesError, EditorAnalysisOutput, EditorAnalysisResults, EditorAnalysisSession,
     EditorDeadCodeAnalysisOutput, EditorDuplicationReport, EditorProjectAnalysisOutput,
+    editor_duplicates, editor_extract, editor_results, editor_security, editor_suppress,
     resolve_git_toplevel, try_get_changed_files_with_toplevel,
 };
 pub use runtime::{
