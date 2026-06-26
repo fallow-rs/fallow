@@ -2064,10 +2064,8 @@ fn render_human_footer(out: &mut String, report: &ImpactReport) {
 
 /// Render the report as JSON.
 pub fn render_json(report: &ImpactReport) -> String {
-    let value = crate::output_envelope::serialize_root_output(
-        crate::output_envelope::FallowOutput::Impact(report.clone()),
-    )
-    .unwrap_or_else(|_| serde_json::json!({"error":"failed to serialize impact report"}));
+    let value = crate::output_envelope::serialize_named_root_output(report.clone(), "impact")
+        .unwrap_or_else(|_| serde_json::json!({"error":"failed to serialize impact report"}));
     serde_json::to_string_pretty(&value)
         .unwrap_or_else(|_| "{\"error\":\"failed to serialize impact report\"}".to_owned())
 }
@@ -2200,12 +2198,11 @@ fn render_markdown_footer(out: &mut String, report: &ImpactReport) {
 /// Render the cross-repo report as JSON via the typed `ImpactCrossRepo` envelope.
 #[must_use]
 pub fn render_cross_repo_json(report: &CrossRepoImpactReport) -> String {
-    let value = crate::output_envelope::serialize_root_output(
-        crate::output_envelope::FallowOutput::ImpactCrossRepo(report.clone()),
-    )
-    .unwrap_or_else(
-        |_| serde_json::json!({"error":"failed to serialize cross-repo impact report"}),
-    );
+    let value =
+        crate::output_envelope::serialize_named_root_output(report.clone(), "impact-cross-repo")
+            .unwrap_or_else(
+                |_| serde_json::json!({"error":"failed to serialize cross-repo impact report"}),
+            );
     serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
         "{\"error\":\"failed to serialize cross-repo impact report\"}".to_owned()
     })

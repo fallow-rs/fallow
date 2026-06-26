@@ -312,12 +312,32 @@ fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
         && !input.opts.entry_points
         && !input.opts.boundaries;
 
-    let mut output = serde_json::Value::Object(result);
-    if has_boundaries {
-        crate::output_envelope::apply_root_kind(&mut output, "list-boundaries");
+    let output = serde_json::Value::Object(result);
+    let output = if has_boundaries {
+        match crate::output_envelope::serialize_named_root_output_without_telemetry(
+            output,
+            "list-boundaries",
+        ) {
+            Ok(value) => value,
+            Err(err) => {
+                eprintln!("Error: failed to serialize list output: {err}");
+                return ExitCode::from(2);
+            }
+        }
     } else if workspace_only {
-        crate::output_envelope::apply_root_kind(&mut output, "list-workspaces");
-    }
+        match crate::output_envelope::serialize_named_root_output_without_telemetry(
+            output,
+            "list-workspaces",
+        ) {
+            Ok(value) => value,
+            Err(err) => {
+                eprintln!("Error: failed to serialize list output: {err}");
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        output
+    };
 
     match serde_json::to_string_pretty(&output) {
         Ok(json) => {

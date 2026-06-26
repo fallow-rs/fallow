@@ -33,6 +33,7 @@ pub use fallow_output::{
     build_dupes_output, build_health_output, default_marker_regex, default_marker_regex_flags,
     is_false,
 };
+use serde::Serialize;
 
 static LEGACY_ENVELOPE: AtomicBool = AtomicBool::new(false);
 static TELEMETRY_ANALYSIS_RUN_ID: Mutex<Option<String>> = Mutex::new(None);
@@ -75,10 +76,21 @@ pub fn serialize_root_output(output: FallowOutput) -> Result<serde_json::Value, 
     serialize_root_output_with_mode(output, EnvelopeMode::current())
 }
 
-pub fn serialize_root_output_without_telemetry(
-    output: FallowOutput,
+pub fn serialize_named_root_output<T: Serialize>(
+    output: T,
+    kind: &'static str,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    fallow_output::serialize_json_root_output(output, EnvelopeMode::current().into())
+    let mut value =
+        fallow_output::serialize_named_json_output(output, kind, EnvelopeMode::current().into())?;
+    attach_telemetry_meta(&mut value);
+    Ok(value)
+}
+
+pub fn serialize_named_root_output_without_telemetry<T: Serialize>(
+    output: T,
+    kind: &'static str,
+) -> Result<serde_json::Value, serde_json::Error> {
+    fallow_output::serialize_named_json_output(output, kind, EnvelopeMode::current().into())
 }
 
 pub fn serialize_root_output_with_mode(
@@ -92,10 +104,6 @@ pub fn serialize_root_output_with_mode(
 
 pub fn attach_telemetry_meta(value: &mut serde_json::Value) {
     fallow_output::attach_telemetry_meta(value, telemetry_analysis_run_id().as_deref());
-}
-
-pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str) {
-    fallow_output::apply_root_kind(value, kind, EnvelopeMode::current().into());
 }
 
 impl From<EnvelopeMode> for fallow_output::RootEnvelopeMode {

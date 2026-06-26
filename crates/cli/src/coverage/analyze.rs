@@ -1172,7 +1172,8 @@ fn print_runtime_json(
     explain: bool,
 ) -> ExitCode {
     use crate::output_envelope::{
-        CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion, FallowOutput, serialize_root_output,
+        CoverageAnalyzeOutput, CoverageAnalyzeSchemaVersion,
+        serialize_named_root_output_without_telemetry,
     };
     use fallow_types::envelope::{ElapsedMs, ToolVersion};
 
@@ -1188,13 +1189,14 @@ fn print_runtime_json(
         runtime_coverage: report.clone(),
         meta: None,
     };
-    let mut output = match serialize_root_output(FallowOutput::CoverageAnalyze(envelope)) {
-        Ok(value) => value,
-        Err(err) => {
-            eprintln!("Error: failed to serialize runtime coverage report: {err}");
-            return ExitCode::from(2);
-        }
-    };
+    let mut output =
+        match serialize_named_root_output_without_telemetry(envelope, "coverage-analyze") {
+            Ok(value) => value,
+            Err(err) => {
+                eprintln!("Error: failed to serialize runtime coverage report: {err}");
+                return ExitCode::from(2);
+            }
+        };
     if explain && let Some(map) = output.as_object_mut() {
         map.insert("_meta".to_owned(), crate::explain::coverage_analyze_meta());
     }

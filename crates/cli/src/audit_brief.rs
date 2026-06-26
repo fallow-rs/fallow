@@ -8,10 +8,9 @@
 //! audit verdict is `fail`. The verdict is still computed and carried in the
 //! brief JSON informationally, but it never drives the exit code on this path.
 //!
-//! The JSON envelope is an independently-versioned
-//! [`crate::output_envelope::FallowOutput::AuditBrief`] variant
-//! (`kind: "audit-brief"`) so the brief shape evolves on its own cadence
-//! without bumping the main `--format json` contract.
+//! The JSON envelope is independently versioned and tagged as
+//! `kind: "audit-brief"` so the brief shape evolves on its own cadence without
+//! bumping the main `--format json` contract.
 
 use std::process::ExitCode;
 
@@ -489,9 +488,12 @@ fn build_brief_json(result: &AuditResult) -> Result<serde_json::Value, ExitCode>
 /// surfaces the error but the brief contract still exits 0.
 fn print_brief_json(result: &AuditResult) -> ExitCode {
     match build_brief_json(result) {
-        Ok(mut output) => {
-            crate::output_envelope::apply_root_kind(&mut output, "audit-brief");
-            crate::output_envelope::attach_telemetry_meta(&mut output);
+        Ok(output) => {
+            let Ok(output) =
+                crate::output_envelope::serialize_named_root_output(output, "audit-brief")
+            else {
+                return ExitCode::SUCCESS;
+            };
             let _ = crate::report::emit_json(&output, "audit-brief");
             ExitCode::SUCCESS
         }
@@ -801,7 +803,7 @@ pub fn print_brief_result(
 /// tool's output + `fallow decision-surface`). Emits ONLY the ranked, capped
 /// decisions with structured `actions[]`, never the full brief. Always exit 0.
 ///
-/// JSON renders the `FallowOutput::DecisionSurface` envelope (`kind:
+/// JSON renders the typed decision-surface envelope (`kind:
 /// "decision-surface"`); human / compact / markdown render the apex header.
 #[must_use]
 pub fn print_decision_surface_result(result: &AuditResult, quiet: bool) -> ExitCode {
@@ -810,13 +812,9 @@ pub fn print_decision_surface_result(result: &AuditResult, quiet: bool) -> ExitC
     let surface = result.decision_surface.clone().unwrap_or_default();
     match result.output {
         OutputFormat::Json => {
-            let envelope = crate::output_envelope::FallowOutput::DecisionSurface(
-                crate::audit_decision_surface::build_decision_surface_output(&surface),
-            );
-            match serde_json::to_value(&envelope) {
-                Ok(mut value) => {
-                    crate::output_envelope::apply_root_kind(&mut value, "decision-surface");
-                    crate::output_envelope::attach_telemetry_meta(&mut value);
+            let output = crate::audit_decision_surface::build_decision_surface_output(&surface);
+            match crate::output_envelope::serialize_named_root_output(output, "decision-surface") {
+                Ok(value) => {
                     let _ = crate::report::emit_json(&value, "decision-surface");
                     ExitCode::SUCCESS
                 }
@@ -834,17 +832,16 @@ pub fn print_decision_surface_result(result: &AuditResult, quiet: bool) -> ExitC
 
 /// Render the agent-contract WALKTHROUGH GUIDE: the digest (brief +
 /// decision surface), the review direction, the JSON schema the agent returns,
-/// and the deterministic graph-snapshot pin. JSON renders the
-/// `FallowOutput::WalkthroughGuide` envelope (`kind: "review-walkthrough-guide"`).
-/// Every format emits the guide as JSON: the guide is an agent-facing contract,
-/// not a human walkthrough. Always exit 0.
+/// and the deterministic graph-snapshot pin. JSON renders the typed guide
+/// envelope (`kind: "review-walkthrough-guide"`). Every format emits the guide
+/// as JSON: the guide is an agent-facing contract, not a human walkthrough.
+/// Always exit 0.
 #[must_use]
 pub fn print_walkthrough_guide_result(result: &AuditResult) -> ExitCode {
     let guide = crate::audit_walkthrough::build_guide_from_result(result);
-    let envelope = crate::output_envelope::FallowOutput::WalkthroughGuide(guide);
-    if let Ok(mut value) = serde_json::to_value(&envelope) {
-        crate::output_envelope::apply_root_kind(&mut value, "review-walkthrough-guide");
-        crate::output_envelope::attach_telemetry_meta(&mut value);
+    if let Ok(value) =
+        crate::output_envelope::serialize_named_root_output(guide, "review-walkthrough-guide")
+    {
         let _ = crate::report::emit_json(&value, "review-walkthrough-guide");
     }
     ExitCode::SUCCESS
@@ -853,7 +850,7 @@ pub fn print_walkthrough_guide_result(result: &AuditResult) -> ExitCode {
 /// Ingest the agent's judgment JSON from `path` and POST-VALIDATE it against
 /// the live graph: reject unanchored signal_ids (anti-hallucination), refuse the
 /// whole payload when the echoed graph-snapshot hash is stale (the tree moved).
-/// JSON renders the `FallowOutput::WalkthroughValidation` envelope (`kind:
+/// JSON renders the typed walkthrough-validation envelope (`kind:
 /// "review-walkthrough-validation"`). Always exit 0 (advisory).
 ///
 /// A path that cannot be read yields an empty agent payload (default `""` hash),
@@ -873,10 +870,10 @@ pub fn print_walkthrough_file_result(result: &AuditResult, path: &std::path::Pat
         &change_anchor_ids,
         &current_hash,
     );
-    let envelope = crate::output_envelope::FallowOutput::WalkthroughValidation(validation);
-    if let Ok(mut value) = serde_json::to_value(&envelope) {
-        crate::output_envelope::apply_root_kind(&mut value, "review-walkthrough-validation");
-        crate::output_envelope::attach_telemetry_meta(&mut value);
+    if let Ok(value) = crate::output_envelope::serialize_named_root_output(
+        validation,
+        "review-walkthrough-validation",
+    ) {
         let _ = crate::report::emit_json(&value, "review-walkthrough-validation");
     }
     ExitCode::SUCCESS
@@ -949,8 +946,11 @@ mod tests {
     #[test]
     fn brief_json_validates_against_audit_brief_schema_variant() {
         let result = audit_result(AuditVerdict::Fail, OutputFormat::Json);
-        let mut value = build_brief_json(&result).expect("brief json must build");
-        crate::output_envelope::apply_root_kind(&mut value, "audit-brief");
+        let value = crate::output_envelope::serialize_named_root_output(
+            build_brief_json(&result).expect("brief json must build"),
+            "audit-brief",
+        )
+        .expect("brief json must serialize");
 
         assert_eq!(value["kind"], "audit-brief");
         assert_eq!(value["command"], "audit-brief");
