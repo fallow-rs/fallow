@@ -23,6 +23,7 @@ use serde::Serialize;
 pub mod audit_output;
 pub mod compact_output;
 pub mod dead_code_codeclimate;
+pub mod dead_code_sarif;
 pub mod dupes_output;
 pub mod editor;
 pub mod grouped_output;
@@ -39,6 +40,7 @@ pub use compact_output::{
     build_health_compact_lines,
 };
 pub use dead_code_codeclimate::build_codeclimate;
+pub use dead_code_sarif::build_sarif;
 pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneFamilyFinding,
     CloneGroupFinding, DupesReportPayload, DuplicationGroup, DuplicationGrouping,

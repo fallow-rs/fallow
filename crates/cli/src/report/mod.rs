@@ -149,6 +149,7 @@ pub fn elide_common_prefix<'a>(base: &str, target: &'a str) -> &'a str {
 }
 
 /// Compute a SARIF-compatible relative URI from an absolute path and project root.
+#[cfg(test)]
 fn relative_uri(path: &Path, root: &Path) -> String {
     normalize_uri(&relative_path(path, root).display().to_string())
 }

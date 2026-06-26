@@ -1,7 +1,3 @@
-/// Fingerprint key used in SARIF partialFingerprints and other CI formats.
-#[cfg(test)]
-pub const FINGERPRINT_KEY: &str = fallow_output::SARIF_FINGERPRINT_KEY;
-
 /// Compute a deterministic fingerprint hash from key fields.
 #[must_use]
 pub fn fingerprint_hash(parts: &[&str]) -> String {

@@ -1,6 +1,7 @@
 use fallow_config::Severity;
 
 #[must_use]
+#[cfg(test)]
 pub const fn sarif_level(severity: Severity) -> &'static str {
     match severity {
         Severity::Error => "error",
