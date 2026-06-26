@@ -14,17 +14,17 @@ pub fn relative_key_path(path: &Path, root: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn dependency_location_key(location: &fallow_core::results::DependencyLocation) -> &'static str {
+fn dependency_location_key(location: &fallow_engine::results::DependencyLocation) -> &'static str {
     match location {
-        fallow_core::results::DependencyLocation::Dependencies => "unused-dependency",
-        fallow_core::results::DependencyLocation::DevDependencies => "unused-dev-dependency",
-        fallow_core::results::DependencyLocation::OptionalDependencies => {
+        fallow_engine::results::DependencyLocation::Dependencies => "unused-dependency",
+        fallow_engine::results::DependencyLocation::DevDependencies => "unused-dev-dependency",
+        fallow_engine::results::DependencyLocation::OptionalDependencies => {
             "unused-optional-dependency"
         }
     }
 }
 
-fn unused_dependency_key(item: &fallow_core::results::UnusedDependency, root: &Path) -> String {
+fn unused_dependency_key(item: &fallow_engine::results::UnusedDependency, root: &Path) -> String {
     format!(
         "{}:{}:{}",
         dependency_location_key(&item.location),
@@ -34,7 +34,7 @@ fn unused_dependency_key(item: &fallow_core::results::UnusedDependency, root: &P
 }
 
 fn invalid_client_export_key(
-    item: &fallow_core::results::InvalidClientExport,
+    item: &fallow_engine::results::InvalidClientExport,
     root: &Path,
 ) -> String {
     format!(
@@ -45,7 +45,7 @@ fn invalid_client_export_key(
 }
 
 fn mixed_client_server_barrel_key(
-    item: &fallow_core::results::MixedClientServerBarrel,
+    item: &fallow_engine::results::MixedClientServerBarrel,
     root: &Path,
 ) -> String {
     format!(
@@ -56,7 +56,10 @@ fn mixed_client_server_barrel_key(
     )
 }
 
-fn misplaced_directive_key(item: &fallow_core::results::MisplacedDirective, root: &Path) -> String {
+fn misplaced_directive_key(
+    item: &fallow_engine::results::MisplacedDirective,
+    root: &Path,
+) -> String {
     format!(
         "misplaced-directive:{}:{}:{}",
         relative_key_path(&item.path, root),
@@ -65,7 +68,7 @@ fn misplaced_directive_key(item: &fallow_core::results::MisplacedDirective, root
     )
 }
 
-fn unprovided_inject_key(item: &fallow_core::results::UnprovidedInject, root: &Path) -> String {
+fn unprovided_inject_key(item: &fallow_engine::results::UnprovidedInject, root: &Path) -> String {
     format!(
         "unprovided-inject:{}:{}",
         relative_key_path(&item.path, root),
@@ -74,7 +77,7 @@ fn unprovided_inject_key(item: &fallow_core::results::UnprovidedInject, root: &P
 }
 
 fn unrendered_component_key(
-    item: &fallow_core::results::UnrenderedComponent,
+    item: &fallow_engine::results::UnrenderedComponent,
     root: &Path,
 ) -> String {
     format!(
@@ -85,7 +88,7 @@ fn unrendered_component_key(
 }
 
 fn unused_component_prop_key(
-    item: &fallow_core::results::UnusedComponentProp,
+    item: &fallow_engine::results::UnusedComponentProp,
     root: &Path,
 ) -> String {
     format!(
@@ -96,7 +99,7 @@ fn unused_component_prop_key(
 }
 
 fn unused_component_emit_key(
-    item: &fallow_core::results::UnusedComponentEmit,
+    item: &fallow_engine::results::UnusedComponentEmit,
     root: &Path,
 ) -> String {
     format!(
@@ -107,7 +110,7 @@ fn unused_component_emit_key(
 }
 
 fn unused_component_input_key(
-    item: &fallow_core::results::UnusedComponentInput,
+    item: &fallow_engine::results::UnusedComponentInput,
     root: &Path,
 ) -> String {
     format!(
@@ -118,7 +121,7 @@ fn unused_component_input_key(
 }
 
 fn unused_component_output_key(
-    item: &fallow_core::results::UnusedComponentOutput,
+    item: &fallow_engine::results::UnusedComponentOutput,
     root: &Path,
 ) -> String {
     format!(
@@ -128,7 +131,10 @@ fn unused_component_output_key(
     )
 }
 
-fn unused_svelte_event_key(item: &fallow_core::results::UnusedSvelteEvent, root: &Path) -> String {
+fn unused_svelte_event_key(
+    item: &fallow_engine::results::UnusedSvelteEvent,
+    root: &Path,
+) -> String {
     format!(
         "unused-svelte-event:{}:{}",
         relative_key_path(&item.path, root),
@@ -137,7 +143,7 @@ fn unused_svelte_event_key(item: &fallow_core::results::UnusedSvelteEvent, root:
 }
 
 fn unused_server_action_key(
-    item: &fallow_core::results::UnusedServerAction,
+    item: &fallow_engine::results::UnusedServerAction,
     root: &Path,
 ) -> String {
     format!(
@@ -147,7 +153,10 @@ fn unused_server_action_key(
     )
 }
 
-fn unused_load_data_key_key(item: &fallow_core::results::UnusedLoadDataKey, root: &Path) -> String {
+fn unused_load_data_key_key(
+    item: &fallow_engine::results::UnusedLoadDataKey,
+    root: &Path,
+) -> String {
     format!(
         "unused-load-data-key:{}:{}",
         relative_key_path(&item.path, root),
@@ -155,7 +164,7 @@ fn unused_load_data_key_key(item: &fallow_core::results::UnusedLoadDataKey, root
     )
 }
 
-fn route_collision_key(item: &fallow_core::results::RouteCollision, root: &Path) -> String {
+fn route_collision_key(item: &fallow_engine::results::RouteCollision, root: &Path) -> String {
     format!(
         "route-collision:{}:{}",
         relative_key_path(&item.path, root),
@@ -164,7 +173,7 @@ fn route_collision_key(item: &fallow_core::results::RouteCollision, root: &Path)
 }
 
 fn dynamic_segment_name_conflict_key(
-    item: &fallow_core::results::DynamicSegmentNameConflict,
+    item: &fallow_engine::results::DynamicSegmentNameConflict,
     root: &Path,
 ) -> String {
     format!(
@@ -174,7 +183,10 @@ fn dynamic_segment_name_conflict_key(
     )
 }
 
-fn unlisted_dependency_key(item: &fallow_core::results::UnlistedDependency, root: &Path) -> String {
+fn unlisted_dependency_key(
+    item: &fallow_engine::results::UnlistedDependency,
+    root: &Path,
+) -> String {
     let mut sites = item
         .imported_from
         .iter()
@@ -198,7 +210,7 @@ fn unlisted_dependency_key(item: &fallow_core::results::UnlistedDependency, root
 
 fn unused_member_key(
     rule_id: &str,
-    item: &fallow_core::results::UnusedMember,
+    item: &fallow_engine::results::UnusedMember,
     root: &Path,
 ) -> String {
     format!(
@@ -211,7 +223,7 @@ fn unused_member_key(
 }
 
 fn unused_catalog_entry_key(
-    item: &fallow_core::results::UnusedCatalogEntry,
+    item: &fallow_engine::results::UnusedCatalogEntry,
     root: &Path,
 ) -> String {
     format!(
@@ -223,7 +235,10 @@ fn unused_catalog_entry_key(
     )
 }
 
-fn empty_catalog_group_key(item: &fallow_core::results::EmptyCatalogGroup, root: &Path) -> String {
+fn empty_catalog_group_key(
+    item: &fallow_engine::results::EmptyCatalogGroup,
+    root: &Path,
+) -> String {
     format!(
         "empty-catalog-group:{}:{}:{}",
         relative_key_path(&item.path, root),
@@ -244,7 +259,7 @@ fn sorted_relative_path_keys<'a>(
 }
 
 fn duplicate_export_key(
-    item: &fallow_core::results::DuplicateExportFinding,
+    item: &fallow_engine::results::DuplicateExportFinding,
     root: &Path,
 ) -> String {
     let mut locations = sorted_relative_path_keys(
@@ -260,7 +275,7 @@ fn duplicate_export_key(
 }
 
 fn circular_dependency_key(
-    item: &fallow_core::results::CircularDependencyFinding,
+    item: &fallow_engine::results::CircularDependencyFinding,
     root: &Path,
 ) -> String {
     let files = sorted_relative_path_keys(
@@ -270,10 +285,10 @@ fn circular_dependency_key(
     format!("circular-dependency:{}", files.join("|"))
 }
 
-fn re_export_cycle_key(item: &fallow_core::results::ReExportCycleFinding, root: &Path) -> String {
+fn re_export_cycle_key(item: &fallow_engine::results::ReExportCycleFinding, root: &Path) -> String {
     let kind = match item.cycle.kind {
-        fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
-        fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+        fallow_engine::results::ReExportCycleKind::MultiNode => "multi-node",
+        fallow_engine::results::ReExportCycleKind::SelfLoop => "self-loop",
     };
     let files = sorted_relative_path_keys(
         item.cycle.files.iter().map(std::path::PathBuf::as_path),
@@ -283,7 +298,7 @@ fn re_export_cycle_key(item: &fallow_core::results::ReExportCycleFinding, root: 
 }
 
 fn boundary_violation_key(
-    item: &fallow_core::results::BoundaryViolationFinding,
+    item: &fallow_engine::results::BoundaryViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -295,7 +310,7 @@ fn boundary_violation_key(
 }
 
 fn boundary_coverage_key(
-    item: &fallow_core::results::BoundaryCoverageViolationFinding,
+    item: &fallow_engine::results::BoundaryCoverageViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -305,7 +320,7 @@ fn boundary_coverage_key(
 }
 
 fn boundary_call_key(
-    item: &fallow_core::results::BoundaryCallViolationFinding,
+    item: &fallow_engine::results::BoundaryCallViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -316,7 +331,7 @@ fn boundary_call_key(
 }
 
 fn policy_violation_key(
-    item: &fallow_core::results::PolicyViolationFinding,
+    item: &fallow_engine::results::PolicyViolationFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -328,7 +343,7 @@ fn policy_violation_key(
     )
 }
 
-fn stale_suppression_key(item: &fallow_core::results::StaleSuppression, root: &Path) -> String {
+fn stale_suppression_key(item: &fallow_engine::results::StaleSuppression, root: &Path) -> String {
     let rule_id = if item.missing_reason {
         "missing-suppression-reason"
     } else {
@@ -342,7 +357,7 @@ fn stale_suppression_key(item: &fallow_core::results::StaleSuppression, root: &P
 }
 
 fn unresolved_catalog_reference_key(
-    item: &fallow_core::results::UnresolvedCatalogReferenceFinding,
+    item: &fallow_engine::results::UnresolvedCatalogReferenceFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -355,7 +370,7 @@ fn unresolved_catalog_reference_key(
 }
 
 fn unused_dependency_override_key(
-    item: &fallow_core::results::UnusedDependencyOverrideFinding,
+    item: &fallow_engine::results::UnusedDependencyOverrideFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -367,7 +382,7 @@ fn unused_dependency_override_key(
 }
 
 fn misconfigured_dependency_override_key(
-    item: &fallow_core::results::MisconfiguredDependencyOverrideFinding,
+    item: &fallow_engine::results::MisconfiguredDependencyOverrideFinding,
     root: &Path,
 ) -> String {
     format!(
@@ -400,24 +415,25 @@ fn misconfigured_dependency_override_key(
     reason = "field names mirror the AnalysisResults field names so the destructure stays shorthand"
 )]
 struct DependencyFindingSlices<'a> {
-    unused_dependencies: &'a [fallow_core::results::UnusedDependencyFinding],
-    unused_dev_dependencies: &'a [fallow_core::results::UnusedDevDependencyFinding],
-    unused_optional_dependencies: &'a [fallow_core::results::UnusedOptionalDependencyFinding],
-    unlisted_dependencies: &'a [fallow_core::results::UnlistedDependencyFinding],
-    type_only_dependencies: &'a [fallow_core::results::TypeOnlyDependencyFinding],
-    test_only_dependencies: &'a [fallow_core::results::TestOnlyDependencyFinding],
+    unused_dependencies: &'a [fallow_engine::results::UnusedDependencyFinding],
+    unused_dev_dependencies: &'a [fallow_engine::results::UnusedDevDependencyFinding],
+    unused_optional_dependencies: &'a [fallow_engine::results::UnusedOptionalDependencyFinding],
+    unlisted_dependencies: &'a [fallow_engine::results::UnlistedDependencyFinding],
+    type_only_dependencies: &'a [fallow_engine::results::TypeOnlyDependencyFinding],
+    test_only_dependencies: &'a [fallow_engine::results::TestOnlyDependencyFinding],
 }
 
 /// The six framework-specific finding slices, bundled so the framework
 /// dispatcher takes one parameter instead of six.
 #[derive(Clone, Copy)]
 struct FrameworkFindingSlices<'a> {
-    unprovided_injects: &'a [fallow_core::results::UnprovidedInjectFinding],
-    unrendered_components: &'a [fallow_core::results::UnrenderedComponentFinding],
-    unused_server_actions: &'a [fallow_core::results::UnusedServerActionFinding],
-    unused_load_data_keys: &'a [fallow_core::results::UnusedLoadDataKeyFinding],
-    route_collisions: &'a [fallow_core::results::RouteCollisionFinding],
-    dynamic_segment_name_conflicts: &'a [fallow_core::results::DynamicSegmentNameConflictFinding],
+    unprovided_injects: &'a [fallow_engine::results::UnprovidedInjectFinding],
+    unrendered_components: &'a [fallow_engine::results::UnrenderedComponentFinding],
+    unused_server_actions: &'a [fallow_engine::results::UnusedServerActionFinding],
+    unused_load_data_keys: &'a [fallow_engine::results::UnusedLoadDataKeyFinding],
+    route_collisions: &'a [fallow_engine::results::RouteCollisionFinding],
+    dynamic_segment_name_conflicts:
+        &'a [fallow_engine::results::DynamicSegmentNameConflictFinding],
 }
 
 /// `dead_code_keys`, `retain_introduced_dead_code`.
@@ -428,7 +444,7 @@ struct FrameworkFindingSlices<'a> {
 /// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` derives
 /// backwards-compatible aliases from `fallow schema` `ts_alias` rows.
 pub(super) fn dead_code_keys(
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
 ) -> FxHashSet<String> {
     let mut collector = DeadCodeKeyCollector::new(root);
@@ -441,8 +457,8 @@ impl DeadCodeKeyCollector<'_> {
         clippy::too_many_lines,
         reason = "flat field-by-field destructure of the large AnalysisResults struct (with per-field provenance comments) plus straight-line dispatch; length tracks the field count, not branching"
     )]
-    fn add_all_findings(&mut self, results: &fallow_core::results::AnalysisResults) {
-        let fallow_core::results::AnalysisResults {
+    fn add_all_findings(&mut self, results: &fallow_engine::results::AnalysisResults) {
+        let fallow_engine::results::AnalysisResults {
             unused_files,
             unused_exports,
             unused_types,
@@ -604,10 +620,10 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_core_findings(
         &mut self,
-        unused_files: &[fallow_core::results::UnusedFileFinding],
-        unused_exports: &[fallow_core::results::UnusedExportFinding],
-        unused_types: &[fallow_core::results::UnusedTypeFinding],
-        private_type_leaks: &[fallow_core::results::PrivateTypeLeakFinding],
+        unused_files: &[fallow_engine::results::UnusedFileFinding],
+        unused_exports: &[fallow_engine::results::UnusedExportFinding],
+        unused_types: &[fallow_engine::results::UnusedTypeFinding],
+        private_type_leaks: &[fallow_engine::results::PrivateTypeLeakFinding],
     ) {
         self.add_unused_files(unused_files);
         self.add_unused_exports(unused_exports);
@@ -617,9 +633,9 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_client_directive_findings(
         &mut self,
-        invalid_client_exports: &[fallow_core::results::InvalidClientExportFinding],
-        mixed_client_server_barrels: &[fallow_core::results::MixedClientServerBarrelFinding],
-        misplaced_directives: &[fallow_core::results::MisplacedDirectiveFinding],
+        invalid_client_exports: &[fallow_engine::results::InvalidClientExportFinding],
+        mixed_client_server_barrels: &[fallow_engine::results::MixedClientServerBarrelFinding],
+        misplaced_directives: &[fallow_engine::results::MisplacedDirectiveFinding],
     ) {
         self.add_invalid_client_exports(invalid_client_exports);
         self.add_mixed_client_server_barrels(mixed_client_server_barrels);
@@ -645,8 +661,8 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_dependency_override_findings(
         &mut self,
-        unused_dependency_overrides: &[fallow_core::results::UnusedDependencyOverrideFinding],
-        misconfigured_dependency_overrides: &[fallow_core::results::MisconfiguredDependencyOverrideFinding],
+        unused_dependency_overrides: &[fallow_engine::results::UnusedDependencyOverrideFinding],
+        misconfigured_dependency_overrides: &[fallow_engine::results::MisconfiguredDependencyOverrideFinding],
     ) {
         self.add_unused_dependency_overrides(unused_dependency_overrides);
         self.add_misconfigured_dependency_overrides(misconfigured_dependency_overrides);
@@ -654,9 +670,9 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_member_findings(
         &mut self,
-        unused_enum_members: &[fallow_core::results::UnusedEnumMemberFinding],
-        unused_class_members: &[fallow_core::results::UnusedClassMemberFinding],
-        unused_store_members: &[fallow_core::results::UnusedStoreMemberFinding],
+        unused_enum_members: &[fallow_engine::results::UnusedEnumMemberFinding],
+        unused_class_members: &[fallow_engine::results::UnusedClassMemberFinding],
+        unused_store_members: &[fallow_engine::results::UnusedStoreMemberFinding],
     ) {
         self.add_unused_enum_members(unused_enum_members);
         self.add_unused_class_members(unused_class_members);
@@ -665,11 +681,11 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_component_contract_findings(
         &mut self,
-        unused_component_props: &[fallow_core::results::UnusedComponentPropFinding],
-        unused_component_emits: &[fallow_core::results::UnusedComponentEmitFinding],
-        unused_component_inputs: &[fallow_core::results::UnusedComponentInputFinding],
-        unused_component_outputs: &[fallow_core::results::UnusedComponentOutputFinding],
-        unused_svelte_events: &[fallow_core::results::UnusedSvelteEventFinding],
+        unused_component_props: &[fallow_engine::results::UnusedComponentPropFinding],
+        unused_component_emits: &[fallow_engine::results::UnusedComponentEmitFinding],
+        unused_component_inputs: &[fallow_engine::results::UnusedComponentInputFinding],
+        unused_component_outputs: &[fallow_engine::results::UnusedComponentOutputFinding],
+        unused_svelte_events: &[fallow_engine::results::UnusedSvelteEventFinding],
     ) {
         self.add_unused_component_props(unused_component_props);
         self.add_unused_component_emits(unused_component_emits);
@@ -680,10 +696,10 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_graph_findings(
         &mut self,
-        unresolved_imports: &[fallow_core::results::UnresolvedImportFinding],
-        duplicate_exports: &[fallow_core::results::DuplicateExportFinding],
-        circular_dependencies: &[fallow_core::results::CircularDependencyFinding],
-        re_export_cycles: &[fallow_core::results::ReExportCycleFinding],
+        unresolved_imports: &[fallow_engine::results::UnresolvedImportFinding],
+        duplicate_exports: &[fallow_engine::results::DuplicateExportFinding],
+        circular_dependencies: &[fallow_engine::results::CircularDependencyFinding],
+        re_export_cycles: &[fallow_engine::results::ReExportCycleFinding],
     ) {
         self.add_unresolved_imports(unresolved_imports);
         self.add_duplicate_exports(duplicate_exports);
@@ -693,11 +709,11 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_boundary_findings(
         &mut self,
-        boundary_violations: &[fallow_core::results::BoundaryViolationFinding],
-        boundary_coverage_violations: &[fallow_core::results::BoundaryCoverageViolationFinding],
-        boundary_call_violations: &[fallow_core::results::BoundaryCallViolationFinding],
-        policy_violations: &[fallow_core::results::PolicyViolationFinding],
-        stale_suppressions: &[fallow_core::results::StaleSuppression],
+        boundary_violations: &[fallow_engine::results::BoundaryViolationFinding],
+        boundary_coverage_violations: &[fallow_engine::results::BoundaryCoverageViolationFinding],
+        boundary_call_violations: &[fallow_engine::results::BoundaryCallViolationFinding],
+        policy_violations: &[fallow_engine::results::PolicyViolationFinding],
+        stale_suppressions: &[fallow_engine::results::StaleSuppression],
     ) {
         self.add_boundary_violations(boundary_violations);
         self.add_boundary_coverage_violations(boundary_coverage_violations);
@@ -708,9 +724,9 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_catalog_findings(
         &mut self,
-        unresolved_catalog_references: &[fallow_core::results::UnresolvedCatalogReferenceFinding],
-        unused_catalog_entries: &[fallow_core::results::UnusedCatalogEntryFinding],
-        empty_catalog_groups: &[fallow_core::results::EmptyCatalogGroupFinding],
+        unresolved_catalog_references: &[fallow_engine::results::UnresolvedCatalogReferenceFinding],
+        unused_catalog_entries: &[fallow_engine::results::UnusedCatalogEntryFinding],
+        empty_catalog_groups: &[fallow_engine::results::EmptyCatalogGroupFinding],
     ) {
         self.add_unresolved_catalog_references(unresolved_catalog_references);
         self.add_unused_catalog_entries(unused_catalog_entries);
@@ -734,7 +750,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         self.add_dynamic_segment_name_conflicts(dynamic_segment_name_conflicts);
     }
 
-    fn add_unused_files(&mut self, items: &[fallow_core::results::UnusedFileFinding]) {
+    fn add_unused_files(&mut self, items: &[fallow_engine::results::UnusedFileFinding]) {
         for item in items {
             self.insert(format!(
                 "unused-file:{}",
@@ -743,7 +759,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
-    fn add_unused_exports(&mut self, items: &[fallow_core::results::UnusedExportFinding]) {
+    fn add_unused_exports(&mut self, items: &[fallow_engine::results::UnusedExportFinding]) {
         for item in items {
             self.insert(format!(
                 "unused-export:{}:{}",
@@ -753,7 +769,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
-    fn add_unused_types(&mut self, items: &[fallow_core::results::UnusedTypeFinding]) {
+    fn add_unused_types(&mut self, items: &[fallow_engine::results::UnusedTypeFinding]) {
         for item in items {
             self.insert(format!(
                 "unused-type:{}:{}",
@@ -763,7 +779,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
-    fn add_private_type_leaks(&mut self, items: &[fallow_core::results::PrivateTypeLeakFinding]) {
+    fn add_private_type_leaks(&mut self, items: &[fallow_engine::results::PrivateTypeLeakFinding]) {
         for item in items {
             self.insert(format!(
                 "private-type-leak:{}:{}:{}",
@@ -776,7 +792,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_invalid_client_exports(
         &mut self,
-        items: &[fallow_core::results::InvalidClientExportFinding],
+        items: &[fallow_engine::results::InvalidClientExportFinding],
     ) {
         for item in items {
             self.insert(invalid_client_export_key(&item.export, self.root));
@@ -785,7 +801,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_mixed_client_server_barrels(
         &mut self,
-        items: &[fallow_core::results::MixedClientServerBarrelFinding],
+        items: &[fallow_engine::results::MixedClientServerBarrelFinding],
     ) {
         for item in items {
             self.insert(mixed_client_server_barrel_key(&item.barrel, self.root));
@@ -794,14 +810,17 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_misplaced_directives(
         &mut self,
-        items: &[fallow_core::results::MisplacedDirectiveFinding],
+        items: &[fallow_engine::results::MisplacedDirectiveFinding],
     ) {
         for item in items {
             self.insert(misplaced_directive_key(&item.directive_site, self.root));
         }
     }
 
-    fn add_unprovided_injects(&mut self, items: &[fallow_core::results::UnprovidedInjectFinding]) {
+    fn add_unprovided_injects(
+        &mut self,
+        items: &[fallow_engine::results::UnprovidedInjectFinding],
+    ) {
         for item in items {
             self.insert(unprovided_inject_key(&item.inject, self.root));
         }
@@ -809,7 +828,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unrendered_components(
         &mut self,
-        items: &[fallow_core::results::UnrenderedComponentFinding],
+        items: &[fallow_engine::results::UnrenderedComponentFinding],
     ) {
         for item in items {
             self.insert(unrendered_component_key(&item.component, self.root));
@@ -818,7 +837,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_component_props(
         &mut self,
-        items: &[fallow_core::results::UnusedComponentPropFinding],
+        items: &[fallow_engine::results::UnusedComponentPropFinding],
     ) {
         for item in items {
             self.insert(unused_component_prop_key(&item.prop, self.root));
@@ -827,7 +846,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_component_emits(
         &mut self,
-        items: &[fallow_core::results::UnusedComponentEmitFinding],
+        items: &[fallow_engine::results::UnusedComponentEmitFinding],
     ) {
         for item in items {
             self.insert(unused_component_emit_key(&item.emit, self.root));
@@ -836,7 +855,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_component_inputs(
         &mut self,
-        items: &[fallow_core::results::UnusedComponentInputFinding],
+        items: &[fallow_engine::results::UnusedComponentInputFinding],
     ) {
         for item in items {
             self.insert(unused_component_input_key(&item.input, self.root));
@@ -845,7 +864,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_component_outputs(
         &mut self,
-        items: &[fallow_core::results::UnusedComponentOutputFinding],
+        items: &[fallow_engine::results::UnusedComponentOutputFinding],
     ) {
         for item in items {
             self.insert(unused_component_output_key(&item.output, self.root));
@@ -854,7 +873,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_svelte_events(
         &mut self,
-        items: &[fallow_core::results::UnusedSvelteEventFinding],
+        items: &[fallow_engine::results::UnusedSvelteEventFinding],
     ) {
         for item in items {
             self.insert(unused_svelte_event_key(&item.event, self.root));
@@ -863,7 +882,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_server_actions(
         &mut self,
-        items: &[fallow_core::results::UnusedServerActionFinding],
+        items: &[fallow_engine::results::UnusedServerActionFinding],
     ) {
         for item in items {
             self.insert(unused_server_action_key(&item.action, self.root));
@@ -872,14 +891,14 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_load_data_keys(
         &mut self,
-        items: &[fallow_core::results::UnusedLoadDataKeyFinding],
+        items: &[fallow_engine::results::UnusedLoadDataKeyFinding],
     ) {
         for item in items {
             self.insert(unused_load_data_key_key(&item.key, self.root));
         }
     }
 
-    fn add_route_collisions(&mut self, items: &[fallow_core::results::RouteCollisionFinding]) {
+    fn add_route_collisions(&mut self, items: &[fallow_engine::results::RouteCollisionFinding]) {
         for item in items {
             self.insert(route_collision_key(&item.collision, self.root));
         }
@@ -887,14 +906,17 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_dynamic_segment_name_conflicts(
         &mut self,
-        items: &[fallow_core::results::DynamicSegmentNameConflictFinding],
+        items: &[fallow_engine::results::DynamicSegmentNameConflictFinding],
     ) {
         for item in items {
             self.insert(dynamic_segment_name_conflict_key(&item.conflict, self.root));
         }
     }
 
-    fn add_unused_dependencies(&mut self, items: &[fallow_core::results::UnusedDependencyFinding]) {
+    fn add_unused_dependencies(
+        &mut self,
+        items: &[fallow_engine::results::UnusedDependencyFinding],
+    ) {
         for item in items {
             self.insert(unused_dependency_key(&item.dep, self.root));
         }
@@ -902,7 +924,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_dev_dependencies(
         &mut self,
-        items: &[fallow_core::results::UnusedDevDependencyFinding],
+        items: &[fallow_engine::results::UnusedDevDependencyFinding],
     ) {
         for item in items {
             self.insert(unused_dependency_key(&item.dep, self.root));
@@ -911,14 +933,17 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_optional_dependencies(
         &mut self,
-        items: &[fallow_core::results::UnusedOptionalDependencyFinding],
+        items: &[fallow_engine::results::UnusedOptionalDependencyFinding],
     ) {
         for item in items {
             self.insert(unused_dependency_key(&item.dep, self.root));
         }
     }
 
-    fn add_unused_enum_members(&mut self, items: &[fallow_core::results::UnusedEnumMemberFinding]) {
+    fn add_unused_enum_members(
+        &mut self,
+        items: &[fallow_engine::results::UnusedEnumMemberFinding],
+    ) {
         for item in items {
             self.insert(unused_member_key(
                 "unused-enum-member",
@@ -930,7 +955,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_class_members(
         &mut self,
-        items: &[fallow_core::results::UnusedClassMemberFinding],
+        items: &[fallow_engine::results::UnusedClassMemberFinding],
     ) {
         for item in items {
             self.insert(unused_member_key(
@@ -943,7 +968,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_store_members(
         &mut self,
-        items: &[fallow_core::results::UnusedStoreMemberFinding],
+        items: &[fallow_engine::results::UnusedStoreMemberFinding],
     ) {
         for item in items {
             self.insert(unused_member_key(
@@ -954,7 +979,10 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
-    fn add_unresolved_imports(&mut self, items: &[fallow_core::results::UnresolvedImportFinding]) {
+    fn add_unresolved_imports(
+        &mut self,
+        items: &[fallow_engine::results::UnresolvedImportFinding],
+    ) {
         for item in items {
             self.insert(format!(
                 "unresolved-import:{}:{}",
@@ -966,14 +994,14 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unlisted_dependencies(
         &mut self,
-        items: &[fallow_core::results::UnlistedDependencyFinding],
+        items: &[fallow_engine::results::UnlistedDependencyFinding],
     ) {
         for item in items {
             self.insert(unlisted_dependency_key(&item.dep, self.root));
         }
     }
 
-    fn add_duplicate_exports(&mut self, items: &[fallow_core::results::DuplicateExportFinding]) {
+    fn add_duplicate_exports(&mut self, items: &[fallow_engine::results::DuplicateExportFinding]) {
         for item in items {
             self.insert(duplicate_export_key(item, self.root));
         }
@@ -981,7 +1009,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_type_only_dependencies(
         &mut self,
-        items: &[fallow_core::results::TypeOnlyDependencyFinding],
+        items: &[fallow_engine::results::TypeOnlyDependencyFinding],
     ) {
         for item in items {
             self.insert(format!(
@@ -994,7 +1022,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_test_only_dependencies(
         &mut self,
-        items: &[fallow_core::results::TestOnlyDependencyFinding],
+        items: &[fallow_engine::results::TestOnlyDependencyFinding],
     ) {
         for item in items {
             self.insert(format!(
@@ -1007,14 +1035,14 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_circular_dependencies(
         &mut self,
-        items: &[fallow_core::results::CircularDependencyFinding],
+        items: &[fallow_engine::results::CircularDependencyFinding],
     ) {
         for item in items {
             self.insert(circular_dependency_key(item, self.root));
         }
     }
 
-    fn add_re_export_cycles(&mut self, items: &[fallow_core::results::ReExportCycleFinding]) {
+    fn add_re_export_cycles(&mut self, items: &[fallow_engine::results::ReExportCycleFinding]) {
         for item in items {
             self.insert(re_export_cycle_key(item, self.root));
         }
@@ -1022,7 +1050,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_boundary_violations(
         &mut self,
-        items: &[fallow_core::results::BoundaryViolationFinding],
+        items: &[fallow_engine::results::BoundaryViolationFinding],
     ) {
         for item in items {
             self.insert(boundary_violation_key(item, self.root));
@@ -1031,7 +1059,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_boundary_coverage_violations(
         &mut self,
-        items: &[fallow_core::results::BoundaryCoverageViolationFinding],
+        items: &[fallow_engine::results::BoundaryCoverageViolationFinding],
     ) {
         for item in items {
             self.insert(boundary_coverage_key(item, self.root));
@@ -1040,20 +1068,20 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_boundary_call_violations(
         &mut self,
-        items: &[fallow_core::results::BoundaryCallViolationFinding],
+        items: &[fallow_engine::results::BoundaryCallViolationFinding],
     ) {
         for item in items {
             self.insert(boundary_call_key(item, self.root));
         }
     }
 
-    fn add_policy_violations(&mut self, items: &[fallow_core::results::PolicyViolationFinding]) {
+    fn add_policy_violations(&mut self, items: &[fallow_engine::results::PolicyViolationFinding]) {
         for item in items {
             self.insert(policy_violation_key(item, self.root));
         }
     }
 
-    fn add_stale_suppressions(&mut self, items: &[fallow_core::results::StaleSuppression]) {
+    fn add_stale_suppressions(&mut self, items: &[fallow_engine::results::StaleSuppression]) {
         for item in items {
             self.insert(stale_suppression_key(item, self.root));
         }
@@ -1061,7 +1089,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unresolved_catalog_references(
         &mut self,
-        items: &[fallow_core::results::UnresolvedCatalogReferenceFinding],
+        items: &[fallow_engine::results::UnresolvedCatalogReferenceFinding],
     ) {
         for item in items {
             self.insert(unresolved_catalog_reference_key(item, self.root));
@@ -1070,7 +1098,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_catalog_entries(
         &mut self,
-        items: &[fallow_core::results::UnusedCatalogEntryFinding],
+        items: &[fallow_engine::results::UnusedCatalogEntryFinding],
     ) {
         for item in items {
             self.insert(unused_catalog_entry_key(&item.entry, self.root));
@@ -1079,7 +1107,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_empty_catalog_groups(
         &mut self,
-        items: &[fallow_core::results::EmptyCatalogGroupFinding],
+        items: &[fallow_engine::results::EmptyCatalogGroupFinding],
     ) {
         for item in items {
             self.insert(empty_catalog_group_key(&item.group, self.root));
@@ -1088,7 +1116,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_unused_dependency_overrides(
         &mut self,
-        items: &[fallow_core::results::UnusedDependencyOverrideFinding],
+        items: &[fallow_engine::results::UnusedDependencyOverrideFinding],
     ) {
         for item in items {
             self.insert(unused_dependency_override_key(item, self.root));
@@ -1097,7 +1125,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 
     fn add_misconfigured_dependency_overrides(
         &mut self,
-        items: &[fallow_core::results::MisconfiguredDependencyOverrideFinding],
+        items: &[fallow_engine::results::MisconfiguredDependencyOverrideFinding],
     ) {
         for item in items {
             self.insert(misconfigured_dependency_override_key(item, self.root));
@@ -1125,7 +1153,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 /// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` derives
 /// backwards-compatible aliases from `fallow schema` `ts_alias` rows.
 pub(super) fn retain_introduced_dead_code(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut fallow_engine::results::AnalysisResults,
     root: &Path,
     base: Option<&FxHashSet<String>>,
 ) {
@@ -1161,7 +1189,7 @@ pub(super) fn retain_introduced_dead_code(
 }
 
 fn introduced_dead_code_keys(
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) -> FxHashSet<String> {
@@ -1171,8 +1199,8 @@ fn introduced_dead_code_keys(
         .collect()
 }
 
-fn classify_introduced_dead_code_fields(results: &fallow_core::results::AnalysisResults) {
-    let fallow_core::results::AnalysisResults {
+fn classify_introduced_dead_code_fields(results: &fallow_engine::results::AnalysisResults) {
+    let fallow_engine::results::AnalysisResults {
         unused_files: _unused_files,
         unused_exports: _unused_exports,
         unused_types: _unused_types,
@@ -1250,9 +1278,9 @@ fn classify_introduced_dead_code_fields(results: &fallow_core::results::Analysis
 }
 
 fn retain_introduced_fast_paths(
-    unused_files: &mut Vec<fallow_core::results::UnusedFileFinding>,
-    unused_exports: &mut Vec<fallow_core::results::UnusedExportFinding>,
-    unused_types: &mut Vec<fallow_core::results::UnusedTypeFinding>,
+    unused_files: &mut Vec<fallow_engine::results::UnusedFileFinding>,
+    unused_exports: &mut Vec<fallow_engine::results::UnusedExportFinding>,
+    unused_types: &mut Vec<fallow_engine::results::UnusedTypeFinding>,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1283,7 +1311,7 @@ fn keep_introduced(introduced: &FxHashSet<String>, key: impl AsRef<str>) -> bool
 }
 
 fn retain_introduced_core_findings(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut fallow_engine::results::AnalysisResults,
     root: &Path,
     introduced: &FxHashSet<String>,
 ) {
@@ -1329,7 +1357,7 @@ fn retain_introduced_core_findings(
 }
 
 fn retain_introduced_dependency_and_graph_findings(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut fallow_engine::results::AnalysisResults,
     root: &Path,
     introduced: &FxHashSet<String>,
 ) {
@@ -1392,7 +1420,7 @@ fn retain_introduced_dependency_and_graph_findings(
 }
 
 fn retain_introduced_workspace_findings(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut fallow_engine::results::AnalysisResults,
     root: &Path,
     introduced: &FxHashSet<String>,
 ) {
@@ -1417,7 +1445,7 @@ fn retain_introduced_workspace_findings(
 }
 
 fn retain_introduced_framework_findings(
-    results: &mut fallow_core::results::AnalysisResults,
+    results: &mut fallow_engine::results::AnalysisResults,
     root: &Path,
     introduced: &FxHashSet<String>,
 ) {
@@ -1494,7 +1522,7 @@ where
 
 pub(super) fn annotate_dead_code_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1514,7 +1542,7 @@ pub(super) fn annotate_dead_code_json(
 
 struct DeadCodeJsonAnnotator<'a> {
     json: &'a mut serde_json::Value,
-    results: &'a fallow_core::results::AnalysisResults,
+    results: &'a fallow_engine::results::AnalysisResults,
     root: &'a Path,
     base: &'a FxHashSet<String>,
 }
@@ -1816,7 +1844,7 @@ impl DeadCodeJsonAnnotator<'_> {
 
 fn annotate_dependency_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1848,7 +1876,7 @@ fn annotate_dependency_json(
 
 fn annotate_member_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1886,7 +1914,7 @@ fn annotate_member_json(
 
 fn annotate_graph_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1897,7 +1925,7 @@ fn annotate_graph_json(
 
 fn annotate_cycle_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1920,8 +1948,8 @@ fn annotate_cycle_json(
         "re_export_cycles",
         results.re_export_cycles.iter().map(|item| {
             let kind = match item.cycle.kind {
-                fallow_core::results::ReExportCycleKind::MultiNode => "multi-node",
-                fallow_core::results::ReExportCycleKind::SelfLoop => "self-loop",
+                fallow_engine::results::ReExportCycleKind::MultiNode => "multi-node",
+                fallow_engine::results::ReExportCycleKind::SelfLoop => "self-loop",
             };
             let mut files: Vec<String> = item
                 .cycle
@@ -1937,7 +1965,7 @@ fn annotate_cycle_json(
 
 fn annotate_boundary_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -1987,7 +2015,7 @@ fn annotate_boundary_json(
 
 fn annotate_policy_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -2019,7 +2047,7 @@ fn annotate_policy_json(
 
 fn annotate_catalog_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -2030,7 +2058,7 @@ fn annotate_catalog_json(
 /// Annotate catalog-reference, catalog-entry, and empty-group issue arrays.
 fn annotate_catalog_entry_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -2071,7 +2099,7 @@ fn annotate_catalog_entry_json(
 /// Annotate dependency-override issue arrays (unused and misconfigured).
 fn annotate_dependency_override_json(
     json: &mut serde_json::Value,
-    results: &fallow_core::results::AnalysisResults,
+    results: &fallow_engine::results::AnalysisResults,
     root: &Path,
     base: &FxHashSet<String>,
 ) {
@@ -2218,7 +2246,7 @@ mod tests {
 
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport};
     use fallow_core::extract::MemberKind;
-    use fallow_core::results::{
+    use fallow_engine::results::{
         AnalysisResults, BoundaryCallViolation, BoundaryCallViolationFinding,
         BoundaryCoverageViolation, BoundaryCoverageViolationFinding, BoundaryViolation,
         BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
