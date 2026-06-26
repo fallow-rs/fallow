@@ -51,13 +51,24 @@ pub struct HealthJsonReportInput<'a> {
 pub struct ProgrammaticHealthRun {
     pub analysis: HealthAnalysisResult,
     pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
-    pub next_steps: Vec<NextStep>,
-    pub envelope_mode: RootEnvelopeMode,
+    pub next_step_facts: ProgrammaticHealthNextStepFacts,
     pub telemetry_analysis_run_id: Option<String>,
 }
 
-/// Temporary runner boundary for programmatic health while execution moves
-/// from the CLI crate into the engine/API stack.
+/// Runtime probes used by the API-owned programmatic health output assembly.
+///
+/// The runner still supplies environment and project facts while health
+/// execution is moving out of the CLI crate. The stable command strings and
+/// output ordering are owned by `fallow-output`.
+pub struct ProgrammaticHealthNextStepFacts {
+    pub suggestions_enabled: bool,
+    pub offer_setup: bool,
+    pub impact_digest: Option<fallow_output::ImpactDigestCounts>,
+    pub audit_changed: bool,
+}
+
+/// Temporary runner boundary for programmatic health while execution moves from
+/// the CLI crate into the engine/API stack.
 pub trait ProgrammaticHealthRunner {
     /// Run health analysis for public programmatic options.
     ///
@@ -179,7 +190,9 @@ pub fn serialize_health_report_json(
 /// Run programmatic health / complexity through the API-owned output boundary.
 ///
 /// The concrete runner is injected while the health implementation is still
-/// being migrated out of the CLI crate.
+/// being migrated out of the CLI crate. Runner-owned responsibilities are
+/// limited to typed analysis plus runtime facts; this API crate owns the final
+/// JSON contract assembly.
 ///
 /// # Errors
 ///
@@ -192,6 +205,14 @@ pub fn compute_complexity_with_runner(
     crate::validate_complexity_options(options)?;
     let result = runner.run_programmatic_health(options)?;
     let root = result.analysis.config.root.clone();
+    let next_steps =
+        fallow_output::build_health_next_steps(fallow_output::build_health_next_steps_input(
+            &result.analysis.report,
+            result.next_step_facts.suggestions_enabled,
+            result.next_step_facts.offer_setup,
+            result.next_step_facts.impact_digest,
+            result.next_step_facts.audit_changed,
+        ));
     let mut output = serialize_health_report_json(HealthJsonReportInput {
         report: result.analysis.report,
         root: &root,
@@ -200,8 +221,8 @@ pub fn compute_complexity_with_runner(
         grouped_by: None,
         groups: None,
         workspace_diagnostics: result.workspace_diagnostics,
-        next_steps: result.next_steps,
-        envelope_mode: result.envelope_mode,
+        next_steps,
+        envelope_mode: root_envelope_mode(options.analysis.legacy_envelope),
     })
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize health report: {err}"), 2)
@@ -1357,7 +1378,6 @@ mod tests {
 
     struct FakeHealthRunner {
         root: PathBuf,
-        envelope_mode: RootEnvelopeMode,
         telemetry_analysis_run_id: Option<String>,
     }
 
@@ -1394,12 +1414,15 @@ mod tests {
                 workspace_diagnostics: vec![WorkspaceDiagnosticOutput(serde_json::json!({
                     "path": self.root.join("package.json")
                 }))],
-                next_steps: vec![NextStep {
-                    id: "inspect-health".to_string(),
-                    command: "fallow health --format json".to_string(),
-                    reason: "inspect health details".to_string(),
-                }],
-                envelope_mode: self.envelope_mode,
+                next_step_facts: ProgrammaticHealthNextStepFacts {
+                    suggestions_enabled: true,
+                    offer_setup: false,
+                    impact_digest: Some(fallow_output::ImpactDigestCounts {
+                        containment_count: 1,
+                        resolved_total: 0,
+                    }),
+                    audit_changed: false,
+                },
                 telemetry_analysis_run_id: self.telemetry_analysis_run_id.clone(),
             })
         }
@@ -1473,7 +1496,6 @@ mod tests {
             },
             &FakeHealthRunner {
                 root,
-                envelope_mode: RootEnvelopeMode::Tagged,
                 telemetry_analysis_run_id: Some("run-123".to_string()),
             },
         )
@@ -1481,7 +1503,7 @@ mod tests {
 
         assert_eq!(json["kind"], "health");
         assert_eq!(json["workspace_diagnostics"][0]["path"], "package.json");
-        assert_eq!(json["next_steps"][0]["id"], "inspect-health");
+        assert_eq!(json["next_steps"][0]["id"], "impact-report");
         assert_eq!(
             json["_meta"]["telemetry"]["analysis_run_id"],
             serde_json::Value::from("run-123")
