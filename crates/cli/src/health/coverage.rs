@@ -244,7 +244,7 @@ pub fn prepare_options(
 pub(super) struct RuntimeCoverageAnalysisInput<'a> {
     pub root: &'a Path,
     pub modules: &'a [fallow_types::extract::ModuleInfo],
-    pub analysis_output: &'a fallow_core::AnalysisOutput,
+    pub analysis_output: &'a fallow_engine::DeadCodeAnalysisArtifacts,
     pub istanbul_coverage: Option<&'a IstanbulCoverage>,
     pub file_paths: &'a FxHashMap<fallow_types::discover::FileId, &'a PathBuf>,
     pub ignore_set: &'a GlobSet,
@@ -928,7 +928,7 @@ fn assemble_request(
 
 fn build_static_signal_index(
     modules: &[fallow_types::extract::ModuleInfo],
-    analysis_output: &fallow_core::AnalysisOutput,
+    analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts,
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
 ) -> Result<StaticSignalIndex, String> {
     let graph = analysis_output
@@ -961,7 +961,7 @@ fn build_static_signal_index(
 /// Seed the signal index with unused-file and unused-export dead-code signals.
 fn index_dead_code_signals(
     index: &mut StaticSignalIndex,
-    analysis_output: &fallow_core::AnalysisOutput,
+    analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts,
 ) {
     for file in &analysis_output.results.unused_files {
         index.unused_files.insert(file.file.path.clone());
@@ -2129,10 +2129,6 @@ const fn verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 }
 
 #[cfg(test)]
-#[expect(
-    deprecated,
-    reason = "ADR-008 deprecates fallow_core::analyze_with_parse_result externally; tests exercise the workspace path dependency"
-)]
 mod tests {
     use super::{
         AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, PackageManagerOutput, RemappedFnKey,
@@ -2159,8 +2155,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use url::Url;
 
-    fn empty_analysis_output() -> fallow_core::AnalysisOutput {
-        fallow_core::AnalysisOutput {
+    fn empty_analysis_output() -> fallow_engine::DeadCodeAnalysisArtifacts {
+        fallow_engine::DeadCodeAnalysisArtifacts {
             results: fallow_core::results::AnalysisResults::default(),
             timings: None,
             graph: None,
@@ -3131,7 +3127,7 @@ mod tests {
         let parse_result = fallow_core::extract::parse_all_files(&files, None, true);
         let modules = parse_result.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
-        let analysis_output = fallow_core::analyze_with_parse_result(&config, &modules)
+        let analysis_output = fallow_engine::analyze_with_parse_result(&config, &modules)
             .unwrap_or_else(|err| panic!("failed to analyze temp project: {err}"));
         let static_signals = build_static_signal_index(&modules, &analysis_output, &file_paths)
             .unwrap_or_else(|err| panic!("failed to build static signal index: {err}"));

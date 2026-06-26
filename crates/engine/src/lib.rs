@@ -590,6 +590,24 @@ pub fn analyze_retaining_modules(
         .map_err(engine_error)
 }
 
+/// Run dead-code analysis from pre-parsed modules.
+///
+/// # Errors
+///
+/// Returns an error if discovery, graph construction, or analysis fails.
+pub fn analyze_with_parse_result(
+    config: &ResolvedConfig,
+    modules: &[ModuleInfo],
+) -> EngineResult<DeadCodeAnalysisArtifacts> {
+    #[expect(
+        deprecated,
+        reason = "fallow-engine is the typed migration boundary over the internal core backend"
+    )]
+    fallow_core::analyze_with_parse_result(config, modules)
+        .map(dead_code_artifacts)
+        .map_err(engine_error)
+}
+
 /// Run dead-code analysis with export usage and retained complexity artifacts.
 ///
 /// # Errors
@@ -623,7 +641,7 @@ pub fn health_shared_parse_data_from_artifacts(
     let (Some(modules), Some(files)) = (modules, files) else {
         return None;
     };
-    let analysis_output = graph.map(|graph| fallow_core::AnalysisOutput {
+    let analysis_output = graph.map(|graph| DeadCodeAnalysisArtifacts {
         results: results.clone(),
         timings: None,
         graph: Some(graph),
