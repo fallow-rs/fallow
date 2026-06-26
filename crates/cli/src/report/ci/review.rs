@@ -208,8 +208,12 @@ fn print_review_envelope_from_ci_issues(
     issues: &[CiIssue],
 ) -> ExitCode {
     let envelope = render_review_envelope(command, provider, issues);
-    let value = crate::output_envelope::serialize_named_root_output(envelope, "review-envelope")
-        .expect("ReviewEnvelopeOutput serializes infallibly");
+    let value = fallow_output::serialize_review_envelope_json_output(
+        envelope,
+        crate::output_envelope::EnvelopeMode::current().into(),
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    )
+    .expect("ReviewEnvelopeOutput serializes infallibly");
     emit_json(&value, "review envelope")
 }
 

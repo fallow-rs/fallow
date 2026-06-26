@@ -16,7 +16,6 @@ use crate::output_envelope::{
     CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutput,
     DupesOutputInput, EnvelopeMode, GroupByMode, WorkspaceDiagnosticOutput,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
-    serialize_named_root_output,
 };
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
@@ -120,7 +119,11 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         ),
     };
 
-    let mut output = match serialize_named_root_output(envelope, "dead-code-grouped") {
+    let mut output = match fallow_output::serialize_check_grouped_json_output(
+        envelope,
+        EnvelopeMode::current().into(),
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    ) {
         Ok(value) => value,
         Err(e) => {
             eprintln!("Error: failed to serialize grouped results: {e}");
@@ -185,7 +188,11 @@ fn build_json_with_config_fixable_and_meta(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    let mut output = serialize_named_root_output(envelope, "dead-code")?;
+    let mut output = fallow_output::serialize_check_json_output(
+        envelope,
+        EnvelopeMode::current().into(),
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    )?;
     postprocess_check_json(&mut output, root);
     Ok(output)
 }
@@ -533,7 +540,11 @@ pub fn build_duplication_json(
             workspace_diagnostics: workspace_diagnostics_for_output(root),
             next_steps,
         });
-    let mut output = serialize_named_root_output(envelope, "dupes")?;
+    let mut output = fallow_output::serialize_dupes_json_output(
+        envelope,
+        EnvelopeMode::current().into(),
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    )?;
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
 
@@ -583,7 +594,11 @@ pub fn build_grouped_duplication_json(
             workspace_diagnostics: workspace_diagnostics_for_output(root),
             next_steps,
         });
-    let mut output = serialize_named_root_output(envelope, "dupes")?;
+    let mut output = fallow_output::serialize_dupes_json_output(
+        envelope,
+        EnvelopeMode::current().into(),
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    )?;
     strip_root_prefix(&mut output, &root_prefix);
 
     let group_values: Vec<serde_json::Value> = grouping

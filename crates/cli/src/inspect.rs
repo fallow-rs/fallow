@@ -8,7 +8,7 @@ use crate::error::emit_error;
 use crate::output_envelope::{
     InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
     InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
-    InspectTargetDescriptor, serialize_named_root_output,
+    InspectTargetDescriptor,
 };
 use crate::report;
 use crate::report::sink::outln;
@@ -290,7 +290,11 @@ fn build_inspect_identity(
 fn emit_inspect_bundle(bundle: InspectOutput, opts: &InspectOptions<'_>) -> ExitCode {
     match opts.output {
         OutputFormat::Json => {
-            let value = match serialize_named_root_output(bundle, "inspect_target") {
+            let value = match fallow_output::serialize_inspect_json_output(
+                bundle,
+                crate::output_envelope::EnvelopeMode::current().into(),
+                crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+            ) {
                 Ok(value) => value,
                 Err(err) => {
                     return emit_error(

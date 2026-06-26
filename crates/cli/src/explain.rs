@@ -870,7 +870,11 @@ pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
                 how_to_fix: guide.how_to_fix.to_string(),
                 docs: rule_docs_url(rule),
             };
-            match crate::output_envelope::serialize_named_root_output(envelope, "explain") {
+            match fallow_output::serialize_explain_json_output(
+                envelope,
+                crate::output_envelope::EnvelopeMode::current().into(),
+                crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+            ) {
                 Ok(value) => crate::report::emit_json(&value, "explain"),
                 Err(e) => {
                     crate::error::emit_error(&format!("JSON serialization error: {e}"), 2, output)

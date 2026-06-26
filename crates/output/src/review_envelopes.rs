@@ -1,5 +1,6 @@
 //! Review integration output envelopes.
 
+use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 use serde::Serialize;
 
 /// Envelope emitted by `fallow --format review-github` / `review-gitlab`.
@@ -21,6 +22,30 @@ pub struct ReviewEnvelopeOutput {
     #[serde(default = "default_marker_regex_flags")]
     pub marker_regex_flags: String,
     pub meta: ReviewEnvelopeMeta,
+}
+
+fn serialize_review_contract_json_output<T: Serialize>(
+    output: T,
+    kind: &'static str,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serialize_named_json_output(output, kind, mode)?;
+    attach_telemetry_meta(&mut value, analysis_run_id);
+    Ok(value)
+}
+
+/// Serialize the review envelope contract emitted by CI review formats.
+///
+/// # Errors
+///
+/// Returns a serde error when the review envelope cannot be converted to JSON.
+pub fn serialize_review_envelope_json_output(
+    output: ReviewEnvelopeOutput,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_review_contract_json_output(output, "review-envelope", mode, analysis_run_id)
 }
 
 /// Default for [`ReviewEnvelopeOutput::marker_regex`].
@@ -226,6 +251,20 @@ pub struct ReviewReconcileOutput {
     pub unapplied_fingerprints: Vec<String>,
 }
 
+/// Serialize the review reconcile contract.
+///
+/// # Errors
+///
+/// Returns a serde error when the review reconcile output cannot be converted
+/// to JSON.
+pub fn serialize_review_reconcile_json_output(
+    output: ReviewReconcileOutput,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_review_contract_json_output(output, "review-reconcile", mode, analysis_run_id)
+}
+
 /// Schema-version discriminator for the review reconcile envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -233,4 +272,73 @@ pub enum ReviewReconcileSchema {
     /// First release of the review reconcile format.
     #[serde(rename = "fallow-review-reconcile/v1")]
     V1,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn review_envelope_json_output_uses_output_owned_root_contract() {
+        let output = ReviewEnvelopeOutput {
+            event: None,
+            body: "body".to_string(),
+            summary: ReviewEnvelopeSummary::default(),
+            comments: Vec::new(),
+            marker_regex: default_marker_regex(),
+            marker_regex_flags: default_marker_regex_flags(),
+            meta: ReviewEnvelopeMeta {
+                schema: ReviewEnvelopeSchema::V2,
+                provider: ReviewProvider::Github,
+                check_conclusion: None,
+            },
+        };
+
+        let value = serialize_review_envelope_json_output(
+            output,
+            RootEnvelopeMode::Tagged,
+            Some("run-review"),
+        )
+        .expect("review envelope should serialize");
+
+        assert_eq!(value["kind"], "review-envelope");
+        assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-review");
+    }
+
+    #[test]
+    fn review_reconcile_json_output_uses_output_owned_root_contract() {
+        let output = ReviewReconcileOutput {
+            schema: ReviewReconcileSchema::V1,
+            provider: ReviewProvider::Github,
+            target: None,
+            dry_run: true,
+            comments: 0,
+            current_fingerprints: 0,
+            existing_fingerprints: 0,
+            new_fingerprints: 0,
+            stale_fingerprints: 0,
+            new: Vec::new(),
+            stale: Vec::new(),
+            provider_warning: None,
+            resolution_comments_posted: 0,
+            threads_resolved: 0,
+            apply_hint: None,
+            apply_errors: Vec::new(),
+            failed_fingerprints: Vec::new(),
+            unapplied_fingerprints: Vec::new(),
+        };
+
+        let value = serialize_review_reconcile_json_output(
+            output,
+            RootEnvelopeMode::Tagged,
+            Some("run-reconcile"),
+        )
+        .expect("review reconcile should serialize");
+
+        assert_eq!(value["kind"], "review-reconcile");
+        assert_eq!(
+            value["_meta"]["telemetry"]["analysis_run_id"],
+            "run-reconcile"
+        );
+    }
 }

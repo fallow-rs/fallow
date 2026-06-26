@@ -314,9 +314,9 @@ fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
 
     let output = serde_json::Value::Object(result);
     let output = if has_boundaries {
-        match crate::output_envelope::serialize_named_root_output_without_telemetry(
+        match fallow_output::serialize_list_boundaries_json_output(
             output,
-            "list-boundaries",
+            crate::output_envelope::EnvelopeMode::current().into(),
         ) {
             Ok(value) => value,
             Err(err) => {
@@ -325,9 +325,9 @@ fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
             }
         }
     } else if workspace_only {
-        match crate::output_envelope::serialize_named_root_output_without_telemetry(
+        match fallow_output::serialize_list_workspaces_json_output(
             output,
-            "list-workspaces",
+            crate::output_envelope::EnvelopeMode::current().into(),
         ) {
             Ok(value) => value,
             Err(err) => {

@@ -1,5 +1,6 @@
 //! List command output envelopes.
 
+use crate::root_envelopes::{RootEnvelopeMode, serialize_named_json_output};
 use serde::Serialize;
 
 /// Envelope emitted by `fallow list --boundaries --format json`. Surfaces
@@ -105,4 +106,56 @@ pub struct BoundariesListLogicalGroup<Status, Rule> {
     pub original_zone_root: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub child_source_indices: Vec<usize>,
+}
+
+/// Serialize `fallow list --boundaries --format json`.
+///
+/// # Errors
+///
+/// Returns a serde error when the list output cannot be converted to JSON.
+pub fn serialize_list_boundaries_json_output<T: Serialize>(
+    output: T,
+    mode: RootEnvelopeMode,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_named_json_output(output, "list-boundaries", mode)
+}
+
+/// Serialize `fallow list --workspaces --format json`.
+///
+/// # Errors
+///
+/// Returns a serde error when the list output cannot be converted to JSON.
+pub fn serialize_list_workspaces_json_output<T: Serialize>(
+    output: T,
+    mode: RootEnvelopeMode,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_named_json_output(output, "list-workspaces", mode)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn list_boundaries_json_output_uses_output_owned_root_contract() {
+        let value = serialize_list_boundaries_json_output(
+            json!({"boundaries": {}}),
+            RootEnvelopeMode::Tagged,
+        )
+        .expect("list boundaries output should serialize");
+
+        assert_eq!(value["kind"], "list-boundaries");
+    }
+
+    #[test]
+    fn list_workspaces_json_output_uses_output_owned_root_contract() {
+        let value = serialize_list_workspaces_json_output(
+            json!({"workspace_count": 0, "workspaces": []}),
+            RootEnvelopeMode::Tagged,
+        )
+        .expect("list workspaces output should serialize");
+
+        assert_eq!(value["kind"], "list-workspaces");
+    }
 }

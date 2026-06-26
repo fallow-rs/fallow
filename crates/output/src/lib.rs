@@ -49,12 +49,15 @@ mod report_contract;
 mod review_envelopes;
 mod root_envelopes;
 mod security;
+mod trace_envelopes;
 
 pub use audit_brief::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
     REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefOutput, ReviewBriefSchemaVersion,
     ReviewBriefSubtractSections, ReviewDeltas, ReviewEffort, ReviewUnitFact, RiskClass,
-    build_review_brief_json_output,
+    build_review_brief_json_output, serialize_decision_surface_json_output,
+    serialize_review_brief_json_output, serialize_walkthrough_guide_json_output,
+    serialize_walkthrough_validation_json_output,
 };
 pub use audit_decision_surface::{
     ALL_CATEGORIES, DECISION_SURFACE_SCHEMA_VERSION, Decision, DecisionAction, DecisionActionType,
@@ -73,7 +76,8 @@ pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
     GroupByMode, WorkspaceDiagnosticOutput, apply_config_fixable_to_duplicate_exports,
-    build_check_output, build_check_summary, workspace_diagnostics_output,
+    build_check_output, build_check_summary, serialize_check_grouped_json_output,
+    serialize_check_json_output, workspace_diagnostics_output,
 };
 pub use codeclimate::{
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
@@ -93,7 +97,7 @@ pub use diff::{
 pub use dupes::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
     DUPES_SUPPRESS_COMMENT, DUPES_SUPPRESS_DESCRIPTION, DupesOutput, DupesOutputInput,
-    build_dupes_output, clone_family_actions, clone_group_actions,
+    build_dupes_output, clone_family_actions, clone_group_actions, serialize_dupes_json_output,
 };
 pub use fallow_types::envelope;
 pub use fallow_types::output;
@@ -173,7 +177,8 @@ pub use impact::{
 pub use inspect_envelopes::{
     ExplainOutput, InspectEvidence, InspectEvidenceScope, InspectEvidenceSection,
     InspectFileIdentity, InspectIdentity, InspectOutput, InspectSectionStatus,
-    InspectSymbolIdentity, InspectTargetDescriptor,
+    InspectSymbolIdentity, InspectTargetDescriptor, serialize_explain_json_output,
+    serialize_inspect_json_output,
 };
 pub use issue_contract::{
     ACTIONS_AUTO_FIXABLE_FIELD_DEFINITION, ACTIONS_FIELD_DEFINITION, CHECK_DOCS,
@@ -183,7 +188,8 @@ pub use issue_contract::{
 pub use json_paths::strip_root_prefix;
 pub use list_envelopes::{
     BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone, BoundariesListing,
-    ListBoundariesOutput, WorkspaceInfo, WorkspacesOutput,
+    ListBoundariesOutput, WorkspaceInfo, WorkspacesOutput, serialize_list_boundaries_json_output,
+    serialize_list_workspaces_json_output,
 };
 pub use next_steps::{
     AuditNextStepsInput, CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput,
@@ -203,6 +209,7 @@ pub use review_envelopes::{
     ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
     ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewProvider, ReviewReconcileOutput,
     ReviewReconcileSchema, default_marker_regex, default_marker_regex_flags, is_false,
+    serialize_review_envelope_json_output, serialize_review_reconcile_json_output,
 };
 pub use root_envelopes::{
     AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, FallowOutput, RootEnvelopeMode,
@@ -222,3 +229,4 @@ pub use security::{
     serialize_security_blind_spots_json_output, serialize_security_json_output,
     serialize_security_summary_json_output, serialize_security_survivors_json_output,
 };
+pub use trace_envelopes::serialize_trace_json_output;
