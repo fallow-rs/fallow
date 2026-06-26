@@ -1452,12 +1452,19 @@ pub mod legacy_semantic {
     /// [`SemanticFact::FluentChainNewMemberAccess`](super::SemanticFact::FluentChainNewMemberAccess).
     /// See issue #605.
     pub const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
+
+    /// Legacy tag string persisted in `used_custom_element_tags` when an
+    /// `html` template rendered a dynamic custom-element tag.
+    ///
+    /// New extraction writes
+    /// [`SemanticFact::DynamicCustomElementRender`](super::SemanticFact::DynamicCustomElementRender).
+    pub const DYNAMIC_CUSTOM_ELEMENT_TAG: &str = "<dynamic>";
 }
 
-pub use legacy_semantic::{
-    ANGULAR_THIS_SPREAD_SENTINEL, ANGULAR_TPL_SENTINEL, FACTORY_CALL_SENTINEL,
-    FLUENT_CHAIN_NEW_SENTINEL, FLUENT_CHAIN_SENTINEL, INSTANCE_EXPORT_SENTINEL,
-    PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+use legacy_semantic::{
+    ANGULAR_THIS_SPREAD_SENTINEL, ANGULAR_TPL_SENTINEL, DYNAMIC_CUSTOM_ELEMENT_TAG,
+    FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL, FLUENT_CHAIN_SENTINEL,
+    INSTANCE_EXPORT_SENTINEL, PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
     PLAYWRIGHT_FIXTURE_TYPE_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL,
 };
 
@@ -2271,11 +2278,6 @@ pub struct AngularComponentSelector {
     /// class-name references project-wide).
     pub class_name: String,
 }
-
-/// Legacy sentinel decoded from older parse caches when an `html` template
-/// renders a dynamic tag. New extraction persists
-/// `SemanticFact::DynamicCustomElementRender` instead.
-pub const DYNAMIC_CUSTOM_ELEMENT_TAG: &str = "<dynamic>";
 
 /// A Lit / web-component custom element registered in a module via
 /// `@customElement('x-foo')` or `customElements.define('x-foo', C)`. Consumed by

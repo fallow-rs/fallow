@@ -54,12 +54,9 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 pub use fallow_types::extract::{
     AngularTemplateMemberAccessFact, AngularThisSpreadFact, ClassHeritageInfo,
     DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
-    ExportName, FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL, FLUENT_CHAIN_SENTINEL,
-    FactoryCallMemberAccessFact, FluentChainMemberAccessFact, FluentChainNewMemberAccessFact,
-    INSTANCE_EXPORT_SENTINEL, ImportInfo, ImportedName, InstanceExportBindingFact,
-    LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
-    PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-    PLAYWRIGHT_FIXTURE_TYPE_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL, ParseResult,
+    ExportName, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
+    LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult,
     PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
     PlaywrightFixtureUseFact, PublicSignatureTypeReference, ReExportInfo, RequireCallInfo,
     SemanticFact, VisibilityTag, compute_line_offsets, legacy_semantic,
@@ -82,7 +79,6 @@ pub use sfc::{
     is_sfc_file,
 };
 pub use sfc_css::{scoped_unused_classes, sfc_virtual_stylesheet};
-pub use sfc_template::angular::{ANGULAR_THIS_SPREAD_SENTINEL, ANGULAR_TPL_SENTINEL};
 pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
 
 #[expect(

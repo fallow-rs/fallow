@@ -5,12 +5,9 @@
 //! `fallow_core::extract::*` paths continue to resolve.
 
 pub use fallow_extract::{
-    ANGULAR_TPL_SENTINEL, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
-    FACTORY_CALL_SENTINEL, FLUENT_CHAIN_NEW_SENTINEL, FLUENT_CHAIN_SENTINEL,
-    INSTANCE_EXPORT_SENTINEL, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
-    ModuleInfo, PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL, PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-    PLAYWRIGHT_FIXTURE_TYPE_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL, ParseResult, ReExportInfo,
-    RequireCallInfo, VisibilityTag, legacy_semantic,
+    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
+    MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult, ReExportInfo, RequireCallInfo,
+    VisibilityTag, legacy_semantic,
 };
 pub use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
 
