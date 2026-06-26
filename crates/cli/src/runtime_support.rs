@@ -5,6 +5,7 @@ use std::sync::{LazyLock, Mutex, OnceLock};
 use fallow_config::{
     FallowConfig, OutputFormat, PartialRulesConfig, ProductionAnalysis, ResolvedConfig, RulesConfig,
 };
+use fallow_output::GroupByMode;
 use rustc_hash::FxHashSet;
 
 static CONFIG_LOADED_LOGGED: LazyLock<Mutex<FxHashSet<PathBuf>>> =
@@ -62,6 +63,17 @@ pub enum GroupBy {
     Section,
 }
 
+impl From<GroupBy> for GroupByMode {
+    fn from(value: GroupBy) -> Self {
+        match value {
+            GroupBy::Owner => Self::Owner,
+            GroupBy::Directory => Self::Directory,
+            GroupBy::Package => Self::Package,
+            GroupBy::Section => Self::Section,
+        }
+    }
+}
+
 /// Build an `OwnershipResolver` from CLI `--group-by` and config settings.
 ///
 /// Returns `None` when no grouping is requested. Returns `Err(ExitCode)` when
@@ -72,15 +84,25 @@ pub fn build_ownership_resolver(
     codeowners_path: Option<&str>,
     output: OutputFormat,
 ) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
+    build_ownership_resolver_for_mode(group_by.map(Into::into), root, codeowners_path, output)
+}
+
+/// Build an `OwnershipResolver` from a typed output grouping mode.
+pub fn build_ownership_resolver_for_mode(
+    group_by: Option<GroupByMode>,
+    root: &Path,
+    codeowners_path: Option<&str>,
+    output: OutputFormat,
+) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
     let Some(mode) = group_by else {
         return Ok(None);
     };
     match mode {
-        GroupBy::Owner => match crate::codeowners::CodeOwners::load(root, codeowners_path) {
+        GroupByMode::Owner => match crate::codeowners::CodeOwners::load(root, codeowners_path) {
             Ok(co) => Ok(Some(crate::report::OwnershipResolver::Owner(co))),
             Err(e) => Err(crate::error::emit_error(&e, 2, output)),
         },
-        GroupBy::Section => match crate::codeowners::CodeOwners::load(root, codeowners_path) {
+        GroupByMode::Section => match crate::codeowners::CodeOwners::load(root, codeowners_path) {
             Ok(co) => {
                 if co.has_sections() {
                     Ok(Some(crate::report::OwnershipResolver::Section(co)))
@@ -96,8 +118,8 @@ pub fn build_ownership_resolver(
             }
             Err(e) => Err(crate::error::emit_error(&e, 2, output)),
         },
-        GroupBy::Directory => Ok(Some(crate::report::OwnershipResolver::Directory)),
-        GroupBy::Package => {
+        GroupByMode::Directory => Ok(Some(crate::report::OwnershipResolver::Directory)),
+        GroupByMode::Package => {
             let workspaces = fallow_config::discover_workspaces(root);
             if workspaces.is_empty() {
                 Err(crate::error::emit_error(

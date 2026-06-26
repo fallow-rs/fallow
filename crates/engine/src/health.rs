@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use fallow_config::{EmailMode, OutputFormat, ResolvedConfig};
 use fallow_output::{
-    DiffIndex, EffortEstimate, FindingSeverity, HealthGrouping, HealthReport, HealthTimings,
-    ImpactDigestCounts, RuntimeCoverageWatermark, WorkspaceDiagnosticOutput,
+    DiffIndex, EffortEstimate, FindingSeverity, GroupByMode, HealthGrouping, HealthReport,
+    HealthTimings, ImpactDigestCounts, RuntimeCoverageWatermark, WorkspaceDiagnosticOutput,
 };
 use fallow_types::path_util::is_absolute_path_any_platform;
 
@@ -194,6 +194,8 @@ pub struct HealthExecutionOptions<'a> {
     pub performance: bool,
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
     pub churn_file: Option<&'a Path>,
+    /// Optional grouping mode for typed health output.
+    pub group_by: Option<GroupByMode>,
 }
 
 /// Derive effective health section flags for CLI and embedders.
@@ -587,6 +589,7 @@ mod tests {
             performance: true,
             runtime_coverage: Some(runtime_coverage),
             churn_file: Some(Path::new("churn.json")),
+            group_by: Some(GroupByMode::Directory),
         };
 
         assert_eq!(options.root, root);
@@ -597,6 +600,7 @@ mod tests {
         );
         assert_eq!(options.workspace, Some(workspace.as_slice()));
         assert!(options.runtime_coverage.is_some());
+        assert_eq!(options.group_by, Some(GroupByMode::Directory));
         assert_eq!(
             options.save_snapshot.as_deref(),
             Some(Path::new(".fallow/snapshots/health.json"))

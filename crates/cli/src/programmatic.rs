@@ -44,10 +44,7 @@ fn build_complexity_options<'a>(
     resolved: &'a ProgrammaticAnalysisContext,
     options: &'a ComplexityOptions,
 ) -> HealthOptions<'a> {
-    HealthOptions {
-        execution: derive_programmatic_health_execution_options(resolved, options),
-        group_by: None,
-    }
+    derive_programmatic_health_execution_options(resolved, options)
 }
 
 struct CliProgrammaticHealthRunner;

@@ -117,6 +117,7 @@ pub fn derive_programmatic_health_execution_options<'a>(
         performance: false,
         runtime_coverage: None,
         churn_file: None,
+        group_by: None,
     }
 }
 
@@ -1807,6 +1808,7 @@ mod tests {
         assert!(execution.enforce_coverage_gap_gate);
         assert!(!execution.performance);
         assert!(execution.runtime_coverage.is_none());
+        assert!(execution.group_by.is_none());
     }
 
     #[test]

@@ -54,18 +54,7 @@ impl From<SortBy> for HealthSort {
     }
 }
 
-pub struct HealthOptions<'a> {
-    pub execution: HealthExecutionOptions<'a>,
-    pub group_by: Option<crate::GroupBy>,
-}
-
-impl<'a> std::ops::Deref for HealthOptions<'a> {
-    type Target = HealthExecutionOptions<'a>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.execution
-    }
-}
+pub type HealthOptions<'a> = HealthExecutionOptions<'a>;
 
 struct HealthPipelineTimings {
     config: f64,
@@ -3983,7 +3972,7 @@ fn build_health_group_resolver(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
 ) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
-    crate::build_ownership_resolver(
+    crate::runtime_support::build_ownership_resolver_for_mode(
         opts.group_by,
         opts.root,
         config.codeowners.as_deref(),
