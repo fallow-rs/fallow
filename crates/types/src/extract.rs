@@ -1822,9 +1822,35 @@ impl<'a> SemanticFactView<'a> {
         playwright_fixture_use_facts_from_parts(self.semantic_facts, self.member_accesses)
     }
 
+    /// Collect only typed Playwright fixture-use facts.
+    pub fn typed_playwright_fixture_uses(self) -> Vec<PlaywrightFixtureUseFact> {
+        playwright_fixture_use_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect only legacy Playwright fixture-use facts decoded from
+    /// `member_accesses`.
+    pub fn legacy_playwright_fixture_uses(self) -> Vec<PlaywrightFixtureUseFact> {
+        legacy_playwright_fixture_use_facts(self.member_accesses).collect()
+    }
+
     /// Collect Playwright fixture-definition facts.
     pub fn playwright_fixture_definitions(self) -> Vec<PlaywrightFixtureDefinitionFact> {
         playwright_fixture_definition_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect only typed Playwright fixture-definition facts.
+    pub fn typed_playwright_fixture_definitions(self) -> Vec<PlaywrightFixtureDefinitionFact> {
+        playwright_fixture_definition_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect only legacy Playwright fixture-definition facts decoded from
+    /// `member_accesses`.
+    pub fn legacy_playwright_fixture_definitions(self) -> Vec<PlaywrightFixtureDefinitionFact> {
+        legacy_playwright_fixture_definition_facts(self.member_accesses).collect()
     }
 
     /// Collect Playwright fixture-alias facts.
@@ -1832,9 +1858,35 @@ impl<'a> SemanticFactView<'a> {
         playwright_fixture_alias_facts_from_parts(self.semantic_facts, self.member_accesses)
     }
 
+    /// Collect only typed Playwright fixture-alias facts.
+    pub fn typed_playwright_fixture_aliases(self) -> Vec<PlaywrightFixtureAliasFact> {
+        playwright_fixture_alias_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect only legacy Playwright fixture-alias facts decoded from
+    /// `member_accesses`.
+    pub fn legacy_playwright_fixture_aliases(self) -> Vec<PlaywrightFixtureAliasFact> {
+        legacy_playwright_fixture_alias_facts(self.member_accesses).collect()
+    }
+
     /// Collect Playwright fixture-type facts.
     pub fn playwright_fixture_types(self) -> Vec<PlaywrightFixtureTypeFact> {
         playwright_fixture_type_facts_from_parts(self.semantic_facts, self.member_accesses)
+    }
+
+    /// Collect only typed Playwright fixture-type facts.
+    pub fn typed_playwright_fixture_types(self) -> Vec<PlaywrightFixtureTypeFact> {
+        playwright_fixture_type_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Collect only legacy Playwright fixture-type facts decoded from
+    /// `member_accesses`.
+    pub fn legacy_playwright_fixture_types(self) -> Vec<PlaywrightFixtureTypeFact> {
+        legacy_playwright_fixture_type_facts(self.member_accesses).collect()
     }
 }
 
@@ -1969,6 +2021,22 @@ fn playwright_fixture_use_facts(
     })
 }
 
+fn legacy_playwright_fixture_use_facts(
+    member_accesses: &[MemberAccess],
+) -> impl Iterator<Item = PlaywrightFixtureUseFact> + '_ {
+    member_accesses.iter().filter_map(|access| {
+        let (test_name, fixture_name) = parse_legacy_playwright_fixture_member_access(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_USE_SENTINEL,
+        )?;
+        Some(PlaywrightFixtureUseFact {
+            test_name: test_name.to_string(),
+            fixture_name: fixture_name.to_string(),
+            member: access.member.clone(),
+        })
+    })
+}
+
 /// Collect Playwright fixture-use facts from typed facts plus cache-compatible
 /// decoded legacy sentinels.
 fn playwright_fixture_use_facts_from_parts(
@@ -1977,17 +2045,7 @@ fn playwright_fixture_use_facts_from_parts(
 ) -> Vec<PlaywrightFixtureUseFact> {
     playwright_fixture_use_facts(semantic_facts)
         .cloned()
-        .chain(member_accesses.iter().filter_map(|access| {
-            let (test_name, fixture_name) = parse_legacy_playwright_fixture_member_access(
-                access.object.as_str(),
-                PLAYWRIGHT_FIXTURE_USE_SENTINEL,
-            )?;
-            Some(PlaywrightFixtureUseFact {
-                test_name: test_name.to_string(),
-                fixture_name: fixture_name.to_string(),
-                member: access.member.clone(),
-            })
-        }))
+        .chain(legacy_playwright_fixture_use_facts(member_accesses))
         .collect()
 }
 
@@ -2004,6 +2062,22 @@ fn playwright_fixture_definition_facts(
     })
 }
 
+fn legacy_playwright_fixture_definition_facts(
+    member_accesses: &[MemberAccess],
+) -> impl Iterator<Item = PlaywrightFixtureDefinitionFact> + '_ {
+    member_accesses.iter().filter_map(|access| {
+        let (test_name, fixture_name) = parse_legacy_playwright_fixture_member_access(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
+        )?;
+        Some(PlaywrightFixtureDefinitionFact {
+            test_name: test_name.to_string(),
+            fixture_name: fixture_name.to_string(),
+            type_name: access.member.clone(),
+        })
+    })
+}
+
 /// Collect Playwright fixture-definition facts from typed facts plus
 /// cache-compatible decoded legacy sentinels.
 fn playwright_fixture_definition_facts_from_parts(
@@ -2012,17 +2086,7 @@ fn playwright_fixture_definition_facts_from_parts(
 ) -> Vec<PlaywrightFixtureDefinitionFact> {
     playwright_fixture_definition_facts(semantic_facts)
         .cloned()
-        .chain(member_accesses.iter().filter_map(|access| {
-            let (test_name, fixture_name) = parse_legacy_playwright_fixture_member_access(
-                access.object.as_str(),
-                PLAYWRIGHT_FIXTURE_DEF_SENTINEL,
-            )?;
-            Some(PlaywrightFixtureDefinitionFact {
-                test_name: test_name.to_string(),
-                fixture_name: fixture_name.to_string(),
-                type_name: access.member.clone(),
-            })
-        }))
+        .chain(legacy_playwright_fixture_definition_facts(member_accesses))
         .collect()
 }
 
@@ -2039,6 +2103,21 @@ fn playwright_fixture_alias_facts(
     })
 }
 
+fn legacy_playwright_fixture_alias_facts(
+    member_accesses: &[MemberAccess],
+) -> impl Iterator<Item = PlaywrightFixtureAliasFact> + '_ {
+    member_accesses.iter().filter_map(|access| {
+        let (test_name, _) = parse_legacy_playwright_fixture_member_access(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
+        )?;
+        Some(PlaywrightFixtureAliasFact {
+            test_name: test_name.to_string(),
+            base_name: access.member.clone(),
+        })
+    })
+}
+
 /// Collect Playwright fixture-alias facts from typed facts plus
 /// cache-compatible decoded legacy sentinels.
 fn playwright_fixture_alias_facts_from_parts(
@@ -2047,16 +2126,7 @@ fn playwright_fixture_alias_facts_from_parts(
 ) -> Vec<PlaywrightFixtureAliasFact> {
     playwright_fixture_alias_facts(semantic_facts)
         .cloned()
-        .chain(member_accesses.iter().filter_map(|access| {
-            let (test_name, _) = parse_legacy_playwright_fixture_member_access(
-                access.object.as_str(),
-                PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL,
-            )?;
-            Some(PlaywrightFixtureAliasFact {
-                test_name: test_name.to_string(),
-                base_name: access.member.clone(),
-            })
-        }))
+        .chain(legacy_playwright_fixture_alias_facts(member_accesses))
         .collect()
 }
 
@@ -2073,6 +2143,22 @@ fn playwright_fixture_type_facts(
     })
 }
 
+fn legacy_playwright_fixture_type_facts(
+    member_accesses: &[MemberAccess],
+) -> impl Iterator<Item = PlaywrightFixtureTypeFact> + '_ {
+    member_accesses.iter().filter_map(|access| {
+        let (alias_name, fixture_name) = parse_legacy_playwright_fixture_member_access(
+            access.object.as_str(),
+            PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
+        )?;
+        Some(PlaywrightFixtureTypeFact {
+            alias_name: alias_name.to_string(),
+            fixture_name: fixture_name.to_string(),
+            type_name: access.member.clone(),
+        })
+    })
+}
+
 /// Collect Playwright fixture-type facts from typed facts plus cache-compatible
 /// decoded legacy sentinels.
 fn playwright_fixture_type_facts_from_parts(
@@ -2081,17 +2167,7 @@ fn playwright_fixture_type_facts_from_parts(
 ) -> Vec<PlaywrightFixtureTypeFact> {
     playwright_fixture_type_facts(semantic_facts)
         .cloned()
-        .chain(member_accesses.iter().filter_map(|access| {
-            let (alias_name, fixture_name) = parse_legacy_playwright_fixture_member_access(
-                access.object.as_str(),
-                PLAYWRIGHT_FIXTURE_TYPE_SENTINEL,
-            )?;
-            Some(PlaywrightFixtureTypeFact {
-                alias_name: alias_name.to_string(),
-                fixture_name: fixture_name.to_string(),
-                type_name: access.member.clone(),
-            })
-        }))
+        .chain(legacy_playwright_fixture_type_facts(member_accesses))
         .collect()
 }
 

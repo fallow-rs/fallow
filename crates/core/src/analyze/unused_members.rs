@@ -11,7 +11,10 @@ use crate::graph::{ModuleGraph, ReferenceKind};
 use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
-use fallow_types::extract::{SemanticFactView, ordinary_whole_object_uses};
+use fallow_types::extract::{
+    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
+    PlaywrightFixtureUseFact, SemanticFactView, ordinary_whole_object_uses,
+};
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
@@ -926,16 +929,49 @@ fn push_playwright_test_key(keys: &mut Vec<PlaywrightTestKey>, key: PlaywrightTe
 
 fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> FxHashSet<String> {
     let mut names = FxHashSet::default();
-    let facts = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
-    let definition_facts = facts.playwright_fixture_definitions();
+    let definition_facts = playwright_fixture_definitions(resolved);
     for access in &definition_facts {
         names.insert(access.test_name.clone());
     }
-    let alias_facts = facts.playwright_fixture_aliases();
+    let alias_facts = playwright_fixture_aliases(resolved);
     for access in &alias_facts {
         names.insert(access.test_name.clone());
     }
     names
+}
+
+fn typed_or_legacy_facts<T>(typed: Vec<T>, legacy: impl FnOnce() -> Vec<T>) -> Vec<T> {
+    if typed.is_empty() { legacy() } else { typed }
+}
+
+fn playwright_fixture_uses(resolved: &ResolvedModule) -> Vec<PlaywrightFixtureUseFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    typed_or_legacy_facts(view.typed_playwright_fixture_uses(), || {
+        view.legacy_playwright_fixture_uses()
+    })
+}
+
+fn playwright_fixture_definitions(
+    resolved: &ResolvedModule,
+) -> Vec<PlaywrightFixtureDefinitionFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    typed_or_legacy_facts(view.typed_playwright_fixture_definitions(), || {
+        view.legacy_playwright_fixture_definitions()
+    })
+}
+
+fn playwright_fixture_aliases(resolved: &ResolvedModule) -> Vec<PlaywrightFixtureAliasFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    typed_or_legacy_facts(view.typed_playwright_fixture_aliases(), || {
+        view.legacy_playwright_fixture_aliases()
+    })
+}
+
+fn playwright_fixture_types(resolved: &ResolvedModule) -> Vec<PlaywrightFixtureTypeFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    typed_or_legacy_facts(view.typed_playwright_fixture_types(), || {
+        view.legacy_playwright_fixture_types()
+    })
 }
 
 fn playwright_test_keys_for_local(
@@ -1010,9 +1046,7 @@ fn collect_playwright_fixture_def_targets(
     type_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
     targets_by_test: &mut FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>>,
 ) {
-    let definition_facts =
-        SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
-            .playwright_fixture_definitions();
+    let definition_facts = playwright_fixture_definitions(resolved);
     for access in definition_facts {
         let test_keys = playwright_test_keys_for_local(
             local_to_export_keys,
@@ -1048,8 +1082,7 @@ fn collect_playwright_fixture_aliases(
     local_playwright_test_names: &FxHashSet<String>,
     aliases_by_test: &mut FxHashMap<PlaywrightTestKey, Vec<PlaywrightTestKey>>,
 ) {
-    let alias_facts = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
-        .playwright_fixture_aliases();
+    let alias_facts = playwright_fixture_aliases(resolved);
     for access in alias_facts {
         let test_keys = playwright_test_keys_for_local(
             local_to_export_keys,
@@ -1167,8 +1200,7 @@ fn build_playwright_fixture_type_targets(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        let type_facts = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
-            .playwright_fixture_types();
+        let type_facts = playwright_fixture_types(resolved);
         for access in type_facts {
             let Some(alias_keys) = local_to_export_keys.get(access.alias_name.as_str()) else {
                 continue;
@@ -1206,8 +1238,7 @@ fn propagate_playwright_fixture_accesses(
 
     for resolved in resolved_modules {
         let local_to_export_keys = build_local_to_export_keys(resolved);
-        let use_facts = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
-            .playwright_fixture_uses();
+        let use_facts = playwright_fixture_uses(resolved);
         for access in use_facts {
             let Some(test_keys) = local_to_export_keys.get(access.test_name.as_str()) else {
                 continue;
@@ -2677,6 +2708,68 @@ mod tests {
             .get(&ExportKey::new(FileId(2), "AdminPage"))
             .expect("legacy fixture target class should be credited");
         assert!(credited.contains("assertGreeting"));
+    }
+
+    #[test]
+    fn typed_playwright_fixture_facts_take_precedence_over_legacy_sentinels() {
+        let mut graph = build_graph(&[
+            ("/src/spec.ts", true),
+            ("/src/fixtures.ts", false),
+            ("/src/admin-page.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members("test", vec![], Some(0))];
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_export_with_members(
+            "AdminPage",
+            vec![
+                make_member("assertGreeting", MemberKind::ClassMethod),
+                make_member("staleLegacyMember", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/src/spec.ts"),
+            resolved_imports: vec![
+                make_resolved_import("./fixtures", "test", "test", 1),
+                make_resolved_import("./admin-page", "AdminPage", "AdminPage", 2),
+            ],
+            semantic_facts: vec![
+                SemanticFact::PlaywrightFixtureDefinition(PlaywrightFixtureDefinitionFact {
+                    test_name: "test".to_string(),
+                    fixture_name: "adminPage".to_string(),
+                    type_name: "AdminPage".to_string(),
+                }),
+                SemanticFact::PlaywrightFixtureUse(PlaywrightFixtureUseFact {
+                    test_name: "test".to_string(),
+                    fixture_name: "adminPage".to_string(),
+                    member: "assertGreeting".to_string(),
+                }),
+            ]
+            .into(),
+            member_accesses: vec![
+                MemberAccess {
+                    object: format!("{PLAYWRIGHT_FIXTURE_DEF_SENTINEL}test:adminPage"),
+                    member: "AdminPage".to_string(),
+                },
+                MemberAccess {
+                    object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}test:adminPage"),
+                    member: "staleLegacyMember".to_string(),
+                },
+            ],
+            ..Default::default()
+        }];
+
+        let mut accessed_members = FxHashMap::default();
+        propagate_playwright_fixture_accesses(&graph, &resolved_modules, &mut accessed_members);
+
+        let credited = accessed_members
+            .get(&ExportKey::new(FileId(2), "AdminPage"))
+            .expect("typed fixture target class should be credited");
+        assert!(credited.contains("assertGreeting"));
+        assert!(!credited.contains("staleLegacyMember"));
     }
 
     #[test]
