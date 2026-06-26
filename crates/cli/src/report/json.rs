@@ -1,23 +1,23 @@
 use crate::report::sink::outln;
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use fallow_api::{DupesReportPayload, DuplicationGroup, DuplicationGrouping};
+use fallow_api::{
+    CheckJsonOutputInput, CheckJsonPayloadInput, DupesReportPayload, DuplicationGrouping,
+    DuplicationJsonOutputInput, GroupedCheckJsonOutputInput, GroupedDuplicationJsonOutputInput,
+};
 use fallow_engine::duplicates::DuplicationReport;
+#[cfg(test)]
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::results::AnalysisResults;
 
+#[cfg(test)]
 use fallow_output::strip_root_prefix;
 
 use super::emit_json;
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
-use fallow_output::{
-    CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput, DupesOutput,
-    DupesOutputInput, GroupByMode, WorkspaceDiagnosticOutput,
-    apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
-};
+use fallow_output::{GroupByMode, WorkspaceDiagnosticOutput};
 
 pub(super) struct PrintJsonInput<'a> {
     pub(super) results: &'a AnalysisResults,
@@ -82,62 +82,29 @@ pub(super) struct PrintGroupedJsonInput<'a> {
 }
 
 pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode {
-    let groups = input.groups;
-    let original = input.original;
-    let root = input.root;
-    let elapsed = input.elapsed;
-    let explain = input.explain;
-    let resolver = input.resolver;
-    let config_fixable = input.config_fixable;
-    let entries: Vec<CheckGroupedEntry> = groups
-        .iter()
-        .map(|group| {
-            let mut results = group.results.clone();
-            apply_config_fixable_to_duplicate_exports(&mut results, config_fixable);
-            CheckGroupedEntry {
-                key: group.key.clone(),
-                owners: group.owners.clone(),
-                total_issues: results.total_issues(),
-                results,
-            }
-        })
-        .collect();
-
-    let envelope = CheckGroupedOutput {
-        schema_version: SchemaVersion(SCHEMA_VERSION),
-        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
-        elapsed_ms: ElapsedMs(elapsed.as_millis() as u64),
-        grouped_by: group_by_mode_from_label(resolver.mode_label()),
-        total_issues: original.total_issues(),
-        groups: entries,
-        meta: explain.then(fallow_output::check_meta),
+    let output = match fallow_api::serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+        groups: input.groups,
+        original: input.original,
+        root: input.root,
+        elapsed: input.elapsed,
+        grouped_by: group_by_mode_from_label(input.resolver.mode_label()),
+        config_fixable: input.config_fixable,
+        meta: input.explain.then(fallow_output::check_meta),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
-            original,
-            root,
-            crate::report::suggestions::setup_pointer_applicable(root),
-            crate::report::suggestions::due_impact_digest(root),
+            input.original,
+            input.root,
+            crate::report::suggestions::setup_pointer_applicable(input.root),
+            crate::report::suggestions::due_impact_digest(input.root),
         ),
-    };
-
-    let mut output = match fallow_output::serialize_check_grouped_json_output(
-        envelope,
-        crate::output_runtime::current_root_envelope_mode(),
-        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
-    ) {
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    }) {
         Ok(value) => value,
         Err(e) => {
             eprintln!("Error: failed to serialize grouped results: {e}");
             return ExitCode::from(2);
         }
     };
-
-    let root_prefix = format!("{}/", root.display());
-    if let Some(arr) = output.get_mut("groups").and_then(|v| v.as_array_mut()) {
-        for entry in arr {
-            strip_root_prefix(entry, &root_prefix);
-            harmonize_multi_kind_suppress_line_actions(entry);
-        }
-    }
 
     emit_json(&output, "JSON")
 }
@@ -181,20 +148,22 @@ fn build_json_with_config_fixable_and_meta(
     config_fixable: bool,
     meta: Option<fallow_types::envelope::Meta>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut envelope = build_cli_check_output(results, root, elapsed, config_fixable, meta);
-    envelope.next_steps = crate::report::suggestions::build_dead_code_next_steps(
+    fallow_api::serialize_check_json(CheckJsonOutputInput {
         results,
         root,
-        crate::report::suggestions::setup_pointer_applicable(root),
-        crate::report::suggestions::due_impact_digest(root),
-    );
-    let mut output = fallow_output::serialize_check_json_output(
-        envelope,
-        crate::output_runtime::current_root_envelope_mode(),
-        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
-    )?;
-    postprocess_check_json(&mut output, root);
-    Ok(output)
+        elapsed,
+        config_fixable,
+        meta,
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        next_steps: crate::report::suggestions::build_dead_code_next_steps(
+            results,
+            root,
+            crate::report::suggestions::setup_pointer_applicable(root),
+            crate::report::suggestions::due_impact_digest(root),
+        ),
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    })
 }
 
 pub fn build_check_json_payload_with_config_fixable(
@@ -203,31 +172,12 @@ pub fn build_check_json_payload_with_config_fixable(
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let envelope = build_cli_check_output(results, root, elapsed, config_fixable, None);
-    let mut output = serde_json::to_value(&envelope)?;
-    postprocess_check_json(&mut output, root);
-    Ok(output)
-}
-
-fn build_cli_check_output(
-    results: &AnalysisResults,
-    root: &Path,
-    elapsed: Duration,
-    config_fixable: bool,
-    meta: Option<fallow_types::envelope::Meta>,
-) -> CheckOutput {
-    build_check_output(CheckOutputInput {
-        schema_version: SCHEMA_VERSION,
-        version: env!("CARGO_PKG_VERSION").to_string(),
+    fallow_api::serialize_check_json_payload(CheckJsonPayloadInput {
+        results,
+        root,
         elapsed,
-        results: results.clone(),
         config_fixable,
-        meta,
         workspace_diagnostics: workspace_diagnostics_for_output(root),
-        // Populated only at the standalone-command entry points; the combined
-        // and audit envelopes reuse this struct as a sub-block and aggregate
-        // their own `next_steps` at the top level, so it stays empty here.
-        next_steps: Vec::new(),
     })
 }
 
@@ -237,158 +187,12 @@ fn workspace_diagnostics_for_output(root: &Path) -> Vec<WorkspaceDiagnosticOutpu
     ))
 }
 
-fn postprocess_check_json(output: &mut serde_json::Value, root: &Path) {
-    let root_prefix = format!("{}/", root.display());
-    strip_root_prefix(output, &root_prefix);
-    harmonize_multi_kind_suppress_line_actions(output);
-}
-
-type SuppressAnchor = (String, u64);
-
 #[allow(
     clippy::redundant_pub_crate,
     reason = "used through report module re-export by audit.rs"
 )]
 pub(crate) fn harmonize_multi_kind_suppress_line_actions(output: &mut serde_json::Value) {
-    let mut anchors: BTreeMap<SuppressAnchor, Vec<String>> = BTreeMap::new();
-    collect_suppress_line_anchors(output, &mut anchors);
-
-    anchors.retain(|_, kinds| {
-        sort_suppression_kinds(kinds);
-        kinds.dedup();
-        kinds.len() > 1
-    });
-    if anchors.is_empty() {
-        return;
-    }
-
-    rewrite_suppress_line_actions(output, &anchors);
-}
-
-fn collect_suppress_line_anchors(
-    value: &serde_json::Value,
-    anchors: &mut BTreeMap<SuppressAnchor, Vec<String>>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(anchor) = suppression_anchor(map)
-                && let Some(actions) = map.get("actions").and_then(serde_json::Value::as_array)
-            {
-                for action in actions {
-                    if let Some(comment) = suppress_line_comment(action) {
-                        for kind in parse_suppress_line_comment(comment) {
-                            let kinds = anchors.entry(anchor.clone()).or_default();
-                            if !kinds.iter().any(|existing| existing == &kind) {
-                                kinds.push(kind);
-                            }
-                        }
-                    }
-                }
-            }
-
-            for child in map.values() {
-                collect_suppress_line_anchors(child, anchors);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_suppress_line_anchors(item, anchors);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn rewrite_suppress_line_actions(
-    value: &mut serde_json::Value,
-    anchors: &BTreeMap<SuppressAnchor, Vec<String>>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(anchor) = suppression_anchor(map)
-                && let Some(kinds) = anchors.get(&anchor)
-            {
-                let comment = format!("// fallow-ignore-next-line {}", kinds.join(", "));
-                if let Some(actions) = map
-                    .get_mut("actions")
-                    .and_then(serde_json::Value::as_array_mut)
-                {
-                    for action in actions {
-                        if suppress_line_comment(action).is_some()
-                            && let serde_json::Value::Object(action_map) = action
-                        {
-                            action_map.insert("comment".to_string(), serde_json::json!(comment));
-                        }
-                    }
-                }
-            }
-
-            for child in map.values_mut() {
-                rewrite_suppress_line_actions(child, anchors);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                rewrite_suppress_line_actions(item, anchors);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn suppression_anchor(map: &serde_json::Map<String, serde_json::Value>) -> Option<SuppressAnchor> {
-    let path = map
-        .get("path")
-        .or_else(|| map.get("from_path"))
-        .and_then(serde_json::Value::as_str)?;
-    let line = map.get("line").and_then(serde_json::Value::as_u64)?;
-    Some((path.to_string(), line))
-}
-
-fn suppress_line_comment(action: &serde_json::Value) -> Option<&str> {
-    (action.get("type").and_then(serde_json::Value::as_str) == Some("suppress-line"))
-        .then_some(())
-        .and_then(|()| action.get("comment").and_then(serde_json::Value::as_str))
-}
-
-fn parse_suppress_line_comment(comment: &str) -> Vec<String> {
-    comment
-        .strip_prefix("// fallow-ignore-next-line ")
-        .map(|rest| {
-            rest.split(|c: char| c == ',' || c.is_whitespace())
-                .filter(|token| !token.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn sort_suppression_kinds(kinds: &mut [String]) {
-    kinds.sort_by_key(|kind| suppression_kind_rank(kind));
-}
-
-fn suppression_kind_rank(kind: &str) -> usize {
-    match kind {
-        "unused-file" => 0,
-        "unused-export" => 1,
-        "unused-type" => 2,
-        "private-type-leak" => 3,
-        "unused-enum-member" => 4,
-        "unused-class-member" => 5,
-        "unused-store-member" => 6,
-        "unresolved-import" => 7,
-        "unlisted-dependency" => 8,
-        "duplicate-export" => 9,
-        "circular-dependency" => 10,
-        "re-export-cycle" => 11,
-        "boundary-violation" => 12,
-        "code-duplication" => 13,
-        "complexity" => 14,
-        "unprovided-inject" => 15,
-        "unrendered-component" => 16,
-        "unused-server-action" => 17,
-        _ => usize::MAX,
-    }
+    fallow_api::harmonize_multi_kind_suppress_line_actions(output);
 }
 
 pub fn build_baseline_deltas_json<'a>(
@@ -528,28 +332,16 @@ pub fn build_duplication_json(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
-        build_dupes_output(DupesOutputInput {
-            schema_version: SCHEMA_VERSION,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            elapsed,
-            report: payload,
-            grouped_by: None,
-            total_issues: None,
-            groups: None,
-            meta: explain.then(fallow_output::dupes_meta),
-            workspace_diagnostics: workspace_diagnostics_for_output(root),
-            next_steps,
-        });
-    let mut output = fallow_output::serialize_dupes_json_output(
-        envelope,
-        crate::output_runtime::current_root_envelope_mode(),
-        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
-    )?;
-    let root_prefix = format!("{}/", root.display());
-    strip_root_prefix(&mut output, &root_prefix);
-
-    Ok(output)
+    fallow_api::serialize_duplication_json(DuplicationJsonOutputInput {
+        report,
+        root,
+        elapsed,
+        meta: explain.then(fallow_output::dupes_meta),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        next_steps,
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    })
 }
 
 pub(super) fn print_duplication_json(
@@ -574,7 +366,6 @@ pub fn build_grouped_duplication_json(
     elapsed: Duration,
     explain: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let root_prefix = format!("{}/", root.display());
     let payload = DupesReportPayload::from_report(report);
     let next_steps = crate::report::suggestions::build_dupes_next_steps(
         &payload,
@@ -582,41 +373,17 @@ pub fn build_grouped_duplication_json(
         crate::report::suggestions::setup_pointer_applicable(root),
         crate::report::suggestions::due_impact_digest(root),
     );
-    let envelope: DupesOutput<DupesReportPayload, DuplicationGroup> =
-        build_dupes_output(DupesOutputInput {
-            schema_version: SCHEMA_VERSION,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            elapsed,
-            report: payload,
-            grouped_by: Some(group_by_mode_from_label(grouping.mode)),
-            total_issues: Some(report.clone_groups.len()),
-            groups: None,
-            meta: explain.then(fallow_output::dupes_meta),
-            workspace_diagnostics: workspace_diagnostics_for_output(root),
-            next_steps,
-        });
-    let mut output = fallow_output::serialize_dupes_json_output(
-        envelope,
-        crate::output_runtime::current_root_envelope_mode(),
-        crate::output_runtime::telemetry_analysis_run_id().as_deref(),
-    )?;
-    strip_root_prefix(&mut output, &root_prefix);
-
-    let group_values: Vec<serde_json::Value> = grouping
-        .groups
-        .iter()
-        .map(|g| {
-            let mut value = serde_json::to_value(g)?;
-            strip_root_prefix(&mut value, &root_prefix);
-            Ok(value)
-        })
-        .collect::<Result<_, serde_json::Error>>()?;
-
-    if let serde_json::Value::Object(ref mut map) = output {
-        map.insert("groups".to_string(), serde_json::Value::Array(group_values));
-    }
-
-    Ok(output)
+    fallow_api::serialize_grouped_duplication_json(GroupedDuplicationJsonOutputInput {
+        report,
+        grouping,
+        root,
+        elapsed,
+        meta: explain.then(fallow_output::dupes_meta),
+        workspace_diagnostics: workspace_diagnostics_for_output(root),
+        next_steps,
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
+        telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+    })
 }
 
 fn group_by_mode_from_label(label: &str) -> GroupByMode {

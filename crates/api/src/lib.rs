@@ -26,6 +26,7 @@ pub mod dupes_output;
 pub mod editor;
 pub mod grouped_output;
 pub mod health_codeclimate;
+pub mod json_output;
 pub mod output_contracts;
 pub mod runtime;
 pub mod security_output;
@@ -47,6 +48,12 @@ pub use grouped_output::{
     largest_clone_group_owner_with,
 };
 pub use health_codeclimate::build_health_codeclimate;
+pub use json_output::{
+    CheckJsonOutputInput, CheckJsonPayloadInput, DuplicationJsonOutputInput,
+    GroupedCheckJsonOutputInput, GroupedDuplicationJsonOutputInput,
+    harmonize_multi_kind_suppress_line_actions, serialize_check_json, serialize_check_json_payload,
+    serialize_duplication_json, serialize_grouped_check_json, serialize_grouped_duplication_json,
+};
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListing, CombinedOutput, FallowOutput,
     ListBoundariesOutput, SecurityGate, SecurityOutput, SecurityOutputConfig,
