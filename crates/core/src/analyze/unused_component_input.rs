@@ -273,12 +273,14 @@ mod tests {
     use fallow_types::discover::FileId;
     use fallow_types::extract::{
         AngularInputMember, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
-        ClassHeritageInfo, MemberAccess, SemanticFact, legacy_semantic,
+        ClassHeritageInfo, MemberAccess, SemanticFact,
     };
     use rustc_hash::FxHashSet;
 
     use super::*;
     use crate::analyze::test_support::empty_module;
+
+    const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
 
     fn input(name: &str, span: u32) -> AngularInputMember {
         AngularInputMember {
@@ -289,7 +291,7 @@ mod tests {
 
     fn tpl_access(member: &str) -> MemberAccess {
         MemberAccess {
-            object: legacy_semantic::ANGULAR_TPL_SENTINEL.to_string(),
+            object: ANGULAR_TPL_SENTINEL.to_string(),
             member: member.to_string(),
         }
     }

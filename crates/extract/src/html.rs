@@ -339,7 +339,8 @@ fn html_module_info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_types::extract::legacy_semantic;
+
+    const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
 
     #[test]
     fn is_html_file_html() {
@@ -795,7 +796,7 @@ mod tests {
         assert!(
             info.member_accesses
                 .iter()
-                .all(|access| access.object != legacy_semantic::ANGULAR_TPL_SENTINEL),
+                .all(|access| access.object != ANGULAR_TPL_SENTINEL),
             "Angular template refs should not emit legacy sentinels: {:?}",
             info.member_accesses
         );

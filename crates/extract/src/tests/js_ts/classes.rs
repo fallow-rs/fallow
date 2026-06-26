@@ -1,6 +1,8 @@
-use fallow_types::extract::{ExportName, MemberKind, SemanticFact, legacy_semantic};
+use fallow_types::extract::{ExportName, MemberKind, SemanticFact};
 
 use crate::tests::parse_ts as parse_source;
+
+const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
 
 #[test]
 fn enum_with_string_values_extracts_members() {
@@ -1184,7 +1186,7 @@ fn static_factory_binding_emits_typed_member_fact() {
         !info
             .member_accesses
             .iter()
-            .any(|a| a.object.starts_with(legacy_semantic::FACTORY_CALL_SENTINEL)),
+            .any(|a| a.object.starts_with(FACTORY_CALL_SENTINEL)),
         "factory call result should not emit a legacy sentinel access: {:?}",
         info.member_accesses
     );
@@ -1225,7 +1227,7 @@ fn static_factory_binding_same_file_emits_direct_access() {
         !info
             .member_accesses
             .iter()
-            .any(|a| a.object.starts_with(legacy_semantic::FACTORY_CALL_SENTINEL)),
+            .any(|a| a.object.starts_with(FACTORY_CALL_SENTINEL)),
         "same-file case must not emit a sentinel access: {:?}",
         info.member_accesses
     );
@@ -1292,7 +1294,7 @@ fn factory_call_candidate_with_unknown_object_is_dropped() {
         !info
             .member_accesses
             .iter()
-            .any(|a| a.object.starts_with(legacy_semantic::FACTORY_CALL_SENTINEL)),
+            .any(|a| a.object.starts_with(FACTORY_CALL_SENTINEL)),
         "calls on globals must not produce a sentinel binding: {:?}",
         info.member_accesses
     );

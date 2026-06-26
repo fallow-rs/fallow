@@ -2447,11 +2447,14 @@ mod tests {
         ClassHeritageInfo, FactoryCallMemberAccessFact, FluentChainMemberAccessFact,
         FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
         PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-        SemanticFact, is_legacy_template_or_semantic_member_access_object, legacy_semantic,
-        semantic_facts_with_legacy_member_accesses,
+        SemanticFact, SemanticFactView,
     };
     use oxc_span::Span;
     use std::path::PathBuf;
+
+    const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_def__:";
+    const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
+    const FLUENT_CHAIN_NEW_SENTINEL: &str = "__fallow_fluent_chain_new__:";
 
     #[expect(
         clippy::cast_possible_truncation,
@@ -2656,17 +2659,11 @@ mod tests {
             ],
             member_accesses: vec![
                 MemberAccess {
-                    object: format!(
-                        "{}test:adminPage",
-                        legacy_semantic::PLAYWRIGHT_FIXTURE_DEF_SENTINEL
-                    ),
+                    object: format!("{PLAYWRIGHT_FIXTURE_DEF_SENTINEL}test:adminPage"),
                     member: "AdminPage".to_string(),
                 },
                 MemberAccess {
-                    object: format!(
-                        "{}test:adminPage",
-                        legacy_semantic::PLAYWRIGHT_FIXTURE_USE_SENTINEL
-                    ),
+                    object: format!("{PLAYWRIGHT_FIXTURE_USE_SENTINEL}test:adminPage"),
                     member: "assertGreeting".to_string(),
                 },
             ],
@@ -5015,19 +5012,14 @@ mod tests {
 
     #[test]
     fn malformed_legacy_member_access_is_skip_only() {
-        let malformed = format!("{}Builder:", legacy_semantic::FLUENT_CHAIN_NEW_SENTINEL);
+        let malformed = format!("{FLUENT_CHAIN_NEW_SENTINEL}Builder:");
         let member_accesses = vec![crate::extract::MemberAccess {
-            object: malformed.clone(),
+            object: malformed,
             member: "value".to_string(),
         }];
 
-        assert!(is_legacy_template_or_semantic_member_access_object(
-            &malformed
-        ));
-        assert!(
-            semantic_facts_with_legacy_member_accesses(&[], &member_accesses)
-                .next()
-                .is_none()
-        );
+        let view = SemanticFactView::new(&[], &member_accesses);
+        assert!(view.facts().next().is_none());
+        assert!(view.ordinary_member_accesses().next().is_none());
     }
 }

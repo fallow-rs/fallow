@@ -214,12 +214,14 @@ fn component_name_for(path: &Path) -> String {
 mod tests {
     use fallow_types::extract::{
         AngularOutputMember, AngularTemplateMemberAccessFact, ClassHeritageInfo, MemberAccess,
-        SemanticFact, legacy_semantic,
+        SemanticFact,
     };
     use rustc_hash::FxHashSet;
 
     use super::*;
     use crate::analyze::test_support::empty_module;
+
+    const ANGULAR_TPL_SENTINEL: &str = "__angular_tpl__";
 
     fn output(name: &str, span: u32) -> AngularOutputMember {
         AngularOutputMember {
@@ -273,7 +275,7 @@ mod tests {
         // emitted.
         let component = ModuleInfo {
             angular_outputs: vec![output("changed", 10)],
-            member_accesses: vec![access(legacy_semantic::ANGULAR_TPL_SENTINEL, "changed")],
+            member_accesses: vec![access(ANGULAR_TPL_SENTINEL, "changed")],
             ..empty_module()
         };
         let emitted = template_emitted_outputs(&component, &[]);
