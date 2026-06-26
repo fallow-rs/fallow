@@ -5,9 +5,8 @@ use fallow_engine::{discover, plugins};
 
 use crate::report::format_display_path;
 use crate::runtime_support::{LoadConfigArgs, load_config};
-use fallow_output::{WorkspaceInfo, WorkspacesOutput};
-
-type CliWorkspacesOutput = WorkspacesOutput<fallow_config::WorkspaceDiagnostic>;
+use fallow_api::{ListJsonEnvelope, ListJsonOutputInput};
+use fallow_output::WorkspaceInfo;
 
 pub struct ListOptions<'a> {
     pub root: &'a std::path::Path,
@@ -305,40 +304,30 @@ struct ListJsonInput<'a> {
 }
 
 fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
-    let result = build_list_json_map(input);
-
     let has_boundaries = input.boundary_data.is_some();
     let workspace_only = input.opts.workspaces
         && !input.opts.plugins
         && !input.opts.files
         && !input.opts.entry_points
         && !input.opts.boundaries;
-
-    let output = serde_json::Value::Object(result);
-    let output = if has_boundaries {
-        match fallow_output::serialize_list_boundaries_json_output(
-            output,
-            crate::output_runtime::current_root_envelope_mode(),
-        ) {
-            Ok(value) => value,
-            Err(err) => {
-                eprintln!("Error: failed to serialize list output: {err}");
-                return ExitCode::from(2);
-            }
-        }
+    let envelope = if has_boundaries {
+        ListJsonEnvelope::Boundaries
     } else if workspace_only {
-        match fallow_output::serialize_list_workspaces_json_output(
-            output,
-            crate::output_runtime::current_root_envelope_mode(),
-        ) {
-            Ok(value) => value,
-            Err(err) => {
-                eprintln!("Error: failed to serialize list output: {err}");
-                return ExitCode::from(2);
-            }
-        }
+        ListJsonEnvelope::Workspaces
     } else {
-        output
+        ListJsonEnvelope::Plain
+    };
+
+    let output = match fallow_api::serialize_list_json_output(
+        build_list_json_output_input(input),
+        crate::output_runtime::current_root_envelope_mode(),
+        envelope,
+    ) {
+        Ok(value) => value,
+        Err(err) => {
+            eprintln!("Error: failed to serialize list output: {err}");
+            return ExitCode::from(2);
+        }
     };
 
     match serde_json::to_string_pretty(&output) {
@@ -353,88 +342,58 @@ fn print_list_json(input: &ListJsonInput<'_>) -> ExitCode {
     }
 }
 
-/// Assemble the JSON object body for a `fallow list` run, one section per
+/// Assemble the typed JSON body for a `fallow list` run, one section per
 /// active listing mode.
-fn build_list_json_map(input: &ListJsonInput<'_>) -> serde_json::Map<String, serde_json::Value> {
+fn build_list_json_output_input(
+    input: &ListJsonInput<'_>,
+) -> ListJsonOutputInput<fallow_api::BoundariesListing, fallow_config::WorkspaceDiagnostic> {
     let opts = input.opts;
     let show_all = input.show_all;
-    let mut result = serde_json::Map::new();
 
-    if (opts.plugins || show_all)
-        && let Some(pr) = input.plugin_result
-    {
-        let pl: Vec<serde_json::Value> = pr
-            .active_plugins
-            .iter()
-            .map(|name| serde_json::json!({ "name": name }))
-            .collect();
-        result.insert("plugins".to_string(), serde_json::json!(pl));
-    }
+    let plugins = if opts.plugins || show_all {
+        input
+            .plugin_result
+            .map(|plugin_result| plugin_result.active_plugins.clone())
+    } else {
+        None
+    };
 
-    if (opts.files || show_all)
-        && let Some(disc) = input.discovered
-    {
-        let paths: Vec<serde_json::Value> = disc
-            .iter()
-            .map(|f| serde_json::json!(format_display_path(&f.path, opts.root)))
-            .collect();
-        result.insert("file_count".to_string(), serde_json::json!(paths.len()));
-        result.insert("files".to_string(), serde_json::json!(paths));
-    }
-
-    if let Some(entries) = input.entry_points {
-        insert_entry_points_json(&mut result, entries, opts.root);
-    }
-
-    if let Some(bd) = input.boundary_data {
-        result.insert("boundaries".to_string(), boundary_data_to_json(bd));
-    }
-
-    if let Some(ws) = input.workspace_data {
-        insert_workspace_json(&mut result, ws, opts.root);
-    }
-
-    result
-}
-
-/// Insert the `entry_point_count` + `entry_points` keys into the list JSON map.
-fn insert_entry_points_json(
-    result: &mut serde_json::Map<String, serde_json::Value>,
-    entries: &[discover::EntryPoint],
-    root: &std::path::Path,
-) {
-    let eps: Vec<serde_json::Value> = entries
-        .iter()
-        .map(|ep| {
-            serde_json::json!({
-                "path": format_display_path(&ep.path, root),
-                "source": ep.source.to_string(),
-            })
+    let files = if opts.files || show_all {
+        input.discovered.map(|discovered| {
+            discovered
+                .iter()
+                .map(|file| format_display_path(&file.path, opts.root))
+                .collect()
         })
-        .collect();
-    result.insert(
-        "entry_point_count".to_string(),
-        serde_json::json!(eps.len()),
-    );
-    result.insert("entry_points".to_string(), serde_json::json!(eps));
-}
+    } else {
+        None
+    };
 
-/// Merge the root-stripped workspace output keys into the list JSON map.
-fn insert_workspace_json(
-    result: &mut serde_json::Map<String, serde_json::Value>,
-    ws: &WorkspaceData,
-    root: &std::path::Path,
-) {
-    let mut workspace_value =
-        serde_json::to_value(workspace_data_to_output(root, ws)).unwrap_or(serde_json::Value::Null);
-    let root_prefix = format!("{}/", root.display());
-    crate::report::strip_root_prefix(&mut workspace_value, &root_prefix);
-    if let serde_json::Value::Object(map) = workspace_value {
-        result.extend(map);
+    let entry_points = input.entry_points.map(|entries| {
+        entries
+            .iter()
+            .map(|entry| fallow_api::ListEntryPointOutput {
+                path: format_display_path(&entry.path, opts.root),
+                source: entry.source.to_string(),
+            })
+            .collect()
+    });
+
+    ListJsonOutputInput {
+        plugins,
+        files,
+        entry_points,
+        boundaries: input.boundary_data.map(boundary_data_to_output),
+        workspaces: input
+            .workspace_data
+            .map(|workspaces| workspace_data_to_output(opts.root, workspaces)),
     }
 }
 
-fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> CliWorkspacesOutput {
+fn workspace_data_to_output(
+    root: &std::path::Path,
+    ws: &WorkspaceData,
+) -> fallow_api::WorkspacesOutput {
     let workspaces = ws
         .workspaces
         .iter()
@@ -447,7 +406,7 @@ fn workspace_data_to_output(root: &std::path::Path, ws: &WorkspaceData) -> CliWo
             }
         })
         .collect::<Vec<_>>();
-    WorkspacesOutput {
+    fallow_api::WorkspacesOutput {
         workspace_count: workspaces.len(),
         workspaces,
         workspace_diagnostics: ws.diagnostics.clone(),
@@ -739,108 +698,79 @@ fn logical_group_info(
     }
 }
 
-fn boundary_data_to_json(bd: &BoundaryData) -> serde_json::Value {
+fn boundary_data_to_output(bd: &BoundaryData) -> fallow_api::BoundariesListing {
     if bd.is_empty {
-        return serde_json::json!({
-            "configured": false,
-            "zone_count": 0,
-            "zones": [],
-            "rule_count": 0,
-            "rules": [],
-            "logical_group_count": 0,
-            "logical_groups": [],
-        });
+        return fallow_api::BoundariesListing {
+            configured: false,
+            zone_count: 0,
+            zones: Vec::new(),
+            rule_count: 0,
+            rules: Vec::new(),
+            logical_group_count: 0,
+            logical_groups: Vec::new(),
+        };
     }
 
-    let zones: Vec<serde_json::Value> = bd
+    let zones = bd
         .zones
         .iter()
-        .map(|z| {
-            serde_json::json!({
-                "name": z.name,
-                "patterns": z.patterns,
-                "file_count": z.file_count,
-            })
+        .map(|zone| fallow_api::BoundariesListZone {
+            name: zone.name.clone(),
+            patterns: zone.patterns.clone(),
+            file_count: zone.file_count,
         })
         .collect();
 
-    let rules: Vec<serde_json::Value> = bd
+    let rules = bd
         .rules
         .iter()
-        .map(|r| {
-            serde_json::json!({
-                "from": r.from,
-                "allow": r.allow,
-            })
+        .map(|rule| fallow_api::BoundariesListRule {
+            from: rule.from.clone(),
+            allow: rule.allow.clone(),
         })
         .collect();
 
-    let logical_groups: Vec<serde_json::Value> = bd
+    let logical_groups = bd
         .logical_groups
         .iter()
-        .map(logical_group_info_to_json)
+        .map(logical_group_info_to_output)
         .collect();
 
-    serde_json::json!({
-        "configured": true,
-        "zone_count": bd.zones.len(),
-        "zones": zones,
-        "rule_count": bd.rules.len(),
-        "rules": rules,
-        "logical_group_count": bd.logical_groups.len(),
-        "logical_groups": logical_groups,
-    })
+    fallow_api::BoundariesListing {
+        configured: true,
+        zone_count: bd.zones.len(),
+        zones,
+        rule_count: bd.rules.len(),
+        rules,
+        logical_group_count: bd.logical_groups.len(),
+        logical_groups,
+    }
 }
 
-fn logical_group_info_to_json(g: &LogicalGroupInfo) -> serde_json::Value {
-    let status = match g.status {
-        fallow_config::LogicalGroupStatus::Ok => "ok",
-        fallow_config::LogicalGroupStatus::Empty => "empty",
-        fallow_config::LogicalGroupStatus::InvalidPath => "invalid_path",
-    };
-    let mut entry = serde_json::Map::new();
-    entry.insert("name".to_string(), serde_json::json!(g.name));
-    entry.insert("children".to_string(), serde_json::json!(g.children));
-    entry.insert(
-        "auto_discover".to_string(),
-        serde_json::json!(g.auto_discover),
-    );
-    entry.insert("status".to_string(), serde_json::json!(status));
-    entry.insert(
-        "source_zone_index".to_string(),
-        serde_json::json!(g.source_zone_index),
-    );
-    entry.insert("file_count".to_string(), serde_json::json!(g.file_count));
-    if let Some(rule) = &g.authored_rule {
-        let mut rule_obj = serde_json::Map::new();
-        rule_obj.insert("allow".to_string(), serde_json::json!(rule.allow));
-        if !rule.allow_type_only.is_empty() {
-            rule_obj.insert(
-                "allow_type_only".to_string(),
-                serde_json::json!(rule.allow_type_only),
-            );
-        }
-        entry.insert(
-            "authored_rule".to_string(),
-            serde_json::Value::Object(rule_obj),
-        );
+#[cfg(test)]
+fn boundary_data_to_json(bd: &BoundaryData) -> serde_json::Value {
+    match serde_json::to_value(boundary_data_to_output(bd)) {
+        Ok(value) => value,
+        Err(error) => panic!("boundary list output should serialize: {error}"),
     }
-    if let Some(fb) = &g.fallback_zone {
-        entry.insert("fallback_zone".to_string(), serde_json::json!(fb));
+}
+
+fn logical_group_info_to_output(
+    group: &LogicalGroupInfo,
+) -> fallow_api::BoundariesListLogicalGroup {
+    fallow_api::BoundariesListLogicalGroup {
+        name: group.name.clone(),
+        children: group.children.clone(),
+        auto_discover: group.auto_discover.clone(),
+        status: group.status,
+        source_zone_index: group.source_zone_index,
+        file_count: group.file_count,
+        authored_rule: group.authored_rule.clone(),
+        fallback_zone: group.fallback_zone.clone(),
+        merged_from: group.merged_from.clone(),
+        original_zone_root: group.original_zone_root.clone(),
+        child_source_indices: group.child_source_indices.clone(),
     }
-    if let Some(chain) = &g.merged_from {
-        entry.insert("merged_from".to_string(), serde_json::json!(chain));
-    }
-    if let Some(root) = &g.original_zone_root {
-        entry.insert("original_zone_root".to_string(), serde_json::json!(root));
-    }
-    if !g.child_source_indices.is_empty() {
-        entry.insert(
-            "child_source_indices".to_string(),
-            serde_json::json!(g.child_source_indices),
-        );
-    }
-    serde_json::Value::Object(entry)
 }
 
 fn print_boundary_data_human(bd: &BoundaryData) {

@@ -27,10 +27,21 @@ pub type BoundariesListing = fallow_output::BoundariesListing<
     fallow_config::AuthoredRule,
 >;
 
+pub type BoundariesListZone = fallow_output::BoundariesListZone;
+
+pub type BoundariesListRule = fallow_output::BoundariesListRule;
+
 pub type BoundariesListLogicalGroup = fallow_output::BoundariesListLogicalGroup<
     fallow_config::LogicalGroupStatus,
     fallow_config::AuthoredRule,
 >;
+
+pub type ListOutput =
+    fallow_output::ListOutput<BoundariesListing, fallow_config::WorkspaceDiagnostic>;
+
+pub type ListEntryPointOutput = fallow_output::ListEntryPointOutput;
+
+pub type ListPluginOutput = fallow_output::ListPluginOutput;
 
 pub type SecurityGate = fallow_output::SecurityGate<crate::SecurityGateMode>;
 

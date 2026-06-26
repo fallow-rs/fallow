@@ -30,6 +30,7 @@ pub mod editor;
 pub mod grouped_output;
 pub mod health_codeclimate;
 pub mod json_output;
+pub mod list_output;
 pub mod markdown_output;
 pub mod output_contracts;
 pub mod runtime;
@@ -100,12 +101,16 @@ pub use json_output::{
     harmonize_multi_kind_suppress_line_actions, serialize_check_json, serialize_check_json_payload,
     serialize_duplication_json, serialize_grouped_check_json, serialize_grouped_duplication_json,
 };
+pub use list_output::{
+    ListJsonEnvelope, ListJsonOutputInput, build_list_json_output, serialize_list_json_output,
+};
 pub use markdown_output::{
     build_duplication_markdown, build_grouped_markdown, build_health_markdown, build_markdown,
 };
 pub use output_contracts::{
-    AuditOutput, BoundariesListLogicalGroup, BoundariesListing, CombinedOutput, FallowOutput,
-    ListBoundariesOutput, SecurityGate, SecurityOutput, SecurityOutputConfig,
+    AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
+    BoundariesListing, CombinedOutput, FallowOutput, ListBoundariesOutput, ListEntryPointOutput,
+    ListOutput, ListPluginOutput, SecurityGate, SecurityOutput, SecurityOutputConfig,
     SecuritySummaryOutput, WorkspacesOutput,
 };
 pub use runtime::{

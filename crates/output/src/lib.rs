@@ -213,8 +213,8 @@ pub use issue_contract::{
 pub use json_paths::{normalize_uri, strip_root_prefix};
 pub use list_envelopes::{
     BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone, BoundariesListing,
-    ListBoundariesOutput, WorkspaceInfo, WorkspacesOutput, serialize_list_boundaries_json_output,
-    serialize_list_workspaces_json_output,
+    ListBoundariesOutput, ListEntryPointOutput, ListOutput, ListPluginOutput, WorkspaceInfo,
+    WorkspacesOutput, serialize_list_boundaries_json_output, serialize_list_workspaces_json_output,
 };
 pub use next_steps::{
     AuditNextStepsInput, CombinedNextStepsInput, DeadCodeNextStepsInput, DupesNextStepsInput,

@@ -3,6 +3,46 @@
 use crate::root_envelopes::{RootEnvelopeMode, serialize_named_json_output};
 use serde::Serialize;
 
+/// Plain body emitted by `fallow list --format json` before an optional
+/// command-specific root envelope is attached.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ListOutput<Boundaries, Diagnostic> {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugins: Option<Vec<ListPluginOutput>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_point_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_points: Option<Vec<ListEntryPointOutput>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundaries: Option<Boundaries>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspaces: Option<Vec<WorkspaceInfo>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_diagnostics: Option<Vec<Diagnostic>>,
+}
+
+/// One active plugin in `fallow list --plugins --format json`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ListPluginOutput {
+    pub name: String,
+}
+
+/// One entry point in `fallow list --entry-points --format json`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct ListEntryPointOutput {
+    pub path: String,
+    pub source: String,
+}
+
 /// Envelope emitted by `fallow list --boundaries --format json`. Surfaces
 /// the architecture boundary zones, rules, and the user's pre-expansion
 /// `autoDiscover` logical groups so consumers can render grouping intent that
