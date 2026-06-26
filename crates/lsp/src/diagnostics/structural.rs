@@ -5,7 +5,7 @@ use ls_types::{
     Position, Range, Uri,
 };
 
-use fallow_engine::results::AnalysisResults;
+use fallow_api::EditorAnalysisResults as AnalysisResults;
 
 use super::{FIRST_LINE_RANGE, doc_link};
 

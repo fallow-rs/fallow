@@ -17,7 +17,8 @@ use ls_types::{
     CodeDescription, Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Uri,
 };
 
-use fallow_engine::results::{AnalysisResults, SecurityFinding, SecurityFindingKind};
+use fallow_api::EditorAnalysisResults as AnalysisResults;
+use fallow_engine::results::{SecurityFinding, SecurityFindingKind};
 
 /// Documentation page for the security candidate surface. The dead-code
 /// `DOCS_BASE` in `super` points at the dead-code explanation; security has its

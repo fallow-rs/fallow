@@ -1204,6 +1204,7 @@ dependencies = [
 name = "fallow-lsp"
 version = "2.102.0"
 dependencies = [
+ "fallow-api",
  "fallow-config",
  "fallow-engine",
  "fallow-types",

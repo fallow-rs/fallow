@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use ls_types::{CodeLens, Command, Position, Range, Uri};
 
-use fallow_engine::results::AnalysisResults;
+use fallow_api::EditorAnalysisResults as AnalysisResults;
 
 /// LSP-local inline complexity signal rendered as a code lens.
 #[derive(Debug, Clone, PartialEq, Eq)]

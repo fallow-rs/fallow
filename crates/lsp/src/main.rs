@@ -27,12 +27,12 @@ use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
 use serde::{Deserialize, Serialize};
 
-use fallow_config::{DetectionMode, DuplicatesConfig};
-use fallow_engine::changed_files::{
-    filter_duplication_by_changed_files, filter_results_by_changed_files, resolve_git_toplevel,
-    try_get_changed_files_with_toplevel,
+use fallow_api::{
+    EditorAnalysisOutput, EditorAnalysisResults as AnalysisResults,
+    EditorAnalysisSession as AnalysisSession, EditorDeadCodeAnalysisOutput,
+    EditorDuplicationReport as DuplicationReport, resolve_git_toplevel,
 };
-use fallow_engine::{AnalysisResults, AnalysisSession, DuplicationReport};
+use fallow_config::{DetectionMode, DuplicatesConfig};
 use fallow_types::issue_meta::{IssueKindMeta, diagnostic_issue_metas};
 
 use crate::code_lens::{InlineComplexityExceeded, InlineComplexityFinding};
@@ -204,8 +204,7 @@ struct ProjectRootAnalysisInput<'a> {
     duplication_options: Option<&'a LspDuplicationOptions>,
     production_override: Option<bool>,
     inline_complexity_enabled: bool,
-    merged_results: &'a mut AnalysisResults,
-    merged_duplication: &'a mut DuplicationReport,
+    merged_analysis: &'a mut EditorAnalysisOutput,
     merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
     config_messages: &'a mut Vec<(MessageType, String)>,
 }
@@ -252,8 +251,7 @@ impl<'a> CodeActionInput<'a> {
 }
 
 struct BlockingAnalysisOutput {
-    results: AnalysisResults,
-    duplication: DuplicationReport,
+    analysis: EditorAnalysisOutput,
     inline_complexity: Vec<InlineComplexityFinding>,
     config_messages: Vec<(MessageType, String)>,
     changed_message: Option<(MessageType, String)>,
@@ -355,14 +353,12 @@ fn run_typed_project_analysis(
                     &output.dead_code,
                 ));
         }
-        merge_results(input.merged_results, output.dead_code.results);
-        merge_duplication(input.merged_duplication, output.duplication);
+        input.merged_analysis.merge_project_output(output);
     }
 }
 
 fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisOutput {
-    let mut results = AnalysisResults::default();
-    let mut duplication = DuplicationReport::default();
+    let mut analysis = EditorAnalysisOutput::default();
     let mut inline_complexity = Vec::new();
     let mut config_messages: Vec<(MessageType, String)> =
         Vec::with_capacity(input.project_roots.len());
@@ -373,8 +369,7 @@ fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisOutpu
             duplication_options: input.duplication_options.as_ref(),
             production_override: input.production_override,
             inline_complexity_enabled: input.inline_complexity_enabled,
-            merged_results: &mut results,
-            merged_duplication: &mut duplication,
+            merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,
             config_messages: &mut config_messages,
         });
@@ -384,14 +379,12 @@ fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisOutpu
         input.changed_since.as_deref(),
         input.toplevel.as_deref().unwrap_or(input.root.as_path()),
         &input.root,
-        &mut results,
-        &mut duplication,
+        &mut analysis,
         &mut inline_complexity,
     );
 
     BlockingAnalysisOutput {
-        results,
-        duplication,
+        analysis,
         inline_complexity,
         config_messages,
         changed_message,
@@ -402,16 +395,14 @@ fn apply_changed_since_filter(
     changed_since: Option<&str>,
     toplevel: &Path,
     root: &Path,
-    results: &mut AnalysisResults,
-    duplication: &mut DuplicationReport,
+    analysis: &mut EditorAnalysisOutput,
     inline_complexity: &mut Vec<InlineComplexityFinding>,
 ) -> Option<(MessageType, String)> {
     let git_ref = changed_since?;
 
-    match try_get_changed_files_with_toplevel(root, toplevel, git_ref) {
+    match fallow_api::try_get_changed_files_with_toplevel(root, toplevel, git_ref) {
         Ok(changed) => {
-            filter_results_by_changed_files(results, &changed);
-            filter_duplication_by_changed_files(duplication, &changed, root);
+            analysis.filter_by_changed_files(&changed, root);
             filter_inline_complexity_by_changed_files(inline_complexity, &changed);
             Some((
                 MessageType::INFO,
@@ -544,7 +535,7 @@ fn build_health_ignore_set(patterns: &[String]) -> Option<globset::GlobSet> {
 
 fn collect_inline_complexity(
     config: &fallow_config::ResolvedConfig,
-    output: &fallow_engine::DeadCodeAnalysisOutput,
+    output: &EditorDeadCodeAnalysisOutput,
 ) -> Vec<InlineComplexityFinding> {
     let Some(modules) = output.modules.as_ref() else {
         return Vec::new();
@@ -1256,20 +1247,23 @@ impl FallowLspServer {
             self.client.log_message(level, msg).await;
         }
 
-        let mut all_diagnostics = diagnostics::build_diagnostics(
-            diagnostics::DiagnosticInput::new(&output.results, &output.duplication, root),
-        );
+        let mut all_diagnostics =
+            diagnostics::build_diagnostics(diagnostics::DiagnosticInput::new(
+                &output.analysis.results,
+                &output.analysis.duplication,
+                root,
+            ));
         attach_changed_since_data(&mut all_diagnostics, changed_since_for_data);
         self.publish_collected_diagnostics(all_diagnostics, version_snapshot)
             .await;
 
         let complete_params = analysis_complete_params(AnalysisCompleteInput::new(
-            &output.results,
-            &output.duplication,
+            &output.analysis.results,
+            &output.analysis.duplication,
         ));
         *self.analysis.write().await = Some(LspAnalysisSnapshot::new(
-            output.results,
-            output.duplication,
+            output.analysis.results,
+            output.analysis.duplication,
             output.inline_complexity,
         ));
 
@@ -1582,39 +1576,21 @@ fn attach_changed_since_data(
     }
 }
 
-/// Fold the analysis results from the single project root into the accumulator.
-///
-/// Thin wrapper over [`AnalysisResults::merge_into`], the single
-/// field-exhaustive union (issue #444). The LSP analyzes one root per run
-/// (see [`find_project_roots`]), so this folds exactly one result; the wrapper
-/// stays because [`AnalysisResults::merge_into`] is the field-drift guard that
-/// `merge_results_covers_all_fields` pins against new `AnalysisResults` fields.
+/// Test-only compatibility wrapper over the editor API accumulator.
+#[cfg(test)]
 fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
-    target.merge_into(source);
+    let mut output =
+        EditorAnalysisOutput::new(std::mem::take(target), DuplicationReport::default());
+    output.merge_results(source);
+    *target = output.results;
 }
 
-/// Fold the duplication report from the single project root into the
-/// accumulator. The LSP analyzes one root per run (see [`find_project_roots`]),
-/// so this folds exactly one report.
+/// Test-only compatibility wrapper over the editor API accumulator.
+#[cfg(test)]
 fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) {
-    target.clone_groups.extend(source.clone_groups);
-    target.clone_families.extend(source.clone_families);
-    target
-        .mirrored_directories
-        .extend(source.mirrored_directories);
-    target.stats.clone_groups += source.stats.clone_groups;
-    target.stats.clone_instances += source.stats.clone_instances;
-    target.stats.total_files += source.stats.total_files;
-    target.stats.files_with_clones += source.stats.files_with_clones;
-    target.stats.total_lines += source.stats.total_lines;
-    target.stats.duplicated_lines += source.stats.duplicated_lines;
-    target.stats.total_tokens += source.stats.total_tokens;
-    target.stats.duplicated_tokens += source.stats.duplicated_tokens;
-    target.stats.duplication_percentage = if target.stats.total_lines > 0 {
-        (target.stats.duplicated_lines as f64 / target.stats.total_lines as f64) * 100.0
-    } else {
-        0.0
-    };
+    let mut output = EditorAnalysisOutput::new(AnalysisResults::default(), std::mem::take(target));
+    output.merge_duplication(source);
+    *target = output.duplication;
 }
 
 #[cfg(test)]
@@ -1650,17 +1626,22 @@ mod tests {
         merged_inline_complexity: &mut Vec<InlineComplexityFinding>,
         config_messages: &mut Vec<(MessageType, String)>,
     ) {
+        let mut merged_analysis = EditorAnalysisOutput::new(
+            std::mem::take(merged_results),
+            std::mem::take(merged_duplication),
+        );
         analyze_project_root(&mut ProjectRootAnalysisInput {
             project_root,
             config_path,
             duplication_options,
             production_override,
             inline_complexity_enabled,
-            merged_results,
-            merged_duplication,
+            merged_analysis: &mut merged_analysis,
             merged_inline_complexity,
             config_messages,
         });
+        *merged_results = merged_analysis.results;
+        *merged_duplication = merged_analysis.duplication;
     }
 
     #[test]

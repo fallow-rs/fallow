@@ -5,8 +5,9 @@ use ls_types::{
     Location, NumberOrString, Position, Range, Uri,
 };
 
-use fallow_engine::duplicates::DuplicationReport;
-use fallow_engine::results::AnalysisResults;
+use fallow_api::{
+    EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
+};
 
 use super::doc_link;
 

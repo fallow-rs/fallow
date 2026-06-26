@@ -8,7 +8,7 @@ use std::path::Path;
 #[allow(clippy::wildcard_imports, reason = "many LSP types used")]
 use ls_types::*;
 
-use fallow_engine::results::AnalysisResults;
+use fallow_api::EditorAnalysisResults as AnalysisResults;
 
 use crate::diagnostics::FIRST_LINE_RANGE;
 

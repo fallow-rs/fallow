@@ -8,8 +8,9 @@ use std::path::Path;
 
 use ls_types::{CodeDescription, Diagnostic, Position, Range, Uri};
 
-use fallow_engine::duplicates::DuplicationReport;
-use fallow_engine::results::AnalysisResults;
+use fallow_api::{
+    EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
+};
 
 /// Base URL for diagnostic documentation links.
 const DOCS_BASE: &str = "https://docs.fallow.tools/explanations/dead-code#";

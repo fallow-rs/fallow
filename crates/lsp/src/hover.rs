@@ -3,8 +3,10 @@ use std::path::Path;
 
 use ls_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Range};
 
-use fallow_engine::duplicates::DuplicationReport;
-use fallow_engine::results::{AnalysisResults, SecurityFindingKind};
+use fallow_api::{
+    EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
+};
+use fallow_engine::results::SecurityFindingKind;
 
 use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;

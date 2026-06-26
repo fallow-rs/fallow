@@ -20,12 +20,18 @@ use serde::Serialize;
 
 pub mod audit_output;
 pub mod dupes_output;
+pub mod editor;
 pub mod runtime;
 pub mod security_output;
 pub use audit_output::{AuditAttribution, AuditSummary, AuditVerdict};
 pub use dupes_output::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, CloneFamilyFinding,
     CloneGroupFinding, DupesReportPayload, DuplicationGroup, DuplicationGrouping,
+};
+pub use editor::{
+    ChangedFilesError, EditorAnalysisOutput, EditorAnalysisResults, EditorAnalysisSession,
+    EditorDeadCodeAnalysisOutput, EditorDuplicationReport, EditorProjectAnalysisOutput,
+    resolve_git_toplevel, try_get_changed_files_with_toplevel,
 };
 pub use runtime::{
     DeadCodeProgrammaticOutput, DuplicationProgrammaticOutput, HealthJsonReportInput,
