@@ -130,7 +130,8 @@ pub fn run_cross_reference(
     let files = fallow_core::discover::discover_files_with_plugin_scopes(config);
     let dupe_report =
         fallow_core::duplicates::find_duplicates(&config.root, &files, &config.duplicates);
-    let cross_ref = fallow_core::cross_reference::cross_reference(&dupe_report, unfiltered_results);
+    let cross_ref =
+        fallow_engine::cross_reference::cross_reference(&dupe_report, unfiltered_results);
 
     if cross_ref.has_findings() {
         report::print_cross_reference_findings(&cross_ref, &config.root, quiet, config.output);
@@ -141,7 +142,7 @@ pub fn run_cross_reference(
 ///
 /// The format is `FILE:EXPORT_NAME`. Uses `rsplit_once` so that colons
 /// in Windows drive letters (e.g., `C:\src\utils.ts:foo`) are handled
-/// correctly — only the last colon is used as the separator.
+/// correctly, only the last colon is used as the separator.
 pub(super) fn parse_trace_spec(spec: &str) -> Option<(&str, &str)> {
     spec.rsplit_once(':')
 }

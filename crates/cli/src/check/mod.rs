@@ -973,8 +973,8 @@ fn load_and_compare_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
+    use fallow_types::extract::MemberKind;
     use std::path::PathBuf;
 
     fn no_filters() -> IssueFilters {

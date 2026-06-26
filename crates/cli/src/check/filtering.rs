@@ -597,8 +597,8 @@ pub fn resolve_workspace_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
+    use fallow_types::extract::MemberKind;
     use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
     use fallow_types::results::{SecurityReachability, SecuritySeverity};
     use std::path::PathBuf;

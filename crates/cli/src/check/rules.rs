@@ -804,8 +804,8 @@ mod tests {
 
     type RuleFieldSetter = fn(&mut RulesConfig);
     type ResultFieldCheck = fn(&AnalysisResults) -> bool;
-    use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
+    use fallow_types::extract::MemberKind;
     use std::path::PathBuf;
 
     #[expect(

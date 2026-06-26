@@ -80,6 +80,13 @@ pub mod changed_files {
     };
 }
 
+/// Cross-reference helpers exposed through the engine boundary.
+pub mod cross_reference {
+    pub use fallow_core::cross_reference::{
+        CombinedFinding, CrossReferenceResult, DeadCodeKind, cross_reference,
+    };
+}
+
 /// Git churn helpers and types exposed through the engine boundary.
 pub mod churn {
     pub use fallow_core::churn::*;

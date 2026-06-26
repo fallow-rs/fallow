@@ -580,7 +580,7 @@ fn warn_grouping_unsupported(grouping: Option<&fallow_output::HealthGrouping>, f
 ///
 /// Only emits output in human format to avoid corrupting structured JSON/SARIF output.
 pub fn print_cross_reference_findings(
-    cross_ref: &fallow_core::cross_reference::CrossReferenceResult,
+    cross_ref: &fallow_engine::cross_reference::CrossReferenceResult,
     root: &Path,
     quiet: bool,
     output: OutputFormat,
