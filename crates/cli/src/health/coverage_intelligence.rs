@@ -1019,7 +1019,7 @@ mod tests {
                 lines_deleted: 20,
                 complexity_density: 0.5,
                 fan_in: 3,
-                trend: fallow_core::churn::ChurnTrend::Stable,
+                trend: fallow_engine::churn::ChurnTrend::Stable,
                 ownership: Some(OwnershipMetrics {
                     bus_factor: 1,
                     contributor_count: 1,

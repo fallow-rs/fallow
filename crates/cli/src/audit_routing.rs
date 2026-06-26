@@ -17,7 +17,7 @@ use rustc_hash::FxHashSet;
 use crate::codeowners::CodeOwners;
 use crate::health::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
 use fallow_config::ResolvedConfig;
-use fallow_core::churn::{self, SinceDuration};
+use fallow_engine::churn::{self, SinceDuration};
 
 /// Default churn window for routing: one year of history is enough to identify
 /// the per-file experts without an unbounded `git log`.

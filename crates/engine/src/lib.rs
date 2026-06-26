@@ -65,6 +65,11 @@ pub mod changed_files {
     };
 }
 
+/// Git churn helpers and types exposed through the engine boundary.
+pub mod churn {
+    pub use fallow_core::churn::*;
+}
+
 /// Security metadata helpers exposed through the engine boundary.
 pub mod security {
     pub use fallow_core::analyze::security_catalogue_title;

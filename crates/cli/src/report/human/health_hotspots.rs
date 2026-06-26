@@ -72,12 +72,12 @@ fn handle_matches_owner(identifier: &str, declared_owner: &str) -> bool {
 
 fn render_ownership_line(
     ownership: &crate::health_types::OwnershipMetrics,
-    trend: fallow_core::churn::ChurnTrend,
+    trend: fallow_engine::churn::ChurnTrend,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     let top_share = ownership.top_contributor.share;
-    let is_accelerating = matches!(trend, fallow_core::churn::ChurnTrend::Accelerating);
+    let is_accelerating = matches!(trend, fallow_engine::churn::ChurnTrend::Accelerating);
     let is_extreme = top_share >= 0.9 || (ownership.bus_factor == 1 && is_accelerating);
     let bus_str = if top_share >= 0.9999 {
         format!("bus={} (sole author)", ownership.bus_factor)
@@ -218,19 +218,19 @@ fn hotspot_score_colored(score: f64) -> String {
     }
 }
 
-fn hotspot_trend_symbol(trend: fallow_core::churn::ChurnTrend) -> String {
+fn hotspot_trend_symbol(trend: fallow_engine::churn::ChurnTrend) -> String {
     match trend {
-        fallow_core::churn::ChurnTrend::Accelerating => "\u{25b2}".red().to_string(),
-        fallow_core::churn::ChurnTrend::Cooling => "\u{25bc}".green().to_string(),
-        fallow_core::churn::ChurnTrend::Stable => "\u{2500}".dimmed().to_string(),
+        fallow_engine::churn::ChurnTrend::Accelerating => "\u{25b2}".red().to_string(),
+        fallow_engine::churn::ChurnTrend::Cooling => "\u{25bc}".green().to_string(),
+        fallow_engine::churn::ChurnTrend::Stable => "\u{2500}".dimmed().to_string(),
     }
 }
 
-fn hotspot_trend_label(trend: fallow_core::churn::ChurnTrend) -> String {
+fn hotspot_trend_label(trend: fallow_engine::churn::ChurnTrend) -> String {
     match trend {
-        fallow_core::churn::ChurnTrend::Accelerating => "\u{25b2} accelerating".red().to_string(),
-        fallow_core::churn::ChurnTrend::Cooling => "\u{25bc} cooling".green().to_string(),
-        fallow_core::churn::ChurnTrend::Stable => "\u{2500} stable".dimmed().to_string(),
+        fallow_engine::churn::ChurnTrend::Accelerating => "\u{25b2} accelerating".red().to_string(),
+        fallow_engine::churn::ChurnTrend::Cooling => "\u{25bc} cooling".green().to_string(),
+        fallow_engine::churn::ChurnTrend::Stable => "\u{2500} stable".dimmed().to_string(),
     }
 }
 
@@ -295,7 +295,7 @@ fn hotspots_have_history_only_ownership(report: &crate::health_types::HealthRepo
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_core::churn::ChurnTrend;
+    use fallow_engine::churn::ChurnTrend;
 
     use super::super::plain;
     use super::*;
