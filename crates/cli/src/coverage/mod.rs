@@ -726,10 +726,8 @@ fn run_setup_json(root: &Path, explain: bool) -> ExitCode {
 )]
 fn build_setup_json(root: &Path, explain: bool) -> serde_json::Value {
     let envelope = build_setup_envelope(root, explain);
-    crate::output_envelope::serialize_root_output(
-        crate::output_envelope::FallowOutput::CoverageSetup(envelope),
-    )
-    .expect("CoverageSetupOutput serializes infallibly")
+    crate::output_envelope::serialize_named_root_output(envelope, "coverage-setup")
+        .expect("CoverageSetupOutput serializes infallibly")
 }
 
 fn build_setup_envelope(root: &Path, explain: bool) -> crate::output_envelope::CoverageSetupOutput {

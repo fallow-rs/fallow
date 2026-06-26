@@ -6,9 +6,9 @@ use serde_json::{Value, json};
 
 use crate::error::emit_error;
 use crate::output_envelope::{
-    FallowOutput, InspectEvidence, InspectEvidenceScope, InspectEvidenceSection,
-    InspectFileIdentity, InspectIdentity, InspectOutput, InspectSectionStatus,
-    InspectSymbolIdentity, InspectTargetDescriptor, serialize_root_output,
+    InspectEvidence, InspectEvidenceScope, InspectEvidenceSection, InspectFileIdentity,
+    InspectIdentity, InspectOutput, InspectSectionStatus, InspectSymbolIdentity,
+    InspectTargetDescriptor, serialize_named_root_output,
 };
 use crate::report;
 use crate::report::sink::outln;
@@ -290,7 +290,7 @@ fn build_inspect_identity(
 fn emit_inspect_bundle(bundle: InspectOutput, opts: &InspectOptions<'_>) -> ExitCode {
     match opts.output {
         OutputFormat::Json => {
-            let value = match serialize_root_output(FallowOutput::Inspect(bundle)) {
+            let value = match serialize_named_root_output(bundle, "inspect_target") {
                 Ok(value) => value,
                 Err(err) => {
                     return emit_error(

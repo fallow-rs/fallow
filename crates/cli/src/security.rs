@@ -1618,9 +1618,8 @@ fn relativize(path: &Path, root: &Path) -> PathBuf {
 /// JSON: the `SecurityOutput` envelope, pretty-printed.
 #[must_use]
 pub fn render_json(output: &SecurityOutput) -> String {
-    let Ok(value) = crate::output_envelope::serialize_root_output(
-        crate::output_envelope::FallowOutput::Security(output.clone()),
-    ) else {
+    let Ok(value) = crate::output_envelope::serialize_named_root_output(output.clone(), "security")
+    else {
         return "{\"error\":\"failed to serialize security output\"}".to_owned();
     };
     serde_json::to_string_pretty(&value)
@@ -1639,9 +1638,9 @@ pub fn render_json_summary(output: &SecurityOutput) -> String {
         gate: output.gate,
         summary: security_summary(output),
     };
-    let Ok(value) = crate::output_envelope::serialize_root_output_without_telemetry(
-        crate::output_envelope::FallowOutput::SecuritySummary(summary),
-    ) else {
+    let Ok(value) =
+        crate::output_envelope::serialize_named_root_output_without_telemetry(summary, "security")
+    else {
         return "{\"error\":\"failed to serialize security summary output\"}".to_owned();
     };
     serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
@@ -1661,8 +1660,9 @@ fn render_survivors_output(
 
 #[must_use]
 pub fn render_survivors_json(output: &SecuritySurvivorsOutput) -> String {
-    let Ok(value) = crate::output_envelope::serialize_root_output_without_telemetry(
-        crate::output_envelope::FallowOutput::SecuritySurvivors(output.clone()),
+    let Ok(value) = crate::output_envelope::serialize_named_root_output_without_telemetry(
+        output.clone(),
+        "security-survivors",
     ) else {
         return "{\"error\":\"failed to serialize security survivors output\"}".to_owned();
     };
@@ -1861,8 +1861,9 @@ fn render_blind_spots_output(
 
 #[must_use]
 pub fn render_blind_spots_json(output: &SecurityBlindSpotsOutput) -> String {
-    let Ok(value) = crate::output_envelope::serialize_root_output_without_telemetry(
-        crate::output_envelope::FallowOutput::SecurityBlindSpots(output.clone()),
+    let Ok(value) = crate::output_envelope::serialize_named_root_output_without_telemetry(
+        output.clone(),
+        "security-blind-spots",
     ) else {
         return "{\"error\":\"failed to serialize security blind-spots output\"}".to_owned();
     };

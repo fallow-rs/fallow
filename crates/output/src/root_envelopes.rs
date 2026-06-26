@@ -41,6 +41,26 @@ pub fn serialize_json_root_output<T: Serialize>(
     Ok(value)
 }
 
+/// Serialize an output envelope and apply an explicit root discriminator.
+///
+/// Use this for command surfaces whose runtime shape is already a typed
+/// envelope struct and does not need to pass through the schema-only
+/// [`FallowOutput`] enum just to get a top-level `kind`.
+///
+/// # Errors
+///
+/// Returns a serde error when the provided envelope cannot be converted to a
+/// JSON value.
+pub fn serialize_named_json_output<T: Serialize>(
+    output: T,
+    kind: &'static str,
+    mode: RootEnvelopeMode,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serde_json::to_value(output)?;
+    apply_root_kind(&mut value, kind, mode);
+    Ok(value)
+}
+
 /// Serialize a typed `fallow audit --format json` envelope with the standard
 /// root discriminator policy.
 ///
@@ -432,6 +452,22 @@ mod tests {
 
         assert!(value.get("kind").is_none());
         assert_eq!(value["schema_version"], 1);
+    }
+
+    #[test]
+    fn serialize_named_json_output_applies_explicit_kind() {
+        let value = serialize_named_json_output(
+            json!({
+                "schema_version": 1,
+                "summary": { "total": 0 }
+            }),
+            "example",
+            RootEnvelopeMode::Tagged,
+        )
+        .expect("named output should serialize");
+
+        assert_eq!(value["kind"], "example");
+        assert_eq!(value["summary"]["total"], 0);
     }
 
     #[test]
