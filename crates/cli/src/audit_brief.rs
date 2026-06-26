@@ -16,7 +16,8 @@ use std::process::ExitCode;
 
 pub use fallow_output::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
-    ReviewBriefSchemaVersion, ReviewDeltas, ReviewEffort, ReviewUnitFact, RiskClass,
+    ReviewBriefSchemaVersion, ReviewBriefSubtractSections, ReviewDeltas, ReviewEffort,
+    ReviewUnitFact, RiskClass,
 };
 use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
@@ -337,103 +338,26 @@ pub fn build_brief_output(result: &AuditResult) -> ReviewBriefOutput {
     }
 }
 
-/// Insert the Stage 0 triage object into the brief JSON map.
-fn insert_brief_triage_json(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    brief: &ReviewBriefOutput,
-) {
-    if let Ok(value) = serde_json::to_value(&brief.triage) {
-        obj.insert("triage".into(), value);
-    }
-}
-
-/// Insert the Stage 1 graph-facts object into the brief JSON map.
-fn insert_brief_graph_facts_json(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    brief: &ReviewBriefOutput,
-) {
-    if let Ok(value) = serde_json::to_value(&brief.graph_facts) {
-        obj.insert("graph_facts".into(), value);
-    }
-}
-
-/// Insert the Stage 2 partition + order object into the brief JSON map.
-fn insert_brief_partition_json(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    brief: &ReviewBriefOutput,
-) {
-    if let Ok(value) = serde_json::to_value(&brief.partition) {
-        obj.insert("partition".into(), value);
-    }
-}
-
-/// Insert the Stage 3 impact-closure object into the brief JSON map.
-fn insert_brief_impact_closure_json(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    brief: &ReviewBriefOutput,
-) {
-    if let Ok(value) = serde_json::to_value(&brief.impact_closure) {
-        obj.insert("impact_closure".into(), value);
-    }
-}
-
-/// Insert the Stage 4 weighted focus map into the brief JSON map. The
-/// `deprioritized` escape-hatch list is ALWAYS present (every de-prioritized
-/// unit), so nothing is hidden regardless of `--show-deprioritized` (a
-/// human-rendering-only flag).
-fn insert_brief_focus_json(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    brief: &ReviewBriefOutput,
-) {
-    if let Ok(value) = serde_json::to_value(&brief.focus) {
-        obj.insert("focus".into(), value);
-    }
-}
-
-/// Insert the deltas / weakening / routing sections into the brief JSON map.
-fn insert_brief_e3_json(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    brief: &ReviewBriefOutput,
-) {
-    if let Ok(value) = serde_json::to_value(&brief.deltas) {
-        obj.insert("deltas".into(), value);
-    }
-    if let Ok(value) = serde_json::to_value(&brief.weakening) {
-        obj.insert("weakening".into(), value);
-    }
-    if let Ok(value) = serde_json::to_value(&brief.routing) {
-        obj.insert("routing".into(), value);
-    }
-}
-
-/// Insert the decision surface (the apex) into the brief JSON map.
-fn insert_brief_decisions_json(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    brief: &ReviewBriefOutput,
-) {
-    if let Ok(value) = serde_json::to_value(&brief.decisions) {
-        obj.insert("decisions".into(), value);
-    }
-}
-
-/// Insert the reused "subtract" section (dead-code / duplication / complexity)
-/// into the brief JSON map, mirroring `fallow audit --format json`. Returns the
-/// failing exit code if any sub-payload fails to serialize; the caller maps that
-/// to a force-success on the brief path but surfaces the serialization error.
-fn insert_brief_subtract_json(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
+/// Build the reused "subtract" section (dead-code / duplication / complexity)
+/// for the brief JSON value, mirroring `fallow audit --format json`.
+fn build_brief_subtract_sections(
     result: &AuditResult,
-) -> Result<(), ExitCode> {
+) -> Result<ReviewBriefSubtractSections, ExitCode> {
+    let mut obj = serde_json::Map::new();
     if let Some(ref check) = result.check {
-        crate::audit::insert_audit_dead_code_json(obj, result, check)?;
+        crate::audit::insert_audit_dead_code_json(&mut obj, result, check)?;
     }
     if let Some(ref dupes) = result.dupes {
-        crate::audit::insert_audit_duplication_json(obj, result, dupes)?;
+        crate::audit::insert_audit_duplication_json(&mut obj, result, dupes)?;
     }
     if let Some(ref health) = result.health {
-        crate::audit::insert_audit_health_json(obj, result, health)?;
+        crate::audit::insert_audit_health_json(&mut obj, result, health)?;
     }
-    Ok(())
+    Ok(ReviewBriefSubtractSections {
+        dead_code: obj.remove("dead_code"),
+        duplication: obj.remove("duplication"),
+        complexity: obj.remove("complexity"),
+    })
 }
 
 /// Build the complete brief JSON value: the versioned brief header, the
@@ -441,47 +365,16 @@ fn insert_brief_subtract_json(
 /// reused subtract section.
 fn build_brief_json(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {
     let brief = build_brief_output(result);
-    let mut obj = serde_json::Map::new();
-
-    obj.insert(
-        "schema_version".into(),
-        serde_json::to_value(brief.schema_version).unwrap_or(serde_json::Value::Null),
-    );
-    obj.insert(
-        "version".into(),
-        serde_json::Value::String(brief.version.clone()),
-    );
-    obj.insert(
-        "command".into(),
-        serde_json::Value::String(brief.command.clone()),
-    );
-
-    // The audit verdict and scope are carried informationally so the brief is a
-    // superset of the audit header; the verdict never drives the brief exit.
-    crate::audit::insert_audit_json_header(&mut obj, result);
-    // Re-stamp the brief command over the audit header's `"audit"` / its
-    // `SCHEMA_VERSION`, so the document advertises the brief contract.
-    obj.insert(
-        "schema_version".into(),
-        serde_json::to_value(brief.schema_version).unwrap_or(serde_json::Value::Null),
-    );
-    obj.insert(
-        "command".into(),
-        serde_json::Value::String(brief.command.clone()),
-    );
-
-    // The decision surface is the apex; it leads the JSON (collapse-by-
-    // default), with the stages below as its drill-down derivation.
-    insert_brief_decisions_json(&mut obj, &brief);
-    insert_brief_triage_json(&mut obj, &brief);
-    insert_brief_graph_facts_json(&mut obj, &brief);
-    insert_brief_partition_json(&mut obj, &brief);
-    insert_brief_impact_closure_json(&mut obj, &brief);
-    insert_brief_focus_json(&mut obj, &brief);
-    insert_brief_e3_json(&mut obj, &brief);
-    insert_brief_subtract_json(&mut obj, result)?;
-
-    Ok(serde_json::Value::Object(obj))
+    let mut audit_header = serde_json::Map::new();
+    crate::audit::insert_audit_json_header(&mut audit_header, result);
+    let subtract = build_brief_subtract_sections(result)?;
+    fallow_output::build_review_brief_json_output(&brief, audit_header, subtract).map_err(|err| {
+        crate::error::emit_error(
+            &format!("JSON serialization error: {err}"),
+            2,
+            fallow_config::OutputFormat::Json,
+        )
+    })
 }
 
 /// Render the brief as JSON. Always returns `SUCCESS`; a serialization failure

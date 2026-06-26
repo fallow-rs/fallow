@@ -52,8 +52,9 @@ mod security;
 
 pub use audit_brief::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
-    REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefOutput, ReviewBriefSchemaVersion, ReviewDeltas,
-    ReviewEffort, ReviewUnitFact, RiskClass,
+    REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefOutput, ReviewBriefSchemaVersion,
+    ReviewBriefSubtractSections, ReviewDeltas, ReviewEffort, ReviewUnitFact, RiskClass,
+    build_review_brief_json_output,
 };
 pub use audit_decision_surface::{
     ALL_CATEGORIES, DECISION_SURFACE_SCHEMA_VERSION, Decision, DecisionAction, DecisionActionType,
