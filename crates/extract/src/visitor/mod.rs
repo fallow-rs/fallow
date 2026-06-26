@@ -377,6 +377,12 @@ pub(crate) struct ModuleInfoExtractor {
     /// `s.member` / `props.store.member` credit the store member through the
     /// existing `binding_target_names` remap (issue #1489 Case 2). Working state
     /// only; never persisted.
+    ///
+    /// Resolution is source-order-dependent (recorded during the walk, the same
+    /// constraint as class type-param resolution): an alias declared BELOW its
+    /// first consuming param is not in the map yet when the param is processed,
+    /// so that one ordering keeps the false positive. The inline
+    /// `ReturnType<typeof useStore>` annotation needs no alias and is unaffected.
     type_alias_store_factory: FxHashMap<String, String>,
     /// SvelteKit `load()` return-object keys harvested from a `load` export.
     /// Basename-gated to page-load producers in `parse.rs` (cleared for any

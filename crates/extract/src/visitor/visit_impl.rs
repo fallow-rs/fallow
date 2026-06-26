@@ -7720,11 +7720,17 @@ impl ModuleInfoExtractor {
                 self.credit_store_pattern_members(obj_pat, ident.name.as_str());
             }
             // const { count } = props.store: destructure on a typed-param store
-            // path bound to a store factory (issue #1489 Case 2).
+            // path bound to a store factory (issue #1489 Case 2). Gated on the
+            // `use<Name>Store` convention, not the broad `is_store_factory_call`:
+            // a class-typed object param (`props: { store: SomeClass }`) also lands
+            // a `binding_target_names["props.store"]` entry (a class name), and that
+            // case is already covered by the generic member-access path, not this
+            // Pinia-specific destructure arm.
             Expression::StaticMemberExpression(_) => {
                 if let Some(path) = static_member_object_name(init)
                     && let Some(factory) = self.binding_target_names.get(&path).cloned()
-                    && self.is_store_factory_call(&factory)
+                    && factory.starts_with("use")
+                    && factory.ends_with("Store")
                 {
                     self.credit_store_pattern_members(obj_pat, &factory);
                 }
