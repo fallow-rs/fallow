@@ -24,7 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is now credited, so it is not reported as unused. Resolution is gated on the
   `use<Name>Store` naming convention, so a non-store `ReturnType<typeof ...>`
   param never masks a genuinely unused member.
-  (Refs [#1489](https://github.com/fallow-rs/fallow/issues/1489))
+  (Closes [#1489](https://github.com/fallow-rs/fallow/issues/1489))
+
+- **`unused-class-members` no longer false-flags a member reached through a
+  factory or composable return value.** When a class instance reaches a call
+  site only through a function that returns it (a `useApi()` composable, a
+  singleton getter), `const api = useApi(); api.Member()` now credits
+  `Class.Member`, including when the factory's return type is inferred rather
+  than annotated. Previously the member was reported as unused unless the
+  instance was reached through a directly-typed reference.
+  (Closes [#1441](https://github.com/fallow-rs/fallow/issues/1441))
 
 - **`ignorePatterns` now accepts a leading `./`.** Entries such as
   `./src/generated/**` now match the same project-root-relative files as

@@ -68,3 +68,37 @@ fn cross_module_factory_return_credits_class_member() {
         "RESTApi.unusedMethod has no call site and must stay flagged, found: {unused:?}"
     );
 }
+
+#[test]
+fn inferred_return_factory_credits_class_member() {
+    // The exact issue #1441 repro: `useApi()` has an INFERRED return type (no
+    // `: Api` annotation), so the class type reaches the consumer only through the
+    // typed module-local `let api: Api` the factory returns. The headline of the
+    // issue is precisely the inferred-return form; the other #1441 fixtures all
+    // annotate the return, so this pins the inferred case against regression.
+    //   const api = useApi(); api.ViaFactory.call() -> must credit Api.ViaFactory
+    //   useDirect(api: Api) { api.Direct.call() }    -> must credit Api.Direct
+    //   Api.DeadMember (never accessed)              -> must stay flagged (control)
+    let root = fixture_path("issue-1441-inferred-return-member");
+    let mut config = create_config(root);
+    config.rules.unused_class_members = fallow_config::Severity::Error;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    for credited in ["Api.Direct", "Api.ViaFactory"] {
+        assert!(
+            !unused.contains(&credited.to_string()),
+            "{credited} is a genuine usage reached through the inferred-return factory and must be \
+             credited (issue #1441), found: {unused:?}"
+        );
+    }
+    assert!(
+        unused.contains(&"Api.DeadMember".to_string()),
+        "Api.DeadMember has no call site and must stay flagged (non-vacuous control), found: {unused:?}"
+    );
+}

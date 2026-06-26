@@ -1,0 +1,5 @@
+{
+  "name": "issue-1441-inferred-return-member",
+  "private": true,
+  "main": "src/main.ts"
+}
