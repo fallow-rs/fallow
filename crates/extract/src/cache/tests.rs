@@ -503,7 +503,7 @@ fn module_to_cached_roundtrip_named_export() {
     };
 
     let cached = module_to_cached_from_parts(&module, 0, 0);
-    assert!(cached.semantic_facts.is_some());
+    assert!(cached.semantic_facts.is_none());
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(
@@ -617,6 +617,7 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
     };
 
     let cached = module_to_cached_from_parts(&module, 0, 0);
+    assert!(cached.semantic_facts.is_none());
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.exports.len(), 1);
@@ -715,6 +716,7 @@ fn module_to_cached_roundtrip_default_export() {
     };
 
     let cached = module_to_cached_from_parts(&module, 0, 0);
+    assert!(cached.semantic_facts.is_none());
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.exports[0].name, ExportName::Default);
@@ -1093,6 +1095,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
     };
 
     let cached = module_to_cached_from_parts(&module, 0, 0);
+    assert!(cached.semantic_facts.is_some());
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.dynamic_imports.len(), 1);
