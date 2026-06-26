@@ -113,7 +113,7 @@ fn detect_folded_enums(lines: &[&str], member_fixes: &[EnumMemberFix]) -> Vec<Fo
 pub(super) struct EnumMemberFixInput<'a, 'member> {
     pub(super) root: &'a Path,
     pub(super) members_by_file:
-        &'a FxHashMap<PathBuf, Vec<&'member fallow_core::results::UnusedMember>>,
+        &'a FxHashMap<PathBuf, Vec<&'member fallow_engine::results::UnusedMember>>,
     pub(super) hashes: &'a CapturedHashes,
     pub(super) plan: &'a mut FixPlan,
     pub(super) output: OutputFormat,
@@ -190,7 +190,7 @@ pub(super) fn apply_enum_member_fixes(input: EnumMemberFixInput<'_, '_>) {
 /// not shift earlier indices.
 fn collect_enum_member_fixes(
     lines: &[&str],
-    file_members: &[&fallow_core::results::UnusedMember],
+    file_members: &[&fallow_engine::results::UnusedMember],
 ) -> Vec<EnumMemberFix> {
     let mut member_fixes: Vec<EnumMemberFix> = Vec::new();
     for member in file_members {
@@ -417,7 +417,7 @@ fn remove_member_from_single_line(line: &str, member_name: &str) -> String {
 mod tests {
     use super::*;
     use fallow_core::extract::MemberKind;
-    use fallow_core::results::UnusedMember;
+    use fallow_engine::results::UnusedMember;
 
     fn make_enum_member(path: &Path, parent: &str, name: &str, line: u32) -> UnusedMember {
         UnusedMember {

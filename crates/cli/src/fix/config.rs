@@ -38,7 +38,7 @@ use fallow_config::{
     ConfigFixPlan as ResolvedConfigPlan, IgnoreExportRule, OutputFormat,
     add_ignore_exports_rule_to_string, classify_config_fix_plan as classify_plan,
 };
-use fallow_core::results::{AnalysisResults, DuplicateExportFinding};
+use fallow_engine::results::{AnalysisResults, DuplicateExportFinding};
 use rustc_hash::FxHashSet;
 
 use super::io::atomic_write;
@@ -458,7 +458,7 @@ fn display_path(root: &Path, path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::results::{DuplicateExport, DuplicateLocation};
+    use fallow_engine::results::{DuplicateExport, DuplicateLocation};
 
     fn duplicate(paths: &[PathBuf]) -> DuplicateExportFinding {
         DuplicateExportFinding::with_actions(DuplicateExport {
@@ -536,7 +536,7 @@ mod tests {
     #[cfg(not(miri))]
     mod fs {
         use super::*;
-        use fallow_core::results::AnalysisResults;
+        use fallow_engine::results::AnalysisResults;
 
         fn results_with_duplicate(root: &Path, name: &str) -> AnalysisResults {
             AnalysisResults {
