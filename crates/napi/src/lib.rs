@@ -8,7 +8,7 @@
 )]
 
 use fallow_api as api;
-use fallow_programmatic_cli::CliHealthRunner;
+use fallow_programmatic_cli as health_runtime;
 use napi::bindgen_prelude::{AsyncTask, JsObjectValue, ToNapiValue, Unknown};
 use napi::{Env, ScopedTask, Status};
 use napi_derive::napi;
@@ -572,7 +572,7 @@ pub fn compute_complexity(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::run_complexity_with_runner(&options, &CliHealthRunner)
+        health_runtime::run_complexity(&options)
             .map(Box::new)
             .map(ProgrammaticOutput::Health)
     })))
@@ -584,7 +584,7 @@ pub fn compute_health(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::run_health_with_runner(&options, &CliHealthRunner)
+        health_runtime::run_health(&options)
             .map(Box::new)
             .map(ProgrammaticOutput::Health)
     })))
@@ -1098,7 +1098,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_health_uses_api_runner_boundary() {
+    fn compute_health_uses_programmatic_health_boundary() {
         let project = tiny_dead_code_project();
         let options = api::ComplexityOptions::try_from(ComplexityOptions {
             root: Some(project.path().display().to_string()),
@@ -1109,9 +1109,8 @@ mod tests {
         })
         .expect("health options should map");
 
-        let json = api::run_health_with_runner(&options, &CliHealthRunner)
-            .and_then(api::HealthProgrammaticOutput::into_json)
-            .expect("health should run through API runner boundary");
+        let json = health_runtime::compute_health(&options)
+            .expect("health should run through programmatic health boundary");
 
         assert_eq!(json["kind"], "health");
         assert_eq!(json["schema_version"], 7);
