@@ -176,7 +176,10 @@ pub type FallowOutput = fallow_output::FallowOutput<
     CheckGroupedOutput,
     crate::impact::ImpactReport,
     crate::impact::CrossRepoImpactReport,
-    crate::security::SecuritySummaryOutput,
+    fallow_output::SecuritySummaryOutput<
+        crate::security::SecurityOutputConfig,
+        crate::security::SecurityGate,
+    >,
     crate::security::SecurityOutput,
     crate::security::SecuritySurvivorsOutput,
     crate::security::SecurityBlindSpotsOutput,

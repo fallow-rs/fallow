@@ -66,18 +66,23 @@ use fallow_cli::report::dupes_grouping::{
 use fallow_cli::security::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
     SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGate, SecurityGateMode,
-    SecurityGateVerdict, SecurityOutput, SecurityReachabilityCounts, SecurityRuntimeStateCounts,
-    SecuritySchemaVersion, SecuritySeverityCounts, SecuritySummary, SecuritySummaryOutput,
-    SecuritySurvivor, SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion,
-    SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
-    SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
-    SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
+    SecurityGateVerdict, SecurityOutput, SecuritySchemaVersion, SecuritySurvivor,
+    SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary,
+    SecurityUnresolvedCalleeDiagnostics, SecurityUnresolvedCalleeReasonCount,
+    SecurityUnresolvedCalleeSample, SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict,
+    SecurityVerifierVerdictStatus,
 };
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_engine::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
 };
+use fallow_output::{
+    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySeverityCounts, SecuritySummary,
+};
+
+type SecuritySummaryOutput =
+    fallow_output::SecuritySummaryOutput<fallow_cli::security::SecurityOutputConfig, SecurityGate>;
 use fallow_output::{
     AcceptedJudgment, AgentSchema, ChangeAnchor, ConfidenceFlag, Decision, DecisionAction,
     DecisionActionType, DecisionCategory, DecisionSurface, DecisionSurfaceOutput,

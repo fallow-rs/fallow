@@ -27,8 +27,7 @@ use fallow_core::results::{
 pub use fallow_output::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
     SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
-    SecurityReachabilityCounts, SecurityRuntimeStateCounts, SecuritySchemaVersion,
-    SecuritySeverityCounts, SecuritySummary, SecuritySurvivor, SecuritySurvivorsOutput,
+    SecuritySchemaVersion, SecuritySurvivor, SecuritySurvivorsOutput,
     SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
     SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
     SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
@@ -79,9 +78,6 @@ pub type SecurityOutputRulesConfig = fallow_output::SecurityOutputRulesConfig<Se
 pub type SecurityRuleSeverityConfig = fallow_output::SecurityRuleSeverityConfig<Severity>;
 
 pub type SecurityOutput = fallow_output::SecurityOutput<SecurityOutputConfig, SecurityGate>;
-
-pub type SecuritySummaryOutput =
-    fallow_output::SecuritySummaryOutput<SecurityOutputConfig, SecurityGate>;
 
 /// Options for `fallow security`, mirroring the global CLI flags it honors.
 pub struct SecurityOptions<'a> {
@@ -1618,8 +1614,11 @@ fn relativize(path: &Path, root: &Path) -> PathBuf {
 /// JSON: the `SecurityOutput` envelope, pretty-printed.
 #[must_use]
 pub fn render_json(output: &SecurityOutput) -> String {
-    let Ok(value) = crate::output_envelope::serialize_named_root_output(output.clone(), "security")
-    else {
+    let Ok(value) = fallow_output::serialize_security_json_output(
+        output.clone(),
+        crate::output_envelope::EnvelopeMode::current().into(),
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    ) else {
         return "{\"error\":\"failed to serialize security output\"}".to_owned();
     };
     serde_json::to_string_pretty(&value)
@@ -1629,18 +1628,11 @@ pub fn render_json(output: &SecurityOutput) -> String {
 /// JSON summary: compact aggregate payload without per-finding arrays.
 #[must_use]
 pub fn render_json_summary(output: &SecurityOutput) -> String {
-    let summary = SecuritySummaryOutput {
-        schema_version: output.schema_version,
-        version: output.version.clone(),
-        elapsed_ms: output.elapsed_ms,
-        config: output.config.clone(),
-        meta: output.meta.clone(),
-        gate: output.gate,
-        summary: security_summary(output),
-    };
-    let Ok(value) =
-        crate::output_envelope::serialize_named_root_output_without_telemetry(summary, "security")
-    else {
+    let Ok(value) = fallow_output::serialize_security_summary_json_output(
+        output,
+        crate::output_envelope::EnvelopeMode::current().into(),
+        None,
+    ) else {
         return "{\"error\":\"failed to serialize security summary output\"}".to_owned();
     };
     serde_json::to_string_pretty(&value).unwrap_or_else(|_| {
@@ -1660,9 +1652,9 @@ fn render_survivors_output(
 
 #[must_use]
 pub fn render_survivors_json(output: &SecuritySurvivorsOutput) -> String {
-    let Ok(value) = crate::output_envelope::serialize_named_root_output_without_telemetry(
+    let Ok(value) = fallow_output::serialize_security_survivors_json_output(
         output.clone(),
-        "security-survivors",
+        crate::output_envelope::EnvelopeMode::current().into(),
     ) else {
         return "{\"error\":\"failed to serialize security survivors output\"}".to_owned();
     };
@@ -1861,9 +1853,9 @@ fn render_blind_spots_output(
 
 #[must_use]
 pub fn render_blind_spots_json(output: &SecurityBlindSpotsOutput) -> String {
-    let Ok(value) = crate::output_envelope::serialize_named_root_output_without_telemetry(
+    let Ok(value) = fallow_output::serialize_security_blind_spots_json_output(
         output.clone(),
-        "security-blind-spots",
+        crate::output_envelope::EnvelopeMode::current().into(),
     ) else {
         return "{\"error\":\"failed to serialize security blind-spots output\"}".to_owned();
     };
@@ -1940,102 +1932,6 @@ fn blind_spot_suggestion(
         fallow_types::extract::SkippedSecurityCalleeReason::UnsupportedAssignmentObject => {
             "inspect assignment targets and simplify the object shape if security sink calls are hidden there."
         }
-    }
-}
-
-fn security_summary(output: &SecurityOutput) -> SecuritySummary {
-    let mut counts = SecuritySummaryCounts::default();
-
-    for finding in &output.security_findings {
-        counts.record(finding);
-    }
-
-    SecuritySummary {
-        security_findings: output.security_findings.len(),
-        by_severity: counts.severity,
-        by_category: counts.category,
-        by_reachability: counts.reachability,
-        by_runtime_state: counts.runtime_state,
-        unresolved_edge_files: output.unresolved_edge_files,
-        unresolved_callee_sites: output.unresolved_callee_sites,
-        attack_surface_entries: output.attack_surface.as_ref().map_or(0, Vec::len),
-    }
-}
-
-#[derive(Default)]
-struct SecuritySummaryCounts {
-    severity: SecuritySeverityCounts,
-    category: BTreeMap<String, usize>,
-    reachability: SecurityReachabilityCounts,
-    runtime_state: SecurityRuntimeStateCounts,
-}
-
-impl SecuritySummaryCounts {
-    fn record(&mut self, finding: &SecurityFinding) {
-        record_security_severity(finding.severity, &mut self.severity);
-        record_security_category(finding, &mut self.category);
-        record_security_reachability(finding, &mut self.reachability);
-        record_security_runtime_state(finding, &mut self.runtime_state);
-    }
-}
-
-fn record_security_severity(severity: SecuritySeverity, by_severity: &mut SecuritySeverityCounts) {
-    match severity {
-        SecuritySeverity::High => by_severity.high += 1,
-        SecuritySeverity::Medium => by_severity.medium += 1,
-        SecuritySeverity::Low => by_severity.low += 1,
-    }
-}
-
-fn record_security_category(finding: &SecurityFinding, by_category: &mut BTreeMap<String, usize>) {
-    let category = finding
-        .category
-        .clone()
-        .unwrap_or_else(|| security_kind_key(finding.kind).to_owned());
-    *by_category.entry(category).or_insert(0) += 1;
-}
-
-fn record_security_reachability(
-    finding: &SecurityFinding,
-    by_reachability: &mut SecurityReachabilityCounts,
-) {
-    if finding.source_backed {
-        by_reachability.source_backed += 1;
-    }
-    let Some(reachability) = &finding.reachability else {
-        return;
-    };
-
-    if reachability.reachable_from_entry {
-        by_reachability.entry_reachable += 1;
-    }
-    if reachability.reachable_from_untrusted_source {
-        by_reachability.untrusted_source_reachable += 1;
-    }
-    if reachability.crosses_boundary {
-        by_reachability.crosses_boundary += 1;
-    }
-    match reachability.taint_confidence {
-        Some(TaintConfidence::ArgLevel) => by_reachability.arg_level += 1,
-        Some(TaintConfidence::ModuleLevel) => by_reachability.module_level += 1,
-        None => {}
-    }
-}
-
-fn record_security_runtime_state(
-    finding: &SecurityFinding,
-    by_runtime_state: &mut SecurityRuntimeStateCounts,
-) {
-    match finding.runtime.as_ref().map(|runtime| runtime.state) {
-        Some(SecurityRuntimeState::RuntimeHot) => by_runtime_state.runtime_hot += 1,
-        Some(SecurityRuntimeState::RuntimeCold) => by_runtime_state.runtime_cold += 1,
-        Some(SecurityRuntimeState::NeverExecuted) => by_runtime_state.never_executed += 1,
-        Some(SecurityRuntimeState::LowTraffic) => by_runtime_state.low_traffic += 1,
-        Some(SecurityRuntimeState::CoverageUnavailable) => {
-            by_runtime_state.coverage_unavailable += 1;
-        }
-        Some(SecurityRuntimeState::RuntimeUnknown) => by_runtime_state.runtime_unknown += 1,
-        None => by_runtime_state.not_collected += 1,
     }
 }
 

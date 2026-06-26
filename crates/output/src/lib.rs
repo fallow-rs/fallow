@@ -215,5 +215,7 @@ pub use security::{
     SecuritySurvivorsOutput, SecuritySurvivorsSchemaVersion, SecuritySurvivorsSummary,
     SecurityUnresolvedCalleeDiagnostics, SecurityUnresolvedCalleeReasonCount,
     SecurityUnresolvedCalleeSample, SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict,
-    SecurityVerifierVerdictStatus,
+    SecurityVerifierVerdictStatus, build_security_summary,
+    serialize_security_blind_spots_json_output, serialize_security_json_output,
+    serialize_security_summary_json_output, serialize_security_survivors_json_output,
 };
