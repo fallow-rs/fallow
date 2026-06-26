@@ -50,6 +50,11 @@ pub mod graph {
     pub use fallow_core::graph::*;
 }
 
+/// Module resolution types exposed through the engine boundary.
+pub mod resolve {
+    pub use fallow_core::resolve::*;
+}
+
 /// Public API graph helpers exposed through the engine boundary.
 pub mod public_api {
     pub use fallow_core::analyze::public_api_package_entry_points;
