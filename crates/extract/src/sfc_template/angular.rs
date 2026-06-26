@@ -18,10 +18,6 @@ use std::sync::LazyLock;
 use rustc_hash::FxHashSet;
 
 use fallow_types::extract::SinkSite;
-#[cfg(test)]
-pub use fallow_types::extract::legacy_semantic::{
-    ANGULAR_THIS_SPREAD_SENTINEL, ANGULAR_TPL_SENTINEL,
-};
 
 use crate::MemberAccess;
 use crate::template_usage::{TemplateSnippetKind, collect_unresolved_refs_and_accesses};

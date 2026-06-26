@@ -1,4 +1,4 @@
-use fallow_types::extract::{ExportName, MemberKind, SemanticFact};
+use fallow_types::extract::{ExportName, MemberKind, SemanticFact, legacy_semantic};
 
 use crate::tests::parse_ts as parse_source;
 
@@ -1181,9 +1181,10 @@ fn static_factory_binding_emits_typed_member_fact() {
         myInstance.getData();",
     );
     assert!(
-        !info.member_accesses.iter().any(|a| a
-            .object
-            .starts_with(crate::legacy_semantic::FACTORY_CALL_SENTINEL)),
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(legacy_semantic::FACTORY_CALL_SENTINEL)),
         "factory call result should not emit a legacy sentinel access: {:?}",
         info.member_accesses
     );
@@ -1221,9 +1222,10 @@ fn static_factory_binding_same_file_emits_direct_access() {
         info.member_accesses
     );
     assert!(
-        !info.member_accesses.iter().any(|a| a
-            .object
-            .starts_with(crate::legacy_semantic::FACTORY_CALL_SENTINEL)),
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(legacy_semantic::FACTORY_CALL_SENTINEL)),
         "same-file case must not emit a sentinel access: {:?}",
         info.member_accesses
     );
@@ -1287,9 +1289,10 @@ fn factory_call_candidate_with_unknown_object_is_dropped() {
         n.toString();",
     );
     assert!(
-        !info.member_accesses.iter().any(|a| a
-            .object
-            .starts_with(crate::legacy_semantic::FACTORY_CALL_SENTINEL)),
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(legacy_semantic::FACTORY_CALL_SENTINEL)),
         "calls on globals must not produce a sentinel binding: {:?}",
         info.member_accesses
     );

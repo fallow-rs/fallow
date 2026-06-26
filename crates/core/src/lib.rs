@@ -1,6 +1,6 @@
 //! fallow-core is the internal implementation crate behind the `fallow`
 //! analyzer. External embedders should consume the curated programmatic
-//! surface at `fallow_cli::programmatic` (e.g. `detect_dead_code`,
+//! surface at `fallow_api` (e.g. `detect_dead_code`,
 //! `detect_boundary_violations`, `detect_duplication`, `compute_complexity`,
 //! `compute_health`); each returns a `serde_json::Value` matching the CLI's
 //! `--format json` shape plus structured `ProgrammaticError` with the CLI's
@@ -313,7 +313,7 @@ fn warn_undeclared_workspaces(
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> {
     let output = analyze_full(config, false, false, false, false)?;
@@ -327,7 +327,7 @@ pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> 
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: export-usage collection is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: export-usage collection is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> {
     let output = analyze_full(config, false, true, false, false)?;
@@ -346,7 +346,7 @@ pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, F
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.90.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code and `compute_complexity` instead. NOTE: this combined LSP-only typed surface is not exposed externally. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::detect_dead_code and `compute_complexity` instead. NOTE: this combined LSP-only typed surface is not exposed externally. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn analyze_with_usages_and_complexity(
     config: &ResolvedConfig,
@@ -361,7 +361,7 @@ pub fn analyze_with_usages_and_complexity(
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: trace timings are not exposed in the programmatic surface today; use `fallow dead-code --performance` for CLI-side timings. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: trace timings are not exposed in the programmatic surface today; use `fallow dead-code --performance` for CLI-side timings. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, FallowError> {
     analyze_full(config, true, false, false, false)
@@ -377,7 +377,7 @@ pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, Fal
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; the CLI fix command uses this via the workspace path dependency. External embedders should use fallow_cli::programmatic::detect_dead_code. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; the CLI fix command uses this via the workspace path dependency. External embedders should use fallow_api::detect_dead_code. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn analyze_with_file_hashes(config: &ResolvedConfig) -> Result<AnalysisOutput, FallowError> {
     analyze_full(config, false, false, false, false)
@@ -394,7 +394,7 @@ pub fn analyze_with_file_hashes(config: &ResolvedConfig) -> Result<AnalysisOutpu
 /// Returns an error if file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: combined-mode module retention is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: combined-mode module retention is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn analyze_retaining_modules(
     config: &ResolvedConfig,
@@ -749,7 +749,7 @@ fn run_plugins_and_scripts(
 /// Returns an error if discovery, graph construction, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead. NOTE: pre-parsed module reuse is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: pre-parsed module reuse is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn analyze_with_parse_result(
     config: &ResolvedConfig,
@@ -2054,7 +2054,7 @@ fn collect_config_search_roots(
 /// Returns an error if config loading, file discovery, parsing, or analysis fails.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_cli::programmatic::detect_dead_code instead (build a `DeadCodeOptions { analysis: AnalysisOptions { root, ..default() }, ..default() }`). See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::detect_dead_code instead (build a `DeadCodeOptions { analysis: AnalysisOptions { root, ..default() }, ..default() }`). See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
     let config = default_config(root);

@@ -9,6 +9,7 @@ use fallow_types::discover::FileId;
 use fallow_types::extract::{
     DiFramework, DiRole, SecurityControlKind, SecurityUrlShape, SemanticFact, SinkArgKind,
     SinkLiteralValue, SinkShape, SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
+    legacy_semantic,
 };
 use helpers::regex_pattern_to_suffix;
 
@@ -62,7 +63,7 @@ fn angular_template_fact_members(info: &crate::ModuleInfo) -> Vec<&str> {
 fn has_no_angular_template_sentinel(info: &crate::ModuleInfo) -> bool {
     info.member_accesses
         .iter()
-        .all(|access| access.object != crate::sfc_template::angular::ANGULAR_TPL_SENTINEL)
+        .all(|access| access.object != legacy_semantic::ANGULAR_TPL_SENTINEL)
 }
 
 fn has_playwright_fixture_use_fact(
@@ -2131,7 +2132,7 @@ fn exported_instance_binding_is_recorded() {
     assert!(
         !info.member_accesses.iter().any(|a| a
             .object
-            .starts_with(crate::legacy_semantic::INSTANCE_EXPORT_SENTINEL)),
+            .starts_with(legacy_semantic::INSTANCE_EXPORT_SENTINEL)),
         "exported instance binding should not emit legacy sentinel access, found: {:?}",
         info.member_accesses
     );
@@ -2588,7 +2589,7 @@ fn playwright_extend_type_alias_records_fixture_definitions() {
     assert!(
         !info.member_accesses.iter().any(|a| a
             .object
-            .starts_with(crate::legacy_semantic::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
+            .starts_with(legacy_semantic::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
         "Playwright fixture definitions should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -2622,7 +2623,7 @@ fn non_playwright_extend_does_not_record_fixture_definitions() {
     assert!(
         !info.member_accesses.iter().any(|a| a
             .object
-            .starts_with(crate::legacy_semantic::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
+            .starts_with(legacy_semantic::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
         "non-Playwright .extend<T>() should not emit Playwright fixture definitions, found: {:?}",
         info.member_accesses
     );
@@ -2643,7 +2644,7 @@ fn playwright_merge_tests_records_fixture_aliases() {
     assert!(
         !info.member_accesses.iter().any(|a| a
             .object
-            .starts_with(crate::legacy_semantic::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)),
+            .starts_with(legacy_semantic::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)),
         "Playwright fixture aliases should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -2711,7 +2712,7 @@ fn non_playwright_merge_tests_does_not_record_fixture_aliases() {
     assert!(
         !info.member_accesses.iter().any(|a| a
             .object
-            .starts_with(crate::legacy_semantic::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)),
+            .starts_with(legacy_semantic::PLAYWRIGHT_FIXTURE_ALIAS_SENTINEL)),
         "local mergeTests should not emit Playwright fixture aliases, found: {:?}",
         info.member_accesses
     );
@@ -2733,7 +2734,7 @@ fn playwright_test_callback_records_fixture_member_uses() {
     assert!(
         !info.member_accesses.iter().any(|a| a
             .object
-            .starts_with(crate::legacy_semantic::PLAYWRIGHT_FIXTURE_USE_SENTINEL)),
+            .starts_with(legacy_semantic::PLAYWRIGHT_FIXTURE_USE_SENTINEL)),
         "Playwright fixture uses should not emit legacy sentinels, found: {:?}",
         info.member_accesses,
     );
@@ -2951,7 +2952,7 @@ fn playwright_fixture_type_alias_records_nested_type_bindings() {
     assert!(
         !info.member_accesses.iter().any(|a| a
             .object
-            .starts_with(crate::legacy_semantic::PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)),
+            .starts_with(legacy_semantic::PLAYWRIGHT_FIXTURE_TYPE_SENTINEL)),
         "Playwright fixture type aliases should not emit legacy sentinels, found: {:?}",
         info.member_accesses
     );
@@ -3185,7 +3186,7 @@ fn non_playwright_helper_does_not_record_fixture_definitions() {
     assert!(
         !info.member_accesses.iter().any(|a| a
             .object
-            .starts_with(crate::legacy_semantic::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
+            .starts_with(legacy_semantic::PLAYWRIGHT_FIXTURE_DEF_SENTINEL)),
         "non-Playwright helper should not emit Playwright fixture definitions, found: {:?}",
         info.member_accesses
     );
@@ -4850,9 +4851,10 @@ fn fluent_chain_emits_typed_member_facts() {
     );
 
     assert!(
-        !info.member_accesses.iter().any(|a| a
-            .object
-            .starts_with(crate::legacy_semantic::FLUENT_CHAIN_SENTINEL)),
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(legacy_semantic::FLUENT_CHAIN_SENTINEL)),
         "fluent chain should not emit legacy sentinel accesses, found: {:?}",
         info.member_accesses,
     );
@@ -4926,7 +4928,7 @@ fn new_expression_fluent_chain_emits_typed_member_facts() {
     assert!(
         !info.member_accesses.iter().any(|a| a
             .object
-            .starts_with(crate::legacy_semantic::FLUENT_CHAIN_NEW_SENTINEL)),
+            .starts_with(legacy_semantic::FLUENT_CHAIN_NEW_SENTINEL)),
         "new-expression fluent chain should not emit legacy sentinel accesses, found: {:?}",
         info.member_accesses,
     );
@@ -6195,9 +6197,10 @@ fn angular_this_spread_emits_typed_abstain_fact() {
         info.semantic_facts
     );
     assert!(
-        !info.member_accesses.iter().any(|access| {
-            access.object == crate::sfc_template::angular::ANGULAR_THIS_SPREAD_SENTINEL
-        }),
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| { access.object == legacy_semantic::ANGULAR_THIS_SPREAD_SENTINEL }),
         "spread-this should not emit a legacy sentinel, found: {:?}",
         info.member_accesses
     );

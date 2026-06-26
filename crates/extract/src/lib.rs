@@ -59,7 +59,7 @@ pub use fallow_types::extract::{
     LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult,
     PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
     PlaywrightFixtureUseFact, PublicSignatureTypeReference, ReExportInfo, RequireCallInfo,
-    SemanticFact, VisibilityTag, compute_line_offsets, legacy_semantic,
+    SemanticFact, VisibilityTag, compute_line_offsets,
 };
 
 pub use astro::{
