@@ -17,13 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`unused-store-members` no longer false-flags a Pinia store member used
-  through a typed parameter.** A store passed as a param typed
+- **`unused-store-members` no longer false-flags a Pinia store member reached
+  through indirection.** A member used inline on a store-factory call
+  (`useFooStore().member`), or through a store passed as a param typed
   `ReturnType<typeof useFooStore>` (inline or via a local `type` alias) and read
-  as `store.member`, `props.store.member`, or `const { member } = props.store`
-  is now credited, so it is not reported as unused. Resolution is gated on the
-  `use<Name>Store` naming convention, so a non-store `ReturnType<typeof ...>`
-  param never masks a genuinely unused member.
+  as `store.member`, `props.store.member`, or `const { member } = props.store`,
+  is now credited instead of reported as unused. Resolution is gated on the
+  `use<Name>Store` naming convention, so a non-store call or
+  `ReturnType<typeof ...>` param never masks a genuinely unused member.
   (Closes [#1489](https://github.com/fallow-rs/fallow/issues/1489))
 
 - **`unused-class-members` no longer false-flags a member reached through a
@@ -34,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than annotated. Previously the member was reported as unused unless the
   instance was reached through a directly-typed reference.
   (Closes [#1441](https://github.com/fallow-rs/fallow/issues/1441))
+
+- **`unused-component-props` no longer aborts on a spaced `</template >` closing
+  tag.** Whitespace inside a Vue SFC closing template tag previously aborted
+  template-usage extraction for the entire component, so every prop and emit in
+  that SFC was reported as unused. The closing tag is now matched regardless of
+  internal whitespace.
+  (Closes [#1439](https://github.com/fallow-rs/fallow/issues/1439))
 
 - **`ignorePatterns` now accepts a leading `./`.** Entries such as
   `./src/generated/**` now match the same project-root-relative files as
