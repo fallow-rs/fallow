@@ -416,7 +416,7 @@ fn remove_member_from_single_line(line: &str, member_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::extract::MemberKind;
+    use fallow_engine::extract::MemberKind;
     use fallow_engine::results::UnusedMember;
 
     fn make_enum_member(path: &Path, parent: &str, name: &str, line: u32) -> UnusedMember {

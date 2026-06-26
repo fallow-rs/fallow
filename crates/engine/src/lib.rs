@@ -38,6 +38,10 @@ pub mod health;
 
 /// Extracted semantic types exposed through the engine boundary.
 pub mod extract {
+    pub mod inventory {
+        pub use fallow_core::extract::inventory::{InventoryEntry, walk_source};
+    }
+
     pub use fallow_types::extract::*;
 }
 

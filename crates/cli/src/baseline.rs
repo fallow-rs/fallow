@@ -2956,7 +2956,7 @@ mod tests {
         reason = "test fixture; linear setup/assert, length is not a maintainability concern"
     )]
     fn make_full_results() -> AnalysisResults {
-        use fallow_core::extract::MemberKind;
+        use fallow_engine::extract::MemberKind;
         use fallow_engine::results::*;
 
         let mut r = make_results();
@@ -3281,7 +3281,7 @@ mod tests {
 
     /// Build results with absolute paths rooted at the given prefix.
     fn make_absolute_results(root: &str) -> AnalysisResults {
-        use fallow_core::extract::MemberKind;
+        use fallow_engine::extract::MemberKind;
         use fallow_engine::results::*;
 
         let p = |rel: &str| PathBuf::from(format!("{root}/{rel}"));

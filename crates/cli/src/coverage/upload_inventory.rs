@@ -8,7 +8,7 @@
 //! The cloud join key is `(filePath, functionName, lineNumber)` since the
 //! line-aware function-identity migration (`0010`), so distinct same-named
 //! functions at different lines in the same file are preserved and merged
-//! into their own rows. The walker in `fallow_core::extract::inventory`
+//! into their own rows. The walker behind `fallow_engine::extract::inventory`
 //! emits Istanbul / `oxc-coverage-instrument`-compatible names and unique
 //! 1-based line numbers per function declaration.
 //!
@@ -20,8 +20,10 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::ResolvedConfig;
-use fallow_core::extract::inventory::{InventoryEntry, walk_source};
 use fallow_cov_protocol::{FunctionIdentity, IdentityResolution, function_identity_id};
+use fallow_engine::{
+    discover, extract::inventory::InventoryEntry, extract::inventory::walk_source,
+};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
@@ -271,7 +273,7 @@ fn collect_inventory(
     exclude_matcher: &GlobSet,
     path_prefix: Option<&str>,
 ) -> Vec<InventoryFunction> {
-    let files = fallow_core::discover::discover_files_with_plugin_scopes(config);
+    let files = discover::discover_files_with_plugin_scopes(config);
     let mut seen: FxHashSet<(String, String, u32)> = FxHashSet::default();
     let mut out: Vec<InventoryFunction> = Vec::new();
     for file in files {

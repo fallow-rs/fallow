@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::time::Duration;
 
 use fallow_config::OutputFormat;
+use fallow_engine::graph::ModuleGraph;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -193,7 +194,7 @@ pub fn note_analysis_scale(file_count: Option<usize>, function_count: Option<usi
 /// This uses only the graph's existing module and edge counts. It never walks
 /// adjacency, resolves dependencies, or computes diameter/depth metrics for
 /// telemetry.
-pub fn note_graph_structure(graph: &fallow_core::graph::ModuleGraph) {
+pub fn note_graph_structure(graph: &ModuleGraph) {
     AVG_FAN_OUT_BUCKET.fetch_max(
         avg_fan_out_bucket_state(graph.module_count(), graph.edge_count()),
         Ordering::Relaxed,
