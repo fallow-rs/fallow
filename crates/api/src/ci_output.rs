@@ -1,0 +1,477 @@
+//! Shared CI comment output contracts for CLI and programmatic consumers.
+
+use std::fmt::Write as _;
+
+use fallow_output::{CodeClimateIssue, CodeClimateSeverity};
+use serde_json::Value;
+
+/// Supported CI review providers for generated comments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CiProvider {
+    Github,
+    Gitlab,
+}
+
+impl CiProvider {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Github => "GitHub",
+            Self::Gitlab => "GitLab",
+        }
+    }
+}
+
+/// Normalized CodeClimate issue used by CI comment renderers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CiIssue {
+    pub rule_id: String,
+    pub description: String,
+    pub severity: String,
+    pub path: String,
+    pub line: u64,
+    pub fingerprint: String,
+}
+
+/// Inputs for rendering a sticky PR/MR summary comment.
+pub struct PrCommentRenderInput<'a> {
+    pub command: &'a str,
+    pub provider: CiProvider,
+    pub issues: &'a [CiIssue],
+    pub marker_id: String,
+    pub max_comments: usize,
+    pub category_for_rule: &'a dyn Fn(&str) -> &'static str,
+}
+
+#[must_use]
+pub fn issues_from_codeclimate(value: &Value) -> Vec<CiIssue> {
+    let mut issues = value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(issue_from_codeclimate)
+        .collect::<Vec<_>>();
+    sort_ci_issues(&mut issues);
+    issues
+}
+
+#[must_use]
+pub fn issues_from_codeclimate_issues(issues: &[CodeClimateIssue]) -> Vec<CiIssue> {
+    let mut issues = issues
+        .iter()
+        .map(issue_from_codeclimate_issue)
+        .collect::<Vec<_>>();
+    sort_ci_issues(&mut issues);
+    issues
+}
+
+fn issue_from_codeclimate(value: &Value) -> Option<CiIssue> {
+    let path = value.pointer("/location/path")?.as_str()?.to_string();
+    let line = value
+        .pointer("/location/lines/begin")
+        .and_then(Value::as_u64)
+        .unwrap_or(1);
+    Some(CiIssue {
+        rule_id: value
+            .get("check_name")
+            .and_then(Value::as_str)
+            .unwrap_or("fallow/finding")
+            .to_string(),
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("Fallow finding")
+            .to_string(),
+        severity: value
+            .get("severity")
+            .and_then(Value::as_str)
+            .unwrap_or("minor")
+            .to_string(),
+        fingerprint: value
+            .get("fingerprint")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        path,
+        line,
+    })
+}
+
+fn issue_from_codeclimate_issue(issue: &CodeClimateIssue) -> CiIssue {
+    CiIssue {
+        rule_id: issue.check_name.clone(),
+        description: issue.description.clone(),
+        severity: codeclimate_severity_label(issue.severity).to_owned(),
+        path: issue.location.path.clone(),
+        line: u64::from(issue.location.lines.begin),
+        fingerprint: issue.fingerprint.clone(),
+    }
+}
+
+const fn codeclimate_severity_label(severity: CodeClimateSeverity) -> &'static str {
+    match severity {
+        CodeClimateSeverity::Info => "info",
+        CodeClimateSeverity::Minor => "minor",
+        CodeClimateSeverity::Major => "major",
+        CodeClimateSeverity::Critical => "critical",
+        CodeClimateSeverity::Blocker => "blocker",
+    }
+}
+
+fn sort_ci_issues(issues: &mut [CiIssue]) {
+    issues
+        .sort_by(|a, b| (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint)));
+}
+
+#[must_use]
+#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
+pub fn render_pr_comment(input: &PrCommentRenderInput<'_>) -> String {
+    let marker = format!("<!-- fallow-id: {} -->", input.marker_id);
+    let title = command_title(input.command);
+    let count = input.issues.len();
+    let noun = if count == 1 { "finding" } else { "findings" };
+
+    let mut out = String::new();
+    out.push_str(&marker);
+    out.push('\n');
+    write!(&mut out, "### Fallow {title}\n\n").expect("write to string");
+    if count == 0 {
+        writeln!(
+            &mut out,
+            "No {provider} PR/MR findings.",
+            provider = input.provider.name()
+        )
+        .expect("write to string");
+    } else {
+        write!(&mut out, "Found **{count}** {noun}.\n\n").expect("write to string");
+        let groups = group_by_category(input.issues, input.category_for_rule);
+        if let [(_, group_issues)] = groups.as_slice() {
+            render_findings_table(&mut out, group_issues, input.max_comments, "Details");
+        } else {
+            for (category, group_issues) in &groups {
+                let summary_label = summary_label(category, group_issues.len(), input.max_comments);
+                render_findings_table(&mut out, group_issues, input.max_comments, &summary_label);
+            }
+        }
+    }
+    out.push_str("\nGenerated by fallow.");
+    out
+}
+
+/// Rule ids whose findings describe project-wide config state rather than a
+/// change touching a specific source line.
+pub const PROJECT_LEVEL_RULE_IDS: &[&str] = &[
+    "fallow/unused-catalog-entry",
+    "fallow/empty-catalog-group",
+    "fallow/unresolved-catalog-reference",
+    "fallow/unused-dependency-override",
+    "fallow/misconfigured-dependency-override",
+    "fallow/unused-dependency",
+    "fallow/unused-dev-dependency",
+    "fallow/unused-optional-dependency",
+    "fallow/type-only-dependency",
+    "fallow/test-only-dependency",
+];
+
+#[must_use]
+pub fn is_project_level_rule(rule_id: &str) -> bool {
+    PROJECT_LEVEL_RULE_IDS.contains(&rule_id)
+}
+
+const CATEGORY_ORDER: [&str; 6] = [
+    "Dead code",
+    "Dependencies",
+    "Duplication",
+    "Health",
+    "Architecture",
+    "Suppressions",
+];
+
+fn group_by_category<'a>(
+    issues: &'a [CiIssue],
+    category_for_rule: &dyn Fn(&str) -> &'static str,
+) -> Vec<(&'static str, Vec<&'a CiIssue>)> {
+    let mut buckets: std::collections::BTreeMap<&'static str, Vec<&CiIssue>> =
+        std::collections::BTreeMap::new();
+    for issue in issues {
+        let category = category_for_rule(&issue.rule_id);
+        buckets.entry(category).or_default().push(issue);
+    }
+    let mut ordered: Vec<(&'static str, Vec<&CiIssue>)> = Vec::with_capacity(buckets.len());
+    for category in CATEGORY_ORDER {
+        if let Some(items) = buckets.remove(category) {
+            ordered.push((category, items));
+        }
+    }
+    for (category, items) in buckets {
+        ordered.push((category, items));
+    }
+    ordered
+}
+
+#[must_use]
+pub fn summary_label(category: &str, total: usize, max: usize) -> String {
+    if total > max {
+        format!("{category} ({total}, showing {max})")
+    } else {
+        format!("{category} ({total})")
+    }
+}
+
+#[expect(clippy::expect_used, reason = "formatting into String is infallible")]
+fn render_findings_table(out: &mut String, issues: &[&CiIssue], max: usize, summary: &str) {
+    writeln!(out, "<details>\n<summary>{summary}</summary>\n").expect("write to string");
+    out.push_str("| Severity | Rule | Location | Description |\n");
+    out.push_str("| --- | --- | --- | --- |\n");
+    for issue in issues.iter().take(max) {
+        writeln!(
+            out,
+            "| {} | `{}` | `{}`:{} | {} |",
+            escape_md(&issue.severity),
+            escape_md(&issue.rule_id),
+            escape_md(&issue.path),
+            issue.line,
+            escape_md(&issue.description),
+        )
+        .expect("write to string");
+    }
+    if issues.len() > max {
+        writeln!(
+            out,
+            "\nShowing {max} of {} findings. Run fallow locally or inspect the CI output for the full report.",
+            issues.len(),
+        )
+        .expect("write to string");
+    }
+    out.push_str("\n</details>\n\n");
+}
+
+#[must_use]
+pub fn command_title(command: &str) -> &'static str {
+    match command {
+        "dead-code" | "check" => "dead-code report",
+        "dupes" => "duplication report",
+        "health" => "health report",
+        "audit" => "audit report",
+        "" | "combined" => "combined report",
+        _ => "report",
+    }
+}
+
+/// Escape a string for inclusion in a Markdown table cell.
+#[must_use]
+pub fn escape_md(value: &str) -> String {
+    let collapsed = value.replace('\n', " ");
+    let mut out = String::with_capacity(collapsed.len());
+    for ch in collapsed.chars() {
+        if matches!(
+            ch,
+            '\\' | '`'
+                | '*'
+                | '_'
+                | '['
+                | ']'
+                | '('
+                | ')'
+                | '!'
+                | '<'
+                | '>'
+                | '#'
+                | '|'
+                | '~'
+                | '&'
+        ) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out.trim().to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fallow_output::{CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation};
+
+    fn category_for_rule(rule_id: &str) -> &'static str {
+        match rule_id {
+            "fallow/code-duplication" => "Duplication",
+            "fallow/high-complexity" => "Health",
+            "fallow/unused-dependency" => "Dependencies",
+            _ => "Dead code",
+        }
+    }
+
+    #[test]
+    fn extracts_issues_from_codeclimate() {
+        let value = serde_json::json!([{
+            "check_name": "fallow/unused-export",
+            "description": "Export x is never imported",
+            "severity": "minor",
+            "fingerprint": "abc",
+            "location": { "path": "src/a.ts", "lines": { "begin": 7 } }
+        }]);
+        let issues = issues_from_codeclimate(&value);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].path, "src/a.ts");
+        assert_eq!(issues[0].line, 7);
+    }
+
+    #[test]
+    fn typed_codeclimate_issues_extract_like_json_codeclimate() {
+        let severities = [
+            (CodeClimateSeverity::Info, "info"),
+            (CodeClimateSeverity::Minor, "minor"),
+            (CodeClimateSeverity::Major, "major"),
+            (CodeClimateSeverity::Critical, "critical"),
+            (CodeClimateSeverity::Blocker, "blocker"),
+        ];
+        let typed = severities
+            .iter()
+            .enumerate()
+            .map(|(index, (severity, _))| CodeClimateIssue {
+                kind: CodeClimateIssueKind::Issue,
+                check_name: format!("fallow/rule-{index}"),
+                description: format!("Finding {index}"),
+                categories: vec!["Complexity".to_owned()],
+                severity: *severity,
+                fingerprint: format!("fp-{index}"),
+                location: CodeClimateLocation {
+                    path: format!("src/{index}.ts"),
+                    lines: CodeClimateLines {
+                        begin: u32::try_from(index + 1).expect("small fixture index"),
+                    },
+                },
+            })
+            .collect::<Vec<_>>();
+        let value = serde_json::to_value(&typed).expect("typed fixture serializes");
+
+        assert_eq!(
+            issues_from_codeclimate_issues(&typed),
+            issues_from_codeclimate(&value)
+        );
+        let typed_labels = issues_from_codeclimate_issues(&typed)
+            .into_iter()
+            .map(|issue| issue.severity)
+            .collect::<Vec<_>>();
+        let expected_labels = severities
+            .iter()
+            .map(|(_, label)| (*label).to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(typed_labels, expected_labels);
+    }
+
+    #[test]
+    fn renders_default_empty_comment() {
+        let body = render_pr_comment(&PrCommentRenderInput {
+            command: "check",
+            provider: CiProvider::Github,
+            issues: &[],
+            marker_id: "fallow-results".to_owned(),
+            max_comments: 50,
+            category_for_rule: &category_for_rule,
+        });
+        assert!(body.contains("<!-- fallow-id: fallow-results"));
+        assert!(body.contains("No GitHub PR/MR findings."));
+    }
+
+    #[test]
+    fn escape_md_escapes_inline_commonmark_specials() {
+        let raw = "foo*bar_baz [a](u) `c` <h> #x !i ~s | p";
+        let escaped = escape_md(raw);
+        for ch in [
+            '*', '_', '[', ']', '(', ')', '`', '<', '>', '#', '!', '~', '|',
+        ] {
+            let raw_count = raw.chars().filter(|c| c == &ch).count();
+            let escaped_count = escaped.matches(&format!("\\{ch}")).count();
+            assert_eq!(
+                raw_count, escaped_count,
+                "char {ch:?}: raw {raw_count} occurrences, escaped {escaped_count} in {escaped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn escape_md_escapes_ampersand_to_block_numeric_entity_bypass() {
+        let raw = "value &#42;suspicious&#42; here";
+        let escaped = escape_md(raw);
+        assert!(escaped.contains(r"\&"), "got: {escaped}");
+        assert!(escaped.contains(r"\#"), "got: {escaped}");
+        assert!(!escaped.contains(" *suspicious"), "got: {escaped}");
+    }
+
+    #[test]
+    fn summary_label_foreshadows_truncation() {
+        assert_eq!(
+            summary_label("Duplication", 160, 50),
+            "Duplication (160, showing 50)"
+        );
+        assert_eq!(summary_label("Health", 12, 50), "Health (12)");
+        assert_eq!(summary_label("Dependencies", 50, 50), "Dependencies (50)");
+    }
+
+    #[test]
+    fn escape_md_does_not_escape_block_only_markers() {
+        let raw = "fallow/test-only-dependency package.json:12";
+        let escaped = escape_md(raw);
+        assert!(!escaped.contains("\\-"), "should not escape `-`");
+        assert!(!escaped.contains("\\."), "should not escape `.`");
+        assert_eq!(escaped, raw);
+    }
+
+    #[test]
+    fn escape_md_collapses_newlines_to_spaces() {
+        let raw = "first\nsecond\nthird";
+        assert_eq!(escape_md(raw), "first second third");
+    }
+
+    #[test]
+    fn escape_md_leaves_safe_chars_unchanged() {
+        let raw = "Export 'helperFn' is never imported by other modules";
+        assert_eq!(
+            escape_md(raw),
+            r"Export 'helperFn' is never imported by other modules"
+        );
+    }
+
+    #[test]
+    fn is_project_level_rule_covers_config_anchored_dependency_findings() {
+        for rule_id in PROJECT_LEVEL_RULE_IDS {
+            assert!(
+                is_project_level_rule(rule_id),
+                "{rule_id} must be project-level"
+            );
+        }
+        for rule_id in [
+            "fallow/unused-file",
+            "fallow/unused-export",
+            "fallow/unused-type",
+            "fallow/unused-enum-member",
+            "fallow/unused-class-member",
+            "fallow/unused-store-member",
+            "fallow/unresolved-import",
+            "fallow/unlisted-dependency",
+            "fallow/duplicate-export",
+            "fallow/circular-dependency",
+            "fallow/re-export-cycle",
+            "fallow/boundary-violation",
+            "fallow/stale-suppression",
+            "fallow/private-type-leak",
+            "fallow/high-complexity",
+            "fallow/high-crap-score",
+        ] {
+            assert!(
+                !is_project_level_rule(rule_id),
+                "{rule_id} must NOT be project-level"
+            );
+        }
+    }
+
+    #[test]
+    fn escape_md_double_apply_is_safe() {
+        let raw = "code with `backticks` and *stars*";
+        let once = escape_md(raw);
+        let twice = escape_md(&once);
+        assert!(twice.contains(r"\\"));
+    }
+}

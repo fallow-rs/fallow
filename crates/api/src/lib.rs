@@ -21,6 +21,7 @@ use fallow_output::EffortEstimate;
 use serde::Serialize;
 
 pub mod audit_output;
+pub mod ci_output;
 pub mod compact_output;
 pub mod dead_code_codeclimate;
 pub mod dead_code_sarif;
@@ -35,6 +36,11 @@ pub mod runtime;
 pub mod sarif_output;
 pub mod security_output;
 pub use audit_output::{AuditAttribution, AuditSummary, AuditVerdict};
+pub use ci_output::{
+    CiIssue, CiProvider, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput, command_title, escape_md,
+    is_project_level_rule, issues_from_codeclimate, issues_from_codeclimate_issues,
+    render_pr_comment, summary_label,
+};
 pub use compact_output::{
     build_compact_lines, build_duplication_compact_lines, build_grouped_compact_lines,
     build_health_compact_lines,

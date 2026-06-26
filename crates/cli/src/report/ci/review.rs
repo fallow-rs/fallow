@@ -5,11 +5,11 @@ use serde_json::Value;
 
 use super::diff_filter::DiffIndex;
 use super::fingerprint::{composite_fingerprint, summary_fingerprint};
-use super::pr_comment::{
-    CiIssue, Provider, command_title, escape_md, issues_from_codeclimate_issues,
-};
 use super::severity;
 use crate::report::emit_json;
+use fallow_api::{
+    CiIssue, CiProvider as Provider, command_title, escape_md, issues_from_codeclimate_issues,
+};
 use fallow_output::{
     GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
     GitLabReviewPositionType, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
