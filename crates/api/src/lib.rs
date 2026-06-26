@@ -51,8 +51,10 @@ pub mod ci_output {
     };
 }
 pub use audit_output::{
-    AuditAttribution, AuditJsonHeaderInput, AuditJsonOutputInput, AuditSummary, AuditVerdict,
-    build_audit_header_json, serialize_audit_json,
+    AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
+    AuditSarifOutputInput, AuditSummary, AuditVerdict, build_audit_codeclimate,
+    build_audit_codeclimate_issues, build_audit_header_json, build_audit_header_map,
+    build_audit_sarif, serialize_audit_json,
 };
 pub use ci_output::{
     CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,

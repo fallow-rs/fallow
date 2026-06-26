@@ -2,9 +2,11 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 
 use colored::Colorize;
-use fallow_api::{AuditJsonHeaderInput, AuditJsonOutputInput, DupesReportPayload};
+use fallow_api::{
+    AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput, AuditSarifOutputInput,
+    DupesReportPayload,
+};
 use fallow_config::{AuditGate, OutputFormat};
-use fallow_output::{CodeClimateIssue, codeclimate_issues_to_value};
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
 use crate::error::emit_error;
@@ -384,7 +386,7 @@ fn changed_files_count_for_output(changed_files_count: usize) -> u32 {
     u32::try_from(changed_files_count).unwrap_or(u32::MAX)
 }
 
-fn audit_json_header_input(result: &AuditResult) -> AuditJsonHeaderInput {
+pub fn audit_json_header_input(result: &AuditResult) -> AuditJsonHeaderInput {
     AuditJsonHeaderInput {
         schema_version: SchemaVersion(crate::report::SCHEMA_VERSION),
         version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
@@ -397,17 +399,6 @@ fn audit_json_header_input(result: &AuditResult) -> AuditJsonHeaderInput {
         base_snapshot_skipped: result.performance.then_some(result.base_snapshot_skipped),
         summary: result.summary.clone(),
         attribution: result.attribution.clone(),
-    }
-}
-
-pub fn insert_audit_json_header(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    result: &AuditResult,
-) {
-    if let Ok(serde_json::Value::Object(header)) =
-        fallow_api::build_audit_header_json(audit_json_header_input(result))
-    {
-        obj.extend(header);
     }
 }
 
@@ -526,49 +517,18 @@ fn audit_next_steps(result: &AuditResult) -> Vec<fallow_types::output::NextStep>
 }
 
 fn print_audit_sarif(result: &AuditResult) -> ExitCode {
-    let mut all_runs = Vec::new();
-
-    if let Some(ref check) = result.check {
-        let sarif = report::build_sarif(&check.results, &check.config.root, &check.config.rules);
-        if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
-            all_runs.extend(runs.iter().cloned());
-        }
-    }
-
-    if let Some(ref dupes) = result.dupes
-        && !dupes.report.clone_groups.is_empty()
-    {
-        let run = serde_json::json!({
-            "tool": {
-                "driver": {
-                    "name": "fallow",
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/fallow-rs/fallow",
-                }
-            },
-            "automationDetails": { "id": "fallow/audit/dupes" },
-            "results": dupes.report.clone_groups.iter().enumerate().map(|(i, g)| {
-                serde_json::json!({
-                    "ruleId": "fallow/code-duplication",
-                    "level": "warning",
-                    "message": { "text": format!("Clone group {} ({} lines, {} instances)", i + 1, g.line_count, g.instances.len()) },
-                })
-            }).collect::<Vec<_>>()
-        });
-        all_runs.push(run);
-    }
-
-    if let Some(ref health) = result.health {
-        let sarif = report::build_health_sarif(&health.report, &health.config.root);
-        if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
-            all_runs.extend(runs.iter().cloned());
-        }
-    }
-
-    let combined = serde_json::json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": all_runs,
+    let check_sarif = result
+        .check
+        .as_ref()
+        .map(|check| report::build_sarif(&check.results, &check.config.root, &check.config.rules));
+    let health_sarif = result
+        .health
+        .as_ref()
+        .map(|health| report::build_health_sarif(&health.report, &health.config.root));
+    let combined = fallow_api::build_audit_sarif(AuditSarifOutputInput {
+        dead_code: check_sarif.as_ref(),
+        duplication: result.dupes.as_ref().map(|dupes| &dupes.report),
+        health: health_sarif.as_ref(),
     });
 
     report::emit_json(&combined, "SARIF audit")
@@ -580,31 +540,17 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
 }
 
 fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
-    let mut all_issues: Vec<CodeClimateIssue> = Vec::new();
-
-    if let Some(ref check) = result.check {
-        all_issues.extend(report::build_codeclimate(
-            &check.results,
-            &check.config.root,
-            &check.config.rules,
-        ));
-    }
-
-    if let Some(ref dupes) = result.dupes {
-        all_issues.extend(report::build_duplication_codeclimate(
-            &dupes.report,
-            &dupes.config.root,
-        ));
-    }
-
-    if let Some(ref health) = result.health {
-        all_issues.extend(report::build_health_codeclimate(
-            &health.report,
-            &health.config.root,
-        ));
-    }
-
-    codeclimate_issues_to_value(&all_issues)
+    fallow_api::build_audit_codeclimate(AuditCodeClimateOutputInput {
+        dead_code: result.check.as_ref().map_or_else(Vec::new, |check| {
+            report::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
+        }),
+        duplication: result.dupes.as_ref().map_or_else(Vec::new, |dupes| {
+            report::build_duplication_codeclimate(&dupes.report, &dupes.config.root)
+        }),
+        health: result.health.as_ref().map_or_else(Vec::new, |health| {
+            report::build_health_codeclimate(&health.report, &health.config.root)
+        }),
+    })
 }
 
 #[cfg(test)]
@@ -809,8 +755,8 @@ mod tests {
         result.changed_files_count = 5;
 
         // Pass verdict + successful JSON emit (no sub-results) maps to success;
-        // exercises insert_audit_json_header's optional base_description / head_sha
-        // / performance branches and the empty next-steps path.
+        // Exercises the typed audit header's optional base_description /
+        // head_sha / performance branches and the empty next-steps path.
         assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
     }
 

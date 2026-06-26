@@ -360,8 +360,16 @@ fn build_brief_subtract_sections(
 /// reused subtract section.
 fn build_brief_json(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {
     let brief = build_brief_output(result);
-    let mut audit_header = serde_json::Map::new();
-    crate::audit::insert_audit_json_header(&mut audit_header, result);
+    let audit_header = fallow_api::build_audit_header_map(crate::audit::audit_json_header_input(
+        result,
+    ))
+    .map_err(|err| {
+        crate::error::emit_error(
+            &format!("JSON serialization error: {err}"),
+            2,
+            fallow_config::OutputFormat::Json,
+        )
+    })?;
     let subtract = build_brief_subtract_sections(result)?;
     fallow_output::build_review_brief_json_output(&brief, audit_header, subtract).map_err(|err| {
         crate::error::emit_error(

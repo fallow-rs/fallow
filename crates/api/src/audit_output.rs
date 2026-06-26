@@ -1,7 +1,10 @@
 //! Shared audit JSON payload contracts for programmatic consumers.
 
 use fallow_config::AuditGate;
-use fallow_output::{AuditCommand, RootEnvelopeMode};
+use fallow_engine::duplicates::DuplicationReport;
+use fallow_output::{
+    AuditCommand, CodeClimateIssue, RootEnvelopeMode, codeclimate_issues_to_value,
+};
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
 use serde::Serialize;
@@ -67,6 +70,21 @@ pub struct AuditJsonOutputInput<DeadCode, Duplication, Complexity> {
     pub next_steps: Vec<NextStep>,
 }
 
+/// Typed audit SARIF assembly input.
+#[derive(Clone, Copy)]
+pub struct AuditSarifOutputInput<'a> {
+    pub dead_code: Option<&'a serde_json::Value>,
+    pub duplication: Option<&'a DuplicationReport>,
+    pub health: Option<&'a serde_json::Value>,
+}
+
+/// Typed audit CodeClimate assembly input.
+pub struct AuditCodeClimateOutputInput {
+    pub dead_code: Vec<CodeClimateIssue>,
+    pub duplication: Vec<CodeClimateIssue>,
+    pub health: Vec<CodeClimateIssue>,
+}
+
 #[derive(Serialize)]
 struct AuditHeaderOutput {
     schema_version: SchemaVersion,
@@ -115,6 +133,23 @@ pub fn build_audit_header_json(
     serde_json::to_value(audit_header_output(input))
 }
 
+/// Build the audit header as an object map for composed output contracts such
+/// as review briefs.
+///
+/// # Errors
+///
+/// Returns a serde error if one of the typed header fields cannot be converted
+/// to JSON, or if the typed header unexpectedly does not serialize to an
+/// object.
+pub fn build_audit_header_map(
+    input: AuditJsonHeaderInput,
+) -> Result<serde_json::Map<String, serde_json::Value>, serde_json::Error> {
+    match build_audit_header_json(input)? {
+        serde_json::Value::Object(header) => Ok(header),
+        _ => unreachable!("AuditHeaderOutput serializes to an object"),
+    }
+}
+
 /// Serialize a typed audit JSON output envelope.
 ///
 /// # Errors
@@ -152,6 +187,80 @@ where
         next_steps: input.next_steps,
     };
     fallow_output::serialize_audit_json_output(output, mode, analysis_run_id)
+}
+
+/// Build the combined SARIF document for `fallow audit`.
+#[must_use]
+pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value {
+    let mut all_runs = Vec::new();
+
+    if let Some(sarif) = input.dead_code {
+        extend_sarif_runs(&mut all_runs, sarif);
+    }
+
+    if let Some(duplication) = input.duplication
+        && !duplication.clone_groups.is_empty()
+    {
+        all_runs.push(build_audit_duplication_sarif_run(duplication));
+    }
+
+    if let Some(sarif) = input.health {
+        extend_sarif_runs(&mut all_runs, sarif);
+    }
+
+    serde_json::json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": all_runs,
+    })
+}
+
+fn extend_sarif_runs(all_runs: &mut Vec<serde_json::Value>, sarif: &serde_json::Value) {
+    if let Some(runs) = sarif.get("runs").and_then(|runs| runs.as_array()) {
+        all_runs.extend(runs.iter().cloned());
+    }
+}
+
+fn build_audit_duplication_sarif_run(duplication: &DuplicationReport) -> serde_json::Value {
+    serde_json::json!({
+        "tool": {
+            "driver": {
+                "name": "fallow",
+                "version": env!("CARGO_PKG_VERSION"),
+                "informationUri": "https://github.com/fallow-rs/fallow",
+            }
+        },
+        "automationDetails": { "id": "fallow/audit/dupes" },
+        "results": duplication.clone_groups.iter().enumerate().map(|(i, group)| {
+            serde_json::json!({
+                "ruleId": "fallow/code-duplication",
+                "level": "warning",
+                "message": {
+                    "text": format!(
+                        "Clone group {} ({} lines, {} instances)",
+                        i + 1,
+                        group.line_count,
+                        group.instances.len()
+                    ),
+                },
+            })
+        }).collect::<Vec<_>>()
+    })
+}
+
+/// Build combined CodeClimate issues for `fallow audit`.
+#[must_use]
+pub fn build_audit_codeclimate_issues(input: AuditCodeClimateOutputInput) -> Vec<CodeClimateIssue> {
+    let mut all_issues = input.dead_code;
+    all_issues.extend(input.duplication);
+    all_issues.extend(input.health);
+    all_issues
+}
+
+/// Build the combined CodeClimate JSON array for `fallow audit`.
+#[must_use]
+pub fn build_audit_codeclimate(input: AuditCodeClimateOutputInput) -> serde_json::Value {
+    codeclimate_issues_to_value(&build_audit_codeclimate_issues(input))
 }
 
 #[cfg(test)]
@@ -201,6 +310,15 @@ mod tests {
     }
 
     #[test]
+    fn audit_header_map_uses_typed_contract_fields() {
+        let header = build_audit_header_map(header_input()).expect("serialize audit header");
+
+        assert_eq!(header["schema_version"], 7);
+        assert_eq!(header["command"], "audit");
+        assert_eq!(header["base_description"], "merge-base with origin/main");
+    }
+
+    #[test]
     fn audit_json_serializer_applies_root_kind_and_sections() {
         let value = serialize_audit_json(
             AuditJsonOutputInput {
@@ -218,5 +336,75 @@ mod tests {
         assert_eq!(value["kind"], "audit");
         assert_eq!(value["dead_code"]["total_issues"], 0);
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-1");
+    }
+
+    #[test]
+    fn audit_sarif_combines_runs_and_duplication_run() {
+        let duplication = DuplicationReport {
+            clone_groups: vec![fallow_engine::duplicates::CloneGroup {
+                instances: vec![
+                    fallow_engine::duplicates::CloneInstance {
+                        file: "src/a.ts".into(),
+                        start_line: 1,
+                        end_line: 12,
+                        start_col: 1,
+                        end_col: 1,
+                        fragment: "duplicated();".to_string(),
+                    },
+                    fallow_engine::duplicates::CloneInstance {
+                        file: "src/b.ts".into(),
+                        start_line: 1,
+                        end_line: 12,
+                        start_col: 1,
+                        end_col: 1,
+                        fragment: "duplicated();".to_string(),
+                    },
+                ],
+                token_count: 40,
+                line_count: 12,
+            }],
+            ..DuplicationReport::default()
+        };
+        let dead_code = serde_json::json!({"runs": [{"automationDetails": {"id": "check"}}]});
+        let health = serde_json::json!({"runs": [{"automationDetails": {"id": "health"}}]});
+
+        let value = build_audit_sarif(AuditSarifOutputInput {
+            dead_code: Some(&dead_code),
+            duplication: Some(&duplication),
+            health: Some(&health),
+        });
+
+        assert_eq!(value["version"], "2.1.0");
+        assert_eq!(value["runs"].as_array().expect("runs").len(), 3);
+        assert_eq!(
+            value["runs"][1]["automationDetails"]["id"],
+            "fallow/audit/dupes"
+        );
+    }
+
+    #[test]
+    fn audit_codeclimate_combines_issue_sections() {
+        let issue = CodeClimateIssue {
+            kind: fallow_output::CodeClimateIssueKind::Issue,
+            check_name: "fallow/test".to_string(),
+            description: "test".to_string(),
+            severity: fallow_output::CodeClimateSeverity::Minor,
+            fingerprint: "abc".to_string(),
+            location: fallow_output::CodeClimateLocation {
+                path: "src/a.ts".to_string(),
+                lines: fallow_output::CodeClimateLines { begin: 1 },
+            },
+            categories: vec!["Bug Risk".to_string()],
+            owner: None,
+            group: None,
+        };
+
+        let value = build_audit_codeclimate(AuditCodeClimateOutputInput {
+            dead_code: vec![issue.clone()],
+            duplication: vec![issue.clone()],
+            health: vec![issue],
+        });
+
+        assert_eq!(value.as_array().expect("issues").len(), 3);
     }
 }

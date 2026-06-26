@@ -2608,9 +2608,10 @@ fn build_audit_health_options<'a>(
 #[path = "audit_output.rs"]
 mod output;
 
+pub use output::audit_json_header_input;
 pub use output::{
     insert_audit_dead_code_json, insert_audit_duplication_json, insert_audit_health_json,
-    insert_audit_json_header, print_audit_findings, print_audit_result,
+    print_audit_findings, print_audit_result,
 };
 
 /// Run the full audit command: execute analyses, print results, return exit code.
