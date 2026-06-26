@@ -1,3 +1,4 @@
+use fallow_engine::duplicates::{self, DuplicationReport};
 use fallow_output::{
     COGNITIVE_EXTRACTION_THRESHOLD, CloneSiblingEvidence, Confidence, ContributingFactor,
     DirectCallerEvidence, EffortEstimate, EvidenceFunction, FileHealthScore, HotspotEntry,
@@ -685,13 +686,13 @@ fn target_evidence_is_empty(evidence: &TargetEvidence) -> bool {
 }
 
 pub(super) fn build_clone_sibling_evidence(
-    report: &fallow_core::duplicates::DuplicationReport,
+    report: &DuplicationReport,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>> {
     let mut by_path: rustc_hash::FxHashMap<std::path::PathBuf, Vec<CloneSiblingEvidence>> =
         rustc_hash::FxHashMap::default();
 
     for group in &report.clone_groups {
-        let fingerprint = fallow_core::duplicates::clone_fingerprint(&group.instances);
+        let fingerprint = duplicates::clone_fingerprint(&group.instances);
         for (idx, instance) in group.instances.iter().enumerate() {
             let siblings = by_path.entry(instance.file.clone()).or_default();
             for (sibling_idx, sibling) in group.instances.iter().enumerate() {
@@ -1039,10 +1040,10 @@ mod tests {
 
     #[test]
     fn clone_sibling_evidence_maps_each_instance_to_peers() {
-        let report = fallow_core::duplicates::DuplicationReport {
-            clone_groups: vec![fallow_core::duplicates::CloneGroup {
+        let report = duplicates::DuplicationReport {
+            clone_groups: vec![duplicates::CloneGroup {
                 instances: vec![
-                    fallow_core::duplicates::CloneInstance {
+                    duplicates::CloneInstance {
                         file: "/src/a.ts".into(),
                         start_line: 1,
                         end_line: 5,
@@ -1050,7 +1051,7 @@ mod tests {
                         end_col: 1,
                         fragment: "const value = call();".into(),
                     },
-                    fallow_core::duplicates::CloneInstance {
+                    duplicates::CloneInstance {
                         file: "/src/b.ts".into(),
                         start_line: 20,
                         end_line: 24,

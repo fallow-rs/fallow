@@ -19,11 +19,11 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
-use fallow_core::analyze::derive_security_severity;
-use fallow_core::results::{
+use fallow_engine::results::{
     AnalysisResults, SecurityAttackSurfaceEntry, SecurityDeadCodeKind, SecurityFinding,
     SecurityFindingKind, TraceHop, TraceHopRole,
 };
+use fallow_engine::security::{derive_security_severity, security_catalogue_title};
 pub use fallow_output::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
     SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
@@ -1516,12 +1516,7 @@ fn unresolved_callee_diagnostics(
     })
 }
 
-fn filter_to_files(
-    results: &mut fallow_core::results::AnalysisResults,
-    root: &Path,
-    files: &[PathBuf],
-    quiet: bool,
-) {
+fn filter_to_files(results: &mut AnalysisResults, root: &Path, files: &[PathBuf], quiet: bool) {
     if files.is_empty() {
         return;
     }
@@ -2278,7 +2273,7 @@ fn security_finding_label(finding: &SecurityFinding) -> String {
             let title = finding
                 .category
                 .as_deref()
-                .and_then(fallow_core::analyze::security_catalogue_title)
+                .and_then(security_catalogue_title)
                 .or(finding.category.as_deref())
                 .unwrap_or("tainted-sink");
             match finding.cwe {
@@ -2547,7 +2542,7 @@ fn sarif_rule_def_tainted_sink(
     let title = finding
         .category
         .as_deref()
-        .and_then(fallow_core::analyze::security_catalogue_title)
+        .and_then(security_catalogue_title)
         .or(finding.category.as_deref())
         .unwrap_or("tainted-sink");
     let mut rule = serde_json::json!({
@@ -2790,7 +2785,7 @@ fn sarif_location(path: &Path, line: u32, col: u32) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::results::{
+    use fallow_engine::results::{
         SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink,
         SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
         TraceHop, TraceHopRole,
@@ -3384,7 +3379,7 @@ mod tests {
             reachable_from_entry: true,
             reachable_from_untrusted_source: true,
             // Cross-module reachability is module-level (issue #1093).
-            taint_confidence: Some(fallow_core::results::TaintConfidence::ModuleLevel),
+            taint_confidence: Some(TaintConfidence::ModuleLevel),
             untrusted_source_hop_count: Some(1),
             untrusted_source_trace: vec![
                 TraceHop {
@@ -4131,10 +4126,7 @@ mod tests {
         // Cross-module reachability is module-level: the structured discriminator
         // says so, and the source node is honestly labeled `ModuleSource`, never
         // `UntrustedSource` (which is reserved for an arg-level same-module read).
-        assert_eq!(
-            reach.taint_confidence,
-            Some(fallow_core::results::TaintConfidence::ModuleLevel)
-        );
+        assert_eq!(reach.taint_confidence, Some(TaintConfidence::ModuleLevel));
         assert_eq!(
             reach
                 .untrusted_source_trace
@@ -4166,7 +4158,7 @@ mod tests {
     #[test]
     fn file_scope_keeps_security_finding_when_anchor_matches() {
         let root = Path::new("/proj/root");
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = AnalysisResults::default();
         results.security_findings.push(sample_finding(root));
 
         filter_to_files(&mut results, root, &[PathBuf::from("src/app.tsx")], true);
@@ -4177,7 +4169,7 @@ mod tests {
     #[test]
     fn file_scope_keeps_security_finding_when_trace_hop_matches() {
         let root = Path::new("/proj/root");
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = AnalysisResults::default();
         results.security_findings.push(sample_finding(root));
 
         filter_to_files(
@@ -4193,7 +4185,7 @@ mod tests {
     #[test]
     fn file_scope_drops_unrelated_security_finding() {
         let root = Path::new("/proj/root");
-        let mut results = fallow_core::results::AnalysisResults::default();
+        let mut results = AnalysisResults::default();
         results.security_findings.push(sample_finding(root));
 
         filter_to_files(&mut results, root, &[PathBuf::from("src/other.ts")], true);

@@ -17,6 +17,7 @@ use super::{
 };
 use crate::report::OwnershipResolver;
 use crate::vital_signs;
+use fallow_engine::{discover::FileId, duplicates, extract::ModuleInfo};
 use fallow_output::{
     ComplexityViolation, FileHealthScore, HealthActionsMeta, HealthFinding, HealthGroup,
     HealthGrouping, HotspotEntry, HotspotFinding, LargeFunctionEntry, RefactoringTarget,
@@ -32,8 +33,8 @@ struct GroupBucket {
 
 pub(super) struct HealthGroupingInput<'a> {
     pub files: &'a [fallow_types::discover::DiscoveredFile],
-    pub modules: &'a [fallow_core::extract::ModuleInfo],
-    pub file_paths: &'a FxHashMap<fallow_core::discover::FileId, &'a PathBuf>,
+    pub modules: &'a [ModuleInfo],
+    pub file_paths: &'a FxHashMap<FileId, &'a PathBuf>,
     pub score_output: Option<&'a FileScoreOutput>,
     pub file_scores: &'a [FileHealthScore],
     pub findings: &'a [ComplexityViolation],
@@ -209,7 +210,7 @@ fn apply_group_duplication_metrics(
         return;
     };
     let group_files = filter_group_items(input.files, paths, |file| &file.path);
-    let dupes_report = fallow_core::duplicates::find_duplicates(project_root, &group_files, config);
+    let dupes_report = duplicates::find_duplicates(project_root, &group_files, config);
     apply_duplication_metrics(vital_signs, counts, &dupes_report);
 }
 

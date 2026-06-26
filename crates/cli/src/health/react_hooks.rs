@@ -15,7 +15,7 @@
 //! severity is introduced; the profile rides the existing complexity finding
 //! alongside `react_hook_count` / `react_prop_count`.
 
-use fallow_core::extract::ModuleInfo;
+use fallow_engine::extract::ModuleInfo;
 use fallow_output::ReactHookProfile;
 use fallow_types::extract::{FunctionComplexity, HookUse, HookUseKind};
 
@@ -198,7 +198,7 @@ mod tests {
         hook_uses: Vec<HookUse>,
     ) -> ModuleInfo {
         ModuleInfo {
-            file_id: fallow_core::discover::FileId(0),
+            file_id: fallow_engine::discover::FileId(0),
             exports: vec![],
             imports: vec![],
             re_exports: vec![],

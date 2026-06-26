@@ -80,8 +80,9 @@ pub mod suppress {
 pub mod changed_files {
     pub use fallow_core::changed_files::{
         ChangedFilesError, filter_duplication_by_changed_files, filter_results_by_changed_files,
-        get_changed_files, resolve_git_common_dir, resolve_git_toplevel, try_get_changed_diff,
-        try_get_changed_files, try_get_changed_files_with_toplevel, validate_git_ref,
+        get_changed_files, resolve_git_common_dir, resolve_git_toplevel, set_spawn_hook,
+        try_get_changed_diff, try_get_changed_files, try_get_changed_files_with_toplevel,
+        validate_git_ref,
     };
 }
 
@@ -99,7 +100,7 @@ pub mod churn {
 
 /// Security metadata helpers exposed through the engine boundary.
 pub mod security {
-    pub use fallow_core::analyze::security_catalogue_title;
+    pub use fallow_core::analyze::{derive_security_severity, security_catalogue_title};
 }
 
 /// Symbol trace types exposed through the engine boundary.

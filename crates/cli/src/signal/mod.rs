@@ -123,7 +123,7 @@ fn platform_install() -> std::io::Result<()> {
 /// consumers in graceful mode (`fallow watch`).
 ///
 /// Graceful mode MUST still drain children: watch's `analyze_and_
-/// report` spawns git subprocesses (via `fallow_core::changed_files`
+/// report` spawns git subprocesses (via `fallow_engine::changed_files`
 /// and `fallow_engine::churn`) that need reaping mid-analysis. Without
 /// drain, a Ctrl+C during analysis would let the parent return from
 /// the inner pass only after every git child completed naturally,
