@@ -942,68 +942,48 @@ fn collect_playwright_local_test_names(resolved: &ResolvedModule) -> FxHashSet<S
     names
 }
 
-fn typed_or_legacy_facts<T>(typed: Vec<T>, legacy: impl FnOnce() -> Vec<T>) -> Vec<T> {
-    if typed.is_empty() { legacy() } else { typed }
-}
-
 fn playwright_fixture_uses(resolved: &ResolvedModule) -> Vec<PlaywrightFixtureUseFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
-    typed_or_legacy_facts(view.typed_playwright_fixture_uses(), || {
-        view.legacy_playwright_fixture_uses()
-    })
+    view.playwright_fixture_uses()
 }
 
 fn playwright_fixture_definitions(
     resolved: &ResolvedModule,
 ) -> Vec<PlaywrightFixtureDefinitionFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
-    typed_or_legacy_facts(view.typed_playwright_fixture_definitions(), || {
-        view.legacy_playwright_fixture_definitions()
-    })
+    view.playwright_fixture_definitions()
 }
 
 fn playwright_fixture_aliases(resolved: &ResolvedModule) -> Vec<PlaywrightFixtureAliasFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
-    typed_or_legacy_facts(view.typed_playwright_fixture_aliases(), || {
-        view.legacy_playwright_fixture_aliases()
-    })
+    view.playwright_fixture_aliases()
 }
 
 fn playwright_fixture_types(resolved: &ResolvedModule) -> Vec<PlaywrightFixtureTypeFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
-    typed_or_legacy_facts(view.typed_playwright_fixture_types(), || {
-        view.legacy_playwright_fixture_types()
-    })
+    view.playwright_fixture_types()
 }
 
 fn instance_export_bindings(resolved: &ResolvedModule) -> Vec<InstanceExportBindingFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
-    typed_or_legacy_facts(view.typed_instance_export_bindings(), || {
-        view.legacy_instance_export_bindings()
-    })
+    view.instance_export_bindings()
 }
 
 fn factory_call_member_accesses(resolved: &ResolvedModule) -> Vec<FactoryCallMemberAccessFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
-    typed_or_legacy_facts(view.typed_factory_call_member_accesses(), || {
-        view.legacy_factory_call_member_accesses()
-    })
+    view.factory_call_member_accesses()
 }
 
 fn fluent_chain_member_accesses(resolved: &ResolvedModule) -> Vec<FluentChainMemberAccessFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
-    typed_or_legacy_facts(view.typed_fluent_chain_member_accesses(), || {
-        view.legacy_fluent_chain_member_accesses()
-    })
+    view.fluent_chain_member_accesses()
 }
 
 fn fluent_chain_new_member_accesses(
     resolved: &ResolvedModule,
 ) -> Vec<FluentChainNewMemberAccessFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
-    typed_or_legacy_facts(view.typed_fluent_chain_new_member_accesses(), || {
-        view.legacy_fluent_chain_new_member_accesses()
-    })
+    view.fluent_chain_new_member_accesses()
 }
 
 fn playwright_test_keys_for_local(

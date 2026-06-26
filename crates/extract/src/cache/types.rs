@@ -649,13 +649,16 @@ use crate::MemberKind;
 /// for older caches.
 ///
 /// Bumped to 207: dynamic custom-element render abstains are now persisted as
-/// typed semantic facts, while the legacy `<dynamic>` tag sentinel remains
-/// decode-only for older caches.
+/// typed semantic facts.
 ///
 /// Bumped to 208: empty cached semantic facts are omitted from the persisted
 /// module payload. The in-memory `ModuleInfo` contract still exposes an empty
 /// vector, but warm caches from 207 carry the old eager `Vec` field shape.
-pub(super) const CACHE_VERSION: u32 = 208;
+///
+/// Bumped to 209: legacy semantic sentinel payloads are no longer decoded from
+/// cached member accesses. Warm caches from 208 or earlier are reparsed so
+/// analyzers consume typed semantic facts only.
+pub(super) const CACHE_VERSION: u32 = 209;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
