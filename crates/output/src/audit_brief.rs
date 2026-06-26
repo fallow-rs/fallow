@@ -1,6 +1,7 @@
 //! Audit brief output contracts.
 
 use serde::Serialize;
+use serde_json::{Map, Value};
 
 /// Wire version for the `fallow audit --brief --format json` envelope.
 pub const REVIEW_BRIEF_SCHEMA_VERSION: u32 = 5;
@@ -128,4 +129,133 @@ pub struct ReviewBriefOutput<Focus, Weakening, Routing, Decisions> {
     pub weakening: Vec<Weakening>,
     pub routing: Routing,
     pub decisions: Decisions,
+}
+
+/// CLI-built audit subreports that are embedded in the audit brief envelope.
+///
+/// The brief envelope and field ordering belong to `fallow-output`; the
+/// underlying subreport payloads are still supplied by the CLI until their
+/// builders are fully command-neutral.
+#[derive(Debug, Clone, Default)]
+pub struct ReviewBriefSubtractSections {
+    pub dead_code: Option<Value>,
+    pub duplication: Option<Value>,
+    pub complexity: Option<Value>,
+}
+
+fn insert_serialized<T: Serialize>(
+    obj: &mut Map<String, Value>,
+    key: &'static str,
+    value: &T,
+) -> Result<(), serde_json::Error> {
+    obj.insert(key.to_string(), serde_json::to_value(value)?);
+    Ok(())
+}
+
+/// Build the complete `fallow audit --brief --format json` value.
+///
+/// `audit_header` carries informational audit scope fields such as verdict,
+/// base ref, summary, and attribution. This function restamps the independent
+/// brief schema and command after merging that header so the resulting document
+/// advertises the brief contract rather than the regular audit JSON contract.
+pub fn build_review_brief_json_output<Focus, Weakening, Routing, Decisions>(
+    brief: &ReviewBriefOutput<Focus, Weakening, Routing, Decisions>,
+    audit_header: Map<String, Value>,
+    subtract: ReviewBriefSubtractSections,
+) -> Result<Value, serde_json::Error>
+where
+    Focus: Serialize,
+    Weakening: Serialize,
+    Routing: Serialize,
+    Decisions: Serialize,
+{
+    let mut obj = Map::new();
+
+    insert_serialized(&mut obj, "schema_version", &brief.schema_version)?;
+    obj.insert("version".into(), Value::String(brief.version.clone()));
+    obj.insert("command".into(), Value::String(brief.command.clone()));
+
+    for (key, value) in audit_header {
+        obj.insert(key, value);
+    }
+
+    insert_serialized(&mut obj, "schema_version", &brief.schema_version)?;
+    obj.insert("command".into(), Value::String(brief.command.clone()));
+
+    insert_serialized(&mut obj, "decisions", &brief.decisions)?;
+    insert_serialized(&mut obj, "triage", &brief.triage)?;
+    insert_serialized(&mut obj, "graph_facts", &brief.graph_facts)?;
+    insert_serialized(&mut obj, "partition", &brief.partition)?;
+    insert_serialized(&mut obj, "impact_closure", &brief.impact_closure)?;
+    insert_serialized(&mut obj, "focus", &brief.focus)?;
+    insert_serialized(&mut obj, "deltas", &brief.deltas)?;
+    insert_serialized(&mut obj, "weakening", &brief.weakening)?;
+    insert_serialized(&mut obj, "routing", &brief.routing)?;
+
+    if let Some(value) = subtract.dead_code {
+        obj.insert("dead_code".into(), value);
+    }
+    if let Some(value) = subtract.duplication {
+        obj.insert("duplication".into(), value);
+    }
+    if let Some(value) = subtract.complexity {
+        obj.insert("complexity".into(), value);
+    }
+
+    Ok(Value::Object(obj))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn review_brief_json_output_restamps_audit_header_contract() {
+        let brief = ReviewBriefOutput {
+            schema_version: ReviewBriefSchemaVersion::default(),
+            version: "1.2.3".to_string(),
+            command: "audit-brief".to_string(),
+            triage: DiffTriage {
+                files: 1,
+                hunks: None,
+                net_lines: None,
+                risk_class: RiskClass::Low,
+                review_effort: ReviewEffort::Glance,
+            },
+            graph_facts: GraphFacts {
+                exports_added: 0,
+                api_width_delta: 0,
+                reachable_from: Vec::new(),
+                boundaries_touched: Vec::new(),
+            },
+            partition: PartitionFacts::default(),
+            impact_closure: ImpactClosureFacts::default(),
+            focus: json!({"units": []}),
+            deltas: ReviewDeltas::default(),
+            weakening: Vec::<Value>::new(),
+            routing: json!({"units": []}),
+            decisions: json!({"decisions": []}),
+        };
+        let mut audit_header = Map::new();
+        audit_header.insert("schema_version".into(), json!(999));
+        audit_header.insert("command".into(), json!("audit"));
+        audit_header.insert("verdict".into(), json!("fail"));
+
+        let value = build_review_brief_json_output(
+            &brief,
+            audit_header,
+            ReviewBriefSubtractSections {
+                dead_code: Some(json!({"issues": []})),
+                duplication: None,
+                complexity: None,
+            },
+        )
+        .expect("brief output should serialize");
+
+        assert_eq!(value["schema_version"], REVIEW_BRIEF_SCHEMA_VERSION);
+        assert_eq!(value["command"], "audit-brief");
+        assert_eq!(value["verdict"], "fail");
+        assert_eq!(value["dead_code"]["issues"], json!([]));
+    }
 }
