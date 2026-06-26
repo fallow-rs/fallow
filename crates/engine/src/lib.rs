@@ -27,6 +27,11 @@ pub mod duplicates {
     pub use fallow_core::duplicates::*;
 }
 
+/// Discovery helpers and types exposed through the engine boundary.
+pub mod discover {
+    pub use fallow_core::discover::*;
+}
+
 pub mod dead_code;
 pub mod health;
 
@@ -43,6 +48,11 @@ pub mod graph {
 /// Public API graph helpers exposed through the engine boundary.
 pub mod public_api {
     pub use fallow_core::analyze::public_api_package_entry_points;
+}
+
+/// Plugin registry helpers and types exposed through the engine boundary.
+pub mod plugins {
+    pub use fallow_core::plugins::*;
 }
 
 /// Git process environment helpers exposed through the engine boundary.
