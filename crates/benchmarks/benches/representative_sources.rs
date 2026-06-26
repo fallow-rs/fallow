@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use fallow_cli::programmatic::{AnalysisOptions, DeadCodeOptions, detect_dead_code};
+use fallow_api::{AnalysisOptions, DeadCodeOptions, detect_dead_code};
 use fallow_core::{
     discover::{DiscoveredFile, FileId},
     extract::parse_single_file,

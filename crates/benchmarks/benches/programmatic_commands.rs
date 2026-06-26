@@ -9,15 +9,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use fallow_cli::programmatic::{
+use fallow_api::{
     AnalysisOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode, DuplicationOptions,
-    compute_health, detect_circular_dependencies, detect_dead_code, detect_duplication,
+    compute_health_with_runner, detect_circular_dependencies, detect_dead_code, detect_duplication,
 };
 use fallow_core::{
     cache::{CacheStore, module_to_cached},
     discover::{DiscoveredFile, FileId},
     extract::{parse_all_files, parse_single_file},
 };
+use fallow_programmatic_cli::CliHealthRunner;
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
@@ -777,7 +778,8 @@ fn create_warm_complexity_health_project() -> CommandInput {
         targets: true,
         ..ComplexityOptions::default()
     };
-    let _ = compute_health(&options).expect("warm complexity cache priming succeeds");
+    let _ = compute_health_with_runner(&options, &CliHealthRunner)
+        .expect("warm complexity cache priming succeeds");
     input
 }
 
@@ -915,7 +917,7 @@ fn health_complex_service_scoring(c: &mut Criterion) {
                     targets: true,
                     ..ComplexityOptions::default()
                 };
-                compute_health(&options)
+                compute_health_with_runner(&options, &CliHealthRunner)
             },
             BatchSize::LargeInput,
         );
@@ -935,7 +937,7 @@ fn health_complex_service_warm_complexity_hit(c: &mut Criterion) {
                     targets: true,
                     ..ComplexityOptions::default()
                 };
-                compute_health(&options)
+                compute_health_with_runner(&options, &CliHealthRunner)
             },
             BatchSize::LargeInput,
         );
@@ -953,7 +955,7 @@ fn health_css_tailwind_design_system(c: &mut Criterion) {
                     score: true,
                     ..ComplexityOptions::default()
                 };
-                compute_health(&options)
+                compute_health_with_runner(&options, &CliHealthRunner)
             },
             BatchSize::LargeInput,
         );

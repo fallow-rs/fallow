@@ -1000,8 +1000,9 @@ name = "fallow-benchmarks"
 version = "2.102.0"
 dependencies = [
  "criterion2",
- "fallow-cli",
+ "fallow-api",
  "fallow-core",
+ "fallow-programmatic-cli",
  "fallow-types",
  "tempfile",
 ]
