@@ -60,6 +60,65 @@ pub trait ProgrammaticHealthRunner {
     ) -> Result<ProgrammaticHealthRun, ProgrammaticError>;
 }
 
+/// Derive engine-owned health execution options from public programmatic API
+/// options and a resolved analysis context.
+///
+/// This keeps option interpretation at the API boundary while temporary
+/// CLI-backed runners focus on executing the health pipeline.
+#[must_use]
+pub fn derive_programmatic_health_execution_options<'a>(
+    resolved: &'a ProgrammaticAnalysisContext,
+    options: &'a ComplexityOptions,
+) -> fallow_engine::HealthExecutionOptions<'a> {
+    let run = crate::derive_complexity_run_options(options);
+
+    fallow_engine::HealthExecutionOptions {
+        root: resolved.root(),
+        config_path: resolved.config_path(),
+        output: OutputFormat::Human,
+        no_cache: resolved.no_cache(),
+        threads: resolved.threads(),
+        quiet: true,
+        thresholds: run.thresholds,
+        top: run.top,
+        sort: run.sort,
+        production: resolved.production_override().unwrap_or(false),
+        production_override: resolved.production_override(),
+        changed_since: resolved.changed_since(),
+        diff_index: resolved.diff_index(),
+        use_shared_diff_index: false,
+        workspace: resolved.workspace(),
+        changed_workspaces: resolved.changed_workspaces(),
+        baseline: None,
+        save_baseline: None,
+        complexity: run.sections.complexity,
+        file_scores: run.sections.file_scores,
+        coverage_gaps: run.sections.coverage_gaps,
+        config_activates_coverage_gaps: !run.sections.any_section,
+        hotspots: run.sections.hotspots,
+        ownership: run.sections.ownership,
+        ownership_emails: run.ownership_emails,
+        targets: run.sections.targets,
+        css: run.css,
+        force_full: run.sections.force_full,
+        score_only_output: run.sections.score_only_output,
+        enforce_coverage_gap_gate: true,
+        effort: run.effort,
+        score: run.sections.score,
+        gates: fallow_engine::HealthGateOptions::default(),
+        since: run.since,
+        min_commits: run.min_commits,
+        explain: resolved.explain_enabled(),
+        summary: false,
+        save_snapshot: None,
+        trend: false,
+        coverage_inputs: run.coverage_inputs,
+        performance: false,
+        runtime_coverage: None,
+        churn_file: None,
+    }
+}
+
 /// Resolved common programmatic analysis context.
 ///
 /// This owns validation, root/config/diff resolution, production overrides,
@@ -1700,6 +1759,52 @@ mod tests {
             root: Some(root.to_path_buf()),
             ..AnalysisOptions::default()
         }
+    }
+
+    #[test]
+    fn derives_programmatic_health_execution_options_from_api_contracts() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        let options = ComplexityOptions {
+            analysis: AnalysisOptions {
+                root: Some(root.to_path_buf()),
+                no_cache: true,
+                threads: Some(2),
+                production_override: Some(true),
+                explain: true,
+                ..AnalysisOptions::default()
+            },
+            max_cyclomatic: Some(12),
+            top: Some(5),
+            complexity: true,
+            ownership: true,
+            score: true,
+            min_commits: Some(3),
+            ..ComplexityOptions::default()
+        };
+        let resolved = resolve_programmatic_analysis_context(&options.analysis)
+            .expect("programmatic context resolves");
+
+        let execution = derive_programmatic_health_execution_options(&resolved, &options);
+
+        assert_eq!(execution.root, root);
+        assert!(matches!(execution.output, OutputFormat::Human));
+        assert!(execution.no_cache);
+        assert_eq!(execution.threads, 2);
+        assert!(execution.quiet);
+        assert_eq!(execution.thresholds.max_cyclomatic, Some(12));
+        assert_eq!(execution.top, Some(5));
+        assert!(execution.production);
+        assert_eq!(execution.production_override, Some(true));
+        assert!(execution.complexity);
+        assert!(execution.hotspots);
+        assert!(execution.ownership);
+        assert!(execution.score);
+        assert_eq!(execution.min_commits, Some(3));
+        assert!(execution.explain);
+        assert!(execution.enforce_coverage_gap_gate);
+        assert!(!execution.performance);
+        assert!(execution.runtime_coverage.is_none());
     }
 
     #[test]

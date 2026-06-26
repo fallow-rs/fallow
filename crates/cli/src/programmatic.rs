@@ -6,7 +6,6 @@
 
 use std::path::Path;
 
-use fallow_config::OutputFormat;
 use fallow_engine::{ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun};
 
 use crate::health::HealthOptions;
@@ -15,7 +14,7 @@ use crate::health::HealthOptions;
 use fallow_api::AnalysisOptions;
 use fallow_api::{
     ComplexityOptions, ProgrammaticAnalysisContext, ProgrammaticError,
-    derive_complexity_run_options, resolve_programmatic_analysis_context,
+    derive_programmatic_health_execution_options, resolve_programmatic_analysis_context,
 };
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
@@ -45,54 +44,8 @@ fn build_complexity_options<'a>(
     resolved: &'a ProgrammaticAnalysisContext,
     options: &'a ComplexityOptions,
 ) -> HealthOptions<'a> {
-    let run = derive_complexity_run_options(options);
-
     HealthOptions {
-        execution: fallow_engine::HealthExecutionOptions {
-            root: resolved.root(),
-            config_path: resolved.config_path(),
-            output: OutputFormat::Human,
-            no_cache: resolved.no_cache(),
-            threads: resolved.threads(),
-            quiet: true,
-            thresholds: run.thresholds,
-            top: run.top,
-            sort: run.sort,
-            production: resolved.production_override().unwrap_or(false),
-            production_override: resolved.production_override(),
-            changed_since: resolved.changed_since(),
-            diff_index: resolved.diff_index(),
-            use_shared_diff_index: false,
-            workspace: resolved.workspace(),
-            changed_workspaces: resolved.changed_workspaces(),
-            baseline: None,
-            save_baseline: None,
-            complexity: run.sections.complexity,
-            file_scores: run.sections.file_scores,
-            coverage_gaps: run.sections.coverage_gaps,
-            config_activates_coverage_gaps: !run.sections.any_section,
-            hotspots: run.sections.hotspots,
-            ownership: run.sections.ownership,
-            ownership_emails: run.ownership_emails,
-            targets: run.sections.targets,
-            css: run.css,
-            force_full: run.sections.force_full,
-            score_only_output: run.sections.score_only_output,
-            enforce_coverage_gap_gate: true,
-            effort: run.effort,
-            score: run.sections.score,
-            gates: fallow_engine::HealthGateOptions::default(),
-            since: run.since,
-            min_commits: run.min_commits,
-            explain: resolved.explain_enabled(),
-            summary: false,
-            save_snapshot: None,
-            trend: false,
-            coverage_inputs: run.coverage_inputs,
-            performance: false,
-            runtime_coverage: None,
-            churn_file: None,
-        },
+        execution: derive_programmatic_health_execution_options(resolved, options),
         complexity_breakdown: false,
         group_by: None,
     }

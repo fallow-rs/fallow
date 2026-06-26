@@ -50,7 +50,8 @@ pub use output_contracts::{
 pub use runtime::{
     DeadCodeProgrammaticOutput, DuplicationProgrammaticOutput, HealthJsonReportInput,
     HealthProgrammaticOutput, ProgrammaticAnalysisContext, ProgrammaticHealthRunner,
-    compute_complexity_with_runner, compute_health_with_runner, detect_boundary_violations,
+    compute_complexity_with_runner, compute_health_with_runner,
+    derive_programmatic_health_execution_options, detect_boundary_violations,
     detect_circular_dependencies, detect_dead_code, detect_duplication,
     resolve_programmatic_analysis_context, run_boundary_violations, run_circular_dependencies,
     run_complexity_with_runner, run_dead_code, run_duplication, run_health_with_runner,
