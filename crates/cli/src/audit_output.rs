@@ -3,7 +3,8 @@ use std::process::ExitCode;
 
 use colored::Colorize;
 use fallow_config::{AuditGate, OutputFormat};
-use fallow_output::CodeClimateIssue;
+use fallow_output::{AuditCommand, AuditOutput, CodeClimateIssue, RootEnvelopeMode};
+use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 
 use crate::error::emit_error;
 use crate::report;
@@ -329,40 +330,69 @@ fn print_audit_status_line(result: &AuditResult) {
 }
 
 fn print_audit_json(result: &AuditResult) -> ExitCode {
-    let mut obj = serde_json::Map::new();
-    insert_audit_json_header(&mut obj, result);
-
-    if let Some(ref check) = result.check
-        && let Err(code) = insert_audit_dead_code_json(&mut obj, result, check)
-    {
-        return code;
-    }
-
-    if let Some(ref dupes) = result.dupes
-        && let Err(code) = insert_audit_duplication_json(&mut obj, result, dupes)
-    {
-        return code;
-    }
-
-    if let Some(ref health) = result.health
-        && let Err(code) = insert_audit_health_json(&mut obj, result, health)
-    {
-        return code;
-    }
-
-    insert_audit_next_steps_json(&mut obj, result);
-
-    let mut output = serde_json::Value::Object(obj);
-    crate::output_envelope::apply_root_kind(&mut output, "audit");
+    let mut output = match build_audit_json_output(result) {
+        Ok(output) => output,
+        Err(code) => return code,
+    };
     report::harmonize_multi_kind_suppress_line_actions(&mut output);
     crate::output_envelope::attach_telemetry_meta(&mut output);
     report::emit_json(&output, "audit")
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "elapsed milliseconds won't exceed u64::MAX"
-)]
+fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {
+    let dead_code = result
+        .check
+        .as_ref()
+        .map(|check| build_audit_dead_code_json(result, check))
+        .transpose()?;
+    let duplication = result
+        .dupes
+        .as_ref()
+        .map(|dupes| build_audit_duplication_json(result, dupes))
+        .transpose()?;
+    let complexity = result
+        .health
+        .as_ref()
+        .map(|health| build_audit_health_json(result, health))
+        .transpose()?;
+
+    let output = AuditOutput {
+        schema_version: SchemaVersion(crate::report::SCHEMA_VERSION),
+        version: ToolVersion(env!("CARGO_PKG_VERSION").to_string()),
+        command: AuditCommand::Audit,
+        verdict: result.verdict,
+        changed_files_count: changed_files_count_for_output(result.changed_files_count),
+        base_ref: result.base_ref.clone(),
+        base_description: result.base_description.clone(),
+        head_sha: result.head_sha.clone(),
+        elapsed_ms: ElapsedMs(elapsed_ms_for_output(result.elapsed)),
+        base_snapshot_skipped: result.performance.then_some(result.base_snapshot_skipped),
+        summary: result.summary.clone(),
+        attribution: result.attribution.clone(),
+        meta: None,
+        dead_code,
+        duplication,
+        complexity,
+        next_steps: audit_next_steps(result),
+    };
+
+    fallow_output::serialize_audit_json_output(output, RootEnvelopeMode::Tagged).map_err(|err| {
+        emit_error(
+            &format!("JSON serialization error: {err}"),
+            2,
+            OutputFormat::Json,
+        )
+    })
+}
+
+fn elapsed_ms_for_output(elapsed: std::time::Duration) -> u64 {
+    u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn changed_files_count_for_output(changed_files_count: usize) -> u32 {
+    u32::try_from(changed_files_count).unwrap_or(u32::MAX)
+}
+
 pub fn insert_audit_json_header(
     obj: &mut serde_json::Map<String, serde_json::Value>,
     result: &AuditResult,
@@ -402,7 +432,9 @@ pub fn insert_audit_json_header(
     }
     obj.insert(
         "elapsed_ms".into(),
-        serde_json::Value::Number(serde_json::Number::from(result.elapsed.as_millis() as u64)),
+        serde_json::Value::Number(serde_json::Number::from(elapsed_ms_for_output(
+            result.elapsed,
+        ))),
     );
     if result.performance {
         obj.insert(
@@ -424,6 +456,15 @@ pub fn insert_audit_dead_code_json(
     result: &AuditResult,
     check: &crate::check::CheckResult,
 ) -> Result<(), ExitCode> {
+    let json = build_audit_dead_code_json(result, check)?;
+    obj.insert("dead_code".into(), json);
+    Ok(())
+}
+
+fn build_audit_dead_code_json(
+    result: &AuditResult,
+    check: &crate::check::CheckResult,
+) -> Result<serde_json::Value, ExitCode> {
     match report::build_check_json_payload_with_config_fixable(
         &check.results,
         &check.config.root,
@@ -439,8 +480,7 @@ pub fn insert_audit_dead_code_json(
                     &base.dead_code,
                 );
             }
-            obj.insert("dead_code".into(), json);
-            Ok(())
+            Ok(json)
         }
         Err(e) => Err(emit_error(
             &format!("JSON serialization error: {e}"),
@@ -455,6 +495,15 @@ pub fn insert_audit_duplication_json(
     result: &AuditResult,
     dupes: &crate::dupes::DupesResult,
 ) -> Result<(), ExitCode> {
+    let json = build_audit_duplication_json(result, dupes)?;
+    obj.insert("duplication".into(), json);
+    Ok(())
+}
+
+fn build_audit_duplication_json(
+    result: &AuditResult,
+    dupes: &crate::dupes::DupesResult,
+) -> Result<serde_json::Value, ExitCode> {
     let payload = crate::output_dupes::DupesReportPayload::from_report(&dupes.report);
     match serde_json::to_value(&payload) {
         Ok(mut json) => {
@@ -463,8 +512,7 @@ pub fn insert_audit_duplication_json(
             if let Some(ref base) = result.base_snapshot {
                 annotate_dupes_json(&mut json, &dupes.report, &dupes.config.root, &base.dupes);
             }
-            obj.insert("duplication".into(), json);
-            Ok(())
+            Ok(json)
         }
         Err(e) => Err(emit_error(
             &format!("JSON serialization error: {e}"),
@@ -479,6 +527,15 @@ pub fn insert_audit_health_json(
     result: &AuditResult,
     health: &crate::health::HealthResult,
 ) -> Result<(), ExitCode> {
+    let json = build_audit_health_json(result, health)?;
+    obj.insert("complexity".into(), json);
+    Ok(())
+}
+
+fn build_audit_health_json(
+    result: &AuditResult,
+    health: &crate::health::HealthResult,
+) -> Result<serde_json::Value, ExitCode> {
     match serde_json::to_value(&health.report) {
         Ok(mut json) => {
             let root_prefix = format!("{}/", health.config.root.display());
@@ -486,8 +543,7 @@ pub fn insert_audit_health_json(
             if let Some(ref base) = result.base_snapshot {
                 annotate_health_json(&mut json, &health.report, &health.config.root, &base.health);
             }
-            obj.insert("complexity".into(), json);
-            Ok(())
+            Ok(json)
         }
         Err(e) => Err(emit_error(
             &format!("JSON serialization error: {e}"),
@@ -497,10 +553,7 @@ pub fn insert_audit_health_json(
     }
 }
 
-fn insert_audit_next_steps_json(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    result: &AuditResult,
-) {
+fn audit_next_steps(result: &AuditResult) -> Vec<fallow_types::output::NextStep> {
     let input = fallow_output::build_audit_next_steps_input(
         result
             .check
@@ -509,12 +562,7 @@ fn insert_audit_next_steps_json(
         result.health.as_ref().map(|health| &health.report),
         crate::report::suggestions::suggestions_enabled(),
     );
-    let next_steps = fallow_output::build_audit_next_steps(&input);
-    if !next_steps.is_empty()
-        && let Ok(value) = serde_json::to_value(&next_steps)
-    {
-        obj.insert("next_steps".into(), value);
-    }
+    fallow_output::build_audit_next_steps(&input)
 }
 
 fn print_audit_sarif(result: &AuditResult) -> ExitCode {
@@ -613,8 +661,8 @@ mod tests {
     use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
 
     use super::{
-        build_audit_codeclimate, build_status_parts, build_vital_sign_parts,
-        format_scope_line_parts, print_audit_result, short_base_ref,
+        build_audit_codeclimate, build_audit_json_output, build_status_parts,
+        build_vital_sign_parts, format_scope_line_parts, print_audit_result, short_base_ref,
     };
 
     fn audit_result(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
@@ -808,6 +856,25 @@ mod tests {
         // exercises insert_audit_json_header's optional base_description / head_sha
         // / performance branches and the empty next-steps path.
         assert_eq!(print_audit_result(&result, true, false), ExitCode::SUCCESS);
+    }
+
+    #[test]
+    fn build_audit_json_output_uses_typed_audit_contract() {
+        let mut result = audit_result(AuditVerdict::Pass, OutputFormat::Json);
+        result.base_description = Some("merge-base with origin/main".to_string());
+        result.head_sha = Some("abc123".to_string());
+        result.performance = true;
+        result.base_snapshot_skipped = true;
+        result.changed_files_count = 5;
+
+        let json = build_audit_json_output(&result).expect("audit JSON should build");
+
+        assert_eq!(json["kind"], "audit");
+        assert_eq!(json["command"], "audit");
+        assert_eq!(json["base_description"], "merge-base with origin/main");
+        assert_eq!(json["head_sha"], "abc123");
+        assert_eq!(json["base_snapshot_skipped"], true);
+        assert_eq!(json["changed_files_count"], 5);
     }
 
     #[test]

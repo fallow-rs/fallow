@@ -201,7 +201,8 @@ pub use review_envelopes::{
 };
 pub use root_envelopes::{
     AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, FallowOutput, RootEnvelopeMode,
-    apply_root_kind, attach_telemetry_meta, remove_root_kind, serialize_json_root_output,
+    apply_root_kind, attach_telemetry_meta, remove_root_kind, serialize_audit_json_output,
+    serialize_json_root_output,
 };
 pub use security::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
