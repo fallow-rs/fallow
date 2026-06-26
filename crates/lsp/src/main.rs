@@ -27,15 +27,15 @@ use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use fallow_api::EditorInlineComplexityExceeded as InlineComplexityExceeded;
 use fallow_api::{
     EditorAnalysisOutput, EditorAnalysisResults as AnalysisResults,
-    EditorAnalysisSession as AnalysisSession, EditorDeadCodeAnalysisOutput,
-    EditorDuplicationReport as DuplicationReport, resolve_git_toplevel,
+    EditorAnalysisSession as AnalysisSession, EditorDuplicationReport as DuplicationReport,
+    EditorInlineComplexityFinding as InlineComplexityFinding, resolve_git_toplevel,
 };
 use fallow_config::{DetectionMode, DuplicatesConfig};
 use fallow_types::issue_meta::{IssueKindMeta, diagnostic_issue_metas};
-
-use crate::code_lens::{InlineComplexityExceeded, InlineComplexityFinding};
 
 /// Custom notification sent to the client after every analysis completes.
 /// Carries summary stats so the extension can update the status bar, context
@@ -348,7 +348,7 @@ fn run_typed_project_analysis(
         if input.inline_complexity_enabled {
             input
                 .merged_inline_complexity
-                .extend(collect_inline_complexity(
+                .extend(fallow_api::collect_inline_complexity(
                     session.config(),
                     &output.dead_code,
                 ));
@@ -403,7 +403,7 @@ fn apply_changed_since_filter(
     match fallow_api::try_get_changed_files_with_toplevel(root, toplevel, git_ref) {
         Ok(changed) => {
             analysis.filter_by_changed_files(&changed, root);
-            filter_inline_complexity_by_changed_files(inline_complexity, &changed);
+            fallow_api::filter_inline_complexity_by_changed_files(inline_complexity, &changed);
             Some((
                 MessageType::INFO,
                 format!(
@@ -516,88 +516,6 @@ fn initialization_inline_complexity_enabled(opts: &serde_json::Value) -> bool {
         .and_then(|health| health.get("inlineComplexity"))
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
-}
-
-fn build_health_ignore_set(patterns: &[String]) -> Option<globset::GlobSet> {
-    if patterns.is_empty() {
-        return None;
-    }
-
-    let mut builder = globset::GlobSetBuilder::new();
-    for pattern in patterns {
-        let Ok(glob) = globset::Glob::new(pattern) else {
-            continue;
-        };
-        builder.add(glob);
-    }
-    builder.build().ok()
-}
-
-fn collect_inline_complexity(
-    config: &fallow_config::ResolvedConfig,
-    output: &EditorDeadCodeAnalysisOutput,
-) -> Vec<InlineComplexityFinding> {
-    let Some(modules) = output.modules.as_ref() else {
-        return Vec::new();
-    };
-    let Some(files) = output.files.as_ref() else {
-        return Vec::new();
-    };
-
-    let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
-    let ignore_set = build_health_ignore_set(&config.health.ignore);
-    let mut findings = Vec::new();
-
-    for module in modules {
-        let Some(path) = file_paths.get(&module.file_id) else {
-            continue;
-        };
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set
-            .as_ref()
-            .is_some_and(|set| set.is_match(relative))
-        {
-            continue;
-        }
-
-        for function in &module.complexity {
-            if fallow_api::editor_suppress::is_suppressed(
-                &module.suppressions,
-                function.line,
-                fallow_api::editor_suppress::IssueKind::Complexity,
-            ) {
-                continue;
-            }
-
-            let exceeds_cyclomatic = function.cyclomatic > config.health.max_cyclomatic;
-            let exceeds_cognitive = function.cognitive > config.health.max_cognitive;
-            let exceeded = match (exceeds_cyclomatic, exceeds_cognitive) {
-                (true, true) => InlineComplexityExceeded::CyclomaticAndCognitive,
-                (true, false) => InlineComplexityExceeded::Cyclomatic,
-                (false, true) => InlineComplexityExceeded::Cognitive,
-                (false, false) => continue,
-            };
-
-            findings.push(InlineComplexityFinding {
-                path: (*path).clone(),
-                name: function.name.clone(),
-                line: function.line,
-                col: function.col,
-                cyclomatic: function.cyclomatic,
-                cognitive: function.cognitive,
-                exceeded,
-            });
-        }
-    }
-
-    findings
-}
-
-fn filter_inline_complexity_by_changed_files(
-    findings: &mut Vec<InlineComplexityFinding>,
-    changed_files: &FxHashSet<PathBuf>,
-) {
-    findings.retain(|finding| changed_files.contains(&finding.path));
 }
 
 #[derive(Clone)]
@@ -4443,118 +4361,6 @@ export function choose(value: number): string {
         assert!(
             msg.contains("parse error"),
             "message must include the original error"
-        );
-    }
-
-    // -------------------------------------------------------------------------
-    // build_health_ignore_set
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn build_health_ignore_set_returns_none_for_empty_patterns() {
-        assert!(
-            build_health_ignore_set(&[]).is_none(),
-            "empty pattern list must yield None so callers skip the match check"
-        );
-    }
-
-    #[test]
-    fn build_health_ignore_set_matches_glob_patterns() {
-        let set =
-            build_health_ignore_set(&["**/*.test.ts".to_string(), "src/generated/**".to_string()])
-                .expect("non-empty patterns must yield Some(GlobSet)");
-
-        assert!(
-            set.is_match(Path::new("src/utils.test.ts")),
-            "*.test.ts glob must match test files"
-        );
-        assert!(
-            set.is_match(Path::new("src/generated/api.ts")),
-            "src/generated/** glob must match generated files"
-        );
-        assert!(
-            !set.is_match(Path::new("src/utils.ts")),
-            "non-matching path must not be covered"
-        );
-    }
-
-    #[test]
-    fn build_health_ignore_set_skips_invalid_patterns() {
-        // An invalid glob is silently skipped; the result is still a valid
-        // (empty) GlobSet rather than None, because at least one token was
-        // processed.
-        let result = build_health_ignore_set(&["[invalid-glob".to_string()]);
-        // Whether this is None or Some(empty set) depends on the globset
-        // implementation; the key property is that it does not panic.
-        if let Some(set) = result {
-            assert!(
-                !set.is_match(Path::new("any/path.ts")),
-                "set built from only invalid patterns must not match anything"
-            );
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // filter_inline_complexity_by_changed_files
-    // -------------------------------------------------------------------------
-
-    fn make_inline_finding(path: PathBuf) -> InlineComplexityFinding {
-        InlineComplexityFinding {
-            path,
-            name: "myFn".to_string(),
-            line: 1,
-            col: 0,
-            cyclomatic: 5,
-            cognitive: 4,
-            exceeded: InlineComplexityExceeded::Cyclomatic,
-        }
-    }
-
-    #[test]
-    fn filter_inline_complexity_keeps_findings_in_changed_set() {
-        let changed: FxHashSet<PathBuf> = [PathBuf::from("/src/a.ts"), PathBuf::from("/src/b.ts")]
-            .into_iter()
-            .collect();
-        let mut findings = vec![
-            make_inline_finding(PathBuf::from("/src/a.ts")),
-            make_inline_finding(PathBuf::from("/src/c.ts")),
-        ];
-
-        filter_inline_complexity_by_changed_files(&mut findings, &changed);
-
-        assert_eq!(findings.len(), 1);
-        assert_eq!(
-            findings[0].path.to_string_lossy().replace('\\', "/"),
-            "/src/a.ts"
-        );
-    }
-
-    #[test]
-    fn filter_inline_complexity_removes_all_when_changed_set_empty() {
-        let changed: FxHashSet<PathBuf> = FxHashSet::default();
-        let mut findings = vec![make_inline_finding(PathBuf::from("/src/a.ts"))];
-
-        filter_inline_complexity_by_changed_files(&mut findings, &changed);
-
-        assert!(
-            findings.is_empty(),
-            "empty changed-files set must drop all inline complexity findings"
-        );
-    }
-
-    #[test]
-    fn filter_inline_complexity_keeps_all_when_all_in_changed_set() {
-        let path_a = PathBuf::from("/src/a.ts");
-        let path_b = PathBuf::from("/src/b.ts");
-        let changed: FxHashSet<PathBuf> = [path_a.clone(), path_b.clone()].into_iter().collect();
-        let mut findings = vec![make_inline_finding(path_a), make_inline_finding(path_b)];
-
-        filter_inline_complexity_by_changed_files(&mut findings, &changed);
-
-        assert_eq!(
-            findings.len(),
-            2,
-            "all findings in the changed set must be retained"
         );
     }
 

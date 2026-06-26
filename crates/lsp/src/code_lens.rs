@@ -1,37 +1,19 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use ls_types::{CodeLens, Command, Position, Range, Uri};
 use serde::Serialize;
 
-use fallow_api::EditorAnalysisResults as AnalysisResults;
+use fallow_api::{
+    EditorAnalysisResults as AnalysisResults,
+    EditorInlineComplexityExceeded as InlineComplexityExceeded,
+    EditorInlineComplexityFinding as InlineComplexityFinding,
+};
 
-/// LSP-local inline complexity signal rendered as a code lens.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InlineComplexityFinding {
-    pub path: PathBuf,
-    pub name: String,
-    pub line: u32,
-    pub col: u32,
-    pub cyclomatic: u16,
-    pub cognitive: u16,
-    pub exceeded: InlineComplexityExceeded,
-}
-
-/// Which health complexity threshold(s) a function exceeded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InlineComplexityExceeded {
-    Cyclomatic,
-    Cognitive,
-    CyclomaticAndCognitive,
-}
-
-impl InlineComplexityExceeded {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Cyclomatic => "cyclomatic",
-            Self::Cognitive => "cognitive",
-            Self::CyclomaticAndCognitive => "cyclomatic, cognitive",
-        }
+fn complexity_exceeded_label(exceeded: InlineComplexityExceeded) -> &'static str {
+    match exceeded {
+        InlineComplexityExceeded::Cyclomatic => "cyclomatic",
+        InlineComplexityExceeded::Cognitive => "cognitive",
+        InlineComplexityExceeded::CyclomaticAndCognitive => "cyclomatic, cognitive",
     }
 }
 
@@ -336,7 +318,7 @@ fn complexity_code_lens(finding: &InlineComplexityFinding) -> CodeLens {
                 finding.name,
                 finding.cyclomatic,
                 finding.cognitive,
-                finding.exceeded.label()
+                complexity_exceeded_label(finding.exceeded)
             ),
             command: "fallow.noop".to_string(),
             arguments: None,

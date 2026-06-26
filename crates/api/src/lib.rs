@@ -83,9 +83,11 @@ pub use dupes_output::{
 };
 pub use editor::{
     ChangedFilesError, EditorAnalysisOutput, EditorAnalysisResults, EditorAnalysisSession,
-    EditorDeadCodeAnalysisOutput, EditorDuplicationReport, EditorProjectAnalysisOutput,
+    EditorDeadCodeAnalysisOutput, EditorDuplicationReport, EditorInlineComplexityExceeded,
+    EditorInlineComplexityFinding, EditorProjectAnalysisOutput, collect_inline_complexity,
     editor_duplicates, editor_extract, editor_results, editor_security, editor_suppress,
-    resolve_git_toplevel, try_get_changed_files_with_toplevel,
+    filter_inline_complexity_by_changed_files, resolve_git_toplevel,
+    try_get_changed_files_with_toplevel,
 };
 pub use grouped_output::{
     ResultGroup, UNOWNED_GROUP_LABEL, build_duplication_grouping_with, group_analysis_results_with,

@@ -48,6 +48,120 @@ pub type EditorAnalysisResults = fallow_types::results::AnalysisResults;
 pub type EditorDeadCodeAnalysisOutput = fallow_engine::DeadCodeAnalysisOutput;
 pub type EditorDuplicationReport = fallow_engine::DuplicationReport;
 
+/// Editor-facing inline complexity signal for code lens and similar surfaces.
+///
+/// The finding is derived from retained typed engine parse artifacts, but the
+/// editor API owns the stable shape so LSP and future editor adapters do not
+/// need to inspect raw modules directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorInlineComplexityFinding {
+    pub path: PathBuf,
+    pub name: String,
+    pub line: u32,
+    pub col: u32,
+    pub cyclomatic: u16,
+    pub cognitive: u16,
+    pub exceeded: EditorInlineComplexityExceeded,
+}
+
+/// Which health complexity threshold(s) a function exceeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorInlineComplexityExceeded {
+    Cyclomatic,
+    Cognitive,
+    CyclomaticAndCognitive,
+}
+
+/// Collect inline complexity findings from retained editor analysis artifacts.
+#[must_use]
+pub fn collect_inline_complexity(
+    config: &fallow_config::ResolvedConfig,
+    output: &EditorDeadCodeAnalysisOutput,
+) -> Vec<EditorInlineComplexityFinding> {
+    let Some(modules) = output.modules.as_ref() else {
+        return Vec::new();
+    };
+    let Some(files) = output.files.as_ref() else {
+        return Vec::new();
+    };
+
+    let file_paths: rustc_hash::FxHashMap<_, _> =
+        files.iter().map(|file| (file.id, &file.path)).collect();
+    let ignore_set = build_health_ignore_set(&config.health.ignore);
+    let mut findings = Vec::new();
+
+    for module in modules {
+        let Some(path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+        let relative = path.strip_prefix(&config.root).unwrap_or(path);
+        if ignore_set
+            .as_ref()
+            .is_some_and(|set| set.is_match(relative))
+        {
+            continue;
+        }
+
+        for function in &module.complexity {
+            if fallow_engine::suppress::is_suppressed(
+                &module.suppressions,
+                function.line,
+                fallow_engine::suppress::IssueKind::Complexity,
+            ) {
+                continue;
+            }
+
+            let exceeds_cyclomatic = function.cyclomatic > config.health.max_cyclomatic;
+            let exceeds_cognitive = function.cognitive > config.health.max_cognitive;
+            let exceeded = match (exceeds_cyclomatic, exceeds_cognitive) {
+                (true, true) => EditorInlineComplexityExceeded::CyclomaticAndCognitive,
+                (true, false) => EditorInlineComplexityExceeded::Cyclomatic,
+                (false, true) => EditorInlineComplexityExceeded::Cognitive,
+                (false, false) => continue,
+            };
+
+            findings.push(EditorInlineComplexityFinding {
+                path: (*path).clone(),
+                name: function.name.clone(),
+                line: function.line,
+                col: function.col,
+                cyclomatic: function.cyclomatic,
+                cognitive: function.cognitive,
+                exceeded,
+            });
+        }
+    }
+
+    findings
+}
+
+/// Filter inline complexity findings to the changed-file set.
+#[allow(
+    clippy::implicit_hasher,
+    reason = "editor analysis changed-file sets use the workspace FxHashSet convention"
+)]
+pub fn filter_inline_complexity_by_changed_files(
+    findings: &mut Vec<EditorInlineComplexityFinding>,
+    changed_files: &FxHashSet<PathBuf>,
+) {
+    findings.retain(|finding| changed_files.contains(&finding.path));
+}
+
+fn build_health_ignore_set(patterns: &[String]) -> Option<globset::GlobSet> {
+    if patterns.is_empty() {
+        return None;
+    }
+
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in patterns {
+        let Ok(glob) = globset::Glob::new(pattern) else {
+            continue;
+        };
+        builder.add(glob);
+    }
+    builder.build().ok()
+}
+
 /// Reusable editor analysis session owned by the API boundary.
 #[derive(Debug)]
 pub struct EditorAnalysisSession {
@@ -309,6 +423,98 @@ mod tests {
                 .files
                 .as_ref()
                 .is_some_and(|files| !files.is_empty())
+        );
+    }
+
+    #[test]
+    fn build_health_ignore_set_returns_none_for_empty_patterns() {
+        assert!(
+            build_health_ignore_set(&[]).is_none(),
+            "empty ignore pattern list should avoid building a matcher"
+        );
+    }
+
+    #[test]
+    fn build_health_ignore_set_matches_glob_patterns() {
+        let set =
+            build_health_ignore_set(&["**/*.test.ts".to_string(), "src/generated/**".to_string()])
+                .expect("valid patterns build a glob set");
+
+        assert!(set.is_match(Path::new("src/foo.test.ts")));
+        assert!(set.is_match(Path::new("src/generated/client.ts")));
+        assert!(!set.is_match(Path::new("src/app.ts")));
+    }
+
+    #[test]
+    fn build_health_ignore_set_skips_invalid_patterns() {
+        let result = build_health_ignore_set(&["[invalid-glob".to_string()]);
+
+        match result {
+            None => {}
+            Some(set) => assert!(
+                !set.is_match(Path::new("any/path.ts")),
+                "set built from only invalid patterns must not match anything"
+            ),
+        }
+    }
+
+    fn make_inline_finding(path: PathBuf) -> EditorInlineComplexityFinding {
+        EditorInlineComplexityFinding {
+            path,
+            name: "myFn".to_string(),
+            line: 1,
+            col: 0,
+            cyclomatic: 5,
+            cognitive: 4,
+            exceeded: EditorInlineComplexityExceeded::Cyclomatic,
+        }
+    }
+
+    #[test]
+    fn filter_inline_complexity_keeps_findings_in_changed_set() {
+        let changed: FxHashSet<PathBuf> = [PathBuf::from("/src/a.ts"), PathBuf::from("/src/b.ts")]
+            .into_iter()
+            .collect();
+        let mut findings = vec![
+            make_inline_finding(PathBuf::from("/src/a.ts")),
+            make_inline_finding(PathBuf::from("/src/c.ts")),
+        ];
+
+        filter_inline_complexity_by_changed_files(&mut findings, &changed);
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].path.to_string_lossy().replace('\\', "/"),
+            "/src/a.ts"
+        );
+    }
+
+    #[test]
+    fn filter_inline_complexity_removes_all_when_changed_set_empty() {
+        let changed: FxHashSet<PathBuf> = FxHashSet::default();
+        let mut findings = vec![make_inline_finding(PathBuf::from("/src/a.ts"))];
+
+        filter_inline_complexity_by_changed_files(&mut findings, &changed);
+
+        assert!(
+            findings.is_empty(),
+            "empty changed-files set must drop all inline complexity findings"
+        );
+    }
+
+    #[test]
+    fn filter_inline_complexity_keeps_all_when_all_in_changed_set() {
+        let path_a = PathBuf::from("/src/a.ts");
+        let path_b = PathBuf::from("/src/b.ts");
+        let changed: FxHashSet<PathBuf> = [path_a.clone(), path_b.clone()].into_iter().collect();
+        let mut findings = vec![make_inline_finding(path_a), make_inline_finding(path_b)];
+
+        filter_inline_complexity_by_changed_files(&mut findings, &changed);
+
+        assert_eq!(
+            findings.len(),
+            2,
+            "all findings in the changed set must be retained"
         );
     }
 }
