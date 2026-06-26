@@ -11,6 +11,7 @@ use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
 use serde::Serialize;
 
+use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 use crate::{GroupByMode, WorkspaceDiagnosticOutput};
 
 /// Envelope emitted by `fallow dupes --format json`.
@@ -77,6 +78,26 @@ pub fn build_dupes_output<Report, Group>(
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
     }
+}
+
+/// Serialize `fallow dupes --format json`.
+///
+/// # Errors
+///
+/// Returns a serde error when the duplication output cannot be converted to
+/// JSON.
+pub fn serialize_dupes_json_output<Report, Group>(
+    output: DupesOutput<Report, Group>,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error>
+where
+    Report: Serialize,
+    Group: Serialize,
+{
+    let mut value = serialize_named_json_output(output, "dupes", mode)?;
+    attach_telemetry_meta(&mut value, analysis_run_id);
+    Ok(value)
 }
 
 /// Inline suppression comment emitted for code duplication findings.
@@ -212,6 +233,30 @@ pub fn clone_family_actions<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn dupes_json_output_uses_output_owned_root_contract() {
+        let output = build_dupes_output(DupesOutputInput::<_, serde_json::Value> {
+            schema_version: 7,
+            version: "0.0.0".to_string(),
+            elapsed: Duration::from_millis(5),
+            report: json!({"stats": {"clone_groups": 0}}),
+            grouped_by: None,
+            total_issues: None,
+            groups: None,
+            meta: None,
+            workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
+        });
+
+        let value =
+            serialize_dupes_json_output(output, RootEnvelopeMode::Tagged, Some("run-dupes"))
+                .expect("dupes output should serialize");
+
+        assert_eq!(value["kind"], "dupes");
+        assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-dupes");
+    }
 
     #[test]
     fn clone_group_actions_keep_primary_then_suppression_order() {

@@ -161,7 +161,11 @@ fn emit_reconcile_result(
         failed_fingerprints: applied.failed_fingerprints.iter().cloned().collect(),
         unapplied_fingerprints: applied.unapplied_fingerprints.iter().cloned().collect(),
     };
-    match crate::output_envelope::serialize_named_root_output(envelope_struct, "review-reconcile") {
+    match fallow_output::serialize_review_reconcile_json_output(
+        envelope_struct,
+        crate::output_envelope::EnvelopeMode::current().into(),
+        crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+    ) {
         Ok(value) => crate::report::emit_json(&value, "review reconcile"),
         Err(e) => emit_error(
             &format!("JSON serialization error: {e}"),

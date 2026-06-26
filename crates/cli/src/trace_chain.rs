@@ -14,7 +14,6 @@ use fallow_config::{OutputFormat, ProductionAnalysis};
 use fallow_engine::trace_chain::{SymbolChainQuery, SymbolChainTrace, TraceDirections};
 
 use crate::error::emit_error;
-use crate::output_envelope::serialize_named_root_output;
 use crate::report;
 use crate::report::sink::outln;
 use crate::{ConfigLoadOptions, load_config_for_analysis};
@@ -113,7 +112,11 @@ fn parse_target(target: &str) -> Option<(String, String)> {
 fn emit_trace(trace: SymbolChainTrace, opts: &TraceChainOptions<'_>) -> ExitCode {
     match opts.output {
         OutputFormat::Json => {
-            let value = match serialize_named_root_output(trace, "trace") {
+            let value = match fallow_output::serialize_trace_json_output(
+                trace,
+                crate::output_envelope::EnvelopeMode::current().into(),
+                crate::output_envelope::telemetry_analysis_run_id().as_deref(),
+            ) {
                 Ok(value) => value,
                 Err(err) => {
                     return emit_error(

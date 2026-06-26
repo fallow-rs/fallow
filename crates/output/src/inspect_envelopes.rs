@@ -1,5 +1,6 @@
 //! Explain and inspect output envelopes.
 
+use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 use serde::Serialize;
 
 /// Envelope emitted by `fallow explain <issue-type> --format json`.
@@ -17,6 +18,21 @@ pub struct ExplainOutput {
     pub example: String,
     pub how_to_fix: String,
     pub docs: String,
+}
+
+/// Serialize the `fallow explain --format json` envelope.
+///
+/// # Errors
+///
+/// Returns a serde error when the explain output cannot be converted to JSON.
+pub fn serialize_explain_json_output(
+    output: ExplainOutput,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serialize_named_json_output(output, "explain", mode)?;
+    attach_telemetry_meta(&mut value, analysis_run_id);
+    Ok(value)
 }
 
 /// Envelope emitted by `fallow inspect --format json`.
@@ -118,6 +134,21 @@ impl InspectEvidenceSection {
     }
 }
 
+/// Serialize the `fallow inspect --format json` envelope.
+///
+/// # Errors
+///
+/// Returns a serde error when the inspect output cannot be converted to JSON.
+pub fn serialize_inspect_json_output(
+    output: InspectOutput,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serialize_named_json_output(output, "inspect_target", mode)?;
+    attach_telemetry_meta(&mut value, analysis_run_id);
+    Ok(value)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -133,4 +164,88 @@ pub enum InspectEvidenceScope {
     Symbol,
     File,
     ProjectFilteredToFile,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explain_json_output_uses_output_owned_root_contract() {
+        let output = ExplainOutput {
+            id: "unused-export".to_string(),
+            name: "Unused export".to_string(),
+            summary: "summary".to_string(),
+            rationale: "rationale".to_string(),
+            example: "example".to_string(),
+            how_to_fix: "fix".to_string(),
+            docs: "https://example.test".to_string(),
+        };
+
+        let value =
+            serialize_explain_json_output(output, RootEnvelopeMode::Tagged, Some("run-explain"))
+                .expect("explain output should serialize");
+
+        assert_eq!(value["kind"], "explain");
+        assert_eq!(
+            value["_meta"]["telemetry"]["analysis_run_id"],
+            "run-explain"
+        );
+    }
+
+    #[test]
+    fn inspect_json_output_uses_output_owned_root_contract() {
+        let output = InspectOutput {
+            target: InspectTargetDescriptor::File {
+                file: "src/app.ts".to_string(),
+            },
+            identity: InspectIdentity::File(InspectFileIdentity {
+                file: "src/app.ts".to_string(),
+                is_reachable: None,
+                is_entry_point: None,
+                export_count: Some(0),
+                import_count: Some(0),
+                imported_by_count: Some(0),
+            }),
+            evidence: InspectEvidence {
+                trace_file: InspectEvidenceSection::ok(
+                    InspectEvidenceScope::File,
+                    serde_json::json!({}),
+                ),
+                trace_export: None,
+                dead_code: InspectEvidenceSection::error(
+                    InspectEvidenceScope::File,
+                    "not run".to_string(),
+                ),
+                duplication: InspectEvidenceSection::error(
+                    InspectEvidenceScope::ProjectFilteredToFile,
+                    "not run".to_string(),
+                ),
+                complexity: InspectEvidenceSection::error(
+                    InspectEvidenceScope::ProjectFilteredToFile,
+                    "not run".to_string(),
+                ),
+                security: InspectEvidenceSection::error(
+                    InspectEvidenceScope::File,
+                    "not run".to_string(),
+                ),
+                impact_closure: InspectEvidenceSection::error(
+                    InspectEvidenceScope::ProjectFilteredToFile,
+                    "not run".to_string(),
+                ),
+                symbol_chain: None,
+            },
+            warnings: Vec::new(),
+        };
+
+        let value =
+            serialize_inspect_json_output(output, RootEnvelopeMode::Tagged, Some("run-inspect"))
+                .expect("inspect output should serialize");
+
+        assert_eq!(value["kind"], "inspect_target");
+        assert_eq!(
+            value["_meta"]["telemetry"]["analysis_run_id"],
+            "run-inspect"
+        );
+    }
 }

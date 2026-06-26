@@ -8,6 +8,8 @@ use fallow_types::output::NextStep;
 use fallow_types::results::AnalysisResults;
 use serde::Serialize;
 
+use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
+
 /// Current schema version for the dead-code/check JSON envelope.
 pub const CHECK_SCHEMA_VERSION: u32 = 7;
 
@@ -181,6 +183,44 @@ pub fn build_check_output(input: CheckOutputInput) -> CheckOutput {
     }
 }
 
+fn serialize_check_family_json_output<T: Serialize>(
+    output: T,
+    kind: &'static str,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut value = serialize_named_json_output(output, kind, mode)?;
+    attach_telemetry_meta(&mut value, analysis_run_id);
+    Ok(value)
+}
+
+/// Serialize `fallow dead-code --format json`.
+///
+/// # Errors
+///
+/// Returns a serde error when the dead-code output cannot be converted to JSON.
+pub fn serialize_check_json_output(
+    output: CheckOutput,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_check_family_json_output(output, "dead-code", mode, analysis_run_id)
+}
+
+/// Serialize `fallow dead-code --group-by ... --format json`.
+///
+/// # Errors
+///
+/// Returns a serde error when the grouped dead-code output cannot be converted
+/// to JSON.
+pub fn serialize_check_grouped_json_output(
+    output: CheckGroupedOutput,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<serde_json::Value, serde_json::Error> {
+    serialize_check_family_json_output(output, "dead-code-grouped", mode, analysis_run_id)
+}
+
 pub fn apply_config_fixable_to_duplicate_exports(
     results: &mut AnalysisResults,
     config_fixable: bool,
@@ -279,6 +319,51 @@ mod tests {
         assert_eq!(output.total_issues, 1);
         assert_eq!(output.summary.unused_files, 1);
         assert_eq!(output.elapsed_ms.0, 42);
+    }
+
+    #[test]
+    fn check_json_output_uses_output_owned_root_contract() {
+        let output = build_check_output(CheckOutputInput {
+            schema_version: 7,
+            version: "0.0.0".to_string(),
+            elapsed: Duration::from_millis(42),
+            results: AnalysisResults::default(),
+            config_fixable: false,
+            meta: None,
+            workspace_diagnostics: Vec::new(),
+            next_steps: Vec::new(),
+        });
+
+        let value =
+            serialize_check_json_output(output, RootEnvelopeMode::Tagged, Some("run-check"))
+                .expect("check output should serialize");
+
+        assert_eq!(value["kind"], "dead-code");
+        assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-check");
+    }
+
+    #[test]
+    fn grouped_check_json_output_uses_output_owned_root_contract() {
+        let output = CheckGroupedOutput {
+            schema_version: SchemaVersion(7),
+            version: ToolVersion("0.0.0".to_string()),
+            elapsed_ms: ElapsedMs(1),
+            grouped_by: GroupByMode::Directory,
+            total_issues: 0,
+            groups: Vec::new(),
+            meta: None,
+            next_steps: Vec::new(),
+        };
+
+        let value = serialize_check_grouped_json_output(
+            output,
+            RootEnvelopeMode::Tagged,
+            Some("run-group"),
+        )
+        .expect("grouped check output should serialize");
+
+        assert_eq!(value["kind"], "dead-code-grouped");
+        assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-group");
     }
 
     #[test]

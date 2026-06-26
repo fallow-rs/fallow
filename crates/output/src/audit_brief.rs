@@ -1,5 +1,6 @@
 //! Audit brief output contracts.
 
+use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
@@ -205,6 +206,77 @@ where
     Ok(Value::Object(obj))
 }
 
+fn serialize_agent_contract_json_output<T: Serialize>(
+    output: T,
+    kind: &'static str,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<Value, serde_json::Error> {
+    let mut value = serialize_named_json_output(output, kind, mode)?;
+    attach_telemetry_meta(&mut value, analysis_run_id);
+    Ok(value)
+}
+
+/// Serialize the `fallow audit --brief --format json` envelope.
+///
+/// # Errors
+///
+/// Returns a serde error when the brief output cannot be converted to JSON.
+pub fn serialize_review_brief_json_output<T: Serialize>(
+    output: T,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<Value, serde_json::Error> {
+    serialize_agent_contract_json_output(output, "audit-brief", mode, analysis_run_id)
+}
+
+/// Serialize the standalone decision-surface envelope.
+///
+/// # Errors
+///
+/// Returns a serde error when the decision-surface output cannot be converted
+/// to JSON.
+pub fn serialize_decision_surface_json_output<T: Serialize>(
+    output: T,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<Value, serde_json::Error> {
+    serialize_agent_contract_json_output(output, "decision-surface", mode, analysis_run_id)
+}
+
+/// Serialize the review walkthrough guide envelope.
+///
+/// # Errors
+///
+/// Returns a serde error when the walkthrough guide cannot be converted to
+/// JSON.
+pub fn serialize_walkthrough_guide_json_output<T: Serialize>(
+    output: T,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<Value, serde_json::Error> {
+    serialize_agent_contract_json_output(output, "review-walkthrough-guide", mode, analysis_run_id)
+}
+
+/// Serialize the review walkthrough validation envelope.
+///
+/// # Errors
+///
+/// Returns a serde error when the walkthrough validation cannot be converted
+/// to JSON.
+pub fn serialize_walkthrough_validation_json_output<T: Serialize>(
+    output: T,
+    mode: RootEnvelopeMode,
+    analysis_run_id: Option<&str>,
+) -> Result<Value, serde_json::Error> {
+    serialize_agent_contract_json_output(
+        output,
+        "review-walkthrough-validation",
+        mode,
+        analysis_run_id,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,5 +329,34 @@ mod tests {
         assert_eq!(value["command"], "audit-brief");
         assert_eq!(value["verdict"], "fail");
         assert_eq!(value["dead_code"]["issues"], json!([]));
+    }
+
+    #[test]
+    fn review_brief_serializer_owns_root_contract() {
+        let value = serialize_review_brief_json_output(
+            json!({"command": "audit-brief"}),
+            RootEnvelopeMode::Tagged,
+            Some("run-brief"),
+        )
+        .expect("brief output should serialize");
+
+        assert_eq!(value["kind"], "audit-brief");
+        assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-brief");
+    }
+
+    #[test]
+    fn decision_surface_serializer_owns_root_contract() {
+        let value = serialize_decision_surface_json_output(
+            json!({"decisions": []}),
+            RootEnvelopeMode::Tagged,
+            Some("run-decision"),
+        )
+        .expect("decision surface should serialize");
+
+        assert_eq!(value["kind"], "decision-surface");
+        assert_eq!(
+            value["_meta"]["telemetry"]["analysis_run_id"],
+            "run-decision"
+        );
     }
 }
