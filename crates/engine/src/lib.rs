@@ -262,6 +262,14 @@ pub struct AnalysisSession {
     files: Vec<DiscoveredFile>,
 }
 
+/// Owned session parts for runners that need to continue an existing pipeline.
+#[derive(Debug)]
+pub struct AnalysisSessionParts {
+    pub config: ResolvedConfig,
+    pub config_path: Option<PathBuf>,
+    pub files: Vec<DiscoveredFile>,
+}
+
 impl AnalysisSession {
     /// Load config and discover files for a project root.
     ///
@@ -338,6 +346,16 @@ impl AnalysisSession {
     #[must_use]
     pub fn files(&self) -> &[DiscoveredFile] {
         &self.files
+    }
+
+    /// Consume the session and return the resolved config plus discovery data.
+    #[must_use]
+    pub fn into_parts(self) -> AnalysisSessionParts {
+        AnalysisSessionParts {
+            config: self.config,
+            config_path: self.config_path,
+            files: self.files,
+        }
     }
 
     /// Run dead-code analysis for this session.
@@ -880,6 +898,25 @@ mod tests {
             .collect();
         assert!(relative_paths.contains(&Path::new("src/index.ts")));
         assert!(!relative_paths.contains(&Path::new("src/index.test.ts")));
+    }
+
+    #[test]
+    fn analysis_session_can_be_consumed_into_pipeline_parts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(src.join("index.ts"), "export const value = 1;\n").expect("source file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        let parts = session.into_parts();
+
+        assert_eq!(parts.config.root, temp.path());
+        assert!(parts.config_path.is_none());
+        assert!(parts.files.iter().any(|file| {
+            file.path
+                .strip_prefix(temp.path())
+                .is_ok_and(|path| path == Path::new("src/index.ts"))
+        }));
     }
 
     #[test]

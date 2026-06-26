@@ -188,8 +188,11 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let t = Instant::now();
-    let files = fallow_engine::discover::discover_files_with_plugin_scopes(&config);
+    let session = fallow_engine::AnalysisSession::from_resolved_config(config);
+    let session = session.into_parts();
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let config = session.config;
+    let files = session.files;
 
     let cache = if config.no_cache {
         None
