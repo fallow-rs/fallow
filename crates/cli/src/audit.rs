@@ -5,6 +5,10 @@ use std::time::{Duration, Instant};
 
 use fallow_config::{AuditGate, OutputFormat};
 use fallow_engine::git_env::clear_ambient_git_env;
+use fallow_types::audit_cache::{
+    AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFingerprint,
+};
+use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -691,7 +695,7 @@ fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> 
     files
 }
 
-fn config_file_fingerprint(opts: &AuditOptions<'_>) -> Result<serde_json::Value, ExitCode> {
+fn config_file_fingerprint(opts: &AuditOptions<'_>) -> Result<AuditConfigFingerprint, ExitCode> {
     let loaded = if let Some(path) = opts.config_path {
         let config = fallow_config::FallowConfig::load(path).map_err(|e| {
             emit_error(
@@ -707,10 +711,10 @@ fn config_file_fingerprint(opts: &AuditOptions<'_>) -> Result<serde_json::Value,
     };
 
     let Some((config, path)) = loaded else {
-        return Ok(serde_json::json!({
-            "path": null,
-            "resolved_hash": null,
-        }));
+        return Ok(AuditConfigFingerprint {
+            path: None,
+            resolved_hash: None,
+        });
     };
     let bytes = serde_json::to_vec(&config).map_err(|e| {
         emit_error(
@@ -719,13 +723,13 @@ fn config_file_fingerprint(opts: &AuditOptions<'_>) -> Result<serde_json::Value,
             opts.output,
         )
     })?;
-    Ok(serde_json::json!({
-        "path": path.to_string_lossy(),
-        "resolved_hash": format!("{:016x}", xxh3_64(&bytes)),
-    }))
+    Ok(AuditConfigFingerprint {
+        path: Some(path.to_string_lossy().to_string()),
+        resolved_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
+    })
 }
 
-fn coverage_file_fingerprint(path: &Path, project_root: &Path) -> serde_json::Value {
+fn coverage_file_fingerprint(path: &Path, project_root: &Path) -> AuditCoverageFingerprint {
     let resolved = crate::health::scoring::resolve_relative_to_root(path, Some(project_root));
     let file_path = if resolved.is_dir() {
         resolved.join("coverage-final.json")
@@ -733,17 +737,27 @@ fn coverage_file_fingerprint(path: &Path, project_root: &Path) -> serde_json::Va
         resolved
     };
     match std::fs::read(&file_path) {
-        Ok(bytes) => serde_json::json!({
-            "path": path.to_string_lossy(),
-            "resolved_path": file_path.to_string_lossy(),
-            "content_hash": format!("{:016x}", xxh3_64(&bytes)),
-            "len": bytes.len(),
-        }),
-        Err(err) => serde_json::json!({
-            "path": path.to_string_lossy(),
-            "resolved_path": file_path.to_string_lossy(),
-            "error": err.kind().to_string(),
-        }),
+        Ok(bytes) => {
+            let source = std::fs::metadata(&file_path)
+                .ok()
+                .map(|metadata| SourceFingerprint::from_metadata(&metadata));
+            AuditCoverageFingerprint {
+                path: path.to_string_lossy().to_string(),
+                resolved_path: file_path.to_string_lossy().to_string(),
+                source,
+                content_hash: Some(format!("{:016x}", xxh3_64(&bytes))),
+                len: Some(bytes.len()),
+                error: None,
+            }
+        }
+        Err(err) => AuditCoverageFingerprint {
+            path: path.to_string_lossy().to_string(),
+            resolved_path: file_path.to_string_lossy().to_string(),
+            source: None,
+            content_hash: None,
+            len: None,
+            error: Some(err.kind().to_string()),
+        },
     }
 }
 
@@ -762,28 +776,39 @@ fn audit_base_snapshot_cache_key(
     let coverage_file = opts
         .coverage
         .map(|p| coverage_file_fingerprint(p, opts.root));
-    let payload = serde_json::json!({
-        "cache_version": AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
-        "cli_version": env!("CARGO_PKG_VERSION"),
-        "base_sha": base_sha,
-        "config_file": config_file,
-        "changed_files": normalized_changed_files(opts.root, changed_files),
-        "production": opts.production,
-        "production_dead_code": opts.production_dead_code,
-        "production_health": opts.production_health,
-        "production_dupes": opts.production_dupes,
-        "workspace": opts.workspace,
-        "changed_workspaces": opts.changed_workspaces,
-        "group_by": opts.group_by.map(|g| format!("{g:?}")),
-        "include_entry_exports": opts.include_entry_exports,
-        "max_crap": opts.max_crap,
-        "coverage": coverage_file,
-        "coverage_root": opts.coverage_root.map(|p| p.to_string_lossy().to_string()),
-        "dead_code_baseline": opts.dead_code_baseline.map(|p| p.to_string_lossy().to_string()),
-        "health_baseline": opts.health_baseline.map(|p| p.to_string_lossy().to_string()),
-        "dupes_baseline": opts.dupes_baseline.map(|p| p.to_string_lossy().to_string()),
-    });
-    let bytes = serde_json::to_vec(&payload).map_err(|e| {
+    let bytes = AuditCacheKeyBuilder::new(
+        AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
+        env!("CARGO_PKG_VERSION"),
+        base_sha.clone(),
+        config_file,
+        normalized_changed_files(opts.root, changed_files),
+    )
+    .production(
+        opts.production,
+        opts.production_dead_code,
+        opts.production_health,
+        opts.production_dupes,
+    )
+    .scope(
+        opts.workspace.map(<[String]>::to_vec),
+        opts.changed_workspaces.map(str::to_string),
+        opts.group_by.map(|g| format!("{g:?}")),
+        opts.include_entry_exports,
+    )
+    .health(
+        opts.max_crap,
+        coverage_file,
+        opts.coverage_root.map(|p| p.to_string_lossy().to_string()),
+    )
+    .baselines(
+        opts.dead_code_baseline
+            .map(|p| p.to_string_lossy().to_string()),
+        opts.health_baseline
+            .map(|p| p.to_string_lossy().to_string()),
+        opts.dupes_baseline.map(|p| p.to_string_lossy().to_string()),
+    )
+    .to_json_bytes()
+    .map_err(|e| {
         emit_error(
             &format!("failed to build audit cache key: {e}"),
             2,
@@ -4077,7 +4102,7 @@ mod tests {
         let second = config_file_fingerprint(&opts).expect("fingerprint should be recomputed");
 
         assert_ne!(
-            first["resolved_hash"], second["resolved_hash"],
+            first.resolved_hash, second.resolved_hash,
             "extended config changes must invalidate cached base snapshots"
         );
     }
