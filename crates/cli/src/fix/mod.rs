@@ -200,15 +200,16 @@ fn apply_all_fixes(
 
 fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
     if matches!(opts.output, OutputFormat::Json) {
-        match serde_json::to_string_pretty(&serde_json::json!({
-            "dry_run": opts.dry_run,
-            "fixes": [],
-            "total_fixed": 0,
-            "skipped": 0,
-            "skipped_content_changed": 0,
-            "skipped_mixed_line_endings": 0,
-            "skipped_low_confidence_exports": 0,
-        })) {
+        let fixes = [];
+        match fallow_output::serialize_fix_json_output(fallow_output::FixJsonOutputInput {
+            dry_run: opts.dry_run,
+            fixes: &fixes,
+            skipped_content_changed: 0,
+            skipped_mixed_line_endings: 0,
+            skipped_low_confidence_exports: 0,
+        })
+        .and_then(|value| serde_json::to_string_pretty(&value))
+        {
             Ok(json) => println!("{json}"),
             Err(e) => {
                 eprintln!("Error: failed to serialize fix output: {e}");
@@ -407,55 +408,17 @@ fn commit_fix_plan(
     outcome
 }
 
-/// Count fix entries whose `applied` flag is true.
-fn count_applied_fixes(fixes: &[serde_json::Value]) -> usize {
-    fixes
-        .iter()
-        .filter(|fix| {
-            fix.get("applied")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-        })
-        .count()
-}
-
-/// Count user-facing skipped entries, excluding plan-level (hash/EOL/low-confidence) skips.
-fn count_reported_skips(fixes: &[serde_json::Value]) -> usize {
-    fixes
-        .iter()
-        .filter(|fix| {
-            let is_skipped = fix
-                .get("skipped")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
-            let reason = fix.get("skip_reason").and_then(serde_json::Value::as_str);
-            let is_plan_skip = matches!(
-                reason,
-                Some(
-                    "content_changed"
-                        | "mixed_line_endings"
-                        | "low_confidence_off_graph"
-                        | "low_confidence_unresolved_imports"
-                )
-            );
-            is_skipped && !is_plan_skip
-        })
-        .count()
-}
-
 fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
     if matches!(input.output, OutputFormat::Json) {
-        let applied_count = count_applied_fixes(input.fixes);
-        let skipped_count = count_reported_skips(input.fixes);
-        match serde_json::to_string_pretty(&serde_json::json!({
-            "dry_run": input.dry_run,
-            "fixes": input.fixes,
-            "total_fixed": applied_count,
-            "skipped": skipped_count,
-            "skipped_content_changed": input.content_changed_count,
-            "skipped_mixed_line_endings": input.mixed_line_endings_count,
-            "skipped_low_confidence_exports": input.low_confidence_count,
-        })) {
+        match fallow_output::serialize_fix_json_output(fallow_output::FixJsonOutputInput {
+            dry_run: input.dry_run,
+            fixes: input.fixes,
+            skipped_content_changed: input.content_changed_count,
+            skipped_mixed_line_endings: input.mixed_line_endings_count,
+            skipped_low_confidence_exports: input.low_confidence_count,
+        })
+        .and_then(|value| serde_json::to_string_pretty(&value))
+        {
             Ok(json) => println!("{json}"),
             Err(e) => {
                 eprintln!("Error: failed to serialize fix output: {e}");
@@ -589,7 +552,7 @@ fn emit_fix_count_line(
         eprintln!("Dry run complete. No files were modified.");
         return;
     }
-    let fixed_count = count_applied_fixes(fixes);
+    let fixed_count = fallow_output::count_applied_fixes(fixes);
     if catalog_comment_lines_removed > 0 {
         let line_word = if catalog_comment_lines_removed == 1 {
             "line"

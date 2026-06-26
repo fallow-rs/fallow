@@ -24,6 +24,7 @@ mod coverage_envelopes;
 mod diff;
 mod dupes;
 mod feature_flags;
+mod fix;
 mod format;
 mod health;
 mod health_actions;
@@ -109,6 +110,10 @@ pub use feature_flags::{
     FeatureFlagFinding, FeatureFlagKind, FeatureFlagsConfidenceMeta, FeatureFlagsKindMeta,
     FeatureFlagsMeta, FeatureFlagsMetaDetails, FeatureFlagsOutput, FeatureFlagsOutputInput,
     build_feature_flags_output, feature_flags_meta, serialize_feature_flags_json_output,
+};
+pub use fix::{
+    FixJsonOutput, FixJsonOutputInput, build_fix_json_output, count_applied_fixes,
+    count_reported_fix_skips, serialize_fix_json_output,
 };
 pub use format::OutputFormat;
 pub use health::{
