@@ -442,8 +442,26 @@ fn to_napi_error(env: Env, error: api::ProgrammaticError) -> napi::Error {
     }
 }
 
+#[derive(Debug)]
+#[doc(hidden)]
+pub enum ProgrammaticOutput {
+    DeadCode(Box<api::DeadCodeProgrammaticOutput>),
+    Duplication(Box<api::DuplicationProgrammaticOutput>),
+    Health(Box<api::HealthProgrammaticOutput>),
+}
+
+impl ProgrammaticOutput {
+    fn into_json(self) -> Result<serde_json::Value, api::ProgrammaticError> {
+        match self {
+            Self::DeadCode(output) => output.into_json(),
+            Self::Duplication(output) => output.into_json(),
+            Self::Health(output) => output.into_json(),
+        }
+    }
+}
+
 type ProgrammaticWork =
-    Box<dyn FnOnce() -> Result<serde_json::Value, api::ProgrammaticError> + Send + 'static>;
+    Box<dyn FnOnce() -> Result<ProgrammaticOutput, api::ProgrammaticError> + Send + 'static>;
 
 #[doc(hidden)]
 pub struct ProgrammaticTask {
@@ -454,7 +472,7 @@ pub struct ProgrammaticTask {
 impl ProgrammaticTask {
     fn new<F>(task: F) -> Self
     where
-        F: FnOnce() -> Result<serde_json::Value, api::ProgrammaticError> + Send + 'static,
+        F: FnOnce() -> Result<ProgrammaticOutput, api::ProgrammaticError> + Send + 'static,
     {
         Self {
             task: Some(Box::new(task)),
@@ -464,7 +482,7 @@ impl ProgrammaticTask {
 }
 
 impl<'task> ScopedTask<'task> for ProgrammaticTask {
-    type Output = serde_json::Value;
+    type Output = ProgrammaticOutput;
     type JsValue = Unknown<'task>;
 
     fn compute(&mut self) -> napi::Result<Self::Output> {
@@ -486,7 +504,10 @@ impl<'task> ScopedTask<'task> for ProgrammaticTask {
     }
 
     fn resolve(&mut self, env: &'task Env, output: Self::Output) -> napi::Result<Self::JsValue> {
-        env.to_js_value(&output)
+        let json = output
+            .into_json()
+            .map_err(|error| to_napi_error(*env, error))?;
+        env.to_js_value(&json)
     }
 
     fn reject(&mut self, env: &'task Env, err: napi::Error) -> napi::Result<Self::JsValue> {
@@ -503,7 +524,9 @@ pub fn detect_dead_code(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::run_dead_code(&options)?.into_json()
+        api::run_dead_code(&options)
+            .map(Box::new)
+            .map(ProgrammaticOutput::DeadCode)
     })))
 }
 
@@ -513,7 +536,9 @@ pub fn detect_circular_dependencies(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::run_circular_dependencies(&options)?.into_json()
+        api::run_circular_dependencies(&options)
+            .map(Box::new)
+            .map(ProgrammaticOutput::DeadCode)
     })))
 }
 
@@ -523,7 +548,9 @@ pub fn detect_boundary_violations(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::run_boundary_violations(&options)?.into_json()
+        api::run_boundary_violations(&options)
+            .map(Box::new)
+            .map(ProgrammaticOutput::DeadCode)
     })))
 }
 
@@ -533,7 +560,9 @@ pub fn detect_duplication(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::DuplicationOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::run_duplication(&options)?.into_json()
+        api::run_duplication(&options)
+            .map(Box::new)
+            .map(ProgrammaticOutput::Duplication)
     })))
 }
 
@@ -543,7 +572,9 @@ pub fn compute_complexity(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::run_complexity_with_runner(&options, &CliHealthRunner)?.into_json()
+        api::run_complexity_with_runner(&options, &CliHealthRunner)
+            .map(Box::new)
+            .map(ProgrammaticOutput::Health)
     })))
 }
 
@@ -553,7 +584,9 @@ pub fn compute_health(
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
     let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
-        api::run_health_with_runner(&options, &CliHealthRunner)?.into_json()
+        api::run_health_with_runner(&options, &CliHealthRunner)
+            .map(Box::new)
+            .map(ProgrammaticOutput::Health)
     })))
 }
 
@@ -1023,10 +1056,30 @@ mod tests {
 
     #[test]
     fn programmatic_task_runs_once_and_preserves_compute_errors() {
-        let mut task = ProgrammaticTask::new(|| Ok(serde_json::json!({ "ok": true })));
+        let project = tiny_dead_code_project();
+        let options = api::DeadCodeOptions {
+            analysis: api::AnalysisOptions {
+                root: Some(project.path().to_path_buf()),
+                no_cache: true,
+                threads: Some(1),
+                ..api::AnalysisOptions::default()
+            },
+            filters: api::DeadCodeFilters {
+                unused_exports: true,
+                ..api::DeadCodeFilters::default()
+            },
+            ..api::DeadCodeOptions::default()
+        };
+        let mut task = ProgrammaticTask::new(move || {
+            api::run_dead_code(&options)
+                .map(Box::new)
+                .map(ProgrammaticOutput::DeadCode)
+        });
 
         let output = task.compute().expect("task should succeed");
-        assert_eq!(output["ok"], true);
+        let json = output.into_json().expect("typed output should serialize");
+        assert_eq!(json["kind"], "dead-code");
+        assert_eq!(unused_export_names(&json), vec!["dead"]);
 
         let consumed = task.compute().expect_err("task should only run once");
         assert!(consumed.reason.contains("already consumed"));
