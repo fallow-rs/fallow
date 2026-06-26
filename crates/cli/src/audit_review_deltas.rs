@@ -16,7 +16,7 @@
 //!    public-API delta; one reachable through an `exports` path yields exactly
 //!    one (the Aisha repro). R4 (attribute to the exports-mapped copy only) is
 //!    encoded by which modules land in the public-API entry-point set
-//!    (`fallow_core::analyze::public_api_package_entry_points`).
+//!    (`fallow_engine::public_api::public_api_package_entry_points`).
 //!
 //! Relocation-awareness (R3) falls out of the set-difference: a moved file that
 //! preserves its zone pair / public-export key / cycle membership produces no
@@ -30,7 +30,7 @@
 
 use std::path::Path;
 
-use fallow_core::results::{BoundaryViolationFinding, CircularDependencyFinding};
+use fallow_engine::results::{BoundaryViolationFinding, CircularDependencyFinding};
 use rustc_hash::FxHashSet;
 
 use super::keys::relative_key_path;
@@ -75,18 +75,19 @@ pub fn cycle_keys(findings: &[CircularDependencyFinding], root: &Path) -> FxHash
 
 /// Compute the exports-aware public-export key set from a retained graph + the
 /// project config and package metadata. Wires
-/// `fallow_core::analyze::public_api_package_entry_points` (the R4 exports-aware
+/// `fallow_engine::public_api::public_api_package_entry_points` (the R4 exports-aware
 /// entry set) into `ModuleGraph::public_export_keys`.
 #[must_use]
 pub fn public_export_keys_for(
-    graph: &fallow_core::graph::ModuleGraph,
+    graph: &fallow_engine::graph::ModuleGraph,
     config: &fallow_config::ResolvedConfig,
     root_pkg: Option<&fallow_config::PackageJson>,
     workspaces: &[fallow_config::WorkspaceInfo],
     root: &Path,
 ) -> FxHashSet<String> {
-    let public_entries =
-        fallow_core::analyze::public_api_package_entry_points(graph, config, root_pkg, workspaces);
+    let public_entries = fallow_engine::public_api::public_api_package_entry_points(
+        graph, config, root_pkg, workspaces,
+    );
     graph.public_export_keys(&public_entries, root)
 }
 
@@ -105,7 +106,7 @@ pub fn introduced_keys(head: &FxHashSet<String>, base: &FxHashSet<String>) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_core::results::{
+    use fallow_engine::results::{
         BoundaryViolation, BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
     };
     use std::path::PathBuf;
