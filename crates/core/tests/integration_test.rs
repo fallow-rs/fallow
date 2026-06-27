@@ -209,6 +209,8 @@ mod workspace_internal_deps;
 
 #[path = "integration_test/inheritance_members.rs"]
 mod inheritance_members;
+#[path = "integration_test/issue_1441_factory_return_member.rs"]
+mod issue_1441_factory_return_member;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]

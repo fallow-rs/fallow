@@ -273,6 +273,7 @@ fn html_module_info(
         complexity,
         flag_uses: Vec::new(),
         class_heritage: vec![],
+        exported_factory_returns: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),

@@ -23,7 +23,7 @@ pub enum ResolveResult {
     },
     /// Resolved to a file outside the project (`node_modules`, `.json`, etc.).
     ExternalFile(PathBuf),
-    /// Bare specifier — an npm package.
+    /// Bare specifier , an npm package.
     NpmPackage(String),
     /// Could not resolve.
     Unresolvable(String),
@@ -162,6 +162,10 @@ pub struct ResolvedModule {
     /// Namespace-import aliases re-exported through an object literal.
     /// See `fallow_types::extract::NamespaceObjectAlias` for the shape.
     pub namespace_object_aliases: Vec<fallow_types::extract::NamespaceObjectAlias>,
+    /// Exported free-function factories that provably return one class instance.
+    /// Mirrors `ModuleInfo.exported_factory_returns`; read by the cross-module
+    /// factory-fn member-credit pass. See issue #1441 (Part A).
+    pub exported_factory_returns: Box<[fallow_types::extract::FactoryReturnExport]>,
 }
 
 impl Default for ResolvedModule {
@@ -182,6 +186,7 @@ impl Default for ResolvedModule {
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         }
     }
 }

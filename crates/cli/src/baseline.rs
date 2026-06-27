@@ -3489,6 +3489,7 @@ mod tests {
                 deployments_observed: 1,
             },
             actions: vec![],
+            discriminators: None,
         }
     }
 

@@ -170,7 +170,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "get_blast_radius",
         kind: "runtime-coverage",
-        description: "Blast-radius context (caller counts, risk bands) from runtime coverage",
+        description: "Blast-radius context (caller counts, risk bands) from runtime coverage; augments review only, never gates safe_to_delete (three-state tracking issues that verdict)",
         key_params: &["coverage", "group_by"],
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),
@@ -179,7 +179,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "get_importance",
         kind: "runtime-coverage",
-        description: "Production-importance scores (0-100) combining invocations, complexity, and ownership",
+        description: "Production-importance scores (0-100) combining invocations, complexity, and ownership; augments review only, never gates safe_to_delete (three-state tracking issues that verdict)",
         key_params: &["coverage", "group_by"],
         license: McpToolLicense::Freemium,
         license_note: Some(RUNTIME_COVERAGE_LICENSE_NOTE),

@@ -107,6 +107,7 @@ fn builtin_modules_not_reported_as_unlisted() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -167,6 +168,7 @@ fn virtual_modules_not_reported_as_unlisted() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -299,6 +301,7 @@ fn peer_dep_not_reported_as_unlisted() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "fixture enumerates several modules")]
 fn unlisted_dep_detected_across_multiple_files() {
     let files = vec![
         DiscoveredFile {
@@ -350,6 +353,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -378,6 +382,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         },
     ];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -442,6 +447,7 @@ fn dynamic_import_unlisted_dep_has_import_site() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -637,7 +643,7 @@ fn at_types_without_bare_package_suppresses_regardless_of_import_style() {
 
     assert!(
         !unlisted.iter().any(|d| d.package_name == "geojson"),
-        "@types/geojson listed — geojson should not be flagged regardless of import style"
+        "@types/geojson listed , geojson should not be flagged regardless of import style"
     );
 }
 
@@ -660,7 +666,7 @@ fn no_at_types_still_flags_unlisted() {
 
     assert!(
         unlisted.iter().any(|d| d.package_name == "axios"),
-        "no @types/axios listed — axios should be flagged as unlisted"
+        "no @types/axios listed , axios should be flagged as unlisted"
     );
 }
 
@@ -920,6 +926,7 @@ fn workspace_import_case(
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 

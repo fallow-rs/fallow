@@ -60,6 +60,17 @@ pub struct ModuleInfo {
     pub flag_uses: Vec<FlagUse>,
     /// Heritage metadata for exported classes that declare `implements`.
     pub class_heritage: Vec<ClassHeritageInfo>,
+    /// Exported free-function factories whose body provably returns a single
+    /// class instance (`export function useApi() { return new RESTApi() }`, or
+    /// the var-return shape resolved to one class). Each entry maps the public
+    /// export name to the class's LOCAL name in this module, so a consumer doing
+    /// `const x = useApi(); x.member` can credit the class across module
+    /// boundaries: the analyze layer walks the import to this module, reads the
+    /// `class_local_name`, then resolves THAT through this module's own imports
+    /// to the class export. Populated only from an all-paths-unanimous proof
+    /// (else absent) to bound the cross-module over-credit blast radius. See
+    /// issue #1441 (cross-module factory, Part A).
+    pub exported_factory_returns: Box<[FactoryReturnExport]>,
     /// Angular `InjectionToken<Interface>` declarations, as
     /// `(token_export_name, interface_name)` pairs. Recorded only for
     /// `new InjectionToken<I>(...)` initializers whose `InjectionToken` is
@@ -826,7 +837,7 @@ pub fn compute_line_offsets(source: &str) -> Vec<u32> {
         if byte == b'\n' {
             debug_assert!(
                 u32::try_from(i + 1).is_ok(),
-                "source file exceeds u32::MAX bytes — line offsets would overflow"
+                "source file exceeds u32::MAX bytes, line offsets would overflow"
             );
             offsets.push((i + 1) as u32);
         }
@@ -1243,6 +1254,26 @@ pub struct ClassHeritageInfo {
     /// Typed instance bindings used to resolve member-access chains in external templates.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub instance_bindings: Vec<(String, String)>,
+}
+
+/// An exported free-function factory that provably returns one class instance.
+/// See `ModuleInfo.exported_factory_returns` and issue #1441 (Part A).
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+    PartialEq,
+    Eq,
+)]
+pub struct FactoryReturnExport {
+    /// Public export name (`default` for a default-exported factory).
+    pub export_name: String,
+    /// The returned class's LOCAL name in the factory's own module. Resolved at
+    /// analyze time through that module's imports to the real class export.
+    pub class_local_name: String,
 }
 
 /// A module-scope declaration that can be used as a TypeScript type.
@@ -1813,7 +1844,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1304);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1320);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -2014,6 +2045,7 @@ mod tests {
                 implements: vec!["Contract".to_string()],
                 instance_bindings: Vec::new(),
             }],
+            exported_factory_returns: Box::default(),
             injection_tokens: vec![("TOKEN".to_string(), "Contract".to_string())],
             local_type_declarations: vec![LocalTypeDeclaration {
                 name: "Contract".to_string(),
@@ -3242,6 +3274,7 @@ mod tests {
             complexity: Vec::new(),
             flag_uses: Vec::new(),
             class_heritage: Vec::new(),
+            exported_factory_returns: Box::default(),
             injection_tokens: Vec::new(),
             local_type_declarations: Vec::new(),
             public_signature_type_references: Vec::new(),

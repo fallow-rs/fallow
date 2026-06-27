@@ -136,7 +136,7 @@ pub(in crate::analyze) fn is_config_file(path: &std::path::Path) -> bool {
 ///
 /// A barrel file like `index.ts` that only contains `export { Foo } from './source'`
 /// lines serves an organizational purpose. If the source modules are reachable,
-/// the barrel file should not be reported as unused — consumers may have bypassed
+/// the barrel file should not be reported as unused , consumers may have bypassed
 /// it with direct imports, but the barrel still provides valid re-exports.
 pub(in crate::analyze) fn is_barrel_with_reachable_sources(
     module: &crate::graph::ModuleNode,
@@ -356,7 +356,7 @@ mod tests {
     }
 
     /// Dotenv files (`.env`, `.env.local`, `.env.production`) are NOT config files
-    /// in this context — they are environment variable files, not JS/TS tool configs.
+    /// in this context , they are environment variable files, not JS/TS tool configs.
     #[test]
     fn not_config_file_dotenv_files() {
         assert!(!is_config_file(std::path::Path::new(".env")));
@@ -488,6 +488,7 @@ mod tests {
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: Box::default(),
             })
             .collect();
 

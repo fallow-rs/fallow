@@ -285,6 +285,7 @@ fn create_re_export_input() -> ReExportInput {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     });
 
     for b in 0..barrel_count {
@@ -358,6 +359,7 @@ fn create_re_export_input() -> ReExportInput {
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         });
     }
 
@@ -414,6 +416,7 @@ fn create_re_export_input() -> ReExportInput {
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         });
     }
 
@@ -686,6 +689,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
         complexity: Vec::new(),
         flag_uses: vec![],
         class_heritage: vec![],
+        exported_factory_returns: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),

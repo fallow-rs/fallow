@@ -587,7 +587,49 @@ use crate::MemberKind;
 /// Bumped to 188: `HookUse` now carries the enclosing `component` name, so the
 /// descriptive per-component hook summary stays exact in multi-component files.
 /// A warm cache from 187 lacks the attribution field on persisted `hook_uses`.
-pub(super) const CACHE_VERSION: u32 = 188;
+///
+/// Bumped to 189 for the extract false-positive hardening bundle:
+/// - issue #1439: Vue SFC template close tags tolerate whitespace before `>`,
+///   so previously dropped template bodies need to be re-extracted.
+/// - issue #1489: inline `useFooStore().member` receivers emit store-factory
+///   member accesses, so warm caches lack the `unused-store-member` credit.
+/// - issue #1441: same-file factory functions returning `new Class()` bind
+///   `const x = useApi()` receivers to the class, so warm caches lack the
+///   `unused-class-member` credit.
+///
+/// Bumped to 190 (issue #1441, var-return): a same-file function that returns a
+/// bare identifier (`useApi() { return api }`) whose typed local (`let api: RESTApi`)
+/// resolves to a class now promotes to a factory-return, so `const x = useApi()`
+/// credits `x.member`. A warm cache from 189 lacks the added `member_accesses`.
+///
+/// Bumped to 191 (issue #1441, cross-module Part A): exported free-function
+/// factories now persist `exported_factory_returns`, and a consumer's
+/// `const x = importedFactory()` emits a cross-module factory-fn sentinel access
+/// so `x.member` credits the class across module boundaries. A warm cache from
+/// 190 lacks both the new metadata and the added sentinel `member_accesses`.
+///
+/// Bumped to 192 (issue #1489 Case 2): a param typed as a Pinia store
+/// (`ReturnType<typeof useFooStore>`, inline or aliased) now binds to the store
+/// factory, so `props.store.member` / `const { m } = props.store` emit factory
+/// `member_accesses` a 191 warm cache lacks.
+///
+/// Bumped to 193 (issue #1641): Svelte template usage now credits
+/// `bind:`/`style:`/`class:` directive shorthands (`bind:open` =
+/// `bind:open={open}`) as references, so a prop used only via a shorthand
+/// directive sets `used_in_template`. A warm cache from 192 carries the stale
+/// (uncredited) prop-usage flags.
+///
+/// Bumped to 194 (issue #1641, Vue side): Vue template usage now credits the
+/// 3.4+ same-name `v-bind` shorthand (`:open` = `:open="open"`, `:some-prop` =
+/// `:some-prop="someProp"`) as a reference, so a prop used only via a value-less
+/// `v-bind` sets `used_in_template`. A warm cache from 193 carries the stale
+/// (uncredited) prop-usage flags.
+///
+/// Bumped to 195: Vue SFC `<style> v-bind(expr)` references are now scanned, so
+/// a prop / import used only via CSS `v-bind(accent)` / `v-bind(props.x)` /
+/// `v-bind('a.b')` sets `used_in_template`. A warm cache from 194 carries the
+/// stale (uncredited) prop-usage flags.
+pub(super) const CACHE_VERSION: u32 = 195;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -641,7 +683,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1304);
+assert_cached_type_size!(CachedModule, 1320);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -662,6 +704,7 @@ assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
 assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
+assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 48);
 assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
 
 /// Cached data for a single module.
@@ -724,6 +767,9 @@ pub struct CachedModule {
     pub flag_uses: Vec<fallow_types::extract::FlagUse>,
     /// Heritage metadata for exported classes.
     pub class_heritage: Vec<fallow_types::extract::ClassHeritageInfo>,
+    /// Exported free-function factories that provably return one class instance
+    /// (`export function useApi() { return new RESTApi() }`). See #1441 Part A.
+    pub exported_factory_returns: Option<Box<[fallow_types::extract::FactoryReturnExport]>>,
     /// Angular `InjectionToken<Interface>` `(token, interface)` pairs (#920).
     pub injection_tokens: Vec<(String, String)>,
     /// Local type-capable declarations.

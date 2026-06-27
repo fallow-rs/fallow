@@ -118,6 +118,7 @@ mod tests {
             complexity: vec![],
             flag_uses: vec![],
             class_heritage: vec![],
+            exported_factory_returns: Box::default(),
             injection_tokens: vec![],
             local_type_declarations: vec![],
             public_signature_type_references: vec![],

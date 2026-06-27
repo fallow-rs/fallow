@@ -14,6 +14,14 @@ pub(super) fn scan_bracket_section(source: &str, start: usize) -> Option<(&str, 
     scan_delimited_section(source, start, 1, 1, b'[', b']')
 }
 
+/// Scan a parenthesized section `(...)` starting at the `(` at `start`, returning
+/// the inner text and the index just past the closing `)`. Quote- and
+/// nesting-aware, so a `)` inside a string or a nested `(...)` does not close
+/// early. Used for Vue SFC `<style>` `v-bind(expr)` extraction.
+pub(super) fn scan_paren_section(source: &str, start: usize) -> Option<(&str, usize)> {
+    scan_delimited_section(source, start, 1, 1, b'(', b')')
+}
+
 fn scan_delimited_section(
     source: &str,
     start: usize,

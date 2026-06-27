@@ -2817,6 +2817,7 @@ mod tests {
                 },
                 actions: vec![],
                 source_hash: None,
+                discriminators: None,
             }],
             hot_paths: vec![crate::health_types::RuntimeCoverageHotPath {
                 id: "fallow:hot:cafebabe".to_owned(),

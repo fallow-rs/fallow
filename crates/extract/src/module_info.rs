@@ -37,6 +37,7 @@ pub fn non_js_module_info(
         complexity: Vec::new(),
         flag_uses: Vec::new(),
         class_heritage: Vec::new(),
+        exported_factory_returns: Box::default(),
         injection_tokens: Vec::new(),
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),

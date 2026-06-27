@@ -31,11 +31,11 @@ use crate::health::RuntimeCoverageOptions;
 use crate::health::scoring::IstanbulCoverage;
 use crate::health_types::{
     RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageConfidence,
-    RuntimeCoverageDataSource, RuntimeCoverageEvidence, RuntimeCoverageFinding,
-    RuntimeCoverageHotPath, RuntimeCoverageMessage, RuntimeCoverageProvenance,
-    RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand,
-    RuntimeCoverageSchemaVersion, RuntimeCoverageSummary, RuntimeCoverageVerdict,
-    RuntimeCoverageWatermark,
+    RuntimeCoverageDataSource, RuntimeCoverageDiscriminators, RuntimeCoverageEvidence,
+    RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
+    RuntimeCoverageProvenance, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+    RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
+    RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
 use crate::license::verifying_key;
 
@@ -271,7 +271,22 @@ pub(super) fn analyze(
     let (request, locations) =
         build_request(options, input, &static_signals, prepared_sources.sources);
     let response = run_sidecar(&sidecar, &request, input.quiet, input.output)?;
-    let mut report = convert_response(response, &locations, options.watermark);
+    // Resolve the verdict thresholds with the SAME defaults the sidecar applies
+    // when they are unset, so the discriminator block (#321) reports the values
+    // that actually produced the verdicts.
+    let min_observation_volume = options
+        .min_observation_volume
+        .unwrap_or(MIN_OBSERVATION_VOLUME_DEFAULT);
+    let low_traffic_threshold = options
+        .low_traffic_threshold
+        .unwrap_or(LOW_TRAFFIC_THRESHOLD_DEFAULT);
+    let mut report = convert_response(
+        response,
+        &locations,
+        options.watermark,
+        min_observation_volume,
+        low_traffic_threshold,
+    );
     apply_top_limit(&mut report, input.top);
     Ok(report)
 }
@@ -1846,8 +1861,15 @@ fn convert_response(
     response: Response,
     _locations: &FunctionLocations,
     watermark: Option<RuntimeCoverageWatermark>,
+    min_observation_volume: u32,
+    low_traffic_threshold: f64,
 ) -> RuntimeCoverageReport {
-    let findings = map_runtime_findings(response.findings);
+    let findings = map_runtime_findings(
+        response.findings,
+        response.summary.trace_count,
+        min_observation_volume,
+        low_traffic_threshold,
+    );
     let hot_paths = map_runtime_hot_paths(response.hot_paths);
     let blast_radius = map_runtime_blast_radius(response.blast_radius);
     let importance = map_runtime_importance(response.importance);
@@ -1934,7 +1956,36 @@ fn convert_response(
     }
 }
 
-fn map_runtime_findings(findings: Vec<ProtocolFinding>) -> Vec<RuntimeCoverageFinding> {
+/// Confidence-table defaults the sidecar (`fallow-cov`) applies when the
+/// corresponding option is unset. Kept in sync with
+/// `fallow-cov/src/analysis.rs` (`MIN_OBSERVATION_VOLUME_DEFAULT`,
+/// `LOW_TRAFFIC_THRESHOLD_DEFAULT`); the sidecar lives in a separate repo so the
+/// values are mirrored here, not imported. They are resolved CLI-side only to
+/// report them in the discriminator block (#321); the sidecar still owns the
+/// verdict computation.
+const MIN_OBSERVATION_VOLUME_DEFAULT: u32 = 5_000;
+const LOW_TRAFFIC_THRESHOLD_DEFAULT: f64 = 0.001;
+
+/// Three-state runtime tracking label from the protocol evidence + invocation
+/// count: `untracked` when V8 never saw the function, else `called` /
+/// `never_called` by whether it was invoked.
+fn tracking_state_label(v8_tracking: &str, invocations: Option<u64>) -> &'static str {
+    if v8_tracking == "untracked" {
+        "untracked"
+    } else if invocations.is_some_and(|count| count > 0) {
+        "called"
+    } else {
+        "never_called"
+    }
+}
+
+fn map_runtime_findings(
+    findings: Vec<ProtocolFinding>,
+    trace_count: u64,
+    min_observation_volume: u32,
+    low_traffic_threshold: f64,
+) -> Vec<RuntimeCoverageFinding> {
+    let meets_observation_volume = trace_count >= u64::from(min_observation_volume);
     let mut findings = findings
         .into_iter()
         .filter_map(|finding| {
@@ -1945,6 +1996,24 @@ fn map_runtime_findings(findings: Vec<ProtocolFinding>) -> Vec<RuntimeCoverageFi
             let (stable_id, source_hash) = finding.identity.map_or((None, None), |identity| {
                 (Some(identity.stable_id), identity.source_hash)
             });
+            let discriminators = RuntimeCoverageDiscriminators {
+                tracking_state: tracking_state_label(
+                    &finding.evidence.v8_tracking,
+                    finding.invocations,
+                )
+                .to_owned(),
+                invocation_ratio: finding.invocations.map(|invocations| {
+                    if trace_count == 0 {
+                        0.0
+                    } else {
+                        invocations as f64 / trace_count as f64
+                    }
+                }),
+                low_traffic_threshold,
+                trace_count,
+                min_observation_volume,
+                meets_observation_volume,
+            };
             Some(RuntimeCoverageFinding {
                 id: finding.id,
                 stable_id,
@@ -1965,6 +2034,7 @@ fn map_runtime_findings(findings: Vec<ProtocolFinding>) -> Vec<RuntimeCoverageFi
                         auto_fixable: action.auto_fixable,
                     })
                     .collect(),
+                discriminators: Some(discriminators),
             })
         })
         .collect::<Vec<_>>();
@@ -2179,7 +2249,7 @@ mod tests {
         build_request, build_static_signal_index, convert_response, discover_sidecar,
         looks_like_istanbul, merge_remapped_functions, path_binary_candidates,
         prepare_coverage_sources, resolve_original_source_path, resolve_sidecar_from_output,
-        resolve_sidecar_via_command, sidecar_binary_name, static_function,
+        resolve_sidecar_via_command, sidecar_binary_name, static_function, tracking_state_label,
         verify_sidecar_signature, write_istanbul_coverage_file,
     };
     use crate::health::RuntimeCoverageOptions;
@@ -3012,7 +3082,7 @@ mod tests {
             errors: vec![],
             warnings: vec![],
         };
-        let report = convert_response(response, &FxHashMap::default(), None);
+        let report = convert_response(response, &FxHashMap::default(), None, 5_000, 0.001);
         assert_eq!(report.findings[0].stable_id, Some(identity.stable_id));
     }
 
@@ -3040,7 +3110,7 @@ mod tests {
             errors: vec![],
             warnings: vec![],
         };
-        let report = convert_response(response, &FxHashMap::default(), None);
+        let report = convert_response(response, &FxHashMap::default(), None, 5_000, 0.001);
         assert_eq!(report.findings[0].stable_id, None);
     }
 
@@ -3076,6 +3146,8 @@ mod tests {
             },
             &locations,
             None,
+            5_000,
+            0.001,
         );
 
         assert_eq!(report.findings[0].id, "fallow:prod:abc12345");
@@ -3087,6 +3159,21 @@ mod tests {
         assert_eq!(report.findings[0].evidence.static_status, "used");
         assert_eq!(report.hot_paths[0].id, "fallow:hot:def67890");
         assert_eq!(report.hot_paths[0].percentile, 50);
+
+        // #321: the merge pipeline emits a discriminator block that reproduces
+        // the verdict. proto_finding is tracked with 0 invocations => the
+        // three-state signal is never_called; ratio is 0/512; trace_count 512 is
+        // below the 5000 floor so the confidence cap is visible.
+        let discriminators = report.findings[0]
+            .discriminators
+            .as_ref()
+            .expect("merge-pipeline findings carry discriminators");
+        assert_eq!(discriminators.tracking_state, "never_called");
+        assert_eq!(discriminators.invocation_ratio, Some(0.0));
+        assert_eq!(discriminators.trace_count, 512);
+        assert!((discriminators.low_traffic_threshold - 0.001).abs() < f64::EPSILON);
+        assert_eq!(discriminators.min_observation_volume, 5_000);
+        assert!(!discriminators.meets_observation_volume);
 
         // #316 / #319: tracked functions present => actionable, with a local,
         // origin-unknown, fresh provenance mirroring the cloud contract.
@@ -3130,6 +3217,8 @@ mod tests {
             },
             &FxHashMap::default(),
             None,
+            5_000,
+            0.001,
         );
 
         // #316: no tracked functions => no usable runtime evidence => the report
@@ -3147,6 +3236,17 @@ mod tests {
                 .is_some_and(|reason| reason.contains("NOT cold")),
         );
         assert!((report.provenance.untracked_ratio - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn tracking_state_label_maps_three_states() {
+        // untracked wins regardless of invocation count.
+        assert_eq!(tracking_state_label("untracked", None), "untracked");
+        assert_eq!(tracking_state_label("untracked", Some(9)), "untracked");
+        // tracked + invoked => called; tracked + zero => never_called.
+        assert_eq!(tracking_state_label("tracked", Some(3)), "called");
+        assert_eq!(tracking_state_label("tracked", Some(0)), "never_called");
+        assert_eq!(tracking_state_label("tracked", None), "never_called");
     }
 
     #[test]

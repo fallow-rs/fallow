@@ -21,7 +21,7 @@ use super::predicates::{
 /// Vite/Parcel-style projects and their referenced assets are tracked via edges.
 ///
 /// Barrel files (index.ts that only re-export) are excluded when their re-export
-/// sources are reachable — they serve an organizational purpose even if consumers
+/// sources are reachable , they serve an organizational purpose even if consumers
 /// import directly from the source files rather than through the barrel.
 #[deprecated(
     since = "2.76.0",
@@ -133,6 +133,7 @@ mod tests {
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: Box::default(),
             })
             .collect();
 
@@ -293,6 +294,7 @@ mod tests {
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
+                exported_factory_returns: Box::default(),
             })
             .collect();
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

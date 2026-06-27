@@ -159,6 +159,7 @@ pub(super) fn build_graph_with_npm_import_sources(
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

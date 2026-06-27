@@ -245,7 +245,7 @@ fn mark_binding_used(
     }
 }
 
-fn kebab_to_camel_case(source: &str) -> String {
+pub(super) fn kebab_to_camel_case(source: &str) -> String {
     let mut camel = String::new();
     let mut uppercase_next = false;
 
