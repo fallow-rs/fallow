@@ -6,7 +6,7 @@ use crate::template_usage::TemplateUsage;
 
 use super::scanners::{scan_bracket_section, scan_curly_section, scan_html_tag};
 use super::shared::{
-    HTML_COMMENT_RE, ParsedAttr, ParsedTag, merge_component_tag_usage,
+    HTML_COMMENT_RE, ParsedAttr, ParsedTag, kebab_to_camel_case, merge_component_tag_usage,
     merge_expression_usage_with_bound_targets, merge_pattern_binding_usage,
     merge_statement_usage_with_bound_targets, parse_tag_attrs,
 };
@@ -351,6 +351,17 @@ fn scan_vue_attrs(
                 arg_locals,
             );
         }
+        if attr.value.is_none()
+            && let Some(binding) = vbind_shorthand_binding(&attr.name)
+        {
+            merge_expression_usage_with_bound_targets(
+                usage,
+                &binding,
+                imported_bindings,
+                bound_targets,
+                attr_locals,
+            );
+        }
         scan_vue_attr_value(attr, imported_bindings, bound_targets, attr_locals, usage);
     }
 }
@@ -454,6 +465,31 @@ fn directive_name(attr_name: &str) -> Option<&str> {
         .next()
         .map(str::trim)
         .filter(|name| !name.is_empty())
+}
+
+/// Vue 3.4+ same-name `v-bind` shorthand: a value-less `:arg` (or `v-bind:arg`)
+/// is shorthand for `:arg="arg"`, so the argument name references a local
+/// binding (`:open` = `:open="open"`, `:some-prop` = `:some-prop="someProp"`).
+/// Only fires for a value-less attribute; with an explicit value the value
+/// expression names the reference and the bare argument is the binding target.
+/// A dynamic argument (`:[expr]`) has no static same-name form and is credited
+/// separately via `dynamic_argument_expression`. Modifiers (`:foo.prop`) do not
+/// change the referenced variable, so the argument before the first `.` wins.
+/// The argument is camelized via `kebab_to_camel_case` to match Vue's own
+/// `camelize` (hyphen-only, so `:some_prop` stays `some_prop`).
+fn vbind_shorthand_binding(attr_name: &str) -> Option<String> {
+    let arg = attr_name
+        .strip_prefix(':')
+        .or_else(|| attr_name.strip_prefix("v-bind:"))?;
+    if arg.starts_with('[') {
+        return None;
+    }
+    let name = arg
+        .split('.')
+        .next()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())?;
+    Some(kebab_to_camel_case(name))
 }
 
 fn is_custom_directive_attr(name: &str) -> bool {

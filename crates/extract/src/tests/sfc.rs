@@ -246,6 +246,87 @@ import { tooltipText } from './utils';
 }
 
 #[test]
+fn vue_vbind_shorthand_credits_prop_usage() {
+    // Props referenced ONLY via a value-less Vue 3.4+ same-name `v-bind`
+    // shorthand (`:open` = `:open="open"`, `:some-prop` = `:some-prop="someProp"`)
+    // must count as template usage, otherwise `unused-component-props`
+    // false-flags them. Regression for #1641 (Vue side).
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { open, someProp } = defineProps<{ open: boolean; someProp: string }>();
+</script>
+<template><Child :open :some-prop /></template>
+"#,
+        "Parent.vue",
+    );
+
+    for name in ["open", "someProp"] {
+        let prop = info
+            .component_props
+            .iter()
+            .find(|prop| prop.name == name)
+            .unwrap_or_else(|| panic!("prop {name} should be harvested"));
+        assert!(
+            prop.used_in_template,
+            "{name} is referenced via a value-less v-bind shorthand, so used_in_template should be true",
+        );
+    }
+}
+
+#[test]
+fn vue_vbind_longform_shorthand_credits_prop_usage() {
+    // The long-form `v-bind:open` value-less shorthand is equivalent to `:open`
+    // and must credit the prop the same way. Regression for #1641 (Vue side).
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { open } = defineProps<{ open: boolean }>();
+</script>
+<template><Child v-bind:open /></template>
+"#,
+        "Parent.vue",
+    );
+
+    let prop = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "open")
+        .expect("open prop should be harvested");
+    assert!(
+        prop.used_in_template,
+        "open is referenced via a value-less v-bind:open, so used_in_template should be true",
+    );
+}
+
+#[test]
+fn vue_vbind_valued_does_not_credit_target_name() {
+    // With an explicit value the `v-bind` argument is the binding target, not a
+    // local reference: `:label="text"` references `text`, so a same-named prop
+    // `label` stays unused.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { label } = defineProps<{ label: string }>();
+const text = 'hi';
+</script>
+<template><Child :label="text" /></template>
+"#,
+        "Parent.vue",
+    );
+
+    let prop = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "label")
+        .expect("label prop should be harvested");
+    assert!(
+        !prop.used_in_template,
+        ":label=\"text\" references text, not the prop label, so it stays unused",
+    );
+}
+
+#[test]
 fn vue_v_on_object_syntax_clears_unused_import_binding() {
     let info = parse_sfc(
         r#"

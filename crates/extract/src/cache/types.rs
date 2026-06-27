@@ -618,7 +618,13 @@ use crate::MemberKind;
 /// `bind:open={open}`) as references, so a prop used only via a shorthand
 /// directive sets `used_in_template`. A warm cache from 192 carries the stale
 /// (uncredited) prop-usage flags.
-pub(super) const CACHE_VERSION: u32 = 193;
+///
+/// Bumped to 194 (issue #1641, Vue side): Vue template usage now credits the
+/// 3.4+ same-name `v-bind` shorthand (`:open` = `:open="open"`, `:some-prop` =
+/// `:some-prop="someProp"`) as a reference, so a prop used only via a value-less
+/// `v-bind` sets `used_in_template`. A warm cache from 193 carries the stale
+/// (uncredited) prop-usage flags.
+pub(super) const CACHE_VERSION: u32 = 194;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
