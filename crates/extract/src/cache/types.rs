@@ -612,7 +612,13 @@ use crate::MemberKind;
 /// (`ReturnType<typeof useFooStore>`, inline or aliased) now binds to the store
 /// factory, so `props.store.member` / `const { m } = props.store` emit factory
 /// `member_accesses` a 191 warm cache lacks.
-pub(super) const CACHE_VERSION: u32 = 192;
+///
+/// Bumped to 193 (issue #1641): Svelte template usage now credits
+/// `bind:`/`style:`/`class:` directive shorthands (`bind:open` =
+/// `bind:open={open}`) as references, so a prop used only via a shorthand
+/// directive sets `used_in_template`. A warm cache from 192 carries the stale
+/// (uncredited) prop-usage flags.
+pub(super) const CACHE_VERSION: u32 = 193;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

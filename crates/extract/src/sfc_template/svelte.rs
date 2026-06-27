@@ -669,6 +669,17 @@ fn merge_markup_attr_usage(
                 current,
             );
         }
+        if attr.value.is_none()
+            && let Some(binding) = directive_shorthand_binding_name(&attr.name)
+        {
+            merge_expression_usage_allow_dollar_refs_with_bound_targets(
+                usage,
+                binding,
+                imported_bindings,
+                bound_targets,
+                current,
+            );
+        }
         if let Some(local) = attr.name.strip_prefix("let:")
             && !local.is_empty()
         {
@@ -733,6 +744,31 @@ fn directive_binding_name(attr_name: &str) -> Option<&str> {
                 .next()
                 .map(str::trim)
                 .filter(|name| !name.is_empty());
+            if binding.is_some() {
+                return binding;
+            }
+        }
+    }
+    None
+}
+
+/// Directive shorthands whose *name* is itself a reference to a local binding
+/// when written without an explicit value: `bind:open` (= `bind:open={open}`),
+/// `style:height` (= `style:height={height}`), `class:active`
+/// (= `class:active={active}`). With an explicit `={…}` value the name is a
+/// target (child prop, CSS property, or class name), not a local reference, so
+/// the caller only consults this for value-less attributes and the value path
+/// credits the binding instead. The leading-character guard rejects CSS custom
+/// properties (`style:--accent`) that would otherwise parse as a `--foo`
+/// pre-decrement expression.
+fn directive_shorthand_binding_name(attr_name: &str) -> Option<&str> {
+    for prefix in ["bind:", "style:", "class:"] {
+        if let Some(rest) = attr_name.strip_prefix(prefix) {
+            let binding = rest.split('|').next().map(str::trim).filter(|name| {
+                name.chars()
+                    .next()
+                    .is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$')
+            });
             if binding.is_some() {
                 return binding;
             }

@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`unused-component-props` no longer false-flags a Svelte prop used only
+  through a `bind:`/`style:`/`class:` directive shorthand.** A value-less
+  directive such as `bind:open`, `style:height`, or `class:active` is shorthand
+  for `directive:NAME={NAME}`, so the directive name itself references the prop.
+  Template-usage extraction now credits these, alongside the existing
+  `use:`/`transition:`/`in:`/`out:`/`animate:` handling. Directives written with
+  an explicit value (`style:height={h}`) are unchanged: the value names the
+  reference, and the bare target (CSS property, class name, child prop) does
+  not.
+  (Closes [#1641](https://github.com/fallow-rs/fallow/issues/1641))
+
 - **`unused-store-members` no longer false-flags a Pinia store member reached
   through indirection.** A member used inline on a store-factory call
   (`useFooStore().member`), or through a store passed as a param typed
