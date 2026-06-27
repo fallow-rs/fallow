@@ -1982,6 +1982,17 @@
             "$ref": "#/definitions/RuntimeCoverageAction"
           },
           "description": "Suggested actions for this finding. Omitted when empty."
+        },
+        "discriminators": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RuntimeCoverageDiscriminators"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The discriminator inputs that produced this verdict (#321), emitted so an\nagent can reproduce it and see the confidence cap. `None` for findings\nnot built from the merge pipeline (e.g. baseline round-trips). Omitted\nfrom JSON when absent."
         }
       },
       "required": [
@@ -17120,6 +17131,46 @@
         "line_count"
       ],
       "description": "One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a\njudgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a\ngraph FINDING (\"fallow emitted this exact finding\"), a change_anchor anchors\nonly a changed REGION (\"fallow confirms this region changed\") , a strictly\nweaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a\nconsumer can tell the two apart. Graph/diff-derived; NEVER from prose."
+    },
+    "RuntimeCoverageDiscriminators": {
+      "type": "object",
+      "properties": {
+        "tracking_state": {
+          "type": "string",
+          "description": "Three-state runtime tracking: `called` (invocations > 0), `never_called`\n(V8 tracked it, invocations == 0), or `untracked` (V8 never saw it). The\nONLY signal that can issue a deletion verdict."
+        },
+        "invocation_ratio": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "`invocations / trace_count` for this function; `null` when untracked (no\ninvocation count). The per-function value behind the low-traffic split."
+        },
+        "low_traffic_threshold": {
+          "type": "number",
+          "description": "Active/low_traffic split ratio in effect (CLI default 0.001). A tracked\nfunction whose `invocation_ratio` is below this reads `low_traffic`, else\n`active`."
+        },
+        "trace_count": {
+          "type": "integer",
+          "description": "Total observed invocations across all functions (the `invocation_ratio`\ndenominator), echoed per finding so the verdict is self-contained."
+        },
+        "min_observation_volume": {
+          "type": "integer",
+          "description": "High-confidence verdict floor (CLI default 5000). When `trace_count` is\nbelow it, confidence is capped regardless of the per-function signal."
+        },
+        "meets_observation_volume": {
+          "type": "boolean",
+          "description": "`trace_count >= min_observation_volume`: whether the dump cleared the\nconfidence floor. `false` means this verdict's confidence is capped."
+        }
+      },
+      "required": [
+        "tracking_state",
+        "low_traffic_threshold",
+        "trace_count",
+        "min_observation_volume",
+        "meets_observation_volume"
+      ],
+      "description": "Discriminator inputs that PRODUCED a finding's verdict (fallow-rs/fallow-cloud#321),\nemitted alongside the verdict so an agent can reproduce it and see the\nminimum-observation confidence cap instead of re-deriving them from scratch.\nF4: these make the EXISTING Fallow-owned discriminators legible; they are not\na new or external signal and gate nothing. Pairs with `evidence.static_status`\n(the static half of the discriminator set)."
     }
   }
 }
