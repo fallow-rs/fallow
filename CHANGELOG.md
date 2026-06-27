@@ -28,6 +28,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not.
   (Closes [#1641](https://github.com/fallow-rs/fallow/issues/1641))
 
+- **`unused-component-props` no longer false-flags a Vue prop used only through
+  a value-less `v-bind` same-name shorthand.** Vue 3.4+ lets `:open` stand for
+  `:open="open"` and `:some-prop` for `:some-prop="someProp"`, so the argument
+  itself references the prop. Template-usage extraction now credits the
+  camelCase argument of a value-less `v-bind`. A `v-bind` written with an
+  explicit value (`:label="text"`) is unchanged: the value names the reference,
+  not the bare argument.
+  (Refs [#1641](https://github.com/fallow-rs/fallow/issues/1641))
+
+- **`unused-component-props` no longer false-flags a Vue prop used only through
+  a `<style> v-bind()` reference.** Vue SFC CSS `v-bind(accent)`,
+  `v-bind(props.accent)`, and the string form `v-bind('a.b')` bind a script or
+  prop value into CSS. Template-usage extraction now scans `<style>` blocks for
+  these references, so a prop consumed only by CSS `v-bind()` is credited
+  instead of reported as unused.
+
 - **`unused-store-members` no longer false-flags a Pinia store member reached
   through indirection.** A member used inline on a store-factory call
   (`useFooStore().member`), or through a store passed as a param typed

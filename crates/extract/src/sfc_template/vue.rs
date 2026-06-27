@@ -4,9 +4,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::template_usage::TemplateUsage;
 
-use super::scanners::{scan_bracket_section, scan_curly_section, scan_html_tag};
+use super::scanners::{
+    scan_bracket_section, scan_curly_section, scan_html_tag, scan_paren_section,
+};
 use super::shared::{
-    HTML_COMMENT_RE, ParsedAttr, ParsedTag, merge_component_tag_usage,
+    HTML_COMMENT_RE, ParsedAttr, ParsedTag, kebab_to_camel_case, merge_component_tag_usage,
     merge_expression_usage_with_bound_targets, merge_pattern_binding_usage,
     merge_statement_usage_with_bound_targets, parse_tag_attrs,
 };
@@ -23,6 +25,13 @@ static TEMPLATE_OPEN_RE: LazyLock<regex::Regex> =
 
 static VUE_FOR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?is)^(?P<binding>.+?)\s+(?:in|of)\s+(?P<source>.+)$"));
+
+/// Matches a `<style ...>...</style>` block, capturing the body. Used to scan
+/// for Vue SFC CSS `v-bind(expr)` references, which bind a script/prop binding
+/// into CSS and otherwise look like usage nowhere in the `<template>`.
+static VUE_STYLE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(r#"(?is)<style\b(?:[^>"']|"[^"]*"|'[^']*')*>(?P<body>.*?)</style>"#)
+});
 
 #[cfg(test)]
 pub(super) fn collect_template_usage(
@@ -74,7 +83,83 @@ pub(super) fn collect_template_usage_with_bound_targets(
         scan_from = body_end;
     }
 
+    scan_style_vbind_usage(source, imported_bindings, bound_targets, &mut usage);
+
     usage
+}
+
+/// Scan each `<style>` block for Vue SFC CSS `v-bind(expr)` references and credit
+/// the referenced bindings, so a prop / import used only via `v-bind(accent)` is
+/// not reported as unused. Handles the identifier form `v-bind(accent)`, the
+/// member form `v-bind(props.accent)`, and the string form `v-bind('a.b')` (the
+/// quoted content is itself a JS expression). Restricted to `<style>` bodies so a
+/// template attribute `v-bind="..."` is never matched here.
+fn scan_style_vbind_usage(
+    source: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    usage: &mut TemplateUsage,
+) {
+    for caps in VUE_STYLE_RE.captures_iter(source) {
+        let Some(body) = caps.name("body") else {
+            continue;
+        };
+        let body = body.as_str();
+        let bytes = body.as_bytes();
+        let mut index = 0;
+        while let Some(rel) = body[index..].find("v-bind") {
+            let start = index + rel;
+            // Require a token boundary before `v-bind` so a longer identifier
+            // (e.g. a CSS custom property containing the substring) is not matched.
+            let preceded_by_word = start
+                .checked_sub(1)
+                .is_some_and(|prev| bytes[prev].is_ascii_alphanumeric() || bytes[prev] == b'_');
+            let mut paren = start + "v-bind".len();
+            while bytes.get(paren).is_some_and(u8::is_ascii_whitespace) {
+                paren += 1;
+            }
+            if !preceded_by_word
+                && bytes.get(paren) == Some(&b'(')
+                && let Some((expr, next)) = scan_paren_section(body, paren)
+            {
+                credit_style_vbind_expr(expr.trim(), imported_bindings, bound_targets, usage);
+                index = next;
+                continue;
+            }
+            index = start + "v-bind".len();
+        }
+    }
+}
+
+/// Credit the bindings referenced by a single `v-bind(...)` style expression.
+/// A wholly-quoted argument (`v-bind('foo.bar')`) is unwrapped because Vue treats
+/// the string content as the JS expression.
+fn credit_style_vbind_expr(
+    expr: &str,
+    imported_bindings: &FxHashSet<String>,
+    bound_targets: &FxHashMap<String, String>,
+    usage: &mut TemplateUsage,
+) {
+    let inner = strip_wrapping_quotes(expr).unwrap_or(expr);
+    if inner.is_empty() {
+        return;
+    }
+    merge_expression_usage_with_bound_targets(usage, inner, imported_bindings, bound_targets, &[]);
+}
+
+/// Strip a single matching wrapping quote pair (`'x'` / `"x"`), but only when the
+/// quote does not reappear inside, so a real expression such as `'a' + b` is left
+/// intact for the analyzer.
+fn strip_wrapping_quotes(expr: &str) -> Option<&str> {
+    let bytes = expr.as_bytes();
+    let first = *bytes.first()?;
+    if (first == b'\'' || first == b'"') && bytes.len() >= 2 && *bytes.last()? == first {
+        let inner = &expr[1..expr.len() - 1];
+        if !inner.as_bytes().contains(&first) {
+            return Some(inner);
+        }
+    }
+    None
 }
 
 /// Locate the `</template>` that closes the root template whose body starts at
@@ -351,6 +436,17 @@ fn scan_vue_attrs(
                 arg_locals,
             );
         }
+        if attr.value.is_none()
+            && let Some(binding) = vbind_shorthand_binding(&attr.name)
+        {
+            merge_expression_usage_with_bound_targets(
+                usage,
+                &binding,
+                imported_bindings,
+                bound_targets,
+                attr_locals,
+            );
+        }
         scan_vue_attr_value(attr, imported_bindings, bound_targets, attr_locals, usage);
     }
 }
@@ -454,6 +550,31 @@ fn directive_name(attr_name: &str) -> Option<&str> {
         .next()
         .map(str::trim)
         .filter(|name| !name.is_empty())
+}
+
+/// Vue 3.4+ same-name `v-bind` shorthand: a value-less `:arg` (or `v-bind:arg`)
+/// is shorthand for `:arg="arg"`, so the argument name references a local
+/// binding (`:open` = `:open="open"`, `:some-prop` = `:some-prop="someProp"`).
+/// Only fires for a value-less attribute; with an explicit value the value
+/// expression names the reference and the bare argument is the binding target.
+/// A dynamic argument (`:[expr]`) has no static same-name form and is credited
+/// separately via `dynamic_argument_expression`. Modifiers (`:foo.prop`) do not
+/// change the referenced variable, so the argument before the first `.` wins.
+/// The argument is camelized via `kebab_to_camel_case` to match Vue's own
+/// `camelize` (hyphen-only, so `:some_prop` stays `some_prop`).
+fn vbind_shorthand_binding(attr_name: &str) -> Option<String> {
+    let arg = attr_name
+        .strip_prefix(':')
+        .or_else(|| attr_name.strip_prefix("v-bind:"))?;
+    if arg.starts_with('[') {
+        return None;
+    }
+    let name = arg
+        .split('.')
+        .next()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())?;
+    Some(kebab_to_camel_case(name))
 }
 
 fn is_custom_directive_attr(name: &str) -> bool {

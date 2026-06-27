@@ -246,6 +246,213 @@ import { tooltipText } from './utils';
 }
 
 #[test]
+fn vue_vbind_shorthand_credits_prop_usage() {
+    // Props referenced ONLY via a value-less Vue 3.4+ same-name `v-bind`
+    // shorthand (`:open` = `:open="open"`, `:some-prop` = `:some-prop="someProp"`)
+    // must count as template usage, otherwise `unused-component-props`
+    // false-flags them. Regression for #1641 (Vue side).
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { open, someProp } = defineProps<{ open: boolean; someProp: string }>();
+</script>
+<template><Child :open :some-prop /></template>
+"#,
+        "Parent.vue",
+    );
+
+    for name in ["open", "someProp"] {
+        let prop = info
+            .component_props
+            .iter()
+            .find(|prop| prop.name == name)
+            .unwrap_or_else(|| panic!("prop {name} should be harvested"));
+        assert!(
+            prop.used_in_template,
+            "{name} is referenced via a value-less v-bind shorthand, so used_in_template should be true",
+        );
+    }
+}
+
+#[test]
+fn vue_vbind_longform_shorthand_credits_prop_usage() {
+    // The long-form `v-bind:open` value-less shorthand is equivalent to `:open`
+    // and must credit the prop the same way. Regression for #1641 (Vue side).
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { open } = defineProps<{ open: boolean }>();
+</script>
+<template><Child v-bind:open /></template>
+"#,
+        "Parent.vue",
+    );
+
+    let prop = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "open")
+        .expect("open prop should be harvested");
+    assert!(
+        prop.used_in_template,
+        "open is referenced via a value-less v-bind:open, so used_in_template should be true",
+    );
+}
+
+#[test]
+fn vue_vbind_valued_does_not_credit_target_name() {
+    // With an explicit value the `v-bind` argument is the binding target, not a
+    // local reference: `:label="text"` references `text`, so a same-named prop
+    // `label` stays unused.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { label } = defineProps<{ label: string }>();
+const text = 'hi';
+</script>
+<template><Child :label="text" /></template>
+"#,
+        "Parent.vue",
+    );
+
+    let prop = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "label")
+        .expect("label prop should be harvested");
+    assert!(
+        !prop.used_in_template,
+        ":label=\"text\" references text, not the prop label, so it stays unused",
+    );
+}
+
+#[test]
+fn vue_style_vbind_credits_prop_usage() {
+    // A prop used ONLY via Vue SFC `<style> v-bind(prop)` (CSS v-bind) must count
+    // as template usage; an unused prop stays flagged. Regression for the
+    // unused-component-props style-v-bind gap.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { accent, gap } = defineProps<{ accent: string; gap: string }>();
+</script>
+<template><div class="box" /></template>
+<style scoped>
+.box { color: v-bind(accent); }
+</style>
+"#,
+        "Styled.vue",
+    );
+
+    let accent = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "accent")
+        .expect("accent prop should be harvested");
+    assert!(
+        accent.used_in_template,
+        "accent is referenced via <style> v-bind(accent), so used_in_template should be true",
+    );
+    let gap = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "gap")
+        .expect("gap prop should be harvested");
+    assert!(
+        !gap.used_in_template,
+        "gap is referenced nowhere, so it stays unused",
+    );
+}
+
+#[test]
+fn vue_style_vbind_member_and_string_forms_credit_prop_usage() {
+    // `v-bind(props.color)` (member) and `v-bind('props.size')` (string form,
+    // whose content is itself a JS expression) both credit the prop.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const props = defineProps<{ color: string; size: string }>();
+</script>
+<template><div /></template>
+<style>
+.a { color: v-bind(props.color); }
+.b { width: v-bind('props.size'); }
+</style>
+"#,
+        "Styled.vue",
+    );
+
+    for name in ["color", "size"] {
+        let prop = info
+            .component_props
+            .iter()
+            .find(|prop| prop.name == name)
+            .unwrap_or_else(|| panic!("prop {name} should be harvested"));
+        assert!(
+            prop.used_in_template,
+            "{name} is referenced via a <style> v-bind member/string form, so used_in_template should be true",
+        );
+    }
+}
+
+#[test]
+fn vue_style_vbind_word_boundary_guard_does_not_credit() {
+    // `zv-bind(accent)` is not the `v-bind` function; the boundary guard must
+    // not credit `accent`, so the prop stays correctly flagged as unused.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { accent } = defineProps<{ accent: string }>();
+</script>
+<template><div /></template>
+<style>
+.box { color: zv-bind(accent); }
+</style>
+"#,
+        "Styled.vue",
+    );
+
+    let accent = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "accent")
+        .expect("accent prop should be harvested");
+    assert!(
+        !accent.used_in_template,
+        "zv-bind(accent) is not a v-bind() reference, so accent stays unused",
+    );
+}
+
+#[test]
+fn vue_style_vbind_multibyte_body_does_not_panic() {
+    // A multi-byte UTF-8 character in the style body must not break byte-offset
+    // scanning of `v-bind()`.
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+const { accent } = defineProps<{ accent: string }>();
+</script>
+<template><div /></template>
+<style>
+/* 日本語コメント */
+.box { color: v-bind(accent); }
+</style>
+"#,
+        "Styled.vue",
+    );
+
+    let accent = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "accent")
+        .expect("accent prop should be harvested");
+    assert!(
+        accent.used_in_template,
+        "accent is referenced via v-bind(accent) after a multibyte comment",
+    );
+}
+
+#[test]
 fn vue_v_on_object_syntax_clears_unused_import_binding() {
     let info = parse_sfc(
         r#"
