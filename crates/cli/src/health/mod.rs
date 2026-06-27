@@ -765,6 +765,10 @@ mod tests {
                     importance: vec![],
                     watermark: None,
                     warnings: vec![],
+                    actionable: true,
+                    actionability_reason: None,
+                    actionability_verdict: None,
+                    provenance: fallow_output::RuntimeCoverageProvenance::default(),
                 }),
                 ..fallow_output::HealthReport::default()
             },

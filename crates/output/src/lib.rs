@@ -163,13 +163,13 @@ pub use health_findings::{
 pub use health_grouped::{HealthGroup, HealthGrouping};
 pub use health_report::HealthReport;
 pub use health_runtime_coverage::{
-    RuntimeCoverageAction, RuntimeCoverageBlastRadiusEntry, RuntimeCoverageCaptureQuality,
-    RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageDiscriminators,
-    RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
-    RuntimeCoverageImportanceEntry, RuntimeCoverageMessage, RuntimeCoverageReport,
-    RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion,
-    RuntimeCoverageSignal, RuntimeCoverageSummary, RuntimeCoverageVerdict,
-    RuntimeCoverageWatermark,
+    RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageBlastRadiusEntry,
+    RuntimeCoverageCaptureQuality, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
+    RuntimeCoverageDiscriminators, RuntimeCoverageEvidence, RuntimeCoverageFinding,
+    RuntimeCoverageHotPath, RuntimeCoverageImportanceEntry, RuntimeCoverageMessage,
+    RuntimeCoverageProvenance, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+    RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSignal,
+    RuntimeCoverageSummary, RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
 pub use health_scores::{
     COGNITIVE_EXTRACTION_THRESHOLD, ComplexityViolation, ComponentRollup, ContributorEntry,

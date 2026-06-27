@@ -595,7 +595,76 @@ pub struct RuntimeCoverageReport {
     #[cfg_attr(feature = "schema", schemars(default))]
     /// Non-fatal merge or coverage diagnostics. Omitted when empty.
     pub warnings: Vec<RuntimeCoverageMessage>,
+    /// Whether an autonomous agent may act on this report (fallow-rs/fallow-cloud#316,
+    /// mirrors the cloud runtime-context contract). `false` when the capture
+    /// carries no usable runtime evidence (no tracked functions); then
+    /// `actionability_verdict` is `insufficient_evidence` and
+    /// `actionability_reason` explains. F4: a non-action floor, never a gate on a
+    /// positive verdict.
+    pub actionable: bool,
+    /// Why the report is non-actionable; `null` when `actionable` is true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub actionability_reason: Option<String>,
+    /// First-class non-action verdict (`insufficient_evidence`) when not
+    /// actionable; `null` otherwise. Mirrors the cloud runtime-context `verdict`;
+    /// named distinctly from the report-context `verdict` above to avoid a
+    /// collision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub actionability_verdict: Option<String>,
+    /// Provenance an agent reads to self-attenuate confidence (fallow-rs/fallow-cloud#319,
+    /// mirrors the cloud runtime-context `provenance`). F4: context only.
+    pub provenance: RuntimeCoverageProvenance,
 }
+
+/// Provenance of a runtime-coverage report (fallow-rs/fallow-cloud#319), mirroring
+/// the cloud runtime-context `provenance` block so the local-capture and cloud
+/// surfaces present one portable shape. F4: provenance is context only; it never
+/// gates a verdict or confidence.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RuntimeCoverageProvenance {
+    /// `local` for a local capture, `cloud` for the cloud read path.
+    pub data_source: RuntimeCoverageDataSource,
+    /// `true` / `false` / `unknown`. Always `unknown` for a local capture: the
+    /// local path has no deployment-origin signal (the cloud may resolve it).
+    pub is_production: String,
+    /// Age in whole days of the most recent evidence; `0` for a fresh local
+    /// capture, `null` when no runtime data is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub freshness_days: Option<u32>,
+    /// `functions_untracked / (functions_tracked + functions_untracked)`, in
+    /// `[0, 1]`. High ratios mark a thin / partial capture.
+    pub untracked_ratio: f64,
+    /// Fraction of resolution-attempted functions whose position could not be
+    /// mapped to source, in `[0, 1]`. `0` for a local capture (positions resolve
+    /// natively or via the sidecar).
+    pub unresolved_ratio: f64,
+    /// Whether `freshness_days` exceeds `stale_after_days`.
+    pub stale: bool,
+    /// The documented staleness cutoff (days), echoed so the rule travels in-band.
+    pub stale_after_days: u32,
+}
+
+impl Default for RuntimeCoverageProvenance {
+    fn default() -> Self {
+        Self {
+            data_source: RuntimeCoverageDataSource::Local,
+            is_production: "unknown".to_owned(),
+            freshness_days: Some(0),
+            untracked_ratio: 0.0,
+            unresolved_ratio: 0.0,
+            stale: false,
+            stale_after_days: RUNTIME_STALE_AFTER_DAYS,
+        }
+    }
+}
+
+/// Staleness cutoff in days, mirrored from the cloud runtime-context
+/// (`RUNTIME_STALE_AFTER_DAYS`) so the local and cloud contracts agree.
+pub const RUNTIME_STALE_AFTER_DAYS: u32 = 14;
 
 #[cfg(test)]
 mod tests {

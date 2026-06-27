@@ -18,11 +18,12 @@ use crate::coverage::cloud_client::{
 use crate::error::emit_error;
 use crate::health::HealthOptions;
 use fallow_output::{
-    RuntimeCoverageAction, RuntimeCoverageCaptureQuality, RuntimeCoverageConfidence,
-    RuntimeCoverageDataSource, RuntimeCoverageEvidence, RuntimeCoverageFinding,
-    RuntimeCoverageHotPath, RuntimeCoverageMessage, RuntimeCoverageReport,
-    RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion,
-    RuntimeCoverageSummary, RuntimeCoverageVerdict,
+    RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageCaptureQuality,
+    RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
+    RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
+    RuntimeCoverageProvenance, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+    RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
+    RuntimeCoverageVerdict,
 };
 
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
@@ -563,6 +564,38 @@ fn merge_cloud_snapshot(
 
     let warnings = cloud_warnings(snapshot, unmatched_cloud_functions);
 
+    // #316 / #319 (cloud-join surface): same trust-output shape as the local
+    // path. The cloud snapshot's own actionable/freshness pass-through is #328
+    // territory, so freshness is left unknown here; the gate (no tracked
+    // functions => non-actionable) and origin-unknown default still hold.
+    let denominator = snapshot.summary.functions_tracked + snapshot.summary.functions_untracked;
+    let untracked_ratio = if denominator == 0 {
+        0.0
+    } else {
+        snapshot.summary.functions_untracked as f64 / denominator as f64
+    };
+    let actionable = snapshot.summary.functions_tracked > 0;
+    let (actionability_reason, actionability_verdict) = if actionable {
+        (None, None)
+    } else {
+        (
+            Some(
+                "No functions were tracked at runtime in this capture, so there is no usable runtime evidence to act on. Treat all functions as do-not-act; this is NOT cold."
+                    .to_owned(),
+            ),
+            Some("insufficient_evidence".to_owned()),
+        )
+    };
+    let provenance = RuntimeCoverageProvenance {
+        data_source: RuntimeCoverageDataSource::Cloud,
+        is_production: "unknown".to_owned(),
+        freshness_days: None,
+        untracked_ratio,
+        unresolved_ratio: 0.0,
+        stale: false,
+        stale_after_days: RUNTIME_STALE_AFTER_DAYS,
+    };
+
     RuntimeCoverageReport {
         schema_version: RuntimeCoverageSchemaVersion::V1,
         verdict: if findings.is_empty() {
@@ -590,6 +623,10 @@ fn merge_cloud_snapshot(
         importance,
         watermark: None,
         warnings,
+        actionable,
+        actionability_reason,
+        actionability_verdict,
+        provenance,
     }
 }
 
@@ -1894,6 +1931,10 @@ mod tests {
             ],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         };
         apply_top_limit(&mut report, Some(1));
         assert_eq!(report.findings.len(), 1);

@@ -1652,6 +1652,28 @@
             "$ref": "#/definitions/RuntimeCoverageMessage"
           },
           "description": "Non-fatal merge or coverage diagnostics. Omitted when empty."
+        },
+        "actionable": {
+          "type": "boolean",
+          "description": "Whether an autonomous agent may act on this report (fallow-rs/fallow-cloud#316,\nmirrors the cloud runtime-context contract). `false` when the capture\ncarries no usable runtime evidence (no tracked functions); then\n`actionability_verdict` is `insufficient_evidence` and\n`actionability_reason` explains. F4: a non-action floor, never a gate on a\npositive verdict."
+        },
+        "actionability_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the report is non-actionable; `null` when `actionable` is true."
+        },
+        "actionability_verdict": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "First-class non-action verdict (`insufficient_evidence`) when not\nactionable; `null` otherwise. Mirrors the cloud runtime-context `verdict`;\nnamed distinctly from the report-context `verdict` above to avoid a\ncollision."
+        },
+        "provenance": {
+          "description": "Provenance an agent reads to self-attenuate confidence (fallow-rs/fallow-cloud#319,\nmirrors the cloud runtime-context `provenance`). F4: context only.",
+          "$ref": "#/definitions/RuntimeCoverageProvenance"
         }
       },
       "required": [
@@ -1659,7 +1681,9 @@
         "verdict",
         "summary",
         "blast_radius",
-        "importance"
+        "importance",
+        "actionable",
+        "provenance"
       ],
       "description": "Runtime coverage findings merged into the health report or emitted by\n`fallow coverage analyze`. Present in health output when --runtime-coverage\nis used. Shape mirrors the runtime coverage JSON contract; cloud mode\nfetches runtime facts explicitly and merges them locally with AST/static\nanalysis."
     },
@@ -17176,6 +17200,51 @@
         "meets_observation_volume"
       ],
       "description": "Discriminator inputs that PRODUCED a finding's verdict (fallow-rs/fallow-cloud#321),\nemitted alongside the verdict so an agent can reproduce it and see the\nminimum-observation confidence cap instead of re-deriving them from scratch.\nF4: these make the EXISTING Fallow-owned discriminators legible; they are not\na new or external signal and gate nothing. Pairs with `evidence.static_status`\n(the static half of the discriminator set)."
+    },
+    "RuntimeCoverageProvenance": {
+      "type": "object",
+      "properties": {
+        "data_source": {
+          "description": "`local` for a local capture, `cloud` for the cloud read path.",
+          "$ref": "#/definitions/RuntimeCoverageDataSource"
+        },
+        "is_production": {
+          "type": "string",
+          "description": "`true` / `false` / `unknown`. Always `unknown` for a local capture: the\nlocal path has no deployment-origin signal (the cloud may resolve it)."
+        },
+        "freshness_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Age in whole days of the most recent evidence; `0` for a fresh local\ncapture, `null` when no runtime data is present."
+        },
+        "untracked_ratio": {
+          "type": "number",
+          "description": "`functions_untracked / (functions_tracked + functions_untracked)`, in\n`[0, 1]`. High ratios mark a thin / partial capture."
+        },
+        "unresolved_ratio": {
+          "type": "number",
+          "description": "Fraction of resolution-attempted functions whose position could not be\nmapped to source, in `[0, 1]`. `0` for a local capture (positions resolve\nnatively or via the sidecar)."
+        },
+        "stale": {
+          "type": "boolean",
+          "description": "Whether `freshness_days` exceeds `stale_after_days`."
+        },
+        "stale_after_days": {
+          "type": "integer",
+          "description": "The documented staleness cutoff (days), echoed so the rule travels in-band."
+        }
+      },
+      "required": [
+        "data_source",
+        "is_production",
+        "untracked_ratio",
+        "unresolved_ratio",
+        "stale",
+        "stale_after_days"
+      ],
+      "description": "Provenance of a runtime-coverage report (fallow-rs/fallow-cloud#319), mirroring\nthe cloud runtime-context `provenance` block so the local-capture and cloud\nsurfaces present one portable shape. F4: provenance is context only; it never\ngates a verdict or confidence."
     }
   }
 }

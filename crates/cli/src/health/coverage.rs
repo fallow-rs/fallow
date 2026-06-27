@@ -31,11 +31,12 @@ use crate::health::scoring::IstanbulCoverage;
 use crate::license::verifying_key;
 use fallow_engine::RuntimeCoverageOptions;
 use fallow_output::{
-    RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
-    RuntimeCoverageDiscriminators, RuntimeCoverageEvidence, RuntimeCoverageFinding,
-    RuntimeCoverageHotPath, RuntimeCoverageMessage, RuntimeCoverageReport,
-    RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion,
-    RuntimeCoverageSummary, RuntimeCoverageVerdict, RuntimeCoverageWatermark,
+    RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageConfidence,
+    RuntimeCoverageDataSource, RuntimeCoverageDiscriminators, RuntimeCoverageEvidence,
+    RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
+    RuntimeCoverageProvenance, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+    RuntimeCoverageRiskBand, RuntimeCoverageSchemaVersion, RuntimeCoverageSummary,
+    RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
 
 /// Ed25519 public key used to verify the fallow-cov sidecar binary at every
@@ -1880,6 +1881,40 @@ fn convert_response(
         0.0
     };
 
+    // #316 / #319: mirror the cloud runtime-context trust-output contract on the
+    // local report. A capture with no tracked functions carries no usable
+    // runtime evidence, so it is non-actionable (insufficient_evidence) rather
+    // than read as cold. A local capture is fresh (age 0) and origin-unknown.
+    let functions_tracked = response.summary.functions_tracked;
+    let functions_untracked = response.summary.functions_untracked;
+    let denominator = functions_tracked + functions_untracked;
+    let untracked_ratio = if denominator == 0 {
+        0.0
+    } else {
+        functions_untracked as f64 / denominator as f64
+    };
+    let actionable = functions_tracked > 0;
+    let (actionability_reason, actionability_verdict) = if actionable {
+        (None, None)
+    } else {
+        (
+            Some(
+                "No functions were tracked at runtime in this capture, so there is no usable runtime evidence to act on. Treat all functions as do-not-act; this is NOT cold."
+                    .to_owned(),
+            ),
+            Some("insufficient_evidence".to_owned()),
+        )
+    };
+    let provenance = RuntimeCoverageProvenance {
+        data_source: RuntimeCoverageDataSource::Local,
+        is_production: "unknown".to_owned(),
+        freshness_days: Some(0),
+        untracked_ratio,
+        unresolved_ratio: 0.0,
+        stale: false,
+        stale_after_days: RUNTIME_STALE_AFTER_DAYS,
+    };
+
     RuntimeCoverageReport {
         schema_version: RuntimeCoverageSchemaVersion::V1,
         verdict: map_report_verdict(&response.verdict),
@@ -1914,6 +1949,10 @@ fn convert_response(
                 message: warning.message,
             })
             .collect(),
+        actionable,
+        actionability_reason,
+        actionability_verdict,
+        provenance,
     }
 }
 
@@ -3125,6 +3164,68 @@ mod tests {
         assert!((discriminators.low_traffic_threshold - 0.001).abs() < f64::EPSILON);
         assert_eq!(discriminators.min_observation_volume, 5_000);
         assert!(!discriminators.meets_observation_volume);
+
+        // #316 / #319: tracked functions present => actionable, with a local,
+        // origin-unknown, fresh provenance mirroring the cloud contract.
+        assert!(report.actionable);
+        assert_eq!(report.actionability_reason, None);
+        assert_eq!(report.actionability_verdict, None);
+        assert_eq!(
+            report.provenance.data_source,
+            fallow_output::RuntimeCoverageDataSource::Local,
+        );
+        assert_eq!(report.provenance.is_production, "unknown");
+        assert_eq!(report.provenance.freshness_days, Some(0));
+        assert!(!report.provenance.stale);
+        assert_eq!(report.provenance.stale_after_days, 14);
+    }
+
+    #[test]
+    fn convert_response_with_no_tracked_functions_is_non_actionable() {
+        let report = convert_response(
+            Response {
+                protocol_version: "0.2.0".to_owned(),
+                verdict: ReportVerdict::Clean,
+                summary: Summary {
+                    functions_tracked: 0,
+                    functions_hit: 0,
+                    functions_unhit: 0,
+                    functions_untracked: 2,
+                    coverage_percent: 0.0,
+                    trace_count: 0,
+                    period_days: 0,
+                    deployments_seen: 0,
+                    capture_quality: None,
+                },
+                findings: vec![],
+                hot_paths: vec![],
+                blast_radius: vec![],
+                importance: vec![],
+                watermark: None,
+                errors: vec![],
+                warnings: vec![],
+            },
+            &FxHashMap::default(),
+            None,
+            5_000,
+            0.001,
+        );
+
+        // #316: no tracked functions => no usable runtime evidence => the report
+        // is non-actionable with a first-class insufficient_evidence verdict,
+        // never read as cold. #319: untracked_ratio reflects the thin capture.
+        assert!(!report.actionable);
+        assert_eq!(
+            report.actionability_verdict.as_deref(),
+            Some("insufficient_evidence"),
+        );
+        assert!(
+            report
+                .actionability_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("NOT cold")),
+        );
+        assert!((report.provenance.untracked_ratio - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -131,7 +131,17 @@ expression: redact_version(&json_str)
         "code": "partial-input",
         "message": "One dump was incomplete."
       }
-    ]
+    ],
+    "actionable": true,
+    "provenance": {
+      "data_source": "local",
+      "is_production": "unknown",
+      "freshness_days": 0,
+      "untracked_ratio": 0.0,
+      "unresolved_ratio": 0.0,
+      "stale": false,
+      "stale_after_days": 14
+    }
   },
   "next_steps": [
     {

@@ -2779,6 +2779,10 @@ mod tests {
             importance: vec![],
             watermark: Some(fallow_output::RuntimeCoverageWatermark::LicenseExpiredGrace),
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         });
 
         let text = plain(&build_health_human_lines(&report, &root));
@@ -2877,6 +2881,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         }
     }
 

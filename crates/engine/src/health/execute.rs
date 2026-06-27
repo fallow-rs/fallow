@@ -7776,6 +7776,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         };
 
         apply_runtime_coverage_filters(
@@ -7834,6 +7838,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         };
 
         apply_runtime_coverage_filters(
@@ -7879,6 +7887,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         };
 
         apply_runtime_coverage_filters(
@@ -7918,6 +7930,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         };
 
         apply_runtime_coverage_filters(
@@ -7946,6 +7962,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         }
     }
 
@@ -8175,6 +8195,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         };
 
         apply_runtime_coverage_filters(
@@ -8222,6 +8246,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         };
 
         apply_runtime_coverage_filters(&mut report, &RuntimeCoverageFilterContext::new(root));
@@ -8253,6 +8281,10 @@ mod tests {
             importance: vec![],
             watermark: Some(fallow_output::RuntimeCoverageWatermark::LicenseExpiredGrace),
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         };
 
         apply_runtime_coverage_filters(

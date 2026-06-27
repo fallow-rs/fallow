@@ -917,6 +917,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         };
         report.summary.functions_tracked = 1;
         report
@@ -954,6 +958,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         }
     }
 
@@ -993,6 +1001,10 @@ mod tests {
             importance: vec![],
             watermark: None,
             warnings: vec![],
+            actionable: true,
+            actionability_reason: None,
+            actionability_verdict: None,
+            provenance: fallow_output::RuntimeCoverageProvenance::default(),
         }
     }
 

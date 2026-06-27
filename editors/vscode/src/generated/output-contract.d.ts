@@ -4874,6 +4874,27 @@ watermark?: (RuntimeCoverageWatermark | null)
  * Non-fatal merge or coverage diagnostics. Omitted when empty.
  */
 warnings?: RuntimeCoverageMessage[]
+/**
+ * Whether an autonomous agent may act on this report (fallow-rs/fallow-cloud#316,
+ * mirrors the cloud runtime-context contract). `false` when the capture
+ * carries no usable runtime evidence (no tracked functions); then
+ * `actionability_verdict` is `insufficient_evidence` and
+ * `actionability_reason` explains. F4: a non-action floor, never a gate on a
+ * positive verdict.
+ */
+actionable: boolean
+/**
+ * Why the report is non-actionable; `null` when `actionable` is true.
+ */
+actionability_reason?: (string | null)
+/**
+ * First-class non-action verdict (`insufficient_evidence`) when not
+ * actionable; `null` otherwise. Mirrors the cloud runtime-context `verdict`;
+ * named distinctly from the report-context `verdict` above to avoid a
+ * collision.
+ */
+actionability_verdict?: (string | null)
+provenance: RuntimeCoverageProvenance
 }
 /**
  * Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
@@ -5246,6 +5267,44 @@ code: string
  * Human-readable warning message.
  */
 message: string
+}
+/**
+ * Provenance of a runtime-coverage report (fallow-rs/fallow-cloud#319), mirroring
+ * the cloud runtime-context `provenance` block so the local-capture and cloud
+ * surfaces present one portable shape. F4: provenance is context only; it never
+ * gates a verdict or confidence.
+ */
+export interface RuntimeCoverageProvenance {
+data_source: RuntimeCoverageDataSource
+/**
+ * `true` / `false` / `unknown`. Always `unknown` for a local capture: the
+ * local path has no deployment-origin signal (the cloud may resolve it).
+ */
+is_production: string
+/**
+ * Age in whole days of the most recent evidence; `0` for a fresh local
+ * capture, `null` when no runtime data is present.
+ */
+freshness_days?: (number | null)
+/**
+ * `functions_untracked / (functions_tracked + functions_untracked)`, in
+ * `[0, 1]`. High ratios mark a thin / partial capture.
+ */
+untracked_ratio: number
+/**
+ * Fraction of resolution-attempted functions whose position could not be
+ * mapped to source, in `[0, 1]`. `0` for a local capture (positions resolve
+ * natively or via the sidecar).
+ */
+unresolved_ratio: number
+/**
+ * Whether `freshness_days` exceeds `stale_after_days`.
+ */
+stale: boolean
+/**
+ * The documented staleness cutoff (days), echoed so the rule travels in-band.
+ */
+stale_after_days: number
 }
 /**
  * Combined coverage, runtime, complexity, and change-scope verdicts.
