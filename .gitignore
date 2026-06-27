@@ -36,6 +36,9 @@ benchmarks/knip6/
 # Incremental cache
 .fallow/
 
+# Ephemeral git worktrees created for parallel/agent work
+.worktrees/
+
 # Python cache
 __pycache__/
 
