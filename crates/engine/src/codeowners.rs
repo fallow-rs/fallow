@@ -114,7 +114,7 @@ impl CodeOwners {
     }
 
     /// Parse CODEOWNERS content into a lookup structure.
-    pub(crate) fn parse(content: &str) -> Result<Self, String> {
+    pub fn parse(content: &str) -> Result<Self, String> {
         let mut parser = CodeOwnersParser::new();
         for line in content.lines() {
             parser.parse_line(line)?;

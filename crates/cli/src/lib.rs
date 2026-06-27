@@ -71,7 +71,7 @@ mod base_worktree;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
-mod baseline;
+use fallow_engine::baseline;
 #[allow(
     dead_code,
     unused_imports,
@@ -85,7 +85,7 @@ mod cache_notice;
 )]
 mod check;
 /// CODEOWNERS file parser and ownership lookup.
-pub mod codeowners;
+pub use fallow_engine::codeowners;
 #[allow(
     dead_code,
     unused_imports,
@@ -201,8 +201,8 @@ mod task_matrix;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
-mod validate;
-mod vital_signs;
+use fallow_engine::validate;
+use fallow_engine::vital_signs;
 
 pub use runtime_support::{AnalysisKind, GroupBy};
 pub(crate) use runtime_support::{

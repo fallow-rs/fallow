@@ -32,9 +32,13 @@ pub mod discover {
     pub use fallow_core::discover::*;
 }
 
+pub mod baseline;
+pub mod codeowners;
 pub mod dead_code;
 pub mod flags;
 pub mod health;
+pub mod validate;
+pub mod vital_signs;
 
 /// Extracted semantic types exposed through the engine boundary.
 pub mod extract {

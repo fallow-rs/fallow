@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_engine::git_env::clear_ambient_git_env;
+use crate::git_env::clear_ambient_git_env;
 
 /// Number of seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;
@@ -23,13 +23,13 @@ use fallow_output::{
 /// Fields are `Option` because not all pipelines run in every health invocation.
 pub struct VitalSignsInput<'a> {
     /// All parsed modules (always available).
-    pub modules: &'a [fallow_engine::extract::ModuleInfo],
+    pub modules: &'a [crate::extract::ModuleInfo],
     /// Optional file-id allowlist used to restrict per-module aggregates
     /// (cyclomatic distribution, total LOC, unit profiles) to a subset.
     /// Used by `--workspace` and `--group-by` to scope project-wide metrics
     /// to a single workspace package without re-parsing.
     /// `None` includes every module in `modules`.
-    pub module_filter: Option<&'a rustc_hash::FxHashSet<fallow_engine::discover::FileId>>,
+    pub module_filter: Option<&'a rustc_hash::FxHashSet<crate::discover::FileId>>,
     /// File health scores (available when file_scores/hotspots/targets are computed).
     pub file_scores: Option<&'a [FileHealthScore]>,
     /// Hotspot entries (available when hotspots are computed).
@@ -45,9 +45,7 @@ pub struct VitalSignsInput<'a> {
 
 impl<'a> VitalSignsInput<'a> {
     /// Iterate the modules selected by `module_filter`.
-    fn selected_modules(
-        &self,
-    ) -> impl Iterator<Item = &'a fallow_engine::extract::ModuleInfo> + '_ {
+    fn selected_modules(&self) -> impl Iterator<Item = &'a crate::extract::ModuleInfo> + '_ {
         let filter = self.module_filter;
         self.modules
             .iter()
@@ -384,7 +382,7 @@ fn compute_interfacing_risk_profile(param_counts: &[u8]) -> RiskProfile {
 ///
 /// The component-graph analogue (render fan-in concentration:
 /// `p95_render_fan_in` / `render_fan_in_high_pct` / `max_render_fan_in`) is
-/// computed in core (`fallow_engine::render_fan_in`), which has the
+/// computed in core (`crate::render_fan_in`), which has the
 /// resolved-module graph the CLI lacks. It mirrors this helper verbatim (p95 +
 /// `high_pct` over the per-component distinct-parents distribution, reusing the
 /// same `max(p95, 10)` floor) and is assigned onto `VitalSigns` in
@@ -601,6 +599,10 @@ pub fn build_counts(input: &VitalSignsInput<'_>) -> VitalSignsCounts {
 }
 
 /// Get the current git SHA (short form).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "trusted git spawn with ambient repo-state env stripped, mirrors fallow_core::spawn::git"
+)]
 fn git_sha(root: &Path) -> Option<String> {
     let mut command = std::process::Command::new("git");
     command
@@ -615,6 +617,10 @@ fn git_sha(root: &Path) -> Option<String> {
 }
 
 /// Get the current git branch name.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "trusted git spawn with ambient repo-state env stripped, mirrors fallow_core::spawn::git"
+)]
 fn git_branch(root: &Path) -> Option<String> {
     let mut command = std::process::Command::new("git");
     command
@@ -658,11 +664,7 @@ pub fn build_snapshot(
 }
 
 /// ISO 8601 UTC timestamp without external chrono dependency.
-#[expect(
-    clippy::redundant_pub_crate,
-    reason = "module is private; pub(crate) documents the cross-module (impact, audit) reuse intent"
-)]
-pub(crate) fn chrono_timestamp() -> String {
+pub fn chrono_timestamp() -> String {
     use std::time::SystemTime;
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -729,6 +731,10 @@ pub fn save_snapshot(
 ///
 /// Corrupt or unreadable files are skipped with a warning to stderr.
 /// Returns an empty vec if the directory does not exist.
+#[expect(
+    clippy::print_stderr,
+    reason = "corrupt-snapshot warnings to stderr, preserved verbatim from the CLI health path"
+)]
 pub fn load_snapshots(root: &Path) -> Vec<VitalSignsSnapshot> {
     let dir = root.join(".fallow").join("snapshots");
     let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -1111,9 +1117,9 @@ impl RoundTo for f64 {
 mod tests {
     use super::*;
 
-    fn make_module(id: u32, cyclomatic: u16) -> fallow_engine::extract::ModuleInfo {
-        fallow_engine::extract::ModuleInfo {
-            file_id: fallow_engine::discover::FileId(id),
+    fn make_module(id: u32, cyclomatic: u16) -> crate::extract::ModuleInfo {
+        crate::extract::ModuleInfo {
+            file_id: crate::discover::FileId(id),
             exports: Vec::new(),
             imports: Vec::new(),
             re_exports: Vec::new(),
@@ -1206,7 +1212,7 @@ mod tests {
         clippy::cast_possible_truncation,
         reason = "test values are trivially small"
     )]
-    fn make_modules() -> Vec<fallow_engine::extract::ModuleInfo> {
+    fn make_modules() -> Vec<crate::extract::ModuleInfo> {
         (0..10)
             .map(|i| make_module(i, (i as u16 + 1) * 2))
             .collect()
@@ -1276,7 +1282,7 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.5,
                 fan_in: 5,
-                trend: fallow_engine::churn::ChurnTrend::Stable,
+                trend: crate::churn::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             },
@@ -1289,7 +1295,7 @@ mod tests {
                 lines_deleted: 20,
                 complexity_density: 0.2,
                 fan_in: 2,
-                trend: fallow_engine::churn::ChurnTrend::Cooling,
+                trend: crate::churn::ChurnTrend::Cooling,
                 ownership: None,
                 is_test_path: false,
             },
@@ -1302,7 +1308,7 @@ mod tests {
                 lines_deleted: 30,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: fallow_engine::churn::ChurnTrend::Accelerating,
+                trend: crate::churn::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             },
