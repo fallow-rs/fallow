@@ -8,14 +8,17 @@ use serde::Serialize;
 pub struct RoutingUnit {
     /// Root-relative path of the changed file.
     pub file: String,
-    /// Routed expert(s), when ownership signals are available.
+    /// The routed expert(s): the CODEOWNERS declared owner when present, else the
+    /// top git-blame / recency contributor; empty when no signal is available.
     pub expert: Vec<String>,
-    /// Whether the only qualified owner is a single contributor.
+    /// Whether the only qualified owner is a single contributor (bus-factor-1):
+    /// a knowledge-concentration risk worth a second reviewer.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bus_factor_one: bool,
 }
 
-/// The full routing section.
+/// The full routing section: one unit per changed source file with a routable
+/// signal. Files with no ownership signal are omitted (no noise).
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RoutingFacts {

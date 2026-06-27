@@ -4,6 +4,11 @@ use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_n
 use serde::Serialize;
 
 /// Envelope emitted by `fallow explain <issue-type> --format json`.
+///
+/// Standalone rule explanation. This command does not run project analysis
+/// and intentionally returns a compact object without `schema_version` /
+/// `version` metadata; consumers that need those should call any other
+/// fallow JSON-producing command.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -94,9 +99,13 @@ pub struct InspectEvidence {
     pub duplication: InspectEvidenceSection,
     pub complexity: InspectEvidenceSection,
     pub security: InspectEvidenceSection,
-    /// Impact closure scoped to the inspected file as the seed.
+    /// Impact closure scoped to the inspected file as the seed: the transitive
+    /// affected-but-not-in-diff set + coordination gap.
     pub impact_closure: InspectEvidenceSection,
-    /// Optional symbol-level call chain.
+    /// OPT-IN symbol-level call chain. Present only when `--symbol-chain` was
+    /// requested AND the target is a SYMBOL (best-effort, syntactic, OFF the
+    /// ranked path). `None` (omitted) by default: symbol-level chains are
+    /// best-effort and not part of the trusted ranked evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub symbol_chain: Option<InspectEvidenceSection>,
 }

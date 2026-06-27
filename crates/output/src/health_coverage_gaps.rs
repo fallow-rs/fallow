@@ -31,7 +31,12 @@ pub struct UntestedExport {
     pub col: u32,
 }
 
-/// Wire-shape envelope for an [`UntestedFile`] finding.
+/// Wire-shape envelope for an [`UntestedFile`] finding. Carries the bare
+/// [`UntestedFile`] flattened in plus a typed `actions` array. The action
+/// vec is computed at construction time using a project-root-relative path
+/// so descriptions match `strip_root_prefix`'s post-pass output on the inner
+/// `path` field. Schemars derives the merged shape natively; this retires
+/// the `augment_finding_definition` graft for `UntestedFile`.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedFileFinding {
@@ -68,7 +73,9 @@ impl UntestedFileFinding {
     }
 }
 
-/// Wire-shape envelope for an [`UntestedExport`] finding.
+/// Wire-shape envelope for an [`UntestedExport`] finding. Same pattern as
+/// [`UntestedFileFinding`]: flattens the bare finding and carries a typed
+/// `actions` array computed at construction time.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct UntestedExportFinding {
@@ -132,17 +139,20 @@ pub struct CoverageGapSummary {
     pub untested_exports: usize,
 }
 
-/// Static test coverage gaps derived from the module graph.
+/// Static test coverage gaps derived from the module graph. Shows runtime files
+/// and exports with no test dependency path.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CoverageGaps {
     /// Summary metrics for the current analysis scope.
     pub summary: CoverageGapSummary,
-    /// Runtime files with no test dependency path.
+    /// Runtime files with no test dependency path. Each entry carries its
+    /// own `actions` array via [`UntestedFileFinding`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub files: Vec<UntestedFileFinding>,
-    /// Runtime exports with no test-reachable reference chain.
+    /// Runtime exports with no test-reachable reference chain. Each entry
+    /// carries its own `actions` array via [`UntestedExportFinding`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[cfg_attr(feature = "schema", schemars(default))]
     pub exports: Vec<UntestedExportFinding>,

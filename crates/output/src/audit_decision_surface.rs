@@ -6,7 +6,8 @@ use serde::Serialize;
 pub const DECISION_SURFACE_SCHEMA_VERSION: u32 = 1;
 
 /// The exactly-three shippable decision categories (the SOLID-3). No cut category
-/// is representable, so confirmed-noise categories cannot ship by construction.
+/// (abstraction / deletion / convention / irreversibility) is representable: this
+/// enum is the structural guarantee that confirmed-noise categories never ship.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -59,6 +60,7 @@ impl DecisionCategory {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Decision {
     /// Deterministic anchor to the fallow-emitted candidate this decision frames.
+    /// `accept_signal_id` rejects any id not in the emitted set.
     pub signal_id: String,
     /// One of the SOLID-3 categories.
     pub category: DecisionCategory,
@@ -66,25 +68,38 @@ pub struct Decision {
     pub question: String,
     /// Root-relative file the decision is anchored at.
     pub anchor_file: String,
-    /// 1-based anchor line, or 0 when unavailable.
+    /// 1-based anchor line, when the underlying signal carries one (0 = file head).
     pub anchor_line: u32,
     /// The raw fallow-emitted candidate key the `signal_id` hashes.
     pub signal_key: String,
-    /// The pre-rename `signal_id`, when the anchor file was renamed.
+    /// The `signal_id` this decision WOULD have had before any rename in this
+    /// change (the anchor file's pre-rename path). Present only when the anchor was
+    /// renamed. A review-memory layer carries a dismissal across a `git mv`: if
+    /// `previous_signal_id` was dismissed in an earlier PR, treat this decision as
+    /// dismissed too. Keeps `signal_id` itself exact + deterministic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_signal_id: Option<String>,
-    /// Blast radius used for ranking.
+    /// Blast radius: count of modules affected beyond the diff by this decision.
     pub blast: u64,
-    /// `blast * reversibility_weight`.
+    /// `blast * reversibility_weight`: the rank key (sorted descending).
     pub consequence: u64,
-    /// Routed expert(s), when ownership signals are available.
+    /// The routed expert(s) to ask, from ownership routing. Empty when no
+    /// ownership signal is available for the anchor file.
     pub expert: Vec<String>,
     /// Whether the anchor file's only qualified owner is one person.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bus_factor_one: bool,
-    /// In-repo modules outside the diff that already depend on this anchor.
+    /// Honest per-decision count: in-repo modules OUTSIDE the diff that already
+    /// depend on this decision's anchor. This is the DISPLAY number (taste
+    /// ownership: the human reads reversibility from the count itself), distinct
+    /// from `blast` (the project-wide proxy used only for ranking). Never a door
+    /// label. Internal-only by construction, so it cannot see a published library's
+    /// external consumers; the public-API trade-off clause names that risk in prose.
     pub internal_consumer_count: u64,
-    /// The named structural trade-off this decision introduces.
+    /// The named structural sacrifice this change makes, stated as a fact, never a
+    /// recommendation (e.g. "Couples `app` to `infra`; 4 in-repo modules already
+    /// depend on this anchor."). A sibling fact to `question`; it never tells the
+    /// human what to choose.
     pub tradeoff: String,
 }
 
@@ -98,7 +113,8 @@ pub struct TruncationNote {
     pub reason: String,
 }
 
-/// The ranked, capped decision surface plus the deterministic signal allowlist.
+/// The ranked, capped decision surface plus the set of signal_ids the
+/// deterministic layer emitted (the anti-hallucination allowlist).
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DecisionSurface {
@@ -107,7 +123,9 @@ pub struct DecisionSurface {
     /// Present when more than the cap were extracted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub truncated: Option<TruncationNote>,
-    /// Every `signal_id` the deterministic layer emitted.
+    /// Every signal_id the deterministic layer emitted, INCLUDING those whose
+    /// decision was collapsed below the cap or suppressed. The anti-hallucination
+    /// allowlist: an agent decision whose id is absent is rejected.
     pub emitted_signal_ids: Vec<String>,
 }
 
@@ -119,7 +137,8 @@ impl DecisionSurface {
     }
 }
 
-/// Independently-versioned wire-version newtype.
+/// Independently-versioned wire-version newtype. Serializes as the integer
+/// [`DECISION_SURFACE_SCHEMA_VERSION`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DecisionSurfaceSchemaVersion(pub u32);
@@ -130,7 +149,8 @@ impl Default for DecisionSurfaceSchemaVersion {
     }
 }
 
-/// A structured action attached to a surfaced decision.
+/// A structured action attached to a surfaced decision (the agent-actionable
+/// surface). Mirrors the typed-action shape the rest of fallow emits.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DecisionAction {
@@ -142,7 +162,8 @@ pub struct DecisionAction {
     /// Runnable command or paste-ready suppression comment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
-    /// Whether fallow can carry the action out automatically.
+    /// Whether fallow can carry the action out automatically. Always `false`:
+    /// a decision is a human judgment, never auto-applied.
     pub auto_fixable: bool,
 }
 
@@ -164,11 +185,14 @@ pub struct DecisionWithActions {
     /// The underlying decision.
     #[serde(flatten)]
     pub decision: Decision,
-    /// Structured actions.
+    /// Structured actions: route to the expert, or suppress.
     pub actions: Vec<DecisionAction>,
 }
 
-/// The separable `decision-surface` envelope.
+/// The separable `decision-surface` envelope: the single call that puts taste-
+/// decisions in front of a human, callable WITHOUT the full pipeline (the
+/// `decision_surface` MCP tool's output). Carries `kind`/`schema_version` plus
+/// structured `actions[]` per decision.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -187,7 +211,7 @@ pub struct DecisionSurfaceOutput {
     /// Present when more than the cap were extracted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub truncated: Option<TruncationNote>,
-    /// Count of fallow-emitted signal ids.
+    /// Count of fallow-emitted signal_ids (the anti-hallucination allowlist size).
     pub signal_count: usize,
 }
 

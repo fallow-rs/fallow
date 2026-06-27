@@ -30,13 +30,22 @@
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
 /**
  * Typed root of every fallow JSON envelope shape that serializes as a JSON
- * object and participates in the documented `FallowOutput` contract.
+ * object and participates in the documented `FallowOutput` contract. The
+ * schema derived from this enum drives the document-root `oneOf` in
+ * `docs/output-schema.json`.
  *
- * The default wire shape carries a top-level `kind` discriminator so agents and
- * schema-validating clients can select the variant without probing for unique
- * field presence. CodeClimate output is intentionally not in this enum because
- * it serializes as a bare JSON array per the Code Climate / GitLab Code Quality
- * spec.
+ * The default wire shape now carries a top-level `kind` discriminator so
+ * agents and schema-validating clients can select the variant in O(1) instead
+ * of probing for unique field presence. `--legacy-envelope` is a one-cycle
+ * compatibility flag that removes only this document-root `kind` field from
+ * CLI JSON output; nested report objects are not rewritten.
+ *
+ * One envelope is intentionally NOT in this enum:
+ * - `CodeClimateOutput` serializes as a bare JSON array
+ *   (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality
+ *   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
+ *   variant and wrapping the array would break the spec. The root schema
+ *   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
  */
 export type FallowOutput = ((AuditOutput & {
 kind: "audit"
@@ -365,7 +374,8 @@ size_bytes: number
 kind: "skipped-minified-file"
 })
 /**
- * Discriminant for [`CloneGroupAction::kind`].
+ * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
+ * emitted by the legacy `build_clone_group_actions` walker.
  */
 export type CloneGroupActionType = ("extract-shared" | "suppress-line")
 /**
@@ -607,7 +617,10 @@ export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_fil
  */
 export type ReviewEnvelopeEvent = "COMMENT"
 /**
- * Per-line review comment.
+ * Per-line review comment. Schema is an `anyOf` between GitHub and GitLab
+ * shapes; at runtime every entry in a single envelope comes from the same
+ * provider because the envelope is built from one provider's branch in
+ * `crates/cli/src/report/ci/review.rs::render_review_envelope`.
  */
 export type ReviewComment = (GitHubReviewComment | GitLabReviewComment)
 /**
@@ -627,7 +640,8 @@ export type ReviewEnvelopeSchema = ("fallow-review-envelope/v1" | "fallow-review
  */
 export type ReviewProvider = ("github" | "gitlab")
 /**
- * `meta.check_conclusion` for the GitHub review envelope.
+ * `meta.check_conclusion` for the GitHub review envelope. Maps to the
+ * GitHub Checks API conclusion field.
  */
 export type ReviewCheckConclusion = ("success" | "neutral" | "failure")
 /**
@@ -652,11 +666,18 @@ export type LogicalGroupStatus = ("ok" | "empty" | "invalid_path")
  */
 export type GroupByMode = ("owner" | "directory" | "package" | "section")
 /**
- * Wire-version discriminator for [`ImpactReport`].
+ * Wire-version discriminator for [`ImpactReport`]. Independent from the global
+ * `SchemaVersion` (the impact report versions on its own cadence) and from the
+ * on-disk `STORE_SCHEMA_VERSION` (the persisted store shape versions
+ * separately). Serializes as a string `const` so JSON consumers can switch on
+ * it, matching the other independently-versioned envelopes (e.g.
+ * `CoverageAnalyzeSchemaVersion`).
  */
 export type ImpactReportSchemaVersion = "1"
 /**
- * Why Impact tracking is or is not active for a project.
+ * Why Impact tracking is (or is not) active for a project. `Project` = an
+ * explicit per-repo `enable`; `User` = the user-global default with no per-repo
+ * decision; `Default` = off (no per-repo decision and no global default).
  */
 export type EnabledSource = ("project" | "user" | "default")
 /**
@@ -664,11 +685,14 @@ export type EnabledSource = ("project" | "user" | "default")
  */
 export type ImpactTrendDirection = ("improving" | "declining" | "stable")
 /**
- * Independent wire-version for the cross-repo impact report.
+ * Independent wire-version for the cross-repo report, on its own cadence (it
+ * versions separately from the per-project `ImpactReportSchemaVersion` and the
+ * on-disk `STORE_SCHEMA_VERSION`).
  */
 export type CrossRepoImpactSchemaVersion = "1"
 /**
- * The `fallow security --format json` schema version.
+ * The `fallow security --format json` schema version. Independently versioned
+ * from the main contract, mirroring `ImpactReportSchemaVersion`.
  */
 export type SecuritySchemaVersion = ("1" | "2" | "3" | "4" | "5" | "6" | "7")
 /**
@@ -683,7 +707,9 @@ export type Severity = ("error" | "warn" | "off")
  */
 export type SecurityGateMode = ("new" | "newly-reachable")
 /**
- * Gate verdict on the wire.
+ * Gate verdict on the wire. `fail` is the CI-state token; human output renders
+ * it as "REVIEW REQUIRED" because these stay unverified candidates, never
+ * confirmed vulnerabilities.
  */
 export type SecurityGateVerdict = ("pass" | "fail")
 /**
@@ -749,22 +775,30 @@ export type SecurityVerifierVerdictStatus = ("survivor" | "dismissed" | "needs-h
 export type SecurityBlindSpotsSchemaVersion = "1"
 /**
  * Independently-versioned wire-version newtype for the brief envelope.
+ * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
 export type ReviewBriefSchemaVersion = number
 /**
- * Coarse risk classification for a changeset.
+ * Coarse risk classification for a changeset, a pure function of the change
+ * size (file count plus, once threaded, net lines).
  */
 export type RiskClass = ("low" | "medium" | "high")
 /**
- * Suggested reviewer effort.
+ * Suggested reviewer effort, a pure function of [`RiskClass`].
  */
 export type ReviewEffort = ("glance" | "review" | "deep_dive")
 /**
- * The focus label for a review unit. There is no `Skip` variant.
+ * The focus label for a review unit. EXACTLY two variants: `Skip` is NOT
+ * representable, so the type system is the guarantee that free mode never emits
+ * a `skip` label (safe explicit-skip is paid, runtime-backed only). Mirrors
+ * the decision surface's "cut category not representable" structural posture.
  */
 export type FocusLabel = ("review-here" | "not-prioritized")
 /**
- * A per-unit confidence flag.
+ * A per-unit confidence flag. The EXACT panel-decided strings: a dynamically-
+ * wired or re-export-heavy unit carries one so its static-reachability signal is
+ * not trusted as complete (the anti-silent-de-prioritization guard). The flag
+ * NEVER lowers the score; it is advisory provenance.
  */
 export type ConfidenceFlag = ("dynamic-dispatch" | "re-export-indirection")
 /**
@@ -773,7 +807,8 @@ export type ConfidenceFlag = ("dynamic-dispatch" | "re-export-indirection")
 export type WeakeningKind = ("test-weakened" | "threshold-lowered" | "suppression-added" | "security-check-removed")
 /**
  * The exactly-three shippable decision categories (the SOLID-3). No cut category
- * is representable, so confirmed-noise categories cannot ship by construction.
+ * (abstraction / deletion / convention / irreversibility) is representable: this
+ * enum is the structural guarantee that confirmed-noise categories never ship.
  */
 export type DecisionCategory = ("coupling-boundary" | "public-api-contract" | "dependency")
 /**
@@ -805,7 +840,8 @@ base_ref: string
  * Human-readable provenance of `base_ref`, e.g. `merge-base with
  * origin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.
  * Present when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;
- * absent for an explicit `--base`.
+ * absent for an explicit `--base` (the ref the user typed is already
+ * self-describing).
  */
 base_description?: (string | null)
 head_sha?: (string | null)
@@ -3578,7 +3614,15 @@ command: string
 reason: string
 }
 /**
- * Wire-shape payload for `fallow dupes --format json`.
+ * Wire-shape payload for `fallow dupes --format json` (the body that
+ * flattens into the `DupesOutput` envelope and is also
+ * emitted under the `dupes` / `duplication` key inside the combined and
+ * audit envelopes).
+ *
+ * Mirrors [`DuplicationReport`] field-for-field, except `clone_groups`
+ * and `clone_families` carry the typed wrapper envelopes instead of bare
+ * findings, so the schema (and any TS / agent consumer) sees the typed
+ * `actions[]` natively.
  */
 export interface DupesReportPayload {
 /**
@@ -3586,7 +3630,13 @@ export interface DupesReportPayload {
  */
 clone_groups: CloneGroupFinding[]
 /**
- * Clone families, each wrapped with typed actions.
+ * Clone families, each wrapped with typed actions. Inner `groups`
+ * inside each `CloneFamilyFinding` are themselves wrapped as
+ * `CloneGroupFinding` entries carrying their own `actions[]` (and
+ * optional audit-mode `introduced` flag), so JSON-Schema strict
+ * consumers and TS consumers reading `clone_families[].groups[]` see
+ * the same shape as the top-level `clone_groups[]` array (preserves
+ * the issue #393 regression contract).
  */
 clone_families: CloneFamilyFinding[]
 /**
@@ -3596,7 +3646,10 @@ mirrored_directories?: MirroredDirectory[]
 stats: DuplicationStats
 }
 /**
- * Wire-shape envelope for a clone group finding.
+ * Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
+ * group via `#[serde(flatten)]` and carries a typed `actions` array plus
+ * the optional audit-mode `introduced` flag. Replaces the legacy
+ * post-pass injection in `crates/cli/src/report/json.rs::inject_dupes_actions`.
  */
 export interface CloneGroupFinding {
 /**
@@ -3612,19 +3665,30 @@ token_count: number
  */
 line_count: number
 /**
- * Stable content fingerprint, usually `dup:<8hex>`.
+ * Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+ * report collisions. Addressable via `fallow dupes --trace dup:<fp>` (and
+ * the `trace_clone` MCP tool) to deep-dive this group; shown alongside
+ * each group in the human listing.
  */
 fingerprint: string
 /**
- * Best-effort human-readable name for the clone.
+ * Best-effort human-readable name for the clone: the dominant repeated
+ * identifier across the duplicated fragment (e.g. a shared `parseCsv`
+ * function). `None` when the clone has no clear dominant name (generic or
+ * tied identifiers); consumers then fall back to a file-based label. Lets
+ * editors and agents label a clone by what it is rather than an opaque
+ * ordinal.
  */
 suggested_name?: (string | null)
 /**
- * Suggested next steps.
+ * Suggested next steps: an `extract-shared` primary and a
+ * `suppress-line` secondary. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: CloneGroupAction[]
 /**
- * Audit-mode introduced flag, populated by audit post-processing.
+ * Set by the audit pass when this clone group is introduced relative
+ * to the merge-base. `None` when serialized directly from Rust.
  */
 introduced?: (AuditIntroduced | null)
 }
@@ -3658,12 +3722,17 @@ end_col: number
 fragment: string
 }
 /**
- * Per-action wire shape attached to each clone group finding.
+ * Per-action wire shape attached to each `CloneGroupFinding` and
+ * `AttributedCloneGroupFinding`. Mirrors the action types previously
+ * emitted by `inject_dupes_actions::build_clone_group_actions` in
+ * `crates/cli/src/report/json.rs`: `extract-shared` plus `suppress-line`.
  */
 export interface CloneGroupAction {
 type: CloneGroupActionType
 /**
- * Whether `fallow fix` can auto-apply this action.
+ * Whether `fallow fix` can auto-apply this action. Both variants are
+ * manual today; the field is non-singleton so a future auto-applier
+ * does not need a schema change.
  */
 auto_fixable: boolean
 /**
@@ -3671,12 +3740,23 @@ auto_fixable: boolean
  */
 description: string
 /**
- * Inline comment to insert for suppression actions.
+ * The inline comment to insert (e.g.,
+ * `// fallow-ignore-next-line code-duplication`). Present on
+ * `suppress-line`; absent on `extract-shared`.
  */
 comment?: (string | null)
 }
 /**
- * Wire-shape envelope for a clone family finding.
+ * Wire-shape envelope for a [`CloneFamily`] finding.
+ *
+ * Unlike most `*Finding` wrappers this one is NOT `#[serde(flatten)]` over
+ * the bare [`CloneFamily`], because the family's nested
+ * `groups: Vec<CloneGroup>` field needs to carry the typed
+ * `CloneGroupFinding` wrapper too (so every nested clone group gets its
+ * own `actions[]` array, matching the legacy post-pass behavior; see issue
+ * #393 regression test). The wire shape stays byte-identical to the
+ * previous post-pass output. No `introduced` field because `fallow audit`
+ * attributes clone groups (not families) when running against a base ref.
  */
 export interface CloneFamilyFinding {
 /**
@@ -3684,7 +3764,9 @@ export interface CloneFamilyFinding {
  */
 files: string[]
 /**
- * Clone groups belonging to this family.
+ * Clone groups belonging to this family, each wrapped with typed
+ * `actions[]` so consumers that read `clone_families[].groups[]`
+ * directly see the same shape as the top-level `clone_groups[]`.
  */
 groups: CloneGroupFinding[]
 /**
@@ -3700,7 +3782,10 @@ total_duplicated_tokens: number
  */
 suggestions: RefactoringSuggestion[]
 /**
- * Suggested next steps.
+ * Suggested next steps: an `extract-shared` primary, one
+ * `apply-suggestion` per `RefactoringSuggestion` on the family, and
+ * a trailing `suppress-line`. Always emitted (possibly empty for
+ * forward-compat).
  */
 actions: CloneFamilyAction[]
 }
@@ -3719,12 +3804,17 @@ description: string
 estimated_savings: number
 }
 /**
- * Per-action wire shape attached to each clone family finding.
+ * Per-action wire shape attached to each `CloneFamilyFinding`. Mirrors
+ * the action types previously emitted by
+ * `build_clone_family_actions`: `extract-shared`, one `apply-suggestion`
+ * per `RefactoringSuggestion` on the family, and a trailing
+ * `suppress-line`.
  */
 export interface CloneFamilyAction {
 type: CloneFamilyActionType
 /**
- * Whether `fallow fix` can auto-apply this action.
+ * Whether `fallow fix` can auto-apply this action. All three variants
+ * are manual today.
  */
 auto_fixable: boolean
 /**
@@ -3732,11 +3822,14 @@ auto_fixable: boolean
  */
 description: string
 /**
- * Additional context for the action.
+ * Additional context. Present on `extract-shared` (explaining that
+ * the family's clone groups share the same files); absent otherwise.
  */
 note?: (string | null)
 /**
- * Inline comment to insert for suppression actions.
+ * The inline comment to insert (e.g.,
+ * `// fallow-ignore-next-line code-duplication`). Present on
+ * `suppress-line` only.
  */
 comment?: (string | null)
 }
@@ -3822,36 +3915,54 @@ clone_groups_below_min_occurrences?: number
 export interface HealthReport {
 /**
  * Functions and synthetic template entries exceeding complexity
- * thresholds, sorted by the --sort criteria.
+ * thresholds, sorted by the --sort criteria. Each entry wraps its
+ * inner `ComplexityViolation` payload (flattened on the wire) with
+ * the typed `actions` list and an optional audit-mode `introduced`
+ * flag.
  */
 findings: HealthFinding[]
 summary: HealthSummary
 /**
- * Configured threshold override states.
+ * Configured threshold override states. Entries are emitted for active
+ * exceptions, stale exceptions, and full-run no-match cleanup hints.
  */
 threshold_overrides?: ThresholdOverrideState[]
 /**
- * Project-wide vital signs.
+ * Project-wide vital signs (always computed from available data).
  */
 vital_signs?: (VitalSigns | null)
 /**
- * Project-wide health score.
+ * Project-wide health score (only populated with `--score`).
  */
 health_score?: (HealthScore | null)
 /**
- * Per-file health scores.
+ * Per-file health scores. Only present when --file-scores is used. Sorted
+ * by risk-aware triage concern, combining low maintainability and high
+ * CRAP risk. Zero-function files (barrels) are excluded by default.
  */
 file_scores?: FileHealthScore[]
 /**
  * Static coverage gaps.
+ *
+ * Populated when coverage gaps are explicitly requested, or when the
+ * top-level `health` command allows config severity to surface them in the
+ * default report.
  */
 coverage_gaps?: (CoverageGaps | null)
 /**
- * Located prop-drilling chains.
+ * Located prop-drilling chains (React/Preact props forwarded unchanged
+ * through 3+ pass-through components). Only present when the opt-in
+ * `prop-drilling` rule is enabled (it defaults to off). Each entry carries
+ * the source, every pass-through hop, and the consumer with file + line +
+ * component, so CI / an agent can act. Surfaced alongside hotspots as a
+ * graph-derived health signal.
  */
 prop_drilling_chains?: PropDrillingChainFinding[]
 /**
- * Hotspot entries combining git churn with complexity.
+ * Hotspot entries combining git churn with complexity. Only present when
+ * --hotspots is used. Sorted by score descending (highest risk first).
+ * Each entry wraps its inner `HotspotEntry` payload (flattened on the
+ * wire) with a typed `actions` list.
  */
 hotspots?: HotspotFinding[]
 /**
@@ -3859,7 +3970,8 @@ hotspots?: HotspotFinding[]
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
- * Runtime coverage findings from the paid sidecar.
+ * Runtime coverage findings from the paid sidecar (only populated with
+ * `--runtime-coverage`).
  */
 runtime_coverage?: (RuntimeCoverageReport | null)
 /**
@@ -3867,11 +3979,15 @@ runtime_coverage?: (RuntimeCoverageReport | null)
  */
 coverage_intelligence?: (CoverageIntelligenceReport | null)
 /**
- * Functions exceeding 60 LOC.
+ * Functions exceeding 60 LOC (very high risk). Only present when unit size
+ * very-high-risk bin >= 3%. Sorted by line count descending.
  */
 large_functions?: LargeFunctionEntry[]
 /**
- * Ranked refactoring recommendations.
+ * Ranked refactoring recommendations. Only present when --targets is used.
+ * Sorted by efficiency (priority/effort) descending. Each entry wraps
+ * its inner `RefactoringTarget` payload (flattened on the wire) with
+ * a typed `actions` list.
  */
 targets?: RefactoringTargetFinding[]
 /**
@@ -3883,15 +3999,22 @@ target_thresholds?: (TargetThresholds | null)
  */
 health_trend?: (HealthTrend | null)
 /**
- * Audit breadcrumb explaining systemic action-array adjustments.
+ * Audit breadcrumb explaining systemic action-array adjustments. Present
+ * only when at least one adjustment was made (e.g., health finding
+ * suppression hints omitted because a baseline is active). When --group-by
+ * is active, each entry of `groups` may carry its own `actions_meta`
+ * describing the same omission so per-group consumers do not need to walk
+ * back to the report root.
  */
 actions_meta?: (HealthActionsMeta | null)
 /**
- * Optional framework-specific detector coverage.
+ * Optional framework-specific detector coverage. Present only when the
+ * health run already needed the dead-code analysis output.
  */
 framework_health?: (FrameworkHealthDiagnostics | null)
 /**
- * Structural CSS analytics.
+ * Structural CSS analytics (specificity hotspots, `!important` density,
+ * over-complex selectors, deep nesting). Present only with `--css`.
  */
 css_analytics?: (CssAnalyticsReport | null)
 }
@@ -4264,7 +4387,8 @@ coupling_high_pct?: (number | null)
 /**
  * Number of located prop-drilling chains (React/Preact props forwarded
  * unchanged through 3+ pass-through components). `None` unless the opt-in
- * `prop-drilling` rule is enabled.
+ * `prop-drilling` rule is enabled (it defaults to off), so the small capped
+ * penalty and the hotspot surface are dormant by default.
  */
 prop_drilling_chain_count?: (number | null)
 /**
@@ -4273,21 +4397,34 @@ prop_drilling_chain_count?: (number | null)
  */
 prop_drilling_max_depth?: (number | null)
 /**
- * 95th-percentile distinct-parent render fan-in across React/Preact
- * components.
+ * 95th-percentile DISTINCT-PARENTS render fan-in across React/Preact
+ * components (the component-graph analogue of `p95_fan_in`, which percentiles
+ * per-FILE module fan-in). `None` on non-React runs. Descriptive
+ * blast-radius context, NOT a gate. Mirrors `compute_coupling_concentration`.
  */
 p95_render_fan_in?: (number | null)
 /**
  * Percentage of components whose render fan-in exceeds the project's
- * `max(p95, 10)` threshold.
+ * `max(p95, 10)` threshold (reuses the coupling-concentration floor; NO new
+ * tunable constant). `None` on non-React runs. Mirrors `coupling_high_pct`.
  */
 render_fan_in_high_pct?: (number | null)
 /**
- * Highest distinct-parent count across all components.
+ * The single highest DISTINCT-PARENTS count across all components (the
+ * headline blast-radius number: the most distinct render LOCATIONS any one
+ * component is rendered from, the honest edit-ripple count). `render_sites`
+ * (incl. repeats) is secondary per-component context, never the headline.
+ * `None` on non-React runs. Descriptive context, no threshold.
  */
 max_render_fan_in?: (number | null)
 /**
- * Highest-fan-in React/Preact components.
+ * The highest-fan-in React/Preact components, located (component name +
+ * project-relative path + render-site / distinct-parent counts), sorted by
+ * distinct parents (the honest headline axis) descending, tie-broken on
+ * render sites descending, and capped at a small N. Lets a consumer see
+ * WHICH component carries the headline `max_render_fan_in`, not just the
+ * number. Empty (and omitted from JSON) on non-React runs, so the contract
+ * stays byte-identical there. Descriptive blast-radius context, NOT a gate.
  */
 top_render_fan_in?: RenderFanInTopComponent[]
 /**
@@ -4297,6 +4434,9 @@ total_loc?: number
 }
 /**
  * Raw counts backing the vital signs percentages.
+ *
+ * Stored alongside `VitalSigns` in snapshots so that Phase 2b trend reporting
+ * can decompose percentage changes into numerator vs denominator shifts.
  */
 export interface VitalSignsCounts {
 /**
@@ -4316,6 +4456,12 @@ total_deps: number
 }
 /**
  * Risk profile: percentage of functions in each risk bin.
+ *
+ * Bins are defined by thresholds that depend on the measured property:
+ * - **Unit size**: low risk (1-15 LOC), medium risk (16-30), high risk (31-60), very high risk (>60)
+ * - **Unit interfacing**: low risk (0-2 params), medium risk (3-4), high risk (5-6), very high risk (>=7)
+ *
+ * Percentages sum to approximately 100.0 (subject to rounding).
  */
 export interface RiskProfile {
 /**
@@ -4338,6 +4484,15 @@ very_high_risk: number
 /**
  * One located high-fan-in React/Preact component for the descriptive
  * `top_render_fan_in` blast-radius list on [`VitalSigns`].
+ *
+ * The component-graph analogue of a high-fan-in module: `distinct_parents` is
+ * the HEADLINE axis (the honest count of distinct parent components / render
+ * LOCATIONS that render this component), `render_sites` is secondary "incl.
+ * repeats" context (every JSX render SITE, so a single parent rendering one
+ * child five times is five sites but one parent). Undercount-safe like the
+ * underlying metric: a child rendered via a JSX spread / dynamic /
+ * member-expression tag resolves to no component, so a true high-fan-in
+ * component can only be undersold.
  */
 export interface RenderFanInTopComponent {
 /**
@@ -4345,15 +4500,18 @@ export interface RenderFanInTopComponent {
  */
 component: string
 /**
- * Project-relative path of the file declaring the component.
+ * Project-relative path of the file declaring the component. Serialized with
+ * forward slashes (same serializer the other relativized health paths use).
  */
 path: string
 /**
- * Total JSX render sites that resolve to this component across the project.
+ * Total JSX render SITES that resolve to this component across the project.
+ * SECONDARY "incl. repeats" context, not the headline (see `distinct_parents`).
  */
 render_sites: number
 /**
  * Distinct `(parent_file, parent_component)` keys that render this component.
+ * The HEADLINE blast-radius axis: distinct render LOCATIONS.
  */
 distinct_parents: number
 }
@@ -4402,16 +4560,19 @@ crap_max: number
 crap_above_threshold: number
 }
 /**
- * Static test coverage gaps derived from the module graph.
+ * Static test coverage gaps derived from the module graph. Shows runtime files
+ * and exports with no test dependency path.
  */
 export interface CoverageGaps {
 summary: CoverageGapSummary
 /**
- * Runtime files with no test dependency path.
+ * Runtime files with no test dependency path. Each entry carries its
+ * own `actions` array via [`UntestedFileFinding`].
  */
 files?: UntestedFileFinding[]
 /**
- * Runtime exports with no test-reachable reference chain.
+ * Runtime exports with no test-reachable reference chain. Each entry
+ * carries its own `actions` array via [`UntestedExportFinding`].
  */
 exports?: UntestedExportFinding[]
 }
@@ -4441,7 +4602,12 @@ untested_files: number
 untested_exports: number
 }
 /**
- * Wire-shape envelope for an [`UntestedFile`] finding.
+ * Wire-shape envelope for an [`UntestedFile`] finding. Carries the bare
+ * [`UntestedFile`] flattened in plus a typed `actions` array. The action
+ * vec is computed at construction time using a project-root-relative path
+ * so descriptions match `strip_root_prefix`'s post-pass output on the inner
+ * `path` field. Schemars derives the merged shape natively; this retires
+ * the `augment_finding_definition` graft for `UntestedFile`.
  */
 export interface UntestedFileFinding {
 /**
@@ -4493,7 +4659,9 @@ note?: (string | null)
 comment?: (string | null)
 }
 /**
- * Wire-shape envelope for an [`UntestedExport`] finding.
+ * Wire-shape envelope for an [`UntestedExport`] finding. Same pattern as
+ * [`UntestedFileFinding`]: flattens the bare finding and carries a typed
+ * `actions` array computed at construction time.
  */
 export interface UntestedExportFinding {
 /**
@@ -5453,9 +5621,16 @@ total: number
  * Auditable breadcrumb recording when health-finding `suppress-line`
  * action hints were omitted from the report.
  *
+ * Set at construction time on `HealthReport::actions_meta` (and on
+ * each `HealthGroup::actions_meta`
+ * when grouped) by the report builder, derived from the active
+ * `HealthActionContext`. Lets consumers see "where did the
+ * suppress-line hints go?" without having to grep the config or CLI
+ * history.
+ *
  * Stable `reason` codes:
- * - `baseline-active`: a baseline is active and inline ignores would become
- *   dead annotations once the baseline regenerates.
+ * - `baseline-active`: a baseline is active and inline ignores would
+ *   become dead annotations once the baseline regenerates.
  * - `config-disabled`: `health.suggestInlineSuppression` is `false`.
  * - `unspecified`: the caller did not record a reason.
  */
@@ -6283,6 +6458,11 @@ count: number
 }
 /**
  * Envelope emitted by `fallow explain <issue-type> --format json`.
+ *
+ * Standalone rule explanation. This command does not run project analysis
+ * and intentionally returns a compact object without `schema_version` /
+ * `version` metadata; consumers that need those should call any other
+ * fallow JSON-producing command.
  */
 export interface ExplainOutput {
 id: string
@@ -6327,7 +6507,10 @@ complexity: InspectEvidenceSection
 security: InspectEvidenceSection
 impact_closure: InspectEvidenceSection
 /**
- * Optional symbol-level call chain.
+ * OPT-IN symbol-level call chain. Present only when `--symbol-chain` was
+ * requested AND the target is a SYMBOL (best-effort, syntactic, OFF the
+ * ranked path). `None` (omitted) by default: symbol-level chains are
+ * best-effort and not part of the trusted ranked evidence.
  */
 symbol_chain?: (InspectEvidenceSection | null)
 }
@@ -6377,7 +6560,8 @@ fingerprint: string
 truncated?: boolean
 }
 /**
- * `position` block inside [`GitLabReviewComment`].
+ * `position` block inside [`GitLabReviewComment`]. Mirrors the GitLab
+ * merge-request discussion-position API.
  */
 export interface GitLabReviewPosition {
 base_sha?: (string | null)
@@ -6397,7 +6581,9 @@ provider: ReviewProvider
 check_conclusion?: (ReviewCheckConclusion | null)
 }
 /**
- * Envelope emitted by `fallow ci reconcile-review --format json`.
+ * Envelope emitted by `fallow ci reconcile-review --format json`. Used by
+ * CI integrations to drive comment carry-over and stale-comment cleanup
+ * across PR / MR revisions.
  */
 export interface ReviewReconcileOutput {
 schema: ReviewReconcileSchema
@@ -6495,8 +6681,10 @@ patterns: string[]
 file_count: number
 }
 /**
- * A boundary import rule, expanded to operate on concrete child zone names
- * after `autoDiscover` flattening.
+ * A boundary import rule, expanded to operate on concrete child zone
+ * names after `autoDiscover` flattening. The user's pre-expansion rule
+ * (keyed on the logical parent name, if any) is preserved on the
+ * corresponding [`BoundariesListLogicalGroup::authored_rule`].
  */
 export interface BoundariesListRule {
 from: string
@@ -6575,12 +6763,17 @@ path: string
 is_internal_dependency: boolean
 }
 /**
- * Envelope emitted by `fallow health --format json`.
+ * Envelope emitted by `fallow health --format json` (plus the `health` block
+ * inside the combined and audit envelopes).
  *
- * The health report body is flattened into the envelope so every report field
- * lives at the top level. `Report` and `Group` are generic while health report
- * internals are still moving out of the CLI crate; the envelope contract itself
- * is owned here so CLI, API, and future embedders share one top-level shape.
+ * The body is `HealthReport` flattened into the envelope so every report
+ * field (`findings`, `summary`, `vital_signs`, `hotspots`, `actions_meta`,
+ * ...) lives at the top level. Grouped runs populate `grouped_by` +
+ * `groups` with per-bucket recomputed metrics. The `actions_meta`
+ * breadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`
+ * and is set at construction time by the report builder when the active
+ * `HealthActionContext` requests suppress-line omission, so the schema
+ * documents the field and serde populates it natively.
  */
 export interface HealthOutput {
 schema_version: SchemaVersion
@@ -6588,36 +6781,54 @@ version: ToolVersion
 elapsed_ms: ElapsedMs
 /**
  * Functions and synthetic template entries exceeding complexity
- * thresholds, sorted by the --sort criteria.
+ * thresholds, sorted by the --sort criteria. Each entry wraps its
+ * inner `ComplexityViolation` payload (flattened on the wire) with
+ * the typed `actions` list and an optional audit-mode `introduced`
+ * flag.
  */
 findings: HealthFinding[]
 summary: HealthSummary
 /**
- * Configured threshold override states.
+ * Configured threshold override states. Entries are emitted for active
+ * exceptions, stale exceptions, and full-run no-match cleanup hints.
  */
 threshold_overrides?: ThresholdOverrideState[]
 /**
- * Project-wide vital signs.
+ * Project-wide vital signs (always computed from available data).
  */
 vital_signs?: (VitalSigns | null)
 /**
- * Project-wide health score.
+ * Project-wide health score (only populated with `--score`).
  */
 health_score?: (HealthScore | null)
 /**
- * Per-file health scores.
+ * Per-file health scores. Only present when --file-scores is used. Sorted
+ * by risk-aware triage concern, combining low maintainability and high
+ * CRAP risk. Zero-function files (barrels) are excluded by default.
  */
 file_scores?: FileHealthScore[]
 /**
  * Static coverage gaps.
+ *
+ * Populated when coverage gaps are explicitly requested, or when the
+ * top-level `health` command allows config severity to surface them in the
+ * default report.
  */
 coverage_gaps?: (CoverageGaps | null)
 /**
- * Located prop-drilling chains.
+ * Located prop-drilling chains (React/Preact props forwarded unchanged
+ * through 3+ pass-through components). Only present when the opt-in
+ * `prop-drilling` rule is enabled (it defaults to off). Each entry carries
+ * the source, every pass-through hop, and the consumer with file + line +
+ * component, so CI / an agent can act. Surfaced alongside hotspots as a
+ * graph-derived health signal.
  */
 prop_drilling_chains?: PropDrillingChainFinding[]
 /**
- * Hotspot entries combining git churn with complexity.
+ * Hotspot entries combining git churn with complexity. Only present when
+ * --hotspots is used. Sorted by score descending (highest risk first).
+ * Each entry wraps its inner `HotspotEntry` payload (flattened on the
+ * wire) with a typed `actions` list.
  */
 hotspots?: HotspotFinding[]
 /**
@@ -6625,7 +6836,8 @@ hotspots?: HotspotFinding[]
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
- * Runtime coverage findings from the paid sidecar.
+ * Runtime coverage findings from the paid sidecar (only populated with
+ * `--runtime-coverage`).
  */
 runtime_coverage?: (RuntimeCoverageReport | null)
 /**
@@ -6633,11 +6845,15 @@ runtime_coverage?: (RuntimeCoverageReport | null)
  */
 coverage_intelligence?: (CoverageIntelligenceReport | null)
 /**
- * Functions exceeding 60 LOC.
+ * Functions exceeding 60 LOC (very high risk). Only present when unit size
+ * very-high-risk bin >= 3%. Sorted by line count descending.
  */
 large_functions?: LargeFunctionEntry[]
 /**
- * Ranked refactoring recommendations.
+ * Ranked refactoring recommendations. Only present when --targets is used.
+ * Sorted by efficiency (priority/effort) descending. Each entry wraps
+ * its inner `RefactoringTarget` payload (flattened on the wire) with
+ * a typed `actions` list.
  */
 targets?: RefactoringTargetFinding[]
 /**
@@ -6649,15 +6865,22 @@ target_thresholds?: (TargetThresholds | null)
  */
 health_trend?: (HealthTrend | null)
 /**
- * Audit breadcrumb explaining systemic action-array adjustments.
+ * Audit breadcrumb explaining systemic action-array adjustments. Present
+ * only when at least one adjustment was made (e.g., health finding
+ * suppression hints omitted because a baseline is active). When --group-by
+ * is active, each entry of `groups` may carry its own `actions_meta`
+ * describing the same omission so per-group consumers do not need to walk
+ * back to the report root.
  */
 actions_meta?: (HealthActionsMeta | null)
 /**
- * Optional framework-specific detector coverage.
+ * Optional framework-specific detector coverage. Present only when the
+ * health run already needed the dead-code analysis output.
  */
 framework_health?: (FrameworkHealthDiagnostics | null)
 /**
- * Structural CSS analytics.
+ * Structural CSS analytics (specificity hotspots, `!important` density,
+ * over-complex selectors, deep nesting). Present only with `--css`.
  */
 css_analytics?: (CssAnalyticsReport | null)
 grouped_by?: (GroupByMode | null)
@@ -6665,7 +6888,8 @@ groups?: (HealthGroup[] | null)
 _meta?: (Meta | null)
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
- * Read-only follow-up commands computed from this run's findings.
+ * Read-only follow-up commands computed from this run's findings. See
+ * `CheckOutput::next_steps` for the contract.
  */
 next_steps?: NextStep[]
 }
@@ -6726,7 +6950,9 @@ vital_signs?: (VitalSigns | null)
 health_score?: (HealthScore | null)
 /**
  * Findings restricted to files in this group. Each entry is the typed
- * [`HealthFinding`] wrapper around a complexity payload.
+ * [`HealthFinding`] wrapper around a
+ * `ComplexityViolation`
+ * payload.
  */
 findings?: HealthFinding[]
 /**
@@ -6735,7 +6961,8 @@ findings?: HealthFinding[]
 file_scores?: FileHealthScore[]
 /**
  * Hotspots restricted to files in this group. Each entry is the typed
- * [`HotspotFinding`] wrapper around a hotspot payload.
+ * [`HotspotFinding`] wrapper around a
+ * `HotspotEntry` payload.
  */
 hotspots?: HotspotFinding[]
 /**
@@ -6744,15 +6971,17 @@ hotspots?: HotspotFinding[]
 large_functions?: LargeFunctionEntry[]
 /**
  * Refactoring targets in files belonging to this group. Each entry is
- * the typed [`RefactoringTargetFinding`] wrapper around a refactoring
- * target payload.
+ * the typed [`RefactoringTargetFinding`] wrapper around a
+ * `RefactoringTarget`
+ * payload.
  */
 targets?: RefactoringTargetFinding[]
 /**
  * Auditable breadcrumb recording why `suppress-line` action hints
  * were omitted from this group's findings. Mirrors the project-level
  * `HealthReport.actions_meta`; populated at construction time when the
- * per-group action context suppresses inline hints.
+ * per-group `HealthActionContext`
+ * suppresses inline hints.
  */
 actions_meta?: (HealthActionsMeta | null)
 }
@@ -6772,7 +7001,13 @@ elapsed_ms: ElapsedMs
  */
 clone_groups: CloneGroupFinding[]
 /**
- * Clone families, each wrapped with typed actions.
+ * Clone families, each wrapped with typed actions. Inner `groups`
+ * inside each `CloneFamilyFinding` are themselves wrapped as
+ * `CloneGroupFinding` entries carrying their own `actions[]` (and
+ * optional audit-mode `introduced` flag), so JSON-Schema strict
+ * consumers and TS consumers reading `clone_families[].groups[]` see
+ * the same shape as the top-level `clone_groups[]` array (preserves
+ * the issue #393 regression contract).
  */
 clone_families: CloneFamilyFinding[]
 /**
@@ -6785,40 +7020,59 @@ total_issues?: (number | null)
 groups?: (DuplicationGroup[] | null)
 /**
  * `_meta` block with metric / rule definitions, emitted when `--explain`
- * is passed.
+ * is passed (always present in MCP responses).
  */
 _meta?: (Meta | null)
+/**
+ * Workspace-discovery diagnostics surfaced during config load
+ * (issue #473). See `CheckOutput::workspace_diagnostics` for the full
+ * contract; the same list is repeated on each top-level command's
+ * envelope so single-command consumers see it without having to look at
+ * a separate top-level field.
+ */
 workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
- * Read-only follow-up commands computed from this run's findings.
+ * Read-only follow-up commands computed from this run's findings. See
+ * `CheckOutput::next_steps` for the contract.
  */
 next_steps?: NextStep[]
 }
 /**
- * A single grouped duplication bucket.
+ * A single grouped duplication bucket. Per-group `stats` are dedup-aware and
+ * computed over the FULL group BEFORE any `--top` truncation.
  */
 export interface DuplicationGroup {
 /**
- * Group label such as owner, directory, package, or section.
+ * Group label (owner / directory / package / section). `(unowned)` for
+ * files with no CODEOWNERS rule, `(no section)` for pre-section rules in
+ * section mode.
  */
 key: string
 stats: DuplicationStats
 /**
- * Clone groups attributed to this bucket.
+ * Clone groups attributed to this owner, each wrapped with the typed
+ * `actions[]` array. Each group's `primary_owner` is its largest-owner
+ * key; per-instance `owner` lets consumers see cross-bucket fan-out
+ * without re-resolving paths.
  */
 clone_groups: AttributedCloneGroupFinding[]
 /**
- * Clone families overlapping this bucket.
+ * Clone families overlapping this bucket, each wrapped with the typed
+ * `actions[]` array.
  */
 clone_families: CloneFamilyFinding[]
 }
 /**
- * Wire-shape envelope for an [`AttributedCloneGroup`] finding.
+ * Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket
+ * duplication attribution emitted under `fallow dupes --group-by`).
+ * Flattens the attributed group and carries the same typed
+ * `CloneGroupAction` array as `CloneGroupFinding`; no `introduced`
+ * field because `fallow audit` does not run on grouped output.
  */
 export interface AttributedCloneGroupFinding {
 /**
- * Largest-owner attribution. Ties are resolved by the caller before this
- * wire DTO is built.
+ * Largest-owner attribution: the resolver key with the most instances in
+ * this clone group. Ties broken alphabetically (smallest key wins).
  */
 primary_owner: string
 /**
@@ -6830,11 +7084,15 @@ token_count: number
  */
 line_count: number
 /**
- * Instances annotated with their resolver keys.
+ * Each instance carries its own `owner` field alongside the standard
+ * CloneInstance shape.
  */
 instances: AttributedInstance[]
 /**
- * Stable content fingerprint, usually `dup:<8hex>`.
+ * Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+ * report collisions. Addressable via `fallow dupes --trace dup:<fp>`.
+ * Computed from the group's instances, so it matches the top-level
+ * `clone_groups[].fingerprint` for the same clone.
  */
 fingerprint: string
 /**
@@ -6843,11 +7101,13 @@ fingerprint: string
 actions: CloneGroupAction[]
 }
 /**
- * A clone instance plus its per-instance owner key.
+ * A clone instance plus its per-instance owner key (for inline JSON / SARIF
+ * rendering).
  *
  * Each instance carries its own `owner` field alongside the standard
- * `CloneInstance` shape so consumers can attribute instances to resolver keys
- * without re-resolving paths.
+ * `CloneInstance` shape (file / start_line / end_line / start_col / end_col /
+ * fragment), so consumers can attribute instances to resolver keys without
+ * re-resolving paths.
  */
 export interface AttributedInstance {
 /**
@@ -6875,7 +7135,8 @@ end_col: number
  */
 fragment: string
 /**
- * Resolver key for this specific instance.
+ * Resolver key for this specific instance (per-instance, not the
+ * group-level largest-owner).
  */
 owner: string
 }
@@ -7239,18 +7500,76 @@ enabled_source: EnabledSource
 record_count: number
 _meta?: (Meta | null)
 first_recorded?: (string | null)
+/**
+ * Git SHA of the most recent recorded run, so a consumer can tell which
+ * commit the `surfacing` counts belong to. This is an ABBREVIATED SHA
+ * (`git rev-parse --short`), so it is for display/correlation only and will
+ * not match a full 40-character SHA from `$GITHUB_SHA` or the git API
+ * without expansion. None when the latest run had no SHA (not a git repo)
+ * or there are no records yet.
+ */
 latest_git_sha?: (string | null)
+/**
+ * Counts from the most recent recorded run. These are CHANGED-FILE scoped
+ * (each record comes from a `fallow audit` run, whose default `new-only`
+ * gate counts only findings in the changed files of that run), NOT a
+ * whole-project total.
+ */
 surfacing?: (ImpactCounts | null)
+/**
+ * Trend between the two most recent records. None until two records exist.
+ */
 trend?: (TrendSummary | null)
+/**
+ * Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT
+ * scope (not changed-file), so this is the current issue total across the
+ * whole repo, context next to the actionable changed-file `surfacing`
+ * count. None until a full `fallow` run has been recorded. v1.6.
+ */
 project_surfacing?: (ImpactCounts | null)
+/**
+ * Trend between the two most recent whole-project records. Comparable over
+ * time (same whole-project denominator every run), unlike the changed-file
+ * `trend`. None until two full `fallow` runs exist. v1.6.
+ */
 project_trend?: (TrendSummary | null)
 containment_count: number
+/**
+ * Most recent containment events (newest last), capped for display.
+ */
 recent_containment: ContainmentEvent[]
+/**
+ * Lifetime count of findings fallow credits as genuinely resolved (code
+ * removed or refactored, never a `fallow-ignore`). v1.5.
+ */
 resolved_total: number
+/**
+ * Lifetime count of findings silenced by a newly-added `fallow-ignore`.
+ * Reported as honest context, never as a win. v1.5.
+ */
 suppressed_total: number
+/**
+ * Most recent resolution events (newest last), capped for display. v1.5.
+ */
 recent_resolved: ResolutionEvent[]
+/**
+ * Whether per-finding attribution has a baseline yet. False on a freshly
+ * upgraded v1 store (no frontier captured), which the renderer uses to show
+ * "resolution tracking starts from your next run" instead of a bare zero.
+ */
 attribution_active: boolean
+/**
+ * Whether the local agent onboarding prompt has been explicitly declined.
+ * Stored in the user config dir (per project) so agents avoid cross-session
+ * nags without writing into the repo.
+ */
 onboarding_declined: boolean
+/**
+ * Whether the user ever made an explicit enable/disable decision for
+ * Impact tracking. `enabled: false` with `explicit_decision: false` means
+ * "never asked"; with `true` it means "asked and declined". Agents use
+ * this to offer the impact opt-in exactly once per project.
+ */
 explicit_decision: boolean
 }
 /**
@@ -7298,19 +7617,36 @@ timestamp: string
  */
 export interface CrossRepoImpactReport {
 schema_version: CrossRepoImpactSchemaVersion
+/**
+ * Per-project stores successfully parsed (add `unreadable_count` for the
+ * total number of store files found in the user config dir).
+ */
 project_count: number
+/**
+ * Stores with recorded history (the rows in `projects`); excludes
+ * enabled-but-empty stores, which are still counted in `project_count`.
+ */
 tracked_count: number
+/**
+ * Stores that failed to parse and were skipped (corrupt or newer-schema).
+ */
 unreadable_count: number
 totals: CrossRepoTotals
 projects: CrossRepoProjectEntry[]
 }
 /**
- * Grand totals across every tracked project.
+ * Grand totals across every tracked project (including repos whose directory no
+ * longer exists on disk: their past wins still count toward lifetime impact).
  */
 export interface CrossRepoTotals {
 resolved_total: number
 suppressed_total: number
 containment_count: number
+/**
+ * Sum of whole-project issue totals across projects that have a full-run
+ * baseline, as of EACH project's last full `fallow` run (not a simultaneous
+ * snapshot).
+ */
 project_wide_issues: number
 projects_with_baseline: number
 }
@@ -7318,25 +7654,69 @@ projects_with_baseline: number
  * One project's row in the cross-repo roll-up.
  */
 export interface CrossRepoProjectEntry {
+/**
+ * Stable, non-reversible project key (the store filename stem); the
+ * cross-tool/cross-run JOIN key. NEVER a path.
+ */
 project_key: string
+/**
+ * Repo basename for display (never a full path). Absent on pre-v5 stores
+ * (the row falls back to the short key).
+ */
 label?: (string | null)
+/**
+ * Timestamp of the project's most recent recorded run (changed-file or
+ * whole-project), for the LAST RUN column and the default `recent` sort.
+ */
 last_recorded?: (string | null)
 report: ImpactReport
 }
 /**
- * The `fallow security --format json` envelope.
+ * The `fallow security --format json` envelope. `FallowOutput` discriminates it
+ * by the `kind: "security"` tag; the optional `gate` block is additive and is
+ * not part of that discrimination.
  */
 export interface SecurityOutput {
 schema_version: SecuritySchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 config: SecurityOutputConfig
+/**
+ * Security-specific rule and field metadata, emitted with `--explain`.
+ */
 _meta?: (Meta | null)
+/**
+ * Gate verdict, present only when `--gate <mode>` was set (issue #886).
+ * Emitted on pass too (`verdict: "pass"`, `new_count: 0`) so consumers
+ * distinguish "gate ran and passed" from "gate did not run" (absent).
+ */
 gate?: (SecurityGate | null)
+/**
+ * Security candidates. Paths are project-root-relative, forward-slash.
+ */
 security_findings: SecurityFinding[]
+/**
+ * Opt-in attack-surface inventory from untrusted entry points to reachable
+ * sinks. Present only when `--surface` was requested.
+ */
 attack_surface?: (SecurityAttackSurfaceEntry[] | null)
+/**
+ * In-band blind spot: number of `"use client"` files whose transitive
+ * import cone contains a dynamic `import()` the reachability BFS could not
+ * follow. A leak hidden behind such an edge would not be reported, so a
+ * zero finding count with a non-zero value here is NOT a clean bill.
+ */
 unresolved_edge_files: number
+/**
+ * In-band blind spot: number of sink-shaped nodes the catalogue detector
+ * could not flatten to a static callee path (dynamic dispatch, computed
+ * members, aliased bindings). A zero finding count with a non-zero value
+ * here is NOT a clean bill.
+ */
 unresolved_callee_sites: number
+/**
+ * Bounded diagnostics for unresolved callee blind spots.
+ */
 unresolved_callee_diagnostics?: (SecurityUnresolvedCalleeDiagnostics | null)
 }
 /**
@@ -7344,7 +7724,15 @@ unresolved_callee_diagnostics?: (SecurityUnresolvedCalleeDiagnostics | null)
  */
 export interface SecurityOutputConfig {
 rules: SecurityOutputRulesConfig
+/**
+ * `security.categories.include` from config. `null` means unset, `[]`
+ * means explicitly empty.
+ */
 categories_include: (string[] | null)
+/**
+ * `security.categories.exclude` from config. `null` means unset, `[]`
+ * means explicitly empty.
+ */
 categories_exclude: (string[] | null)
 }
 export interface SecurityOutputRulesConfig {
@@ -7357,10 +7745,14 @@ effective: Severity
 }
 /**
  * The `gate` block on `SecurityOutput`, present only when `--gate <mode>` ran.
+ * Invariant: `verdict == Fail  IFF  exit code 8  IFF  new_count > 0`.
  */
 export interface SecurityGate {
 mode: SecurityGateMode
 verdict: SecurityGateVerdict
+/**
+ * Number of candidates matching the selected gate mode.
+ */
 new_count: number
 }
 /**
@@ -7829,10 +8221,25 @@ callee: string
  * Bounded unresolved-callee diagnostics for `fallow security --format json`.
  */
 export interface SecurityUnresolvedCalleeDiagnostics {
+/**
+ * Deterministic sample rows, capped by `sample_limit`.
+ */
 sampled: SecurityUnresolvedCalleeSample[]
+/**
+ * Files with the most unresolved callees, capped by `top_files_limit`.
+ */
 top_files: SecurityUnresolvedCalleeTopFile[]
+/**
+ * Full count by unresolved-callee reason, sorted by count then reason.
+ */
 by_reason: SecurityUnresolvedCalleeReasonCount[]
+/**
+ * Maximum number of sample rows emitted.
+ */
 sample_limit: number
+/**
+ * Maximum number of top-file rows emitted.
+ */
 top_files_limit: number
 }
 /**
@@ -7850,6 +8257,9 @@ expression_kind: SkippedSecurityCalleeExpressionKind
  */
 export interface SecurityUnresolvedCalleeTopFile {
 path: string
+/**
+ * Number of unresolved callees in this file.
+ */
 count: number
 }
 /**
@@ -7857,17 +8267,28 @@ count: number
  */
 export interface SecurityUnresolvedCalleeReasonCount {
 reason: SkippedSecurityCalleeReason
+/**
+ * Number of unresolved callees with this reason.
+ */
 count: number
 }
 /**
- * Compact `fallow security --summary --format json` payload.
+ * Compact `fallow security --summary --format json` payload. Uses the same
+ * `kind: "security"` discriminator as the full payload, but omits candidate
+ * arrays and exposes only aggregate counts.
  */
 export interface SecuritySummaryOutput {
 schema_version: SecuritySchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 config: SecurityOutputConfig
+/**
+ * Security-specific rule and field metadata, emitted with `--explain`.
+ */
 _meta?: (Meta | null)
+/**
+ * Gate verdict, present only when `--gate <mode>` was set.
+ */
 gate?: (SecurityGate | null)
 summary: SecuritySummary
 }
@@ -7875,15 +8296,31 @@ summary: SecuritySummary
  * Aggregate counts for `fallow security --summary --format json`.
  */
 export interface SecuritySummary {
+/**
+ * Number of security candidates after all filters, gates, and scopes.
+ */
 security_findings: number
 by_severity: SecuritySeverityCounts
+/**
+ * Finding counts by catalogue category, or by kind for findings without a
+ * catalogue category.
+ */
 by_category: {
 [k: string]: number
 }
 by_reachability: SecurityReachabilityCounts
 by_runtime_state: SecurityRuntimeStateCounts
+/**
+ * Number of client files whose dynamic imports could not be followed.
+ */
 unresolved_edge_files: number
+/**
+ * Number of sink-shaped callees that could not be statically flattened.
+ */
 unresolved_callee_sites: number
+/**
+ * Number of attack-surface entries included in the prepared full output.
+ */
 attack_surface_entries: number
 }
 /**
@@ -7925,9 +8362,16 @@ schema_version: SecuritySurvivorsSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 summary: SecuritySurvivorsSummary
+/**
+ * Verifier-retained candidates keyed by finding id.
+ */
 survivors: {
 [k: string]: SecuritySurvivor
 }
+/**
+ * Ambiguous candidates keyed by finding id. These are not dismissed and are
+ * kept explicit so queues can decide whether to include them.
+ */
 needs_human_review: {
 [k: string]: SecuritySurvivor
 }
@@ -7947,12 +8391,24 @@ unverdicted: number
  * One verifier-retained candidate row.
  */
 export interface SecuritySurvivor {
+/**
+ * Stable candidate id from `security_findings[].finding_id`.
+ */
 finding_id: string
 verdict: SecurityVerifierVerdictStatus
 reason?: (string | null)
 rationale?: (string | null)
+/**
+ * Optional verifier-provided confidence or review priority.
+ */
 confidence?: (string | null)
+/**
+ * Optional verifier-provided impact statement.
+ */
 impact?: (string | null)
+/**
+ * Optional verifier-owned remediation direction.
+ */
 fix_direction?: (string | null)
 candidate: SecurityFinding
 }
@@ -7964,6 +8420,9 @@ schema_version: SecurityBlindSpotsSchemaVersion
 version: ToolVersion
 elapsed_ms: ElapsedMs
 summary: SecurityBlindSpotsSummary
+/**
+ * Grouped unresolved callee diagnostics, derived from existing samples.
+ */
 groups: SecurityBlindSpotGroup[]
 }
 /**
@@ -7980,8 +8439,17 @@ sampled_callee_sites: number
 export interface SecurityBlindSpotGroup {
 reason: SkippedSecurityCalleeReason
 expression_kind: SkippedSecurityCalleeExpressionKind
+/**
+ * Count in the bounded diagnostic sample.
+ */
 sampled_count: number
+/**
+ * Top files in this bounded diagnostic sample.
+ */
 files: SecurityBlindSpotFile[]
+/**
+ * Suggested next action for this group.
+ */
 suggestion: string
 }
 /**
@@ -7989,6 +8457,9 @@ suggestion: string
  */
 export interface SecurityBlindSpotFile {
 path: string
+/**
+ * Count in the bounded diagnostic sample.
+ */
 sampled_count: number
 }
 /**
@@ -8018,11 +8489,20 @@ health?: (Meta | null)
 telemetry?: (TelemetryMeta | null)
 }
 /**
- * The full `fallow audit --brief --format json` envelope.
+ * The full `fallow audit --brief --format json` envelope. Carries the
+ * informational verdict, the triage and graph-facts orientation stages, plus
+ * the reused "subtract" section (the same dead-code / duplication / complexity
+ * payload `fallow audit --format json` emits).
  */
 export interface ReviewBriefOutput {
 schema_version: ReviewBriefSchemaVersion
+/**
+ * Fallow CLI version that produced this output.
+ */
 version: string
+/**
+ * Command discriminator singleton: always `"audit-brief"`.
+ */
 command: string
 triage: DiffTriage
 graph_facts: GraphFacts
@@ -8030,74 +8510,176 @@ partition: PartitionFacts
 impact_closure: ImpactClosureFacts
 focus: FocusMap
 deltas: ReviewDeltas
+/**
+ * 6.F, headline: reviewer-private weakening signals (tests
+ * removed/skipped, thresholds lowered, suppressions added, security steps
+ * removed). Advisory, never gates, never auto-posted.
+ */
 weakening: WeakeningSignal[]
 routing: RoutingFacts
 decisions: DecisionSurface
 }
 /**
- * Stage 0 of the brief: triage facts derived from diff size.
+ * Stage 0 of the brief: triage facts derived purely from the diff size.
+ *
+ * `hunks` and `net_lines` are `None` in v1: the file-level audit does not yet
+ * thread a `DiffIndex` (from `report/ci/diff_filter.rs`). They populate later,
+ * on `--diff-file` / `--diff-stdin`, without a schema bump.
  */
 export interface DiffTriage {
+/**
+ * Number of changed files in the audit scope.
+ */
 files: number
+/**
+ * Number of diff hunks. `None` in v1 (no diff index threaded yet).
+ */
 hunks?: (number | null)
+/**
+ * Net added-minus-removed lines. `None` in v1 (no diff index threaded yet).
+ */
 net_lines?: (number | null)
 risk_class: RiskClass
 review_effort: ReviewEffort
 }
 /**
  * Stage 1 of the brief: graph-derived orientation facts.
+ *
+ * `boundaries_touched` is derived from the run's boundary-violation zones;
+ * `reachable_from` is populated by the impact closure (the affected-not-shown
+ * set: modules the changed code is reachable from / affects, none in the diff).
+ * `exports_added` / `api_width_delta` stay honestly stubbed (`0`) until the
+ * export-surface delta lands. The fields are present and correctly typed so
+ * values fill in later without a schema bump.
  */
 export interface GraphFacts {
+/**
+ * Number of exports added by the changeset. Stubbed to `0` in v1.
+ */
 exports_added: number
+/**
+ * Change in public API width (added minus removed exports). Stubbed to `0`
+ * in v1.
+ */
 api_width_delta: number
+/**
+ * Root-relative paths of modules the changed code is reachable from / affects
+ * (the impact closure's affected-but-not-in-diff set), deduped and sorted.
+ * Empty when no graph was retained or nothing depends on the changed files.
+ */
 reachable_from: string[]
+/**
+ * Architecture boundary zones touched by the changeset, deduped and sorted.
+ * Derived from the run's boundary-violation findings.
+ */
 boundaries_touched: string[]
 }
 /**
- * Stage 2 of the brief: the partition and review order.
+ * Stage 2 of the brief: the partition + order. The changed files split into
+ * coherent BY-MODULE units (the only byte-identical-deterministic clustering
+ * definition straight from the graph), plus a dependency-sensible review ORDER
+ * over those units (definitions before consumers, mechanical/leaf units last,
+ * ties broken by the path sort). Stage 2 sits UNDER the decision surface as a
+ * drill-down; it is the backbone the directed-review loop hands the agent.
+ *
+ * Feature-cluster and concern partitioning are deferred (they need scoring
+ * heuristics whose tie-breaks are a fresh nondeterminism surface).
  */
 export interface PartitionFacts {
+/**
+ * The by-module units, sorted by module directory. Empty when no graph was
+ * retained or no changed file maps to a known module.
+ */
 units: ReviewUnitFact[]
+/**
+ * The dependency-sensible review order: module-directory strings,
+ * definitions before consumers, mechanical/leaf units last. A permutation of
+ * the `units` module directories.
+ */
 order: string[]
 }
 /**
  * One review unit: a coherent by-module cluster of the changed set.
  */
 export interface ReviewUnitFact {
+/**
+ * The module directory the unit covers (root-relative, forward-slashed).
+ * The empty string is the repository-root group.
+ */
 module_dir: string
+/**
+ * The changed files in this unit, path-sorted.
+ */
 files: string[]
 }
 /**
- * Stage 3 of the brief: the impact closure.
+ * Stage 3 of the brief: the impact closure. The transitive
+ * affected-but-not-in-diff set plus the coordination gap. The differentiator a
+ * diff tool fundamentally cannot do, because it has no graph.
+ *
+ * Honest scope (ADR-001, syntactic): the coordination gap is an attention
+ * pointer at the exact inter-module failure mode, NOT a correctness proof.
  */
 export interface ImpactClosureFacts {
+/**
+ * Root-relative paths transitively affected by the changeset (reverse-deps +
+ * re-export chains) that are NOT in the diff, deduped and sorted.
+ */
 affected_not_shown: string[]
+/**
+ * Coordination gaps: a changed file exports a contract consumed by a module
+ * absent from the diff. One entry per (changed file, consumer) pair.
+ */
 coordination_gap: CoordinationGapFact[]
 }
 /**
- * One coordination-gap entry.
+ * One coordination-gap entry: a changed file exports symbols consumed by a
+ * `consumer_file` that is NOT in the diff. Deduped per (changed, consumer) pair
+ * (firing-precision rule R2).
  */
 export interface CoordinationGapFact {
+/**
+ * Root-relative path of the changed file whose contract is consumed elsewhere.
+ */
 changed_file: string
+/**
+ * Root-relative path of the consumer module that is NOT in the diff.
+ */
 consumer_file: string
+/**
+ * The exported symbol names the consumer references, sorted.
+ */
 consumed_symbols: string[]
+/**
+ * Honest scope note: this is a syntactic attention pointer, not a proof.
+ */
 note: string
 }
 /**
- * The weighted focus map.
+ * The weighted focus map: the ranked `review-here` units plus the FULL
+ * `deprioritized` escape-hatch list, so nothing is hidden.
+ *
+ * Completeness invariant (the escape-hatch done-condition): the two lists
+ * partition the unit set, so `review_here.len() + deprioritized.len()` equals
+ * the total unit count by construction.
  */
 export interface FocusMap {
 /**
- * Units labeled `review-here`.
+ * Units labeled `review-here`, ranked by composite score (descending), ties
+ * broken by path for determinism.
  */
 review_here: FocusUnit[]
 /**
- * Every `not-prioritized` unit.
+ * EVERY `not-prioritized` unit (the escape hatch). Always present and fully
+ * enumerated so a reviewer can always "show me what you de-prioritized"; the
+ * human brief collapses it by default and re-expands under
+ * `--show-deprioritized`.
  */
 deprioritized: FocusUnit[]
 }
 /**
- * One review unit on the focus map.
+ * One review unit on the focus map: its file, composite score, label, human
+ * reason, and any confidence flags.
  */
 export interface FocusUnit {
 /**
@@ -8107,16 +8689,18 @@ file: string
 score: FocusScore
 label: FocusLabel
 /**
- * Human-readable reason for the label.
+ * A human-readable reason for the label, built from the present signals.
  */
 reason: string
 /**
- * Confidence flags.
+ * Confidence flags (advisory; never lower the score). Sorted, deduped.
  */
 confidence?: ConfidenceFlag[]
 }
 /**
- * The composite attention score and component breakdown.
+ * The composite attention score, with the four deterministic component
+ * sub-scores kept on the wire so the runtime seam can re-weight `total`
+ * without recomputing the signals.
  */
 export interface FocusScore {
 /**
@@ -8124,46 +8708,69 @@ export interface FocusScore {
  */
 fan_io: number
 /**
- * Security source to sink taint-touch component.
+ * Security source -> sink taint-touch component (0 until a security pass is
+ * threaded onto the brief path; the seam is built and tested).
  */
 security_taint: number
 /**
- * Risk-zone component.
+ * Risk-zone component (boundary / public-API / security-sensitive).
  */
 risk_zone: number
 /**
- * Change-shape component.
+ * Change-shape component (new/widened export, signature change proxy).
  */
 change_shape: number
 /**
- * The summed total.
+ * The summed total. The paid runtime layer multiplies a runtime hot/cold weight in here.
  */
 total: number
 }
 /**
- * Diff-aware deterministic deltas, framed new-vs-pre-existing.
+ * Diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against
+ * the audit base snapshot. Each entry is a brief summary/verdict line.
+ *
+ * `public_api` is batch-consolidated to ONE decision per change (rule R1):
+ * the `added` list carries the introduced public-export keys as evidence, but a
+ * reviewer reads "the public surface widened by N", never one decision per
+ * symbol.
  */
 export interface ReviewDeltas {
+/**
+ * Cross-zone boundary EDGES introduced vs base (R2 first-edge-only: one per
+ * `<from_zone>-><to_zone>` pair, never per import). New-vs-pre-existing.
+ */
 boundary_introduced: string[]
+/**
+ * Circular dependencies introduced vs base (canonical file-set keys).
+ */
 cycle_introduced: string[]
+/**
+ * Exports-aware public-API surface delta: the public-export keys
+ * (`<rel_path>::<name>`) added vs base, resolved through `package.json`
+ * `exports` + re-export reachability. A symbol re-exported only through an
+ * internal barrel NOT in `exports` is absent here (zero delta); one
+ * reachable through an `exports` path is present (exactly one).
+ */
 public_api_added: string[]
 }
 /**
- * One weakening signal.
+ * One weakening signal: a category, the file it was detected in, and a short
+ * human-readable evidence string. Reviewer-private; never gates.
  */
 export interface WeakeningSignal {
 kind: WeakeningKind
 /**
- * Root-relative changed file path.
+ * Root-relative path of the changed file the signal was detected in.
  */
 file: string
 /**
- * Short evidence string.
+ * Short evidence string (e.g. the offending token or the threshold delta).
  */
 evidence: string
 }
 /**
- * The full routing section.
+ * The full routing section: one unit per changed source file with a routable
+ * signal. Files with no ownership signal are omitted (no noise).
  */
 export interface RoutingFacts {
 /**
@@ -8180,16 +8787,19 @@ export interface RoutingUnit {
  */
 file: string
 /**
- * Routed expert(s), when ownership signals are available.
+ * The routed expert(s): the CODEOWNERS declared owner when present, else the
+ * top git-blame / recency contributor; empty when no signal is available.
  */
 expert: string[]
 /**
- * Whether the only qualified owner is a single contributor.
+ * Whether the only qualified owner is a single contributor (bus-factor-1):
+ * a knowledge-concentration risk worth a second reviewer.
  */
 bus_factor_one?: boolean
 }
 /**
- * The ranked, capped decision surface plus the deterministic signal allowlist.
+ * The ranked, capped decision surface plus the set of signal_ids the
+ * deterministic layer emitted (the anti-hallucination allowlist).
  */
 export interface DecisionSurface {
 /**
@@ -8201,7 +8811,9 @@ decisions: Decision[]
  */
 truncated?: (TruncationNote | null)
 /**
- * Every `signal_id` the deterministic layer emitted.
+ * Every signal_id the deterministic layer emitted, INCLUDING those whose
+ * decision was collapsed below the cap or suppressed. The anti-hallucination
+ * allowlist: an agent decision whose id is absent is rejected.
  */
 emitted_signal_ids: string[]
 }
@@ -8212,6 +8824,7 @@ emitted_signal_ids: string[]
 export interface Decision {
 /**
  * Deterministic anchor to the fallow-emitted candidate this decision frames.
+ * `accept_signal_id` rejects any id not in the emitted set.
  */
 signal_id: string
 category: DecisionCategory
@@ -8224,7 +8837,7 @@ question: string
  */
 anchor_file: string
 /**
- * 1-based anchor line, or 0 when unavailable.
+ * 1-based anchor line, when the underlying signal carries one (0 = file head).
  */
 anchor_line: number
 /**
@@ -8232,19 +8845,24 @@ anchor_line: number
  */
 signal_key: string
 /**
- * The pre-rename `signal_id`, when the anchor file was renamed.
+ * The `signal_id` this decision WOULD have had before any rename in this
+ * change (the anchor file's pre-rename path). Present only when the anchor was
+ * renamed. A review-memory layer carries a dismissal across a `git mv`: if
+ * `previous_signal_id` was dismissed in an earlier PR, treat this decision as
+ * dismissed too. Keeps `signal_id` itself exact + deterministic.
  */
 previous_signal_id?: (string | null)
 /**
- * Blast radius used for ranking.
+ * Blast radius: count of modules affected beyond the diff by this decision.
  */
 blast: number
 /**
- * `blast * reversibility_weight`.
+ * `blast * reversibility_weight`: the rank key (sorted descending).
  */
 consequence: number
 /**
- * Routed expert(s), when ownership signals are available.
+ * The routed expert(s) to ask, from ownership routing. Empty when no
+ * ownership signal is available for the anchor file.
  */
 expert: string[]
 /**
@@ -8252,11 +8870,19 @@ expert: string[]
  */
 bus_factor_one?: boolean
 /**
- * In-repo modules outside the diff that already depend on this anchor.
+ * Honest per-decision count: in-repo modules OUTSIDE the diff that already
+ * depend on this decision's anchor. This is the DISPLAY number (taste
+ * ownership: the human reads reversibility from the count itself), distinct
+ * from `blast` (the project-wide proxy used only for ranking). Never a door
+ * label. Internal-only by construction, so it cannot see a published library's
+ * external consumers; the public-API trade-off clause names that risk in prose.
  */
 internal_consumer_count: number
 /**
- * The named structural trade-off this decision introduces.
+ * The named structural sacrifice this change makes, stated as a fact, never a
+ * recommendation (e.g. "Couples `app` to `infra`; 4 in-repo modules already
+ * depend on this anchor."). A sibling fact to `question`; it never tells the
+ * human what to choose.
  */
 tradeoff: string
 }
@@ -8274,7 +8900,9 @@ collapsed: number
 reason: string
 }
 /**
- * The `fallow review --walkthrough-guide` envelope.
+ * The `fallow review --walkthrough-guide` envelope: the current digest + schema
+ * the agent fetches. The tool owns this; the skill stays thin (it fetches this
+ * rather than embedding a frozen copy). Always emitted with exit 0.
  */
 export interface WalkthroughGuide {
 schema_version: ReviewBriefSchemaVersion
@@ -8283,31 +8911,40 @@ schema_version: ReviewBriefSchemaVersion
  */
 version: string
 /**
- * Command discriminator singleton.
+ * Command discriminator singleton: always `"review-walkthrough-guide"`.
  */
 command: string
 /**
- * Deterministic graph-snapshot hash pinned into the digest.
+ * The deterministic graph-snapshot hash pinned into the digest. The agent
+ * echoes it back; a mismatch on reentry refuses the payload as stale.
  */
 graph_snapshot_hash: string
 digest: ReviewBriefOutput
 direction: ReviewDirection
 /**
- * Per-hunk change anchors.
+ * The per-hunk change anchors: one stable id per changed region. An agent
+ * may cite a `change_anchor` as a judgment anchor in addition to an emitted
+ * `signal_id`, so a trade-off about a changed region with no graph finding
+ * can still anchor (and be post-validated) rather than hallucinate.
  */
 change_anchors: ChangeAnchor[]
 agent_schema: AgentSchema
 /**
- * The injection-resistance note.
+ * The injection-resistance note (digest is graph-only; PR prose untrusted).
  */
 injection_note: string
 }
 /**
- * The review direction artifact.
+ * The review direction artifact: the order to review in, the coherent units,
+ * and per-unit concern lens + out-of-diff + expert. A minimal projection of the
+ * EXISTING graph facts (routing units + impact closure); the full weighted-focus
+ * engine is a later epic. Graph-derived only (injection-resistant).
  */
 export interface ReviewDirection {
 /**
- * Dependency-sensible review order.
+ * The dependency-sensible review order: unit file paths, units carrying
+ * out-of-diff consumers first (review the load-bearing definitions before
+ * the mechanical units).
  */
 order: string[]
 /**
@@ -8316,7 +8953,9 @@ order: string[]
 units: DirectionUnit[]
 }
 /**
- * One directed review unit projected from the graph.
+ * One directed review unit projected from the graph: a file the change touches,
+ * the concern to check, the out-of-diff consumers it must account for, and the
+ * routed expert. Graph-derived only (routing + impact closure), NEVER from prose.
  */
 export interface DirectionUnit {
 /**
@@ -8324,15 +8963,19 @@ export interface DirectionUnit {
  */
 file: string
 /**
- * The concern lens the agent should check for this unit.
+ * The concern lens the agent should check for this unit, derived from the
+ * unit's risk signals (impact-closure consumers vs a plain touched file).
  */
 concern_lens: string
 /**
- * Per-unit review-effort budget.
+ * Per-unit review-effort budget: the weighted-focus composite score for
+ * this file. A cloud fan-out spends AI passes/verifiers PROPORTIONAL to this
+ * (higher = review harder); a local single-agent loop can ignore it.
  */
 scoring_budget: number
 /**
- * Root-relative paths affected by this unit but not in the diff.
+ * Root-relative paths of modules affected by this unit but NOT in the diff
+ * (the out-of-diff context the agent must reason about).
  */
 out_of_diff: string[]
 /**
@@ -8341,11 +8984,18 @@ out_of_diff: string[]
 expert: string[]
 }
 /**
- * One stable per-hunk change anchor.
+ * One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a
+ * judgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a
+ * graph FINDING ("fallow emitted this exact finding"), a change_anchor anchors
+ * only a changed REGION ("fallow confirms this region changed") , a strictly
+ * weaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a
+ * consumer can tell the two apart. Graph/diff-derived; NEVER from prose.
  */
 export interface ChangeAnchor {
 /**
- * Stable, content-addressed id.
+ * Stable, CONTENT-addressed id: `chg:<16-hex>` over the file path + the
+ * normalized added text (line numbers are NOT hashed, so an edit above the
+ * hunk or a whitespace-only change does not move the id).
  */
 change_anchor: string
 /**
@@ -8353,28 +9003,34 @@ change_anchor: string
  */
 file: string
 /**
- * 1-based first line of the hunk in the head file.
+ * 1-based first line of the hunk in the head file (display/deep-link only;
+ * NOT part of the id).
  */
 start_line: number
 /**
- * Number of added lines in the hunk.
+ * Number of added lines in the hunk (display only; NOT part of the id).
  */
 line_count: number
 /**
- * Rename-durable anchor.
+ * Rename-durable anchor: the id this same hunk would have had under the
+ * pre-rename path. `None` unless the file was renamed in this change, so an
+ * agent that cited the anchor before a `git mv` still resolves.
  */
 previous_change_anchor?: (string | null)
 }
 /**
- * The shape the agent must return, embedded in the guide.
+ * The shape the agent must return, embedded in the guide so a thin skill needs
+ * no frozen copy. Documents the anchoring + staleness contract in the wire.
  */
 export interface AgentSchema {
 /**
- * How the agent must structure each judgment.
+ * How the agent must structure each judgment: cite an emitted `signal_id`,
+ * add free-text `framing` (non-deterministic, fenced), an optional `concern`.
  */
 judgment_shape: string
 /**
- * The echoed graph snapshot field.
+ * The agent MUST echo this `graph_snapshot_hash` back in its JSON; a
+ * mismatch on reentry REFUSES the payload as stale.
  */
 echo_field: string
 /**
@@ -8383,7 +9039,8 @@ echo_field: string
 anchoring_rule: string
 }
 /**
- * The `fallow review --walkthrough-file` validation envelope.
+ * The `fallow review --walkthrough-file` validation envelope: the result of
+ * post-validating the agent's judgment against the live graph. Always exit 0.
  */
 export interface WalkthroughValidation {
 schema_version: ReviewBriefSchemaVersion
@@ -8392,7 +9049,7 @@ schema_version: ReviewBriefSchemaVersion
  */
 version: string
 /**
- * Command discriminator singleton.
+ * Command discriminator singleton: always `"review-walkthrough-validation"`.
  */
 command: string
 /**
@@ -8400,15 +9057,16 @@ command: string
  */
 graph_snapshot_hash: string
 /**
- * Whether the payload was refused as stale.
+ * `true` when the agent's echoed hash != the current hash (the tree moved):
+ * the WHOLE payload is refused, `accepted` is empty.
  */
 stale: boolean
 /**
- * Accepted anchored judgments.
+ * Judgments that cite a real fallow-emitted signal, framing fenced.
  */
 accepted: AcceptedJudgment[]
 /**
- * Rejected judgments.
+ * Judgments rejected (unanchored signal id, or all-rejected when stale).
  */
 rejected: RejectedJudgment[]
 /**
@@ -8420,24 +9078,32 @@ accepted_count: number
  */
 rejected_count: number
 /**
- * Count of accepted judgments without a verified anchor.
+ * Count of accepted judgments whose `signal_id` resolved against the live
+ * allowlist. Zero unanchored when this equals `accepted_count` and there are
+ * no rejections (the clean done-condition).
  */
 unanchored_count: number
 }
 /**
- * One accepted judgment.
+ * One accepted judgment: the real anchored signal passed through with the
+ * agent's framing FENCED as non-deterministic.
  */
 export interface AcceptedJudgment {
 /**
- * The verified `signal_id`, or empty when anchored by a change anchor.
+ * The fallow-emitted `signal_id` (verified against the allowlist). Empty
+ * when this judgment was anchored by a `change_anchor` instead.
  */
 signal_id: string
 /**
- * The verified change anchor, or empty when anchored by a signal id.
+ * The fallow-emitted `change_anchor` (verified against the allowlist). Empty
+ * when this judgment was anchored by a `signal_id`.
  */
 change_anchor: string
 /**
- * Which anchor resolved.
+ * Which anchor resolved: `"signal"` (a graph FINDING, the strong anchor) or
+ * `"change"` (a changed REGION only, the weaker anchor). Lets a consumer
+ * distinguish a finding-anchored judgment from a region-anchored one rather
+ * than collapsing both into one accepted bucket.
  */
 anchor_kind: string
 /**
@@ -8449,7 +9115,8 @@ agent_framing: string
  */
 concern?: (string | null)
 /**
- * Hard fence: always `false`.
+ * Hard fence: always `false`. The framing is agent prose, never a
+ * deterministic fallow result, so it never gates or auto-posts.
  */
 deterministic: boolean
 }
@@ -8458,15 +9125,19 @@ deterministic: boolean
  */
 export interface RejectedJudgment {
 /**
- * The cited `signal_id`.
+ * The `signal_id` the agent cited (fallow never emitted it). Empty when the
+ * judgment cited a `change_anchor` instead.
  */
 signal_id: string
 /**
- * The cited `change_anchor`.
+ * The `change_anchor` the agent cited (fallow never emitted it). Empty when
+ * the judgment cited a `signal_id` instead.
  */
 change_anchor: string
 /**
- * The rejection reason.
+ * The rejection reason: `unanchored-signal-id` (cited a signal fallow did
+ * not emit), `unknown-change-anchor` (cited a region fallow did not emit),
+ * or `stale-snapshot` (the tree moved).
  */
 reason: string
 }

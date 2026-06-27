@@ -13,44 +13,67 @@ use fallow_types::output_dead_code::PropDrillingChainFinding;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct HealthReport {
     /// Functions and synthetic template entries exceeding complexity
-    /// thresholds, sorted by the --sort criteria.
+    /// thresholds, sorted by the --sort criteria. Each entry wraps its
+    /// inner `ComplexityViolation` payload (flattened on the wire) with
+    /// the typed `actions` list and an optional audit-mode `introduced`
+    /// flag.
     pub findings: Vec<HealthFinding>,
     /// Summary statistics.
     pub summary: HealthSummary,
-    /// Configured threshold override states.
+    /// Configured threshold override states. Entries are emitted for active
+    /// exceptions, stale exceptions, and full-run no-match cleanup hints.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub threshold_overrides: Vec<ThresholdOverrideState>,
-    /// Project-wide vital signs.
+    /// Project-wide vital signs (always computed from available data).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vital_signs: Option<VitalSigns>,
-    /// Project-wide health score.
+    /// Project-wide health score (only populated with `--score`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_score: Option<HealthScore>,
-    /// Per-file health scores.
+    /// Per-file health scores. Only present when --file-scores is used. Sorted
+    /// by risk-aware triage concern, combining low maintainability and high
+    /// CRAP risk. Zero-function files (barrels) are excluded by default.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,
     /// Static coverage gaps.
+    ///
+    /// Populated when coverage gaps are explicitly requested, or when the
+    /// top-level `health` command allows config severity to surface them in the
+    /// default report.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_gaps: Option<CoverageGaps>,
-    /// Located prop-drilling chains.
+    /// Located prop-drilling chains (React/Preact props forwarded unchanged
+    /// through 3+ pass-through components). Only present when the opt-in
+    /// `prop-drilling` rule is enabled (it defaults to off). Each entry carries
+    /// the source, every pass-through hop, and the consumer with file + line +
+    /// component, so CI / an agent can act. Surfaced alongside hotspots as a
+    /// graph-derived health signal.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prop_drilling_chains: Vec<PropDrillingChainFinding>,
-    /// Hotspot entries combining git churn with complexity.
+    /// Hotspot entries combining git churn with complexity. Only present when
+    /// --hotspots is used. Sorted by score descending (highest risk first).
+    /// Each entry wraps its inner `HotspotEntry` payload (flattened on the
+    /// wire) with a typed `actions` list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<HotspotFinding>,
     /// Hotspot analysis summary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hotspot_summary: Option<HotspotSummary>,
-    /// Runtime coverage findings from the paid sidecar.
+    /// Runtime coverage findings from the paid sidecar (only populated with
+    /// `--runtime-coverage`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_coverage: Option<RuntimeCoverageReport>,
     /// Combined coverage, runtime, complexity, and change-scope verdicts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_intelligence: Option<CoverageIntelligenceReport>,
-    /// Functions exceeding 60 LOC.
+    /// Functions exceeding 60 LOC (very high risk). Only present when unit size
+    /// very-high-risk bin >= 3%. Sorted by line count descending.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub large_functions: Vec<LargeFunctionEntry>,
-    /// Ranked refactoring recommendations.
+    /// Ranked refactoring recommendations. Only present when --targets is used.
+    /// Sorted by efficiency (priority/effort) descending. Each entry wraps
+    /// its inner `RefactoringTarget` payload (flattened on the wire) with
+    /// a typed `actions` list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<RefactoringTargetFinding>,
     /// Adaptive thresholds used for target scoring.
@@ -59,13 +82,20 @@ pub struct HealthReport {
     /// Health trend comparison against a previous snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_trend: Option<HealthTrend>,
-    /// Audit breadcrumb explaining systemic action-array adjustments.
+    /// Audit breadcrumb explaining systemic action-array adjustments. Present
+    /// only when at least one adjustment was made (e.g., health finding
+    /// suppression hints omitted because a baseline is active). When --group-by
+    /// is active, each entry of `groups` may carry its own `actions_meta`
+    /// describing the same omission so per-group consumers do not need to walk
+    /// back to the report root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actions_meta: Option<HealthActionsMeta>,
-    /// Optional framework-specific detector coverage.
+    /// Optional framework-specific detector coverage. Present only when the
+    /// health run already needed the dead-code analysis output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub framework_health: Option<FrameworkHealthDiagnostics>,
-    /// Structural CSS analytics.
+    /// Structural CSS analytics (specificity hotspots, `!important` density,
+    /// over-complex selectors, deep nesting). Present only with `--css`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub css_analytics: Option<CssAnalyticsReport>,
     /// Per-file top render fan-in for the descriptive human drill-down only.

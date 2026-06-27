@@ -105,7 +105,7 @@
             "string",
             "null"
           ],
-          "description": "Human-readable provenance of `base_ref`, e.g. `merge-base with\norigin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.\nPresent when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;\nabsent for an explicit `--base`."
+          "description": "Human-readable provenance of `base_ref`, e.g. `merge-base with\norigin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.\nPresent when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;\nabsent for an explicit `--base` (the ref the user typed is already\nself-describing)."
         },
         "head_sha": {
           "type": [
@@ -229,7 +229,7 @@
         "docs"
       ],
       "title": "fallow explain <issue-type> --format json",
-      "description": "Envelope emitted by `fallow explain <issue-type> --format json`."
+      "description": "Envelope emitted by `fallow explain <issue-type> --format json`.\n\nStandalone rule explanation. This command does not run project analysis\nand intentionally returns a compact object without `schema_version` /\n`version` metadata; consumers that need those should call any other\nfallow JSON-producing command."
     },
     "CoverageSetupOutput": {
       "type": "object",
@@ -1251,7 +1251,7 @@
           "items": {
             "$ref": "#/definitions/HealthFinding"
           },
-          "description": "Functions and synthetic template entries exceeding complexity\nthresholds, sorted by the --sort criteria."
+          "description": "Functions and synthetic template entries exceeding complexity\nthresholds, sorted by the --sort criteria. Each entry wraps its\ninner `ComplexityViolation` payload (flattened on the wire) with\nthe typed `actions` list and an optional audit-mode `introduced`\nflag."
         },
         "summary": {
           "description": "Summary statistics.",
@@ -1262,7 +1262,7 @@
           "items": {
             "$ref": "#/definitions/ThresholdOverrideState"
           },
-          "description": "Configured threshold override states."
+          "description": "Configured threshold override states. Entries are emitted for active\nexceptions, stale exceptions, and full-run no-match cleanup hints."
         },
         "vital_signs": {
           "anyOf": [
@@ -1273,7 +1273,7 @@
               "type": "null"
             }
           ],
-          "description": "Project-wide vital signs."
+          "description": "Project-wide vital signs (always computed from available data)."
         },
         "health_score": {
           "anyOf": [
@@ -1284,14 +1284,14 @@
               "type": "null"
             }
           ],
-          "description": "Project-wide health score."
+          "description": "Project-wide health score (only populated with `--score`)."
         },
         "file_scores": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/FileHealthScore"
           },
-          "description": "Per-file health scores."
+          "description": "Per-file health scores. Only present when --file-scores is used. Sorted\nby risk-aware triage concern, combining low maintainability and high\nCRAP risk. Zero-function files (barrels) are excluded by default."
         },
         "coverage_gaps": {
           "anyOf": [
@@ -1302,21 +1302,21 @@
               "type": "null"
             }
           ],
-          "description": "Static coverage gaps."
+          "description": "Static coverage gaps.\n\nPopulated when coverage gaps are explicitly requested, or when the\ntop-level `health` command allows config severity to surface them in the\ndefault report."
         },
         "prop_drilling_chains": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/PropDrillingChainFinding"
           },
-          "description": "Located prop-drilling chains."
+          "description": "Located prop-drilling chains (React/Preact props forwarded unchanged\nthrough 3+ pass-through components). Only present when the opt-in\n`prop-drilling` rule is enabled (it defaults to off). Each entry carries\nthe source, every pass-through hop, and the consumer with file + line +\ncomponent, so CI / an agent can act. Surfaced alongside hotspots as a\ngraph-derived health signal."
         },
         "hotspots": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/HotspotFinding"
           },
-          "description": "Hotspot entries combining git churn with complexity."
+          "description": "Hotspot entries combining git churn with complexity. Only present when\n--hotspots is used. Sorted by score descending (highest risk first).\nEach entry wraps its inner `HotspotEntry` payload (flattened on the\nwire) with a typed `actions` list."
         },
         "hotspot_summary": {
           "anyOf": [
@@ -1338,7 +1338,7 @@
               "type": "null"
             }
           ],
-          "description": "Runtime coverage findings from the paid sidecar."
+          "description": "Runtime coverage findings from the paid sidecar (only populated with\n`--runtime-coverage`)."
         },
         "coverage_intelligence": {
           "anyOf": [
@@ -1356,14 +1356,14 @@
           "items": {
             "$ref": "#/definitions/LargeFunctionEntry"
           },
-          "description": "Functions exceeding 60 LOC."
+          "description": "Functions exceeding 60 LOC (very high risk). Only present when unit size\nvery-high-risk bin >= 3%. Sorted by line count descending."
         },
         "targets": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RefactoringTargetFinding"
           },
-          "description": "Ranked refactoring recommendations."
+          "description": "Ranked refactoring recommendations. Only present when --targets is used.\nSorted by efficiency (priority/effort) descending. Each entry wraps\nits inner `RefactoringTarget` payload (flattened on the wire) with\na typed `actions` list."
         },
         "target_thresholds": {
           "anyOf": [
@@ -1396,7 +1396,7 @@
               "type": "null"
             }
           ],
-          "description": "Audit breadcrumb explaining systemic action-array adjustments."
+          "description": "Audit breadcrumb explaining systemic action-array adjustments. Present\nonly when at least one adjustment was made (e.g., health finding\nsuppression hints omitted because a baseline is active). When --group-by\nis active, each entry of `groups` may carry its own `actions_meta`\ndescribing the same omission so per-group consumers do not need to walk\nback to the report root."
         },
         "framework_health": {
           "anyOf": [
@@ -1407,7 +1407,7 @@
               "type": "null"
             }
           ],
-          "description": "Optional framework-specific detector coverage."
+          "description": "Optional framework-specific detector coverage. Present only when the\nhealth run already needed the dead-code analysis output."
         },
         "css_analytics": {
           "anyOf": [
@@ -1418,7 +1418,7 @@
               "type": "null"
             }
           ],
-          "description": "Structural CSS analytics."
+          "description": "Structural CSS analytics (specificity hotspots, `!important` density,\nover-complex selectors, deep nesting). Present only with `--css`."
         },
         "grouped_by": {
           "anyOf": [
@@ -1460,7 +1460,7 @@
           "items": {
             "$ref": "#/definitions/NextStep"
           },
-          "description": "Read-only follow-up commands computed from this run's findings."
+          "description": "Read-only follow-up commands computed from this run's findings. See\n`CheckOutput::next_steps` for the contract."
         }
       },
       "required": [
@@ -1470,7 +1470,7 @@
         "findings",
         "summary"
       ],
-      "description": "Envelope emitted by `fallow health --format json`.\n\nThe health report body is flattened into the envelope so every report field\nlives at the top level. `Report` and `Group` are generic while health report\ninternals are still moving out of the CLI crate; the envelope contract itself\nis owned here so CLI, API, and future embedders share one top-level shape.",
+      "description": "Envelope emitted by `fallow health --format json` (plus the `health` block\ninside the combined and audit envelopes).\n\nThe body is `HealthReport` flattened into the envelope so every report\nfield (`findings`, `summary`, `vital_signs`, `hotspots`, `actions_meta`,\n...) lives at the top level. Grouped runs populate `grouped_by` +\n`groups` with per-bucket recomputed metrics. The `actions_meta`\nbreadcrumb is modeled on `HealthReport` as an `Option<HealthActionsMeta>`\nand is set at construction time by the report builder when the active\n`HealthActionContext` requests suppress-line omission, so the schema\ndocuments the field and serde populates it natively.",
       "title": "fallow health --format json"
     },
     "HealthGroup": {
@@ -1536,7 +1536,7 @@
           "items": {
             "$ref": "#/definitions/HealthFinding"
           },
-          "description": "Findings restricted to files in this group. Each entry is the typed\n[`HealthFinding`] wrapper around a complexity payload."
+          "description": "Findings restricted to files in this group. Each entry is the typed\n[`HealthFinding`] wrapper around a\n`ComplexityViolation`\npayload."
         },
         "file_scores": {
           "type": "array",
@@ -1550,7 +1550,7 @@
           "items": {
             "$ref": "#/definitions/HotspotFinding"
           },
-          "description": "Hotspots restricted to files in this group. Each entry is the typed\n[`HotspotFinding`] wrapper around a hotspot payload."
+          "description": "Hotspots restricted to files in this group. Each entry is the typed\n[`HotspotFinding`] wrapper around a\n`HotspotEntry` payload."
         },
         "large_functions": {
           "type": "array",
@@ -1564,7 +1564,7 @@
           "items": {
             "$ref": "#/definitions/RefactoringTargetFinding"
           },
-          "description": "Refactoring targets in files belonging to this group. Each entry is\nthe typed [`RefactoringTargetFinding`] wrapper around a refactoring\ntarget payload."
+          "description": "Refactoring targets in files belonging to this group. Each entry is\nthe typed [`RefactoringTargetFinding`] wrapper around a\n`RefactoringTarget`\npayload."
         },
         "actions_meta": {
           "anyOf": [
@@ -1575,7 +1575,7 @@
               "type": "null"
             }
           ],
-          "description": "Auditable breadcrumb recording why `suppress-line` action hints\nwere omitted from this group's findings. Mirrors the project-level\n`HealthReport.actions_meta`; populated at construction time when the\nper-group action context suppresses inline hints."
+          "description": "Auditable breadcrumb recording why `suppress-line` action hints\nwere omitted from this group's findings. Mirrors the project-level\n`HealthReport.actions_meta`; populated at construction time when the\nper-group `HealthActionContext`\nsuppresses inline hints."
         }
       },
       "required": [
@@ -2217,7 +2217,7 @@
           "items": {
             "$ref": "#/definitions/HealthFinding"
           },
-          "description": "Functions and synthetic template entries exceeding complexity\nthresholds, sorted by the --sort criteria."
+          "description": "Functions and synthetic template entries exceeding complexity\nthresholds, sorted by the --sort criteria. Each entry wraps its\ninner `ComplexityViolation` payload (flattened on the wire) with\nthe typed `actions` list and an optional audit-mode `introduced`\nflag."
         },
         "summary": {
           "description": "Summary statistics.",
@@ -2228,7 +2228,7 @@
           "items": {
             "$ref": "#/definitions/ThresholdOverrideState"
           },
-          "description": "Configured threshold override states."
+          "description": "Configured threshold override states. Entries are emitted for active\nexceptions, stale exceptions, and full-run no-match cleanup hints."
         },
         "vital_signs": {
           "anyOf": [
@@ -2239,7 +2239,7 @@
               "type": "null"
             }
           ],
-          "description": "Project-wide vital signs."
+          "description": "Project-wide vital signs (always computed from available data)."
         },
         "health_score": {
           "anyOf": [
@@ -2250,14 +2250,14 @@
               "type": "null"
             }
           ],
-          "description": "Project-wide health score."
+          "description": "Project-wide health score (only populated with `--score`)."
         },
         "file_scores": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/FileHealthScore"
           },
-          "description": "Per-file health scores."
+          "description": "Per-file health scores. Only present when --file-scores is used. Sorted\nby risk-aware triage concern, combining low maintainability and high\nCRAP risk. Zero-function files (barrels) are excluded by default."
         },
         "coverage_gaps": {
           "anyOf": [
@@ -2268,21 +2268,21 @@
               "type": "null"
             }
           ],
-          "description": "Static coverage gaps."
+          "description": "Static coverage gaps.\n\nPopulated when coverage gaps are explicitly requested, or when the\ntop-level `health` command allows config severity to surface them in the\ndefault report."
         },
         "prop_drilling_chains": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/PropDrillingChainFinding"
           },
-          "description": "Located prop-drilling chains."
+          "description": "Located prop-drilling chains (React/Preact props forwarded unchanged\nthrough 3+ pass-through components). Only present when the opt-in\n`prop-drilling` rule is enabled (it defaults to off). Each entry carries\nthe source, every pass-through hop, and the consumer with file + line +\ncomponent, so CI / an agent can act. Surfaced alongside hotspots as a\ngraph-derived health signal."
         },
         "hotspots": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/HotspotFinding"
           },
-          "description": "Hotspot entries combining git churn with complexity."
+          "description": "Hotspot entries combining git churn with complexity. Only present when\n--hotspots is used. Sorted by score descending (highest risk first).\nEach entry wraps its inner `HotspotEntry` payload (flattened on the\nwire) with a typed `actions` list."
         },
         "hotspot_summary": {
           "anyOf": [
@@ -2304,7 +2304,7 @@
               "type": "null"
             }
           ],
-          "description": "Runtime coverage findings from the paid sidecar."
+          "description": "Runtime coverage findings from the paid sidecar (only populated with\n`--runtime-coverage`)."
         },
         "coverage_intelligence": {
           "anyOf": [
@@ -2322,14 +2322,14 @@
           "items": {
             "$ref": "#/definitions/LargeFunctionEntry"
           },
-          "description": "Functions exceeding 60 LOC."
+          "description": "Functions exceeding 60 LOC (very high risk). Only present when unit size\nvery-high-risk bin >= 3%. Sorted by line count descending."
         },
         "targets": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RefactoringTargetFinding"
           },
-          "description": "Ranked refactoring recommendations."
+          "description": "Ranked refactoring recommendations. Only present when --targets is used.\nSorted by efficiency (priority/effort) descending. Each entry wraps\nits inner `RefactoringTarget` payload (flattened on the wire) with\na typed `actions` list."
         },
         "target_thresholds": {
           "anyOf": [
@@ -2362,7 +2362,7 @@
               "type": "null"
             }
           ],
-          "description": "Audit breadcrumb explaining systemic action-array adjustments."
+          "description": "Audit breadcrumb explaining systemic action-array adjustments. Present\nonly when at least one adjustment was made (e.g., health finding\nsuppression hints omitted because a baseline is active). When --group-by\nis active, each entry of `groups` may carry its own `actions_meta`\ndescribing the same omission so per-group consumers do not need to walk\nback to the report root."
         },
         "framework_health": {
           "anyOf": [
@@ -2373,7 +2373,7 @@
               "type": "null"
             }
           ],
-          "description": "Optional framework-specific detector coverage."
+          "description": "Optional framework-specific detector coverage. Present only when the\nhealth run already needed the dead-code analysis output."
         },
         "css_analytics": {
           "anyOf": [
@@ -2384,7 +2384,7 @@
               "type": "null"
             }
           ],
-          "description": "Structural CSS analytics."
+          "description": "Structural CSS analytics (specificity hotspots, `!important` density,\nover-complex selectors, deep nesting). Present only with `--css`."
         }
       },
       "required": [
@@ -2417,7 +2417,7 @@
           "items": {
             "$ref": "#/definitions/CloneFamilyFinding"
           },
-          "description": "Clone families, each wrapped with typed actions."
+          "description": "Clone families, each wrapped with typed actions. Inner `groups`\ninside each `CloneFamilyFinding` are themselves wrapped as\n`CloneGroupFinding` entries carrying their own `actions[]` (and\noptional audit-mode `introduced` flag), so JSON-Schema strict\nconsumers and TS consumers reading `clone_families[].groups[]` see\nthe same shape as the top-level `clone_groups[]` array (preserves\nthe issue #393 regression contract)."
         },
         "mirrored_directories": {
           "type": "array",
@@ -2464,20 +2464,21 @@
               "type": "null"
             }
           ],
-          "description": "`_meta` block with metric / rule definitions, emitted when `--explain`\nis passed."
+          "description": "`_meta` block with metric / rule definitions, emitted when `--explain`\nis passed (always present in MCP responses)."
         },
         "workspace_diagnostics": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/WorkspaceDiagnostic"
-          }
+          },
+          "description": "Workspace-discovery diagnostics surfaced during config load\n(issue #473). See `CheckOutput::workspace_diagnostics` for the full\ncontract; the same list is repeated on each top-level command's\nenvelope so single-command consumers see it without having to look at\na separate top-level field."
         },
         "next_steps": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/NextStep"
           },
-          "description": "Read-only follow-up commands computed from this run's findings."
+          "description": "Read-only follow-up commands computed from this run's findings. See\n`CheckOutput::next_steps` for the contract."
         }
       },
       "required": [
@@ -2496,7 +2497,7 @@
       "properties": {
         "key": {
           "type": "string",
-          "description": "Group label such as owner, directory, package, or section."
+          "description": "Group label (owner / directory / package / section). `(unowned)` for\nfiles with no CODEOWNERS rule, `(no section)` for pre-section rules in\nsection mode."
         },
         "stats": {
           "description": "Dedup-aware aggregate stats for the group.",
@@ -2507,14 +2508,14 @@
           "items": {
             "$ref": "#/definitions/AttributedCloneGroupFinding"
           },
-          "description": "Clone groups attributed to this bucket."
+          "description": "Clone groups attributed to this owner, each wrapped with the typed\n`actions[]` array. Each group's `primary_owner` is its largest-owner\nkey; per-instance `owner` lets consumers see cross-bucket fan-out\nwithout re-resolving paths."
         },
         "clone_families": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CloneFamilyFinding"
           },
-          "description": "Clone families overlapping this bucket."
+          "description": "Clone families overlapping this bucket, each wrapped with the typed\n`actions[]` array."
         }
       },
       "required": [
@@ -2523,14 +2524,14 @@
         "clone_groups",
         "clone_families"
       ],
-      "description": "A single grouped duplication bucket."
+      "description": "A single grouped duplication bucket. Per-group `stats` are dedup-aware and\ncomputed over the FULL group BEFORE any `--top` truncation."
     },
     "AttributedCloneGroup": {
       "type": "object",
       "properties": {
         "primary_owner": {
           "type": "string",
-          "description": "Largest-owner attribution. Ties are resolved by the caller before this\nwire DTO is built."
+          "description": "Largest-owner attribution: the resolver key with the most instances in\nthis clone group. Ties broken alphabetically (smallest key wins)."
         },
         "token_count": {
           "type": "integer",
@@ -2545,7 +2546,7 @@
           "items": {
             "$ref": "#/definitions/AttributedInstance"
           },
-          "description": "Instances annotated with their resolver keys."
+          "description": "Each instance carries its own `owner` field alongside the standard\nCloneInstance shape."
         }
       },
       "required": [
@@ -3216,20 +3217,20 @@
           "items": {
             "$ref": "#/definitions/UntestedFileFinding"
           },
-          "description": "Runtime files with no test dependency path."
+          "description": "Runtime files with no test dependency path. Each entry carries its\nown `actions` array via [`UntestedFileFinding`]."
         },
         "exports": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/UntestedExportFinding"
           },
-          "description": "Runtime exports with no test-reachable reference chain."
+          "description": "Runtime exports with no test-reachable reference chain. Each entry\ncarries its own `actions` array via [`UntestedExportFinding`]."
         }
       },
       "required": [
         "summary"
       ],
-      "description": "Static test coverage gaps derived from the module graph."
+      "description": "Static test coverage gaps derived from the module graph. Shows runtime files\nand exports with no test dependency path."
     },
     "CoverageGapSummary": {
       "type": "object",
@@ -3638,7 +3639,7 @@
             "integer",
             "null"
           ],
-          "description": "Number of located prop-drilling chains (React/Preact props forwarded\nunchanged through 3+ pass-through components). `None` unless the opt-in\n`prop-drilling` rule is enabled."
+          "description": "Number of located prop-drilling chains (React/Preact props forwarded\nunchanged through 3+ pass-through components). `None` unless the opt-in\n`prop-drilling` rule is enabled (it defaults to off), so the small capped\npenalty and the hotspot surface are dormant by default."
         },
         "prop_drilling_max_depth": {
           "type": [
@@ -3652,28 +3653,28 @@
             "integer",
             "null"
           ],
-          "description": "95th-percentile distinct-parent render fan-in across React/Preact\ncomponents."
+          "description": "95th-percentile DISTINCT-PARENTS render fan-in across React/Preact\ncomponents (the component-graph analogue of `p95_fan_in`, which percentiles\nper-FILE module fan-in). `None` on non-React runs. Descriptive\nblast-radius context, NOT a gate. Mirrors `compute_coupling_concentration`."
         },
         "render_fan_in_high_pct": {
           "type": [
             "number",
             "null"
           ],
-          "description": "Percentage of components whose render fan-in exceeds the project's\n`max(p95, 10)` threshold."
+          "description": "Percentage of components whose render fan-in exceeds the project's\n`max(p95, 10)` threshold (reuses the coupling-concentration floor; NO new\ntunable constant). `None` on non-React runs. Mirrors `coupling_high_pct`."
         },
         "max_render_fan_in": {
           "type": [
             "integer",
             "null"
           ],
-          "description": "Highest distinct-parent count across all components."
+          "description": "The single highest DISTINCT-PARENTS count across all components (the\nheadline blast-radius number: the most distinct render LOCATIONS any one\ncomponent is rendered from, the honest edit-ripple count). `render_sites`\n(incl. repeats) is secondary per-component context, never the headline.\n`None` on non-React runs. Descriptive context, no threshold."
         },
         "top_render_fan_in": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RenderFanInTopComponent"
           },
-          "description": "Highest-fan-in React/Preact components."
+          "description": "The highest-fan-in React/Preact components, located (component name +\nproject-relative path + render-site / distinct-parent counts), sorted by\ndistinct parents (the honest headline axis) descending, tie-broken on\nrender sites descending, and capped at a small N. Lets a consumer see\nWHICH component carries the headline `max_render_fan_in`, not just the\nnumber. Empty (and omitted from JSON) on non-React runs, so the contract\nstays byte-identical there. Descriptive blast-radius context, NOT a gate."
         },
         "total_loc": {
           "type": "integer",
@@ -3712,7 +3713,7 @@
         "high_risk",
         "very_high_risk"
       ],
-      "description": "Risk profile: percentage of functions in each risk bin."
+      "description": "Risk profile: percentage of functions in each risk bin.\n\nBins are defined by thresholds that depend on the measured property:\n- **Unit size**: low risk (1-15 LOC), medium risk (16-30), high risk (31-60), very high risk (>60)\n- **Unit interfacing**: low risk (0-2 params), medium risk (3-4), high risk (5-6), very high risk (>=7)\n\nPercentages sum to approximately 100.0 (subject to rounding)."
     },
     "IssueAction": {
       "anyOf": [
@@ -4034,7 +4035,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action."
+          "description": "Whether `fallow fix` can auto-apply this action. All three variants\nare manual today."
         },
         "description": {
           "type": "string",
@@ -4045,14 +4046,14 @@
             "string",
             "null"
           ],
-          "description": "Additional context for the action."
+          "description": "Additional context. Present on `extract-shared` (explaining that\nthe family's clone groups share the same files); absent otherwise."
         },
         "comment": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Inline comment to insert for suppression actions."
+          "description": "The inline comment to insert (e.g.,\n`// fallow-ignore-next-line code-duplication`). Present on\n`suppress-line` only."
         }
       },
       "required": [
@@ -4060,7 +4061,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Per-action wire shape attached to each clone family finding."
+      "description": "Per-action wire shape attached to each `CloneFamilyFinding`. Mirrors\nthe action types previously emitted by\n`build_clone_family_actions`: `extract-shared`, one `apply-suggestion`\nper `RefactoringSuggestion` on the family, and a trailing\n`suppress-line`."
     },
     "CloneGroupAction": {
       "type": "object",
@@ -4071,7 +4072,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action."
+          "description": "Whether `fallow fix` can auto-apply this action. Both variants are\nmanual today; the field is non-singleton so a future auto-applier\ndoes not need a schema change."
         },
         "description": {
           "type": "string",
@@ -4082,7 +4083,7 @@
             "string",
             "null"
           ],
-          "description": "Inline comment to insert for suppression actions."
+          "description": "The inline comment to insert (e.g.,\n`// fallow-ignore-next-line code-duplication`). Present on\n`suppress-line`; absent on `extract-shared`."
         }
       },
       "required": [
@@ -4090,7 +4091,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Per-action wire shape attached to each clone group finding."
+      "description": "Per-action wire shape attached to each `CloneGroupFinding` and\n`AttributedCloneGroupFinding`. Mirrors the action types previously\nemitted by `inject_dupes_actions::build_clone_group_actions` in\n`crates/cli/src/report/json.rs`: `extract-shared` plus `suppress-line`."
     },
     "UnusedFile": {
       "type": "object",
@@ -5445,7 +5446,7 @@
         "new_path",
         "new_line"
       ],
-      "description": "`position` block inside [`GitLabReviewComment`]."
+      "description": "`position` block inside [`GitLabReviewComment`]. Mirrors the GitLab\nmerge-request discussion-position API."
     },
     "ReviewReconcileOutput": {
       "type": "object",
@@ -5545,7 +5546,7 @@
         "apply_errors"
       ],
       "title": "fallow ci reconcile-review --format json",
-      "description": "Envelope emitted by `fallow ci reconcile-review --format json`."
+      "description": "Envelope emitted by `fallow ci reconcile-review --format json`. Used by\nCI integrations to drive comment carry-over and stale-comment cleanup\nacross PR / MR revisions."
     },
     "MirroredDirectory": {
       "type": "object",
@@ -5624,7 +5625,7 @@
         "dead_exports",
         "total_deps"
       ],
-      "description": "Raw counts backing the vital signs percentages."
+      "description": "Raw counts backing the vital signs percentages.\n\nStored alongside `VitalSigns` in snapshots so that Phase 2b trend reporting\ncan decompose percentage changes into numerator vs denominator shifts."
     },
     "Meta": {
       "type": "object",
@@ -5692,7 +5693,7 @@
         "reason",
         "scope"
       ],
-      "description": "Auditable breadcrumb recording when health-finding `suppress-line`\naction hints were omitted from the report.\n\nStable `reason` codes:\n- `baseline-active`: a baseline is active and inline ignores would become\n  dead annotations once the baseline regenerates.\n- `config-disabled`: `health.suggestInlineSuppression` is `false`.\n- `unspecified`: the caller did not record a reason."
+      "description": "Auditable breadcrumb recording when health-finding `suppress-line`\naction hints were omitted from the report.\n\nSet at construction time on `HealthReport::actions_meta` (and on\neach `HealthGroup::actions_meta`\nwhen grouped) by the report builder, derived from the active\n`HealthActionContext`. Lets consumers see \"where did the\nsuppress-line hints go?\" without having to grep the config or CLI\nhistory.\n\nStable `reason` codes:\n- `baseline-active`: a baseline is active and inline ignores would\n  become dead annotations once the baseline regenerates.\n- `config-disabled`: `health.suggestInlineSuppression` is `false`.\n- `unspecified`: the caller did not record a reason."
     },
     "AnalysisResults": {
       "type": "object",
@@ -7419,7 +7420,7 @@
           "$ref": "#/definitions/GitLabReviewComment"
         }
       ],
-      "description": "Per-line review comment."
+      "description": "Per-line review comment. Schema is an `anyOf` between GitHub and GitLab\nshapes; at runtime every entry in a single envelope comes from the same\nprovider because the envelope is built from one provider's branch in\n`crates/cli/src/report/ci/review.rs::render_review_envelope`."
     },
     "GitHubReviewSide": {
       "type": "string",
@@ -7509,7 +7510,7 @@
           "description": "At least one finding gated as failure."
         }
       ],
-      "description": "`meta.check_conclusion` for the GitHub review envelope."
+      "description": "`meta.check_conclusion` for the GitHub review envelope. Maps to the\nGitHub Checks API conclusion field."
     },
     "ReviewReconcileSchema": {
       "oneOf": [
@@ -7728,7 +7729,7 @@
         "from",
         "allow"
       ],
-      "description": "A boundary import rule, expanded to operate on concrete child zone names\nafter `autoDiscover` flattening."
+      "description": "A boundary import rule, expanded to operate on concrete child zone\nnames after `autoDiscover` flattening. The user's pre-expansion rule\n(keyed on the logical parent name, if any) is preserved on the\ncorresponding [`BoundariesListLogicalGroup::authored_rule`]."
     },
     "BoundariesListZone": {
       "type": "object",
@@ -8386,7 +8387,7 @@
         }
       ],
       "title": "fallow --format json (typed root)",
-      "description": "Typed root of every fallow JSON envelope shape that serializes as a JSON\nobject and participates in the documented `FallowOutput` contract.\n\nThe default wire shape carries a top-level `kind` discriminator so agents and\nschema-validating clients can select the variant without probing for unique\nfield presence. CodeClimate output is intentionally not in this enum because\nit serializes as a bare JSON array per the Code Climate / GitLab Code Quality\nspec."
+      "description": "Typed root of every fallow JSON envelope shape that serializes as a JSON\nobject and participates in the documented `FallowOutput` contract. The\nschema derived from this enum drives the document-root `oneOf` in\n`docs/output-schema.json`.\n\nThe default wire shape now carries a top-level `kind` discriminator so\nagents and schema-validating clients can select the variant in O(1) instead\nof probing for unique field presence. `--legacy-envelope` is a one-cycle\ncompatibility flag that removes only this document-root `kind` field from\nCLI JSON output; nested report objects are not rewritten.\n\nOne envelope is intentionally NOT in this enum:\n- `CodeClimateOutput` serializes as a bare JSON array\n  (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality\n  spec; `#[serde(tag = ...)]` cannot internally tag a non-object\n  variant and wrapping the array would break the spec. The root schema\n  carries it as a sibling `oneOf` branch alongside `FallowOutput`."
     },
     "UntestedExportFinding": {
       "type": "object",
@@ -8422,7 +8423,7 @@
         "col",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`UntestedExport`] finding."
+      "description": "Wire-shape envelope for an [`UntestedExport`] finding. Same pattern as\n[`UntestedFileFinding`]: flattens the bare finding and carries a typed\n`actions` array computed at construction time."
     },
     "UntestedFileFinding": {
       "type": "object",
@@ -8448,7 +8449,7 @@
         "value_export_count",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`UntestedFile`] finding."
+      "description": "Wire-shape envelope for an [`UntestedFile`] finding. Carries the bare\n[`UntestedFile`] flattened in plus a typed `actions` array. The action\nvec is computed at construction time using a project-root-relative path\nso descriptions match `strip_root_prefix`'s post-pass output on the inner\n`path` field. Schemars derives the merged shape natively; this retires\nthe `augment_finding_definition` graft for `UntestedFile`."
     },
     "AttributedInstance": {
       "type": "object",
@@ -8479,7 +8480,7 @@
         },
         "owner": {
           "type": "string",
-          "description": "Resolver key for this specific instance."
+          "description": "Resolver key for this specific instance (per-instance, not the\ngroup-level largest-owner)."
         }
       },
       "required": [
@@ -8491,7 +8492,7 @@
         "fragment",
         "owner"
       ],
-      "description": "A clone instance plus its per-instance owner key.\n\nEach instance carries its own `owner` field alongside the standard\n`CloneInstance` shape so consumers can attribute instances to resolver keys\nwithout re-resolving paths."
+      "description": "A clone instance plus its per-instance owner key (for inline JSON / SARIF\nrendering).\n\nEach instance carries its own `owner` field alongside the standard\n`CloneInstance` shape (file / start_line / end_line / start_col / end_col /\nfragment), so consumers can attribute instances to resolver keys without\nre-resolving paths."
     },
     "UnusedFileFinding": {
       "type": "object",
@@ -9954,7 +9955,7 @@
       "properties": {
         "primary_owner": {
           "type": "string",
-          "description": "Largest-owner attribution. Ties are resolved by the caller before this\nwire DTO is built."
+          "description": "Largest-owner attribution: the resolver key with the most instances in\nthis clone group. Ties broken alphabetically (smallest key wins)."
         },
         "token_count": {
           "type": "integer",
@@ -9969,11 +9970,11 @@
           "items": {
             "$ref": "#/definitions/AttributedInstance"
           },
-          "description": "Instances annotated with their resolver keys."
+          "description": "Each instance carries its own `owner` field alongside the standard\nCloneInstance shape."
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable content fingerprint, usually `dup:<8hex>`."
+          "description": "Stable content fingerprint, usually `dup:<8hex>` and widened on rare\nreport collisions. Addressable via `fallow dupes --trace dup:<fp>`.\nComputed from the group's instances, so it matches the top-level\n`clone_groups[].fingerprint` for the same clone."
         },
         "actions": {
           "type": "array",
@@ -9991,7 +9992,7 @@
         "fingerprint",
         "actions"
       ],
-      "description": "Wire-shape envelope for an [`AttributedCloneGroup`] finding."
+      "description": "Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket\nduplication attribution emitted under `fallow dupes --group-by`).\nFlattens the attributed group and carries the same typed\n`CloneGroupAction` array as `CloneGroupFinding`; no `introduced`\nfield because `fallow audit` does not run on grouped output."
     },
     "CloneFamilyActionType": {
       "oneOf": [
@@ -10028,7 +10029,7 @@
           "items": {
             "$ref": "#/definitions/CloneGroupFinding"
           },
-          "description": "Clone groups belonging to this family."
+          "description": "Clone groups belonging to this family, each wrapped with typed\n`actions[]` so consumers that read `clone_families[].groups[]`\ndirectly see the same shape as the top-level `clone_groups[]`."
         },
         "total_duplicated_lines": {
           "type": "integer",
@@ -10050,7 +10051,7 @@
           "items": {
             "$ref": "#/definitions/CloneFamilyAction"
           },
-          "description": "Suggested next steps."
+          "description": "Suggested next steps: an `extract-shared` primary, one\n`apply-suggestion` per `RefactoringSuggestion` on the family, and\na trailing `suppress-line`. Always emitted (possibly empty for\nforward-compat)."
         }
       },
       "required": [
@@ -10061,7 +10062,7 @@
         "suggestions",
         "actions"
       ],
-      "description": "Wire-shape envelope for a clone family finding."
+      "description": "Wire-shape envelope for a [`CloneFamily`] finding.\n\nUnlike most `*Finding` wrappers this one is NOT `#[serde(flatten)]` over\nthe bare [`CloneFamily`], because the family's nested\n`groups: Vec<CloneGroup>` field needs to carry the typed\n`CloneGroupFinding` wrapper too (so every nested clone group gets its\nown `actions[]` array, matching the legacy post-pass behavior; see issue\n#393 regression test). The wire shape stays byte-identical to the\nprevious post-pass output. No `introduced` field because `fallow audit`\nattributes clone groups (not families) when running against a base ref."
     },
     "CloneGroupActionType": {
       "oneOf": [
@@ -10076,7 +10077,7 @@
           "description": "Suppress the finding with an inline comment above the duplicated code."
         }
       ],
-      "description": "Discriminant for [`CloneGroupAction::kind`]."
+      "description": "Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types\nemitted by the legacy `build_clone_group_actions` walker."
     },
     "CloneGroupFinding": {
       "type": "object",
@@ -10098,21 +10099,21 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable content fingerprint, usually `dup:<8hex>`."
+          "description": "Stable content fingerprint, usually `dup:<8hex>` and widened on rare\nreport collisions. Addressable via `fallow dupes --trace dup:<fp>` (and\nthe `trace_clone` MCP tool) to deep-dive this group; shown alongside\neach group in the human listing."
         },
         "suggested_name": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Best-effort human-readable name for the clone."
+          "description": "Best-effort human-readable name for the clone: the dominant repeated\nidentifier across the duplicated fragment (e.g. a shared `parseCsv`\nfunction). `None` when the clone has no clear dominant name (generic or\ntied identifiers); consumers then fall back to a file-based label. Lets\neditors and agents label a clone by what it is rather than an opaque\nordinal."
         },
         "actions": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CloneGroupAction"
           },
-          "description": "Suggested next steps."
+          "description": "Suggested next steps: an `extract-shared` primary and a\n`suppress-line` secondary. Always emitted (possibly empty for\nforward-compat)."
         },
         "introduced": {
           "anyOf": [
@@ -10123,7 +10124,7 @@
               "type": "null"
             }
           ],
-          "description": "Audit-mode introduced flag, populated by audit post-processing."
+          "description": "Set by the audit pass when this clone group is introduced relative\nto the merge-base. `None` when serialized directly from Rust."
         }
       },
       "required": [
@@ -10133,7 +10134,7 @@
         "fingerprint",
         "actions"
       ],
-      "description": "Wire-shape envelope for a clone group finding."
+      "description": "Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare\ngroup via `#[serde(flatten)]` and carries a typed `actions` array plus\nthe optional audit-mode `introduced` flag. Replaces the legacy\npost-pass injection in `crates/cli/src/report/json.rs::inject_dupes_actions`."
     },
     "DupesReportPayload": {
       "type": "object",
@@ -10150,7 +10151,7 @@
           "items": {
             "$ref": "#/definitions/CloneFamilyFinding"
           },
-          "description": "Clone families, each wrapped with typed actions."
+          "description": "Clone families, each wrapped with typed actions. Inner `groups`\ninside each `CloneFamilyFinding` are themselves wrapped as\n`CloneGroupFinding` entries carrying their own `actions[]` (and\noptional audit-mode `introduced` flag), so JSON-Schema strict\nconsumers and TS consumers reading `clone_families[].groups[]` see\nthe same shape as the top-level `clone_groups[]` array (preserves\nthe issue #393 regression contract)."
         },
         "mirrored_directories": {
           "type": "array",
@@ -10169,7 +10170,7 @@
         "clone_families",
         "stats"
       ],
-      "description": "Wire-shape payload for `fallow dupes --format json`."
+      "description": "Wire-shape payload for `fallow dupes --format json` (the body that\nflattens into the `DupesOutput` envelope and is also\nemitted under the `dupes` / `duplication` key inside the combined and\naudit envelopes).\n\nMirrors [`DuplicationReport`] field-for-field, except `clone_groups`\nand `clone_families` carry the typed wrapper envelopes instead of bare\nfindings, so the schema (and any TS / agent consumer) sees the typed\n`actions[]` natively."
     },
     "CoverageAnalyzeSchemaVersion": {
       "type": "string",
@@ -10763,13 +10764,14 @@
       "type": "object",
       "properties": {
         "schema_version": {
-          "description": "Output-shape version for this report.",
+          "description": "Output-shape version for this report, so JSON consumers have a\nforward-compat signal independent of the on-disk store version. Always\npresent; bumped only on a breaking change to this report's wire shape.",
           "$ref": "#/definitions/ImpactReportSchemaVersion"
         },
         "enabled": {
           "type": "boolean"
         },
         "enabled_source": {
+          "description": "WHY tracking is on or off: `project` (an explicit per-repo enable/disable\ndecision), `user` (the user-global default with no per-repo decision), or\n`default` (off, no per-repo decision and no global default). Combine with\n`explicit_decision` to tell a never-asked off-state (`enabled:false`,\n`explicit_decision:false`, offer to enable) from a declined-here one\n(`enabled:false`, `explicit_decision:true`, do not nag).",
           "$ref": "#/definitions/EnabledSource"
         },
         "record_count": {
@@ -10795,7 +10797,8 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Git SHA of the most recent recorded run, so a consumer can tell which\ncommit the `surfacing` counts belong to. This is an ABBREVIATED SHA\n(`git rev-parse --short`), so it is for display/correlation only and will\nnot match a full 40-character SHA from `$GITHUB_SHA` or the git API\nwithout expansion. None when the latest run had no SHA (not a git repo)\nor there are no records yet."
         },
         "surfacing": {
           "anyOf": [
@@ -10805,7 +10808,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Counts from the most recent recorded run. These are CHANGED-FILE scoped\n(each record comes from a `fallow audit` run, whose default `new-only`\ngate counts only findings in the changed files of that run), NOT a\nwhole-project total."
         },
         "trend": {
           "anyOf": [
@@ -10815,7 +10819,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Trend between the two most recent records. None until two records exist."
         },
         "project_surfacing": {
           "anyOf": [
@@ -10825,7 +10830,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Counts from the most recent whole-project `fallow` run. WHOLE-PROJECT\nscope (not changed-file), so this is the current issue total across the\nwhole repo, context next to the actionable changed-file `surfacing`\ncount. None until a full `fallow` run has been recorded. v1.6."
         },
         "project_trend": {
           "anyOf": [
@@ -10835,7 +10841,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Trend between the two most recent whole-project records. Comparable over\ntime (same whole-project denominator every run), unlike the changed-file\n`trend`. None until two full `fallow` runs exist. v1.6."
         },
         "containment_count": {
           "type": "integer"
@@ -10844,28 +10851,35 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/ContainmentEvent"
-          }
+          },
+          "description": "Most recent containment events (newest last), capped for display."
         },
         "resolved_total": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lifetime count of findings fallow credits as genuinely resolved (code\nremoved or refactored, never a `fallow-ignore`). v1.5."
         },
         "suppressed_total": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Lifetime count of findings silenced by a newly-added `fallow-ignore`.\nReported as honest context, never as a win. v1.5."
         },
         "recent_resolved": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/ResolutionEvent"
-          }
+          },
+          "description": "Most recent resolution events (newest last), capped for display. v1.5."
         },
         "attribution_active": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether per-finding attribution has a baseline yet. False on a freshly\nupgraded v1 store (no frontier captured), which the renderer uses to show\n\"resolution tracking starts from your next run\" instead of a bare zero."
         },
         "onboarding_declined": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether the local agent onboarding prompt has been explicitly declined.\nStored in the user config dir (per project) so agents avoid cross-session\nnags without writing into the repo."
         },
         "explicit_decision": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Whether the user ever made an explicit enable/disable decision for\nImpact tracking. `enabled: false` with `explicit_decision: false` means\n\"never asked\"; with `true` it means \"asked and declined\". Agents use\nthis to offer the impact opt-in exactly once per project."
         }
       },
       "required": [
@@ -10938,7 +10952,7 @@
           "description": "First release of the `fallow impact --format json` shape."
         }
       ],
-      "description": "Wire-version discriminator for [`ImpactReport`]."
+      "description": "Wire-version discriminator for [`ImpactReport`]. Independent from the global\n`SchemaVersion` (the impact report versions on its own cadence) and from the\non-disk `STORE_SCHEMA_VERSION` (the persisted store shape versions\nseparately). Serializes as a string `const` so JSON consumers can switch on\nit, matching the other independently-versioned envelopes (e.g.\n`CoverageAnalyzeSchemaVersion`)."
     },
     "ResolutionEvent": {
       "type": "object",
@@ -10984,15 +10998,19 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Schema version of this envelope.",
           "$ref": "#/definitions/SecuritySchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock milliseconds spent producing the report.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "config": {
+          "description": "Privacy-safe config context relevant to security candidate generation.",
           "$ref": "#/definitions/SecurityOutputConfig"
         },
         "_meta": {
@@ -11003,7 +11021,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Security-specific rule and field metadata, emitted with `--explain`."
         },
         "gate": {
           "anyOf": [
@@ -11013,13 +11032,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Gate verdict, present only when `--gate <mode>` was set (issue #886).\nEmitted on pass too (`verdict: \"pass\"`, `new_count: 0`) so consumers\ndistinguish \"gate ran and passed\" from \"gate did not run\" (absent)."
         },
         "security_findings": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/SecurityFinding"
-          }
+          },
+          "description": "Security candidates. Paths are project-root-relative, forward-slash."
         },
         "attack_surface": {
           "type": [
@@ -11028,13 +11049,16 @@
           ],
           "items": {
             "$ref": "#/definitions/SecurityAttackSurfaceEntry"
-          }
+          },
+          "description": "Opt-in attack-surface inventory from untrusted entry points to reachable\nsinks. Present only when `--surface` was requested."
         },
         "unresolved_edge_files": {
-          "type": "integer"
+          "type": "integer",
+          "description": "In-band blind spot: number of `\"use client\"` files whose transitive\nimport cone contains a dynamic `import()` the reachability BFS could not\nfollow. A leak hidden behind such an edge would not be reported, so a\nzero finding count with a non-zero value here is NOT a clean bill."
         },
         "unresolved_callee_sites": {
-          "type": "integer"
+          "type": "integer",
+          "description": "In-band blind spot: number of sink-shaped nodes the catalogue detector\ncould not flatten to a static callee path (dynamic dispatch, computed\nmembers, aliased bindings). A zero finding count with a non-zero value\nhere is NOT a clean bill."
         },
         "unresolved_callee_diagnostics": {
           "anyOf": [
@@ -11044,7 +11068,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Bounded diagnostics for unresolved callee blind spots."
         }
       },
       "required": [
@@ -11056,7 +11081,7 @@
         "unresolved_edge_files",
         "unresolved_callee_sites"
       ],
-      "description": "The `fallow security --format json` envelope."
+      "description": "The `fallow security --format json` envelope. `FallowOutput` discriminates it\nby the `kind: \"security\"` tag; the optional `gate` block is additive and is\nnot part of that discrimination."
     },
     "SecuritySchemaVersion": {
       "oneOf": [
@@ -11096,7 +11121,7 @@
           "description": "Adds the server-only-import category on client-server-leak findings."
         }
       ],
-      "description": "The `fallow security --format json` schema version."
+      "description": "The `fallow security --format json` schema version. Independently versioned\nfrom the main contract, mirroring `ImpactReportSchemaVersion`."
     },
     "SecurityFinding": {
       "type": "object",
@@ -11666,7 +11691,8 @@
           "$ref": "#/definitions/SecurityGateVerdict"
         },
         "new_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of candidates matching the selected gate mode."
         }
       },
       "required": [
@@ -11674,7 +11700,7 @@
         "verdict",
         "new_count"
       ],
-      "description": "The `gate` block on `SecurityOutput`, present only when `--gate <mode>` ran."
+      "description": "The `gate` block on `SecurityOutput`, present only when `--gate <mode>` ran.\nInvariant: `verdict == Fail  IFF  exit code 8  IFF  new_count > 0`."
     },
     "SecurityGateMode": {
       "oneOf": [
@@ -11704,7 +11730,7 @@
           "description": "At least one new candidate in the changed lines."
         }
       ],
-      "description": "Gate verdict on the wire."
+      "description": "Gate verdict on the wire. `fail` is the CI-state token; human output renders\nit as \"REVIEW REQUIRED\" because these stay unverified candidates, never\nconfirmed vulnerabilities."
     },
     "SecurityCandidate": {
       "type": "object",
@@ -12162,6 +12188,7 @@
       "type": "object",
       "properties": {
         "rules": {
+          "description": "Relevant rule severities before and after this command applies its\ndefault-on behavior for security-only rules.",
           "$ref": "#/definitions/SecurityOutputRulesConfig"
         },
         "categories_include": {
@@ -12171,7 +12198,8 @@
           ],
           "items": {
             "type": "string"
-          }
+          },
+          "description": "`security.categories.include` from config. `null` means unset, `[]`\nmeans explicitly empty."
         },
         "categories_exclude": {
           "type": [
@@ -12180,7 +12208,8 @@
           ],
           "items": {
             "type": "string"
-          }
+          },
+          "description": "`security.categories.exclude` from config. `null` means unset, `[]`\nmeans explicitly empty."
         }
       },
       "required": [
@@ -12209,9 +12238,11 @@
       "type": "object",
       "properties": {
         "configured": {
+          "description": "Severity read from resolved config before the security command applies\nits default-on behavior.",
           "$ref": "#/definitions/Severity"
         },
         "effective": {
+          "description": "Severity used for this command run.",
           "$ref": "#/definitions/Severity"
         }
       },
@@ -12244,15 +12275,19 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Schema version of this envelope.",
           "$ref": "#/definitions/SecuritySchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock milliseconds spent producing the report.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "config": {
+          "description": "Privacy-safe config context relevant to security candidate generation.",
           "$ref": "#/definitions/SecurityOutputConfig"
         },
         "_meta": {
@@ -12263,7 +12298,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Security-specific rule and field metadata, emitted with `--explain`."
         },
         "gate": {
           "anyOf": [
@@ -12273,9 +12309,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Gate verdict, present only when `--gate <mode>` was set."
         },
         "summary": {
+          "description": "Aggregate security counts after all filters, gates, and scopes.",
           "$ref": "#/definitions/SecuritySummary"
         }
       },
@@ -12286,37 +12324,45 @@
         "config",
         "summary"
       ],
-      "description": "Compact `fallow security --summary --format json` payload."
+      "description": "Compact `fallow security --summary --format json` payload. Uses the same\n`kind: \"security\"` discriminator as the full payload, but omits candidate\narrays and exposes only aggregate counts."
     },
     "SecuritySummary": {
       "type": "object",
       "properties": {
         "security_findings": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of security candidates after all filters, gates, and scopes."
         },
         "by_severity": {
+          "description": "Fixed severity counts for the closed security severity enum.",
           "$ref": "#/definitions/SecuritySeverityCounts"
         },
         "by_category": {
           "type": "object",
           "additionalProperties": {
             "type": "integer"
-          }
+          },
+          "description": "Finding counts by catalogue category, or by kind for findings without a\ncatalogue category."
         },
         "by_reachability": {
+          "description": "Fixed reachability counts for ranking and triage signals.",
           "$ref": "#/definitions/SecurityReachabilityCounts"
         },
         "by_runtime_state": {
+          "description": "Fixed runtime coverage counts for runtime-state triage signals.",
           "$ref": "#/definitions/SecurityRuntimeStateCounts"
         },
         "unresolved_edge_files": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of client files whose dynamic imports could not be followed."
         },
         "unresolved_callee_sites": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of sink-shaped callees that could not be statically flattened."
         },
         "attack_surface_entries": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of attack-surface entries included in the prepared full output."
         }
       },
       "required": [
@@ -12358,25 +12404,30 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/SecurityUnresolvedCalleeSample"
-          }
+          },
+          "description": "Deterministic sample rows, capped by `sample_limit`."
         },
         "top_files": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/SecurityUnresolvedCalleeTopFile"
-          }
+          },
+          "description": "Files with the most unresolved callees, capped by `top_files_limit`."
         },
         "by_reason": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/SecurityUnresolvedCalleeReasonCount"
-          }
+          },
+          "description": "Full count by unresolved-callee reason, sorted by count then reason."
         },
         "sample_limit": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Maximum number of sample rows emitted."
         },
         "top_files_limit": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Maximum number of top-file rows emitted."
         }
       },
       "required": [
@@ -12395,7 +12446,8 @@
           "$ref": "#/definitions/SkippedSecurityCalleeReason"
         },
         "count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of unresolved callees with this reason."
         }
       },
       "required": [
@@ -12420,6 +12472,7 @@
           "$ref": "#/definitions/SkippedSecurityCalleeReason"
         },
         "expression_kind": {
+          "description": "Compact syntax shape of the skipped callee.",
           "$ref": "#/definitions/SkippedSecurityCalleeExpressionKind"
         }
       },
@@ -12439,7 +12492,8 @@
           "type": "string"
         },
         "count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of unresolved callees in this file."
         }
       },
       "required": [
@@ -13071,7 +13125,7 @@
         "user",
         "default"
       ],
-      "description": "Why Impact tracking is or is not active for a project."
+      "description": "Why Impact tracking is (or is not) active for a project. `Project` = an\nexplicit per-repo `enable`; `User` = the user-global default with no per-repo\ndecision; `Default` = off (no per-repo decision and no global default)."
     },
     "MixedClientServerBarrelFinding": {
       "type": "object",
@@ -13179,13 +13233,16 @@
           "$ref": "#/definitions/CrossRepoImpactSchemaVersion"
         },
         "project_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Per-project stores successfully parsed (add `unreadable_count` for the\ntotal number of store files found in the user config dir)."
         },
         "tracked_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Stores with recorded history (the rows in `projects`); excludes\nenabled-but-empty stores, which are still counted in `project_count`."
         },
         "unreadable_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Stores that failed to parse and were skipped (corrupt or newer-schema)."
         },
         "totals": {
           "$ref": "#/definitions/CrossRepoTotals"
@@ -13216,27 +13273,31 @@
           "description": "First release of the `fallow impact --all --format json` shape."
         }
       ],
-      "description": "Independent wire-version for the cross-repo impact report."
+      "description": "Independent wire-version for the cross-repo report, on its own cadence (it\nversions separately from the per-project `ImpactReportSchemaVersion` and the\non-disk `STORE_SCHEMA_VERSION`)."
     },
     "CrossRepoProjectEntry": {
       "type": "object",
       "properties": {
         "project_key": {
-          "type": "string"
+          "type": "string",
+          "description": "Stable, non-reversible project key (the store filename stem); the\ncross-tool/cross-run JOIN key. NEVER a path."
         },
         "label": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Repo basename for display (never a full path). Absent on pre-v5 stores\n(the row falls back to the short key)."
         },
         "last_recorded": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Timestamp of the project's most recent recorded run (changed-file or\nwhole-project), for the LAST RUN column and the default `recent` sort."
         },
         "report": {
+          "description": "The full per-project report (identical shape to `fallow impact --format\njson`), reused verbatim so the per-project wire contract is the sub-shape.",
           "$ref": "#/definitions/ImpactReport"
         }
       },
@@ -13259,7 +13320,8 @@
           "type": "integer"
         },
         "project_wide_issues": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Sum of whole-project issue totals across projects that have a full-run\nbaseline, as of EACH project's last full `fallow` run (not a simultaneous\nsnapshot)."
         },
         "projects_with_baseline": {
           "type": "integer"
@@ -13272,7 +13334,7 @@
         "project_wide_issues",
         "projects_with_baseline"
       ],
-      "description": "Grand totals across every tracked project."
+      "description": "Grand totals across every tracked project (including repos whose directory no\nlonger exists on disk: their past wins still count toward lifetime impact)."
     },
     "UnusedStoreMemberFinding": {
       "type": "object",
@@ -15129,15 +15191,15 @@
         },
         "path": {
           "type": "string",
-          "description": "Project-relative path of the file declaring the component."
+          "description": "Project-relative path of the file declaring the component. Serialized with\nforward slashes (same serializer the other relativized health paths use)."
         },
         "render_sites": {
           "type": "integer",
-          "description": "Total JSX render sites that resolve to this component across the project."
+          "description": "Total JSX render SITES that resolve to this component across the project.\nSECONDARY \"incl. repeats\" context, not the headline (see `distinct_parents`)."
         },
         "distinct_parents": {
           "type": "integer",
-          "description": "Distinct `(parent_file, parent_component)` keys that render this component."
+          "description": "Distinct `(parent_file, parent_component)` keys that render this component.\nThe HEADLINE blast-radius axis: distinct render LOCATIONS."
         }
       },
       "required": [
@@ -15146,18 +15208,21 @@
         "render_sites",
         "distinct_parents"
       ],
-      "description": "One located high-fan-in React/Preact component for the descriptive\n`top_render_fan_in` blast-radius list on [`VitalSigns`]."
+      "description": "One located high-fan-in React/Preact component for the descriptive\n`top_render_fan_in` blast-radius list on [`VitalSigns`].\n\nThe component-graph analogue of a high-fan-in module: `distinct_parents` is\nthe HEADLINE axis (the honest count of distinct parent components / render\nLOCATIONS that render this component), `render_sites` is secondary \"incl.\nrepeats\" context (every JSX render SITE, so a single parent rendering one\nchild five times is five sites but one parent). Undercount-safe like the\nunderlying metric: a child rendered via a JSX spread / dynamic /\nmember-expression tag resolves to no component, so a true high-fan-in\ncomponent can only be undersold."
     },
     "SecuritySurvivorsOutput": {
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Schema version of this envelope.",
           "$ref": "#/definitions/SecuritySurvivorsSchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock milliseconds spent producing the report.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "summary": {
@@ -15167,13 +15232,15 @@
           "type": "object",
           "additionalProperties": {
             "$ref": "#/definitions/SecuritySurvivor"
-          }
+          },
+          "description": "Verifier-retained candidates keyed by finding id."
         },
         "needs_human_review": {
           "type": "object",
           "additionalProperties": {
             "$ref": "#/definitions/SecuritySurvivor"
-          }
+          },
+          "description": "Ambiguous candidates keyed by finding id. These are not dismissed and are\nkept explicit so queues can decide whether to include them."
         }
       },
       "required": [
@@ -15232,7 +15299,8 @@
       "type": "object",
       "properties": {
         "finding_id": {
-          "type": "string"
+          "type": "string",
+          "description": "Stable candidate id from `security_findings[].finding_id`."
         },
         "verdict": {
           "$ref": "#/definitions/SecurityVerifierVerdictStatus"
@@ -15253,21 +15321,25 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Optional verifier-provided confidence or review priority."
         },
         "impact": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Optional verifier-provided impact statement."
         },
         "fix_direction": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Optional verifier-owned remediation direction."
         },
         "candidate": {
+          "description": "Original typed fallow security candidate.",
           "$ref": "#/definitions/SecurityFinding"
         }
       },
@@ -15282,10 +15354,12 @@
       "type": "object",
       "properties": {
         "schema_version": {
-          "type": "string"
+          "type": "string",
+          "description": "Must be `fallow-security-verdict/v1`."
         },
         "finding_id": {
-          "type": "string"
+          "type": "string",
+          "description": "Stable candidate id from `security_findings[].finding_id`."
         },
         "verdict": {
           "$ref": "#/definitions/SecurityVerifierVerdictStatus"
@@ -15306,19 +15380,22 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Optional verifier-provided confidence or review priority."
         },
         "impact": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Optional verifier-provided impact statement."
         },
         "fix_direction": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Optional verifier-owned remediation direction."
         }
       },
       "required": [
@@ -15352,22 +15429,27 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Schema version of this envelope.",
           "$ref": "#/definitions/SecurityBlindSpotsSchemaVersion"
         },
         "version": {
+          "description": "Fallow CLI version that produced this output.",
           "$ref": "#/definitions/ToolVersion"
         },
         "elapsed_ms": {
+          "description": "Wall-clock milliseconds spent producing the report.",
           "$ref": "#/definitions/ElapsedMs"
         },
         "summary": {
+          "description": "Aggregate blind-spot counts from the security analysis.",
           "$ref": "#/definitions/SecurityBlindSpotsSummary"
         },
         "groups": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/SecurityBlindSpotGroup"
-          }
+          },
+          "description": "Grouped unresolved callee diagnostics, derived from existing samples."
         }
       },
       "required": [
@@ -15416,19 +15498,23 @@
           "$ref": "#/definitions/SkippedSecurityCalleeReason"
         },
         "expression_kind": {
+          "description": "Compact syntax shape of the skipped callee.",
           "$ref": "#/definitions/SkippedSecurityCalleeExpressionKind"
         },
         "sampled_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Count in the bounded diagnostic sample."
         },
         "files": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/SecurityBlindSpotFile"
-          }
+          },
+          "description": "Top files in this bounded diagnostic sample."
         },
         "suggestion": {
-          "type": "string"
+          "type": "string",
+          "description": "Suggested next action for this group."
         }
       },
       "required": [
@@ -15447,7 +15533,8 @@
           "type": "string"
         },
         "sampled_count": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Count in the bounded diagnostic sample."
         }
       },
       "required": [
@@ -15549,7 +15636,7 @@
           "$ref": "#/definitions/InspectEvidenceSection"
         },
         "impact_closure": {
-          "description": "Impact closure scoped to the inspected file as the seed.",
+          "description": "Impact closure scoped to the inspected file as the seed: the transitive\naffected-but-not-in-diff set + coordination gap.",
           "$ref": "#/definitions/InspectEvidenceSection"
         },
         "symbol_chain": {
@@ -15561,7 +15648,7 @@
               "type": "null"
             }
           ],
-          "description": "Optional symbol-level call chain."
+          "description": "OPT-IN symbol-level call chain. Present only when `--symbol-chain` was\nrequested AND the target is a SYMBOL (best-effort, syntactic, OFF the\nranked path). `None` (omitted) by default: symbol-level chains are\nbest-effort and not part of the trusted ranked evidence."
         }
       },
       "required": [
@@ -15742,42 +15829,53 @@
       "type": "object",
       "properties": {
         "schema_version": {
+          "description": "Independently-versioned brief schema version.",
           "$ref": "#/definitions/ReviewBriefSchemaVersion"
         },
         "version": {
-          "type": "string"
+          "type": "string",
+          "description": "Fallow CLI version that produced this output."
         },
         "command": {
-          "type": "string"
+          "type": "string",
+          "description": "Command discriminator singleton: always `\"audit-brief\"`."
         },
         "triage": {
           "$ref": "#/definitions/DiffTriage"
         },
         "graph_facts": {
+          "description": "Stage 1: graph orientation facts.",
           "$ref": "#/definitions/GraphFacts"
         },
         "partition": {
+          "description": "Stage 2: the partition + order (by-module units + dependency-sensible\nreview order). The backbone the directed-review loop hands the agent.",
           "$ref": "#/definitions/PartitionFacts"
         },
         "impact_closure": {
+          "description": "Stage 3: the impact closure (affected-not-shown + coordination gap).",
           "$ref": "#/definitions/ImpactClosureFacts"
         },
         "focus": {
+          "description": "Stage 4: the weighted focus map. A composite attention score per\nchanged-file unit (fan-in/out + security taint + risk zone + change shape),\nwith `review-here` / `not-prioritized` labels (NEVER `skip` in free mode),\na per-unit confidence flag, and the FULL `deprioritized` escape-hatch list\nso every de-prioritized piece is reachable. Stage 4 sits UNDER the decision\nsurface as drill-down.",
           "$ref": "#/definitions/FocusMap"
         },
         "deltas": {
+          "description": "6.A: diff-aware deterministic deltas (boundary/cycle introduced +\nexports-aware public-API surface delta), new-vs-pre-existing.",
           "$ref": "#/definitions/ReviewDeltas"
         },
         "weakening": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/WeakeningSignal"
-          }
+          },
+          "description": "6.F, headline: reviewer-private weakening signals (tests\nremoved/skipped, thresholds lowered, suppressions added, security steps\nremoved). Advisory, never gates, never auto-posted."
         },
         "routing": {
+          "description": "6.D: ownership-aware reviewer routing (per-file expert + bus-factor).",
           "$ref": "#/definitions/RoutingFacts"
         },
         "decisions": {
+          "description": "6.G, the APEX: the decision surface. The ranked, capped,\nsignal_id-anchored set of consequential structural decisions, each framed\nas a judgment question with its routed expert. This is the only thing the\nbrief visibly leads with; the stages above are its drill-down derivation.",
           "$ref": "#/definitions/DecisionSurface"
         }
       },
@@ -15796,11 +15894,11 @@
         "decisions"
       ],
       "title": "fallow audit --brief --format json",
-      "description": "The full `fallow audit --brief --format json` envelope."
+      "description": "The full `fallow audit --brief --format json` envelope. Carries the\ninformational verdict, the triage and graph-facts orientation stages, plus\nthe reused \"subtract\" section (the same dead-code / duplication / complexity\npayload `fallow audit --format json` emits)."
     },
     "ReviewBriefSchemaVersion": {
       "type": "integer",
-      "description": "Independently-versioned wire-version newtype for the brief envelope."
+      "description": "Independently-versioned wire-version newtype for the brief envelope.\nSerializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`."
     },
     "RiskClass": {
       "oneOf": [
@@ -15820,7 +15918,7 @@
           "description": "Large change spanning many files or lines."
         }
       ],
-      "description": "Coarse risk classification for a changeset."
+      "description": "Coarse risk classification for a changeset, a pure function of the change\nsize (file count plus, once threaded, net lines)."
     },
     "ReviewEffort": {
       "oneOf": [
@@ -15840,30 +15938,35 @@
           "description": "A careful, deep review is warranted."
         }
       ],
-      "description": "Suggested reviewer effort."
+      "description": "Suggested reviewer effort, a pure function of [`RiskClass`]."
     },
     "DiffTriage": {
       "type": "object",
       "properties": {
         "files": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of changed files in the audit scope."
         },
         "hunks": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Number of diff hunks. `None` in v1 (no diff index threaded yet)."
         },
         "net_lines": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Net added-minus-removed lines. `None` in v1 (no diff index threaded yet)."
         },
         "risk_class": {
+          "description": "Coarse risk class derived from the change size.",
           "$ref": "#/definitions/RiskClass"
         },
         "review_effort": {
+          "description": "Suggested reviewer effort derived from `risk_class`.",
           "$ref": "#/definitions/ReviewEffort"
         }
       },
@@ -15872,28 +15975,32 @@
         "risk_class",
         "review_effort"
       ],
-      "description": "Stage 0 of the brief: triage facts derived from diff size."
+      "description": "Stage 0 of the brief: triage facts derived purely from the diff size.\n\n`hunks` and `net_lines` are `None` in v1: the file-level audit does not yet\nthread a `DiffIndex` (from `report/ci/diff_filter.rs`). They populate later,\non `--diff-file` / `--diff-stdin`, without a schema bump."
     },
     "GraphFacts": {
       "type": "object",
       "properties": {
         "exports_added": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Number of exports added by the changeset. Stubbed to `0` in v1."
         },
         "api_width_delta": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Change in public API width (added minus removed exports). Stubbed to `0`\nin v1."
         },
         "reachable_from": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Root-relative paths of modules the changed code is reachable from / affects\n(the impact closure's affected-but-not-in-diff set), deduped and sorted.\nEmpty when no graph was retained or nothing depends on the changed files."
         },
         "boundaries_touched": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Architecture boundary zones touched by the changeset, deduped and sorted.\nDerived from the run's boundary-violation findings."
         }
       },
       "required": [
@@ -15902,7 +16009,7 @@
         "reachable_from",
         "boundaries_touched"
       ],
-      "description": "Stage 1 of the brief: graph-derived orientation facts."
+      "description": "Stage 1 of the brief: graph-derived orientation facts.\n\n`boundaries_touched` is derived from the run's boundary-violation zones;\n`reachable_from` is populated by the impact closure (the affected-not-shown\nset: modules the changed code is reachable from / affects, none in the diff).\n`exports_added` / `api_width_delta` stay honestly stubbed (`0`) until the\nexport-surface delta lands. The fields are present and correctly typed so\nvalues fill in later without a schema bump."
     },
     "ImpactClosureFacts": {
       "type": "object",
@@ -15911,38 +16018,44 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Root-relative paths transitively affected by the changeset (reverse-deps +\nre-export chains) that are NOT in the diff, deduped and sorted."
         },
         "coordination_gap": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/CoordinationGapFact"
-          }
+          },
+          "description": "Coordination gaps: a changed file exports a contract consumed by a module\nabsent from the diff. One entry per (changed file, consumer) pair."
         }
       },
       "required": [
         "affected_not_shown",
         "coordination_gap"
       ],
-      "description": "Stage 3 of the brief: the impact closure."
+      "description": "Stage 3 of the brief: the impact closure. The transitive\naffected-but-not-in-diff set plus the coordination gap. The differentiator a\ndiff tool fundamentally cannot do, because it has no graph.\n\nHonest scope (ADR-001, syntactic): the coordination gap is an attention\npointer at the exact inter-module failure mode, NOT a correctness proof."
     },
     "CoordinationGapFact": {
       "type": "object",
       "properties": {
         "changed_file": {
-          "type": "string"
+          "type": "string",
+          "description": "Root-relative path of the changed file whose contract is consumed elsewhere."
         },
         "consumer_file": {
-          "type": "string"
+          "type": "string",
+          "description": "Root-relative path of the consumer module that is NOT in the diff."
         },
         "consumed_symbols": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "The exported symbol names the consumer references, sorted."
         },
         "note": {
-          "type": "string"
+          "type": "string",
+          "description": "Honest scope note: this is a syntactic attention pointer, not a proof."
         }
       },
       "required": [
@@ -15951,7 +16064,7 @@
         "consumed_symbols",
         "note"
       ],
-      "description": "One coordination-gap entry."
+      "description": "One coordination-gap entry: a changed file exports symbols consumed by a\n`consumer_file` that is NOT in the diff. Deduped per (changed, consumer) pair\n(firing-precision rule R2)."
     },
     "ReviewDeltas": {
       "type": "object",
@@ -15960,19 +16073,22 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Cross-zone boundary EDGES introduced vs base (R2 first-edge-only: one per\n`<from_zone>-><to_zone>` pair, never per import). New-vs-pre-existing."
         },
         "cycle_introduced": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Circular dependencies introduced vs base (canonical file-set keys)."
         },
         "public_api_added": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Exports-aware public-API surface delta: the public-export keys\n(`<rel_path>::<name>`) added vs base, resolved through `package.json`\n`exports` + re-export reachability. A symbol re-exported only through an\ninternal barrel NOT in `exports` is absent here (zero delta); one\nreachable through an `exports` path is present (exactly one)."
         }
       },
       "required": [
@@ -15980,7 +16096,7 @@
         "cycle_introduced",
         "public_api_added"
       ],
-      "description": "Diff-aware deterministic deltas, framed new-vs-pre-existing."
+      "description": "Diff-aware deterministic deltas (6.A), framed new-vs-pre-existing against\nthe audit base snapshot. Each entry is a brief summary/verdict line.\n\n`public_api` is batch-consolidated to ONE decision per change (rule R1):\nthe `added` list carries the introduced public-export keys as evidence, but a\nreviewer reads \"the public surface widened by N\", never one decision per\nsymbol."
     },
     "WeakeningSignal": {
       "type": "object",
@@ -15991,11 +16107,11 @@
         },
         "file": {
           "type": "string",
-          "description": "Root-relative changed file path."
+          "description": "Root-relative path of the changed file the signal was detected in."
         },
         "evidence": {
           "type": "string",
-          "description": "Short evidence string."
+          "description": "Short evidence string (e.g. the offending token or the threshold delta)."
         }
       },
       "required": [
@@ -16003,7 +16119,7 @@
         "file",
         "evidence"
       ],
-      "description": "One weakening signal."
+      "description": "One weakening signal: a category, the file it was detected in, and a short\nhuman-readable evidence string. Reviewer-private; never gates."
     },
     "WeakeningKind": {
       "oneOf": [
@@ -16044,7 +16160,7 @@
       "required": [
         "units"
       ],
-      "description": "The full routing section."
+      "description": "The full routing section: one unit per changed source file with a routable\nsignal. Files with no ownership signal are omitted (no noise)."
     },
     "RoutingUnit": {
       "type": "object",
@@ -16058,11 +16174,11 @@
           "items": {
             "type": "string"
           },
-          "description": "Routed expert(s), when ownership signals are available."
+          "description": "The routed expert(s): the CODEOWNERS declared owner when present, else the\ntop git-blame / recency contributor; empty when no signal is available."
         },
         "bus_factor_one": {
           "type": "boolean",
-          "description": "Whether the only qualified owner is a single contributor."
+          "description": "Whether the only qualified owner is a single contributor (bus-factor-1):\na knowledge-concentration risk worth a second reviewer."
         }
       },
       "required": [
@@ -16076,7 +16192,7 @@
       "properties": {
         "signal_id": {
           "type": "string",
-          "description": "Deterministic anchor to the fallow-emitted candidate this decision frames."
+          "description": "Deterministic anchor to the fallow-emitted candidate this decision frames.\n`accept_signal_id` rejects any id not in the emitted set."
         },
         "category": {
           "description": "One of the SOLID-3 categories.",
@@ -16092,7 +16208,7 @@
         },
         "anchor_line": {
           "type": "integer",
-          "description": "1-based anchor line, or 0 when unavailable."
+          "description": "1-based anchor line, when the underlying signal carries one (0 = file head)."
         },
         "signal_key": {
           "type": "string",
@@ -16103,22 +16219,22 @@
             "string",
             "null"
           ],
-          "description": "The pre-rename `signal_id`, when the anchor file was renamed."
+          "description": "The `signal_id` this decision WOULD have had before any rename in this\nchange (the anchor file's pre-rename path). Present only when the anchor was\nrenamed. A review-memory layer carries a dismissal across a `git mv`: if\n`previous_signal_id` was dismissed in an earlier PR, treat this decision as\ndismissed too. Keeps `signal_id` itself exact + deterministic."
         },
         "blast": {
           "type": "integer",
-          "description": "Blast radius used for ranking."
+          "description": "Blast radius: count of modules affected beyond the diff by this decision."
         },
         "consequence": {
           "type": "integer",
-          "description": "`blast * reversibility_weight`."
+          "description": "`blast * reversibility_weight`: the rank key (sorted descending)."
         },
         "expert": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Routed expert(s), when ownership signals are available."
+          "description": "The routed expert(s) to ask, from ownership routing. Empty when no\nownership signal is available for the anchor file."
         },
         "bus_factor_one": {
           "type": "boolean",
@@ -16126,11 +16242,11 @@
         },
         "internal_consumer_count": {
           "type": "integer",
-          "description": "In-repo modules outside the diff that already depend on this anchor."
+          "description": "Honest per-decision count: in-repo modules OUTSIDE the diff that already\ndepend on this decision's anchor. This is the DISPLAY number (taste\nownership: the human reads reversibility from the count itself), distinct\nfrom `blast` (the project-wide proxy used only for ranking). Never a door\nlabel. Internal-only by construction, so it cannot see a published library's\nexternal consumers; the public-API trade-off clause names that risk in prose."
         },
         "tradeoff": {
           "type": "string",
-          "description": "The named structural trade-off this decision introduces."
+          "description": "The named structural sacrifice this change makes, stated as a fact, never a\nrecommendation (e.g. \"Couples `app` to `infra`; 4 in-repo modules already\ndepend on this anchor.\"). A sibling fact to `question`; it never tells the\nhuman what to choose."
         }
       },
       "required": [
@@ -16168,7 +16284,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether fallow can carry the action out automatically."
+          "description": "Whether fallow can carry the action out automatically. Always `false`:\na decision is a human judgment, never auto-applied."
         }
       },
       "required": [
@@ -16176,7 +16292,7 @@
         "description",
         "auto_fixable"
       ],
-      "description": "A structured action attached to a surfaced decision."
+      "description": "A structured action attached to a surfaced decision (the agent-actionable\nsurface). Mirrors the typed-action shape the rest of fallow emits."
     },
     "DecisionActionType": {
       "oneOf": [
@@ -16211,7 +16327,7 @@
           "description": "A new third-party dependency (new maintenance + security surface).\n\nThe arm is part of the SOLID-3 surface, but its candidate source is not\nyet threaded onto the brief path, so the extractor never constructs it\nfrom a live signal today. Reserved, not dead."
         }
       ],
-      "description": "The exactly-three shippable decision categories (the SOLID-3). No cut category\nis representable, so confirmed-noise categories cannot ship by construction."
+      "description": "The exactly-three shippable decision categories (the SOLID-3). No cut category\n(abstraction / deletion / convention / irreversibility) is representable: this\nenum is the structural guarantee that confirmed-noise categories never ship."
     },
     "DecisionSurface": {
       "type": "object",
@@ -16239,14 +16355,14 @@
           "items": {
             "type": "string"
           },
-          "description": "Every `signal_id` the deterministic layer emitted."
+          "description": "Every signal_id the deterministic layer emitted, INCLUDING those whose\ndecision was collapsed below the cap or suppressed. The anti-hallucination\nallowlist: an agent decision whose id is absent is rejected."
         }
       },
       "required": [
         "decisions",
         "emitted_signal_ids"
       ],
-      "description": "The ranked, capped decision surface plus the deterministic signal allowlist."
+      "description": "The ranked, capped decision surface plus the set of signal_ids the\ndeterministic layer emitted (the anti-hallucination allowlist)."
     },
     "DecisionSurfaceOutput": {
       "type": "object",
@@ -16283,7 +16399,7 @@
         },
         "signal_count": {
           "type": "integer",
-          "description": "Count of fallow-emitted signal ids."
+          "description": "Count of fallow-emitted signal_ids (the anti-hallucination allowlist size)."
         }
       },
       "required": [
@@ -16294,18 +16410,18 @@
         "signal_count"
       ],
       "title": "fallow decision-surface --format json",
-      "description": "The separable `decision-surface` envelope."
+      "description": "The separable `decision-surface` envelope: the single call that puts taste-\ndecisions in front of a human, callable WITHOUT the full pipeline (the\n`decision_surface` MCP tool's output). Carries `kind`/`schema_version` plus\nstructured `actions[]` per decision."
     },
     "DecisionSurfaceSchemaVersion": {
       "type": "integer",
-      "description": "Independently-versioned wire-version newtype."
+      "description": "Independently-versioned wire-version newtype. Serializes as the integer\n[`DECISION_SURFACE_SCHEMA_VERSION`]."
     },
     "DecisionWithActions": {
       "type": "object",
       "properties": {
         "signal_id": {
           "type": "string",
-          "description": "Deterministic anchor to the fallow-emitted candidate this decision frames."
+          "description": "Deterministic anchor to the fallow-emitted candidate this decision frames.\n`accept_signal_id` rejects any id not in the emitted set."
         },
         "category": {
           "description": "One of the SOLID-3 categories.",
@@ -16321,7 +16437,7 @@
         },
         "anchor_line": {
           "type": "integer",
-          "description": "1-based anchor line, or 0 when unavailable."
+          "description": "1-based anchor line, when the underlying signal carries one (0 = file head)."
         },
         "signal_key": {
           "type": "string",
@@ -16332,22 +16448,22 @@
             "string",
             "null"
           ],
-          "description": "The pre-rename `signal_id`, when the anchor file was renamed."
+          "description": "The `signal_id` this decision WOULD have had before any rename in this\nchange (the anchor file's pre-rename path). Present only when the anchor was\nrenamed. A review-memory layer carries a dismissal across a `git mv`: if\n`previous_signal_id` was dismissed in an earlier PR, treat this decision as\ndismissed too. Keeps `signal_id` itself exact + deterministic."
         },
         "blast": {
           "type": "integer",
-          "description": "Blast radius used for ranking."
+          "description": "Blast radius: count of modules affected beyond the diff by this decision."
         },
         "consequence": {
           "type": "integer",
-          "description": "`blast * reversibility_weight`."
+          "description": "`blast * reversibility_weight`: the rank key (sorted descending)."
         },
         "expert": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Routed expert(s), when ownership signals are available."
+          "description": "The routed expert(s) to ask, from ownership routing. Empty when no\nownership signal is available for the anchor file."
         },
         "bus_factor_one": {
           "type": "boolean",
@@ -16355,18 +16471,18 @@
         },
         "internal_consumer_count": {
           "type": "integer",
-          "description": "In-repo modules outside the diff that already depend on this anchor."
+          "description": "Honest per-decision count: in-repo modules OUTSIDE the diff that already\ndepend on this decision's anchor. This is the DISPLAY number (taste\nownership: the human reads reversibility from the count itself), distinct\nfrom `blast` (the project-wide proxy used only for ranking). Never a door\nlabel. Internal-only by construction, so it cannot see a published library's\nexternal consumers; the public-API trade-off clause names that risk in prose."
         },
         "tradeoff": {
           "type": "string",
-          "description": "The named structural trade-off this decision introduces."
+          "description": "The named structural sacrifice this change makes, stated as a fact, never a\nrecommendation (e.g. \"Couples `app` to `infra`; 4 in-repo modules already\ndepend on this anchor.\"). A sibling fact to `question`; it never tells the\nhuman what to choose."
         },
         "actions": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/DecisionAction"
           },
-          "description": "Structured actions."
+          "description": "Structured actions: route to the expert, or suppress."
         }
       },
       "required": [
@@ -16408,15 +16524,15 @@
       "properties": {
         "signal_id": {
           "type": "string",
-          "description": "The verified `signal_id`, or empty when anchored by a change anchor."
+          "description": "The fallow-emitted `signal_id` (verified against the allowlist). Empty\nwhen this judgment was anchored by a `change_anchor` instead."
         },
         "change_anchor": {
           "type": "string",
-          "description": "The verified change anchor, or empty when anchored by a signal id."
+          "description": "The fallow-emitted `change_anchor` (verified against the allowlist). Empty\nwhen this judgment was anchored by a `signal_id`."
         },
         "anchor_kind": {
           "type": "string",
-          "description": "Which anchor resolved."
+          "description": "Which anchor resolved: `\"signal\"` (a graph FINDING, the strong anchor) or\n`\"change\"` (a changed REGION only, the weaker anchor). Lets a consumer\ndistinguish a finding-anchored judgment from a region-anchored one rather\nthan collapsing both into one accepted bucket."
         },
         "agent_framing": {
           "type": "string",
@@ -16431,7 +16547,7 @@
         },
         "deterministic": {
           "type": "boolean",
-          "description": "Hard fence: always `false`."
+          "description": "Hard fence: always `false`. The framing is agent prose, never a\ndeterministic fallow result, so it never gates or auto-posts."
         }
       },
       "required": [
@@ -16441,18 +16557,18 @@
         "agent_framing",
         "deterministic"
       ],
-      "description": "One accepted judgment."
+      "description": "One accepted judgment: the real anchored signal passed through with the\nagent's framing FENCED as non-deterministic."
     },
     "AgentSchema": {
       "type": "object",
       "properties": {
         "judgment_shape": {
           "type": "string",
-          "description": "How the agent must structure each judgment."
+          "description": "How the agent must structure each judgment: cite an emitted `signal_id`,\nadd free-text `framing` (non-deterministic, fenced), an optional `concern`."
         },
         "echo_field": {
           "type": "string",
-          "description": "The echoed graph snapshot field."
+          "description": "The agent MUST echo this `graph_snapshot_hash` back in its JSON; a\nmismatch on reentry REFUSES the payload as stale."
         },
         "anchoring_rule": {
           "type": "string",
@@ -16464,7 +16580,7 @@
         "echo_field",
         "anchoring_rule"
       ],
-      "description": "The shape the agent must return, embedded in the guide."
+      "description": "The shape the agent must return, embedded in the guide so a thin skill needs\nno frozen copy. Documents the anchoring + staleness contract in the wire."
     },
     "DirectionUnit": {
       "type": "object",
@@ -16475,18 +16591,18 @@
         },
         "concern_lens": {
           "type": "string",
-          "description": "The concern lens the agent should check for this unit."
+          "description": "The concern lens the agent should check for this unit, derived from the\nunit's risk signals (impact-closure consumers vs a plain touched file)."
         },
         "scoring_budget": {
           "type": "integer",
-          "description": "Per-unit review-effort budget."
+          "description": "Per-unit review-effort budget: the weighted-focus composite score for\nthis file. A cloud fan-out spends AI passes/verifiers PROPORTIONAL to this\n(higher = review harder); a local single-agent loop can ignore it."
         },
         "out_of_diff": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Root-relative paths affected by this unit but not in the diff."
+          "description": "Root-relative paths of modules affected by this unit but NOT in the diff\n(the out-of-diff context the agent must reason about)."
         },
         "expert": {
           "type": "array",
@@ -16503,22 +16619,22 @@
         "out_of_diff",
         "expert"
       ],
-      "description": "One directed review unit projected from the graph."
+      "description": "One directed review unit projected from the graph: a file the change touches,\nthe concern to check, the out-of-diff consumers it must account for, and the\nrouted expert. Graph-derived only (routing + impact closure), NEVER from prose."
     },
     "RejectedJudgment": {
       "type": "object",
       "properties": {
         "signal_id": {
           "type": "string",
-          "description": "The cited `signal_id`."
+          "description": "The `signal_id` the agent cited (fallow never emitted it). Empty when the\njudgment cited a `change_anchor` instead."
         },
         "change_anchor": {
           "type": "string",
-          "description": "The cited `change_anchor`."
+          "description": "The `change_anchor` the agent cited (fallow never emitted it). Empty when\nthe judgment cited a `signal_id` instead."
         },
         "reason": {
           "type": "string",
-          "description": "The rejection reason."
+          "description": "The rejection reason: `unanchored-signal-id` (cited a signal fallow did\nnot emit), `unknown-change-anchor` (cited a region fallow did not emit),\nor `stale-snapshot` (the tree moved)."
         }
       },
       "required": [
@@ -16536,7 +16652,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Dependency-sensible review order."
+          "description": "The dependency-sensible review order: unit file paths, units carrying\nout-of-diff consumers first (review the load-bearing definitions before\nthe mechanical units)."
         },
         "units": {
           "type": "array",
@@ -16550,13 +16666,13 @@
         "order",
         "units"
       ],
-      "description": "The review direction artifact."
+      "description": "The review direction artifact: the order to review in, the coherent units,\nand per-unit concern lens + out-of-diff + expert. A minimal projection of the\nEXISTING graph facts (routing units + impact closure); the full weighted-focus\nengine is a later epic. Graph-derived only (injection-resistant)."
     },
     "WalkthroughGuide": {
       "type": "object",
       "properties": {
         "schema_version": {
-          "description": "Pinned to the brief schema version.",
+          "description": "Pinned to the brief schema version (the spec versions the guide by\n`review_brief_schema_version`).",
           "$ref": "#/definitions/ReviewBriefSchemaVersion"
         },
         "version": {
@@ -16565,18 +16681,18 @@
         },
         "command": {
           "type": "string",
-          "description": "Command discriminator singleton."
+          "description": "Command discriminator singleton: always `\"review-walkthrough-guide\"`."
         },
         "graph_snapshot_hash": {
           "type": "string",
-          "description": "Deterministic graph-snapshot hash pinned into the digest."
+          "description": "The deterministic graph-snapshot hash pinned into the digest. The agent\nechoes it back; a mismatch on reentry refuses the payload as stale."
         },
         "digest": {
-          "description": "The graph-derived digest.",
+          "description": "The graph-derived digest (brief + decision surface). Pure over the tree.",
           "$ref": "#/definitions/ReviewBriefOutput"
         },
         "direction": {
-          "description": "The review direction.",
+          "description": "The review direction (order/units/concern-lens/out-of-diff/expert).",
           "$ref": "#/definitions/ReviewDirection"
         },
         "change_anchors": {
@@ -16584,15 +16700,15 @@
           "items": {
             "$ref": "#/definitions/ChangeAnchor"
           },
-          "description": "Per-hunk change anchors."
+          "description": "The per-hunk change anchors: one stable id per changed region. An agent\nmay cite a `change_anchor` as a judgment anchor in addition to an emitted\n`signal_id`, so a trade-off about a changed region with no graph finding\ncan still anchor (and be post-validated) rather than hallucinate."
         },
         "agent_schema": {
-          "description": "The JSON shape the agent must return.",
+          "description": "The JSON shape the agent must return, embedded so the skill stays thin.",
           "$ref": "#/definitions/AgentSchema"
         },
         "injection_note": {
           "type": "string",
-          "description": "The injection-resistance note."
+          "description": "The injection-resistance note (digest is graph-only; PR prose untrusted)."
         }
       },
       "required": [
@@ -16607,7 +16723,7 @@
         "injection_note"
       ],
       "title": "fallow review --walkthrough-guide --format json",
-      "description": "The `fallow review --walkthrough-guide` envelope."
+      "description": "The `fallow review --walkthrough-guide` envelope: the current digest + schema\nthe agent fetches. The tool owns this; the skill stays thin (it fetches this\nrather than embedding a frozen copy). Always emitted with exit 0."
     },
     "WalkthroughValidation": {
       "type": "object",
@@ -16622,7 +16738,7 @@
         },
         "command": {
           "type": "string",
-          "description": "Command discriminator singleton."
+          "description": "Command discriminator singleton: always `\"review-walkthrough-validation\"`."
         },
         "graph_snapshot_hash": {
           "type": "string",
@@ -16630,21 +16746,21 @@
         },
         "stale": {
           "type": "boolean",
-          "description": "Whether the payload was refused as stale."
+          "description": "`true` when the agent's echoed hash != the current hash (the tree moved):\nthe WHOLE payload is refused, `accepted` is empty."
         },
         "accepted": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/AcceptedJudgment"
           },
-          "description": "Accepted anchored judgments."
+          "description": "Judgments that cite a real fallow-emitted signal, framing fenced."
         },
         "rejected": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/RejectedJudgment"
           },
-          "description": "Rejected judgments."
+          "description": "Judgments rejected (unanchored signal id, or all-rejected when stale)."
         },
         "accepted_count": {
           "type": "integer",
@@ -16656,7 +16772,7 @@
         },
         "unanchored_count": {
           "type": "integer",
-          "description": "Count of accepted judgments without a verified anchor."
+          "description": "Count of accepted judgments whose `signal_id` resolved against the live\nallowlist. Zero unanchored when this equals `accepted_count` and there are\nno rejections (the clean done-condition)."
         }
       },
       "required": [
@@ -16672,7 +16788,7 @@
         "unanchored_count"
       ],
       "title": "fallow review --walkthrough-file --format json",
-      "description": "The `fallow review --walkthrough-file` validation envelope."
+      "description": "The `fallow review --walkthrough-file` validation envelope: the result of\npost-validating the agent's judgment against the live graph. Always exit 0."
     },
     "PartitionFacts": {
       "type": "object",
@@ -16681,32 +16797,36 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/ReviewUnitFact"
-          }
+          },
+          "description": "The by-module units, sorted by module directory. Empty when no graph was\nretained or no changed file maps to a known module."
         },
         "order": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "The dependency-sensible review order: module-directory strings,\ndefinitions before consumers, mechanical/leaf units last. A permutation of\nthe `units` module directories."
         }
       },
       "required": [
         "units",
         "order"
       ],
-      "description": "Stage 2 of the brief: the partition and review order."
+      "description": "Stage 2 of the brief: the partition + order. The changed files split into\ncoherent BY-MODULE units (the only byte-identical-deterministic clustering\ndefinition straight from the graph), plus a dependency-sensible review ORDER\nover those units (definitions before consumers, mechanical/leaf units last,\nties broken by the path sort). Stage 2 sits UNDER the decision surface as a\ndrill-down; it is the backbone the directed-review loop hands the agent.\n\nFeature-cluster and concern partitioning are deferred (they need scoring\nheuristics whose tie-breaks are a fresh nondeterminism surface)."
     },
     "ReviewUnitFact": {
       "type": "object",
       "properties": {
         "module_dir": {
-          "type": "string"
+          "type": "string",
+          "description": "The module directory the unit covers (root-relative, forward-slashed).\nThe empty string is the repository-root group."
         },
         "files": {
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "The changed files in this unit, path-sorted."
         }
       },
       "required": [
@@ -16728,7 +16848,7 @@
           "description": "Not prioritized, but still visible in the escape-hatch list."
         }
       ],
-      "description": "The focus label for a review unit. There is no `Skip` variant."
+      "description": "The focus label for a review unit. EXACTLY two variants: `Skip` is NOT\nrepresentable, so the type system is the guarantee that free mode never emits\na `skip` label (safe explicit-skip is paid, runtime-backed only). Mirrors\nthe decision surface's \"cut category not representable\" structural posture."
     },
     "ConfidenceFlag": {
       "oneOf": [
@@ -16743,7 +16863,7 @@
           "description": "The unit's reachability runs through re-export barrels."
         }
       ],
-      "description": "A per-unit confidence flag."
+      "description": "A per-unit confidence flag. The EXACT panel-decided strings: a dynamically-\nwired or re-export-heavy unit carries one so its static-reachability signal is\nnot trusted as complete (the anti-silent-de-prioritization guard). The flag\nNEVER lowers the score; it is advisory provenance."
     },
     "FocusScore": {
       "type": "object",
@@ -16754,19 +16874,19 @@
         },
         "security_taint": {
           "type": "integer",
-          "description": "Security source to sink taint-touch component."
+          "description": "Security source -> sink taint-touch component (0 until a security pass is\nthreaded onto the brief path; the seam is built and tested)."
         },
         "risk_zone": {
           "type": "integer",
-          "description": "Risk-zone component."
+          "description": "Risk-zone component (boundary / public-API / security-sensitive)."
         },
         "change_shape": {
           "type": "integer",
-          "description": "Change-shape component."
+          "description": "Change-shape component (new/widened export, signature change proxy)."
         },
         "total": {
           "type": "integer",
-          "description": "The summed total."
+          "description": "The summed total. The paid runtime layer multiplies a runtime hot/cold weight in here."
         }
       },
       "required": [
@@ -16776,7 +16896,7 @@
         "change_shape",
         "total"
       ],
-      "description": "The composite attention score and component breakdown."
+      "description": "The composite attention score, with the four deterministic component\nsub-scores kept on the wire so the runtime seam can re-weight `total`\nwithout recomputing the signals."
     },
     "FocusUnit": {
       "type": "object",
@@ -16790,19 +16910,19 @@
           "$ref": "#/definitions/FocusScore"
         },
         "label": {
-          "description": "The focus label.",
+          "description": "The focus label (`review-here` / `not-prioritized`; NEVER `skip`).",
           "$ref": "#/definitions/FocusLabel"
         },
         "reason": {
           "type": "string",
-          "description": "Human-readable reason for the label."
+          "description": "A human-readable reason for the label, built from the present signals."
         },
         "confidence": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/ConfidenceFlag"
           },
-          "description": "Confidence flags."
+          "description": "Confidence flags (advisory; never lower the score). Sorted, deduped."
         }
       },
       "required": [
@@ -16811,7 +16931,7 @@
         "label",
         "reason"
       ],
-      "description": "One review unit on the focus map."
+      "description": "One review unit on the focus map: its file, composite score, label, human\nreason, and any confidence flags."
     },
     "FocusMap": {
       "type": "object",
@@ -16821,21 +16941,21 @@
           "items": {
             "$ref": "#/definitions/FocusUnit"
           },
-          "description": "Units labeled `review-here`."
+          "description": "Units labeled `review-here`, ranked by composite score (descending), ties\nbroken by path for determinism."
         },
         "deprioritized": {
           "type": "array",
           "items": {
             "$ref": "#/definitions/FocusUnit"
           },
-          "description": "Every `not-prioritized` unit."
+          "description": "EVERY `not-prioritized` unit (the escape hatch). Always present and fully\nenumerated so a reviewer can always \"show me what you de-prioritized\"; the\nhuman brief collapses it by default and re-expands under\n`--show-deprioritized`."
         }
       },
       "required": [
         "review_here",
         "deprioritized"
       ],
-      "description": "The weighted focus map."
+      "description": "The weighted focus map: the ranked `review-here` units plus the FULL\n`deprioritized` escape-hatch list, so nothing is hidden.\n\nCompleteness invariant (the escape-hatch done-condition): the two lists\npartition the unit set, so `review_here.len() + deprioritized.len()` equals\nthe total unit count by construction."
     },
     "SymbolChainTrace": {
       "type": "object",
@@ -16976,7 +17096,7 @@
       "properties": {
         "change_anchor": {
           "type": "string",
-          "description": "Stable, content-addressed id."
+          "description": "Stable, CONTENT-addressed id: `chg:<16-hex>` over the file path + the\nnormalized added text (line numbers are NOT hashed, so an edit above the\nhunk or a whitespace-only change does not move the id)."
         },
         "file": {
           "type": "string",
@@ -16984,18 +17104,18 @@
         },
         "start_line": {
           "type": "integer",
-          "description": "1-based first line of the hunk in the head file."
+          "description": "1-based first line of the hunk in the head file (display/deep-link only;\nNOT part of the id)."
         },
         "line_count": {
           "type": "integer",
-          "description": "Number of added lines in the hunk."
+          "description": "Number of added lines in the hunk (display only; NOT part of the id)."
         },
         "previous_change_anchor": {
           "type": [
             "string",
             "null"
           ],
-          "description": "Rename-durable anchor."
+          "description": "Rename-durable anchor: the id this same hunk would have had under the\npre-rename path. `None` unless the file was renamed in this change, so an\nagent that cited the anchor before a `git mv` still resolves."
         }
       },
       "required": [
@@ -17004,7 +17124,7 @@
         "start_line",
         "line_count"
       ],
-      "description": "One stable per-hunk change anchor."
+      "description": "One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a\njudgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a\ngraph FINDING (\"fallow emitted this exact finding\"), a change_anchor anchors\nonly a changed REGION (\"fallow confirms this region changed\") , a strictly\nweaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a\nconsumer can tell the two apart. Graph/diff-derived; NEVER from prose."
     }
   }
 }

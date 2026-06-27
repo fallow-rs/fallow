@@ -17,14 +17,15 @@ pub enum WeakeningKind {
     SecurityCheckRemoved,
 }
 
-/// One weakening signal.
+/// One weakening signal: a category, the file it was detected in, and a short
+/// human-readable evidence string. Reviewer-private; never gates.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct WeakeningSignal {
     /// What kind of guardrail was weakened.
     pub kind: WeakeningKind,
-    /// Root-relative changed file path.
+    /// Root-relative path of the changed file the signal was detected in.
     pub file: String,
-    /// Short evidence string.
+    /// Short evidence string (e.g. the offending token or the threshold delta).
     pub evidence: String,
 }

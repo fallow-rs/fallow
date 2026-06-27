@@ -36,12 +36,18 @@ pub struct DupesOutput<Report, Group> {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub groups: Option<Vec<Group>>,
     /// `_meta` block with metric / rule definitions, emitted when `--explain`
-    /// is passed.
+    /// is passed (always present in MCP responses).
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+    /// Workspace-discovery diagnostics surfaced during config load
+    /// (issue #473). See `CheckOutput::workspace_diagnostics` for the full
+    /// contract; the same list is repeated on each top-level command's
+    /// envelope so single-command consumers see it without having to look at
+    /// a separate top-level field.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
-    /// Read-only follow-up commands computed from this run's findings.
+    /// Read-only follow-up commands computed from this run's findings. See
+    /// `CheckOutput::next_steps` for the contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_steps: Vec<NextStep>,
 }
@@ -108,23 +114,31 @@ pub const DUPES_SUPPRESS_COMMENT: &str = "// fallow-ignore-next-line code-duplic
 pub const DUPES_SUPPRESS_DESCRIPTION: &str =
     "Suppress with an inline comment above the duplicated code";
 
-/// Per-action wire shape attached to each clone group finding.
+/// Per-action wire shape attached to each `CloneGroupFinding` and
+/// `AttributedCloneGroupFinding`. Mirrors the action types previously
+/// emitted by `inject_dupes_actions::build_clone_group_actions` in
+/// `crates/cli/src/report/json.rs`: `extract-shared` plus `suppress-line`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneGroupAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: CloneGroupActionType,
-    /// Whether `fallow fix` can auto-apply this action.
+    /// Whether `fallow fix` can auto-apply this action. Both variants are
+    /// manual today; the field is non-singleton so a future auto-applier
+    /// does not need a schema change.
     pub auto_fixable: bool,
     /// Human-readable description of the action.
     pub description: String,
-    /// Inline comment to insert for suppression actions.
+    /// The inline comment to insert (e.g.,
+    /// `// fallow-ignore-next-line code-duplication`). Present on
+    /// `suppress-line`; absent on `extract-shared`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
 }
 
-/// Discriminant for [`CloneGroupAction::kind`].
+/// Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
+/// emitted by the legacy `build_clone_group_actions` walker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -135,21 +149,29 @@ pub enum CloneGroupActionType {
     SuppressLine,
 }
 
-/// Per-action wire shape attached to each clone family finding.
+/// Per-action wire shape attached to each `CloneFamilyFinding`. Mirrors
+/// the action types previously emitted by
+/// `build_clone_family_actions`: `extract-shared`, one `apply-suggestion`
+/// per `RefactoringSuggestion` on the family, and a trailing
+/// `suppress-line`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneFamilyAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: CloneFamilyActionType,
-    /// Whether `fallow fix` can auto-apply this action.
+    /// Whether `fallow fix` can auto-apply this action. All three variants
+    /// are manual today.
     pub auto_fixable: bool,
     /// Human-readable description of the action.
     pub description: String,
-    /// Additional context for the action.
+    /// Additional context. Present on `extract-shared` (explaining that
+    /// the family's clone groups share the same files); absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-    /// Inline comment to insert for suppression actions.
+    /// The inline comment to insert (e.g.,
+    /// `// fallow-ignore-next-line code-duplication`). Present on
+    /// `suppress-line` only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
 }

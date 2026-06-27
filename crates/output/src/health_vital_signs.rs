@@ -91,25 +91,39 @@ pub struct VitalSigns {
     pub coupling_high_pct: Option<f64>,
     /// Number of located prop-drilling chains (React/Preact props forwarded
     /// unchanged through 3+ pass-through components). `None` unless the opt-in
-    /// `prop-drilling` rule is enabled.
+    /// `prop-drilling` rule is enabled (it defaults to off), so the small capped
+    /// penalty and the hotspot surface are dormant by default.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub prop_drilling_chain_count: Option<u32>,
     /// The deepest located prop-drilling chain's depth (forwarding hops). `None`
     /// when no chains were found or the rule is off. Descriptive context only.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub prop_drilling_max_depth: Option<u32>,
-    /// 95th-percentile distinct-parent render fan-in across React/Preact
-    /// components.
+    /// 95th-percentile DISTINCT-PARENTS render fan-in across React/Preact
+    /// components (the component-graph analogue of `p95_fan_in`, which percentiles
+    /// per-FILE module fan-in). `None` on non-React runs. Descriptive
+    /// blast-radius context, NOT a gate. Mirrors `compute_coupling_concentration`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub p95_render_fan_in: Option<u32>,
     /// Percentage of components whose render fan-in exceeds the project's
-    /// `max(p95, 10)` threshold.
+    /// `max(p95, 10)` threshold (reuses the coupling-concentration floor; NO new
+    /// tunable constant). `None` on non-React runs. Mirrors `coupling_high_pct`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub render_fan_in_high_pct: Option<f64>,
-    /// Highest distinct-parent count across all components.
+    /// The single highest DISTINCT-PARENTS count across all components (the
+    /// headline blast-radius number: the most distinct render LOCATIONS any one
+    /// component is rendered from, the honest edit-ripple count). `render_sites`
+    /// (incl. repeats) is secondary per-component context, never the headline.
+    /// `None` on non-React runs. Descriptive context, no threshold.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub max_render_fan_in: Option<u32>,
-    /// Highest-fan-in React/Preact components.
+    /// The highest-fan-in React/Preact components, located (component name +
+    /// project-relative path + render-site / distinct-parent counts), sorted by
+    /// distinct parents (the honest headline axis) descending, tie-broken on
+    /// render sites descending, and capped at a small N. Lets a consumer see
+    /// WHICH component carries the headline `max_render_fan_in`, not just the
+    /// number. Empty (and omitted from JSON) on non-React runs, so the contract
+    /// stays byte-identical there. Descriptive blast-radius context, NOT a gate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub top_render_fan_in: Vec<RenderFanInTopComponent>,
     /// Total lines of code across all parsed modules.
@@ -119,21 +133,39 @@ pub struct VitalSigns {
 
 /// One located high-fan-in React/Preact component for the descriptive
 /// `top_render_fan_in` blast-radius list on [`VitalSigns`].
+///
+/// The component-graph analogue of a high-fan-in module: `distinct_parents` is
+/// the HEADLINE axis (the honest count of distinct parent components / render
+/// LOCATIONS that render this component), `render_sites` is secondary "incl.
+/// repeats" context (every JSX render SITE, so a single parent rendering one
+/// child five times is five sites but one parent). Undercount-safe like the
+/// underlying metric: a child rendered via a JSX spread / dynamic /
+/// member-expression tag resolves to no component, so a true high-fan-in
+/// component can only be undersold.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RenderFanInTopComponent {
     /// The component name.
     pub component: String,
-    /// Project-relative path of the file declaring the component.
+    /// Project-relative path of the file declaring the component. Serialized with
+    /// forward slashes (same serializer the other relativized health paths use).
     #[serde(serialize_with = "fallow_types::serde_path::serialize")]
     pub path: std::path::PathBuf,
-    /// Total JSX render sites that resolve to this component across the project.
+    /// Total JSX render SITES that resolve to this component across the project.
+    /// SECONDARY "incl. repeats" context, not the headline (see `distinct_parents`).
     pub render_sites: u32,
     /// Distinct `(parent_file, parent_component)` keys that render this component.
+    /// The HEADLINE blast-radius axis: distinct render LOCATIONS.
     pub distinct_parents: u32,
 }
 
 /// Risk profile: percentage of functions in each risk bin.
+///
+/// Bins are defined by thresholds that depend on the measured property:
+/// - **Unit size**: low risk (1-15 LOC), medium risk (16-30), high risk (31-60), very high risk (>60)
+/// - **Unit interfacing**: low risk (0-2 params), medium risk (3-4), high risk (5-6), very high risk (>=7)
+///
+/// Percentages sum to approximately 100.0 (subject to rounding).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[allow(
@@ -152,6 +184,9 @@ pub struct RiskProfile {
 }
 
 /// Raw counts backing the vital signs percentages.
+///
+/// Stored alongside `VitalSigns` in snapshots so that Phase 2b trend reporting
+/// can decompose percentage changes into numerator vs denominator shifts.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct VitalSignsCounts {

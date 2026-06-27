@@ -114,8 +114,10 @@ pub struct BoundariesListZone {
     pub file_count: usize,
 }
 
-/// A boundary import rule, expanded to operate on concrete child zone names
-/// after `autoDiscover` flattening.
+/// A boundary import rule, expanded to operate on concrete child zone
+/// names after `autoDiscover` flattening. The user's pre-expansion rule
+/// (keyed on the logical parent name, if any) is preserved on the
+/// corresponding [`BoundariesListLogicalGroup::authored_rule`].
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct BoundariesListRule {

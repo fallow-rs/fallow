@@ -7,7 +7,12 @@ use crate::ReviewBriefSchemaVersion;
 /// The standing injection-resistance note stamped on every guide.
 pub const INJECTION_NOTE: &str = "The digest is built from the deterministic module graph only; PR prose is untrusted and never enters the digest. Your free-text framing is fenced as non-deterministic and never gates or auto-posts.";
 
-/// One stable per-hunk change anchor.
+/// One stable per-hunk CHANGE ANCHOR: a changed region the agent may cite as a
+/// judgment anchor IN ADDITION to a `signal_id`. Where a `signal_id` anchors a
+/// graph FINDING ("fallow emitted this exact finding"), a change_anchor anchors
+/// only a changed REGION ("fallow confirms this region changed") , a strictly
+/// weaker guarantee, surfaced as `anchor_kind` on the accepted judgment so a
+/// consumer can tell the two apart. Graph/diff-derived; NEVER from prose.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[allow(
@@ -15,52 +20,71 @@ pub const INJECTION_NOTE: &str = "The digest is built from the deterministic mod
     reason = "change_anchor / previous_change_anchor are load-bearing wire keys"
 )]
 pub struct ChangeAnchor {
-    /// Stable, content-addressed id.
+    /// Stable, CONTENT-addressed id: `chg:<16-hex>` over the file path + the
+    /// normalized added text (line numbers are NOT hashed, so an edit above the
+    /// hunk or a whitespace-only change does not move the id).
     pub change_anchor: String,
     /// Root-relative path of the changed file.
     pub file: String,
-    /// 1-based first line of the hunk in the head file.
+    /// 1-based first line of the hunk in the head file (display/deep-link only;
+    /// NOT part of the id).
     pub start_line: u32,
-    /// Number of added lines in the hunk.
+    /// Number of added lines in the hunk (display only; NOT part of the id).
     pub line_count: u32,
-    /// Rename-durable anchor.
+    /// Rename-durable anchor: the id this same hunk would have had under the
+    /// pre-rename path. `None` unless the file was renamed in this change, so an
+    /// agent that cited the anchor before a `git mv` still resolves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_change_anchor: Option<String>,
 }
 
-/// One directed review unit projected from the graph.
+/// One directed review unit projected from the graph: a file the change touches,
+/// the concern to check, the out-of-diff consumers it must account for, and the
+/// routed expert. Graph-derived only (routing + impact closure), NEVER from prose.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DirectionUnit {
     /// Root-relative path of the unit to review.
     pub file: String,
-    /// The concern lens the agent should check for this unit.
+    /// The concern lens the agent should check for this unit, derived from the
+    /// unit's risk signals (impact-closure consumers vs a plain touched file).
     pub concern_lens: String,
-    /// Per-unit review-effort budget.
+    /// Per-unit review-effort budget: the weighted-focus composite score for
+    /// this file. A cloud fan-out spends AI passes/verifiers PROPORTIONAL to this
+    /// (higher = review harder); a local single-agent loop can ignore it.
     pub scoring_budget: u32,
-    /// Root-relative paths affected by this unit but not in the diff.
+    /// Root-relative paths of modules affected by this unit but NOT in the diff
+    /// (the out-of-diff context the agent must reason about).
     pub out_of_diff: Vec<String>,
     /// Routed expert(s), when ownership signals are available.
     pub expert: Vec<String>,
 }
 
-/// The review direction artifact.
+/// The review direction artifact: the order to review in, the coherent units,
+/// and per-unit concern lens + out-of-diff + expert. A minimal projection of the
+/// EXISTING graph facts (routing units + impact closure); the full weighted-focus
+/// engine is a later epic. Graph-derived only (injection-resistant).
 #[derive(Debug, Clone, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ReviewDirection {
-    /// Dependency-sensible review order.
+    /// The dependency-sensible review order: unit file paths, units carrying
+    /// out-of-diff consumers first (review the load-bearing definitions before
+    /// the mechanical units).
     pub order: Vec<String>,
     /// Coherent review units, in `order`.
     pub units: Vec<DirectionUnit>,
 }
 
-/// The shape the agent must return, embedded in the guide.
+/// The shape the agent must return, embedded in the guide so a thin skill needs
+/// no frozen copy. Documents the anchoring + staleness contract in the wire.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AgentSchema {
-    /// How the agent must structure each judgment.
+    /// How the agent must structure each judgment: cite an emitted `signal_id`,
+    /// add free-text `framing` (non-deterministic, fenced), an optional `concern`.
     pub judgment_shape: &'static str,
-    /// The echoed graph snapshot field.
+    /// The agent MUST echo this `graph_snapshot_hash` back in its JSON; a
+    /// mismatch on reentry REFUSES the payload as stale.
     pub echo_field: &'static str,
     /// The anchoring rule name.
     pub anchoring_rule: &'static str,
@@ -76,7 +100,9 @@ pub const fn agent_schema() -> AgentSchema {
     }
 }
 
-/// The `fallow review --walkthrough-guide` envelope.
+/// The `fallow review --walkthrough-guide` envelope: the current digest + schema
+/// the agent fetches. The tool owns this; the skill stays thin (it fetches this
+/// rather than embedding a frozen copy). Always emitted with exit 0.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -84,23 +110,28 @@ pub const fn agent_schema() -> AgentSchema {
     schemars(title = "fallow review --walkthrough-guide --format json")
 )]
 pub struct WalkthroughGuide<Digest> {
-    /// Pinned to the brief schema version.
+    /// Pinned to the brief schema version (the spec versions the guide by
+    /// `review_brief_schema_version`).
     pub schema_version: ReviewBriefSchemaVersion,
     /// Fallow CLI version that produced this guide.
     pub version: String,
-    /// Command discriminator singleton.
+    /// Command discriminator singleton: always `"review-walkthrough-guide"`.
     pub command: String,
-    /// Deterministic graph-snapshot hash pinned into the digest.
+    /// The deterministic graph-snapshot hash pinned into the digest. The agent
+    /// echoes it back; a mismatch on reentry refuses the payload as stale.
     pub graph_snapshot_hash: String,
-    /// The graph-derived digest.
+    /// The graph-derived digest (brief + decision surface). Pure over the tree.
     pub digest: Digest,
-    /// The review direction.
+    /// The review direction (order/units/concern-lens/out-of-diff/expert).
     pub direction: ReviewDirection,
-    /// Per-hunk change anchors.
+    /// The per-hunk change anchors: one stable id per changed region. An agent
+    /// may cite a `change_anchor` as a judgment anchor in addition to an emitted
+    /// `signal_id`, so a trade-off about a changed region with no graph finding
+    /// can still anchor (and be post-validated) rather than hallucinate.
     pub change_anchors: Vec<ChangeAnchor>,
-    /// The JSON shape the agent must return.
+    /// The JSON shape the agent must return, embedded so the skill stays thin.
     pub agent_schema: AgentSchema,
-    /// The injection-resistance note.
+    /// The injection-resistance note (digest is graph-only; PR prose untrusted).
     pub injection_note: &'static str,
 }
 
@@ -135,22 +166,29 @@ pub struct AgentJudgment {
     pub concern: Option<String>,
 }
 
-/// One accepted judgment.
+/// One accepted judgment: the real anchored signal passed through with the
+/// agent's framing FENCED as non-deterministic.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AcceptedJudgment {
-    /// The verified `signal_id`, or empty when anchored by a change anchor.
+    /// The fallow-emitted `signal_id` (verified against the allowlist). Empty
+    /// when this judgment was anchored by a `change_anchor` instead.
     pub signal_id: String,
-    /// The verified change anchor, or empty when anchored by a signal id.
+    /// The fallow-emitted `change_anchor` (verified against the allowlist). Empty
+    /// when this judgment was anchored by a `signal_id`.
     pub change_anchor: String,
-    /// Which anchor resolved.
+    /// Which anchor resolved: `"signal"` (a graph FINDING, the strong anchor) or
+    /// `"change"` (a changed REGION only, the weaker anchor). Lets a consumer
+    /// distinguish a finding-anchored judgment from a region-anchored one rather
+    /// than collapsing both into one accepted bucket.
     pub anchor_kind: String,
     /// The agent's fenced free-text framing.
     pub agent_framing: String,
     /// The agent's optional concern category.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concern: Option<String>,
-    /// Hard fence: always `false`.
+    /// Hard fence: always `false`. The framing is agent prose, never a
+    /// deterministic fallow result, so it never gates or auto-posts.
     pub deterministic: bool,
 }
 
@@ -158,15 +196,20 @@ pub struct AcceptedJudgment {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RejectedJudgment {
-    /// The cited `signal_id`.
+    /// The `signal_id` the agent cited (fallow never emitted it). Empty when the
+    /// judgment cited a `change_anchor` instead.
     pub signal_id: String,
-    /// The cited `change_anchor`.
+    /// The `change_anchor` the agent cited (fallow never emitted it). Empty when
+    /// the judgment cited a `signal_id` instead.
     pub change_anchor: String,
-    /// The rejection reason.
+    /// The rejection reason: `unanchored-signal-id` (cited a signal fallow did
+    /// not emit), `unknown-change-anchor` (cited a region fallow did not emit),
+    /// or `stale-snapshot` (the tree moved).
     pub reason: String,
 }
 
-/// The `fallow review --walkthrough-file` validation envelope.
+/// The `fallow review --walkthrough-file` validation envelope: the result of
+/// post-validating the agent's judgment against the live graph. Always exit 0.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
@@ -178,20 +221,23 @@ pub struct WalkthroughValidation {
     pub schema_version: ReviewBriefSchemaVersion,
     /// Fallow CLI version that produced this validation.
     pub version: String,
-    /// Command discriminator singleton.
+    /// Command discriminator singleton: always `"review-walkthrough-validation"`.
     pub command: String,
     /// The current run's deterministic graph-snapshot hash.
     pub graph_snapshot_hash: String,
-    /// Whether the payload was refused as stale.
+    /// `true` when the agent's echoed hash != the current hash (the tree moved):
+    /// the WHOLE payload is refused, `accepted` is empty.
     pub stale: bool,
-    /// Accepted anchored judgments.
+    /// Judgments that cite a real fallow-emitted signal, framing fenced.
     pub accepted: Vec<AcceptedJudgment>,
-    /// Rejected judgments.
+    /// Judgments rejected (unanchored signal id, or all-rejected when stale).
     pub rejected: Vec<RejectedJudgment>,
     /// Count of accepted judgments.
     pub accepted_count: usize,
     /// Count of rejected judgments.
     pub rejected_count: usize,
-    /// Count of accepted judgments without a verified anchor.
+    /// Count of accepted judgments whose `signal_id` resolved against the live
+    /// allowlist. Zero unanchored when this equals `accepted_count` and there are
+    /// no rejections (the clean done-condition).
     pub unanchored_count: usize,
 }

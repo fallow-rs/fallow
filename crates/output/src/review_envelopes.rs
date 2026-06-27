@@ -95,7 +95,10 @@ pub enum ReviewEnvelopeEvent {
     Comment,
 }
 
-/// Per-line review comment.
+/// Per-line review comment. Schema is an `anyOf` between GitHub and GitLab
+/// shapes; at runtime every entry in a single envelope comes from the same
+/// provider because the envelope is built from one provider's branch in
+/// `crates/cli/src/report/ci/review.rs::render_review_envelope`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
@@ -146,7 +149,8 @@ pub fn is_false(value: &bool) -> bool {
     !*value
 }
 
-/// `position` block inside [`GitLabReviewComment`].
+/// `position` block inside [`GitLabReviewComment`]. Mirrors the GitLab
+/// merge-request discussion-position API.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct GitLabReviewPosition {
@@ -207,7 +211,8 @@ pub enum ReviewProvider {
     Gitlab,
 }
 
-/// `meta.check_conclusion` for the GitHub review envelope.
+/// `meta.check_conclusion` for the GitHub review envelope. Maps to the
+/// GitHub Checks API conclusion field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
@@ -220,7 +225,9 @@ pub enum ReviewCheckConclusion {
     Failure,
 }
 
-/// Envelope emitted by `fallow ci reconcile-review --format json`.
+/// Envelope emitted by `fallow ci reconcile-review --format json`. Used by
+/// CI integrations to drive comment carry-over and stale-comment cleanup
+/// across PR / MR revisions.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(

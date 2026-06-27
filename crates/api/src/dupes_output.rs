@@ -16,18 +16,21 @@ use fallow_types::envelope::AuditIntroduced;
 use fallow_types::serde_path;
 use serde::Serialize;
 
-/// A clone instance plus its per-instance owner key.
+/// A clone instance plus its per-instance owner key (for inline JSON / SARIF
+/// rendering).
 ///
 /// Each instance carries its own `owner` field alongside the standard
-/// `CloneInstance` shape so consumers can attribute instances to resolver keys
-/// without re-resolving paths.
+/// `CloneInstance` shape (file / start_line / end_line / start_col / end_col /
+/// fragment), so consumers can attribute instances to resolver keys without
+/// re-resolving paths.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttributedInstance {
     /// The original clone instance.
     #[serde(flatten)]
     pub instance: CloneInstance,
-    /// Resolver key for this specific instance.
+    /// Resolver key for this specific instance (per-instance, not the
+    /// group-level largest-owner).
     pub owner: String,
 }
 
@@ -36,14 +39,15 @@ pub struct AttributedInstance {
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttributedCloneGroup {
-    /// Largest-owner attribution. Ties are resolved by the caller before this
-    /// wire DTO is built.
+    /// Largest-owner attribution: the resolver key with the most instances in
+    /// this clone group. Ties broken alphabetically (smallest key wins).
     pub primary_owner: String,
     /// Number of tokens in the clone group.
     pub token_count: usize,
     /// Number of source lines in the clone group.
     pub line_count: usize,
-    /// Instances annotated with their resolver keys.
+    /// Each instance carries its own `owner` field alongside the standard
+    /// CloneInstance shape.
     pub instances: Vec<AttributedInstance>,
 }
 
@@ -60,14 +64,21 @@ impl AttributedCloneGroup {
     }
 }
 
-/// Wire-shape envelope for an [`AttributedCloneGroup`] finding.
+/// Wire-shape envelope for an [`AttributedCloneGroup`] finding (per-bucket
+/// duplication attribution emitted under `fallow dupes --group-by`).
+/// Flattens the attributed group and carries the same typed
+/// `CloneGroupAction` array as `CloneGroupFinding`; no `introduced`
+/// field because `fallow audit` does not run on grouped output.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AttributedCloneGroupFinding {
     /// The underlying attributed clone group.
     #[serde(flatten)]
     pub group: AttributedCloneGroup,
-    /// Stable content fingerprint, usually `dup:<8hex>`.
+    /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+    /// report collisions. Addressable via `fallow dupes --trace dup:<fp>`.
+    /// Computed from the group's instances, so it matches the top-level
+    /// `clone_groups[].fingerprint` for the same clone.
     pub fingerprint: String,
     /// Suggested next steps. Always emitted.
     pub actions: Vec<CloneGroupAction>,
@@ -100,17 +111,24 @@ impl AttributedCloneGroupFinding {
     }
 }
 
-/// A single grouped duplication bucket.
+/// A single grouped duplication bucket. Per-group `stats` are dedup-aware and
+/// computed over the FULL group BEFORE any `--top` truncation.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DuplicationGroup {
-    /// Group label such as owner, directory, package, or section.
+    /// Group label (owner / directory / package / section). `(unowned)` for
+    /// files with no CODEOWNERS rule, `(no section)` for pre-section rules in
+    /// section mode.
     pub key: String,
     /// Dedup-aware aggregate stats for the group.
     pub stats: DuplicationStats,
-    /// Clone groups attributed to this bucket.
+    /// Clone groups attributed to this owner, each wrapped with the typed
+    /// `actions[]` array. Each group's `primary_owner` is its largest-owner
+    /// key; per-instance `owner` lets consumers see cross-bucket fan-out
+    /// without re-resolving paths.
     pub clone_groups: Vec<AttributedCloneGroupFinding>,
-    /// Clone families overlapping this bucket.
+    /// Clone families overlapping this bucket, each wrapped with the typed
+    /// `actions[]` array.
     pub clone_families: Vec<CloneFamilyFinding>,
 }
 
@@ -123,21 +141,35 @@ pub struct DuplicationGrouping {
     pub groups: Vec<DuplicationGroup>,
 }
 
-/// Wire-shape envelope for a clone group finding.
+/// Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
+/// group via `#[serde(flatten)]` and carries a typed `actions` array plus
+/// the optional audit-mode `introduced` flag. Replaces the legacy
+/// post-pass injection in `crates/cli/src/report/json.rs::inject_dupes_actions`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneGroupFinding {
     /// The underlying clone group.
     #[serde(flatten)]
     pub group: CloneGroup,
-    /// Stable content fingerprint, usually `dup:<8hex>`.
+    /// Stable content fingerprint, usually `dup:<8hex>` and widened on rare
+    /// report collisions. Addressable via `fallow dupes --trace dup:<fp>` (and
+    /// the `trace_clone` MCP tool) to deep-dive this group; shown alongside
+    /// each group in the human listing.
     pub fingerprint: String,
-    /// Best-effort human-readable name for the clone.
+    /// Best-effort human-readable name for the clone: the dominant repeated
+    /// identifier across the duplicated fragment (e.g. a shared `parseCsv`
+    /// function). `None` when the clone has no clear dominant name (generic or
+    /// tied identifiers); consumers then fall back to a file-based label. Lets
+    /// editors and agents label a clone by what it is rather than an opaque
+    /// ordinal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_name: Option<String>,
-    /// Suggested next steps.
+    /// Suggested next steps: an `extract-shared` primary and a
+    /// `suppress-line` secondary. Always emitted (possibly empty for
+    /// forward-compat).
     pub actions: Vec<CloneGroupAction>,
-    /// Audit-mode introduced flag, populated by audit post-processing.
+    /// Set by the audit pass when this clone group is introduced relative
+    /// to the merge-base. `None` when serialized directly from Rust.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introduced: Option<AuditIntroduced>,
 }
@@ -169,14 +201,25 @@ impl CloneGroupFinding {
     }
 }
 
-/// Wire-shape envelope for a clone family finding.
+/// Wire-shape envelope for a [`CloneFamily`] finding.
+///
+/// Unlike most `*Finding` wrappers this one is NOT `#[serde(flatten)]` over
+/// the bare [`CloneFamily`], because the family's nested
+/// `groups: Vec<CloneGroup>` field needs to carry the typed
+/// `CloneGroupFinding` wrapper too (so every nested clone group gets its
+/// own `actions[]` array, matching the legacy post-pass behavior; see issue
+/// #393 regression test). The wire shape stays byte-identical to the
+/// previous post-pass output. No `introduced` field because `fallow audit`
+/// attributes clone groups (not families) when running against a base ref.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CloneFamilyFinding {
     /// The files involved in this family.
     #[serde(serialize_with = "serde_path::serialize_vec")]
     pub files: Vec<PathBuf>,
-    /// Clone groups belonging to this family.
+    /// Clone groups belonging to this family, each wrapped with typed
+    /// `actions[]` so consumers that read `clone_families[].groups[]`
+    /// directly see the same shape as the top-level `clone_groups[]`.
     pub groups: Vec<CloneGroupFinding>,
     /// Total number of duplicated lines across all groups.
     pub total_duplicated_lines: usize,
@@ -184,7 +227,10 @@ pub struct CloneFamilyFinding {
     pub total_duplicated_tokens: usize,
     /// Refactoring suggestions for this family.
     pub suggestions: Vec<RefactoringSuggestion>,
-    /// Suggested next steps.
+    /// Suggested next steps: an `extract-shared` primary, one
+    /// `apply-suggestion` per `RefactoringSuggestion` on the family, and
+    /// a trailing `suppress-line`. Always emitted (possibly empty for
+    /// forward-compat).
     pub actions: Vec<CloneFamilyAction>,
 }
 
@@ -241,13 +287,27 @@ fn build_clone_family_actions(
     )
 }
 
-/// Wire-shape payload for `fallow dupes --format json`.
+/// Wire-shape payload for `fallow dupes --format json` (the body that
+/// flattens into the `DupesOutput` envelope and is also
+/// emitted under the `dupes` / `duplication` key inside the combined and
+/// audit envelopes).
+///
+/// Mirrors [`DuplicationReport`] field-for-field, except `clone_groups`
+/// and `clone_families` carry the typed wrapper envelopes instead of bare
+/// findings, so the schema (and any TS / agent consumer) sees the typed
+/// `actions[]` natively.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DupesReportPayload {
     /// All detected clone groups, each wrapped with typed actions.
     pub clone_groups: Vec<CloneGroupFinding>,
-    /// Clone families, each wrapped with typed actions.
+    /// Clone families, each wrapped with typed actions. Inner `groups`
+    /// inside each `CloneFamilyFinding` are themselves wrapped as
+    /// `CloneGroupFinding` entries carrying their own `actions[]` (and
+    /// optional audit-mode `introduced` flag), so JSON-Schema strict
+    /// consumers and TS consumers reading `clone_families[].groups[]` see
+    /// the same shape as the top-level `clone_groups[]` array (preserves
+    /// the issue #393 regression contract).
     pub clone_families: Vec<CloneFamilyFinding>,
     /// Mirrored directory pairs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

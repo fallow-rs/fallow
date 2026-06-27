@@ -176,7 +176,8 @@ pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Com
     /// Human-readable provenance of `base_ref`, e.g. `merge-base with
     /// origin/main`, `local main`, or `FALLOW_AUDIT_BASE=upstream/main`.
     /// Present when the base was auto-detected or set via `FALLOW_AUDIT_BASE`;
-    /// absent for an explicit `--base`.
+    /// absent for an explicit `--base` (the ref the user typed is already
+    /// self-describing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -248,13 +249,22 @@ pub struct CombinedMeta {
 }
 
 /// Typed root of every fallow JSON envelope shape that serializes as a JSON
-/// object and participates in the documented `FallowOutput` contract.
+/// object and participates in the documented `FallowOutput` contract. The
+/// schema derived from this enum drives the document-root `oneOf` in
+/// `docs/output-schema.json`.
 ///
-/// The default wire shape carries a top-level `kind` discriminator so agents and
-/// schema-validating clients can select the variant without probing for unique
-/// field presence. CodeClimate output is intentionally not in this enum because
-/// it serializes as a bare JSON array per the Code Climate / GitLab Code Quality
-/// spec.
+/// The default wire shape now carries a top-level `kind` discriminator so
+/// agents and schema-validating clients can select the variant in O(1) instead
+/// of probing for unique field presence. `--legacy-envelope` is a one-cycle
+/// compatibility flag that removes only this document-root `kind` field from
+/// CLI JSON output; nested report objects are not rewritten.
+///
+/// One envelope is intentionally NOT in this enum:
+/// - `CodeClimateOutput` serializes as a bare JSON array
+///   (`#[serde(transparent)]`) per the Code Climate / GitLab Code Quality
+///   spec; `#[serde(tag = ...)]` cannot internally tag a non-object
+///   variant and wrapping the array would break the spec. The root schema
+///   carries it as a sibling `oneOf` branch alongside `FallowOutput`.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[cfg_attr(
