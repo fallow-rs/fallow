@@ -327,6 +327,39 @@ pub struct RuntimeCoverageMessage {
     pub message: String,
 }
 
+/// Discriminator inputs that PRODUCED a finding's verdict (fallow-rs/fallow-cloud#321),
+/// emitted alongside the verdict so an agent can reproduce it and see the
+/// minimum-observation confidence cap instead of re-deriving them from scratch.
+/// F4: these make the EXISTING Fallow-owned discriminators legible; they are not
+/// a new or external signal and gate nothing. Pairs with `evidence.static_status`
+/// (the static half of the discriminator set).
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RuntimeCoverageDiscriminators {
+    /// Three-state runtime tracking: `called` (invocations > 0), `never_called`
+    /// (V8 tracked it, invocations == 0), or `untracked` (V8 never saw it). The
+    /// ONLY signal that can issue a deletion verdict.
+    pub tracking_state: String,
+    /// `invocations / trace_count` for this function; `null` when untracked (no
+    /// invocation count). The per-function value behind the low-traffic split.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub invocation_ratio: Option<f64>,
+    /// Active/low_traffic split ratio in effect (CLI default 0.001). A tracked
+    /// function whose `invocation_ratio` is below this reads `low_traffic`, else
+    /// `active`.
+    pub low_traffic_threshold: f64,
+    /// Total observed invocations across all functions (the `invocation_ratio`
+    /// denominator), echoed per finding so the verdict is self-contained.
+    pub trace_count: u64,
+    /// High-confidence verdict floor (CLI default 5000). When `trace_count` is
+    /// below it, confidence is capped regardless of the per-function signal.
+    pub min_observation_volume: u32,
+    /// `trace_count >= min_observation_volume`: whether the dump cleared the
+    /// confidence floor. `false` means this verdict's confidence is capped.
+    pub meets_observation_volume: bool,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RuntimeCoverageFinding {
@@ -374,6 +407,13 @@ pub struct RuntimeCoverageFinding {
     #[cfg_attr(feature = "schema", schemars(default))]
     /// Suggested actions for this finding. Omitted when empty.
     pub actions: Vec<RuntimeCoverageAction>,
+    /// The discriminator inputs that produced this verdict (#321), emitted so an
+    /// agent can reproduce it and see the confidence cap. `None` for findings
+    /// not built from the merge pipeline (e.g. baseline round-trips). Omitted
+    /// from JSON when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub discriminators: Option<RuntimeCoverageDiscriminators>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

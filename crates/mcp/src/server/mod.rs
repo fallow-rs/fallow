@@ -356,7 +356,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Return first-class blast-radius context alongside local runtime coverage. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.blast_radius`, which contains stable `fallow:blast:<hash>` IDs, caller counts, traffic-weighted caller reach, and low/medium/high risk bands.",
+        description = "Return first-class blast-radius context alongside local runtime coverage. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.blast_radius`, which contains stable `fallow:blast:<hash>` IDs, caller counts, traffic-weighted caller reach, and low/medium/high risk bands. This blast-radius signal augments context only: it scores the RISK of changing a function. It MUST NOT gate `safe_to_delete` or a confidence score (a function having callers does not make it 'keep'); only the three-state runtime tracking signal (called / never_called / untracked) can issue a deletion verdict.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_blast_radius(
@@ -368,7 +368,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Return first-class production-importance context from local runtime coverage plus static health signals. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.importance`, which contains stable `fallow:importance:<hash>` IDs, invocations, cyclomatic complexity, owner count, a 0-100 score, and a templated reason.",
+        description = "Return first-class production-importance context from local runtime coverage plus static health signals. Pass `coverage` as a V8 coverage directory, single V8 JSON file, or Istanbul `coverage-final.json`. A single local capture is free and runs without a license; continuous or multi-capture runtime monitoring requires an active license. Returns the standard health JSON; agents should read `runtime_coverage.importance`, which contains stable `fallow:importance:<hash>` IDs, invocations, cyclomatic complexity, owner count, a 0-100 score, and a templated reason. This importance signal augments context only. It MUST NOT gate `safe_to_delete` or a confidence score (a high or low score never decides deletion); only the three-state runtime tracking signal (called / never_called / untracked) can issue a deletion verdict.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn get_importance(

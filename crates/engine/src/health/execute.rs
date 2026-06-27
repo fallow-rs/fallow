@@ -7717,6 +7717,7 @@ mod tests {
                     evidence: fx_evidence("used", "not_covered", "tracked"),
                     actions: vec![],
                     source_hash: None,
+                    discriminators: None,
                 },
                 fallow_output::RuntimeCoverageFinding {
                     id: "fallow:prod:bbbbbbbb".to_owned(),
@@ -7730,6 +7731,7 @@ mod tests {
                     evidence: fx_evidence("used", "not_covered", "untracked"),
                     actions: vec![],
                     source_hash: None,
+                    discriminators: None,
                 },
                 fallow_output::RuntimeCoverageFinding {
                     id: "fallow:prod:cccccccc".to_owned(),
@@ -7743,6 +7745,7 @@ mod tests {
                     evidence: fx_evidence("used", "not_covered", "tracked"),
                     actions: vec![],
                     source_hash: None,
+                    discriminators: None,
                 },
             ],
             hot_paths: vec![
@@ -7824,6 +7827,7 @@ mod tests {
                 evidence: fx_evidence("used", "not_covered", "tracked"),
                 actions: vec![],
                 source_hash: None,
+                discriminators: None,
             }],
             hot_paths: vec![],
             blast_radius: vec![],
@@ -8164,6 +8168,7 @@ mod tests {
                 evidence: fx_evidence("unused", "not_covered", "tracked"),
                 actions: vec![],
                 source_hash: None,
+                discriminators: None,
             }],
             hot_paths: vec![fx_hot_path("fallow:hot:0b0b0b0b", "src/hot.ts", 7, 24)],
             blast_radius: vec![],
@@ -8210,6 +8215,7 @@ mod tests {
                 evidence: fx_evidence("unused", "not_covered", "tracked"),
                 actions: vec![],
                 source_hash: None,
+                discriminators: None,
             }],
             hot_paths: vec![fx_hot_path("fallow:hot:0c0c0c0c", "src/hot.ts", 7, 24)],
             blast_radius: vec![],

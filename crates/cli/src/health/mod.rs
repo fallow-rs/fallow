@@ -758,6 +758,7 @@ mod tests {
                         evidence: fx_evidence("used", "not_covered", "tracked"),
                         actions: vec![],
                         source_hash: None,
+                        discriminators: None,
                     }],
                     hot_paths: vec![],
                     blast_radius: vec![],
