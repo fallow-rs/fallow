@@ -9,10 +9,11 @@ use fallow_config::{
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
 use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CheckOutput, CheckOutputInput, DiffIndex, DupesOutput, DupesOutputInput,
-    GroupByMode, HealthGroup, HealthGrouping, HealthJsonOutputInput, HealthOutputInput,
-    HealthReport, MAX_DIFF_BYTES, RootEnvelopeMode, build_check_output, build_dupes_output,
-    check_meta, health_meta, relative_to_diff_path, serialize_check_json_output,
+    CHECK_SCHEMA_VERSION, CheckOutput, CheckOutputInput, DeadCodeNextStepsInput, DiffIndex,
+    DupesNextStepsInput, DupesOutput, DupesOutputInput, GroupByMode, HealthGroup, HealthGrouping,
+    HealthJsonOutputInput, HealthOutputInput, HealthReport, MAX_DIFF_BYTES, RootEnvelopeMode,
+    build_check_output, build_dead_code_next_steps, build_dupes_next_steps, build_dupes_output,
+    check_meta, dupes_meta, health_meta, relative_to_diff_path, serialize_check_json_output,
     serialize_dupes_json_output, strip_root_prefix,
 };
 use fallow_types::workspace::WorkspaceDiagnostic;
@@ -540,6 +541,108 @@ fn group_by_mode_from_label(label: &str) -> Option<GroupByMode> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Next-steps runtime probes for the programmatic / napi surface.
+//
+// The pure builders live in `fallow-output`; the env/fs/git probes the CLI
+// keeps in `report::suggestions` are mirrored here for the api boundary, which
+// cannot depend on `fallow-cli`. The `impact_digest` is deliberately `None`:
+// the Fallow Impact store is a CLI-owned, developer-local opt-in the api crate
+// has no access to, and it only ever rides an otherwise-clean run.
+// ---------------------------------------------------------------------------
+
+/// `FALLOW_SUGGESTIONS=off` (or `0`/`false`/`no`/`disabled`) disables the
+/// `next_steps[]` array. Mirrors `report::suggestions::suggestions_enabled`.
+fn suggestions_enabled() -> bool {
+    match std::env::var("FALLOW_SUGGESTIONS").ok().as_deref() {
+        Some(raw) => !matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "off" | "0" | "false" | "no" | "disabled"
+        ),
+        None => true,
+    }
+}
+
+fn is_ci() -> bool {
+    std::env::var_os("CI").is_some()
+        || std::env::var_os("GITHUB_ACTIONS").is_some()
+        || std::env::var_os("GITLAB_CI").is_some()
+}
+
+/// First-contact `setup` next-step gate: no fallow config up to the repo root
+/// and not running in CI. The CLI additionally consults the impact store for a
+/// declined-onboarding flag; that store is CLI-owned, so the api surface omits
+/// it (an embedder that wants the prompt suppressed sets `FALLOW_SUGGESTIONS`).
+fn setup_pointer_applicable(root: &Path) -> bool {
+    root.exists() && fallow_config::FallowConfig::find_config_path(root).is_none() && !is_ci()
+}
+
+/// Resolve a concrete `--changed-workspaces` ref for the `scope-workspaces`
+/// next step, or `None` when there are no workspaces / no resolvable ref (in
+/// which case the step is omitted rather than shipping an unrunnable guess).
+fn default_workspace_ref(root: &Path) -> Option<String> {
+    if fallow_config::discover_workspaces(root).is_empty() {
+        return None;
+    }
+    if let Some(reference) = run_git(
+        root,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    ) {
+        let reference = reference.trim();
+        if !reference.is_empty() {
+            return Some(reference.to_string());
+        }
+    }
+    ["origin/main", "origin/master"]
+        .into_iter()
+        .find(|candidate| git_ref_exists(root, candidate))
+        .map(str::to_string)
+}
+
+fn git_ref_exists(root: &Path, reference: &str) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--verify", "--quiet", reference])
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+fn run_git(root: &Path, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
+}
+
+/// Discover and stash workspace-discovery diagnostics for `root` so the
+/// programmatic / napi serializers can read them back via
+/// [`fallow_config::workspace_diagnostics_for`]. The CLI does this in its
+/// `load_config_for_analysis` (`runtime_support::report_workspace_diagnostics`);
+/// the engine-backed config load the api crate uses does not, so without this
+/// the `workspace_diagnostics[]` array would be empty even when the CLI emits
+/// it. Best-effort: a discovery error leaves the registry untouched rather than
+/// failing the analysis.
+fn stash_workspace_diagnostics_for_session(session: &AnalysisSession) {
+    let root = session.root();
+    if let Ok((_, diagnostics)) =
+        fallow_config::discover_workspaces_with_diagnostics(root, &session.config().ignore_patterns)
+    {
+        fallow_config::stash_workspace_diagnostics(root, diagnostics);
+    }
+}
+
 fn detect_dead_code_inner(
     options: &DeadCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
@@ -547,6 +650,7 @@ fn detect_dead_code_inner(
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let start = Instant::now();
     let session = load_dead_code_session(options, resolved)?;
+    stash_workspace_diagnostics_for_session(&session);
     let analysis = session.analyze_dead_code().map_err(|err| {
         ProgrammaticError::new(format!("dead-code analysis failed: {err}"), 2)
             .with_code("FALLOW_DEAD_CODE_FAILED")
@@ -558,6 +662,16 @@ fn detect_dead_code_inner(
     apply_dead_code_filters(&options.filters, &mut results);
     post_filter(&mut results);
 
+    let root = session.root();
+    let next_steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+        suggestions_enabled: suggestions_enabled(),
+        results: &results,
+        root,
+        offer_setup: setup_pointer_applicable(root),
+        impact_digest: None,
+        workspace_ref: default_workspace_ref(root).as_deref(),
+        audit_changed: fallow_engine::churn::is_git_repo(root),
+    });
     let output = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -568,8 +682,8 @@ fn detect_dead_code_inner(
             resolved.config_path.as_ref(),
         ),
         meta: options.analysis.explain.then(check_meta),
-        workspace_diagnostics: Vec::new(),
-        next_steps: Vec::new(),
+        workspace_diagnostics: fallow_config::workspace_diagnostics_for(root),
+        next_steps,
     });
     Ok(DeadCodeProgrammaticOutput {
         output,
@@ -1011,6 +1125,7 @@ fn detect_duplication_inner(
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let start = Instant::now();
     let session = load_duplication_session(options, resolved)?;
+    stash_workspace_diagnostics_for_session(&session);
     let dupes_config = build_dupes_config(options, &session.config().duplicates);
     let changed_files = changed_files_for_run(resolved)?;
     let cache_dir = (!resolved.no_cache).then_some(session.config().cache_dir.as_path());
@@ -1035,7 +1150,20 @@ fn detect_duplication_inner(
         apply_top(&mut report, top, session.root());
     }
 
+    let root = session.root();
     let payload = DupesReportPayload::from_report(&report);
+    let clone_fingerprints = payload
+        .clone_groups
+        .iter()
+        .map(|group| group.fingerprint.as_str())
+        .collect::<Vec<_>>();
+    let next_steps = build_dupes_next_steps(DupesNextStepsInput {
+        suggestions_enabled: suggestions_enabled(),
+        clone_fingerprints: &clone_fingerprints,
+        offer_setup: setup_pointer_applicable(root),
+        impact_digest: None,
+        audit_changed: fallow_engine::churn::is_git_repo(root),
+    });
     let output: DupesOutput<DupesReportPayload, serde_json::Value> =
         build_dupes_output(DupesOutputInput {
             schema_version: SCHEMA_VERSION,
@@ -1045,9 +1173,9 @@ fn detect_duplication_inner(
             grouped_by: None,
             total_issues: None,
             groups: None,
-            meta: None,
-            workspace_diagnostics: Vec::new(),
-            next_steps: Vec::new(),
+            meta: resolved.explain_enabled().then(dupes_meta),
+            workspace_diagnostics: fallow_config::workspace_diagnostics_for(root),
+            next_steps,
         });
     Ok(DuplicationProgrammaticOutput {
         output,
@@ -1939,6 +2067,129 @@ mod tests {
         assert_eq!(json["kind"], "dupes");
         assert!(json["clone_groups"].is_array());
         assert!(json["stats"].is_object());
+    }
+
+    /// A monorepo whose `workspaces` glob matches a directory with no
+    /// `package.json` produces a `GlobMatchedNoPackageJson` workspace
+    /// diagnostic that the CLI surfaces on `workspace_diagnostics[]`, plus
+    /// unused exports + a clone that drive `next_steps[]`. The api / napi
+    /// surface must carry the same enrichment the CLI emits.
+    fn enriched_project() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        // `packages/empty` matches the glob but has no package.json -> diagnostic.
+        std::fs::create_dir_all(root.join("packages/empty")).expect("empty pkg dir");
+        std::fs::write(
+            root.join("packages/empty/note.txt"),
+            "no package.json here\n",
+        )
+        .expect("note");
+        write_json(
+            root.join("package.json"),
+            r#"{"name":"api-enriched","main":"src/index.ts","workspaces":["packages/*"]}"#,
+        );
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "import './a';\nimport './b';\nexport const entry = 1;\nconsole.log(entry);\n",
+        )
+        .expect("entry");
+        // Identical bodies so dupes detection (and the trace-clone next step)
+        // has a clone to report, plus an unused export per file.
+        let clone = "export function repeated() {\n  return ['x', 'y', 'z'].join(',');\n}\n";
+        std::fs::write(root.join("src/a.ts"), clone).expect("a");
+        std::fs::write(root.join("src/b.ts"), clone).expect("b");
+        project
+    }
+
+    fn has_glob_no_package_json(diagnostics: &serde_json::Value) -> bool {
+        diagnostics
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|diag| diag["kind"] == "glob-matched-no-package-json")
+    }
+
+    /// Regression guard: the napi/api dead-code path must populate
+    /// `workspace_diagnostics` and `next_steps` exactly like the CLI's
+    /// `serialize_check_json` route does. The pre-fix code hardcoded both to
+    /// empty, silently dropping the enrichment for `fallow/types` embedders.
+    #[test]
+    fn detect_dead_code_carries_workspace_diagnostics_and_next_steps() {
+        let project = enriched_project();
+        let root = project.path();
+
+        let json = detect_dead_code(&DeadCodeOptions {
+            analysis: analysis_at(root),
+            filters: DeadCodeFilters {
+                unused_exports: true,
+                ..DeadCodeFilters::default()
+            },
+            ..DeadCodeOptions::default()
+        })
+        .expect("dead-code succeeds");
+
+        // Findings exist, so the enrichment must be present (not the dropped
+        // empties the crate-split regression produced).
+        assert!(
+            !json["unused_exports"].as_array().expect("array").is_empty(),
+            "fixture must produce unused exports to drive next_steps"
+        );
+        assert!(
+            has_glob_no_package_json(&json["workspace_diagnostics"]),
+            "workspace_diagnostics must carry the glob-no-package-json diagnostic, got {:?}",
+            json["workspace_diagnostics"]
+        );
+        assert!(
+            json["next_steps"]
+                .as_array()
+                .is_some_and(|steps| !steps.is_empty()),
+            "next_steps must be populated for a run with findings, got {:?}",
+            json["next_steps"]
+        );
+    }
+
+    /// Companion regression guard for the duplication path: the napi/api dupes
+    /// JSON must carry `workspace_diagnostics`, `next_steps`, and (under
+    /// `explain`) the `_meta` block, matching the CLI's `build_duplication_json`
+    /// route. The pre-fix code hardcoded `meta: None` and both vecs empty.
+    #[test]
+    fn detect_duplication_carries_meta_diagnostics_and_next_steps() {
+        let project = enriched_project();
+        let root = project.path();
+
+        let json = detect_duplication(&DuplicationOptions {
+            analysis: AnalysisOptions {
+                explain: true,
+                ..analysis_at(root)
+            },
+            min_tokens: 1,
+            min_lines: 1,
+            ..DuplicationOptions::default()
+        })
+        .expect("duplication succeeds");
+
+        assert!(
+            !json["clone_groups"].as_array().expect("array").is_empty(),
+            "fixture must produce a clone to drive trace-clone next step"
+        );
+        assert!(
+            json["_meta"].is_object(),
+            "explain mode must emit the dupes _meta block, got {:?}",
+            json["_meta"]
+        );
+        assert!(
+            has_glob_no_package_json(&json["workspace_diagnostics"]),
+            "workspace_diagnostics must carry the glob-no-package-json diagnostic, got {:?}",
+            json["workspace_diagnostics"]
+        );
+        assert!(
+            json["next_steps"]
+                .as_array()
+                .is_some_and(|steps| !steps.is_empty()),
+            "next_steps must be populated for a run with clones, got {:?}",
+            json["next_steps"]
+        );
     }
 
     #[test]
