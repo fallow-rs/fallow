@@ -907,6 +907,7 @@ mod tests {
                         auto_fixable: false,
                     }],
                     source_hash: None,
+                    discriminators: None,
                 }],
                 hot_paths: vec![RuntimeCoverageHotPath {
                     id: "fallow:hot:cafebabe".to_owned(),

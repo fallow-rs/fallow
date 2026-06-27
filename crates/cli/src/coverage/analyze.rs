@@ -803,6 +803,10 @@ fn cloud_finding(
             deployments_observed: function.deployments_observed,
         },
         actions: runtime_actions(verdict),
+        // The cloud-join path (analyze --cloud) does not carry the window
+        // trace_count + thresholds here, so it omits the #321 discriminator
+        // block; that surface's discriminator contract is #328 territory.
+        discriminators: None,
     }
 }
 
@@ -2040,6 +2044,7 @@ mod tests {
                 deployments_observed: 0,
             },
             actions: vec![],
+            discriminators: None,
         }
     }
 

@@ -1007,6 +1007,7 @@ mod tests {
                     },
                     actions: vec![],
                     source_hash: None,
+                    discriminators: None,
                 }],
                 hot_paths: vec![RuntimeCoverageHotPath {
                     id: "fallow:hot:cafebabe".to_owned(),
