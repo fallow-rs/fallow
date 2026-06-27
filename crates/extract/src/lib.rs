@@ -122,27 +122,25 @@ pub fn parse_all_files(
     cache: Option<&CacheStore>,
     need_complexity: bool,
 ) -> ParseResult {
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-    let cache_hits = AtomicUsize::new(0);
-    let cache_misses = AtomicUsize::new(0);
-    let parse_cpu_nanos = AtomicU64::new(0);
-
-    let modules: Vec<ModuleInfo> = files
+    let results: Vec<ParseFileResult> = files
         .par_iter()
-        .filter_map(|file| {
-            parse_single_file_cached(
-                file,
-                cache,
-                &cache_hits,
-                &cache_misses,
-                &parse_cpu_nanos,
-                need_complexity,
-            )
-        })
+        .map(|file| parse_single_file_cached(file, cache, need_complexity))
         .collect();
 
-    let hits = cache_hits.load(Ordering::Relaxed);
-    let misses = cache_misses.load(Ordering::Relaxed);
+    let mut modules = Vec::with_capacity(results.len());
+    let mut hits = 0usize;
+    let mut misses = 0usize;
+    let mut parse_cpu_nanos = 0u64;
+
+    for result in results {
+        hits += result.cache_hits;
+        misses += result.cache_misses;
+        parse_cpu_nanos = parse_cpu_nanos.saturating_add(result.parse_cpu_nanos);
+        if let Some(module) = result.module {
+            modules.push(module);
+        }
+    }
+
     if hits > 0 || misses > 0 {
         tracing::info!(
             cache_hits = hits,
@@ -155,7 +153,43 @@ pub fn parse_all_files(
         modules,
         cache_hits: hits,
         cache_misses: misses,
-        parse_cpu_ms: parse_cpu_nanos.load(Ordering::Relaxed) as f64 / 1_000_000.0,
+        parse_cpu_ms: parse_cpu_nanos as f64 / 1_000_000.0,
+    }
+}
+
+struct ParseFileResult {
+    module: Option<ModuleInfo>,
+    cache_hits: usize,
+    cache_misses: usize,
+    parse_cpu_nanos: u64,
+}
+
+impl ParseFileResult {
+    fn cache_hit(module: ModuleInfo) -> Self {
+        Self {
+            module: Some(module),
+            cache_hits: 1,
+            cache_misses: 0,
+            parse_cpu_nanos: 0,
+        }
+    }
+
+    fn cache_miss(module: ModuleInfo, parse_cpu_nanos: u64) -> Self {
+        Self {
+            module: Some(module),
+            cache_hits: 0,
+            cache_misses: 1,
+            parse_cpu_nanos,
+        }
+    }
+
+    const fn skipped() -> Self {
+        Self {
+            module: None,
+            cache_hits: 0,
+            cache_misses: 0,
+            parse_cpu_nanos: 0,
+        }
     }
 }
 
@@ -170,13 +204,8 @@ pub fn parse_all_files(
 fn parse_single_file_cached(
     file: &DiscoveredFile,
     cache: Option<&CacheStore>,
-    cache_hits: &std::sync::atomic::AtomicUsize,
-    cache_misses: &std::sync::atomic::AtomicUsize,
-    parse_cpu_nanos: &std::sync::atomic::AtomicU64,
     need_complexity: bool,
-) -> Option<ModuleInfo> {
-    use std::sync::atomic::Ordering;
-
+) -> ParseFileResult {
     let cached_by_path = cache.and_then(|store| store.get_by_path_only(&file.path));
 
     if let Some(cached) = cached_by_path
@@ -190,8 +219,7 @@ fn parse_single_file_cached(
             && fingerprint.has_known_mtime()
             && (!need_complexity || !cached.complexity.is_empty())
         {
-            cache_hits.fetch_add(1, Ordering::Relaxed);
-            return Some(cache::cached_to_module_opts(
+            return ParseFileResult::cache_hit(cache::cached_to_module_opts(
                 cached,
                 file.id,
                 need_complexity,
@@ -199,7 +227,9 @@ fn parse_single_file_cached(
         }
     }
 
-    let raw = std::fs::read_to_string(&file.path).ok()?;
+    let Ok(raw) = std::fs::read_to_string(&file.path) else {
+        return ParseFileResult::skipped();
+    };
     let source = strip_bom(&raw);
     let content_hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());
 
@@ -207,22 +237,17 @@ fn parse_single_file_cached(
         && cached.content_hash == content_hash
         && (!need_complexity || !cached.complexity.is_empty())
     {
-        cache_hits.fetch_add(1, Ordering::Relaxed);
-        return Some(cache::cached_to_module_opts(
+        return ParseFileResult::cache_hit(cache::cached_to_module_opts(
             cached,
             file.id,
             need_complexity,
         ));
     }
-    cache_misses.fetch_add(1, Ordering::Relaxed);
 
     let parse_start = std::time::Instant::now();
     let module = parse_source_to_module(file.id, &file.path, source, content_hash, need_complexity);
-    parse_cpu_nanos.fetch_add(
-        u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX),
-        Ordering::Relaxed,
-    );
-    Some(module)
+    let parse_cpu_nanos = u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX);
+    ParseFileResult::cache_miss(module, parse_cpu_nanos)
 }
 
 /// Parse a single file and extract module information (without complexity).
