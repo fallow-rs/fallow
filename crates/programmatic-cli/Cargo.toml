@@ -8,12 +8,11 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Temporary CLI-backed health runner adapter for fallow embedders"
+description = "Compatibility health runner adapter for fallow embedders"
 readme = "../../README.md"
 
 [dependencies]
 fallow-api = { workspace = true }
-fallow-cli = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]

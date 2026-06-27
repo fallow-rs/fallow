@@ -24,12 +24,41 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Duplication result types exposed through the engine boundary.
 pub mod duplicates {
-    pub use fallow_core::duplicates::*;
+    pub mod families {
+        pub use fallow_core::duplicates::families::{
+            detect_mirrored_directories, group_into_families,
+        };
+    }
+
+    pub mod tokenize {
+        pub use fallow_core::duplicates::tokenize::tokenize_file;
+    }
+
+    pub use fallow_core::duplicates::{
+        CloneFamily, CloneFingerprintSet, CloneGroup, CloneInstance, DefaultIgnoreSkips,
+        DuplicationReport, DuplicationStats, FINGERPRINT_PREFIX, MirroredDirectory,
+        RefactoringKind, RefactoringSuggestion, clone_fingerprint, dominant_identifier,
+        find_duplicates, find_duplicates_cached, find_duplicates_cached_with_default_ignore_skips,
+        find_duplicates_in_project, find_duplicates_touching_files,
+        find_duplicates_touching_files_cached,
+        find_duplicates_touching_files_cached_with_default_ignore_skips,
+        find_duplicates_touching_files_with_default_ignore_skips,
+        find_duplicates_with_default_ignore_skips, fingerprint_for_fragment,
+    };
 }
 
 /// Discovery helpers and types exposed through the engine boundary.
 pub mod discover {
-    pub use fallow_core::discover::*;
+    pub use fallow_core::discover::{
+        CategorizedEntryPoints, HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS, SOURCE_EXTENSIONS,
+        collect_hidden_dir_scopes, collect_plugin_hidden_dir_scopes, compile_glob_set,
+        discover_dynamically_loaded_entry_points, discover_entry_points, discover_files,
+        discover_files_and_config_candidates, discover_files_with_additional_hidden_dirs,
+        discover_files_with_plugin_scopes, discover_infrastructure_entry_points,
+        discover_plugin_entry_point_sets, discover_plugin_entry_points,
+        discover_workspace_entry_points, is_allowed_hidden_dir,
+    };
+    pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 }
 
 pub mod baseline;
@@ -44,26 +73,37 @@ pub mod vital_signs;
 /// Extracted semantic types exposed through the engine boundary.
 pub mod extract {
     pub mod inventory {
-        pub use fallow_core::extract::inventory::{InventoryEntry, walk_source};
+        pub use fallow_extract::inventory::{InventoryEntry, walk_source};
     }
 
-    pub use fallow_core::extract::*;
+    pub use fallow_extract::css::{
+        extract_apply_tokens, extract_css_module_exports, scan_theme_blocks,
+    };
+    pub use fallow_extract::css_classes::{is_typo_edit, scan_markup_class_tokens};
+    pub use fallow_extract::css_metrics::compute_css_analytics;
+    pub use fallow_extract::parse_all_files;
+    pub use fallow_extract::sfc::extract_sfc_styles;
+    pub use fallow_extract::sfc_css::{scoped_unused_classes, sfc_virtual_stylesheet};
+    pub use fallow_extract::tailwind::scan_tailwind_arbitrary_values;
     pub use fallow_types::extract::*;
 }
 
 /// Parse cache helpers exposed through the engine boundary.
 pub mod cache {
-    pub use fallow_core::cache::*;
+    pub use fallow_extract::cache::CacheStore;
 }
 
 /// Module graph types exposed through the engine boundary.
 pub mod graph {
-    pub use fallow_core::graph::*;
+    pub use fallow_graph::graph::{
+        CoordinationGapPaths, ExportSymbol, FocusFileFactsPaths, ImpactClosurePaths, ModuleGraph,
+        ModuleNode, PartitionOrderPaths,
+    };
 }
 
 /// Module resolution types exposed through the engine boundary.
 pub mod resolve {
-    pub use fallow_core::resolve::*;
+    pub use fallow_graph::resolve::ResolvedModule;
 }
 
 /// Public API graph helpers exposed through the engine boundary.
@@ -73,7 +113,13 @@ pub mod public_api {
 
 /// Plugin registry helpers and types exposed through the engine boundary.
 pub mod plugins {
-    pub use fallow_core::plugins::*;
+    pub mod registry {
+        pub use fallow_core::plugins::registry::{
+            builtin_plugin_names, format_plugin_regex_errors,
+        };
+    }
+
+    pub use fallow_core::plugins::{AggregatedPluginResult, PluginRegistry};
 }
 
 /// Git process environment helpers exposed through the engine boundary.
@@ -83,7 +129,8 @@ pub mod git_env {
 
 /// Analysis result types exposed through the engine boundary.
 pub mod results {
-    pub use fallow_core::results::*;
+    pub use fallow_types::output_dead_code::*;
+    pub use fallow_types::results::*;
 }
 
 /// Suppression helpers exposed for editor and embedding surfaces.
@@ -111,7 +158,11 @@ pub mod cross_reference {
 
 /// Git churn helpers and types exposed through the engine boundary.
 pub mod churn {
-    pub use fallow_core::churn::*;
+    pub use fallow_core::churn::{
+        AuthorContribution, ChurnResult, ChurnSpawnHook, FileChurn, SinceDuration, analyze_churn,
+        analyze_churn_cached, analyze_churn_from_file, is_git_repo, parse_since, set_spawn_hook,
+    };
+    pub use fallow_types::churn::ChurnTrend;
 }
 
 /// Security metadata helpers exposed through the engine boundary.

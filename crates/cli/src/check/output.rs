@@ -88,7 +88,7 @@ pub fn write_sarif_file(
     sarif_path: &std::path::Path,
     quiet: bool,
 ) {
-    let sarif = report::build_sarif(results, &config.root, &config.rules);
+    let sarif = report::api_sarif_document(results, &config.root, &config.rules);
     if let Some(parent) = sarif_path.parent()
         && !parent.as_os_str().is_empty()
         && let Err(e) = std::fs::create_dir_all(parent)

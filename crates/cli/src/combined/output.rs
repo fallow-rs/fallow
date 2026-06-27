@@ -551,7 +551,8 @@ fn print_combined_sarif(
     let mut all_runs = Vec::new();
 
     if let Some(result) = check {
-        let sarif = report::build_sarif(&result.results, &result.config.root, &result.config.rules);
+        let sarif =
+            report::api_sarif_document(&result.results, &result.config.root, &result.config.rules);
         if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
             all_runs.extend(runs.iter().cloned());
         }
@@ -579,7 +580,7 @@ fn print_combined_sarif(
     }
 
     if let Some(result) = health {
-        let sarif = report::build_health_sarif(&result.report, &result.config.root);
+        let sarif = report::api_health_sarif_document(&result.report, &result.config.root);
         if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
             all_runs.extend(runs.iter().cloned());
         }
@@ -640,7 +641,7 @@ fn build_combined_codeclimate_issues(
 ) -> Vec<CodeClimateIssue> {
     let mut all_issues: Vec<CodeClimateIssue> = Vec::new();
     if let Some(result) = check {
-        all_issues.extend(report::build_codeclimate(
+        all_issues.extend(fallow_api::build_codeclimate(
             &result.results,
             &result.config.root,
             &result.config.rules,
@@ -648,14 +649,14 @@ fn build_combined_codeclimate_issues(
     }
 
     if let Some(result) = dupes {
-        all_issues.extend(report::build_duplication_codeclimate(
+        all_issues.extend(fallow_api::build_duplication_codeclimate(
             &result.report,
             &result.config.root,
         ));
     }
 
     if let Some(result) = health {
-        all_issues.extend(report::build_health_codeclimate(
+        all_issues.extend(fallow_api::build_health_codeclimate(
             &result.report,
             &result.config.root,
         ));

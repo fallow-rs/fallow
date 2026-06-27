@@ -18,8 +18,8 @@
 //!   negligible shape treated as a call);
 //! - a `member_access` with `object == "this" && member == bar` (the output read
 //!   as a value, e.g. forwarded to a function that may emit it). Over-credit;
-//! - a typed Angular template member fact for `bar`, with legacy semantic
-//!   member accesses accepted only as an older parse-cache fallback, which
+//! - a typed Angular template member fact for `bar`, with older cached
+//!   member accesses accepted only as a conservative parse-cache fallback, which
 //!   credits a template-handler emit such as `(click)="bar.emit(...)"` (Angular
 //!   templates emit outputs directly off the bare name, with no `this.` prefix);
 //! - the same template member evidence in the linked external `templateUrl`

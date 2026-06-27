@@ -7,11 +7,12 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use fallow_api::{
+    build_codeclimate, build_duplication_codeclimate, build_health_codeclimate,
+    build_health_sarif as build_api_health_sarif, build_sarif as build_api_sarif,
+};
 use fallow_cli::report::{
-    build_codeclimate, build_compact_lines, build_duplication_codeclimate,
-    build_duplication_markdown, build_grouped_duplication_json, build_health_codeclimate,
-    build_health_json, build_health_markdown, build_health_sarif, build_json, build_markdown,
-    build_sarif,
+    build_compact_lines, build_duplication_markdown, build_health_markdown, build_markdown,
     ci::{
         pr_comment::{Provider, issues_from_codeclimate, render_pr_comment},
         review::render_review_envelope,
@@ -23,6 +24,109 @@ use fallow_core::extract::MemberKind;
 use fallow_core::results::*;
 use fallow_output::codeclimate_issues_to_value;
 use fallow_output::*;
+
+fn sarif_rule(id: &str, fallback_short: &str, level: &str) -> serde_json::Value {
+    let def = fallow_cli::explain::rule_by_id(id);
+    let short_description = def.map_or(fallback_short, |def| def.short);
+    let full_description = def.map(|def| def.full);
+    let help_uri = def.map(fallow_cli::explain::rule_docs_url);
+    build_sarif_rule(SarifRuleInput {
+        id,
+        short_description,
+        level,
+        full_description,
+        help_uri: help_uri.as_deref(),
+    })
+}
+
+fn build_sarif(results: &AnalysisResults, root: &Path, rules: &RulesConfig) -> serde_json::Value {
+    build_api_sarif(results, root, rules, &sarif_rule)
+}
+
+fn build_health_sarif(report: &HealthReport, root: &Path) -> serde_json::Value {
+    build_api_health_sarif(report, root, &sarif_rule)
+}
+
+fn api_check_json_document(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+) -> Result<serde_json::Value, serde_json::Error> {
+    fallow_api::serialize_check_json(fallow_api::CheckJsonOutputInput {
+        results,
+        root,
+        elapsed,
+        config_fixable: true,
+        meta: None,
+        extras: fallow_api::CheckJsonExtraOutputs::default(),
+        workspace_diagnostics: Vec::new(),
+        next_steps: build_dead_code_next_steps(DeadCodeNextStepsInput {
+            suggestions_enabled: true,
+            results,
+            root,
+            offer_setup: false,
+            impact_digest: None,
+            workspace_ref: None,
+            audit_changed: false,
+        }),
+        envelope_mode: RootEnvelopeMode::Tagged,
+        telemetry_analysis_run_id: None,
+    })
+}
+
+fn api_health_json_document(
+    report: &HealthReport,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    fallow_api::serialize_health_report_json(fallow_api::HealthJsonReportInput {
+        report: report.clone(),
+        root,
+        elapsed,
+        explain,
+        grouped_by: None,
+        groups: None,
+        workspace_diagnostics: Vec::new(),
+        next_steps: build_health_next_steps(build_health_next_steps_input(
+            report, true, false, None, false,
+        )),
+        envelope_mode: RootEnvelopeMode::Tagged,
+        telemetry_analysis_run_id: None,
+    })
+}
+
+fn api_grouped_duplication_json_document(
+    report: &DuplicationReport,
+    grouping: &fallow_api::DuplicationGrouping,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let payload = fallow_api::DupesReportPayload::from_report(report);
+    let fingerprints: Vec<&str> = payload
+        .clone_groups
+        .iter()
+        .map(|group| group.fingerprint.as_str())
+        .collect();
+    fallow_api::serialize_grouped_duplication_json(fallow_api::GroupedDuplicationJsonOutputInput {
+        report,
+        grouping,
+        root,
+        elapsed,
+        meta: explain.then(dupes_meta),
+        workspace_diagnostics: Vec::new(),
+        next_steps: build_dupes_next_steps(DupesNextStepsInput {
+            suggestions_enabled: true,
+            clone_fingerprints: &fingerprints,
+            offer_setup: false,
+            impact_digest: None,
+            audit_changed: false,
+        }),
+        envelope_mode: RootEnvelopeMode::Tagged,
+        telemetry_analysis_run_id: None,
+    })
+}
 
 /// Build sample `AnalysisResults` with one issue of each type for consistent snapshots.
 #[expect(
@@ -326,7 +430,8 @@ fn json_output_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let elapsed = Duration::from_millis(42);
-    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let value =
+        api_check_json_document(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
 
     insta::assert_snapshot!(
@@ -345,7 +450,8 @@ fn next_steps_are_read_only_and_placeholder_free() {
     // mutating (`fix`/`init`/`hooks`/`migrate`), per the NextStep contract.
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let steps = value
         .get("next_steps")
         .and_then(serde_json::Value::as_array)
@@ -379,7 +485,8 @@ fn json_empty_results_snapshot() {
     let root = PathBuf::from("/project");
     let results = AnalysisResults::default();
     let elapsed = Duration::from_millis(0);
-    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let value =
+        api_check_json_document(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
 
     insta::assert_snapshot!(
@@ -715,7 +822,8 @@ fn json_re_export_variant_snapshot() {
             is_re_export: true,
         }));
     let elapsed = Duration::from_millis(0);
-    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let value =
+        api_check_json_document(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "json_re_export_variant",
@@ -828,7 +936,8 @@ fn json_type_only_deps_snapshot() {
             },
         ));
     let elapsed = Duration::from_millis(10);
-    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let value =
+        api_check_json_document(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "json_type_only_deps",
@@ -855,7 +964,8 @@ fn json_unused_files_only_snapshot() {
         .push(UnusedFileFinding::with_actions(UnusedFile {
             path: root.join("src/dead.ts"),
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_files_only", redact_version(&json_str));
 }
@@ -875,7 +985,8 @@ fn json_unused_exports_only_snapshot() {
             span_start: 120,
             is_re_export: false,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_exports_only", redact_version(&json_str));
 }
@@ -895,7 +1006,8 @@ fn json_unused_types_only_snapshot() {
             span_start: 60,
             is_re_export: false,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_types_only", redact_version(&json_str));
 }
@@ -913,7 +1025,8 @@ fn json_unused_deps_only_snapshot() {
             line: 5,
             used_in_workspaces: Vec::new(),
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_deps_only", redact_version(&json_str));
 }
@@ -931,7 +1044,8 @@ fn json_unresolved_imports_only_snapshot() {
             col: 0,
             specifier_col: 0,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unresolved_imports_only", redact_version(&json_str));
 }
@@ -952,7 +1066,8 @@ fn json_unlisted_deps_only_snapshot() {
                 }],
             },
         ));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unlisted_deps_only", redact_version(&json_str));
 }
@@ -971,7 +1086,8 @@ fn json_unused_enum_members_only_snapshot() {
             line: 8,
             col: 2,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_enum_members_only", redact_version(&json_str));
 }
@@ -990,7 +1106,8 @@ fn json_unused_class_members_only_snapshot() {
             line: 42,
             col: 4,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_class_members_only", redact_version(&json_str));
 }
@@ -1016,7 +1133,8 @@ fn json_duplicate_exports_only_snapshot() {
                 },
             ],
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_duplicate_exports_only", redact_version(&json_str));
 }
@@ -1051,7 +1169,8 @@ fn json_stale_suppression_unknown_kind_snapshot() {
         missing_reason: false,
         actions: StaleSuppression::actions_for(false),
     });
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "json_stale_suppression_unknown_kind",
@@ -1293,7 +1412,8 @@ fn json_multiple_exports_same_file_snapshot() {
             span_start: 0,
             is_re_export: false,
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_multiple_exports_same_file", redact_version(&json_str));
 }
@@ -1385,7 +1505,8 @@ fn json_workspace_dep_snapshot() {
             line: 5,
             used_in_workspaces: Vec::new(),
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_workspace_deps", redact_version(&json_str));
 }
@@ -1901,7 +2022,8 @@ fn json_circular_deps_only_snapshot() {
                 is_cross_package: false,
             },
         ));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_circular_deps_only", redact_version(&json_str));
 }
@@ -1971,7 +2093,8 @@ fn re_export_cycles_results(root: &Path) -> AnalysisResults {
 fn json_re_export_cycles_only_snapshot() {
     let root = PathBuf::from("/project");
     let results = re_export_cycles_results(&root);
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_re_export_cycles_only", redact_version(&json_str));
 }
@@ -2062,7 +2185,8 @@ fn json_unused_dev_deps_only_snapshot() {
             line: 12,
             used_in_workspaces: Vec::new(),
         }));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_dev_deps_only", redact_version(&json_str));
 }
@@ -2103,7 +2227,8 @@ fn json_unused_optional_deps_only_snapshot() {
                 used_in_workspaces: Vec::new(),
             },
         ));
-    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let value = api_check_json_document(&results, &root, Duration::ZERO)
+        .expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_unused_optional_deps_only", redact_version(&json_str));
 }
@@ -2153,7 +2278,8 @@ fn json_mixed_severity_snapshot() {
     let root = PathBuf::from("/project");
     let results = sample_results(&root);
     let elapsed = Duration::from_millis(42);
-    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let value =
+        api_check_json_document(&results, &root, elapsed).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_mixed_severity", redact_version(&json_str));
 }
@@ -2692,7 +2818,7 @@ fn health_report_with_coverage_intelligence(root: &Path) -> HealthReport {
 fn json_health_with_coverage_intelligence_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_coverage_intelligence(&root);
-    let value = build_health_json(&report, &root, Duration::ZERO, false)
+    let value = api_health_json_document(&report, &root, Duration::ZERO, false)
         .expect("health JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
@@ -2895,7 +3021,7 @@ fn codeclimate_health_with_runtime_coverage_snapshot() {
 fn json_health_with_runtime_coverage_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_runtime_coverage(&root);
-    let value = build_health_json(&report, &root, Duration::ZERO, false)
+    let value = api_health_json_document(&report, &root, Duration::ZERO, false)
         .expect("health JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
@@ -2950,7 +3076,7 @@ fn health_report_with_coverage_gaps(root: &Path) -> HealthReport {
 fn json_health_with_coverage_gaps_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_coverage_gaps(&root);
-    let value = build_health_json(&report, &root, Duration::ZERO, false)
+    let value = api_health_json_document(&report, &root, Duration::ZERO, false)
         .expect("health JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!("json_health_with_coverage_gaps", redact_version(&json_str));
@@ -3267,9 +3393,14 @@ fn grouped_duplication_json_directory_snapshot() {
     let resolver = fallow_cli::report::OwnershipResolver::Directory;
     let grouping =
         fallow_cli::report::dupes_grouping::build_duplication_grouping(&report, &root, &resolver);
-    let value =
-        build_grouped_duplication_json(&report, &grouping, &root, Duration::from_millis(0), false)
-            .expect("should serialize");
+    let value = api_grouped_duplication_json_document(
+        &report,
+        &grouping,
+        &root,
+        Duration::from_millis(0),
+        false,
+    )
+    .expect("should serialize");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "grouped_duplication_json_directory",

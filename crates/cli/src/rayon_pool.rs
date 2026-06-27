@@ -10,7 +10,7 @@ pub fn configure_global_pool(threads: usize) {
 
 #[allow(
     dead_code,
-    reason = "used by the library programmatic API; the CLI binary uses the global pool"
+    reason = "used by library embedders; the CLI binary uses the global pool"
 )]
 pub fn build_thread_pool(threads: usize) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
     build_pool(threads).build()

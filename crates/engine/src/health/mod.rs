@@ -251,8 +251,7 @@ pub struct HealthRunOptions<'a> {
 
 /// Command-neutral inputs needed to execute a health analysis.
 ///
-/// The concrete health runner is still being migrated out of the CLI crate,
-/// but these fields are shared runner inputs rather than rendering concerns.
+/// These fields are shared runner inputs rather than rendering concerns.
 #[derive(Debug, Clone)]
 pub struct HealthExecutionOptions<'a> {
     pub root: &'a Path,
@@ -456,7 +455,7 @@ pub fn derive_complexity_sections(options: &ComplexitySectionOptions) -> Derived
 }
 
 /// Normalized programmatic complexity / health inputs shared by API, NAPI, and
-/// the CLI-backed runner during the engine migration.
+/// engine-backed runners.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexityRunOptions<'a> {
     pub thresholds: HealthThresholdOverrides,
@@ -499,9 +498,8 @@ pub struct HealthSharedParseData {
 
 /// Typed health analysis result shared by CLI, API, NAPI, and future embedders.
 ///
-/// The health runner still lives in `fallow-cli` during the staged migration,
-/// but the result contract belongs at the engine boundary so downstream callers
-/// can depend on a command-neutral shape.
+/// The result contract belongs at the engine boundary so downstream callers can
+/// depend on a command-neutral shape.
 #[derive(Debug)]
 pub struct HealthAnalysisResult<GroupResolver = ()> {
     pub report: HealthReport,

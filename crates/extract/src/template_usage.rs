@@ -307,7 +307,7 @@ fn with_parsed_template_expression<R>(
     if snippet.is_empty() {
         return None;
     }
-    let wrapped = format!("const __fallow_template_sink = ({snippet});");
+    let wrapped = format!("const __f_tpl_sink = ({snippet});");
     let allocator = Allocator::default();
     let parser_return = Parser::new(&allocator, &wrapped, SourceType::ts()).parse();
     let Statement::VariableDeclaration(decl) = parser_return.program.body.first()? else {
@@ -489,11 +489,11 @@ fn remap_object_name(
 fn wrap_snippet(snippet: &str, kind: TemplateSnippetKind, locals: &[String]) -> String {
     let mut wrapped = String::new();
     if !locals.is_empty() {
-        wrapped.push_str("const __fallow_local = undefined;\n");
+        wrapped.push_str("const __f_tpl_local = undefined;\n");
         for local in locals {
             wrapped.push_str("const ");
             wrapped.push_str(local);
-            wrapped.push_str(" = __fallow_local;\n");
+            wrapped.push_str(" = __f_tpl_local;\n");
         }
     }
 

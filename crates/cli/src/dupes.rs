@@ -892,7 +892,7 @@ mod tests {
         }
     }
 
-    /// Build a `DupesOptions` with the legacy CLI-default scalars preset
+    /// Build a `DupesOptions` with the command-default scalars preset
     /// (`min_tokens=50`, `min_lines=5`, `threshold=0.0`). Tests that exercise
     /// CLI-override semantics still need a concrete value, so we wrap each
     /// scalar in `Some(...)` here. Tests that want the config-fallback path

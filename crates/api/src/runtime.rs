@@ -51,9 +51,8 @@ pub struct HealthJsonReportInput<'a> {
 
 /// Runtime probes used by programmatic health output assembly.
 ///
-/// The current CLI-backed runner supplies environment and project facts while
-/// health execution moves into the engine/API stack. The stable command strings
-/// and output ordering remain owned by `fallow-output`.
+/// Concrete runners supply environment and project facts while the stable
+/// command strings and output ordering remain owned by `fallow-output`.
 pub struct ProgrammaticHealthNextStepFacts {
     pub suggestions_enabled: bool,
     pub offer_setup: bool,
@@ -61,7 +60,7 @@ pub struct ProgrammaticHealthNextStepFacts {
     pub audit_changed: bool,
 }
 
-/// Health runner output shared by API, NAPI, and temporary CLI adapters.
+/// Health runner output shared by API, NAPI, and compatibility adapters.
 ///
 /// The analysis payload is a typed engine result. Runtime-only presentation
 /// probes stay explicit so the API boundary, not the concrete runner, owns the
@@ -250,8 +249,8 @@ pub fn compute_health(options: &ComplexityOptions) -> ProgrammaticResult<serde_j
 /// Derive engine-owned health execution options from public programmatic API
 /// options and a resolved analysis context.
 ///
-/// This keeps option interpretation at the API boundary while temporary
-/// CLI-backed runners focus on executing the health pipeline.
+/// This keeps option interpretation at the API boundary while concrete runners
+/// focus on executing the health pipeline.
 #[must_use]
 pub fn derive_programmatic_health_execution_options<'a>(
     resolved: &'a ProgrammaticAnalysisContext,
@@ -312,9 +311,7 @@ pub fn derive_programmatic_health_execution_options<'a>(
 ///
 /// This owns validation, root/config/diff resolution, production overrides,
 /// workspace scope, and the per-call thread pool shared by programmatic
-/// analysis families. API runtimes use it directly, and temporary concrete
-/// runners can use the same context while execution finishes moving behind
-/// typed engine results.
+/// analysis families. API runtimes and engine-backed runners use it directly.
 pub struct ProgrammaticAnalysisContext {
     root: PathBuf,
     config_path: Option<PathBuf>,
@@ -500,8 +497,7 @@ pub fn run_duplication(
 /// Run dead-code analysis and return the JSON output contract.
 ///
 /// This runtime path is owned by `fallow-api` and uses the typed engine plus
-/// output crates directly. NAPI still calls the legacy CLI-backed route until
-/// follow-up parity slices move the public binding over.
+/// output crates directly.
 ///
 /// # Errors
 ///

@@ -588,65 +588,65 @@ use crate::MemberKind;
 /// A warm cache from 187 lacks the attribution field on persisted `hook_uses`.
 ///
 /// Bumped to 189: `ModuleInfo`/`CachedModule` now carry typed semantic facts for
-/// Angular template member accesses alongside the legacy sentinel entries.
+/// Angular template member accesses alongside the older string payload entries.
 ///
 /// Bumped to 190: `SemanticFact` now includes typed static-factory call member
-/// access facts alongside the legacy factory-call sentinel entries.
+/// access facts alongside the older factory-call string payload entries.
 ///
 /// Bumped to 191: `SemanticFact` now includes typed fluent-chain member access
-/// facts alongside the legacy fluent-chain sentinel entries.
+/// facts alongside the older fluent-chain string payload entries.
 ///
 /// Bumped to 192: `SemanticFact` now includes typed Playwright fixture-use facts
-/// alongside the legacy fixture-use sentinel entries.
+/// alongside the older fixture-use string payload entries.
 ///
 /// Bumped to 193: `SemanticFact` now includes typed Playwright fixture definition
-/// facts alongside the legacy fixture-definition sentinel entries.
+/// facts alongside the older fixture-definition string payload entries.
 ///
 /// Bumped to 194: `SemanticFact` now includes typed Playwright fixture alias
-/// facts alongside the legacy fixture-alias sentinel entries.
+/// facts alongside the older fixture-alias string payload entries.
 ///
 /// Bumped to 195: `SemanticFact` now includes typed Playwright fixture type
-/// facts alongside the legacy fixture-type sentinel entries.
+/// facts alongside the older fixture-type string payload entries.
 ///
 /// Bumped to 196: `SemanticFact` now includes typed instance export binding
-/// facts alongside the legacy instance-export sentinel entries.
+/// facts alongside the older instance-export string payload entries.
 ///
 /// Bumped to 197: factory-call member accesses are now persisted only as typed
-/// semantic facts, while legacy sentinels remain decode-only for older caches.
+/// semantic facts; older cache payloads are reparsed by subsequent schema bumps.
 ///
 /// Bumped to 198: fluent-chain member accesses are now persisted only as typed
-/// semantic facts, while legacy sentinels remain decode-only for older caches.
+/// semantic facts; older cache payloads are reparsed by subsequent schema bumps.
 ///
 /// Bumped to 199: constructor-rooted fluent-chain member accesses are now
-/// persisted only as typed semantic facts, while legacy sentinels remain
-/// decode-only for older caches.
+/// persisted only as typed semantic facts; older cache payloads are reparsed by
+/// subsequent schema bumps.
 ///
 /// Bumped to 200: instance export bindings are now persisted only as typed
-/// semantic facts, while legacy sentinels remain decode-only for older caches.
+/// semantic facts; older cache payloads are reparsed by subsequent schema bumps.
 ///
 /// Bumped to 201: Playwright fixture-use member accesses are now persisted only
-/// as typed semantic facts, while legacy sentinels remain decode-only for older
-/// caches.
+/// as typed semantic facts; older cache payloads are reparsed by subsequent
+/// schema bumps.
 ///
 /// Bumped to 202: Playwright fixture-definition member accesses are now
-/// persisted only as typed semantic facts, while legacy sentinels remain
-/// decode-only for older caches.
+/// persisted only as typed semantic facts; older cache payloads are reparsed by
+/// subsequent schema bumps.
 ///
 /// Bumped to 203: Playwright fixture-alias member accesses are now persisted
-/// only as typed semantic facts, while legacy sentinels remain decode-only for
-/// older caches.
+/// only as typed semantic facts; older cache payloads are reparsed by subsequent
+/// schema bumps.
 ///
 /// Bumped to 204: Playwright fixture-type member accesses are now persisted
-/// only as typed semantic facts, while legacy sentinels remain decode-only for
-/// older caches.
+/// only as typed semantic facts; older cache payloads are reparsed by subsequent
+/// schema bumps.
 ///
 /// Bumped to 205: Angular template member accesses are now persisted only as
-/// typed semantic facts, while legacy template sentinels remain decode-only for
-/// older caches.
+/// typed semantic facts; older cache payloads are reparsed by subsequent schema
+/// bumps.
 ///
 /// Bumped to 206: Angular `{ ...this }` spread abstains are now persisted as
-/// typed semantic facts, while the legacy spread sentinel remains decode-only
-/// for older caches.
+/// typed semantic facts; older cache payloads are reparsed by subsequent schema
+/// bumps.
 ///
 /// Bumped to 207: dynamic custom-element render abstains are now persisted as
 /// typed semantic facts.
@@ -655,9 +655,9 @@ use crate::MemberKind;
 /// module payload. The in-memory `ModuleInfo` contract still exposes an empty
 /// vector, but warm caches from 207 carry the old eager `Vec` field shape.
 ///
-/// Bumped to 209: legacy semantic sentinel payloads are no longer decoded from
-/// cached member accesses. Warm caches from 208 or earlier are reparsed so
-/// analyzers consume typed semantic facts only.
+/// Bumped to 209: pre-typed semantic payloads are no longer decoded from cached
+/// member accesses. Warm caches from 208 or earlier are reparsed so analyzers
+/// consume typed semantic facts only.
 ///
 /// Bumped to 210 (issue #1489 Case 2): a param typed as a Pinia store
 /// (`ReturnType<typeof useFooStore>`, inline or aliased) now binds to the store

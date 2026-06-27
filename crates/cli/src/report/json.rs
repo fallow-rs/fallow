@@ -43,7 +43,7 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
     let regression = input.regression;
     let baseline_matched = input.baseline_matched;
     let config_fixable = input.config_fixable;
-    match build_json_with_config_fixable_meta_and_extras(
+    match api_check_json_document_with_config_fixable_meta_and_extras(
         results,
         root,
         elapsed,
@@ -104,16 +104,13 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
 )]
 pub(crate) const SCHEMA_VERSION: u32 = 7;
 
-#[allow(
-    dead_code,
-    reason = "used by the fallow-cli library target for embedders, but dead in the binary target"
-)]
-pub fn build_json(
+#[cfg(test)]
+pub(super) fn api_check_json_document(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    build_json_with_config_fixable(
+    api_check_json_document_with_config_fixable(
         results,
         root,
         elapsed,
@@ -121,23 +118,31 @@ pub fn build_json(
     )
 }
 
-pub fn build_json_with_config_fixable(
+#[cfg(test)]
+pub(super) fn api_check_json_document_with_config_fixable(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    build_json_with_config_fixable_and_meta(results, root, elapsed, config_fixable, None)
+    api_check_json_document_with_config_fixable_and_meta(
+        results,
+        root,
+        elapsed,
+        config_fixable,
+        None,
+    )
 }
 
-fn build_json_with_config_fixable_and_meta(
+#[cfg(test)]
+fn api_check_json_document_with_config_fixable_and_meta(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
     meta: Option<fallow_types::envelope::Meta>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    build_json_with_config_fixable_meta_and_extras(
+    api_check_json_document_with_config_fixable_meta_and_extras(
         results,
         root,
         elapsed,
@@ -147,7 +152,7 @@ fn build_json_with_config_fixable_and_meta(
     )
 }
 
-pub fn build_json_with_config_fixable_meta_and_extras(
+pub(super) fn api_check_json_document_with_config_fixable_meta_and_extras(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
@@ -174,13 +179,13 @@ pub fn build_json_with_config_fixable_meta_and_extras(
     })
 }
 
-pub fn build_check_json_payload_with_config_fixable(
+pub fn api_check_json_payload_with_config_fixable(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
     config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    build_check_json_payload_with_config_fixable_and_extras(
+    api_check_json_payload_with_config_fixable_and_extras(
         results,
         root,
         elapsed,
@@ -189,7 +194,7 @@ pub fn build_check_json_payload_with_config_fixable(
     )
 }
 
-pub fn build_check_json_payload_with_config_fixable_and_extras(
+pub fn api_check_json_payload_with_config_fixable_and_extras(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
@@ -327,7 +332,7 @@ fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     }
 }
 
-pub fn build_health_json(
+pub(super) fn api_health_json_document(
     report: &fallow_output::HealthReport,
     root: &Path,
     elapsed: Duration,
@@ -355,7 +360,7 @@ pub fn build_health_json(
     Ok(output)
 }
 
-pub fn build_grouped_health_json(
+pub(super) fn api_grouped_health_json_document(
     report: &fallow_output::HealthReport,
     grouping: &fallow_output::HealthGrouping,
     root: &Path,
@@ -389,7 +394,7 @@ pub(super) fn print_health_json(
     elapsed: Duration,
     explain: bool,
 ) -> ExitCode {
-    match build_health_json(report, root, elapsed, explain) {
+    match api_health_json_document(report, root, elapsed, explain) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize health report: {e}");
@@ -405,7 +410,7 @@ pub(super) fn print_grouped_health_json(
     elapsed: Duration,
     explain: bool,
 ) -> ExitCode {
-    match build_grouped_health_json(report, grouping, root, elapsed, explain) {
+    match api_grouped_health_json_document(report, grouping, root, elapsed, explain) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped health report: {e}");
@@ -414,7 +419,7 @@ pub(super) fn print_grouped_health_json(
     }
 }
 
-pub fn build_duplication_json(
+pub(super) fn api_duplication_json_document(
     report: &DuplicationReport,
     root: &Path,
     elapsed: Duration,
@@ -445,7 +450,7 @@ pub(super) fn print_duplication_json(
     elapsed: Duration,
     explain: bool,
 ) -> ExitCode {
-    match build_duplication_json(report, root, elapsed, explain) {
+    match api_duplication_json_document(report, root, elapsed, explain) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize duplication report: {e}");
@@ -454,7 +459,7 @@ pub(super) fn print_duplication_json(
     }
 }
 
-pub fn build_grouped_duplication_json(
+pub(super) fn api_grouped_duplication_json_document(
     report: &DuplicationReport,
     grouping: &DuplicationGrouping,
     root: &Path,
@@ -497,7 +502,7 @@ pub(super) fn print_grouped_duplication_json(
     elapsed: Duration,
     explain: bool,
 ) -> ExitCode {
-    match build_grouped_duplication_json(report, grouping, root, elapsed, explain) {
+    match api_grouped_duplication_json_document(report, grouping, root, elapsed, explain) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped duplication report: {e}");
@@ -579,7 +584,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(123);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
         assert_eq!(output["schema_version"], 7);
@@ -593,7 +598,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(50);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["unused_files"].as_array().unwrap().len(), 1);
         assert_eq!(output["unused_exports"].as_array().unwrap().len(), 1);
@@ -776,7 +781,7 @@ mod tests {
             }],
         };
 
-        let output = build_grouped_health_json(
+        let output = api_grouped_health_json_document(
             &fallow_output::HealthReport::default(),
             &grouping,
             &root,
@@ -798,7 +803,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
         let keys: Vec<&String> = output.as_object().unwrap().keys().collect();
         assert_eq!(keys[0], "kind");
         assert_eq!(keys[1], "schema_version");
@@ -813,7 +818,7 @@ mod tests {
         let results = sample_results(&root);
         let total = results.total_issues();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["total_issues"], total);
     }
@@ -834,7 +839,7 @@ mod tests {
                 is_re_export: false,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let export = &output["unused_exports"][0];
         assert_eq!(export["export_name"], "helperFn");
@@ -850,7 +855,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(42);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let json_str = serde_json::to_string_pretty(&output).expect("should stringify");
         let reparsed: serde_json::Value =
@@ -863,7 +868,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["total_issues"], 0);
         assert_eq!(output["unused_files"].as_array().unwrap().len(), 0);
@@ -891,7 +896,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let json_str = serde_json::to_string(&output).expect("should stringify");
         let reparsed: serde_json::Value =
@@ -909,7 +914,7 @@ mod tests {
                 path: root.join("src/deep/nested/file.ts"),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let path = output["unused_files"][0]["path"].as_str().unwrap();
         assert_eq!(path, "src/deep/nested/file.ts");
@@ -933,7 +938,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let site_path = output["unlisted_dependencies"][0]["imported_from"][0]["path"]
             .as_str()
@@ -963,7 +968,7 @@ mod tests {
                 ],
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let loc0 = output["duplicate_exports"][0]["locations"][0]["path"]
             .as_str()
@@ -992,7 +997,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let files = output["circular_dependencies"][0]["files"]
             .as_array()
@@ -1011,7 +1016,7 @@ mod tests {
                 path: PathBuf::from("/other/project/src/file.ts"),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let path = output["unused_files"][0]["path"].as_str().unwrap();
         assert!(path.contains("/other/project/"));
@@ -1027,7 +1032,7 @@ mod tests {
                 path: root.join("src/orphan.ts"),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let file = &output["unused_files"][0];
         assert_eq!(file["path"], "src/orphan.ts");
@@ -1049,7 +1054,7 @@ mod tests {
                 is_re_export: false,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let typ = &output["unused_types"][0];
         assert_eq!(typ["export_name"], "OldInterface");
@@ -1072,7 +1077,7 @@ mod tests {
                 used_in_workspaces: Vec::new(),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["unused_dependencies"][0];
         assert_eq!(dep["package_name"], "axios");
@@ -1094,7 +1099,7 @@ mod tests {
                 used_in_workspaces: vec![root.join("packages/consumer")],
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["unused_dependencies"][0];
         assert_eq!(
@@ -1117,7 +1122,7 @@ mod tests {
                 used_in_workspaces: Vec::new(),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["unused_dev_dependencies"][0];
         assert_eq!(dep["package_name"], "vitest");
@@ -1139,7 +1144,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["unused_optional_dependencies"][0];
         assert_eq!(dep["package_name"], "fsevents");
@@ -1161,7 +1166,7 @@ mod tests {
                 col: 2,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let member = &output["unused_enum_members"][0];
         assert_eq!(member["parent_name"], "Color");
@@ -1185,7 +1190,7 @@ mod tests {
                 col: 4,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let member = &output["unused_class_members"][0];
         assert_eq!(member["parent_name"], "ApiClient");
@@ -1207,7 +1212,7 @@ mod tests {
                 specifier_col: 0,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let import = &output["unresolved_imports"][0];
         assert_eq!(import["specifier"], "@acme/missing-pkg");
@@ -1239,7 +1244,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["unlisted_dependencies"][0];
         assert_eq!(dep["package_name"], "dotenv");
@@ -1271,7 +1276,7 @@ mod tests {
                 ],
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dup = &output["duplicate_exports"][0];
         assert_eq!(dup["export_name"], "Button");
@@ -1305,7 +1310,7 @@ mod tests {
                 ],
             }));
 
-        let output = build_json(&results, root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, root, Duration::ZERO).unwrap();
         let actions = output["duplicate_exports"][0]["actions"]
             .as_array()
             .unwrap();
@@ -1336,7 +1341,7 @@ mod tests {
                 ],
             }));
 
-        let output = build_json(&results, root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, root, Duration::ZERO).unwrap();
         let actions = output["duplicate_exports"][0]["actions"]
             .as_array()
             .unwrap();
@@ -1374,7 +1379,7 @@ mod tests {
                 ],
             }));
 
-        let output = build_json(&results, &sub, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &sub, Duration::ZERO).unwrap();
         let actions = output["duplicate_exports"][0]["actions"]
             .as_array()
             .unwrap();
@@ -1396,7 +1401,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let dep = &output["type_only_dependencies"][0];
         assert_eq!(dep["package_name"], "zod");
@@ -1424,7 +1429,7 @@ mod tests {
                 },
             ));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let cycle = &output["circular_dependencies"][0];
         assert_eq!(cycle["length"], 3);
@@ -1449,7 +1454,7 @@ mod tests {
                 is_re_export: true,
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["unused_exports"][0]["is_re_export"], true);
     }
@@ -1459,7 +1464,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["schema_version"], SCHEMA_VERSION);
         assert_eq!(output["schema_version"], 7);
@@ -1470,7 +1475,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["version"], env!("CARGO_PKG_VERSION"));
     }
@@ -1479,7 +1484,8 @@ mod tests {
     fn json_elapsed_ms_zero_duration() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
-        let output = build_json(&results, &root, Duration::ZERO).expect("should serialize");
+        let output =
+            api_check_json_document(&results, &root, Duration::ZERO).expect("should serialize");
 
         assert_eq!(output["elapsed_ms"], 0);
     }
@@ -1489,7 +1495,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_mins(2);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["elapsed_ms"], 120_000);
     }
@@ -1499,7 +1505,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_micros(500);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["elapsed_ms"], 0);
     }
@@ -1524,7 +1530,7 @@ mod tests {
                 path: root.join("src/c.ts"),
             }));
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["unused_files"].as_array().unwrap().len(), 3);
         assert_eq!(output["total_issues"], 3);
@@ -1623,7 +1629,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(100);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["total_issues"], results.total_issues());
     }
@@ -1633,7 +1639,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let json_str = serde_json::to_string(&output).expect("should stringify");
         assert!(!json_str.contains("/project/src/"));
@@ -1646,8 +1652,8 @@ mod tests {
         let results = sample_results(&root);
         let elapsed = Duration::from_millis(50);
 
-        let output1 = build_json(&results, &root, elapsed).expect("first build");
-        let output2 = build_json(&results, &root, elapsed).expect("second build");
+        let output1 = api_check_json_document(&results, &root, elapsed).expect("first build");
+        let output2 = api_check_json_document(&results, &root, elapsed).expect("second build");
 
         assert_eq!(output1, output2);
     }
@@ -1657,7 +1663,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(99);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
         assert_eq!(output["schema_version"], 7);
@@ -1669,7 +1675,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let expected_arrays = [
             "unused_files",
@@ -1784,7 +1790,8 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
-        let mut output = build_json(&results, &root, elapsed).expect("should serialize");
+        let mut output =
+            api_check_json_document(&results, &root, elapsed).expect("should serialize");
         insert_meta(
             &mut output,
             serde_json::to_value(fallow_output::check_meta()).unwrap(),
@@ -1820,7 +1827,7 @@ mod tests {
             }));
 
         let elapsed = Duration::from_millis(0);
-        let output = build_json(&results, &root, elapsed).expect("should serialize");
+        let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         let enum_member = &output["unused_enum_members"][0];
         assert!(enum_member["kind"].is_string());
@@ -1843,7 +1850,7 @@ mod tests {
                 span_start: 120,
                 is_re_export: false,
             }));
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_exports"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
@@ -1873,7 +1880,7 @@ mod tests {
                 },
             ));
 
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
         let action = &output["boundary_coverage_violations"][0]["actions"][1];
 
         assert_eq!(
@@ -1913,7 +1920,7 @@ mod tests {
                 span_start: 60,
                 is_re_export: false,
             }));
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let export_actions = output["unused_exports"][0]["actions"].as_array().unwrap();
         let type_actions = output["unused_types"][0]["actions"].as_array().unwrap();
@@ -1981,7 +1988,7 @@ mod tests {
             .push(UnusedFileFinding::with_actions(UnusedFile {
                 path: root.join("src/dead.ts"),
             }));
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_files"][0]["actions"].as_array().unwrap();
         assert_eq!(actions[0]["type"], "delete-file");
@@ -2004,7 +2011,7 @@ mod tests {
                 line: 5,
                 used_in_workspaces: Vec::new(),
             }));
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_dependencies"][0]["actions"]
             .as_array()
@@ -2030,7 +2037,7 @@ mod tests {
                 line: 5,
                 used_in_workspaces: vec![root.join("packages/consumer")],
             }));
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let actions = output["unused_dependencies"][0]["actions"]
             .as_array()
@@ -2050,7 +2057,7 @@ mod tests {
     fn json_empty_results_have_no_actions_in_empty_arrays() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         assert!(output["unused_exports"].as_array().unwrap().is_empty());
         assert!(output["unused_files"].as_array().unwrap().is_empty());
@@ -2060,7 +2067,7 @@ mod tests {
     fn json_all_issue_types_have_actions() {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
-        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+        let output = api_check_json_document(&results, &root, Duration::ZERO).unwrap();
 
         let issue_keys = [
             "unused_files",

@@ -1002,7 +1002,6 @@ dependencies = [
  "criterion2",
  "fallow-api",
  "fallow-core",
- "fallow-programmatic-cli",
  "fallow-types",
  "tempfile",
 ]
@@ -1142,6 +1141,8 @@ dependencies = [
  "dunce",
  "fallow-config",
  "fallow-core",
+ "fallow-extract",
+ "fallow-graph",
  "fallow-output",
  "fallow-types",
  "globset",
@@ -1275,7 +1276,6 @@ name = "fallow-programmatic-cli"
 version = "2.102.0"
 dependencies = [
  "fallow-api",
- "fallow-cli",
  "serde_json",
  "tempfile",
 ]

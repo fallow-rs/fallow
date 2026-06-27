@@ -416,7 +416,7 @@ fn build_audit_dead_code_json(
     result: &AuditResult,
     check: &crate::check::CheckResult,
 ) -> Result<serde_json::Value, ExitCode> {
-    match report::build_check_json_payload_with_config_fixable(
+    match report::api_check_json_payload_with_config_fixable(
         &check.results,
         &check.config.root,
         check.elapsed,
@@ -517,14 +517,13 @@ fn audit_next_steps(result: &AuditResult) -> Vec<fallow_types::output::NextStep>
 }
 
 fn print_audit_sarif(result: &AuditResult) -> ExitCode {
-    let check_sarif = result
-        .check
-        .as_ref()
-        .map(|check| report::build_sarif(&check.results, &check.config.root, &check.config.rules));
+    let check_sarif = result.check.as_ref().map(|check| {
+        report::api_sarif_document(&check.results, &check.config.root, &check.config.rules)
+    });
     let health_sarif = result
         .health
         .as_ref()
-        .map(|health| report::build_health_sarif(&health.report, &health.config.root));
+        .map(|health| report::api_health_sarif_document(&health.report, &health.config.root));
     let combined = fallow_api::build_audit_sarif(AuditSarifOutputInput {
         dead_code: check_sarif.as_ref(),
         duplication: result.dupes.as_ref().map(|dupes| &dupes.report),
@@ -542,13 +541,13 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
 fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
     fallow_api::build_audit_codeclimate(AuditCodeClimateOutputInput {
         dead_code: result.check.as_ref().map_or_else(Vec::new, |check| {
-            report::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
+            fallow_api::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
         }),
         duplication: result.dupes.as_ref().map_or_else(Vec::new, |dupes| {
-            report::build_duplication_codeclimate(&dupes.report, &dupes.config.root)
+            fallow_api::build_duplication_codeclimate(&dupes.report, &dupes.config.root)
         }),
         health: result.health.as_ref().map_or_else(Vec::new, |health| {
-            report::build_health_codeclimate(&health.report, &health.config.root)
+            fallow_api::build_health_codeclimate(&health.report, &health.config.root)
         }),
     })
 }

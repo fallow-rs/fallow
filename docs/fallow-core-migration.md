@@ -36,10 +36,9 @@ For duplication clone detection, use
 `fallow_api::detect_duplication` or `fallow_api::run_duplication`. For health,
 complexity, hotspots, targets, and coverage-gap output, `fallow_api` owns the
 JSON output contract through `compute_health_with_runner` /
-`run_health_with_runner`; the concrete health runner is still being migrated
-out of the CLI crate. External consumers that cannot supply a runner yet should
-use `fallow health --format json --quiet` until the engine-owned runner is
-available.
+`run_health_with_runner`. Use `fallow_engine::EngineHealthRunner` when you need
+typed engine execution from Rust, or `fallow_api::compute_health` when you want
+the supported JSON contract directly.
 
 ## Minimal example
 

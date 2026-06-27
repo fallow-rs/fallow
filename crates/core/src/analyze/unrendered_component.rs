@@ -568,8 +568,8 @@ pub fn find_unrendered_lit_elements(input: &LitUnrenderedInput<'_>) -> Vec<Unren
         modules.iter().map(|m| (m.file_id, m)).collect();
 
     // Pass 1: project-wide rendered-tag union, built LIBERALLY. A dynamic-render
-    // fact abstains on the whole project. The legacy sentinel path keeps older
-    // parse caches conservative.
+    // fact abstains on the whole project. Older parse-cache payloads stay
+    // conservative through the member-access fallback.
     let mut rendered_tags: FxHashSet<&str> = FxHashSet::default();
     for module in modules {
         if has_dynamic_custom_element_render(module) {

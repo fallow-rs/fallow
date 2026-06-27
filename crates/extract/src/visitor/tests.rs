@@ -2363,7 +2363,7 @@ fn exported_instance_binding_is_recorded() {
 
     assert!(
         !has_legacy_semantic_member_accesses(&info),
-        "exported instance binding should not emit legacy sentinel access, found: {:?}",
+        "exported instance binding should not emit synthetic member access, found: {:?}",
         info.member_accesses
     );
     assert!(
@@ -2818,7 +2818,7 @@ fn playwright_extend_type_alias_records_fixture_definitions() {
 
     assert!(
         !has_legacy_semantic_member_accesses(&info),
-        "Playwright fixture definitions should not emit legacy sentinels, found: {:?}",
+        "Playwright fixture definitions should not emit synthetic member accesses, found: {:?}",
         info.member_accesses
     );
     assert!(
@@ -2869,7 +2869,7 @@ fn playwright_merge_tests_records_fixture_aliases() {
 
     assert!(
         !has_legacy_semantic_member_accesses(&info),
-        "Playwright fixture aliases should not emit legacy sentinels, found: {:?}",
+        "Playwright fixture aliases should not emit synthetic member accesses, found: {:?}",
         info.member_accesses
     );
     assert!(
@@ -2955,7 +2955,7 @@ fn playwright_test_callback_records_fixture_member_uses() {
 
     assert!(
         !has_legacy_semantic_member_accesses(&info),
-        "Playwright fixture uses should not emit legacy sentinels, found: {:?}",
+        "Playwright fixture uses should not emit synthetic member accesses, found: {:?}",
         info.member_accesses,
     );
     assert!(
@@ -3171,7 +3171,7 @@ fn playwright_fixture_type_alias_records_nested_type_bindings() {
 
     assert!(
         !has_legacy_semantic_member_accesses(&info),
-        "Playwright fixture type aliases should not emit legacy sentinels, found: {:?}",
+        "Playwright fixture type aliases should not emit synthetic member accesses, found: {:?}",
         info.member_accesses
     );
     assert!(
@@ -5068,7 +5068,7 @@ fn fluent_chain_emits_typed_member_facts() {
 
     assert!(
         !has_legacy_semantic_member_accesses(&info),
-        "fluent chain should not emit legacy sentinel accesses, found: {:?}",
+        "fluent chain should not emit synthetic member accesses, found: {:?}",
         info.member_accesses,
     );
     let fluent_facts: Vec<_> = info
@@ -5140,7 +5140,7 @@ fn new_expression_fluent_chain_emits_typed_member_facts() {
     );
     assert!(
         !has_legacy_semantic_member_accesses(&info),
-        "new-expression fluent chain should not emit legacy sentinel accesses, found: {:?}",
+        "new-expression fluent chain should not emit synthetic member accesses, found: {:?}",
         info.member_accesses,
     );
     let fluent_new_facts: Vec<_> = info
@@ -6149,7 +6149,7 @@ fn angular_inline_template_emits_typed_member_facts() {
     assert!(fact_refs.contains(&"onClick"));
     assert!(
         has_no_legacy_semantic_member_accesses(&info),
-        "inline template should not emit legacy sentinels, found: {:?}",
+        "inline template should not emit synthetic member accesses, found: {:?}",
         info.member_accesses
     );
 }
@@ -6173,7 +6173,7 @@ fn angular_inline_template_backtick_scanned() {
     assert!(fact_refs.contains(&"title"));
     assert!(
         has_no_legacy_semantic_member_accesses(&info),
-        "backtick template should not emit legacy sentinels, found: {:?}",
+        "backtick template should not emit synthetic member accesses, found: {:?}",
         info.member_accesses
     );
 }
@@ -6295,7 +6295,7 @@ fn angular_host_bindings_emit_typed_member_facts() {
     assert!(fact_refs.contains(&"customColor"));
     assert!(
         has_no_legacy_semantic_member_accesses(&info),
-        "host bindings should not emit legacy sentinels, found: {:?}",
+        "host bindings should not emit synthetic member accesses, found: {:?}",
         info.member_accesses
     );
 }
@@ -6324,7 +6324,7 @@ fn angular_host_binding_skips_keywords() {
     );
     assert!(
         has_no_legacy_semantic_member_accesses(&info),
-        "keyword-only host bindings should not emit legacy sentinels, found: {:?}",
+        "keyword-only host bindings should not emit synthetic member accesses, found: {:?}",
         info.member_accesses
     );
 }
@@ -6354,7 +6354,7 @@ fn angular_inputs_outputs_metadata_emit_typed_member_facts() {
     assert!(refs.contains(&"clicked"));
     assert!(
         has_no_legacy_semantic_member_accesses(&info),
-        "inputs/outputs metadata should not emit legacy sentinels, found: {:?}",
+        "inputs/outputs metadata should not emit synthetic member accesses, found: {:?}",
         info.member_accesses
     );
 }
@@ -6384,7 +6384,7 @@ fn angular_queries_metadata_emit_typed_member_facts() {
     assert!(refs.contains(&"footer"));
     assert!(
         has_no_legacy_semantic_member_accesses(&info),
-        "queries metadata should not emit legacy sentinels, found: {:?}",
+        "queries metadata should not emit synthetic member accesses, found: {:?}",
         info.member_accesses
     );
 }
@@ -6409,7 +6409,7 @@ fn angular_this_spread_emits_typed_abstain_fact() {
     );
     assert!(
         !has_legacy_semantic_member_accesses(&info),
-        "spread-this should not emit a legacy sentinel, found: {:?}",
+        "spread-this should not emit a synthetic member access, found: {:?}",
         info.member_accesses
     );
 }
@@ -6685,7 +6685,7 @@ fn angular_component_all_metadata_combined() {
     assert!(refs.contains(&"externalOutput"));
     assert!(
         has_no_legacy_semantic_member_accesses(&info),
-        "external template should not emit legacy sentinels, found: {:?}",
+        "external template should not emit synthetic member accesses, found: {:?}",
         info.member_accesses
     );
 

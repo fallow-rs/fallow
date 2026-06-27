@@ -11,8 +11,8 @@
 //! Usage is detected by over-crediting (every ambiguous shape credits toward
 //! "used", so only false negatives can result, never false positives). An input
 //! `foo` is USED if ANY hold:
-//! - a typed Angular template member fact for `foo`, with legacy semantic
-//!   member accesses accepted only as an older parse-cache fallback; inline
+//! - a typed Angular template member fact for `foo`, with older cached
+//!   member accesses accepted only as a conservative parse-cache fallback; inline
 //!   templates, host bindings, and `inputs:` / `outputs:` metadata arrays all
 //!   emit this template member evidence in the component's own module;
 //! - the component has `has_angular_component_template_url` and the linked
@@ -206,8 +206,8 @@ fn external_template_modules<'a>(
         let Some(target_module) = modules_by_id.get(&target) else {
             continue;
         };
-        // The external template module carries typed template facts, while
-        // older parse-cache payloads may still carry legacy sentinel accesses.
+        // The external template module carries typed template facts. Older
+        // parse-cache payloads may still carry conservative member accesses.
         if SemanticFactView::new(
             &target_module.semantic_facts,
             &target_module.member_accesses,

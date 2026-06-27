@@ -38,7 +38,7 @@ fn sarif_rule(id: &str, fallback_short: &str, level: &str) -> serde_json::Value 
 }
 
 #[must_use]
-pub fn build_sarif(
+pub fn api_sarif_document(
     results: &AnalysisResults,
     root: &Path,
     rules: &RulesConfig,
@@ -47,7 +47,7 @@ pub fn build_sarif(
 }
 
 pub(super) fn print_sarif(results: &AnalysisResults, root: &Path, rules: &RulesConfig) -> ExitCode {
-    let sarif = build_sarif(results, root, rules);
+    let sarif = api_sarif_document(results, root, rules);
     emit_json(&sarif, "SARIF")
 }
 
@@ -58,7 +58,7 @@ pub(super) fn print_grouped_sarif(
     rules: &RulesConfig,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let mut sarif = build_sarif(results, root, rules);
+    let mut sarif = api_sarif_document(results, root, rules);
     fallow_api::annotate_sarif_results(&mut sarif, "owner", |uri| {
         let decoded = uri.replace("%5B", "[").replace("%5D", "]");
         grouping::resolve_owner(Path::new(&decoded), Path::new(""), resolver)
@@ -84,12 +84,15 @@ pub(super) fn print_grouped_duplication_sarif(
 }
 
 #[must_use]
-pub fn build_health_sarif(report: &fallow_output::HealthReport, root: &Path) -> serde_json::Value {
+pub fn api_health_sarif_document(
+    report: &fallow_output::HealthReport,
+    root: &Path,
+) -> serde_json::Value {
     fallow_api::build_health_sarif(report, root, &sarif_rule)
 }
 
 pub(super) fn print_health_sarif(report: &fallow_output::HealthReport, root: &Path) -> ExitCode {
-    let sarif = build_health_sarif(report, root);
+    let sarif = api_health_sarif_document(report, root);
     emit_json(&sarif, "SARIF")
 }
 
@@ -98,7 +101,7 @@ pub(super) fn print_grouped_health_sarif(
     root: &Path,
     resolver: &OwnershipResolver,
 ) -> ExitCode {
-    let mut sarif = build_health_sarif(report, root);
+    let mut sarif = api_health_sarif_document(report, root);
     fallow_api::annotate_sarif_results(&mut sarif, "group", |uri| {
         let decoded = uri.replace("%5B", "[").replace("%5D", "]");
         grouping::resolve_owner(Path::new(&decoded), Path::new(""), resolver)

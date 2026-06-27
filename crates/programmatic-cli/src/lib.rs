@@ -1,9 +1,8 @@
-//! Temporary programmatic runner bridge for CLI-backed health execution.
+//! Compatibility programmatic health runner crate.
 //!
 //! `fallow-api` owns the public programmatic contracts and serialization.
-//! Health execution still needs the CLI implementation until the health
-//! pipeline finishes moving behind typed engine results, so this crate exposes
-//! only the removable runner adapter.
+//! Health execution now goes through the API-owned engine runner; this crate
+//! remains only as a compatibility entrypoint for existing embedders.
 
 #![cfg_attr(not(test), deny(clippy::disallowed_methods))]
 #![cfg_attr(
@@ -15,25 +14,36 @@
 )]
 
 use fallow_api::{
-    ComplexityOptions, HealthProgrammaticOutput, ProgrammaticError, ProgrammaticHealthRun,
+    ComplexityOptions, EngineHealthRunner, HealthProgrammaticOutput, ProgrammaticError,
+    ProgrammaticHealthRun, ProgrammaticHealthRunner,
 };
 
-/// CLI-backed health runner used by embedders during the health migration.
+/// Engine-backed health runner used by embedders.
+pub type HealthRunner = EngineHealthRunner;
+
+/// Compatibility runner for callers that still refer to the old runner name.
+#[deprecated(
+    since = "2.102.0",
+    note = "use HealthRunner or fallow_api::EngineHealthRunner"
+)]
 pub struct CliHealthRunner;
 
-impl fallow_api::ProgrammaticHealthRunner for CliHealthRunner {
+#[expect(
+    deprecated,
+    reason = "the impl keeps the deprecated compatibility alias functional"
+)]
+impl ProgrammaticHealthRunner for CliHealthRunner {
     fn run_programmatic_health(
         &self,
         options: &ComplexityOptions,
     ) -> Result<ProgrammaticHealthRun, ProgrammaticError> {
-        fallow_cli::programmatic::run_programmatic_health(options)
+        EngineHealthRunner.run_programmatic_health(options)
     }
 }
 
 /// Run health / complexity and return the typed programmatic output.
 ///
-/// This is the temporary CLI-backed health entrypoint for embedders while the
-/// health pipeline finishes moving behind the engine/API boundary.
+/// This uses the API-owned engine runner and does not depend on `fallow-cli`.
 ///
 /// # Errors
 ///
@@ -42,7 +52,7 @@ impl fallow_api::ProgrammaticHealthRunner for CliHealthRunner {
 pub fn run_complexity(
     options: &ComplexityOptions,
 ) -> Result<HealthProgrammaticOutput, ProgrammaticError> {
-    fallow_api::run_complexity_with_runner(options, &CliHealthRunner)
+    fallow_api::run_complexity_with_runner(options, &EngineHealthRunner)
 }
 
 /// Alias for [`run_complexity`] with a product-oriented name.
@@ -84,11 +94,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cli_health_runner_returns_typed_programmatic_run() {
+    fn health_runner_returns_typed_programmatic_run() {
         let project = tiny_project();
         let root = project.path();
 
-        let run = CliHealthRunner
+        let run = EngineHealthRunner
             .run_programmatic_health(&ComplexityOptions {
                 analysis: AnalysisOptions {
                     root: Some(root.to_path_buf()),

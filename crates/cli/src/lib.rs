@@ -143,9 +143,6 @@ mod telemetry;
 pub mod output_envelope;
 pub(crate) mod output_runtime;
 
-/// Temporary CLI-backed runner bridge for programmatic health execution.
-pub mod programmatic;
-
 /// Cross-platform path classification helpers (POSIX-style root + Windows
 /// drive prefix detection that `Path::is_absolute()` misclassifies).
 #[allow(

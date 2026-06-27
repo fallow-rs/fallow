@@ -21,7 +21,7 @@ crates/
     duplicates/ -- Clone detection (families, normalize, tokenize)
   engine/   -- Command-neutral analysis runners and typed engine results
   api/      -- Programmatic API boundary for JS/native callers
-  programmatic-cli/ -- CLI harness for programmatic API contracts and smoke coverage
+  programmatic-cli/ -- Compatibility crate for programmatic API contracts and smoke coverage
   cli/      -- CLI binary, split into per-command modules
     audit.rs, check.rs, dupes.rs, health/, watch.rs, fix/, init.rs, list.rs, schema.rs, validate.rs, regression/, impact.rs, security.rs
     license/    -- `fallow license {activate, status, refresh, deactivate}` with offline JWT verify plus live trial / refresh flows

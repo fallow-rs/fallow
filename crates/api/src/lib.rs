@@ -398,9 +398,8 @@ pub fn derive_complexity_run_options(options: &ComplexityOptions) -> ComplexityR
 /// Validate programmatic complexity / health inputs before invoking a concrete
 /// runner.
 ///
-/// Concrete health runners are injected during the migration, but these option
-/// contracts belong to the API boundary because NAPI and future Rust embedders
-/// construct the same [`ComplexityOptions`] type.
+/// These option contracts belong to the API boundary because NAPI and future
+/// Rust embedders construct the same [`ComplexityOptions`] type.
 ///
 /// # Errors
 ///

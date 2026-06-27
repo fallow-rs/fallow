@@ -28,9 +28,8 @@ pub struct ModuleInfo {
     pub member_accesses: Vec<MemberAccess>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
     ///
-    /// This carries facts that used to be encoded through legacy sentinel
-    /// strings in `member_accesses`. New extraction writes typed facts only;
-    /// analyzers decode legacy sentinels solely for older cache payloads.
+    /// This carries facts that were previously encoded as synthetic
+    /// `member_accesses` strings. Extraction and analysis now use typed facts.
     pub semantic_facts: Box<[SemanticFact]>,
     /// Identifiers used in whole-object access patterns.
     pub whole_object_uses: Box<[String]>,

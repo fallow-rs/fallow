@@ -250,7 +250,7 @@ fn print_results_ci_comment(
     ctx: &ReportContext<'_>,
     output: OutputFormat,
 ) -> ExitCode {
-    let issues = codeclimate::build_codeclimate(results, ctx.root, ctx.rules);
+    let issues = codeclimate::api_codeclimate_issues(results, ctx.root, ctx.rules);
     let value = fallow_output::codeclimate_issues_to_value(&issues);
     print_ci_comment_format("dead-code", &value, output).unwrap_or_else(|| {
         eprintln!("Error: badge format is only supported for the health command");
@@ -361,7 +361,7 @@ fn print_duplication_ci_comment(
     root: &Path,
     output: OutputFormat,
 ) -> ExitCode {
-    let issues = codeclimate::build_duplication_codeclimate(report, root);
+    let issues = codeclimate::api_duplication_codeclimate_issues(report, root);
     let value = fallow_output::codeclimate_issues_to_value(&issues);
     print_ci_comment_format("dupes", &value, output).unwrap_or_else(|| {
         eprintln!("Error: badge format is only supported for the health command");
@@ -556,7 +556,7 @@ fn print_health_ci_comment(
     root: &Path,
     output: OutputFormat,
 ) -> ExitCode {
-    let issues = codeclimate::build_health_codeclimate(report, root);
+    let issues = codeclimate::api_health_codeclimate_issues(report, root);
     let value = fallow_output::codeclimate_issues_to_value(&issues);
     print_ci_comment_format("health", &value, output).unwrap_or_else(|| {
         eprintln!("Error: badge format is only supported for the health command");
@@ -672,21 +672,6 @@ pub fn print_health_performance(timings: &fallow_output::HealthTimings, format: 
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
 )]
-pub use codeclimate::build_codeclimate;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use codeclimate::build_duplication_codeclimate;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use codeclimate::build_health_codeclimate;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
 pub use fallow_api::build_compact_lines;
 #[allow(
     unused_imports,
@@ -708,22 +693,11 @@ pub use fallow_api::build_markdown;
     reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
 )]
 pub(crate) use json::SCHEMA_VERSION;
-pub use json::build_check_json_payload_with_config_fixable;
 #[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
+    clippy::redundant_pub_crate,
+    reason = "target-dependent: report is public in lib, private in bin, but this adapter remains crate-internal"
 )]
-pub use json::build_duplication_json;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use json::build_grouped_duplication_json;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use json::build_health_json;
+pub(crate) use json::api_check_json_payload_with_config_fixable;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in bin audit.rs, unused in lib"
@@ -733,22 +707,29 @@ pub use json::build_health_json;
     reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
 )]
 pub(crate) use json::harmonize_multi_kind_suppress_line_actions;
-pub use json::{build_baseline_deltas_output, check_json_extras};
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "target-dependent: report is public in lib, private in bin, but these adapters remain crate-internal"
+)]
+pub(crate) use json::{build_baseline_deltas_output, check_json_extras};
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
 )]
-pub use json::{build_json, build_json_with_config_fixable};
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "target-dependent: report is public in lib, private in bin, but this adapter remains crate-internal"
+)]
+pub(crate) use sarif::api_health_sarif_document;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
 )]
-pub use sarif::build_health_sarif;
 #[allow(
-    unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
+    clippy::redundant_pub_crate,
+    reason = "target-dependent: report is public in lib, private in bin, but this adapter remains crate-internal"
 )]
-pub use sarif::build_sarif;
+pub(crate) use sarif::api_sarif_document;
 
 #[cfg(test)]
 mod tests {

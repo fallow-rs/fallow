@@ -1494,7 +1494,7 @@ fn attach_changed_since_data(
     }
 }
 
-/// Test-only compatibility wrapper over the editor API accumulator.
+/// Test helper over the editor API accumulator.
 #[cfg(test)]
 fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
     let mut output =
@@ -1503,7 +1503,7 @@ fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
     *target = output.results;
 }
 
-/// Test-only compatibility wrapper over the editor API accumulator.
+/// Test helper over the editor API accumulator.
 #[cfg(test)]
 fn merge_duplication(target: &mut DuplicationReport, source: DuplicationReport) {
     let mut output = EditorAnalysisOutput::new(AnalysisResults::default(), std::mem::take(target));
