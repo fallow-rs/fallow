@@ -21,7 +21,7 @@ use super::predicates::{
 /// Vite/Parcel-style projects and their referenced assets are tracked via edges.
 ///
 /// Barrel files (index.ts that only re-export) are excluded when their re-export
-/// sources are reachable — they serve an organizational purpose even if consumers
+/// sources are reachable , they serve an organizational purpose even if consumers
 /// import directly from the source files rather than through the barrel.
 #[deprecated(
     since = "2.76.0",

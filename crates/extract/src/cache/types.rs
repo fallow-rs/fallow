@@ -669,7 +669,11 @@ use crate::MemberKind;
 /// `const x = importedFactory()` emits a typed `FactoryFnMemberAccess` semantic
 /// fact so `x.member` credits the returned class across module boundaries. A
 /// warm cache from 210 lacks both the new metadata and the added facts.
-pub(super) const CACHE_VERSION: u32 = 211;
+///
+/// Bumped to 212 (issue #1489 Case 1): an inline `useFooStore().member` call
+/// with no bound local now emits a factory `member_access` so the member is
+/// credited; a 211 warm cache lacks it.
+pub(super) const CACHE_VERSION: u32 = 212;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

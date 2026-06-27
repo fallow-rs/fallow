@@ -27,7 +27,7 @@ fn dummy_span() -> Span {
 
 /// Build a minimal `ResolveContext` backed by a real resolver but with
 /// empty lookup tables. Every specifier resolves to `NpmPackage` or
-/// `Unresolvable`, which is fine — the tests focus on how helper functions
+/// `Unresolvable`, which is fine , the tests focus on how helper functions
 /// *transform* inputs into `ResolvedImport` / `ResolvedReExport` structs.
 ///
 /// Under Miri this is a no-op: `oxc_resolver` uses the `statx` syscall

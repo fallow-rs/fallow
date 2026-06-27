@@ -96,6 +96,33 @@ fn credits_consumed_store_members() {
 }
 
 #[test]
+fn credits_inline_store_call_members_and_flags_dead_ones() {
+    // Issue #1489 case 1: a member consumed only through an inline
+    // `useCounterStore().member` (no bound local) must be credited, while a
+    // genuinely unaccessed member on the same store still flags.
+    let root = fixture_path("pinia-inline-store-member");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let names: Vec<String> = store_members(&results, &root)
+        .into_iter()
+        .map(|(_, m)| m)
+        .collect();
+
+    for credited in ["count", "increment"] {
+        assert!(
+            !names.contains(&credited.to_string()),
+            "{credited} consumed via inline useCounterStore().{credited} must be credited: {names:?}"
+        );
+    }
+    for dead in ["deadState", "deadAction"] {
+        assert!(
+            names.contains(&dead.to_string()),
+            "{dead} is never accessed and should still flag: {names:?}"
+        );
+    }
+}
+
+#[test]
 fn abstains_on_whole_object_dynamic_and_map_helpers() {
     let root = fixture_path("pinia-store-members-abstain");
     let config = create_config(root.clone());
