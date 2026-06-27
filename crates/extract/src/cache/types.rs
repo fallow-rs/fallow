@@ -658,7 +658,12 @@ use crate::MemberKind;
 /// Bumped to 209: legacy semantic sentinel payloads are no longer decoded from
 /// cached member accesses. Warm caches from 208 or earlier are reparsed so
 /// analyzers consume typed semantic facts only.
-pub(super) const CACHE_VERSION: u32 = 209;
+///
+/// Bumped to 210 (issue #1489 Case 2): a param typed as a Pinia store
+/// (`ReturnType<typeof useFooStore>`, inline or aliased) now binds to the store
+/// factory, so `props.store.member` / `const { m } = props.store` emit factory
+/// `member_accesses` a 209 warm cache lacks.
+pub(super) const CACHE_VERSION: u32 = 210;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

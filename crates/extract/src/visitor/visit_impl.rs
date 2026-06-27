@@ -575,13 +575,31 @@ impl ModuleInfoExtractor {
     }
 
     fn record_typed_binding(&mut self, binding_name: &str, type_annotation: &TSTypeAnnotation<'_>) {
-        if let Some(type_name) = extract_type_annotation_name(type_annotation)
+        if let Some(factory) = self.store_factory_for_type(&type_annotation.type_annotation) {
+            // Param typed as a Pinia store (`s: ReturnType<typeof useFooStore>` or
+            // an alias of it): bind the local to the store factory so `s.member`
+            // and `const { m } = s` credit the store member through the
+            // `binding_target_names` remap (issue #1489 Case 2). Also flag it as a
+            // store-instance local so the destructure-on-a-bound-store path fires.
+            self.insert_class_binding_target(binding_name.to_string(), factory);
+            self.store_instance_locals.insert(binding_name.to_string());
+        } else if let Some(type_name) = extract_type_annotation_name(type_annotation)
             && let Some(resolved) = self.resolve_class_type_param(&type_name)
         {
             self.insert_class_binding_target(binding_name.to_string(), resolved);
         }
 
         for (property_path, type_name) in extract_nested_type_bindings(type_annotation) {
+            // Nested store-typed prop (`props: { store: CounterStore }`): bind the
+            // `props.store` path to the factory so `props.store.member` credits
+            // (issue #1489 Case 2). Falls back to the class-type-param resolution.
+            if let Some(factory) = self.store_factory_for_type_name(&type_name) {
+                self.insert_class_binding_target(
+                    format!("{binding_name}.{property_path}"),
+                    factory,
+                );
+                continue;
+            }
             let Some(resolved) = self.resolve_class_type_param(&type_name) else {
                 continue;
             };
@@ -602,9 +620,18 @@ impl ModuleInfoExtractor {
         if let TSType::TSTypeLiteral(type_lit) = &type_annotation.type_annotation {
             let properties = collect_object_type_property_types(&type_lit.members);
             for (local, key) in bindings {
-                if let Some(class_name) = properties.get(&key) {
-                    self.insert_class_binding_target_if_absent(local, class_name.clone());
+                let Some(class_name) = properties.get(&key) else {
+                    continue;
+                };
+                // Destructured store param (`({ store }: { store: CounterStore })`):
+                // bind the local to the store factory + mark it a store instance so
+                // `store.member` and `const { m } = store` credit (issue #1489 Case 2).
+                if let Some(factory) = self.store_factory_for_type_name(class_name) {
+                    self.insert_class_binding_target(local.clone(), factory);
+                    self.store_instance_locals.insert(local);
+                    continue;
                 }
+                self.insert_class_binding_target_if_absent(local, class_name.clone());
             }
         } else if let Some(type_name) = extract_type_annotation_name(type_annotation) {
             for (local, key) in bindings {
@@ -2883,6 +2910,13 @@ impl ModuleInfoExtractor {
         self.record_local_declaration_name(&alias.id.name);
         self.record_local_type_declaration(&alias.id.name, alias.id.span);
         self.record_playwright_fixture_type_alias(alias);
+        if let Some(factory) = Self::store_factory_from_return_type(&alias.type_annotation) {
+            // `type CounterStore = ReturnType<typeof useCounterStore>`: remember the
+            // store factory so a param typed `CounterStore` credits store members
+            // (issue #1489 Case 2).
+            self.type_alias_store_factory
+                .insert(alias.id.name.to_string(), factory);
+        }
         let refs = Self::collect_type_alias_signature_refs(alias);
         self.record_local_signature_refs(&alias.id.name, refs);
         if let TSType::TSTypeLiteral(type_lit) = &alias.type_annotation {
@@ -7050,6 +7084,24 @@ impl ModuleInfoExtractor {
             {
                 self.credit_store_pattern_members(obj_pat, ident.name.as_str());
             }
+            // const { count } = props.store: destructure on a typed-param store
+            // path bound to a store factory (issue #1489 Case 2). Gated on the
+            // `use<Name>Store` convention, not the broad `is_store_factory_call`:
+            // a class-typed object param (`props: { store: SomeClass }`) also lands
+            // a `binding_target_names["props.store"]` entry (a class name), and that
+            // case is already covered by the generic member-access path, not this
+            // Pinia-specific destructure arm.
+            Expression::StaticMemberExpression(_) => {
+                if let Some(path) = static_member_object_name(init)
+                    && let Some(BindingTarget::Class(factory)) =
+                        self.binding_target_names.get(&path)
+                    && factory.starts_with("use")
+                    && factory.ends_with("Store")
+                {
+                    let factory = factory.clone();
+                    self.credit_store_pattern_members(obj_pat, &factory);
+                }
+            }
             _ => {}
         }
     }
@@ -7447,6 +7499,57 @@ impl ModuleInfoExtractor {
     fn is_store_factory_call(&self, name: &str) -> bool {
         self.imports.iter().any(|i| i.local_name == name)
             || (name.starts_with("use") && name.ends_with("Store"))
+    }
+
+    /// Match `ReturnType<typeof useFooStore>` and return the store factory name.
+    /// Gated on the `use<Name>Store` convention (NOT the broad
+    /// `is_store_factory_call`, which matches any import) so a
+    /// `ReturnType<typeof makeAnything>` never treats an arbitrary factory as a
+    /// store and masks a real unused member. Backs the typed-param store
+    /// crediting for issue #1489 Case 2.
+    fn store_factory_from_return_type(ty: &TSType<'_>) -> Option<String> {
+        let TSType::TSTypeReference(type_ref) = ty else {
+            return None;
+        };
+        let TSTypeName::IdentifierReference(root) = &type_ref.type_name else {
+            return None;
+        };
+        if root.name != "ReturnType" {
+            return None;
+        }
+        let TSType::TSTypeQuery(query) = type_ref.type_arguments.as_deref()?.params.first()? else {
+            return None;
+        };
+        let TSTypeQueryExprName::IdentifierReference(ident) = &query.expr_name else {
+            return None;
+        };
+        let factory = ident.name.to_string();
+        (factory.starts_with("use") && factory.ends_with("Store")).then_some(factory)
+    }
+
+    /// Resolve a param type annotation to a store factory, accepting either the
+    /// inline `ReturnType<typeof useFooStore>` form or a recorded alias of it.
+    fn store_factory_for_type(&self, ty: &TSType<'_>) -> Option<String> {
+        if let Some(factory) = Self::store_factory_from_return_type(ty) {
+            return Some(factory);
+        }
+        if let TSType::TSTypeReference(type_ref) = ty
+            && let TSTypeName::IdentifierReference(ident) = &type_ref.type_name
+        {
+            return self
+                .type_alias_store_factory
+                .get(ident.name.as_str())
+                .cloned();
+        }
+        None
+    }
+
+    /// Resolve a bare type-reference name (`CounterStore`) to its store factory
+    /// via a recorded `type CounterStore = ReturnType<typeof useCounterStore>`
+    /// alias. Used on the nested-property path (`props: { store: CounterStore }`)
+    /// where only the alias name is in hand.
+    fn store_factory_for_type_name(&self, type_name: &str) -> Option<String> {
+        self.type_alias_store_factory.get(type_name).cloned()
     }
 
     fn store_name_from_refs_arg<'a>(&self, arg: &'a Argument<'_>) -> Option<&'a str> {
