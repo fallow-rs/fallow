@@ -177,12 +177,15 @@ fn parse_single_file_cached(
 ) -> Option<ModuleInfo> {
     use std::sync::atomic::Ordering;
 
-    if let Some(store) = cache
+    let cached_by_path = cache.and_then(|store| store.get_by_path_only(&file.path));
+
+    if let Some(cached) = cached_by_path
         && let Ok(metadata) = std::fs::metadata(&file.path)
     {
         let fingerprint =
             fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
-        if let Some(cached) = store.get_by_metadata(&file.path, fingerprint)
+        if cached.source_fingerprint() == fingerprint
+            && fingerprint.has_known_mtime()
             && (!need_complexity || !cached.complexity.is_empty())
         {
             cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -198,8 +201,8 @@ fn parse_single_file_cached(
     let source = strip_bom(&raw);
     let content_hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());
 
-    if let Some(store) = cache
-        && let Some(cached) = store.get(&file.path, content_hash)
+    if let Some(cached) = cached_by_path
+        && cached.content_hash == content_hash
         && (!need_complexity || !cached.complexity.is_empty())
     {
         cache_hits.fetch_add(1, Ordering::Relaxed);
