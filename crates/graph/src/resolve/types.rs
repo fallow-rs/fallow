@@ -175,6 +175,9 @@ pub struct ResolvedModule {
     /// Namespace-import aliases re-exported through an object literal.
     /// See `fallow_types::extract::NamespaceObjectAlias` for the shape.
     pub namespace_object_aliases: Vec<fallow_types::extract::NamespaceObjectAlias>,
+    /// Exported free-function factories that provably return one class instance.
+    /// See `fallow_types::extract::FactoryReturnExport` and issue #1441 (Part A).
+    pub exported_factory_returns: Box<[fallow_types::extract::FactoryReturnExport]>,
 }
 
 impl Default for ResolvedModule {
@@ -196,6 +199,7 @@ impl Default for ResolvedModule {
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
         }
     }
 }

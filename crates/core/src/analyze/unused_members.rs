@@ -12,10 +12,10 @@ use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
-    FactoryCallMemberAccessFact, FluentChainMemberAccessFact, FluentChainNewMemberAccessFact,
-    InstanceExportBindingFact, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
-    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, SemanticFactView,
-    ordinary_whole_object_uses,
+    FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
+    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
+    SemanticFactView, ordinary_whole_object_uses,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -974,6 +974,11 @@ fn factory_call_member_accesses(resolved: &ResolvedModule) -> Vec<FactoryCallMem
     view.factory_call_member_accesses()
 }
 
+fn factory_fn_member_accesses(resolved: &ResolvedModule) -> Vec<FactoryFnMemberAccessFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    view.factory_fn_member_accesses()
+}
+
 fn fluent_chain_member_accesses(resolved: &ResolvedModule) -> Vec<FluentChainMemberAccessFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
     view.fluent_chain_member_accesses()
@@ -1553,6 +1558,141 @@ fn propagate_factory_call_accesses(
                         .entry(origin)
                         .or_default()
                         .insert(access.member.clone());
+                }
+            }
+        }
+    }
+}
+
+/// Whether an export named `name` in `module` is a class carrying members, the
+/// final over-credit gate for cross-module factory-fn credit. A class records
+/// `ClassMethod`/`ClassProperty` members; enums, namespaces, and stores use
+/// other `MemberKind`s, so a wrong resolution onto one of those credits nothing.
+fn export_is_class_with_members(module: &ResolvedModule, name: &str) -> bool {
+    module.exports.iter().any(|export| {
+        export.name.matches_str(name)
+            && export.members.iter().any(|member| {
+                member.kind == MemberKind::ClassMethod || member.kind == MemberKind::ClassProperty
+            })
+    })
+}
+
+struct FactoryReturnCreditContext<'a, 'ctx> {
+    graph: &'ctx ModuleGraph,
+    module_by_id: &'ctx FxHashMap<FileId, &'a ResolvedModule>,
+    factory_keys_cache: &'ctx mut FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>>,
+    accessed_members: &'ctx mut FxHashMap<ExportKey, FxHashSet<String>>,
+}
+
+fn credit_factory_return_class_member<'a>(
+    context: &mut FactoryReturnCreditContext<'a, '_>,
+    factory_origin_file_id: FileId,
+    factory_module: &'a ResolvedModule,
+    class_local_name: &str,
+    member: &str,
+) {
+    let factory_local_keys = context
+        .factory_keys_cache
+        .entry(factory_origin_file_id)
+        .or_insert_with(|| build_local_to_export_keys(factory_module));
+    let Some(class_seed_keys) = factory_local_keys.get(class_local_name) else {
+        return;
+    };
+    for class_seed in class_seed_keys {
+        for class_origin in export_key_with_origins(context.graph, class_seed) {
+            let class_has_members =
+                context
+                    .module_by_id
+                    .get(&class_origin.file_id)
+                    .is_some_and(|class_module| {
+                        export_is_class_with_members(
+                            class_module,
+                            class_origin.export_name.as_str(),
+                        )
+                    });
+            if class_has_members {
+                context
+                    .accessed_members
+                    .entry(class_origin)
+                    .or_default()
+                    .insert(member.to_string());
+            }
+        }
+    }
+}
+
+/// Credit member accesses produced by cross-module free-function factory
+/// bindings (`const x = importedFactory(); x.member`) onto the class the factory
+/// returns. Each link in the resolution chain is also an over-credit guard, and
+/// a wrong credit is a silent false-negative, so every link must hold:
+///
+///   1. the fact's callee resolves through the consumer's imports/exports to an
+///      export key (`local_to_export_keys`);
+///   2. that key walks (re-export aware) to an origin module that actually
+///      declares an `exported_factory_returns` entry for the export, i.e. an
+///      internal exported factory proven to return a single class;
+///   3. the entry's `class_local_name` resolves through THAT factory module's own
+///      imports/exports to a class export;
+///   4. the resolved export is a class with members.
+///
+/// See issue #1441 (Part A).
+fn propagate_factory_fn_accesses(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) {
+    let module_by_id: FxHashMap<FileId, &ResolvedModule> = resolved_modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
+    // The same factory module is reached once per credited access; build its
+    // local->export keys once and reuse (mirrors the per-consumer hoist below).
+    let mut factory_keys_cache: FxHashMap<FileId, FxHashMap<&str, Vec<ExportKey>>> =
+        FxHashMap::default();
+    let mut credit_context = FactoryReturnCreditContext {
+        graph,
+        module_by_id: &module_by_id,
+        factory_keys_cache: &mut factory_keys_cache,
+        accessed_members,
+    };
+
+    for resolved in resolved_modules {
+        let local_to_export_keys = build_local_to_export_keys(resolved);
+        for access in factory_fn_member_accesses(resolved) {
+            let Some(seed_keys) = local_to_export_keys.get(access.callee_name.as_str()) else {
+                continue;
+            };
+            for seed_key in seed_keys {
+                for factory_origin in
+                    walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
+                {
+                    let Some(factory_module) =
+                        credit_context.module_by_id.get(&factory_origin.file_id)
+                    else {
+                        continue;
+                    };
+                    // (2) the origin must declare an exported factory-return for
+                    // this export name, the cross-module over-credit gate.
+                    let Some(factory_return) =
+                        factory_module
+                            .exported_factory_returns
+                            .iter()
+                            .find(|factory_return| {
+                                factory_origin.export_name.as_str()
+                                    == factory_return.export_name.as_str()
+                            })
+                    else {
+                        continue;
+                    };
+                    // (3) resolve the returned class's LOCAL name through the
+                    // factory module's own imports/exports to a class export.
+                    credit_factory_return_class_member(
+                        &mut credit_context,
+                        factory_origin.file_id,
+                        factory_module,
+                        factory_return.class_local_name.as_str(),
+                        access.member.as_str(),
+                    );
                 }
             }
         }
@@ -2213,6 +2353,7 @@ fn propagate_common_member_accesses(
 ) {
     propagate_playwright_fixture_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_factory_call_accesses(input.graph, input.resolved_modules, accessed_members);
+    propagate_factory_fn_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_fluent_chain_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_fluent_chain_new_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_accesses_through_typed_instance_bindings(
@@ -3118,6 +3259,7 @@ mod tests {
                 implements: implements.iter().map(ToString::to_string).collect(),
                 instance_bindings: Vec::new(),
             }],
+            exported_factory_returns: Box::default(),
             injection_tokens: Vec::new(),
             local_type_declarations: vec![],
             public_signature_type_references: vec![],

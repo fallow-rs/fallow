@@ -66,6 +66,12 @@ pub struct ModuleInfo {
     pub flag_uses: Vec<FlagUse>,
     /// Heritage metadata for exported classes that declare `implements`.
     pub class_heritage: Vec<ClassHeritageInfo>,
+    /// Exported free-function factories that provably return one class instance
+    /// (`export function useApi() { return new RESTApi() }`). Origin-module proof
+    /// that an exported function returns a class instance, so a cross-module
+    /// `const x = useApi(); x.member` consumer can credit the returned class.
+    /// See issue #1441 (Part A).
+    pub exported_factory_returns: Box<[FactoryReturnExport]>,
     /// Angular `InjectionToken<Interface>` declarations, as
     /// `(token_export_name, interface_name)` pairs. Recorded only for
     /// `new InjectionToken<I>(...)` initializers whose `InjectionToken` is
@@ -1255,6 +1261,31 @@ pub struct ClassHeritageInfo {
     pub instance_bindings: Vec<(String, String)>,
 }
 
+/// An exported free-function factory proven to return one class instance.
+///
+/// `export function useApi() { return new RESTApi() }` records
+/// `FactoryReturnExport { export_name: "useApi", class_local_name: "RESTApi" }`.
+/// The `class_local_name` is the factory module's own LOCAL name, resolved at
+/// analyze time through that module's imports/exports to the real class export,
+/// so a cross-module `const x = useApi(); x.member` consumer credits the class
+/// across the boundary. See issue #1441 (Part A).
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+    PartialEq,
+    Eq,
+)]
+pub struct FactoryReturnExport {
+    /// Public export name (honors `export { useApi as useRestApi }`).
+    pub export_name: String,
+    /// The returned class's local name within the factory module.
+    pub class_local_name: String,
+}
+
 /// A module-scope declaration that can be used as a TypeScript type.
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct LocalTypeDeclaration {
@@ -1361,6 +1392,9 @@ pub enum SemanticFact {
     AngularThisSpread(AngularThisSpreadFact),
     /// A member access on a value returned by an imported static factory call.
     FactoryCallMemberAccess(FactoryCallMemberAccessFact),
+    /// A member access on a value returned by an imported free-function factory
+    /// (`const x = importedFactory(); x.member`). See issue #1441 (Part A).
+    FactoryFnMemberAccess(FactoryFnMemberAccessFact),
     /// A member access on a fluent chain rooted at an imported static factory.
     FluentChainMemberAccess(FluentChainMemberAccessFact),
     /// A member access on a fluent chain rooted at a `new` expression.
@@ -1508,6 +1542,18 @@ impl<'a> SemanticFactView<'a> {
         self.factory_call_member_accesses()
     }
 
+    /// Collect free-function factory-return member facts.
+    pub fn factory_fn_member_accesses(self) -> Vec<FactoryFnMemberAccessFact> {
+        factory_fn_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
+    /// Alias for [`Self::factory_fn_member_accesses`].
+    pub fn typed_factory_fn_member_accesses(self) -> Vec<FactoryFnMemberAccessFact> {
+        self.factory_fn_member_accesses()
+    }
+
     /// Collect static factory fluent-chain member facts.
     pub fn fluent_chain_member_accesses(self) -> Vec<FluentChainMemberAccessFact> {
         fluent_chain_member_access_facts(self.semantic_facts)
@@ -1605,6 +1651,19 @@ fn factory_call_member_access_facts(
 ) -> impl Iterator<Item = &FactoryCallMemberAccessFact> {
     semantic_facts.iter().filter_map(|fact| {
         if let SemanticFact::FactoryCallMemberAccess(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed free-function factory-return member facts.
+fn factory_fn_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &FactoryFnMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::FactoryFnMemberAccess(access) = fact {
             Some(access)
         } else {
             None
@@ -1711,6 +1770,23 @@ pub struct FactoryCallMemberAccessFact {
     pub callee_object: String,
     /// Static factory method invoked on the callee object.
     pub callee_method: String,
+    /// Member accessed on the returned instance-like object.
+    pub member: String,
+}
+
+/// A member access on a value returned by an imported free-function factory.
+///
+/// `const x = importedFactory(); x.member` emits one fact per first-level read
+/// on `x`. The analyze layer resolves `callee_name` through the consumer's
+/// imports to the factory's origin module, reads that module's
+/// `exported_factory_returns` to learn the returned class's local name, resolves
+/// THAT through the factory module's own imports to the class export, and
+/// credits `member` on the class. See issue #1441 (Part A).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FactoryFnMemberAccessFact {
+    /// Local imported function used as the factory callee.
+    pub callee_name: String,
     /// Member accessed on the returned instance-like object.
     pub member: String,
 }
@@ -2271,7 +2347,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1304);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1320);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]
@@ -2742,6 +2818,10 @@ mod tests {
                 implements: vec!["Contract".to_string()],
                 instance_bindings: Vec::new(),
             }],
+            exported_factory_returns: Box::from([FactoryReturnExport {
+                export_name: "useApi".to_string(),
+                class_local_name: "RESTApi".to_string(),
+            }]),
             injection_tokens: vec![("TOKEN".to_string(), "Contract".to_string())],
             local_type_declarations: vec![LocalTypeDeclaration {
                 name: "Contract".to_string(),
@@ -2817,6 +2897,7 @@ mod tests {
         assert_eq!(module.complexity.len(), 1);
         assert_eq!(module.flag_uses.len(), 1);
         assert_eq!(module.class_heritage.len(), 1);
+        assert_eq!(module.exported_factory_returns.len(), 1);
         assert_eq!(module.injection_tokens.len(), 1);
         assert_eq!(module.local_type_declarations.len(), 1);
         assert_eq!(module.public_signature_type_references.len(), 1);
@@ -3971,6 +4052,7 @@ mod tests {
             complexity: Vec::new(),
             flag_uses: Vec::new(),
             class_heritage: Vec::new(),
+            exported_factory_returns: Box::default(),
             injection_tokens: Vec::new(),
             local_type_declarations: Vec::new(),
             public_signature_type_references: Vec::new(),

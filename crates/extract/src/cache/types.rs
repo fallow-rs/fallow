@@ -663,7 +663,13 @@ use crate::MemberKind;
 /// (`ReturnType<typeof useFooStore>`, inline or aliased) now binds to the store
 /// factory, so `props.store.member` / `const { m } = props.store` emit factory
 /// `member_accesses` a 209 warm cache lacks.
-pub(super) const CACHE_VERSION: u32 = 210;
+///
+/// Bumped to 211 (issue #1441, cross-module Part A): exported free-function
+/// factories now persist `exported_factory_returns`, and a consumer's
+/// `const x = importedFactory()` emits a typed `FactoryFnMemberAccess` semantic
+/// fact so `x.member` credits the returned class across module boundaries. A
+/// warm cache from 210 lacks both the new metadata and the added facts.
+pub(super) const CACHE_VERSION: u32 = 211;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -717,7 +723,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1304);
+assert_cached_type_size!(CachedModule, 1320);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -739,6 +745,7 @@ assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 96);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
 assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 96);
+assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 48);
 assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
 
 /// Cached data for a single module.
@@ -804,6 +811,10 @@ pub struct CachedModule {
     pub flag_uses: Vec<fallow_types::extract::FlagUse>,
     /// Heritage metadata for exported classes.
     pub class_heritage: Vec<fallow_types::extract::ClassHeritageInfo>,
+    /// Exported free-function factories that provably return one class instance
+    /// (`export function useApi() { return new RESTApi() }`). Compacted to `None`
+    /// when empty so the common no-factory module pays no payload. See #1441 Part A.
+    pub exported_factory_returns: Option<Box<[fallow_types::extract::FactoryReturnExport]>>,
     /// Angular `InjectionToken<Interface>` `(token, interface)` pairs (#920).
     pub injection_tokens: Vec<(String, String)>,
     /// Local type-capable declarations.

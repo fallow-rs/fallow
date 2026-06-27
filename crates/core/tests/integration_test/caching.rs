@@ -3,6 +3,10 @@ use std::path::PathBuf;
 use super::common::{create_config, create_config_with_cache, fixture_path};
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "roundtrip fixture enumerates cache fields"
+)]
 fn cache_roundtrip() {
     use fallow_core::cache::CacheStore;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -43,6 +47,7 @@ fn cache_roundtrip() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: vec![],
         public_signature_type_references: vec![],
@@ -297,6 +302,7 @@ fn incremental_cache_prune_stale_entries() {
         complexity: vec![],
         flag_uses: vec![],
         class_heritage: vec![],
+        exported_factory_returns: None,
         injection_tokens: vec![],
         local_type_declarations: vec![],
         public_signature_type_references: vec![],

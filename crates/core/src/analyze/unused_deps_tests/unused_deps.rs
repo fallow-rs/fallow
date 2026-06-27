@@ -454,6 +454,7 @@ fn path_alias_imports_not_reported_as_unlisted() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -520,6 +521,7 @@ fn multiple_unresolved_imports_collected() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -599,6 +601,7 @@ fn workspace_dep_used_within_workspace_not_flagged() {
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 

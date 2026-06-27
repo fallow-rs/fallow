@@ -292,6 +292,219 @@ fn into_module_info_transfers_whole_object_uses() {
     assert!(info.whole_object_uses.len() >= 2);
 }
 
+fn has_member_access(info: &crate::ModuleInfo, object: &str, member: &str) -> bool {
+    info.member_accesses
+        .iter()
+        .any(|a| a.object == object && a.member == member)
+}
+
+fn has_factory_fn_fact(info: &crate::ModuleInfo, callee: &str, member: &str) -> bool {
+    info.semantic_facts.iter().any(|fact| {
+        matches!(
+            fact,
+            SemanticFact::FactoryFnMemberAccess(access)
+                if access.callee_name == callee && access.member == member
+        )
+    })
+}
+
+fn has_exported_factory_return(info: &crate::ModuleInfo, export: &str, class_local: &str) -> bool {
+    info.exported_factory_returns
+        .iter()
+        .any(|fr| fr.export_name == export && fr.class_local_name == class_local)
+}
+
+#[test]
+fn factory_return_function_decl_credits_member_on_class() {
+    // `function useApi() { return new RESTApi() }` + `const api = useApi(); api.Plan()`
+    // credits `Plan` on `RESTApi` via same-file factory-return tracing (issue #1441).
+    let info = parse(
+        "class RESTApi { Plan() {} }\nfunction useApi() { return new RESTApi() }\nconst api = useApi()\napi.Plan()",
+    );
+    assert!(
+        has_member_access(&info, "RESTApi", "Plan"),
+        "factory-return function should credit the member on the class: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn factory_return_arrow_bodies_credit_member_on_class() {
+    for source in [
+        "class RESTApi { Plan() {} }\nconst useApi = () => new RESTApi()\nconst api = useApi()\napi.Plan()",
+        "class RESTApi { Plan() {} }\nconst useApi = () => { return new RESTApi() }\nconst api = useApi()\napi.Plan()",
+    ] {
+        let info = parse(source);
+        assert!(
+            has_member_access(&info, "RESTApi", "Plan"),
+            "arrow factory-return should credit the member on the class: {source:?}"
+        );
+    }
+}
+
+#[test]
+fn non_factory_function_does_not_credit_member_on_class() {
+    // `useApi` does not return `new Class()`, so no binding is recorded and
+    // `api.Plan` is not credited on `RESTApi` (it stays a flaggable member).
+    let info = parse(
+        "class RESTApi { Plan() {} }\nfunction useApi() { return 1 }\nconst api = useApi()\napi.Plan()",
+    );
+    assert!(
+        !has_member_access(&info, "RESTApi", "Plan"),
+        "a non-factory function must not credit a class member: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn factory_returning_builtin_constructor_is_not_traced() {
+    // `return new Map()` is a builtin constructor, so no user class is bound and
+    // no spurious member access is emitted against the builtin name.
+    let info = parse("function makeMap() { return new Map() }\nconst m = makeMap()\nm.set('a', 1)");
+    assert!(
+        !has_member_access(&info, "Map", "set"),
+        "a builtin-returning factory must not bind: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn factory_var_return_credits_member_via_typed_local() {
+    // Real composable shape: `useApi` returns the module `let api: RESTApi` (a bare
+    // identifier, assigned from a separate factory). The typed local resolves the
+    // class, so `const x = useApi(); x.Plan()` credits `RESTApi.Plan`. Issue #1441.
+    let info = parse(
+        "class RESTApi { Plan() {} }\nlet api: RESTApi\nfunction useApi() { if (!api) { api = initializeApi() } return api }\nfunction initializeApi() { return new RESTApi() }\nconst x = useApi()\nx.Plan()",
+    );
+    assert!(
+        has_member_access(&info, "RESTApi", "Plan"),
+        "var-return through a typed local should credit the member: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn cross_module_factory_fn_emits_fact_for_imported_callee() {
+    // `const api = useApi()` where `useApi` is IMPORTED emits a typed
+    // `FactoryFnMemberAccess` fact, so `api.Plan()` becomes a fact the analyze
+    // layer resolves across the module boundary. Issue #1441 (Part A).
+    let info =
+        parse("import { useApi } from './composables/api'\nconst api = useApi()\napi.Plan()");
+    assert!(
+        has_factory_fn_fact(&info, "useApi", "Plan"),
+        "imported factory callee should emit a factory-fn fact: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn cross_module_factory_fn_no_fact_for_local_non_factory_callee() {
+    // `useThing` is a LOCAL (non-imported) call, so no cross-module fact is
+    // emitted, guards against blanket fact emission for every bare call.
+    let info = parse("function useThing() { return {} }\nconst x = useThing()\nx.Plan()");
+    assert!(
+        !info
+            .semantic_facts
+            .iter()
+            .any(|fact| matches!(fact, SemanticFact::FactoryFnMemberAccess(_))),
+        "a local non-factory callee must not emit a factory-fn fact: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn exported_factory_returns_records_direct_new_return() {
+    // `export function useApi() { return new RESTApi() }` is published as
+    // cross-module metadata mapping the export name to the class's local name.
+    let info =
+        parse("class RESTApi { Plan() {} }\nexport function useApi() { return new RESTApi() }");
+    assert!(
+        has_exported_factory_return(&info, "useApi", "RESTApi"),
+        "an exported direct-new factory should be recorded: {:?}",
+        info.exported_factory_returns
+    );
+}
+
+#[test]
+fn exported_factory_returns_honors_aliased_export_name() {
+    // `export { useApi as useRestApi }` publishes under the PUBLIC name while the
+    // class local name stays the in-module name.
+    let info = parse(
+        "class RESTApi { Plan() {} }\nfunction useApi() { return new RESTApi() }\nexport { useApi as useRestApi }",
+    );
+    assert!(
+        has_exported_factory_return(&info, "useRestApi", "RESTApi"),
+        "aliased export name should be honored: {:?}",
+        info.exported_factory_returns
+    );
+}
+
+#[test]
+fn exported_factory_returns_abstains_on_conflicting_returns() {
+    // Two different classes across return paths -> not unanimous -> NOT exported.
+    let info = parse(
+        "class A { m() {} }\nclass B { m() {} }\nexport function make(f) { if (f) { return new A() } return new B() }",
+    );
+    assert!(
+        info.exported_factory_returns.is_empty(),
+        "conflicting return classes must abstain from cross-module export: {:?}",
+        info.exported_factory_returns
+    );
+}
+
+#[test]
+fn exported_factory_returns_abstains_on_async_factory() {
+    // `async function make()` returns Promise<RESTApi>, not RESTApi. Must abstain.
+    let info = parse(
+        "class RESTApi { Plan() {} }\nexport async function make(): Promise<RESTApi> { return new RESTApi() }",
+    );
+    assert!(
+        info.exported_factory_returns.is_empty(),
+        "an async factory must not be exported cross-module: {:?}",
+        info.exported_factory_returns
+    );
+}
+
+#[test]
+fn exported_factory_returns_abstains_on_fallthrough_return() {
+    // `if (flag) return new RESTApi()` falls through to `undefined` when flag is
+    // false, so the function does not provably return RESTApi on every path.
+    let info = parse(
+        "class RESTApi { Plan() {} }\nexport function make(flag: boolean) { if (flag) { return new RESTApi() } }",
+    );
+    assert!(
+        info.exported_factory_returns.is_empty(),
+        "a factory that can fall through to undefined must abstain: {:?}",
+        info.exported_factory_returns
+    );
+}
+
+#[test]
+fn exported_factory_returns_requires_value_proof_for_alias() {
+    // A typed module-local with NO value assignment (`let api: RESTApi`) is only a
+    // TYPE annotation, not a runtime proof the function returns RESTApi. It must
+    // NOT leak into cross-module metadata. Issue #1441 (Part A), over-credit guard.
+    let info = parse(
+        "import { RESTApi } from './api'\nlet api: RESTApi\nexport function useApi(): RESTApi { return api }",
+    );
+    assert!(
+        info.exported_factory_returns.is_empty(),
+        "a type-only alias (no value assignment) must not be exported cross-module: {:?}",
+        info.exported_factory_returns
+    );
+}
+
+#[test]
+fn exported_factory_returns_skips_unexported_factory() {
+    // A same-file factory that is NOT exported carries no cross-module metadata.
+    let info = parse("class RESTApi { Plan() {} }\nfunction useApi() { return new RESTApi() }");
+    assert!(
+        info.exported_factory_returns.is_empty(),
+        "an unexported factory must not be published as cross-module metadata: {:?}",
+        info.exported_factory_returns
+    );
+}
+
 #[test]
 fn into_module_info_transfers_member_accesses() {
     let info = parse("import { Obj } from './x';\nObj.method();");
