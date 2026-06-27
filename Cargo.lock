@@ -1035,7 +1035,6 @@ dependencies = [
  "miette",
  "notify",
  "oxc_coverage_instrument",
- "oxc_span",
  "proc-macro2",
  "proptest",
  "rayon",
@@ -1254,7 +1253,6 @@ name = "fallow-node"
 version = "2.102.0"
 dependencies = [
  "fallow-api",
- "fallow-programmatic-cli",
  "napi",
  "napi-build",
  "napi-derive",

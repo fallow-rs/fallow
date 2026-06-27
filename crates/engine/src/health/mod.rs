@@ -47,6 +47,27 @@ pub trait HealthGroupResolver {
     fn section_owners_of(&self, rel_path: &Path) -> Option<&[String]>;
 }
 
+/// Placeholder grouping resolver for runs without `--group-by` (the programmatic
+/// API path). Constructed only as `None`, so its methods are never invoked.
+#[derive(Debug, Clone, Copy)]
+pub enum NoGroupResolver {}
+
+#[expect(
+    clippy::uninhabited_references,
+    reason = "NoGroupResolver is uninhabited; these methods are unreachable and exist only to satisfy the trait bound for the group-less programmatic path"
+)]
+impl HealthGroupResolver for NoGroupResolver {
+    fn mode_label(&self) -> &'static str {
+        match *self {}
+    }
+    fn resolve_with_rule(&self, _rel_path: &Path) -> (String, Option<String>) {
+        match *self {}
+    }
+    fn section_owners_of(&self, _rel_path: &Path) -> Option<&[String]> {
+        match *self {}
+    }
+}
+
 /// Runtime coverage analysis seam.
 ///
 /// Runtime coverage execution drives the closed-source `fallow-cov` sidecar

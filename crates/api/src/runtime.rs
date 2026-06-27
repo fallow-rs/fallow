@@ -7,6 +7,10 @@ use fallow_config::{
     DetectionMode, DuplicatesConfig, OutputFormat, ProductionAnalysis, WorkspaceInfo,
 };
 use fallow_engine::duplicates::{CloneInstance, DuplicationReport, DuplicationStats};
+use fallow_engine::health::{
+    HealthPipelineInputs, HealthScopeInputs, HealthSeams, RuntimeCoverageSeamInput,
+    execute_health_inner, validate_health_churn_file,
+};
 use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConfigOptions};
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckOutput, CheckOutputInput, DeadCodeNextStepsInput, DiffIndex,
@@ -82,6 +86,165 @@ pub trait ProgrammaticHealthRunner {
         &self,
         options: &ComplexityOptions,
     ) -> Result<ProgrammaticHealthRun, ProgrammaticError>;
+}
+
+/// Default health runner backed directly by `fallow-engine`.
+///
+/// This runs the command-neutral health pipeline through
+/// [`execute_health_inner`] without touching the CLI crate: the programmatic
+/// path never groups (`--group-by`), never drives the runtime coverage sidecar,
+/// and never records CLI telemetry, so the seams are inert no-ops. NAPI and
+/// future Rust embedders use this runner; the CLI keeps its own runner for the
+/// `fallow health` command path.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EngineHealthRunner;
+
+impl ProgrammaticHealthRunner for EngineHealthRunner {
+    fn run_programmatic_health(
+        &self,
+        options: &ComplexityOptions,
+    ) -> Result<ProgrammaticHealthRun, ProgrammaticError> {
+        let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+        resolved.install(|| run_programmatic_health_on_engine(&resolved, options))
+    }
+}
+
+/// The runtime coverage seam is never reached on the programmatic path
+/// (`runtime_coverage` is always `None`), so the analyzer is an unreachable
+/// guard rather than a real sidecar driver.
+fn programmatic_runtime_coverage_seam(
+    _options: &fallow_engine::RuntimeCoverageOptions,
+    _input: RuntimeCoverageSeamInput<'_>,
+) -> Result<fallow_output::RuntimeCoverageReport, std::process::ExitCode> {
+    Err(std::process::ExitCode::from(2))
+}
+
+fn run_programmatic_health_on_engine(
+    resolved: &ProgrammaticAnalysisContext,
+    options: &ComplexityOptions,
+) -> ProgrammaticResult<ProgrammaticHealthRun> {
+    let health_options = derive_programmatic_health_execution_options(resolved, options);
+
+    validate_health_churn_file(&health_options).map_err(|_| generic_health_error("health"))?;
+
+    let start = Instant::now();
+    let project_config = fallow_engine::config_for_project_analysis(
+        &resolved.root,
+        resolved.config_path.as_deref(),
+        ProjectConfigOptions {
+            output: OutputFormat::Human,
+            no_cache: resolved.no_cache,
+            threads: resolved.threads,
+            production_override: resolved.production_override,
+            quiet: true,
+            analysis: ProductionAnalysis::Health,
+        },
+    )
+    .map_err(|err| {
+        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
+            .with_code("FALLOW_CONFIG_LOAD_FAILED")
+            .with_context("analysis.configPath")
+    })?;
+    let config_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+    let session = AnalysisSession::from_config(project_config);
+    stash_workspace_diagnostics_for_session(&session);
+    let parts = session.into_parts();
+    let config = parts.config;
+    let files = parts.files;
+
+    let parse_start = Instant::now();
+    let cache = if config.no_cache {
+        None
+    } else {
+        fallow_engine::cache::CacheStore::load(
+            &config.cache_dir,
+            config.cache_config_hash,
+            fallow_engine::resolve_cache_max_size_bytes(&config),
+        )
+    };
+    let parse_result = fallow_engine::extract::parse_all_files(&files, cache.as_ref(), true);
+    let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
+    let parse_cpu_ms = parse_result.parse_cpu_ms;
+
+    let scope_inputs = HealthScopeInputs::<fallow_engine::health::NoGroupResolver> {
+        changed_files: resolved
+            .changed_since
+            .as_deref()
+            .and_then(|git_ref| fallow_engine::changed_files(&resolved.root, git_ref).ok()),
+        diff_index: resolved.diff.as_ref(),
+        ws_roots: resolved.workspace_roots.clone(),
+        group_resolver: None,
+    };
+    let seams = HealthSeams {
+        runtime_coverage_analyzer: &programmatic_runtime_coverage_seam,
+        note_graph_structure: &|_module_count, _edge_count| {},
+    };
+
+    let result = execute_health_inner(
+        &health_options,
+        HealthPipelineInputs {
+            config,
+            files,
+            modules: parse_result.modules,
+            config_ms,
+            discover_ms: 0.0,
+            parse_ms,
+            parse_cpu_ms,
+            shared_parse: false,
+            pre_computed_analysis: None,
+        },
+        scope_inputs,
+        &seams,
+    )
+    .map_err(|_| generic_health_error("health"))?;
+
+    let root = result.config.root.clone();
+    let next_step_facts = ProgrammaticHealthNextStepFacts {
+        suggestions_enabled: suggestions_enabled(),
+        offer_setup: setup_pointer_applicable(&root),
+        impact_digest: None,
+        audit_changed: fallow_engine::churn::is_git_repo(&root),
+    };
+    Ok(ProgrammaticHealthRun {
+        analysis: result.without_group_resolver(),
+        workspace_diagnostics: fallow_config::workspace_diagnostics_for(&root),
+        next_step_facts,
+        telemetry_analysis_run_id: None,
+    })
+}
+
+fn generic_health_error(command: &str) -> ProgrammaticError {
+    let code = format!(
+        "FALLOW_{}_FAILED",
+        command.replace('-', "_").to_ascii_uppercase()
+    );
+    ProgrammaticError::new(format!("{command} failed"), 2)
+        .with_code(code)
+        .with_context(format!("fallow {command}"))
+        .with_help(format!(
+            "Re-run `fallow {command} --format json --quiet` in the target project for CLI diagnostics"
+        ))
+}
+
+/// Run programmatic health / complexity through the engine-backed runner.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error for invalid options or analysis
+/// failures.
+pub fn run_health(options: &ComplexityOptions) -> ProgrammaticResult<HealthProgrammaticOutput> {
+    run_health_with_runner(options, &EngineHealthRunner)
+}
+
+/// Run programmatic health / complexity and return the stable JSON contract.
+///
+/// # Errors
+///
+/// Returns a structured programmatic error for invalid options, analysis
+/// failures, or output serialization failures.
+pub fn compute_health(options: &ComplexityOptions) -> ProgrammaticResult<serde_json::Value> {
+    run_health(options)?.into_json()
 }
 
 /// Derive engine-owned health execution options from public programmatic API
