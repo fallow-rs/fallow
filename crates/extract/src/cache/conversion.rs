@@ -560,7 +560,7 @@ pub fn module_to_cached(
 ) -> CachedModule {
     CachedModule {
         content_hash: module.content_hash,
-        mtime_secs: fingerprint.mtime_ns,
+        mtime_ns: fingerprint.mtime_ns,
         file_size: fingerprint.file_size,
         last_access_secs: current_unix_seconds(),
         exports: module_exports_to_cached(&module.exports),

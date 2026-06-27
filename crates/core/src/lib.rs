@@ -1545,6 +1545,10 @@ fn build_graph_cache_manifest(
 /// Hash the resolver-affecting options: the project root, extraction config
 /// hash (which already folds tsconfig / resolver-relevant config), and the
 /// user-supplied resolve `conditions`.
+///
+/// `production` and `ignore_patterns` intentionally stay out of this hash:
+/// they shape discovery, so changed file sets already miss through stable file
+/// keys and source fingerprints in the manifest.
 fn resolver_options_hash(config: &ResolvedConfig) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();

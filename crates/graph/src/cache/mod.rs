@@ -307,6 +307,24 @@ mod tests {
     }
 
     #[test]
+    fn manifest_misses_on_file_deletion() {
+        let before = vec![
+            file(0, "/project/src/a.ts"),
+            file(1, "/project/src/deleted.ts"),
+        ];
+        let after = vec![file(0, "/project/src/a.ts")];
+        let map = fingerprints(&[
+            ("/project/src/a.ts", SourceFingerprint::new(10, 1)),
+            ("/project/src/deleted.ts", SourceFingerprint::new(20, 1)),
+        ]);
+
+        let cached = manifest(&before, mode(), &map);
+        let current = manifest(&after, mode(), &map);
+
+        assert!(!cached.matches_inputs(&current));
+    }
+
+    #[test]
     fn manifest_misses_on_mode_change() {
         let files = vec![file(0, "/project/src/a.ts")];
         let map = fingerprints(&[("/project/src/a.ts", SourceFingerprint::new(10, 1))]);

@@ -23,7 +23,7 @@ fn cache_roundtrip() {
 
     let cached = fallow_core::cache::CachedModule {
         content_hash: 12345,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -278,7 +278,7 @@ fn incremental_cache_prune_stale_entries() {
     let mut store = fallow_core::cache::CacheStore::new();
     let make_module = || fallow_core::cache::CachedModule {
         content_hash: 1,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],

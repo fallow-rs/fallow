@@ -757,9 +757,9 @@ assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);
 pub struct CachedModule {
     /// xxh3 hash of the file content.
     pub content_hash: u64,
-    /// File modification time for fast cache validation.
+    /// File modification time in nanoseconds for fast cache validation.
     /// When mtime+size match the on-disk file, we skip reading file content entirely.
-    pub mtime_secs: u64,
+    pub mtime_ns: u64,
     /// File size in bytes for fast cache validation.
     pub file_size: u64,
     /// Seconds-since-epoch at the time this entry was last WRITTEN
@@ -967,12 +967,9 @@ pub struct CachedModule {
 impl CachedModule {
     /// Source metadata fingerprint stored with this cache entry.
     ///
-    /// The on-disk field name `mtime_secs` is legacy. It stores the shared
-    /// nanosecond mtime value used by
-    /// [`SourceFingerprint`](fallow_types::source_fingerprint::SourceFingerprint).
     #[must_use]
     pub fn source_fingerprint(&self) -> fallow_types::source_fingerprint::SourceFingerprint {
-        fallow_types::source_fingerprint::SourceFingerprint::new(self.mtime_secs, self.file_size)
+        fallow_types::source_fingerprint::SourceFingerprint::new(self.mtime_ns, self.file_size)
     }
 }
 

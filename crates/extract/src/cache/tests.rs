@@ -111,7 +111,7 @@ fn cache_store_insert_and_get() {
     let mut store = CacheStore::new();
     let module = CachedModule {
         content_hash: 42,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -195,7 +195,7 @@ fn cache_store_hash_mismatch_returns_none() {
     let mut store = CacheStore::new();
     let module = CachedModule {
         content_hash: 42,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -287,7 +287,7 @@ fn cache_store_overwrite_entry() {
     let mut store = CacheStore::new();
     let m1 = CachedModule {
         content_hash: 1,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -362,7 +362,7 @@ fn cache_store_overwrite_entry() {
     };
     let m2 = CachedModule {
         content_hash: 2,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -1351,7 +1351,7 @@ fn cache_save_and_load_roundtrip() {
     let mut store = CacheStore::new();
     let module = CachedModule {
         content_hash: 42,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -1446,7 +1446,7 @@ fn cache_version_mismatch_returns_none() {
     let mut store = CacheStore::new();
     let module = CachedModule {
         content_hash: 42,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -1635,7 +1635,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
     let mut store = CacheStore::new();
     let module = CachedModule {
         content_hash: 42,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -1733,7 +1733,7 @@ fn retain_paths_removes_stale_entries() {
     let mut store = CacheStore::new();
     let m = || CachedModule {
         content_hash: 1,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -1837,7 +1837,7 @@ fn retain_paths_with_empty_files_clears_cache() {
     let mut store = CacheStore::new();
     let m = CachedModule {
         content_hash: 1,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs: 0,
         exports: vec![],
@@ -1922,7 +1922,7 @@ fn get_by_metadata_returns_entry_on_match() {
     let mut store = CacheStore::new();
     let module = CachedModule {
         content_hash: 42,
-        mtime_secs: 1000,
+        mtime_ns: 1000,
         file_size: 500,
         last_access_secs: 0,
         exports: vec![],
@@ -2007,7 +2007,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
     let mut store = CacheStore::new();
     let module = CachedModule {
         content_hash: 42,
-        mtime_secs: 1000,
+        mtime_ns: 1000,
         file_size: 500,
         last_access_secs: 0,
         exports: vec![],
@@ -2094,7 +2094,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
     let mut store = CacheStore::new();
     let module = CachedModule {
         content_hash: 42,
-        mtime_secs: 1000,
+        mtime_ns: 1000,
         file_size: 500,
         last_access_secs: 0,
         exports: vec![],
@@ -2181,7 +2181,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
     let mut store = CacheStore::new();
     let module = CachedModule {
         content_hash: 42,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 500,
         last_access_secs: 0,
         exports: vec![],
@@ -2355,7 +2355,7 @@ fn module_to_cached_stores_mtime_and_size() {
     };
 
     let cached = module_to_cached_from_parts(&module, 12345, 6789);
-    assert_eq!(cached.mtime_secs, 12345);
+    assert_eq!(cached.mtime_ns, 12345);
     assert_eq!(cached.file_size, 6789);
     assert_eq!(cached.content_hash, 42);
 }
@@ -3761,7 +3761,7 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
     let payload = "a".repeat(payload_kb * 1024);
     CachedModule {
         content_hash,
-        mtime_secs: 0,
+        mtime_ns: 0,
         file_size: 0,
         last_access_secs,
         exports: vec![],
