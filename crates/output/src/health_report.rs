@@ -56,7 +56,7 @@ pub struct HealthReport {
     /// wire) with a typed `actions` list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<HotspotFinding>,
-    /// Hotspot analysis summary.
+    /// Hotspot analysis summary (only set with `--hotspots`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hotspot_summary: Option<HotspotSummary>,
     /// Runtime coverage findings from the paid sidecar (only populated with
@@ -76,10 +76,10 @@ pub struct HealthReport {
     /// a typed `actions` list.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<RefactoringTargetFinding>,
-    /// Adaptive thresholds used for target scoring.
+    /// Adaptive thresholds used for target scoring (only set with `--targets`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_thresholds: Option<TargetThresholds>,
-    /// Health trend comparison against a previous snapshot.
+    /// Health trend comparison against a previous snapshot (only set with `--trend`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_trend: Option<HealthTrend>,
     /// Audit breadcrumb explaining systemic action-array adjustments. Present

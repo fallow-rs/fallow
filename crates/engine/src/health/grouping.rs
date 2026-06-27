@@ -1,6 +1,6 @@
 //! Per-group health computation for `--group-by`.
 //!
-//! Partitions the project's analyzed files by an [`OwnershipResolver`] and
+//! Partitions the project's analyzed files by an ownership resolver and
 //! produces a [`HealthGroup`] for each bucket. Each group computes its own
 //! `VitalSigns` / `HealthScore` from the files in that group, mirroring
 //! how `--workspace` already scopes a single subset (`SubsetFilter::Paths`

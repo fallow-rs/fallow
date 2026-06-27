@@ -1,7 +1,7 @@
 //! Persisted graph-cache identity contracts and on-disk store.
 //!
 //! The manifest types here define the invalidation surface a persisted graph
-//! cache must satisfy before a cached graph can be trusted; [`store`] implements
+//! cache must satisfy before a cached graph can be trusted; the store implements
 //! the coarse all-or-nothing load / save of a previously-built `ModuleGraph`
 //! keyed by that manifest.
 

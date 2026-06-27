@@ -108,7 +108,7 @@ impl AnalysisCountsSnapshot {
     /// Unused-dep counting is special-cased: dep entries are keyed by their
     /// `package.json` path, which is never a source file and therefore never
     /// matches the source-file membership of a `Paths` subset. For
-    /// [`crate::health::SubsetFilter::Paths`], a `package.json` is considered
+    /// `SubsetFilter::Paths`, a `package.json` is considered
     /// in scope when at least one source file in the subset sits inside its
     /// directory (the dep's owning workspace).
     ///

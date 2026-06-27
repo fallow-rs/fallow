@@ -137,6 +137,7 @@ pub mod trace {
     };
 }
 
+pub use fallow_core::AnalysisDiscovery;
 pub use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DefaultIgnoreSkips, DuplicationReport,
     DuplicationStats, MirroredDirectory, RefactoringSuggestion,
@@ -264,7 +265,7 @@ pub struct DuplicationAnalysis {
 pub struct AnalysisSession {
     config: ResolvedConfig,
     config_path: Option<PathBuf>,
-    files: Vec<DiscoveredFile>,
+    discovery: AnalysisDiscovery,
 }
 
 /// Owned session parts for runners that need to continue an existing pipeline.
@@ -314,11 +315,11 @@ impl AnalysisSession {
     /// Build a session from a previously resolved config.
     #[must_use]
     pub fn from_config(project_config: ProjectConfig) -> Self {
-        let files = discover_files_with_plugin_scopes(&project_config.config);
+        let discovery = fallow_core::prepare_analysis_discovery(&project_config.config);
         Self {
             config: project_config.config,
             config_path: project_config.path,
-            files,
+            discovery,
         }
     }
 
@@ -350,7 +351,7 @@ impl AnalysisSession {
     /// Discovered files for this session.
     #[must_use]
     pub fn files(&self) -> &[DiscoveredFile] {
-        &self.files
+        self.discovery.files()
     }
 
     /// Consume the session and return the resolved config plus discovery data.
@@ -359,7 +360,7 @@ impl AnalysisSession {
         AnalysisSessionParts {
             config: self.config,
             config_path: self.config_path,
-            files: self.files,
+            files: self.discovery.into_files(),
         }
     }
 
@@ -369,7 +370,9 @@ impl AnalysisSession {
     ///
     /// Returns an error if parsing or analysis fails.
     pub fn analyze_dead_code(&self) -> EngineResult<DeadCodeAnalysis> {
-        analyze_with_usages(&self.config)
+        fallow_core::analyze_with_usages_from_discovery(&self.config, &self.discovery)
+            .map(|results| DeadCodeAnalysis { results })
+            .map_err(engine_error)
     }
 
     /// Run dead-code analysis with retained complexity artifacts.
@@ -378,7 +381,16 @@ impl AnalysisSession {
     ///
     /// Returns an error if parsing or analysis fails.
     pub fn analyze_dead_code_with_complexity(&self) -> EngineResult<DeadCodeAnalysisOutput> {
-        analyze_with_usages_and_complexity(&self.config)
+        fallow_core::analyze_with_usages_and_complexity_from_discovery(
+            &self.config,
+            &self.discovery,
+        )
+        .map(|output| DeadCodeAnalysisOutput {
+            results: output.results,
+            modules: output.modules,
+            files: output.files,
+        })
+        .map_err(engine_error)
     }
 
     /// Run dead-code analysis with retained modules, discovered files and graph.
@@ -391,19 +403,26 @@ impl AnalysisSession {
         need_complexity: bool,
         retain_graph: bool,
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {
-        analyze_retaining_modules(&self.config, need_complexity, retain_graph)
+        fallow_core::analyze_retaining_modules_from_discovery(
+            &self.config,
+            &self.discovery,
+            need_complexity,
+            retain_graph,
+        )
+        .map(dead_code_artifacts)
+        .map_err(engine_error)
     }
 
     /// Run duplication detection using the session's discovered files.
     #[must_use]
     pub fn find_duplicates(&self) -> DuplicationReport {
-        find_duplicates(&self.config.root, &self.files, &self.config.duplicates)
+        find_duplicates(&self.config.root, self.files(), &self.config.duplicates)
     }
 
     /// Run duplication detection using custom duplicate options.
     #[must_use]
     pub fn find_duplicates_with(&self, config: &DuplicatesConfig) -> DuplicationReport {
-        find_duplicates(&self.config.root, &self.files, config)
+        find_duplicates(&self.config.root, self.files(), config)
     }
 
     /// Run dead-code and duplication analysis for this session.
@@ -443,7 +462,7 @@ impl AnalysisSession {
         config: &DuplicatesConfig,
         cache_dir: Option<&Path>,
     ) -> DuplicationAnalysis {
-        find_duplicates_with_defaults(&self.config.root, &self.files, config, cache_dir)
+        find_duplicates_with_defaults(&self.config.root, self.files(), config, cache_dir)
     }
 
     /// Run focused duplication detection for a changed-file set.
@@ -456,7 +475,7 @@ impl AnalysisSession {
     ) -> DuplicationAnalysis {
         find_duplicates_touching_files_with_defaults(
             &self.config.root,
-            &self.files,
+            self.files(),
             config,
             changed_files,
             cache_dir,
@@ -946,6 +965,28 @@ mod tests {
         assert!(analysis.dead_code.modules.is_some());
         assert!(analysis.dead_code.files.is_some());
         assert!(!analysis.duplication.clone_groups.is_empty());
+    }
+
+    #[test]
+    fn analysis_session_reuses_discovery_for_dead_code() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(src.join("index.ts"), "export const value = 1;\n").expect("source file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        std::fs::write(src.join("late.ts"), "export const late = 1;\n").expect("late source file");
+
+        let analysis = session.analyze_dead_code().expect("analysis succeeds");
+
+        assert!(
+            analysis
+                .results
+                .unused_files
+                .iter()
+                .all(|finding| !finding.file.path.ends_with("late.ts")),
+            "session analysis must not rediscover files added after session load"
+        );
     }
 
     #[test]

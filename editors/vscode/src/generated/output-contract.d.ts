@@ -3966,7 +3966,7 @@ prop_drilling_chains?: PropDrillingChainFinding[]
  */
 hotspots?: HotspotFinding[]
 /**
- * Hotspot analysis summary.
+ * Hotspot analysis summary (only set with `--hotspots`).
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
@@ -3991,11 +3991,11 @@ large_functions?: LargeFunctionEntry[]
  */
 targets?: RefactoringTargetFinding[]
 /**
- * Adaptive thresholds used for target scoring.
+ * Adaptive thresholds used for target scoring (only set with `--targets`).
  */
 target_thresholds?: (TargetThresholds | null)
 /**
- * Health trend comparison against a previous snapshot.
+ * Health trend comparison against a previous snapshot (only set with `--trend`).
  */
 health_trend?: (HealthTrend | null)
 /**
@@ -6832,7 +6832,7 @@ prop_drilling_chains?: PropDrillingChainFinding[]
  */
 hotspots?: HotspotFinding[]
 /**
- * Hotspot analysis summary.
+ * Hotspot analysis summary (only set with `--hotspots`).
  */
 hotspot_summary?: (HotspotSummary | null)
 /**
@@ -6857,11 +6857,11 @@ large_functions?: LargeFunctionEntry[]
  */
 targets?: RefactoringTargetFinding[]
 /**
- * Adaptive thresholds used for target scoring.
+ * Adaptive thresholds used for target scoring (only set with `--targets`).
  */
 target_thresholds?: (TargetThresholds | null)
 /**
- * Health trend comparison against a previous snapshot.
+ * Health trend comparison against a previous snapshot (only set with `--trend`).
  */
 health_trend?: (HealthTrend | null)
 /**

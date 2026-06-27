@@ -1327,7 +1327,7 @@
               "type": "null"
             }
           ],
-          "description": "Hotspot analysis summary."
+          "description": "Hotspot analysis summary (only set with `--hotspots`)."
         },
         "runtime_coverage": {
           "anyOf": [
@@ -1374,7 +1374,7 @@
               "type": "null"
             }
           ],
-          "description": "Adaptive thresholds used for target scoring."
+          "description": "Adaptive thresholds used for target scoring (only set with `--targets`)."
         },
         "health_trend": {
           "anyOf": [
@@ -1385,7 +1385,7 @@
               "type": "null"
             }
           ],
-          "description": "Health trend comparison against a previous snapshot."
+          "description": "Health trend comparison against a previous snapshot (only set with `--trend`)."
         },
         "actions_meta": {
           "anyOf": [
@@ -2293,7 +2293,7 @@
               "type": "null"
             }
           ],
-          "description": "Hotspot analysis summary."
+          "description": "Hotspot analysis summary (only set with `--hotspots`)."
         },
         "runtime_coverage": {
           "anyOf": [
@@ -2340,7 +2340,7 @@
               "type": "null"
             }
           ],
-          "description": "Adaptive thresholds used for target scoring."
+          "description": "Adaptive thresholds used for target scoring (only set with `--targets`)."
         },
         "health_trend": {
           "anyOf": [
@@ -2351,7 +2351,7 @@
               "type": "null"
             }
           ],
-          "description": "Health trend comparison against a previous snapshot."
+          "description": "Health trend comparison against a previous snapshot (only set with `--trend`)."
         },
         "actions_meta": {
           "anyOf": [

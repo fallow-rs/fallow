@@ -335,6 +335,20 @@ pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, F
     Ok(output.results)
 }
 
+/// Run the full analysis pipeline with export usage collection from a reusable
+/// discovery prelude.
+///
+/// # Errors
+///
+/// Returns an error if parsing or analysis fails.
+pub fn analyze_with_usages_from_discovery(
+    config: &ResolvedConfig,
+    discovery: &AnalysisDiscovery,
+) -> Result<AnalysisResults, FallowError> {
+    let output = analyze_full_from_discovery(config, discovery, false, true, false, false)?;
+    Ok(output.results)
+}
+
 /// Run the full analysis pipeline with export usage collection and retained
 /// per-function complexity modules.
 ///
@@ -353,6 +367,19 @@ pub fn analyze_with_usages_and_complexity(
     config: &ResolvedConfig,
 ) -> Result<AnalysisOutput, FallowError> {
     analyze_full(config, false, true, true, true)
+}
+
+/// Run the full analysis pipeline with export usage collection and retained
+/// complexity artifacts from a reusable discovery prelude.
+///
+/// # Errors
+///
+/// Returns an error if parsing or analysis fails.
+pub fn analyze_with_usages_and_complexity_from_discovery(
+    config: &ResolvedConfig,
+    discovery: &AnalysisDiscovery,
+) -> Result<AnalysisOutput, FallowError> {
+    analyze_full_from_discovery(config, discovery, false, true, true, true)
 }
 
 /// Run the full analysis pipeline with optional performance timings and graph retention.
@@ -403,6 +430,28 @@ pub fn analyze_retaining_modules(
     retain_graph: bool,
 ) -> Result<AnalysisOutput, FallowError> {
     analyze_full(config, retain_graph, false, need_complexity, true)
+}
+
+/// Run the full analysis pipeline with retained modules/files from a reusable
+/// discovery prelude.
+///
+/// # Errors
+///
+/// Returns an error if parsing or analysis fails.
+pub fn analyze_retaining_modules_from_discovery(
+    config: &ResolvedConfig,
+    discovery: &AnalysisDiscovery,
+    need_complexity: bool,
+    retain_graph: bool,
+) -> Result<AnalysisOutput, FallowError> {
+    analyze_full_from_discovery(
+        config,
+        discovery,
+        retain_graph,
+        false,
+        need_complexity,
+        true,
+    )
 }
 
 fn new_analysis_progress(config: &ResolvedConfig) -> progress::AnalysisProgress {
@@ -463,6 +512,35 @@ struct AnalysisSetup {
     workspaces_ms: f64,
 }
 
+/// Reusable discovery prelude for a resolved project.
+///
+/// This carries the file registry plus the workspace and config-candidate state
+/// that plugin detection needs, so engine sessions can run several analyses
+/// over one stable discovery boundary without re-walking the project.
+#[derive(Debug, Clone)]
+pub struct AnalysisDiscovery {
+    files: Vec<discover::DiscoveredFile>,
+    workspaces: Vec<fallow_config::WorkspaceInfo>,
+    root_pkg: Option<PackageJson>,
+    config_candidates: Vec<std::path::PathBuf>,
+    discover_ms: f64,
+    workspaces_ms: f64,
+}
+
+impl AnalysisDiscovery {
+    /// Discovered source files, indexed by stable `FileId` for this session.
+    #[must_use]
+    pub fn files(&self) -> &[discover::DiscoveredFile] {
+        &self.files
+    }
+
+    /// Consume this discovery prelude and return its source file registry.
+    #[must_use]
+    pub fn into_files(self) -> Vec<discover::DiscoveredFile> {
+        self.files
+    }
+}
+
 /// Owned state shared across one core analysis run.
 ///
 /// This is the first non-persisted session boundary for the engine. It keeps
@@ -500,6 +578,19 @@ impl<'a> AnalysisSession<'a> {
             config_candidates,
             discover_ms,
             workspaces_ms,
+        }
+    }
+
+    fn from_discovery(config: &'a ResolvedConfig, discovery: AnalysisDiscovery) -> Self {
+        Self {
+            config,
+            pipeline_start: Instant::now(),
+            progress: new_analysis_progress(config),
+            project: project::ProjectState::new(discovery.files, discovery.workspaces),
+            root_pkg: discovery.root_pkg,
+            config_candidates: discovery.config_candidates,
+            discover_ms: discovery.discover_ms,
+            workspaces_ms: discovery.workspaces_ms,
         }
     }
 
@@ -689,6 +780,35 @@ fn run_analysis_setup(config: &ResolvedConfig) -> AnalysisSetup {
     AnalysisSetup {
         progress,
         project,
+        root_pkg,
+        config_candidates,
+        discover_ms,
+        workspaces_ms,
+    }
+}
+
+/// Run the shared discovery prelude once for callers that need a reusable
+/// analysis session.
+///
+/// # Panics
+///
+/// Panics only when the underlying source discovery walk hits its documented
+/// compile-time glob/template invariants.
+#[must_use]
+pub fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
+    let AnalysisSetup {
+        progress,
+        project,
+        root_pkg,
+        config_candidates,
+        discover_ms,
+        workspaces_ms,
+    } = run_analysis_setup(config);
+    progress.finish();
+
+    AnalysisDiscovery {
+        files: project.files().to_vec(),
+        workspaces: project.workspaces().to_vec(),
         root_pkg,
         config_candidates,
         discover_ms,
@@ -1045,6 +1165,23 @@ fn analyze_full(
 ) -> Result<AnalysisOutput, FallowError> {
     let _span = tracing::info_span!("fallow_analyze").entered();
     AnalysisSession::new(config).run_full(retain, collect_usages, need_complexity, retain_modules)
+}
+
+fn analyze_full_from_discovery(
+    config: &ResolvedConfig,
+    discovery: &AnalysisDiscovery,
+    retain: bool,
+    collect_usages: bool,
+    need_complexity: bool,
+    retain_modules: bool,
+) -> Result<AnalysisOutput, FallowError> {
+    let _span = tracing::info_span!("fallow_analyze").entered();
+    AnalysisSession::from_discovery(config, discovery.clone()).run_full(
+        retain,
+        collect_usages,
+        need_complexity,
+        retain_modules,
+    )
 }
 
 fn full_analysis_pipeline_profile(
@@ -1405,12 +1542,13 @@ fn build_graph_cache_manifest(
     )
 }
 
-/// Hash the resolver-affecting options: the extraction config hash (which
-/// already folds tsconfig / resolver-relevant config) combined with the
+/// Hash the resolver-affecting options: the project root, extraction config
+/// hash (which already folds tsconfig / resolver-relevant config), and the
 /// user-supplied resolve `conditions`.
 fn resolver_options_hash(config: &ResolvedConfig) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();
+    config.root.hash(&mut hasher);
     config.cache_config_hash.hash(&mut hasher);
     config.resolve.conditions.hash(&mut hasher);
     hasher.finish()
@@ -1432,8 +1570,7 @@ fn entry_points_hash(entry_points: &discover::CategorizedEntryPoints) -> u64 {
     hasher.finish()
 }
 
-/// Hash the plugin-derived graph-affecting configuration: the sorted active
-/// plugin names plus the sorted path aliases the resolver applies.
+/// Hash the plugin-derived graph-affecting configuration.
 fn plugin_config_hash(plugin_result: &plugins::AggregatedPluginResult) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();
@@ -1461,7 +1598,56 @@ fn plugin_config_hash(plugin_result: &plugins::AggregatedPluginResult) -> u64 {
         replacement.hash(&mut hasher);
     }
 
+    let mut auto_imports: Vec<(&str, &std::path::Path, fallow_config::AutoImportKind)> =
+        plugin_result
+            .auto_imports
+            .iter()
+            .map(|rule| (rule.name.as_str(), rule.source.as_path(), rule.kind))
+            .collect();
+    auto_imports.sort_unstable_by(|a, b| {
+        a.0.cmp(b.0)
+            .then_with(|| a.1.cmp(b.1))
+            .then_with(|| auto_import_kind_rank(a.2).cmp(&auto_import_kind_rank(b.2)))
+    });
+    auto_imports.len().hash(&mut hasher);
+    for (name, source, kind) in auto_imports {
+        name.hash(&mut hasher);
+        source.hash(&mut hasher);
+        auto_import_kind_rank(kind).hash(&mut hasher);
+    }
+
+    let mut scss_include_paths: Vec<&std::path::Path> = plugin_result
+        .scss_include_paths
+        .iter()
+        .map(std::path::PathBuf::as_path)
+        .collect();
+    scss_include_paths.sort_unstable();
+    scss_include_paths.len().hash(&mut hasher);
+    for path in scss_include_paths {
+        path.hash(&mut hasher);
+    }
+
+    let mut static_dir_mappings: Vec<(&std::path::Path, &str)> = plugin_result
+        .static_dir_mappings
+        .iter()
+        .map(|(from_dir, mount)| (from_dir.as_path(), mount.as_str()))
+        .collect();
+    static_dir_mappings.sort_unstable();
+    static_dir_mappings.len().hash(&mut hasher);
+    for (from_dir, mount) in static_dir_mappings {
+        from_dir.hash(&mut hasher);
+        mount.hash(&mut hasher);
+    }
+
     hasher.finish()
+}
+
+fn auto_import_kind_rank(kind: fallow_config::AutoImportKind) -> u8 {
+    match kind {
+        fallow_config::AutoImportKind::Named => 0,
+        fallow_config::AutoImportKind::Default => 1,
+        fallow_config::AutoImportKind::DefaultComponent => 2,
+    }
 }
 
 fn collect_file_hashes(
@@ -2312,11 +2498,89 @@ fn num_cpus() -> usize {
 mod tests {
     use super::{
         AnalysisSession, bucket_files_by_workspace, collect_config_search_roots, default_config,
-        format_undeclared_workspace_warning, warn_undeclared_workspaces,
+        format_undeclared_workspace_warning, plugin_config_hash, resolver_options_hash,
+        warn_undeclared_workspaces,
     };
     use std::path::{Path, PathBuf};
 
-    use fallow_config::{WorkspaceDiagnostic, WorkspaceDiagnosticKind};
+    use fallow_config::{
+        AutoImportKind, AutoImportRule, WorkspaceDiagnostic, WorkspaceDiagnosticKind,
+    };
+
+    fn plugin_result() -> crate::plugins::AggregatedPluginResult {
+        let mut result = crate::plugins::AggregatedPluginResult::default();
+        result.active_plugins.push("nuxt".to_string());
+        result
+            .path_aliases
+            .push(("@/".to_string(), "src/".to_string()));
+        result
+    }
+
+    #[test]
+    fn graph_cache_resolver_hash_includes_project_root() {
+        let dir_a = tempfile::tempdir().expect("create temp dir a");
+        let dir_b = tempfile::tempdir().expect("create temp dir b");
+        let config_a = session_config(dir_a.path());
+        let config_b = session_config(dir_b.path());
+
+        assert_ne!(
+            resolver_options_hash(&config_a),
+            resolver_options_hash(&config_b),
+            "shared cache dirs must not reuse graphs across project roots"
+        );
+    }
+
+    #[test]
+    fn graph_cache_plugin_hash_includes_auto_imports() {
+        let mut without_auto_import = plugin_result();
+        let mut with_auto_import = plugin_result();
+        with_auto_import.auto_imports.push(AutoImportRule {
+            name: "useCounter".to_string(),
+            source: PathBuf::from("/project/composables/useCounter.ts"),
+            kind: AutoImportKind::Named,
+        });
+
+        assert_ne!(
+            plugin_config_hash(&without_auto_import),
+            plugin_config_hash(&with_auto_import),
+            "auto-import edge changes must invalidate the graph cache"
+        );
+
+        without_auto_import.auto_imports.push(AutoImportRule {
+            name: "useCounter".to_string(),
+            source: PathBuf::from("/project/composables/useCounter.ts"),
+            kind: AutoImportKind::Default,
+        });
+        assert_ne!(
+            plugin_config_hash(&without_auto_import),
+            plugin_config_hash(&with_auto_import),
+            "auto-import kind changes must invalidate the graph cache"
+        );
+    }
+
+    #[test]
+    fn graph_cache_plugin_hash_includes_style_and_static_mappings() {
+        let base = plugin_result();
+        let mut with_scss = base.clone();
+        with_scss
+            .scss_include_paths
+            .push(PathBuf::from("/project/styles"));
+        assert_ne!(
+            plugin_config_hash(&base),
+            plugin_config_hash(&with_scss),
+            "SCSS include path changes must invalidate the graph cache"
+        );
+
+        let mut with_static_dir = base.clone();
+        with_static_dir
+            .static_dir_mappings
+            .push((PathBuf::from("/project/public"), "/".to_string()));
+        assert_ne!(
+            plugin_config_hash(&base),
+            plugin_config_hash(&with_static_dir),
+            "static directory mapping changes must invalidate the graph cache"
+        );
+    }
 
     fn diag(root: &Path, relative: &str) -> WorkspaceDiagnostic {
         WorkspaceDiagnostic::new(
