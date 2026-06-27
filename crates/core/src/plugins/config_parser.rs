@@ -1069,13 +1069,22 @@ fn find_config_object<'a>(program: &'a Program) -> Option<&'a ObjectExpression<'
                     if let Some(name) = unwrap_to_identifier_name(expr) {
                         return find_variable_init_object(program, name);
                     }
+                    if let Some(obj) = resolve_wrapped_config_object(program, expr) {
+                        return Some(obj);
+                    }
                 }
             }
             Statement::ExpressionStatement(expr_stmt) => {
                 if let Expression::AssignmentExpression(assign) = &expr_stmt.expression
                     && is_module_exports_target(&assign.left)
                 {
-                    return extract_object_from_expression(&assign.right);
+                    if let Some(obj) = extract_object_from_expression(&assign.right) {
+                        return Some(obj);
+                    }
+                    if let Some(name) = unwrap_to_identifier_name(&assign.right) {
+                        return find_variable_init_object(program, name);
+                    }
+                    return resolve_wrapped_config_object(program, &assign.right);
                 }
             }
             _ => {}
@@ -1212,6 +1221,51 @@ fn find_variable_init_object<'a>(
                     return extract_object_from_expression(init);
                 }
             }
+        }
+    }
+    None
+}
+
+/// Resolve a config object that is passed as a NAMED CONST to a wrapper call:
+/// `export default withMDX(nextConfig)`, `module.exports = createJestConfig(cfg)`,
+/// nested `withMDX(withFoo(nextConfig))`, and curried `compose(...)(nextConfig)`.
+/// This is the call-argument analog of the bare `export default config` identifier
+/// resolution already done via [`unwrap_to_identifier_name`] +
+/// [`find_variable_init_object`]; it lets the official `@next/mdx` /
+/// `withSentry(nextConfig)` / `next-compose-plugins` idioms resolve so their
+/// `pageExtensions` / plugin config is extracted instead of silently dropped.
+///
+/// Returns the first argument (scanning nested wrapper calls) that resolves to a
+/// local `const NAME = { ... }`. An inline object argument is already handled by
+/// [`extract_object_from_expression`], which the caller tries first.
+fn resolve_wrapped_config_object<'a>(
+    program: &'a Program,
+    expr: &'a Expression<'a>,
+) -> Option<&'a ObjectExpression<'a>> {
+    let call = match expr {
+        Expression::CallExpression(call) => call,
+        Expression::ParenthesizedExpression(paren) => {
+            return resolve_wrapped_config_object(program, &paren.expression);
+        }
+        Expression::TSSatisfiesExpression(ts_sat) => {
+            return resolve_wrapped_config_object(program, &ts_sat.expression);
+        }
+        Expression::TSAsExpression(ts_as) => {
+            return resolve_wrapped_config_object(program, &ts_as.expression);
+        }
+        _ => return None,
+    };
+    for arg in &call.arguments {
+        let Some(arg_expr) = arg.as_expression() else {
+            continue;
+        };
+        if let Some(name) = unwrap_to_identifier_name(arg_expr)
+            && let Some(obj) = find_variable_init_object(program, name)
+        {
+            return Some(obj);
+        }
+        if let Some(obj) = resolve_wrapped_config_object(program, arg_expr) {
+            return Some(obj);
         }
     }
     None
@@ -4961,5 +5015,69 @@ mod tests {
             &["test", "setupFiles"],
         );
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn wrapped_named_const_default_export_resolves() {
+        // `export default withMDX(nextConfig)` (official @next/mdx idiom): the
+        // config is passed as a named const to a wrapper call. Regression #1642.
+        let source = r#"
+            import createMDX from "@next/mdx";
+            const nextConfig = { pageExtensions: ["ts", "tsx", "md", "mdx"] };
+            const withMDX = createMDX({});
+            export default withMDX(nextConfig);
+        "#;
+        let exts = extract_config_string_array(source, &ts_path(), &["pageExtensions"]);
+        assert_eq!(exts, vec!["ts", "tsx", "md", "mdx"]);
+    }
+
+    #[test]
+    fn wrapped_named_const_module_exports_resolves() {
+        // `module.exports = createJestConfig(customConfig)` (next/jest idiom).
+        let source = r#"
+            const nextJest = require("next/jest");
+            const createJestConfig = nextJest();
+            const customConfig = { testMatch: ["**/*.test.ts"] };
+            module.exports = createJestConfig(customConfig);
+        "#;
+        let matches = extract_config_string_array(source, &js_path(), &["testMatch"]);
+        assert_eq!(matches, vec!["**/*.test.ts"]);
+    }
+
+    #[test]
+    fn wrapped_named_const_nested_and_curried_resolve() {
+        let nested = r#"
+            const nextConfig = { pageExtensions: ["mdx"] };
+            const withMDX = (c) => c;
+            const withFoo = (c) => c;
+            export default withMDX(withFoo(nextConfig));
+        "#;
+        assert_eq!(
+            extract_config_string_array(nested, &js_path(), &["pageExtensions"]),
+            vec!["mdx"]
+        );
+
+        let curried = r#"
+            const nextConfig = { pageExtensions: ["md"] };
+            const compose = (..._p) => (c) => c;
+            export default compose(a, b)(nextConfig);
+        "#;
+        assert_eq!(
+            extract_config_string_array(curried, &js_path(), &["pageExtensions"]),
+            vec!["md"]
+        );
+    }
+
+    #[test]
+    fn wrapped_inline_object_still_resolves() {
+        // The pre-existing inline-object form must keep working unchanged.
+        let source = r#"
+            const withMDX = createMDX({});
+            export default withMDX({ pageExtensions: ["mdx"] });
+        "#;
+        assert_eq!(
+            extract_config_string_array(source, &js_path(), &["pageExtensions"]),
+            vec!["mdx"]
+        );
     }
 }

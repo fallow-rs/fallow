@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`unused-files` no longer false-flags Next.js `page.mdx` (and other entries)
+  when `next.config` wraps its config object.** fallow resolved a bare
+  `export default config`, but not a config passed as a named const to a wrapper
+  call, so `export default withMDX(nextConfig)` (the official `@next/mdx` docs
+  idiom), `module.exports = createJestConfig(customConfig)`, nested wrappers, and
+  `compose(...)(nextConfig)` all read as an empty config. The Next.js plugin
+  never saw `pageExtensions`, so MDX App Router pages were reported as unused.
+  The shared config resolver now follows the named const (including through
+  nested wrapper calls), which also fixes the same class for any wrapped Vite /
+  Webpack / Jest config.
+  (Closes [#1642](https://github.com/fallow-rs/fallow/issues/1642))
+
 ## [2.103.0] - 2026-06-28
 
 ### Added

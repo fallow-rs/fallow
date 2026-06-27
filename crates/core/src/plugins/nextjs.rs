@@ -459,6 +459,30 @@ mod tests {
     }
 
     #[test]
+    fn resolve_config_page_extensions_wrapped_named_const() {
+        // The official @next/mdx idiom: a separate `const nextConfig` passed to a
+        // wrapper call. The page entry patterns must still pick up the custom
+        // mdx extension. Regression for #1642.
+        let source = r#"
+            import createMDX from "@next/mdx";
+            const nextConfig = { pageExtensions: ["ts", "tsx", "md", "mdx"] };
+            const withMDX = createMDX({});
+            export default withMDX(nextConfig);
+        "#;
+        let plugin = NextJsPlugin;
+        let result =
+            plugin.resolve_config(Path::new("next.config.mjs"), source, Path::new("/project"));
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|p| p.starts_with("app/**/page") && p.contains("mdx")),
+            "wrapped named-const config should still yield mdx page entry patterns: {:?}",
+            result.entry_patterns
+        );
+    }
+
+    #[test]
     fn resolve_config_page_extensions_includes_src_variants() {
         let source = r#"
             export default {
