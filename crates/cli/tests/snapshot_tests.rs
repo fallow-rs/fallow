@@ -2587,6 +2587,10 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
             code: "partial-input".to_string(),
             message: "One dump was incomplete.".to_string(),
         }],
+        actionable: true,
+        actionability_reason: None,
+        actionability_verdict: None,
+        provenance: fallow_cli::health_types::RuntimeCoverageProvenance::default(),
     });
     report
 }

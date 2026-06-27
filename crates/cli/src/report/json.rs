@@ -926,6 +926,10 @@ mod tests {
                     code: "partial-merge".to_owned(),
                     message: "Merged coverage omitted one chunk.".to_owned(),
                 }],
+                actionable: true,
+                actionability_reason: None,
+                actionability_verdict: None,
+                provenance: crate::health_types::RuntimeCoverageProvenance::default(),
             }),
             ..Default::default()
         };

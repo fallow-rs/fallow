@@ -4222,6 +4222,10 @@ mod tests {
                 importance: vec![],
                 watermark: None,
                 warnings: vec![],
+                actionable: true,
+                actionability_reason: None,
+                actionability_verdict: None,
+                provenance: crate::health_types::RuntimeCoverageProvenance::default(),
             }),
             ..Default::default()
         };
@@ -4289,6 +4293,10 @@ mod tests {
                 importance: vec![],
                 watermark: None,
                 warnings: vec![],
+                actionable: true,
+                actionability_reason: None,
+                actionability_verdict: None,
+                provenance: crate::health_types::RuntimeCoverageProvenance::default(),
             }),
             ..Default::default()
         };

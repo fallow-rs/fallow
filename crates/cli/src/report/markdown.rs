@@ -4473,6 +4473,10 @@ mod tests {
                 importance: vec![],
                 watermark: Some(RuntimeCoverageWatermark::TrialExpired),
                 warnings: vec![],
+                actionable: true,
+                actionability_reason: None,
+                actionability_verdict: None,
+                provenance: crate::health_types::RuntimeCoverageProvenance::default(),
             }),
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,
@@ -4529,6 +4533,10 @@ mod tests {
                 importance: vec![],
                 watermark: None,
                 warnings: vec![],
+                actionable: true,
+                actionability_reason: None,
+                actionability_verdict: None,
+                provenance: crate::health_types::RuntimeCoverageProvenance::default(),
             }),
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,
