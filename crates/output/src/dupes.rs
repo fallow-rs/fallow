@@ -9,10 +9,11 @@ use std::time::Duration;
 
 use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
+use fallow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 
+use crate::GroupByMode;
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
-use crate::{GroupByMode, WorkspaceDiagnosticOutput};
 
 /// Envelope emitted by `fallow dupes --format json`.
 ///
@@ -39,7 +40,7 @@ pub struct DupesOutput<Report, Group> {
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_steps: Vec<NextStep>,
@@ -57,7 +58,7 @@ pub struct DupesOutputInput<Report, Group> {
     pub total_issues: Option<usize>,
     pub groups: Option<Vec<Group>>,
     pub meta: Option<Meta>,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub next_steps: Vec<NextStep>,
 }
 

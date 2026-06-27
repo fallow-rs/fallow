@@ -70,3 +70,9 @@ pub mod serde_path;
 pub mod source_fingerprint;
 /// Inline suppression comment types and issue kind definitions.
 pub mod suppress;
+/// Workspace and source-discovery diagnostic data types
+/// (`WorkspaceDiagnostic`, `WorkspaceDiagnosticKind`). Re-exported by
+/// `fallow-config` for back-compat; embedded directly by `fallow-output` so
+/// `workspace_diagnostics[]` keeps its typed JSON schema. The
+/// `schemars::JsonSchema` derive is gated on the `schema` feature.
+pub mod workspace;

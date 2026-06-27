@@ -79,9 +79,8 @@ pub use audit_walkthrough::{
 pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
-    GroupByMode, WorkspaceDiagnosticOutput, apply_config_fixable_to_duplicate_exports,
-    build_check_output, build_check_summary, serialize_check_grouped_json_output,
-    serialize_check_json_output, workspace_diagnostics_output,
+    GroupByMode, apply_config_fixable_to_duplicate_exports, build_check_output,
+    build_check_summary, serialize_check_grouped_json_output, serialize_check_json_output,
 };
 pub use ci_output::{
     CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,

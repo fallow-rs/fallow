@@ -6,38 +6,13 @@ use fallow_types::envelope::{
 };
 use fallow_types::output::NextStep;
 use fallow_types::results::AnalysisResults;
+use fallow_types::workspace::WorkspaceDiagnostic;
 use serde::Serialize;
 
 use crate::root_envelopes::{RootEnvelopeMode, attach_telemetry_meta, serialize_named_json_output};
 
 /// Current schema version for the dead-code/check JSON envelope.
 pub const CHECK_SCHEMA_VERSION: u32 = 7;
-
-/// Serialized workspace-discovery diagnostic surfaced on check output.
-///
-/// The runtime diagnostic type currently lives in `fallow-config`, which is
-/// upstream of `fallow-output`. This transparent DTO keeps the wire contract in
-/// the output layer without introducing a crate cycle.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(transparent)]
-pub struct WorkspaceDiagnosticOutput(pub serde_json::Value);
-
-/// Convert runtime workspace diagnostics into the output-layer DTO.
-///
-/// Serialization failures are skipped to match the existing JSON output
-/// behavior: diagnostics are advisory and must never make analysis fail.
-pub fn workspace_diagnostics_output<I, T>(diagnostics: I) -> Vec<WorkspaceDiagnosticOutput>
-where
-    I: IntoIterator<Item = T>,
-    T: Serialize,
-{
-    diagnostics
-        .into_iter()
-        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
-        .map(WorkspaceDiagnosticOutput)
-        .collect()
-}
 
 /// Envelope emitted by `fallow dead-code --format json` (plus the `check`
 /// block inside the combined and audit envelopes).
@@ -70,7 +45,7 @@ pub struct CheckOutput {
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings, emitted
     /// at the JSON root so an agent acting on the output is pointed at fallow's
     /// adjacent verification capabilities (trace, complexity breakdown, audit,
@@ -147,7 +122,7 @@ pub struct CheckOutputInput {
     pub results: AnalysisResults,
     pub config_fixable: bool,
     pub meta: Option<Meta>,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub next_steps: Vec<NextStep>,
 }
 
@@ -287,13 +262,7 @@ mod tests {
     use super::*;
     use fallow_types::output_dead_code::UnusedFileFinding;
     use fallow_types::results::UnusedFile;
-    use serde::Serialize;
-
-    #[derive(Serialize)]
-    struct Diagnostic {
-        path: &'static str,
-        message: &'static str,
-    }
+    use fallow_types::workspace::WorkspaceDiagnosticKind;
 
     #[test]
     fn build_check_output_counts_issues_and_entry_points() {
@@ -367,14 +336,37 @@ mod tests {
     }
 
     #[test]
-    fn workspace_diagnostics_output_serializes_runtime_diagnostics() {
-        let output = workspace_diagnostics_output([Diagnostic {
-            path: "package.json",
-            message: "workspace is not declared",
-        }]);
+    fn workspace_diagnostics_serialize_typed_kind_path_message() {
+        let root = std::path::Path::new("/project");
+        let output = build_check_output(CheckOutputInput {
+            schema_version: 7,
+            version: "0.0.0".to_string(),
+            elapsed: Duration::from_millis(1),
+            results: AnalysisResults::default(),
+            config_fixable: false,
+            meta: None,
+            workspace_diagnostics: vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("packages/legacy"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )],
+            next_steps: Vec::new(),
+        });
 
-        assert_eq!(output.len(), 1);
-        assert_eq!(output[0].0["path"], "package.json");
-        assert_eq!(output[0].0["message"], "workspace is not declared");
+        let value = serde_json::to_value(&output).expect("check output serializes");
+        let diag = &value["workspace_diagnostics"][0];
+        assert_eq!(diag["kind"], "undeclared-workspace");
+        assert!(
+            diag["path"]
+                .as_str()
+                .is_some_and(|path| path.contains("packages/legacy")),
+            "path field is carried verbatim: {diag}"
+        );
+        assert!(
+            diag["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("packages/legacy")),
+            "message is rendered from kind + path: {diag}"
+        );
     }
 }

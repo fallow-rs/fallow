@@ -22,7 +22,8 @@ use fallow_types::envelope::{
 
 use super::emit_json;
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
-use fallow_output::{GroupByMode, WorkspaceDiagnosticOutput};
+use fallow_config::WorkspaceDiagnostic;
+use fallow_output::GroupByMode;
 
 pub(super) struct PrintJsonInput<'a> {
     pub(super) results: &'a AnalysisResults,
@@ -205,10 +206,8 @@ pub fn build_check_json_payload_with_config_fixable_and_extras(
     })
 }
 
-fn workspace_diagnostics_for_output(root: &Path) -> Vec<WorkspaceDiagnosticOutput> {
-    fallow_output::workspace_diagnostics_output(crate::runtime_support::workspace_diagnostics_for(
-        root,
-    ))
+fn workspace_diagnostics_for_output(root: &Path) -> Vec<WorkspaceDiagnostic> {
+    crate::runtime_support::workspace_diagnostics_for(root)
 }
 
 #[allow(

@@ -11,10 +11,11 @@ use fallow_engine::{AnalysisResults, AnalysisSession, ProjectConfig, ProjectConf
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckOutput, CheckOutputInput, DiffIndex, DupesOutput, DupesOutputInput,
     GroupByMode, HealthGroup, HealthGrouping, HealthJsonOutputInput, HealthOutputInput,
-    HealthReport, MAX_DIFF_BYTES, RootEnvelopeMode, WorkspaceDiagnosticOutput, build_check_output,
-    build_dupes_output, check_meta, health_meta, relative_to_diff_path,
-    serialize_check_json_output, serialize_dupes_json_output, strip_root_prefix,
+    HealthReport, MAX_DIFF_BYTES, RootEnvelopeMode, build_check_output, build_dupes_output,
+    check_meta, health_meta, relative_to_diff_path, serialize_check_json_output,
+    serialize_dupes_json_output, strip_root_prefix,
 };
+use fallow_types::workspace::WorkspaceDiagnostic;
 use fallow_types::{output::NextStep, path_util::is_absolute_path_any_platform};
 use globset::Glob;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -37,7 +38,7 @@ pub struct HealthJsonReportInput<'a> {
     pub explain: bool,
     pub grouped_by: Option<GroupByMode>,
     pub groups: Option<Vec<HealthGroup>>,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<&'a str>,
@@ -62,7 +63,7 @@ pub struct ProgrammaticHealthNextStepFacts {
 /// final programmatic report assembly.
 pub struct ProgrammaticHealthRun {
     pub analysis: fallow_engine::HealthAnalysisResult,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub next_step_facts: ProgrammaticHealthNextStepFacts,
     pub telemetry_analysis_run_id: Option<String>,
 }
@@ -254,7 +255,7 @@ pub struct HealthProgrammaticOutput {
     pub root: PathBuf,
     pub elapsed: std::time::Duration,
     pub explain: bool,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<String>,
@@ -1761,9 +1762,11 @@ mod tests {
                     coverage_gaps_has_findings: false,
                     should_fail_on_coverage_gaps: false,
                 },
-                workspace_diagnostics: vec![WorkspaceDiagnosticOutput(serde_json::json!({
-                    "path": self.root.join("package.json")
-                }))],
+                workspace_diagnostics: vec![WorkspaceDiagnostic::new(
+                    &self.root,
+                    self.root.join("package.json"),
+                    fallow_types::workspace::WorkspaceDiagnosticKind::UndeclaredWorkspace,
+                )],
                 next_step_facts: ProgrammaticHealthNextStepFacts {
                     suggestions_enabled: true,
                     offer_setup: false,
@@ -1843,9 +1846,11 @@ mod tests {
             explain: true,
             grouped_by: None,
             groups: None,
-            workspace_diagnostics: vec![WorkspaceDiagnosticOutput(serde_json::json!({
-                "path": "/repo/package.json"
-            }))],
+            workspace_diagnostics: vec![WorkspaceDiagnostic::new(
+                Path::new("/repo"),
+                PathBuf::from("/repo/package.json"),
+                fallow_types::workspace::WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )],
             next_steps: vec![NextStep {
                 id: "inspect-health".to_string(),
                 command: "fallow health --format json".to_string(),

@@ -4,9 +4,10 @@ use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
 use serde::Serialize;
 
+use fallow_types::workspace::WorkspaceDiagnostic;
+
 use crate::{
-    GroupByMode, RootEnvelopeMode, WorkspaceDiagnosticOutput, apply_root_kind,
-    attach_telemetry_meta, strip_root_prefix,
+    GroupByMode, RootEnvelopeMode, apply_root_kind, attach_telemetry_meta, strip_root_prefix,
 };
 
 /// Envelope emitted by `fallow health --format json`.
@@ -31,7 +32,7 @@ pub struct HealthOutput<Report, Group> {
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_steps: Vec<NextStep>,
@@ -48,7 +49,7 @@ pub struct HealthOutputInput<Report, Group> {
     pub grouped_by: Option<GroupByMode>,
     pub groups: Option<Vec<Group>>,
     pub meta: Option<Meta>,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub next_steps: Vec<NextStep>,
 }
 

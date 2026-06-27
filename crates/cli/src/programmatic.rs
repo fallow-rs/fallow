@@ -20,10 +20,8 @@ type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
 fn workspace_diagnostics_for_programmatic_output(
     root: &Path,
-) -> Vec<fallow_output::WorkspaceDiagnosticOutput> {
-    fallow_output::workspace_diagnostics_output(crate::runtime_support::workspace_diagnostics_for(
-        root,
-    ))
+) -> Vec<fallow_config::WorkspaceDiagnostic> {
+    crate::runtime_support::workspace_diagnostics_for(root)
 }
 
 fn generic_analysis_error(command: &str) -> ProgrammaticError {

@@ -7,7 +7,7 @@ use std::time::Duration;
 use fallow_engine::duplicates::DuplicationReport;
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
-    DupesOutput, DupesOutputInput, GroupByMode, RootEnvelopeMode, WorkspaceDiagnosticOutput,
+    DupesOutput, DupesOutputInput, GroupByMode, RootEnvelopeMode,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
     strip_root_prefix,
 };
@@ -16,6 +16,7 @@ use fallow_types::envelope::{
 };
 use fallow_types::output::NextStep;
 use fallow_types::results::AnalysisResults;
+use fallow_types::workspace::WorkspaceDiagnostic;
 
 use crate::{DupesReportPayload, DuplicationGroup, DuplicationGrouping, ResultGroup};
 
@@ -29,7 +30,7 @@ pub struct CheckJsonOutputInput<'a> {
     pub config_fixable: bool,
     pub meta: Option<Meta>,
     pub extras: CheckJsonExtraOutputs,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<&'a str>,
@@ -42,7 +43,7 @@ pub struct CheckJsonPayloadInput<'a> {
     pub elapsed: Duration,
     pub config_fixable: bool,
     pub extras: CheckJsonExtraOutputs,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
 }
 
 /// Optional root sections for dead-code JSON envelopes.
@@ -62,7 +63,7 @@ struct CheckJsonEnvelopeInput<'a> {
     config_fixable: bool,
     meta: Option<Meta>,
     extras: CheckJsonExtraOutputs,
-    workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     next_steps: Vec<NextStep>,
 }
 
@@ -86,7 +87,7 @@ pub struct DuplicationJsonOutputInput<'a> {
     pub root: &'a Path,
     pub elapsed: Duration,
     pub meta: Option<Meta>,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<&'a str>,
@@ -99,7 +100,7 @@ pub struct GroupedDuplicationJsonOutputInput<'a> {
     pub root: &'a Path,
     pub elapsed: Duration,
     pub meta: Option<Meta>,
-    pub workspace_diagnostics: Vec<WorkspaceDiagnosticOutput>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<&'a str>,
