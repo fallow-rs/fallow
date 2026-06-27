@@ -624,7 +624,12 @@ use crate::MemberKind;
 /// `:some-prop="someProp"`) as a reference, so a prop used only via a value-less
 /// `v-bind` sets `used_in_template`. A warm cache from 193 carries the stale
 /// (uncredited) prop-usage flags.
-pub(super) const CACHE_VERSION: u32 = 194;
+///
+/// Bumped to 195: Vue SFC `<style> v-bind(expr)` references are now scanned, so
+/// a prop / import used only via CSS `v-bind(accent)` / `v-bind(props.x)` /
+/// `v-bind('a.b')` sets `used_in_template`. A warm cache from 194 carries the
+/// stale (uncredited) prop-usage flags.
+pub(super) const CACHE_VERSION: u32 = 195;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
