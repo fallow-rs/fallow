@@ -35,10 +35,10 @@ default = []
 test-sidecar-key = []
 # Library feature that toggles `JsonSchema` derives on the health output types
 # defined in `crates/cli/src/health_types/`. Mirrors the `schema` feature on
-# `fallow-types` and `fallow-core` so the schema-emit binary can derive a
-# single `JsonSchema` document covering health alongside the rest of the
-# output contract. Strictly additive: non-schema builds pay zero compile cost
-# because every derive is gated behind `#[cfg_attr(feature = "schema", ...)]`.
+# `fallow-types` so the schema-emit binary can derive a single `JsonSchema`
+# document covering health alongside the rest of the output contract. Strictly
+# additive: non-schema builds pay zero compile cost because every derive is
+# gated behind `#[cfg_attr(feature = "schema", ...)]`.
 schema = ["dep:schemars", "fallow-api/schema", "fallow-output/schema", "fallow-types/schema"]
 # Build-only feature that enables the `fallow-schema-emit` binary, which
 # regenerates `docs/output-schema.json` from the Rust source of truth. Pulls in
@@ -48,12 +48,10 @@ schema = ["dep:schemars", "fallow-api/schema", "fallow-output/schema", "fallow-t
 schema-emit = [
     "schema",
     "fallow-types/schema",
-    "fallow-core/schema",
 ]
 
 [dependencies]
 fallow-api = { workspace = true }
-fallow-core = { workspace = true }
 fallow-engine = { workspace = true }
 fallow-config = { workspace = true }
 fallow-output = { workspace = true }
@@ -109,6 +107,7 @@ doctest = false
 
 [dev-dependencies]
 insta = { workspace = true }
+fallow-core = { workspace = true }
 fallow-types = { workspace = true }
 proptest = { workspace = true }
 proc-macro2 = { version = "1", features = ["span-locations"] }
