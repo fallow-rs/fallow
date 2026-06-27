@@ -180,7 +180,9 @@ fn parse_single_file_cached(
     let cached_by_path = cache.and_then(|store| store.get_by_path_only(&file.path));
 
     if let Some(cached) = cached_by_path
+        && cached.file_size == file.size_bytes
         && let Ok(metadata) = std::fs::metadata(&file.path)
+        && metadata.len() == cached.file_size
     {
         let fingerprint =
             fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
