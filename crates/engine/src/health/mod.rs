@@ -1,14 +1,102 @@
 //! Typed health result contracts exposed through the engine boundary.
 
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::time::Duration;
 
 use fallow_config::{EmailMode, OutputFormat, ResolvedConfig};
 use fallow_output::{
     DiffIndex, EffortEstimate, FindingSeverity, GroupByMode, HealthGrouping, HealthReport,
-    HealthTimings, RuntimeCoverageWatermark,
+    HealthTimings, RuntimeCoverageReport, RuntimeCoverageWatermark,
 };
 use fallow_types::path_util::is_absolute_path_any_platform;
+
+mod assembly;
+mod coverage_gaps;
+mod coverage_intelligence;
+mod execute;
+mod grouping;
+mod hotspots;
+pub mod ownership;
+mod react_hooks;
+mod runtime_filter;
+pub mod scoring;
+mod tailwind_theme;
+mod targets;
+
+pub(crate) use execute::{
+    HealthOptions, HealthReportAssembly, SubsetFilter, VitalSignsAndCountsInput,
+    apply_duplication_metrics, compute_vital_signs_and_counts,
+};
+pub use execute::{
+    HealthPipelineInputs, HealthResultGeneric, HealthScopeInputs, execute_health_inner,
+    validate_health_churn_file,
+};
+
+/// Command-neutral grouping resolver contract for `--group-by` health output.
+///
+/// The CLI owns the concrete resolver (CODEOWNERS parsing, package discovery);
+/// the engine grouping pass only needs these three read operations, so it stays
+/// generic over the resolver instead of depending on the CLI type.
+pub trait HealthGroupResolver {
+    /// Stable label for the active grouping mode (`owner` / `directory` / ...).
+    fn mode_label(&self) -> &'static str;
+    /// Resolve a repo-relative path to its group key and the matching rule.
+    fn resolve_with_rule(&self, rel_path: &Path) -> (String, Option<String>);
+    /// Section owners for the group a path belongs to, when known.
+    fn section_owners_of(&self, rel_path: &Path) -> Option<&[String]>;
+}
+
+/// Runtime coverage analysis seam.
+///
+/// Runtime coverage execution drives the closed-source `fallow-cov` sidecar
+/// (license verification, subprocess spawning), which stays in the CLI. The
+/// engine calls this callback only when [`HealthExecutionOptions::runtime_coverage`]
+/// is set, so the default and programmatic paths never touch it.
+pub type RuntimeCoverageAnalyzer<'a> = dyn Fn(
+        &RuntimeCoverageOptions,
+        RuntimeCoverageSeamInput<'_>,
+    ) -> Result<RuntimeCoverageReport, ExitCode>
+    + 'a;
+
+/// Inputs the runtime coverage seam needs from the analysis core.
+pub struct RuntimeCoverageSeamInput<'a> {
+    pub root: &'a Path,
+    pub modules: &'a [fallow_types::extract::ModuleInfo],
+    pub analysis_output: &'a crate::DeadCodeAnalysisArtifacts,
+    pub istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
+    pub file_paths: &'a rustc_hash::FxHashMap<fallow_types::discover::FileId, &'a PathBuf>,
+    pub ignore_set: &'a globset::GlobSet,
+    pub changed_files: Option<&'a rustc_hash::FxHashSet<PathBuf>>,
+    pub ws_roots: Option<&'a [PathBuf]>,
+    pub top: Option<usize>,
+    pub codeowners_path: Option<&'a str>,
+    pub quiet: bool,
+    pub output: OutputFormat,
+}
+
+/// CLI-supplied callbacks the command-neutral health pipeline needs.
+///
+/// The pipeline itself stays cli-free; these are the seams the CLI threads in.
+pub struct HealthSeams<'a> {
+    /// Runs the runtime coverage sidecar (only when runtime coverage is set).
+    pub runtime_coverage_analyzer: &'a RuntimeCoverageAnalyzer<'a>,
+    /// Records module-graph structure facts (graph node count, edge count) into
+    /// the CLI's process-global telemetry sinks. Best-effort; the engine never
+    /// owns telemetry state.
+    pub note_graph_structure: &'a dyn Fn(usize, usize),
+}
+
+/// Telemetry facts the engine surfaces for the CLI to record.
+///
+/// Telemetry sinks are process-global CLI state; the engine accumulates the raw
+/// counts so the CLI wrapper can feed `telemetry::note_*` without the engine
+/// depending on the CLI telemetry module.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HealthTelemetryFacts {
+    /// Module-graph node and edge counts when a graph was built.
+    pub graph_structure: Option<(usize, usize)>,
+}
 
 /// Command-neutral sort criteria for health complexity findings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

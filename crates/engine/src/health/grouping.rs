@@ -12,12 +12,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::scoring::FileScoreOutput;
 use super::{
-    SubsetFilter, VitalSignsAndCountsInput, apply_duplication_metrics,
+    HealthGroupResolver, SubsetFilter, VitalSignsAndCountsInput, apply_duplication_metrics,
     compute_vital_signs_and_counts,
 };
-use crate::report::OwnershipResolver;
 use crate::vital_signs;
-use fallow_engine::{discover::FileId, duplicates, extract::ModuleInfo};
+use crate::{discover::FileId, duplicates, extract::ModuleInfo};
 use fallow_output::{
     ComplexityViolation, FileHealthScore, HealthActionsMeta, HealthFinding, HealthGroup,
     HealthGrouping, HotspotEntry, HotspotFinding, LargeFunctionEntry, RefactoringTarget,
@@ -57,7 +56,7 @@ pub(super) struct HealthGroupingInput<'a> {
 /// dropped before resolution so groups never include files the user has
 /// excluded from the run.
 pub(super) fn build_health_grouping(
-    resolver: &OwnershipResolver,
+    resolver: &dyn HealthGroupResolver,
     project_root: &Path,
     candidate_paths: &FxHashSet<PathBuf>,
     input: &HealthGroupingInput<'_>,
@@ -81,7 +80,7 @@ pub(super) fn build_health_grouping(
 /// last (matches the `dead-code` grouped output's ordering convention so that
 /// human / JSON consumers see the same row ordering across analyses).
 fn bucket_paths(
-    resolver: &OwnershipResolver,
+    resolver: &dyn HealthGroupResolver,
     project_root: &Path,
     candidate_paths: &FxHashSet<PathBuf>,
 ) -> Vec<GroupBucket> {

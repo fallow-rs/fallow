@@ -35,6 +35,7 @@ pub mod discover {
 pub mod baseline;
 pub mod codeowners;
 pub mod dead_code;
+pub mod error;
 pub mod flags;
 pub mod health;
 pub mod validate;

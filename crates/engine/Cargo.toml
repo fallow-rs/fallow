@@ -16,17 +16,22 @@ fallow-config = { workspace = true }
 fallow-core = { workspace = true }
 fallow-output = { workspace = true }
 fallow-types = { workspace = true }
+colored = { workspace = true }
 dunce = { workspace = true }
 globset = { workspace = true }
+oxc_coverage_instrument = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
 tracing = { workspace = true }
+xxhash-rust = { workspace = true }
 
 [features]
 schema = ["fallow-core/schema", "fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
+oxc_span = { workspace = true }
 tempfile = { workspace = true }
 
 [lints]

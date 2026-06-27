@@ -12,7 +12,7 @@ pub(super) struct RuntimeCoverageFilterContext<'a> {
     pub root: &'a Path,
     pub top: Option<usize>,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
-    pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+    pub diff_index: Option<&'a fallow_output::DiffIndex>,
 }
 
 impl<'a> RuntimeCoverageFilterContext<'a> {
@@ -46,7 +46,7 @@ impl<'a> RuntimeCoverageFilterContext<'a> {
 
     pub(super) fn with_diff_index(
         mut self,
-        diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
+        diff_index: Option<&'a fallow_output::DiffIndex>,
     ) -> Self {
         self.diff_index = diff_index;
         self
@@ -107,7 +107,8 @@ fn retain_hot_paths_in_change_scope(
         }
 
         if let Some(changed_files) = ctx.changed_files {
-            let absolute = if crate::path_util::is_absolute_path_any_platform(&hot_path.path) {
+            let absolute = if fallow_types::path_util::is_absolute_path_any_platform(&hot_path.path)
+            {
                 hot_path.path.clone()
             } else {
                 ctx.root.join(&hot_path.path)
@@ -125,7 +126,7 @@ pub(super) fn relative_to_root(path: &Path, root: &Path) -> Option<String> {
     if let Ok(stripped) = path.strip_prefix(root) {
         return Some(stripped.to_string_lossy().replace('\\', "/"));
     }
-    if crate::path_util::is_absolute_path_any_platform(path) {
+    if fallow_types::path_util::is_absolute_path_any_platform(path) {
         return None;
     }
     Some(path.to_string_lossy().replace('\\', "/"))

@@ -1139,17 +1139,22 @@ dependencies = [
 name = "fallow-engine"
 version = "2.102.0"
 dependencies = [
+ "colored 3.1.1",
  "dunce",
  "fallow-config",
  "fallow-core",
  "fallow-output",
  "fallow-types",
  "globset",
+ "oxc_coverage_instrument",
+ "oxc_span",
  "rustc-hash 2.1.2",
  "serde",
  "serde_json",
  "tempfile",
+ "toml",
  "tracing",
+ "xxhash-rust",
 ]
 
 [[package]]

@@ -195,8 +195,16 @@ pub fn note_analysis_scale(file_count: Option<usize>, function_count: Option<usi
 /// adjacency, resolves dependencies, or computes diameter/depth metrics for
 /// telemetry.
 pub fn note_graph_structure(graph: &ModuleGraph) {
+    note_graph_structure_counts(graph.module_count(), graph.edge_count());
+}
+
+/// Record a coarse fan-out bucket from already-computed module and edge counts.
+///
+/// Used by the engine-backed health pipeline, which surfaces the counts rather
+/// than the graph so the engine does not depend on this CLI telemetry module.
+pub fn note_graph_structure_counts(module_count: usize, edge_count: usize) {
     AVG_FAN_OUT_BUCKET.fetch_max(
-        avg_fan_out_bucket_state(graph.module_count(), graph.edge_count()),
+        avg_fan_out_bucket_state(module_count, edge_count),
         Ordering::Relaxed,
     );
 }

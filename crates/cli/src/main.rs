@@ -35,7 +35,7 @@ mod combined;
 mod config;
 mod coverage;
 mod dupes;
-mod error;
+use fallow_engine::error;
 mod explain;
 mod fix;
 mod flags;

@@ -1,4 +1,4 @@
-use fallow_engine::{
+use crate::{
     discover::FileId,
     extract::ModuleInfo,
     graph::{ModuleGraph, ModuleNode},
@@ -6,7 +6,7 @@ use fallow_engine::{
 };
 use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
 
-pub(super) struct CoverageGapData {
+pub struct CoverageGapData {
     pub report: CoverageGaps,
     pub runtime_paths: Vec<std::path::PathBuf>,
 }
