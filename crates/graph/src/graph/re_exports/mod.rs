@@ -26,7 +26,7 @@ use propagate::{
 /// into graph for the conversion; `fallow_core::analyze::re_export_cycles`
 /// performs the `GraphReExportCycle` to `ReExportCycle` mapping by reading
 /// `is_self_loop` and routing to the matching `ReExportCycleKind` variant.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GraphReExportCycle {
     /// Member files participating in the cycle, sorted lexicographically by
     /// the `Path::display()` form (matches the existing diagnostic-output

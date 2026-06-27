@@ -90,6 +90,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Graph
 fixedbitset = "0.5"
 
+# Persisted graph cache serialization (postcard is already pulled in transitively
+# by oxc-browserslist; pin it directly so the persisted-graph-cache store uses a
+# stable, alloc-backed binary format).
+postcard = { version = "1", default-features = false, features = ["alloc"] }
+
 # LSP
 ls-types = "0.0.6"
 tower-lsp-server = "0.23"

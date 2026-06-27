@@ -1173,7 +1173,7 @@ pub struct DynamicImportPattern {
 }
 
 /// Visibility tag from JSDoc/TSDoc comments that suppresses unused-export detection.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 #[repr(u8)]
 pub enum VisibilityTag {
@@ -1352,7 +1352,17 @@ pub struct MemberInfo {
 }
 
 /// The kind of member.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MemberKind {
@@ -2272,7 +2282,7 @@ fn serialize_span<S: serde::Serializer>(span: &Span, serializer: S) -> Result<S:
 }
 
 /// Export identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ExportName {
     /// A named export (e.g., `export const foo`).
     Named(String),
@@ -2320,7 +2330,7 @@ pub struct ImportInfo {
 }
 
 /// How a symbol is imported.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ImportedName {
     /// A named import (e.g., `import { foo }`).
     Named(String),

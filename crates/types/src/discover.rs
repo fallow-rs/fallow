@@ -45,7 +45,7 @@ pub struct DiscoveredFile {
 /// let copy = id;
 /// assert_eq!(id, copy);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct FileId(pub u32);
 
 const _: () = assert!(std::mem::size_of::<FileId>() == 4);
@@ -58,7 +58,9 @@ const _: () = assert!(std::mem::size_of::<DiscoveredFile>() == 40);
 /// `FileId` remains a dense in-memory index. This key is path-derived, root
 /// relative where possible, and uses `/` separators so graph-cache metadata can
 /// compare file identity without relying on platform path display quirks.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct StableFileKey(String);
 
 impl StableFileKey {

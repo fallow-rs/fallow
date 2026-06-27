@@ -3,14 +3,14 @@
 use std::fs::Metadata;
 use std::time::SystemTime;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// File metadata used to decide whether a source-derived cache entry is fresh.
 ///
 /// This is intentionally metadata-only. Callers that need content validation
 /// can combine it with their existing content hash, while cheap caches can use
 /// the same freshness shape without inventing their own `(mtime, size)` tuple.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SourceFingerprint {
     /// Source file modification time as nanoseconds since the Unix epoch.
     ///

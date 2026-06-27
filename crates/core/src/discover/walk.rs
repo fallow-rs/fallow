@@ -655,6 +655,13 @@ pub fn discover_files_and_config_candidates(
     let mut raw = collected
         .into_inner()
         .expect("walk collector lock poisoned");
+    // ADR-004 (path-sorted FileIds): the parallel walk visits files in
+    // nondeterministic order, so we sort by absolute path BEFORE the
+    // `.enumerate()` FileId assignment below. This is the stable-cross-run
+    // identity invariant the persisted graph cache depends on: an identical
+    // file set yields identical FileIds, so a cache hit (same paths +
+    // fingerprints) can trust graph data persisted by FileId. Do not replace
+    // this with insertion-order assignment.
     raw.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
     let mut config_candidates = config_collected
@@ -692,6 +699,64 @@ mod tests {
     use std::ffi::OsStr;
 
     use super::*;
+
+    /// Reproduce the FileId-assignment rule used by `walk_source_files`: sort by
+    /// absolute path, then assign `FileId(idx)` in that order.
+    fn assign_file_ids(mut raw: Vec<(std::path::PathBuf, u64)>) -> Vec<DiscoveredFile> {
+        raw.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        raw.into_iter()
+            .enumerate()
+            .map(|(idx, (path, size_bytes))| DiscoveredFile {
+                id: FileId(idx as u32),
+                path,
+                size_bytes,
+            })
+            .collect()
+    }
+
+    /// ADR-004: an identical file set must yield identical FileIds regardless of
+    /// the (nondeterministic, parallel) discovery order. The persisted graph
+    /// cache keys persisted graph data by FileId, so a cache HIT (same paths +
+    /// fingerprints) must reproduce the exact same FileId-to-path mapping the
+    /// graph was built against. This guards the cache's soundness prerequisite.
+    #[test]
+    fn file_id_assignment_is_deterministic_for_identical_file_set() {
+        let paths = [
+            "/project/src/z.ts",
+            "/project/src/a.ts",
+            "/project/src/components/Button.tsx",
+            "/project/src/components/Button.module.css",
+            "/project/index.ts",
+        ];
+
+        // Two independent walks that observe the same paths in DIFFERENT orders.
+        let walk_one: Vec<(std::path::PathBuf, u64)> = paths
+            .iter()
+            .map(|p| (std::path::PathBuf::from(p), 10))
+            .collect();
+        let mut walk_two = walk_one.clone();
+        walk_two.reverse();
+
+        let files_one = assign_file_ids(walk_one);
+        let files_two = assign_file_ids(walk_two);
+
+        // Identical (FileId -> path) mapping despite the different walk orders.
+        assert_eq!(files_one.len(), files_two.len());
+        for (a, b) in files_one.iter().zip(files_two.iter()) {
+            assert_eq!(a.id, b.id);
+            assert_eq!(a.path, b.path);
+        }
+
+        // The mapping is the path-sorted order, and each FileId equals its index
+        // (the density invariant `project.rs` asserts and the graph relies on).
+        for (idx, file) in files_one.iter().enumerate() {
+            assert_eq!(file.id, FileId(idx as u32));
+        }
+        assert_eq!(
+            files_one[0].path,
+            std::path::PathBuf::from("/project/index.ts")
+        );
+    }
 
     #[test]
     fn allowed_hidden_dirs() {

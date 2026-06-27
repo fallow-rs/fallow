@@ -1,23 +1,126 @@
-//! Persisted graph-cache identity contracts.
+//! Persisted graph-cache identity contracts and on-disk store.
 //!
-//! This module does not read or write graph caches yet. It defines the
-//! invalidation surface a future persisted graph cache must satisfy before a
-//! cached graph can be trusted.
+//! The manifest types here define the invalidation surface a persisted graph
+//! cache must satisfy before a cached graph can be trusted; [`store`] implements
+//! the coarse all-or-nothing load / save of a previously-built `ModuleGraph`
+//! keyed by that manifest.
 
 use std::path::Path;
 
 use fallow_types::discover::{DiscoveredFile, StableFileKey};
 use fallow_types::source_fingerprint::SourceFingerprint;
 
+mod store;
+
+pub use store::GraphCacheStore;
+
 /// Persisted graph cache schema version.
+///
+/// Bump this whenever the serialized shape of the persisted graph (any of the
+/// graph types that derive serde for the cache, the manifest types, or the
+/// store envelope) changes, so a stale `graph-cache.bin` written by an older
+/// binary is rejected rather than deserialized into the wrong shape.
 pub const GRAPH_CACHE_VERSION: u32 = 1;
+
+/// Serialize an [`oxc_span::Span`] as a `[start, end]` `u32` pair.
+///
+/// `oxc_span::Span` does not enable its own serde feature in this workspace, so
+/// the graph types that carry spans route them through this module via
+/// `#[serde(with = "crate::cache::span_serde")]`. A 2-element array keeps the
+/// postcard encoding compact (two varints) and is trivially lossless: a `Span`
+/// is fully described by its `start` / `end` offsets.
+pub(crate) mod span_serde {
+    use oxc_span::Span;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde `serialize_with` / `with` requires a `&T` signature"
+    )]
+    pub fn serialize<S: Serializer>(span: &Span, serializer: S) -> Result<S::Ok, S::Error> {
+        [span.start, span.end].serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Span, D::Error> {
+        let [start, end] = <[u32; 2]>::deserialize(deserializer)?;
+        Ok(Span::new(start, end))
+    }
+}
+
+/// Lossless cache (de)serialization for `Vec<MemberInfo>`.
+///
+/// `fallow_types::extract::MemberInfo` derives only `serde::Serialize`, and its
+/// `span` field uses `serialize_with` with no matching deserializer, so it
+/// cannot be deserialized through a plain derive. Rather than change the shared
+/// type's serde shape (which would ripple into JSON output), the cache mirrors
+/// it field-for-field into a dedicated `CachedMemberInfo` and converts both
+/// ways. Every `MemberInfo` field is carried, so the round-trip is lossless.
+pub(crate) mod member_serde {
+    use fallow_types::extract::{MemberInfo, MemberKind};
+    use oxc_span::Span;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    struct CachedMemberInfo {
+        name: String,
+        kind: MemberKind,
+        span: [u32; 2],
+        has_decorator: bool,
+        decorator_names: Vec<String>,
+        is_instance_returning_static: bool,
+        is_self_returning: bool,
+    }
+
+    impl From<&MemberInfo> for CachedMemberInfo {
+        fn from(member: &MemberInfo) -> Self {
+            Self {
+                name: member.name.clone(),
+                kind: member.kind,
+                span: [member.span.start, member.span.end],
+                has_decorator: member.has_decorator,
+                decorator_names: member.decorator_names.clone(),
+                is_instance_returning_static: member.is_instance_returning_static,
+                is_self_returning: member.is_self_returning,
+            }
+        }
+    }
+
+    impl From<CachedMemberInfo> for MemberInfo {
+        fn from(cached: CachedMemberInfo) -> Self {
+            Self {
+                name: cached.name,
+                kind: cached.kind,
+                span: Span::new(cached.span[0], cached.span[1]),
+                has_decorator: cached.has_decorator,
+                decorator_names: cached.decorator_names,
+                is_instance_returning_static: cached.is_instance_returning_static,
+                is_self_returning: cached.is_self_returning,
+            }
+        }
+    }
+
+    pub fn serialize<S: Serializer>(
+        members: &[MemberInfo],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mirror: Vec<CachedMemberInfo> = members.iter().map(CachedMemberInfo::from).collect();
+        mirror.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<MemberInfo>, D::Error> {
+        let mirror = Vec::<CachedMemberInfo>::deserialize(deserializer)?;
+        Ok(mirror.into_iter().map(MemberInfo::from).collect())
+    }
+}
 
 /// Option dimensions that affect graph construction.
 ///
 /// The hashes are intentionally opaque to this crate. Callers decide which
 /// resolver/plugin/entry-point inputs feed each hash, while this contract keeps
 /// graph-cache validation explicit and typed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct GraphCacheMode {
     /// Import resolver and tsconfig-relevant options.
     pub resolver_options_hash: u64,
@@ -44,7 +147,7 @@ impl GraphCacheMode {
 }
 
 /// Source freshness for one file in a graph-cache manifest.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct GraphCacheFile {
     /// Persistable identity for the file.
     pub key: StableFileKey,
@@ -68,7 +171,7 @@ impl GraphCacheFile {
 }
 
 /// Manifest inputs required to trust a persisted graph cache entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GraphCacheManifest {
     /// Schema version used by the persisted graph-cache entry.
     pub version: u32,

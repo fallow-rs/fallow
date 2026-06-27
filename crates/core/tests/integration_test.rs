@@ -63,6 +63,8 @@ mod framework_convention_coverage_router;
 mod framework_convention_coverage_vitepress;
 #[path = "integration_test/frameworks.rs"]
 mod frameworks;
+#[path = "integration_test/graph_cache_transparency.rs"]
+mod graph_cache_transparency;
 #[path = "integration_test/graphql_imports.rs"]
 mod graphql_imports;
 #[path = "integration_test/hono_html_tagged_template.rs"]

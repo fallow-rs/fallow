@@ -41,6 +41,7 @@ pub mod suppress;
 pub mod trace;
 pub mod trace_chain;
 
+pub use fallow_graph::cache as graph_cache;
 pub use fallow_graph::graph;
 pub use fallow_graph::project;
 pub use fallow_graph::resolve;
@@ -984,13 +985,15 @@ fn build_analysis_graph_timed(
 ) -> TimedGraph {
     let t = Instant::now();
     input.progress.set_stage("building module graph...");
-    let graph = build_analysis_graph(
+    let graph = build_analysis_graph(&BuildAnalysisGraphInput {
+        config: input.config,
+        plugin_result: input.plugin_result,
         resolved,
-        &entry_points.entry_points,
-        input.files,
+        entry_points: &entry_points.entry_points,
+        files: input.files,
         modules,
-        input.workspaces,
-    );
+        workspaces: input.workspaces,
+    });
     TimedGraph {
         graph,
         elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
@@ -1313,23 +1316,152 @@ fn resolve_analysis_imports(
     resolved
 }
 
-fn build_analysis_graph(
-    resolved: &[resolve::ResolvedModule],
-    entry_points: &discover::CategorizedEntryPoints,
-    files: &[discover::DiscoveredFile],
-    modules: &[extract::ModuleInfo],
-    workspaces: &[fallow_config::WorkspaceInfo],
-) -> graph::ModuleGraph {
+struct BuildAnalysisGraphInput<'a> {
+    config: &'a ResolvedConfig,
+    plugin_result: &'a plugins::AggregatedPluginResult,
+    resolved: &'a [resolve::ResolvedModule],
+    entry_points: &'a discover::CategorizedEntryPoints,
+    files: &'a [discover::DiscoveredFile],
+    modules: &'a [extract::ModuleInfo],
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+}
+
+/// Build the analysis graph, transparently backed by a persisted graph cache.
+///
+/// On a re-run whose file set + fingerprints + graph-affecting options are
+/// byte-identical to the previous run, the previously-built `ModuleGraph` is
+/// loaded from `.fallow/graph-cache.bin` and the (potentially large) build is
+/// skipped. The persisted graph already includes the `credit_*` post-build
+/// steps, so the cache hit returns it directly; a miss builds fresh, runs both
+/// credit steps, and persists for next time. The cache is gated on
+/// `config.no_cache` (same flag as the extraction cache) and is a strict
+/// performance optimization: a cache hit produces an identical `ModuleGraph`,
+/// so analysis results are unchanged (the mandatory correctness gate).
+fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGraph {
+    let caching_enabled = !input.config.no_cache;
+
+    let current_manifest = caching_enabled.then(|| build_graph_cache_manifest(input));
+
+    if let Some(current) = current_manifest.as_ref()
+        && let Some(store) = graph_cache::GraphCacheStore::load(&input.config.cache_dir)
+        && store.manifest.matches_inputs(current)
+    {
+        // Cache hit: the persisted graph already includes the post-build credit
+        // steps and a reconstructed `namespace_imported` bitset (rebuilt inside
+        // `GraphCacheStore::load`), so it is returned verbatim.
+        tracing::debug!("Graph cache hit: skipping graph build");
+        return store.graph;
+    }
+
     let mut graph = graph::ModuleGraph::build_with_reachability_roots(
-        resolved,
-        &entry_points.all,
-        &entry_points.runtime,
-        &entry_points.test,
-        files,
+        input.resolved,
+        &input.entry_points.all,
+        &input.entry_points.runtime,
+        &input.entry_points.test,
+        input.files,
     );
-    credit_package_path_references(&mut graph, modules);
-    credit_workspace_package_usage(&mut graph, resolved, workspaces);
+    credit_package_path_references(&mut graph, input.modules);
+    credit_workspace_package_usage(&mut graph, input.resolved, input.workspaces);
+
+    if let Some(manifest) = current_manifest {
+        let store = graph_cache::GraphCacheStore {
+            version: graph_cache::GRAPH_CACHE_VERSION,
+            manifest,
+            graph,
+        };
+        store.save(&input.config.cache_dir);
+        // `save` borrows the store, so the freshly built graph is moved back out
+        // and returned in-memory. The warm path loads-and-reconstructs an
+        // identical graph from this same persisted blob (proven by the
+        // cold-vs-warm correctness gate).
+        return store.graph;
+    }
+
     graph
+}
+
+/// Build the current `GraphCacheManifest` from the run's discovered files and
+/// graph-affecting option hashes.
+fn build_graph_cache_manifest(
+    input: &BuildAnalysisGraphInput<'_>,
+) -> graph_cache::GraphCacheManifest {
+    let mode = graph_cache::GraphCacheMode::new(
+        resolver_options_hash(input.config),
+        entry_points_hash(input.entry_points),
+        plugin_config_hash(input.plugin_result),
+    );
+    graph_cache::GraphCacheManifest::from_discovered_files(
+        &input.config.root,
+        input.files,
+        mode,
+        |path| {
+            std::fs::metadata(path).map_or(
+                fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
+                |metadata| {
+                    fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata)
+                },
+            )
+        },
+    )
+}
+
+/// Hash the resolver-affecting options: the extraction config hash (which
+/// already folds tsconfig / resolver-relevant config) combined with the
+/// user-supplied resolve `conditions`.
+fn resolver_options_hash(config: &ResolvedConfig) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = rustc_hash::FxHasher::default();
+    config.cache_config_hash.hash(&mut hasher);
+    config.resolve.conditions.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Hash the entry-point set (sorted paths per role) so any change in reachability
+/// roots misses the cache.
+fn entry_points_hash(entry_points: &discover::CategorizedEntryPoints) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = rustc_hash::FxHasher::default();
+    for role in [&entry_points.all, &entry_points.runtime, &entry_points.test] {
+        let mut paths: Vec<&std::path::Path> = role.iter().map(|ep| ep.path.as_path()).collect();
+        paths.sort_unstable();
+        paths.len().hash(&mut hasher);
+        for path in paths {
+            path.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+/// Hash the plugin-derived graph-affecting configuration: the sorted active
+/// plugin names plus the sorted path aliases the resolver applies.
+fn plugin_config_hash(plugin_result: &plugins::AggregatedPluginResult) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = rustc_hash::FxHasher::default();
+
+    let mut active: Vec<&str> = plugin_result
+        .active_plugins
+        .iter()
+        .map(String::as_str)
+        .collect();
+    active.sort_unstable();
+    active.len().hash(&mut hasher);
+    for name in active {
+        name.hash(&mut hasher);
+    }
+
+    let mut aliases: Vec<(&str, &str)> = plugin_result
+        .path_aliases
+        .iter()
+        .map(|(prefix, replacement)| (prefix.as_str(), replacement.as_str()))
+        .collect();
+    aliases.sort_unstable();
+    aliases.len().hash(&mut hasher);
+    for (prefix, replacement) in aliases {
+        prefix.hash(&mut hasher);
+        replacement.hash(&mut hasher);
+    }
+
+    hasher.finish()
 }
 
 fn collect_file_hashes(

@@ -35,6 +35,10 @@ fixedbitset = { workspace = true }
 # Hashing
 rustc-hash = { workspace = true }
 
+# Persisted graph cache (serde derives on the graph types + postcard store)
+serde = { workspace = true }
+postcard = { workspace = true }
+
 # Logging
 tracing = { workspace = true }
 serde_json = { workspace = true }

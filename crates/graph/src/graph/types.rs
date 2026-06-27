@@ -11,7 +11,7 @@ use fallow_types::extract::{ExportName, VisibilityTag};
 /// Boolean flags are packed into a `u8` to keep the struct at 96 bytes
 /// (down from 104 with 5 separate `bool` fields), improving cache line
 /// utilization in hot graph traversal loops.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ModuleNode {
     /// Unique identifier for this module.
     pub file_id: FileId,
@@ -136,7 +136,7 @@ impl ModuleNode {
 }
 
 /// A re-export edge, tracking which exports are forwarded from which module.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ReExportEdge {
     /// The module being re-exported from.
     pub source_file: FileId,
@@ -149,11 +149,12 @@ pub struct ReExportEdge {
     /// Source span of the re-export declaration on this module, used for
     /// line-number reporting. `(0, 0)` for re-exports synthesized inside the
     /// graph layer (e.g., `export *` chain propagation, namespace narrowing).
+    #[serde(with = "crate::cache::span_serde")]
     pub span: oxc_span::Span,
 }
 
 /// An export with reference tracking.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct ExportSymbol {
     /// The exported name (named or default).
     pub name: ExportName,
@@ -170,15 +171,22 @@ pub struct ExportSymbol {
     /// Human-authored reason on `@expected-unused -- <reason>`, when present.
     pub expected_unused_reason: Option<String>,
     /// Source span of the export declaration.
+    #[serde(with = "crate::cache::span_serde")]
     pub span: oxc_span::Span,
     /// Which files reference this export.
     pub references: Vec<SymbolReference>,
     /// Members of this export (enum members, class members).
+    ///
+    /// `MemberInfo` is a shared `fallow-types` struct whose serde shape is
+    /// serialize-only (its `span` uses `serialize_with` with no matching
+    /// deserializer), so it cannot round-trip through a plain derive. The cache
+    /// routes it through a dedicated lossless mirror in `crate::cache`.
+    #[serde(with = "crate::cache::member_serde")]
     pub members: Vec<fallow_types::extract::MemberInfo>,
 }
 
 /// A reference to an export from another file.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct SymbolReference {
     /// The file that references this export.
     pub from_file: FileId,
@@ -186,11 +194,12 @@ pub struct SymbolReference {
     pub kind: ReferenceKind,
     /// Byte span of the import statement in the referencing file.
     /// Used by the LSP to locate references for Code Lens navigation.
+    #[serde(with = "crate::cache::span_serde")]
     pub import_span: oxc_span::Span,
 }
 
 /// How an export is referenced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReferenceKind {
     /// A named import (`import { foo }`).
     NamedImport,
