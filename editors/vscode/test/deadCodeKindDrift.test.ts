@@ -288,6 +288,16 @@ const DEAD_CODE_WIRING = {
       origin: { type: "comment", issue_kind: "unused-export", is_file_level: false },
     },
   },
+  "missing-suppression-reason": {
+    field: "stale_suppressions",
+    category: "stale-suppressions",
+    diagnosticCode: "stale-suppression",
+    finding: {
+      ...loc,
+      origin: { type: "comment", issue_kind: "unused-export", is_file_level: false },
+      missing_reason: true,
+    },
+  },
   "unused-catalog-entry": {
     field: "unused_catalog_entries",
     category: "unused-catalog-entries",
