@@ -501,6 +501,64 @@ import { isActive } from './utils';
 }
 
 #[test]
+fn svelte_shorthand_directive_credits_prop_usage() {
+    // Props referenced ONLY via `bind:`/`style:`/`class:` shorthand directives
+    // (where the directive name IS the prop reference) must count as template
+    // usage, otherwise `unused-component-props` false-flags them. Regression
+    // for #1641.
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+let { open = $bindable(), height = '200px', active = false } = $props();
+</script>
+<details bind:open>
+  <div style:height class:active>x</div>
+</details>
+"#,
+        "Modal.svelte",
+    );
+
+    for name in ["open", "height", "active"] {
+        let prop = info
+            .component_props
+            .iter()
+            .find(|prop| prop.name == name)
+            .unwrap_or_else(|| panic!("prop {name} should be harvested"));
+        assert!(
+            prop.used_in_template,
+            "{name} is referenced via a shorthand directive, so used_in_template should be true",
+        );
+    }
+}
+
+#[test]
+fn svelte_directive_value_does_not_credit_target_name() {
+    // With an explicit `={…}` value the directive name is a target (CSS
+    // property / class name), not a local reference. The value expression is
+    // credited; the bare target name is not, so a same-named prop stays unused.
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+let { height = '200px' } = $props();
+let h = '300px';
+</script>
+<div style:height={h}>x</div>
+"#,
+        "Box.svelte",
+    );
+
+    let prop = info
+        .component_props
+        .iter()
+        .find(|prop| prop.name == "height")
+        .expect("height prop should be harvested");
+    assert!(
+        !prop.used_in_template,
+        "style:height={{h}} references h, not the prop height, so it stays unused",
+    );
+}
+
+#[test]
 fn svelte_store_subscription_clears_unused_import_binding() {
     let info = parse_sfc(
         r#"
