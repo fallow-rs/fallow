@@ -1220,7 +1220,6 @@ dependencies = [
  "fallow-config",
  "fallow-types",
  "futures",
- "globset",
  "ls-types",
  "rustc-hash 2.1.2",
  "serde",

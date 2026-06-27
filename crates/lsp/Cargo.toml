@@ -15,7 +15,6 @@ path = "src/main.rs"
 fallow-api = { workspace = true }
 fallow-config = { workspace = true }
 fallow-types = { workspace = true }
-globset = { workspace = true }
 ls-types = { workspace = true }
 tower-lsp-server = { workspace = true }
 serde = { workspace = true }
