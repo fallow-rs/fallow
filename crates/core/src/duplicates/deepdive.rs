@@ -327,13 +327,18 @@ fn is_plain_single_token(word: &str) -> bool {
 }
 
 fn has_identifier_separator_or_case_transition(word: &str) -> bool {
-    word.contains('_')
-        || word.contains('$')
-        || word
-            .chars()
-            .collect::<Vec<_>>()
-            .windows(2)
-            .any(|pair| pair[0].is_ascii_lowercase() && pair[1].is_ascii_uppercase())
+    if word.contains('_') || word.contains('$') {
+        return true;
+    }
+
+    let mut previous = None;
+    for ch in word.chars() {
+        if previous.is_some_and(|prev: char| prev.is_ascii_lowercase() && ch.is_ascii_uppercase()) {
+            return true;
+        }
+        previous = Some(ch);
+    }
+    false
 }
 
 /// Yield identifier-like words (`[A-Za-z_$][A-Za-z0-9_$]*`) from raw source.
