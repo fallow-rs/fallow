@@ -200,13 +200,17 @@ impl CacheStore {
     }
 
     /// Remove cache entries for files that are no longer in the project.
-    pub fn retain_paths(&mut self, files: &[fallow_types::discover::DiscoveredFile]) {
+    ///
+    /// Returns `true` when any entry was removed.
+    pub fn retain_paths(&mut self, files: &[fallow_types::discover::DiscoveredFile]) -> bool {
         use rustc_hash::FxHashSet;
         let current_paths: FxHashSet<String> = files
             .iter()
             .map(|f| f.path.to_string_lossy().to_string())
             .collect();
+        let before = self.entries.len();
         self.entries.retain(|key, _| current_paths.contains(key));
+        self.entries.len() != before
     }
 
     /// Number of cached entries.

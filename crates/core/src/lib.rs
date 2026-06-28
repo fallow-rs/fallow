@@ -174,7 +174,8 @@ fn update_cache(
     store: &mut cache::CacheStore,
     modules: &[extract::ModuleInfo],
     files: &[discover::DiscoveredFile],
-) {
+) -> bool {
+    let mut dirty = false;
     for module in modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
             let fingerprint = file_fingerprint(&file.path);
@@ -186,13 +187,16 @@ fn update_cache(
                     let mut refreshed = cache::module_to_cached(module, fingerprint);
                     refreshed.last_access_secs = preserved_last_access;
                     store.insert(&file.path, refreshed);
+                    dirty = true;
                 }
                 continue;
             }
             store.insert(&file.path, cache::module_to_cached(module, fingerprint));
+            dirty = true;
         }
     }
-    store.retain_paths(files);
+    let removed_stale_paths = store.retain_paths(files);
+    dirty || removed_stale_paths
 }
 
 /// Resolve `config.cache_max_size_mb` into bytes, falling back to the
@@ -1413,12 +1417,13 @@ fn update_parse_cache_if_enabled(
     let t = Instant::now();
     if !config.no_cache {
         let store = cache_store.get_or_insert_with(cache::CacheStore::new);
-        update_cache(store, modules, files);
-        if let Err(error) = store.save(
-            &config.cache_dir,
-            config.cache_config_hash,
-            cache_max_size_bytes,
-        ) {
+        if update_cache(store, modules, files)
+            && let Err(error) = store.save(
+                &config.cache_dir,
+                config.cache_config_hash,
+                cache_max_size_bytes,
+            )
+        {
             tracing::warn!("Failed to save cache: {error}");
         }
     }

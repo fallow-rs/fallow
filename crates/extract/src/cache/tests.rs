@@ -1825,11 +1825,12 @@ fn retain_paths_removes_stale_entries() {
         },
     ];
 
-    store.retain_paths(&files);
+    assert!(store.retain_paths(&files));
     assert_eq!(store.len(), 2);
     assert!(store.get_by_path_only(Path::new("/project/a.ts")).is_some());
     assert!(store.get_by_path_only(Path::new("/project/b.ts")).is_none());
     assert!(store.get_by_path_only(Path::new("/project/c.ts")).is_some());
+    assert!(!store.retain_paths(&files));
 }
 
 #[test]
@@ -1913,8 +1914,9 @@ fn retain_paths_with_empty_files_clears_cache() {
     store.insert(Path::new("a.ts"), m);
     assert_eq!(store.len(), 1);
 
-    store.retain_paths(&[]);
+    assert!(store.retain_paths(&[]));
     assert!(store.is_empty());
+    assert!(!store.retain_paths(&[]));
 }
 
 #[test]
