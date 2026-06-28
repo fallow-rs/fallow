@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use oxc_resolver::Resolver;
 use rustc_hash::{FxHashMap, FxHashSet};
+use serde_json::Value;
 
 use fallow_types::discover::FileId;
 
@@ -277,6 +278,50 @@ pub(super) struct ResolveContext<'a> {
     /// warning per affected file. Shared across all parallel resolver
     /// threads via `Mutex`. Empty and unused when no tsconfig errors occur.
     pub tsconfig_warned: &'a Mutex<FxHashSet<String>>,
+    /// Per-analysis cache for local tsconfig discovery and JSON parsing.
+    /// Import resolution calls these fallbacks for every unresolved or
+    /// tsconfig-poisoned specifier, so keeping it session-local avoids
+    /// repeated filesystem work without risking stale data across runs.
+    pub tsconfig_cache: &'a TsconfigCache,
+}
+
+/// Session-local cache for tsconfig helper lookups used during import resolution.
+#[derive(Default)]
+pub(super) struct TsconfigCache {
+    json: Mutex<FxHashMap<PathBuf, Option<Value>>>,
+    chains: Mutex<FxHashMap<PathBuf, Vec<PathBuf>>>,
+}
+
+impl TsconfigCache {
+    /// Return a cached parsed tsconfig JSON value, loading it on first miss.
+    pub fn json(&self, path: &Path, load: impl FnOnce(&Path) -> Option<Value>) -> Option<Value> {
+        if let Ok(cache) = self.json.lock()
+            && let Some(value) = cache.get(path)
+        {
+            return value.clone();
+        }
+
+        let value = load(path);
+        if let Ok(mut cache) = self.json.lock() {
+            cache.insert(path.to_path_buf(), value.clone());
+        }
+        value
+    }
+
+    /// Return the cached tsconfig chain for a source file, if one exists.
+    pub fn chain(&self, from_file: &Path) -> Option<Vec<PathBuf>> {
+        self.chains
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(from_file).cloned())
+    }
+
+    /// Store the computed tsconfig chain for a source file.
+    pub fn store_chain(&self, from_file: &Path, chain: Vec<PathBuf>) {
+        if let Ok(mut cache) = self.chains.lock() {
+            cache.insert(from_file.to_path_buf(), chain);
+        }
+    }
 }
 
 /// Package manifest data used by source fallbacks.

@@ -17,7 +17,7 @@ use super::react_native;
 use super::require_imports::{resolve_require_imports, resolve_single_require};
 use super::specifier;
 use super::static_imports::resolve_static_imports;
-use super::types::ResolveContext;
+use super::types::{ResolveContext, TsconfigCache};
 use super::upgrades::apply_specifier_upgrades;
 use super::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 
@@ -44,6 +44,7 @@ fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
     let condition_names = react_native::build_condition_names(&[], &[]);
     let root = PathBuf::from("/project");
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let tsconfig_cache = TsconfigCache::default();
     let ctx = ResolveContext {
         resolver: &resolver,
         style_resolver: &style_resolver,
@@ -59,6 +60,7 @@ fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
         root: &root,
         canonical_fallback: None,
         tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
     };
     f(&ctx);
 }
@@ -1368,6 +1370,7 @@ fn pnpm_package_source_alias_preserves_declared_import_name() {
     let package_manifests = Vec::new();
     let condition_names = react_native::build_condition_names(&[], &[]);
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let tsconfig_cache = TsconfigCache::default();
     let ctx = ResolveContext {
         resolver: &resolver,
         style_resolver: &style_resolver,
@@ -1383,6 +1386,7 @@ fn pnpm_package_source_alias_preserves_declared_import_name() {
         root,
         canonical_fallback: None,
         tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
     };
 
     let result = specifier::resolve_specifier(&ctx, &root.join("app.ts"), "unstorage", false);
@@ -1425,6 +1429,7 @@ fn pnpm_jsr_package_source_alias_preserves_declared_import_name() {
     let package_manifests = Vec::new();
     let condition_names = react_native::build_condition_names(&[], &[]);
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let tsconfig_cache = TsconfigCache::default();
     let ctx = ResolveContext {
         resolver: &resolver,
         style_resolver: &style_resolver,
@@ -1440,6 +1445,7 @@ fn pnpm_jsr_package_source_alias_preserves_declared_import_name() {
         root,
         canonical_fallback: None,
         tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
     };
 
     let result =
@@ -1621,6 +1627,7 @@ fn specifier_plugin_alias_match_returns_unresolvable() {
     let root = PathBuf::from("/project");
     let aliases = vec![("$lib/".to_string(), "src/lib/".to_string())];
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let tsconfig_cache = TsconfigCache::default();
     let ctx = ResolveContext {
         resolver: &resolver,
         style_resolver: &style_resolver,
@@ -1636,6 +1643,7 @@ fn specifier_plugin_alias_match_returns_unresolvable() {
         root: &root,
         canonical_fallback: None,
         tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
     };
 
     let file = Path::new("/project/src/app.ts");
@@ -1983,6 +1991,7 @@ fn bare_at_alias_does_not_swallow_scoped_npm_packages() {
     // Register a bare "@" alias pointing to "./src", the problematic case.
     let aliases = vec![("@".to_string(), "src".to_string())];
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+    let tsconfig_cache = TsconfigCache::default();
     let ctx = ResolveContext {
         resolver: &resolver,
         style_resolver: &style_resolver,
@@ -1998,6 +2007,7 @@ fn bare_at_alias_does_not_swallow_scoped_npm_packages() {
         root: &root,
         canonical_fallback: None,
         tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
     };
 
     let file = Path::new("/project/src/app.ts");

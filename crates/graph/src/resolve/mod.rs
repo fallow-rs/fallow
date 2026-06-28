@@ -176,6 +176,7 @@ pub fn resolve_all_imports_with_session(
     };
 
     let tsconfig_warned: Mutex<FxHashSet<String>> = Mutex::new(FxHashSet::default());
+    let tsconfig_cache = types::TsconfigCache::default();
 
     let ctx = ResolveContext {
         resolver: &session.resolver,
@@ -192,6 +193,7 @@ pub fn resolve_all_imports_with_session(
         root: input.root,
         canonical_fallback: canonical_fallback.as_ref(),
         tsconfig_warned: &tsconfig_warned,
+        tsconfig_cache: &tsconfig_cache,
     };
 
     let mut resolved: Vec<ResolvedModule> = input

@@ -240,18 +240,28 @@ fn nearest_tsconfig_path(root: &Path, from_file: &Path) -> Option<PathBuf> {
     }
 }
 
-fn local_tsconfig_chain(root: &Path, from_file: &Path) -> Vec<PathBuf> {
+fn local_tsconfig_chain(ctx: &ResolveContext<'_>, from_file: &Path) -> Vec<PathBuf> {
+    if let Some(chain) = ctx.tsconfig_cache.chain(from_file) {
+        return chain;
+    }
+    let chain = local_tsconfig_chain_uncached(ctx, from_file);
+    ctx.tsconfig_cache.store_chain(from_file, chain.clone());
+    chain
+}
+
+fn local_tsconfig_chain_uncached(ctx: &ResolveContext<'_>, from_file: &Path) -> Vec<PathBuf> {
+    let root = ctx.root;
     let Some(first) = nearest_tsconfig_path(root, from_file) else {
         return Vec::new();
     };
     let mut chain = Vec::new();
     let mut seen = rustc_hash::FxHashSet::default();
-    collect_local_tsconfig_chain(root, from_file, &first, &mut chain, &mut seen);
+    collect_local_tsconfig_chain(ctx, from_file, &first, &mut chain, &mut seen);
     chain
 }
 
 fn collect_local_tsconfig_chain(
-    root: &Path,
+    ctx: &ResolveContext<'_>,
     from_file: &Path,
     tsconfig_path: &Path,
     chain: &mut Vec<PathBuf>,
@@ -260,22 +270,23 @@ fn collect_local_tsconfig_chain(
     if !seen.insert(tsconfig_path.to_path_buf()) {
         return;
     }
-    let Some(json) = read_tsconfig_json(tsconfig_path) else {
+    let Some(json) = read_tsconfig_json_cached(ctx, tsconfig_path) else {
         return;
     };
     chain.push(tsconfig_path.to_path_buf());
 
+    let root = ctx.root;
     let tsconfig_dir = tsconfig_path.parent().unwrap_or(root);
     for reference in referenced_tsconfig_paths(tsconfig_dir, &json) {
-        if reference.is_file() && tsconfig_applies_to_file(&reference, from_file, root) {
-            collect_local_tsconfig_chain(root, from_file, &reference, chain, seen);
+        if reference.is_file() && tsconfig_applies_to_file(ctx, &reference, from_file) {
+            collect_local_tsconfig_chain(ctx, from_file, &reference, chain, seen);
         }
     }
 
     for extends in tsconfig_extends_values(&json) {
         let next = resolve_tsconfig_extends_path(tsconfig_dir, extends);
         if next.is_file() {
-            collect_local_tsconfig_chain(root, from_file, &next, chain, seen);
+            collect_local_tsconfig_chain(ctx, from_file, &next, chain, seen);
         }
     }
 }
@@ -320,8 +331,13 @@ fn tsconfig_extends_values(json: &Value) -> Vec<&str> {
     }
 }
 
-fn tsconfig_applies_to_file(tsconfig_path: &Path, from_file: &Path, root: &Path) -> bool {
-    let Some(json) = read_tsconfig_json(tsconfig_path) else {
+fn tsconfig_applies_to_file(
+    ctx: &ResolveContext<'_>,
+    tsconfig_path: &Path,
+    from_file: &Path,
+) -> bool {
+    let root = ctx.root;
+    let Some(json) = read_tsconfig_json_cached(ctx, tsconfig_path) else {
         return false;
     };
     let tsconfig_dir = tsconfig_path.parent().unwrap_or(root);
@@ -572,6 +588,10 @@ fn read_tsconfig_json(path: &Path) -> Option<Value> {
     read_json_file(path)
 }
 
+fn read_tsconfig_json_cached(ctx: &ResolveContext<'_>, path: &Path) -> Option<Value> {
+    ctx.tsconfig_cache.json(path, read_tsconfig_json)
+}
+
 fn read_json_file(path: &Path) -> Option<Value> {
     let content = fs::read_to_string(path).ok()?;
     if let Ok(json) = serde_json::from_str::<Value>(&content) {
@@ -616,9 +636,13 @@ fn path_alias_capture<'a>(pattern: &str, specifier: &'a str) -> Option<&'a str> 
     }
 }
 
-fn matches_nearest_tsconfig_path_alias(root: &Path, from_file: &Path, specifier: &str) -> bool {
-    for tsconfig_path in local_tsconfig_chain(root, from_file) {
-        let Some(paths) = read_tsconfig_json(&tsconfig_path).and_then(|json| {
+fn matches_nearest_tsconfig_path_alias(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> bool {
+    for tsconfig_path in local_tsconfig_chain(ctx, from_file) {
+        let Some(paths) = read_tsconfig_json_cached(ctx, &tsconfig_path).and_then(|json| {
             json.get("compilerOptions")
                 .and_then(|compiler_options| compiler_options.get("paths"))
                 .and_then(Value::as_object)
@@ -638,9 +662,9 @@ fn try_nearest_tsconfig_path_alias(
     from_file: &Path,
     specifier: &str,
 ) -> Option<ResolveResult> {
-    let chain = local_tsconfig_chain(ctx.root, from_file);
+    let chain = local_tsconfig_chain(ctx, from_file);
     for tsconfig_path in &chain {
-        let Some(json) = read_tsconfig_json(tsconfig_path) else {
+        let Some(json) = read_tsconfig_json_cached(ctx, tsconfig_path) else {
             continue;
         };
         let has_paths = json
@@ -655,7 +679,7 @@ fn try_nearest_tsconfig_path_alias(
         }
     }
     for tsconfig_path in &chain {
-        let Some(json) = read_tsconfig_json(tsconfig_path) else {
+        let Some(json) = read_tsconfig_json_cached(ctx, tsconfig_path) else {
             continue;
         };
         let has_base_url = json
@@ -1424,7 +1448,7 @@ fn resolve_resolved_specifier(
         {
             return result;
         }
-        if matches_nearest_tsconfig_path_alias(ctx.root, from_file, specifier) {
+        if matches_nearest_tsconfig_path_alias(ctx, from_file, specifier) {
             return ResolveResult::Unresolvable(specifier.to_string());
         }
     }
@@ -1478,7 +1502,7 @@ fn resolve_failed_specifier(
     }
 
     let matches_tsconfig_path_alias =
-        matches_nearest_tsconfig_path_alias(ctx.root, from_file, specifier);
+        matches_nearest_tsconfig_path_alias(ctx, from_file, specifier);
 
     if let Some(result) = try_failed_package_fallbacks(ctx, from_file, specifier) {
         return result;
@@ -1613,8 +1637,8 @@ fn try_tsconfig_root_dirs(
     if !specifier.starts_with('.') {
         return None;
     }
-    for tsconfig_path in local_tsconfig_chain(ctx.root, from_file) {
-        let Some(json) = read_tsconfig_json(&tsconfig_path) else {
+    for tsconfig_path in local_tsconfig_chain(ctx, from_file) {
+        let Some(json) = read_tsconfig_json_cached(ctx, &tsconfig_path) else {
             continue;
         };
         let Some(compiler_options) = json.get("compilerOptions") else {
@@ -1662,7 +1686,11 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use oxc_resolver::{JSONError, ResolveError};
+    use rustc_hash::{FxHashMap, FxHashSet};
     use tempfile::tempdir;
+
+    use crate::resolve::react_native;
+    use crate::resolve::types::{ResolveContext, TsconfigCache};
 
     use super::{
         SpecifierNormalization, extension_alias_matches, glob_values_match, has_glob_meta,
@@ -1840,13 +1868,41 @@ mod tests {
         )
         .unwrap();
 
+        let resolver = super::create_resolver(&[], &[]);
+        let style_resolver = super::create_resolver(&[], &["style".to_string()]);
+        let extensions = react_native::build_extensions(&[]);
+        let path_to_id = FxHashMap::default();
+        let raw_path_to_id = FxHashMap::default();
+        let workspace_roots = FxHashMap::default();
+        let package_manifests = Vec::new();
+        let condition_names = react_native::build_condition_names(&[], &[]);
+        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+        let tsconfig_cache = TsconfigCache::default();
+        let ctx = ResolveContext {
+            resolver: &resolver,
+            style_resolver: &style_resolver,
+            extensions: &extensions,
+            path_to_id: &path_to_id,
+            raw_path_to_id: &raw_path_to_id,
+            workspace_roots: &workspace_roots,
+            package_manifests: &package_manifests,
+            condition_names: &condition_names,
+            path_aliases: &[],
+            scss_include_paths: &[],
+            static_dir_mappings: &[],
+            root: &project_root,
+            canonical_fallback: None,
+            tsconfig_warned: &tsconfig_warned,
+            tsconfig_cache: &tsconfig_cache,
+        };
+
         assert!(matches_nearest_tsconfig_path_alias(
-            &project_root,
+            &ctx,
             &source_file,
             "@gen/foo"
         ));
         assert!(!matches_nearest_tsconfig_path_alias(
-            &project_root,
+            &ctx,
             &source_file,
             "@other/foo"
         ));
