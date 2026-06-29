@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Telemetry: the `security` workflow once again records `findings_present` for
+  the `survivors` and `blind-spots` subcommands.** Both subcommands emit a
+  `security` telemetry event but never noted their find-state, so the
+  process-global accumulator stayed unset and `findings_present` serialized as
+  null. Because `fallow security` exits non-zero only when findings exist and the
+  rule is raised to `error`, `findings_present` is the field that distinguishes
+  "found candidates" from "errored," and a null value lost that signal for these
+  modes. `survivors` now notes its retained (non-dismissed) candidate count and
+  `blind-spots` notes its unresolved-callee-site count before exit, matching the
+  default / `--file` / `--gate` paths. No change to the telemetry payload shape.
+  (Closes [#1650](https://github.com/fallow-rs/fallow/issues/1650))
 - **`unused-files` no longer false-flags a custom version-bump `updater` script
   referenced under the package.json `commit-and-tag-version` key.** A custom
   updater module (`app/scripts/gradle-updater.cjs`) is loaded by

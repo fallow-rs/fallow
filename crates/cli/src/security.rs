@@ -153,6 +153,14 @@ pub fn run_survivors(opts: &SecuritySurvivorsOptions<'_>) -> ExitCode {
         Ok(output) => output,
         Err(message) => return emit_error(&message, 2, opts.output),
     };
+    // Note find-state for telemetry before any exit (issue #1650): the survivors
+    // subcommand emits a `security` workflow event, and without this the
+    // process-global findings-present accumulator stays unset (-> null). The
+    // retained, non-dismissed candidates (survivors + needs-human-review) are
+    // what this run surfaced as actionable; an all-dismissed run is clean.
+    crate::telemetry::note_result_count(
+        output.summary.survivors + output.summary.needs_human_review,
+    );
     if opts.require_verdict_for_each_candidate && output.summary.unverdicted > 0 {
         return emit_error(
             &format!(
@@ -179,6 +187,11 @@ pub fn run_blind_spots(opts: &SecurityOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
     let output = build_blind_spots_output(&security_output);
+    // Note find-state for telemetry before exit (issue #1650): the blind-spots
+    // subcommand emits a `security` workflow event; without this the
+    // findings-present accumulator stays unset (-> null). Its findings are the
+    // unresolved callee sites it surfaces; zero blind spots is a clean run.
+    crate::telemetry::note_result_count(output.summary.unresolved_callee_sites);
     outln!("{}", render_blind_spots_output(opts.output, &output));
     ExitCode::SUCCESS
 }
