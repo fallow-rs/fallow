@@ -106,6 +106,7 @@ pub use list_output::{
 };
 pub use markdown_output::{
     build_duplication_markdown, build_grouped_markdown, build_health_markdown, build_markdown,
+    build_walkthrough_markdown,
 };
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,

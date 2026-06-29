@@ -134,6 +134,17 @@ pub struct AuditOptions<'a> {
     /// Emit the agent-contract walkthrough GUIDE (digest + schema + graph-
     /// snapshot pin) instead of the brief body. Implies `brief`. Always exit 0.
     pub walkthrough_guide: bool,
+    /// Render the existing walkthrough guide as a staged HUMAN terminal tour
+    /// (or markdown with `--format markdown`). Implies `brief`. Always exit 0.
+    /// `--format json --walkthrough` reuses the guide JSON path verbatim, so it
+    /// is byte-identical to `--walkthrough-guide --format json`.
+    pub walkthrough: bool,
+    /// Changed files to record as VIEWED in the local walkthrough viewed-state
+    /// ledger before rendering the tour. Empty off the walkthrough path.
+    pub mark_viewed: &'a [std::path::PathBuf],
+    /// Expand the Cleared panel (de-prioritized + already-viewed files) in the
+    /// human/markdown walkthrough tour. Only consulted on the walkthrough path.
+    pub show_cleared: bool,
     /// Path to an agent's judgment JSON to POST-VALIDATE against the live
     /// graph. Implies `brief`. Always exit 0. `None` off the walkthrough path.
     pub walkthrough_file: Option<&'a std::path::Path>,
@@ -953,6 +964,9 @@ fn build_base_audit_options<'a>(
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
+        walkthrough: false,
+        mark_viewed: &[],
+        show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
     }
@@ -2676,6 +2690,15 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
             // requested. Both always exit 0.
             if opts.walkthrough_guide {
                 crate::audit_brief::print_walkthrough_guide_result(&result)
+            } else if opts.walkthrough {
+                crate::audit_brief::print_walkthrough_human_result(
+                    &result,
+                    opts.root,
+                    opts.cache_dir,
+                    opts.mark_viewed,
+                    opts.show_cleared,
+                    opts.quiet,
+                )
             } else if let Some(path) = opts.walkthrough_file {
                 crate::audit_brief::print_walkthrough_file_result(&result, path)
             } else if opts.brief {
@@ -3909,6 +3932,9 @@ mod tests {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -3974,6 +4000,9 @@ mod tests {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -4053,6 +4082,9 @@ mod tests {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -4130,6 +4162,9 @@ mod tests {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -4212,6 +4247,9 @@ mod tests {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -4310,6 +4348,9 @@ mod tests {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -4392,6 +4433,9 @@ mod tests {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -4553,6 +4597,9 @@ mod tests {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -4692,6 +4739,9 @@ export function App() {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -4838,6 +4888,9 @@ export function App() {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -4925,6 +4978,9 @@ export function App() {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -5006,6 +5062,9 @@ export function App() {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -5093,6 +5152,9 @@ export function App() {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };
@@ -5203,6 +5265,9 @@ export function App() {
             brief: false,
             max_decisions: 4,
             walkthrough_guide: false,
+            walkthrough: false,
+            mark_viewed: &[],
+            show_cleared: false,
             walkthrough_file: None,
             show_deprioritized: false,
         };

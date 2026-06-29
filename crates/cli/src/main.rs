@@ -25,6 +25,7 @@ mod audit_decision_surface;
 mod audit_focus;
 mod audit_walkthrough;
 mod base_worktree;
+mod walkthrough_state;
 use fallow_engine::baseline;
 mod cache_notice;
 mod check;
@@ -1204,7 +1205,7 @@ enum Command {
         /// folded in, so it is injection-resistant). Implies the brief; always
         /// exits 0. A thin agent skill calls this to fetch the current guide,
         /// produces judgment JSON, then reopens with `--walkthrough-file`.
-        #[arg(long, conflicts_with = "walkthrough_file")]
+        #[arg(long, conflicts_with_all = ["walkthrough_file", "walkthrough"])]
         walkthrough_guide: bool,
 
         /// Ingest an agent's judgment JSON and POST-VALIDATE it against the
@@ -1216,6 +1217,28 @@ enum Command {
         /// and never gates or auto-posts.
         #[arg(long, value_name = "PATH")]
         walkthrough_file: Option<PathBuf>,
+
+        /// Render the existing walkthrough guide as a staged HUMAN terminal tour
+        /// (Stage 1 load-bearing / Stage 2 mechanical), or markdown with
+        /// `--format markdown`. Implies the brief; always exits 0.
+        /// `--format json --walkthrough` emits the same agent-contract JSON as
+        /// `--walkthrough-guide`.
+        #[arg(long, conflicts_with_all = ["walkthrough_guide", "walkthrough_file"])]
+        walkthrough: bool,
+
+        /// Record one or more changed files as VIEWED in the local walkthrough
+        /// viewed-state ledger (`.fallow/walkthrough-state.json`), then render the
+        /// tour. Files already viewed (and still current) collapse into the
+        /// Cleared panel. Repeatable. Stale marks (the tree moved) are ignored on
+        /// render but never deleted. Only consulted on the `--walkthrough` path.
+        #[arg(long, value_name = "PATH")]
+        mark_viewed: Vec<PathBuf>,
+
+        /// Expand the Cleared panel in the human/markdown walkthrough tour: list
+        /// each de-prioritized and already-viewed file instead of the collapsed
+        /// one-line summary. Only consulted on the `--walkthrough` path.
+        #[arg(long)]
+        show_cleared: bool,
 
         /// Expand the de-prioritized units in the review brief's weighted
         /// focus map ("show me what you de-prioritized"). The `deprioritized`
@@ -4365,6 +4388,9 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         max_decisions,
         walkthrough_guide,
         walkthrough_file,
+        walkthrough,
+        mark_viewed,
+        show_cleared,
         show_deprioritized,
     } = command
     else {
@@ -4373,7 +4399,7 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
 
     // The walkthrough flags imply the brief path (the guide digest + the
     // graph-snapshot pin are brief-path data).
-    let brief = brief || walkthrough_guide || walkthrough_file.is_some();
+    let brief = brief || walkthrough_guide || walkthrough || walkthrough_file.is_some();
 
     dispatch_audit(
         dispatch,
@@ -4395,6 +4421,9 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             max_decisions,
             walkthrough_guide,
             walkthrough_file,
+            walkthrough,
+            mark_viewed,
+            show_cleared,
             show_deprioritized,
         },
     )
@@ -5243,6 +5272,12 @@ struct AuditDispatchArgs {
     /// Post-validate an agent's judgment JSON from this path against the
     /// live graph.
     walkthrough_file: Option<PathBuf>,
+    /// Render the existing walkthrough guide as a staged human/markdown tour.
+    walkthrough: bool,
+    /// Changed files to record as VIEWED before rendering the tour.
+    mark_viewed: Vec<PathBuf>,
+    /// Expand the Cleared panel (de-prioritized + viewed) in the tour.
+    show_cleared: bool,
     /// Expand the de-prioritized units in the human focus map.
     show_deprioritized: bool,
 }
@@ -5375,6 +5410,9 @@ fn run_resolved_audit(
             brief: args.brief,
             max_decisions: args.max_decisions,
             walkthrough_guide: args.walkthrough_guide,
+            walkthrough: args.walkthrough,
+            mark_viewed: &args.mark_viewed,
+            show_cleared: args.show_cleared,
             walkthrough_file: args.walkthrough_file.as_deref(),
             show_deprioritized: args.show_deprioritized,
         },
@@ -5407,6 +5445,9 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
         max_decisions,
         walkthrough_guide: false,
         walkthrough_file: None,
+        walkthrough: false,
+        mark_viewed: Vec::new(),
+        show_cleared: false,
         show_deprioritized: false,
     };
     let inputs = match resolve_audit_inputs(dispatch, &args) {
@@ -5445,6 +5486,9 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
         brief: true,
         max_decisions,
         walkthrough_guide: false,
+        walkthrough: false,
+        mark_viewed: &[],
+        show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
     })

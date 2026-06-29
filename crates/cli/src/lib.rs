@@ -71,6 +71,12 @@ mod base_worktree;
     unused_imports,
     reason = "shared CLI library compiles bin-oriented support modules for reuse"
 )]
+pub mod walkthrough_state;
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
 use fallow_engine::baseline;
 #[allow(
     dead_code,

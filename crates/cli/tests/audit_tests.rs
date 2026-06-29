@@ -2428,3 +2428,367 @@ fn e5_stale_snapshot_hash_is_refused() {
     );
     assert_eq!(validation["rejected"][0]["reason"], "stale-snapshot");
 }
+
+// ---------------------------------------------------------------------------
+// W2 (#347): `fallow review --walkthrough` human/markdown renderer.
+// ---------------------------------------------------------------------------
+
+/// Run `fallow review --walkthrough` (default human) and return the raw output.
+fn run_walkthrough_human(root: &Path) -> common::CommandOutput {
+    run_fallow_raw(&[
+        "review",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+    ])
+}
+
+/// Strip the per-run `analysis_run_id` so two walkthrough-guide JSON envelopes
+/// from separate processes can be compared (the id is random telemetry meta, not
+/// part of the guide contract).
+fn strip_run_id(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(telemetry) = value
+        .get_mut("_meta")
+        .and_then(|m| m.get_mut("telemetry"))
+        .and_then(|t| t.as_object_mut())
+    {
+        telemetry.remove("analysis_run_id");
+    }
+    value
+}
+
+#[test]
+fn w2_walkthrough_human_renders_stages_and_badges() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let output = run_walkthrough_human(tmp.path());
+    assert_eq!(
+        output.code, 0,
+        "walkthrough always exits 0. stderr: {}",
+        output.stderr
+    );
+    // The Review Focus header is orientation on stderr.
+    assert!(
+        output.stderr.contains("Review Focus"),
+        "stderr carries the Review Focus header. stderr: {}",
+        output.stderr
+    );
+    // The tour body is on stdout: at least one stage and the changed file row.
+    assert!(
+        output.stdout.contains("Stage"),
+        "stdout carries a stage header. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("page.ts"),
+        "the changed page.ts file is in the tour. stdout: {}",
+        output.stdout
+    );
+    // The ui->db boundary decision synthesizes a COUPLING badge.
+    assert!(
+        output.stdout.contains("COUPLING"),
+        "the boundary decision renders a COUPLING badge. stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn w2_walkthrough_json_is_byte_identical_to_guide() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let walkthrough_json = run_fallow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(walkthrough_json.code, 0, "exits 0");
+    let guide_json = run_walkthrough_guide(tmp.path());
+
+    let from_walkthrough = parse_json(&walkthrough_json);
+    // Same agent-contract kind + deterministic snapshot hash.
+    assert_eq!(from_walkthrough["kind"], "review-walkthrough-guide");
+    assert_eq!(
+        from_walkthrough["graph_snapshot_hash"],
+        guide_json["graph_snapshot_hash"],
+    );
+    // The whole envelope matches once the random per-run id is stripped: the
+    // json branch reuses the one guide JSON path, no second serializer.
+    assert_eq!(
+        strip_run_id(from_walkthrough),
+        strip_run_id(guide_json),
+        "--walkthrough --format json must reuse the guide JSON path verbatim",
+    );
+}
+
+#[test]
+fn w2_walkthrough_markdown_renders_plain_paste_artifact() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--format",
+        "markdown",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
+    assert!(
+        output.stdout.starts_with("## Fallow Review"),
+        "markdown leads with the H2 header. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("### Stage"),
+        "markdown has a stage section. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("`COUPLING`"),
+        "badges render as inline code spans. stdout: {}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains('\u{1b}'),
+        "markdown carries no ANSI escapes. stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn w2_walkthrough_exits_zero_even_when_verdict_fails() {
+    let tmp = create_audit_baseline_fixture();
+    fs::write(tmp.path().join("fallow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
+    let config = tmp.path().join("fallow.toml");
+
+    // Sanity: the plain audit on this fixture really does fail.
+    let audit = run_fallow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--config",
+        config.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(audit.code, 1, "the underlying audit verdict is fail");
+
+    // All three walkthrough render modes stay exit 0 (advisory surface).
+    for format in ["human", "markdown", "json"] {
+        let output = run_fallow_raw(&[
+            "review",
+            "--root",
+            tmp.path().to_str().unwrap(),
+            "--base",
+            "main",
+            "--config",
+            config.to_str().unwrap(),
+            "--walkthrough",
+            "--format",
+            format,
+            "--quiet",
+        ]);
+        assert_eq!(
+            output.code, 0,
+            "--walkthrough --format {format} must exit 0 on a fail verdict. stderr: {}",
+            output.stderr
+        );
+    }
+}
+
+#[test]
+fn w2_walkthrough_cleared_panel_collapses_then_expands() {
+    let tmp = create_audit_baseline_fixture();
+    // Default human render: the Cleared panel is a single collapsed line.
+    let collapsed = run_fallow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--walkthrough",
+    ]);
+    assert_eq!(collapsed.code, 0, "exits 0. stderr: {}", collapsed.stderr);
+
+    // The baseline fixture may or may not de-prioritize a unit; only assert the
+    // collapse/expand contract when a Cleared panel is present.
+    if collapsed.stdout.contains("Cleared (") {
+        assert!(
+            collapsed.stdout.contains("--show-cleared"),
+            "collapsed Cleared panel points at --show-cleared. stdout: {}",
+            collapsed.stdout
+        );
+        let expanded = run_fallow_raw(&[
+            "review",
+            "--root",
+            tmp.path().to_str().unwrap(),
+            "--base",
+            "main",
+            "--walkthrough",
+            "--show-cleared",
+        ]);
+        assert_eq!(expanded.code, 0, "exits 0");
+        assert!(
+            !expanded.stdout.contains("pass --show-cleared to expand"),
+            "the expanded panel drops the collapse hint. stdout: {}",
+            expanded.stdout
+        );
+    }
+}
+
+#[test]
+fn w2_walkthrough_viewed_state_round_trips() {
+    let tmp = create_boundary_walkthrough_fixture();
+    // First render to learn the current snapshot hash.
+    let guide = run_walkthrough_guide(tmp.path());
+    let hash = guide["graph_snapshot_hash"].as_str().unwrap().to_string();
+
+    // Write a viewed-state ledger keyed on the changed file.
+    let state_dir = tmp.path().join(".fallow");
+    fs::create_dir_all(&state_dir).unwrap();
+    let state = serde_json::json!({
+        "version": 1,
+        "schema": "walkthrough-viewed-marks",
+        "graph_snapshot_hash": hash,
+        "entries": { "src/ui/page.ts": { "viewed_at": "2026-01-01T00:00:00Z" } }
+    });
+    fs::write(
+        state_dir.join("walkthrough-state.json"),
+        serde_json::to_string(&state).unwrap(),
+    )
+    .unwrap();
+
+    let output = run_walkthrough_human(tmp.path());
+    assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
+    assert!(
+        output.stdout.contains("viewed"),
+        "the matched file renders a viewed mark. stdout: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn w2_walkthrough_stale_viewed_state_is_ignored_not_deleted() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let state_dir = tmp.path().join(".fallow");
+    fs::create_dir_all(&state_dir).unwrap();
+    let state_path = state_dir.join("walkthrough-state.json");
+    // A deliberately WRONG hash: the marks must be ignored on render.
+    let state = serde_json::json!({
+        "version": 1,
+        "schema": "walkthrough-viewed-marks",
+        "graph_snapshot_hash": "graph:staleeeeeeeeeeee",
+        "entries": { "src/ui/page.ts": { "viewed_at": "2026-01-01T00:00:00Z" } }
+    });
+    fs::write(&state_path, serde_json::to_string(&state).unwrap()).unwrap();
+
+    let output = run_walkthrough_human(tmp.path());
+    assert_eq!(output.code, 0, "exits 0");
+    assert!(
+        !output.stdout.contains("\u{2713} viewed"),
+        "a stale viewed mark must not render. stdout: {}",
+        output.stdout
+    );
+    // The ledger on disk is NOT deleted (carry-forward).
+    assert!(
+        state_path.exists(),
+        "a stale ledger is carried forward, never deleted"
+    );
+    let on_disk: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    assert!(
+        on_disk["entries"]["src/ui/page.ts"].is_object(),
+        "the stale entry survives on disk"
+    );
+}
+
+#[test]
+fn w2_walkthrough_missing_and_garbled_state_still_exit_zero() {
+    let tmp = create_boundary_walkthrough_fixture();
+    // No state file: first-run common case.
+    let fresh = run_walkthrough_human(tmp.path());
+    assert_eq!(fresh.code, 0, "missing state file still exits 0");
+    assert!(
+        !fresh.stdout.contains("\u{2713} viewed"),
+        "no viewed marks without a ledger"
+    );
+
+    // A garbled state file must not hard-error the render.
+    let state_dir = tmp.path().join(".fallow");
+    fs::create_dir_all(&state_dir).unwrap();
+    fs::write(state_dir.join("walkthrough-state.json"), b"{ not json").unwrap();
+    let garbled = run_walkthrough_human(tmp.path());
+    assert_eq!(garbled.code, 0, "garbled state file still exits 0");
+}
+
+#[test]
+fn w2_walkthrough_mark_viewed_writes_local_ledger() {
+    let tmp = create_boundary_walkthrough_fixture();
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--mark-viewed",
+        "src/ui/page.ts",
+    ]);
+    assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
+    let state_path = tmp.path().join(".fallow/walkthrough-state.json");
+    assert!(state_path.exists(), "--mark-viewed writes the ledger");
+    let state: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&state_path).unwrap()).unwrap();
+    assert_eq!(state["version"], 1);
+    assert_eq!(state["schema"], "walkthrough-viewed-marks");
+    assert!(
+        state["entries"]["src/ui/page.ts"].is_object(),
+        "the marked file is recorded. state: {state}"
+    );
+}
+
+#[test]
+fn w2_walkthrough_conflicts_with_guide_and_file() {
+    let tmp = create_boundary_walkthrough_fixture();
+    // --walkthrough + --walkthrough-guide is a clap arg conflict (usage error,
+    // distinct from the exit-0 success path).
+    let with_guide = run_fallow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--walkthrough-guide",
+    ]);
+    assert_ne!(
+        with_guide.code, 0,
+        "--walkthrough + --walkthrough-guide is rejected by clap"
+    );
+
+    let with_file = run_fallow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--walkthrough-file",
+        "agent.json",
+    ]);
+    assert_ne!(
+        with_file.code, 0,
+        "--walkthrough + --walkthrough-file is rejected by clap"
+    );
+}

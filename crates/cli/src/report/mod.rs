@@ -34,6 +34,41 @@ pub use fallow_output::strip_root_prefix;
 pub use grouping::OwnershipResolver;
 pub use human::health::{render_health_score, render_health_trend};
 
+/// The three line-groups of a human `fallow review --walkthrough` render: the
+/// orientation header and final status (stderr), and the staged tour body
+/// (stdout). The entry point in `audit_brief.rs` owns the stream split; this
+/// keeps the pure line builder behind the private `human` module while exposing
+/// exactly what the entry point needs.
+pub struct WalkthroughHumanRender {
+    /// Review Focus orientation header lines (stderr).
+    pub header: Vec<String>,
+    /// The staged tour body lines (stdout).
+    pub body: Vec<String>,
+    /// The final green status line (stderr).
+    pub status: String,
+}
+
+/// Build the human walkthrough tour from the in-memory guide. Pure: no IO, no
+/// mutation. `viewed` decorates each file row; `show_cleared` expands the
+/// Cleared panel.
+#[must_use]
+pub fn build_walkthrough_human(
+    guide: &fallow_output::StandardWalkthroughGuide,
+    viewed: &crate::walkthrough_state::ViewedState,
+    show_cleared: bool,
+) -> WalkthroughHumanRender {
+    let input = human::walkthrough::WalkthroughHumanInput {
+        guide,
+        viewed,
+        show_cleared,
+    };
+    WalkthroughHumanRender {
+        header: human::walkthrough::build_focus_header(guide),
+        body: human::walkthrough::build_walkthrough_human_lines(&input),
+        status: human::walkthrough::build_status_line(guide),
+    }
+}
+
 /// Shared context for all report dispatch functions.
 ///
 /// Bundles the common parameters that every format renderer needs,

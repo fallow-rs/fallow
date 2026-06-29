@@ -26,6 +26,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing is not silently inert.
   (Closes [#1648](https://github.com/fallow-rs/fallow/issues/1648))
 
+- **`fallow review --walkthrough`: render the review walkthrough as a staged
+  terminal tour.** Turns the existing walkthrough guide into an ordered,
+  human-readable tour: a Review Focus header, staged sections, ordered files
+  each with a one-line fact and grounded badges, and a "cleared" panel collapsed
+  by default with an expand hint. `--format markdown` emits a paste-into-PR
+  artifact (no ANSI); `--format json` is byte-identical to `--walkthrough-guide`
+  (the same agent-contract envelope, no new schema). Per-file viewed state
+  persists locally under the project cache (`--mark-viewed`) and is tolerant of a
+  moved tree (a changed graph snapshot reads as not-viewed without discarding
+  marks). The renderer is pure presentation over the in-memory guide; it never
+  re-derives ordering or facts, and the review path still always exits 0.
+
 ### Fixed
 
 - **Telemetry: `fallow flags` and `fallow watch` now record `findings_present`,

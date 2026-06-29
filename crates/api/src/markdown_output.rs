@@ -2052,3 +2052,375 @@ fn write_metric_legend(out: &mut String, report: &fallow_output::HealthReport) {
         "\n[Full metric reference](https://docs.fallow.tools/explanations/metrics)\n\n</details>\n",
     );
 }
+
+/// Build a paste-into-PR markdown rendering of the existing walkthrough guide.
+///
+/// Mirrors the human terminal tour: a Focus line, Stage 1 (load-bearing) and
+/// Stage 2 (mechanical) sections partitioned by `concern_lens`, with synthesized
+/// badges as inline code spans, then a collapsible Cleared panel. The JSON guide
+/// path is untouched; this is the only NEW walkthrough markdown surface. No ANSI.
+#[must_use]
+pub fn build_walkthrough_markdown(
+    guide: &fallow_output::StandardWalkthroughGuide,
+    root: &Path,
+) -> String {
+    let mut out = String::new();
+    out.push_str("## Fallow Review \u{2014} Walkthrough\n\n");
+    push_walkthrough_focus(&mut out, guide);
+
+    if guide.direction.order.is_empty() {
+        out.push_str("_No reviewable units in this change (orientation only)._\n");
+        return out;
+    }
+
+    let (stage1, stage2) = partition_walkthrough_stages(guide);
+    push_walkthrough_stage(
+        &mut out,
+        "Stage 1 \u{00b7} Load-bearing",
+        &stage1,
+        guide,
+        root,
+    );
+    push_walkthrough_stage(
+        &mut out,
+        "Stage 2 \u{00b7} Mechanical",
+        &stage2,
+        guide,
+        root,
+    );
+    push_walkthrough_cleared(&mut out, guide, root);
+    out
+}
+
+/// Push the `**Focus:**` line built from the guide's triage.
+fn push_walkthrough_focus(out: &mut String, guide: &fallow_output::StandardWalkthroughGuide) {
+    let triage = &guide.digest.triage;
+    let _ = write!(
+        out,
+        "**Focus:** {} risk \u{00b7} {} \u{00b7} {} file{}\n\n",
+        walkthrough_risk_label(triage.risk_class),
+        walkthrough_effort_label(triage.review_effort),
+        triage.files,
+        plural(triage.files),
+    );
+}
+
+/// Partition the guide's units into (contract-break, orientation), each in
+/// `direction.order`.
+fn partition_walkthrough_stages(
+    guide: &fallow_output::StandardWalkthroughGuide,
+) -> (
+    Vec<&fallow_output::DirectionUnit>,
+    Vec<&fallow_output::DirectionUnit>,
+) {
+    let mut load_bearing = Vec::new();
+    let mut mechanical = Vec::new();
+    for file in &guide.direction.order {
+        let Some(unit) = guide.direction.units.iter().find(|u| &u.file == file) else {
+            continue;
+        };
+        if unit.concern_lens == "contract-break" {
+            load_bearing.push(unit);
+        } else {
+            mechanical.push(unit);
+        }
+    }
+    (load_bearing, mechanical)
+}
+
+/// Push one markdown stage section. Skipped when empty.
+fn push_walkthrough_stage(
+    out: &mut String,
+    title: &str,
+    units: &[&fallow_output::DirectionUnit],
+    guide: &fallow_output::StandardWalkthroughGuide,
+    root: &Path,
+) {
+    if units.is_empty() {
+        return;
+    }
+    let _ = write!(out, "### {title}\n\n");
+    for unit in units {
+        let rel = markdown_relative_path_str(&unit.file, root);
+        let badges = walkthrough_markdown_badges(unit, guide);
+        let suffix = if badges.is_empty() {
+            String::new()
+        } else {
+            format!("  {}", badges.join(" "))
+        };
+        let _ = writeln!(
+            out,
+            "- `{rel}` (score {}) \u{2014} {}{suffix}",
+            unit.scoring_budget,
+            walkthrough_fact(unit, guide),
+        );
+    }
+    out.push('\n');
+}
+
+/// Synthesize the inline-code-span badges for a file in markdown (paste-safe).
+fn walkthrough_markdown_badges(
+    unit: &fallow_output::DirectionUnit,
+    guide: &fallow_output::StandardWalkthroughGuide,
+) -> Vec<String> {
+    let mut badges: Vec<String> = Vec::new();
+    for decision in &guide.digest.decisions.decisions {
+        if decision.anchor_file != unit.file {
+            continue;
+        }
+        let token = match decision.category {
+            fallow_output::DecisionCategory::CouplingBoundary => "COUPLING",
+            fallow_output::DecisionCategory::PublicApiContract => "PUBLIC-API",
+            fallow_output::DecisionCategory::Dependency => "DEPENDENCY",
+        };
+        let chip = format!("`{token}`");
+        if !badges.contains(&chip) {
+            badges.push(chip);
+        }
+    }
+    if walkthrough_introduced(&unit.file, guide) {
+        badges.push("`INTRODUCED`".to_string());
+    }
+    if unit.concern_lens == "contract-break" {
+        badges.push("`OUT-OF-DIFF`".to_string());
+    }
+    if let Some(owner) = unit.expert.first() {
+        badges.push(format!("`OWNER:{}`", escape_backticks(owner)));
+    }
+    if walkthrough_bus_factor(&unit.file, guide) {
+        badges.push("`BUS-FACTOR-1`".to_string());
+    }
+    if walkthrough_weakened(&unit.file, guide) {
+        badges.push("`WEAKENED`".to_string());
+    }
+    badges
+}
+
+/// The one-line "why" for a markdown file row: decision question > out-of-diff
+/// count > focus reason > orientation only.
+fn walkthrough_fact(
+    unit: &fallow_output::DirectionUnit,
+    guide: &fallow_output::StandardWalkthroughGuide,
+) -> String {
+    if let Some(decision) = guide
+        .digest
+        .decisions
+        .decisions
+        .iter()
+        .find(|d| d.anchor_file == unit.file)
+    {
+        return escape_backticks(&decision.question);
+    }
+    if !unit.out_of_diff.is_empty() {
+        return format!(
+            "{} out-of-diff consumer{}",
+            unit.out_of_diff.len(),
+            plural(unit.out_of_diff.len())
+        );
+    }
+    if let Some(fu) = guide
+        .digest
+        .focus
+        .review_here
+        .iter()
+        .chain(guide.digest.focus.deprioritized.iter())
+        .find(|fu| fu.file == unit.file)
+    {
+        return escape_backticks(&fu.reason);
+    }
+    "orientation only".to_string()
+}
+
+fn walkthrough_introduced(file: &str, guide: &fallow_output::StandardWalkthroughGuide) -> bool {
+    let deltas = &guide.digest.deltas;
+    deltas
+        .boundary_introduced
+        .iter()
+        .chain(deltas.cycle_introduced.iter())
+        .chain(deltas.public_api_added.iter())
+        .any(|entry| entry.contains(file))
+}
+
+fn walkthrough_bus_factor(file: &str, guide: &fallow_output::StandardWalkthroughGuide) -> bool {
+    guide
+        .digest
+        .routing
+        .units
+        .iter()
+        .any(|u| u.file == file && u.bus_factor_one)
+}
+
+fn walkthrough_weakened(file: &str, guide: &fallow_output::StandardWalkthroughGuide) -> bool {
+    guide.digest.weakening.iter().any(|w| w.file == file)
+}
+
+/// Push the collapsible Cleared `<details>` panel.
+fn push_walkthrough_cleared(
+    out: &mut String,
+    guide: &fallow_output::StandardWalkthroughGuide,
+    root: &Path,
+) {
+    let deprioritized = &guide.digest.focus.deprioritized;
+    if deprioritized.is_empty() {
+        return;
+    }
+    let _ = write!(
+        out,
+        "<details><summary>Cleared ({} de-prioritized)</summary>\n\n",
+        deprioritized.len(),
+    );
+    for unit in deprioritized {
+        let _ = writeln!(
+            out,
+            "- `{}` \u{2014} {}",
+            markdown_relative_path_str(&unit.file, root),
+            escape_backticks(&unit.reason),
+        );
+    }
+    out.push_str("\n</details>\n");
+}
+
+/// A file-path string already relative to `root` (the guide stores root-relative
+/// paths), normalized + backtick-escaped for a markdown code span.
+fn markdown_relative_path_str(file: &str, root: &Path) -> String {
+    let path = Path::new(file);
+    if path.is_absolute() {
+        return markdown_relative_path(path, root);
+    }
+    escape_backticks(&normalize_uri(file))
+}
+
+fn walkthrough_risk_label(risk: fallow_output::RiskClass) -> &'static str {
+    match risk {
+        fallow_output::RiskClass::Low => "low",
+        fallow_output::RiskClass::Medium => "medium",
+        fallow_output::RiskClass::High => "high",
+    }
+}
+
+fn walkthrough_effort_label(effort: fallow_output::ReviewEffort) -> &'static str {
+    match effort {
+        fallow_output::ReviewEffort::Glance => "glance",
+        fallow_output::ReviewEffort::Review => "review",
+        fallow_output::ReviewEffort::DeepDive => "deep-dive",
+    }
+}
+
+#[cfg(test)]
+mod walkthrough_markdown_tests {
+    use super::build_walkthrough_markdown;
+    use fallow_output::{
+        AgentSchema, Decision, DecisionCategory, DecisionSurface, DiffTriage, DirectionUnit,
+        FocusMap, GraphFacts, INJECTION_NOTE, ImpactClosureFacts, PartitionFacts,
+        ReviewBriefSchemaVersion, ReviewDeltas, ReviewDirection, ReviewEffort, RiskClass,
+        RoutingFacts, StandardReviewBriefOutput, StandardWalkthroughGuide,
+    };
+    use std::path::Path;
+
+    fn guide_with_question(file: &str, question: &str) -> StandardWalkthroughGuide {
+        let unit = DirectionUnit {
+            file: file.to_string(),
+            concern_lens: "contract-break".to_string(),
+            scoring_budget: 3,
+            out_of_diff: vec!["src/consumer.ts".to_string()],
+            expert: Vec::new(),
+        };
+        let decision = Decision {
+            signal_id: "sig:1".to_string(),
+            category: DecisionCategory::CouplingBoundary,
+            question: question.to_string(),
+            anchor_file: file.to_string(),
+            anchor_line: 1,
+            signal_key: "k".to_string(),
+            previous_signal_id: None,
+            blast: 1,
+            consequence: 2,
+            expert: Vec::new(),
+            bus_factor_one: false,
+            internal_consumer_count: 0,
+            tradeoff: String::new(),
+        };
+        let digest = StandardReviewBriefOutput {
+            schema_version: ReviewBriefSchemaVersion::default(),
+            version: "test".to_string(),
+            command: "audit-brief".to_string(),
+            triage: DiffTriage {
+                files: 1,
+                hunks: None,
+                net_lines: None,
+                risk_class: RiskClass::Low,
+                review_effort: ReviewEffort::Glance,
+            },
+            graph_facts: GraphFacts {
+                exports_added: 0,
+                api_width_delta: 0,
+                reachable_from: Vec::new(),
+                boundaries_touched: Vec::new(),
+            },
+            partition: PartitionFacts::default(),
+            impact_closure: ImpactClosureFacts::default(),
+            focus: FocusMap::default(),
+            deltas: ReviewDeltas::default(),
+            weakening: Vec::new(),
+            routing: RoutingFacts::default(),
+            decisions: DecisionSurface {
+                decisions: vec![decision],
+                truncated: None,
+                emitted_signal_ids: Vec::new(),
+            },
+        };
+        StandardWalkthroughGuide {
+            schema_version: ReviewBriefSchemaVersion::default(),
+            version: "test".to_string(),
+            command: "review-walkthrough-guide".to_string(),
+            graph_snapshot_hash: "graph:abc".to_string(),
+            digest,
+            direction: ReviewDirection {
+                order: vec![file.to_string()],
+                units: vec![unit],
+            },
+            change_anchors: Vec::new(),
+            agent_schema: AgentSchema {
+                judgment_shape: "",
+                echo_field: "graph_snapshot_hash",
+                anchoring_rule: "",
+            },
+            injection_note: INJECTION_NOTE,
+        }
+    }
+
+    #[test]
+    fn renders_header_stage_and_code_span_badges() {
+        let guide = guide_with_question("src/page.ts", "Couple ui to db?");
+        let md = build_walkthrough_markdown(&guide, Path::new("/project"));
+        assert!(md.starts_with("## Fallow Review"), "got: {md}");
+        assert!(md.contains("### Stage 1"), "got: {md}");
+        assert!(md.contains("`COUPLING`"), "badges are code spans: {md}");
+        assert!(md.contains("`OUT-OF-DIFF`"), "got: {md}");
+        assert!(!md.contains('\u{1b}'), "no ANSI in markdown");
+    }
+
+    #[test]
+    fn escapes_backticks_in_decision_question() {
+        // A backtick-laden question must not break code fences when escaped.
+        let guide = guide_with_question("src/page.ts", "Replace `old` with `new`?");
+        let md = build_walkthrough_markdown(&guide, Path::new("/project"));
+        assert!(
+            md.contains("Replace \\`old\\` with \\`new\\`?"),
+            "backticks in the question are escaped: {md}"
+        );
+        // The number of UNESCAPED backticks stays balanced (even count), so no
+        // dangling code fence.
+        let unescaped = md.matches('`').count() - md.matches("\\`").count();
+        assert_eq!(unescaped % 2, 0, "code spans stay balanced: {md}");
+    }
+
+    #[test]
+    fn empty_order_renders_orientation_only_note() {
+        let mut guide = guide_with_question("src/page.ts", "q");
+        guide.direction.order.clear();
+        guide.direction.units.clear();
+        let md = build_walkthrough_markdown(&guide, Path::new("/project"));
+        assert!(md.contains("orientation only"), "got: {md}");
+    }
+}

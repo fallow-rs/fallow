@@ -7,6 +7,7 @@ mod health_runtime;
 mod health_targets;
 mod perf;
 mod traces;
+pub(super) mod walkthrough;
 
 pub(super) use check::*;
 pub(super) use cross_ref::*;

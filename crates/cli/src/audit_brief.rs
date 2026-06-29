@@ -23,6 +23,7 @@ use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
 use crate::audit::AuditResult;
+use crate::report::sink::outln;
 
 pub type ReviewBriefOutput = fallow_output::StandardReviewBriefOutput;
 
@@ -782,6 +783,94 @@ pub fn print_walkthrough_file_result(result: &AuditResult, path: &std::path::Pat
         let _ = crate::report::emit_json(&value, "review-walkthrough-validation");
     }
     ExitCode::SUCCESS
+}
+
+/// Render the EXISTING walkthrough guide as a HUMAN terminal tour (or markdown
+/// with `--format markdown`). The guide data is built unchanged by
+/// [`crate::audit_walkthrough::build_guide_from_result`]; this only renders it.
+///
+/// Format dispatch on `result.output`:
+/// - `Json` delegates verbatim to [`print_walkthrough_guide_result`], so
+///   `--walkthrough --format json` is byte-identical to `--walkthrough-guide
+///   --format json` (the json-reuse seam, zero duplication).
+/// - `Markdown` emits a paste-into-PR markdown tour to STDOUT.
+/// - every other format (Human / Compact / the CI envelopes) emits the colored
+///   staged terminal tour: the Review Focus header + final status to stderr, the
+///   tour body to stdout. The guide is advisory, never a CI gate envelope, so
+///   SARIF / CodeClimate / PR-comment formats fall through to the human tour
+///   rather than implying gate semantics.
+///
+/// `root` and `cache_dir` are threaded from `AuditOptions` because `AuditResult`
+/// carries neither: `root` displays paths, `cache_dir` locates the local
+/// viewed-state ledger. `mark_viewed` records files as viewed BEFORE rendering;
+/// the render itself is read-only. Always exit 0, even when the verdict is Fail.
+#[must_use]
+pub fn print_walkthrough_human_result(
+    result: &AuditResult,
+    root: &std::path::Path,
+    cache_dir: &std::path::Path,
+    mark_viewed: &[std::path::PathBuf],
+    show_cleared: bool,
+    quiet: bool,
+) -> ExitCode {
+    use fallow_config::OutputFormat;
+
+    // JSON reuses the single guide JSON path verbatim (no second serializer).
+    if matches!(result.output, OutputFormat::Json) {
+        return print_walkthrough_guide_result(result);
+    }
+
+    let guide = crate::audit_walkthrough::build_guide_from_result(result);
+    record_walkthrough_marks(&guide, root, cache_dir, mark_viewed);
+
+    if matches!(result.output, OutputFormat::Markdown) {
+        let markdown = fallow_api::build_walkthrough_markdown(&guide, root);
+        outln!("{markdown}");
+        return ExitCode::SUCCESS;
+    }
+
+    let viewed = crate::walkthrough_state::load_viewed_state(cache_dir);
+    let render = crate::report::build_walkthrough_human(&guide, &viewed, show_cleared);
+    if !quiet {
+        for line in &render.header {
+            eprintln!("{line}");
+        }
+    }
+    for line in &render.body {
+        outln!("{line}");
+    }
+    if !quiet {
+        eprintln!("{}", render.status);
+    }
+    ExitCode::SUCCESS
+}
+
+/// Record each `--mark-viewed` path as viewed against the current guide hash.
+///
+/// Paths are normalized to the guide's root-relative VIEW key (the guide stores
+/// root-relative paths in `direction.order`). IO failures are swallowed: the
+/// viewed-state is a local convenience and must never change the exit code.
+fn record_walkthrough_marks(
+    guide: &crate::audit_walkthrough::WalkthroughGuide,
+    root: &std::path::Path,
+    cache_dir: &std::path::Path,
+    mark_viewed: &[std::path::PathBuf],
+) {
+    if mark_viewed.is_empty() {
+        return;
+    }
+    let keys: Vec<String> = mark_viewed
+        .iter()
+        .map(|path| walkthrough_view_key(path, root))
+        .collect();
+    let _ = crate::walkthrough_state::mark_viewed(cache_dir, &keys, &guide.graph_snapshot_hash);
+}
+
+/// Normalize a `--mark-viewed` path to the guide's root-relative, forward-slashed
+/// VIEW key, so a user can pass either an absolute or a relative path.
+fn walkthrough_view_key(path: &std::path::Path, root: &std::path::Path) -> String {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    rel.to_string_lossy().replace('\\', "/")
 }
 
 #[cfg(test)]
