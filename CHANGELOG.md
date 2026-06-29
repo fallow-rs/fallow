@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Styling health: a second CSS-quality health axis under `fallow health --css`,
+  now confidence-aware.** `fallow health --css` reports a `styling_health` score
+  (0-100) and A-F grade derived from the structural CSS analytics, scored
+  SEPARATELY from the code health score (which is byte-unchanged). It is
+  descriptive-only: no exit code, badge, or CI gating. Five capped penalty
+  categories (duplication, dead surface, broken references, token erosion,
+  structural), each shown in a `Deductions:` breakdown mirroring the code score.
+  To keep the grade honest on thin CSS, it carries a `confidence` marker (`high`
+  or `low`) plus a `confidence_reason`: `low` means the grade was computed from a
+  small authored-CSS surface (below 50 declarations, e.g. a utility-first Tailwind
+  app), where the penalty ratios are too sensitive to be authoritative. A
+  low-confidence grade renders dimmed (prefixed `~`) with a plain-text caveat
+  naming the declaration and stylesheet counts; agents reading `--format json`
+  get the `confidence` flag plus the raw `css_analytics.summary.total_declarations`
+  to apply their own threshold. When no stylesheet is import-reachable, the axis
+  is withheld entirely with an explanatory note. The rubric was calibrated against
+  a real-project corpus (government design systems grade A, the worst app a B from
+  a genuine high `!important` density). Reach this over MCP via `check_health`
+  with `css=true`.
+
 - **`unusedComponentProps.ignorePattern`: opt-in regex to treat
   leading-underscore (or any pattern-matched) destructured props as
   intentionally unused.** Component frameworks often accept a prop for public-API
