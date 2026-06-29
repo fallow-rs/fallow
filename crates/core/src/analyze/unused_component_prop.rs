@@ -41,6 +41,7 @@ pub struct SfcPropScan {
 /// Find Vue `<script setup>` `defineProps` and Svelte 5 `$props()` props
 /// referenced nowhere in their own SFC. Returns framework findings only when
 /// the matching framework dependency is declared.
+#[must_use]
 pub fn find_unused_component_props(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],

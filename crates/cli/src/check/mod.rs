@@ -848,7 +848,7 @@ fn print_unused_component_props_exempted_note(result: &CheckResult, quiet: bool)
     let noun = if count == 1 { "prop" } else { "props" };
     eprintln!(
         "Note: {count} component {noun} exempted by unusedComponentProps.ignorePattern \
-         (matched on local binding name)."
+         (matched on the local binding name, e.g. _stage, not the public prop name)."
     );
 }
 
