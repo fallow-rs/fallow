@@ -6,7 +6,7 @@ paths:
 
 # Plugin system
 
-122 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, package.json metadata hooks, and optional `resolve_config()` for AST-based config parsing.
+123 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, package.json metadata hooks, and optional `resolve_config()` for AST-based config parsing.
 
 ## Rich config parsing (47 plugins)
 
@@ -36,6 +36,7 @@ paths:
 - **Wuchale**: keeps documented `wuchale.config.js` files alive at the root or inside workspaces; credits package imports/requires from those config files; treats `wuchale` and `@wuchale/vite-plugin` as tooling dependencies; and follows static `configFile` values passed to `@wuchale/vite-plugin` in `vite.config.*` only when they point at JavaScript config modules. Dynamic values and unsupported `wuchale.config.ts` files remain reportable.
 - **tsdown**: keeps `tsdown.config.{ts,mts,cts,js,cjs,mjs}` files alive, credits packages imported from those config files, and extracts literal `entry` arrays as source entry points so library entry files remain reachable. See issue #744 for the `.mts` / `.cts` config extension coverage.
 - **Velite**: activates on the `velite` dependency or a root/workspace `velite.config.{ts,mts,cts,js,mjs,cjs}` file. Keeps the config and generated `.velite/**` output always-used, traverses the hidden `.velite` directory when active, credits packages imported by the config and `velite` as a tooling dependency, and parses `defineConfig` / `defineCollection` to join each collection `pattern` (string or array, negations skipped) to the top-level `root` (default `content`) as support entry points; no recoverable pattern falls back to `<root>/**/*.{md,mdx,yml,yaml,json}`. A non-default `output.data` directory is credited config-relative. Patterns are scoped to the config file's package. See issue #609.
+- **commit-and-tag-version**: activates on `commit-and-tag-version` or the legacy `standard-version` dependency. Keeps `.versionrc` / `.versionrc.{json,js,cjs}` configs always-used, credits both packages as tooling dependencies, and reads the `bumpFiles[]` / `packageFiles[]` arrays from the package.json `commit-and-tag-version` key and from those standalone configs. Each entry's custom `updater` JS module (loaded by the tool at runtime via `readVersion` / `writeVersion`) and `filename` bump target is credited as a support setup file, resolved relative to the config directory. Crediting is gated on the file existing on disk, so non-JS `filename` targets (gradle, plist, version.txt) and phantom paths are never over-credited. Limitation: the plugin reads a single package.json key (`commit-and-tag-version`), so a legacy `standard-version` user whose bump config is inlined under the `standard-version` package.json key (rather than a `.versionrc` file) is not covered; the `.versionrc` path covers both tools. See issue #1640.
 
 ## Shared alias resolver
 

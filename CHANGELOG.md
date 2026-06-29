@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`unused-files` no longer false-flags a custom version-bump `updater` script
+  referenced under the package.json `commit-and-tag-version` key.** A custom
+  updater module (`app/scripts/gradle-updater.cjs`) is loaded by
+  commit-and-tag-version at runtime and has no static importer, so fallow
+  reported it as unused. fallow only scanned an allowlist of package.json keys
+  (`main`, `bin`, `exports`, `scripts`, ...) for file references and had no
+  plugin for this tool. A new `commit-and-tag-version` plugin (legacy enabler
+  `standard-version`) now credits each `bumpFiles[]` / `packageFiles[]` entry's
+  `updater` module and `filename` target, from both the package.json key and
+  standalone `.versionrc` / `.versionrc.{json,js,cjs}` configs. Crediting is
+  gated on the file existing on disk, so non-source targets (gradle, plist,
+  version.txt) and phantom paths are never over-credited.
+  (Closes [#1640](https://github.com/fallow-rs/fallow/issues/1640))
 - **`unused-files` no longer false-flags Next.js `page.mdx` (and other entries)
   when `next.config` wraps its config object.** fallow resolved a bare
   `export default config`, but not a config passed as a named const to a wrapper

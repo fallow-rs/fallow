@@ -85,7 +85,7 @@ For cleanup-specific findings:
 npx fallow dead-code
 ```
 
-122 framework plugins. No Node.js runtime required for static analysis. No config needed for the first run.
+123 framework plugins. No Node.js runtime required for static analysis. No config needed for the first run.
 
 ## What is Fallow?
 
@@ -914,7 +914,7 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 
 ## Framework plugins
 
-122 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
+123 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
 
 | Category | Plugins |
 |---|---|

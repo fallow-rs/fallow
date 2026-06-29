@@ -1,0 +1,16 @@
+{
+  "name": "issue-1640-commit-and-tag-version-updater",
+  "version": "1.0.0",
+  "private": true,
+  "devDependencies": {
+    "commit-and-tag-version": "^12.0.0"
+  },
+  "commit-and-tag-version": {
+    "bumpFiles": [
+      {
+        "filename": "android/build.gradle",
+        "updater": "scripts/gradle-updater.cjs"
+      }
+    ]
+  }
+}

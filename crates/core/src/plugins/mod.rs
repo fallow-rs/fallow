@@ -1158,6 +1158,7 @@ mod bun;
 mod c8;
 mod capacitor;
 mod changesets;
+mod commit_and_tag_version;
 mod commitizen;
 mod commitlint;
 mod content_collections;
