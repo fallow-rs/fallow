@@ -250,6 +250,15 @@ fn render_styling_health(lines: &mut Vec<String>, report: &fallow_output::Health
         "(CSS quality, scored separately from the code health score)".dimmed(),
     ));
 
+    // Low confidence: the grade above is rendered dimmed (no green/yellow/red
+    // band) and a caveat carries the reason in TEXT, so the signal survives a
+    // non-color terminal or piped output (agents read piped human output too).
+    // The caveat sits before `Deductions:` so the reader sees the qualifier
+    // before the penalty breakdown they might act on.
+    if let Some(reason) = &styling.confidence_reason {
+        lines.push(format!("  {} {reason}", "Low confidence:".yellow().bold()));
+    }
+
     let penalties = styling_health_penalties(&styling.penalties);
     if !penalties.is_empty() {
         lines.push(format!(
@@ -278,6 +287,18 @@ fn styling_health_penalties(p: &fallow_output::StylingHealthPenalties) -> Vec<(&
 }
 
 fn styling_health_colored(styling: &fallow_output::StylingHealth) -> String {
+    // A low-confidence grade is dimmed and prefixed with `~` regardless of score
+    // band: rendering a sparse-surface 89 in confident green-bold would fight the
+    // "Low confidence:" caveat line. The band coloring is reserved for grades the
+    // analyzed CSS surface is large enough to back.
+    if matches!(
+        styling.confidence,
+        fallow_output::StylingHealthConfidence::Low
+    ) {
+        return format!("~{:.0} {}", styling.score, styling.grade)
+            .dimmed()
+            .to_string();
+    }
     let text = format!("{:.0} {}", styling.score, styling.grade);
     if styling.score >= 85.0 {
         text.green().bold().to_string()

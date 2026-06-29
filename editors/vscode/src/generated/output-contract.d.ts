@@ -601,6 +601,16 @@ export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "co
  * Discriminant for [`UnusedAtRule::kind`].
  */
 export type UnusedAtRuleKind = ("property-registration" | "layer")
+/**
+ * Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier
+ * `high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON
+ * PURPOSE: styling confidence is a binary sample-size knee (the authored-CSS
+ * surface is either large enough for the declaration-normalized rubric to be
+ * reliable or it is not), not three distinct evidence tiers, so a never-emitted
+ * `Medium` would be dead surface. Serializes lowercase (`"high"` / `"low"`),
+ * matching the sibling confidence enums' vocabulary.
+ */
+export type StylingHealthConfidence = ("high" | "low")
 export type InspectTargetDescriptor = ({
 file: string
 type: "file"
@@ -6590,6 +6600,14 @@ formula_version: number
 score: number
 grade: string
 penalties: StylingHealthPenalties
+confidence: StylingHealthConfidence
+/**
+ * Human-readable reason the grade is low-confidence (the declaration and
+ * stylesheet counts the grade was computed from). `None` when confidence is
+ * `High`. Prose, not a stable machine field: gate on `confidence` (or on the
+ * raw `total_declarations`), not on this string.
+ */
+confidence_reason?: (string | null)
 }
 /**
  * Per-category penalty breakdown for the styling-health score. Each field is the
@@ -6606,9 +6624,12 @@ export interface StylingHealthPenalties {
  */
 duplication: number
 /**
- * Dead styling surface: unreferenced classes, unused `@theme` tokens, unused
- * `@property`/`@layer` at-rules, and dead `@font-face` families, normalized
- * per analyzed stylesheet. Capped at 20pt.
+ * Dead styling surface, two independently-normalized terms summed and capped
+ * at 20pt: (a) unused `@theme` tokens as a share of the total `@theme` token
+ * population (size-independent, so a declaration-sparse Tailwind project is
+ * not penalized for a few dead tokens); plus (b) the other dead entities
+ * (unreferenced classes, unused `@property`/`@layer` at-rules, dead
+ * `@font-face` families) as a share of `total_declarations`.
  */
 dead_surface: number
 /**

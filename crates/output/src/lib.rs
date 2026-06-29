@@ -181,9 +181,9 @@ pub use health_scores::{
     HealthConfiguredThresholds, HealthEffectiveThresholds, HealthScore, HealthScorePenalties,
     HealthSummary, HotspotEntry, HotspotSummary, LargeFunctionEntry, MI_DENSITY_MIN_LINES,
     OwnershipMetrics, OwnershipState, ReactHookProfile, STYLING_HEALTH_FORMULA_VERSION,
-    StylingHealth, StylingHealthPenalties, ThresholdOverrideMetrics, ThresholdOverrideState,
-    ThresholdOverrideStatus, ThresholdSource, compute_finding_severity, letter_grade,
-    summarize_coverage_source_consistency,
+    StylingHealth, StylingHealthConfidence, StylingHealthPenalties, ThresholdOverrideMetrics,
+    ThresholdOverrideState, ThresholdOverrideStatus, ThresholdSource, compute_finding_severity,
+    letter_grade, summarize_coverage_source_consistency,
 };
 pub use health_targets::{
     CloneSiblingEvidence, Confidence, ContributingFactor, DirectCallerEvidence,

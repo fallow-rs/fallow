@@ -93,6 +93,40 @@ pub struct StylingHealth {
     pub score: f64,
     pub grade: &'static str,
     pub penalties: StylingHealthPenalties,
+    /// How much to trust the grade. `Low` when the analyzed CSS surface is too
+    /// thin for the declaration-normalized penalty rubric to be reliable (see
+    /// `confidence_reason`); `High` otherwise. This is descriptive metadata that
+    /// NEVER feeds the score: `score`/`grade`/`penalties` are byte-identical
+    /// whether confidence is high or low. An agent reads `confidence` as a
+    /// convenience flag and `css_analytics.summary.total_declarations` (always
+    /// co-emitted under `--css`) as the raw substrate to apply its own threshold;
+    /// the current rule is `Low` when `total_declarations` is below 50.
+    pub confidence: StylingHealthConfidence,
+    /// Human-readable reason the grade is low-confidence (the declaration and
+    /// stylesheet counts the grade was computed from). `None` when confidence is
+    /// `High`. Prose, not a stable machine field: gate on `confidence` (or on the
+    /// raw `total_declarations`), not on this string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence_reason: Option<String>,
+}
+
+/// Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier
+/// `high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON
+/// PURPOSE: styling confidence is a binary sample-size knee (the authored-CSS
+/// surface is either large enough for the declaration-normalized rubric to be
+/// reliable or it is not), not three distinct evidence tiers, so a never-emitted
+/// `Medium` would be dead surface. Serializes lowercase (`"high"` / `"low"`),
+/// matching the sibling confidence enums' vocabulary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum StylingHealthConfidence {
+    /// The analyzed CSS surface is large enough for the grade to be reliable.
+    High,
+    /// The grade was computed from a thin authored-CSS surface, so it is
+    /// indicative rather than authoritative. NOT a signal that fallow's analysis
+    /// failed: the rubric simply had little authored CSS to measure.
+    Low,
 }
 
 /// Per-category penalty breakdown for the styling-health score. Each field is the
@@ -840,6 +874,8 @@ mod tests {
                 token_erosion: 2.0,
                 structural: 2.0,
             },
+            confidence: StylingHealthConfidence::High,
+            confidence_reason: None,
         };
         let json = serde_json::to_string(&styling).expect("styling health should serialize");
         let parsed: serde_json::Value =
@@ -852,6 +888,35 @@ mod tests {
         assert_eq!(parsed["penalties"]["broken_references"], 4.0);
         assert_eq!(parsed["penalties"]["token_erosion"], 2.0);
         assert_eq!(parsed["penalties"]["structural"], 2.0);
+        // `high` confidence omits the reason; the enum serializes lowercase.
+        assert_eq!(parsed["confidence"], "high");
+        assert!(parsed.get("confidence_reason").is_none());
+    }
+
+    #[test]
+    fn styling_health_low_confidence_serializes_reason() {
+        let styling = StylingHealth {
+            formula_version: STYLING_HEALTH_FORMULA_VERSION,
+            score: 89.0,
+            grade: "A",
+            penalties: StylingHealthPenalties {
+                duplication: 0.0,
+                dead_surface: 0.0,
+                broken_references: 0.0,
+                token_erosion: 0.0,
+                structural: 0.0,
+            },
+            confidence: StylingHealthConfidence::Low,
+            confidence_reason: Some("graded from only 24 declarations across 2 stylesheets".into()),
+        };
+        let json = serde_json::to_string(&styling).expect("styling health should serialize");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("styling health JSON should parse");
+        assert_eq!(parsed["confidence"], "low");
+        assert_eq!(
+            parsed["confidence_reason"],
+            "graded from only 24 declarations across 2 stylesheets"
+        );
     }
 
     #[test]

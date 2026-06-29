@@ -2961,6 +2961,30 @@ fn health_css_flag_surfaces_css_analytics() {
     );
 }
 
+/// Assert the styling-health confidence marker shape: a `high`/`low` enum, with
+/// the prose reason present iff `low` and omitted iff `high`.
+fn assert_styling_confidence_shape(styling: &serde_json::Value) {
+    let confidence = styling["confidence"].as_str();
+    assert!(
+        matches!(confidence, Some("high" | "low")),
+        "styling_health carries a confidence marker: {styling}"
+    );
+    if confidence == Some("low") {
+        assert!(
+            styling
+                .get("confidence_reason")
+                .and_then(|r| r.as_str())
+                .is_some_and(|r| r.contains("declaration")),
+            "a low-confidence grade names the declaration count: {styling}"
+        );
+    } else {
+        assert!(
+            styling.get("confidence_reason").is_none(),
+            "a high-confidence grade omits the reason: {styling}"
+        );
+    }
+}
+
 #[test]
 fn health_css_flag_surfaces_styling_health_axis() {
     let dir = tempdir().unwrap();
@@ -3049,6 +3073,7 @@ fn health_css_flag_surfaces_styling_health_axis() {
         styling["score"].as_f64().is_some_and(|s| s < 100.0),
         "a dead @font-face should dock the styling score: {styling}"
     );
+    assert_styling_confidence_shape(styling);
 
     // The CODE health_score is byte-identical with and without --css: the styling
     // axis is additive and never folds into the code score.

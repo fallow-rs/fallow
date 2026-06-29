@@ -17291,13 +17291,25 @@
         },
         "penalties": {
           "$ref": "#/definitions/StylingHealthPenalties"
+        },
+        "confidence": {
+          "description": "How much to trust the grade. `Low` when the analyzed CSS surface is too\nthin for the declaration-normalized penalty rubric to be reliable (see\n`confidence_reason`); `High` otherwise. This is descriptive metadata that\nNEVER feeds the score: `score`/`grade`/`penalties` are byte-identical\nwhether confidence is high or low. An agent reads `confidence` as a\nconvenience flag and `css_analytics.summary.total_declarations` (always\nco-emitted under `--css`) as the raw substrate to apply its own threshold;\nthe current rule is `Low` when `total_declarations` is below 50.",
+          "$ref": "#/definitions/StylingHealthConfidence"
+        },
+        "confidence_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Human-readable reason the grade is low-confidence (the declaration and\nstylesheet counts the grade was computed from). `None` when confidence is\n`High`. Prose, not a stable machine field: gate on `confidence` (or on the\nraw `total_declarations`), not on this string."
         }
       },
       "required": [
         "formula_version",
         "score",
         "grade",
-        "penalties"
+        "penalties",
+        "confidence"
       ],
       "description": "Project-level styling-health score: a SECOND health axis computed purely from\nthe structural CSS analytics (`CssAnalyticsReport`), orthogonal to the JS/TS\ncode-health [`HealthScore`]. Surfaced only alongside the `--css` analytics, so\na plain `fallow health` run is byte-unchanged. The code score and grade stay\nuntouched: styling health is additive, never folded into the code score.\n\nLike [`HealthScore`], the score starts at 100 and subtracts capped per-category\npenalties; the grade reuses the shared [`letter_grade`] thresholds verbatim\n(A>=85, B>=70, C>=55, D>=40, F<40), so the two axes are read on one scale."
     },
@@ -17310,7 +17322,7 @@
         },
         "dead_surface": {
           "type": "number",
-          "description": "Dead styling surface: unreferenced classes, unused `@theme` tokens, unused\n`@property`/`@layer` at-rules, and dead `@font-face` families, normalized\nper analyzed stylesheet. Capped at 20pt."
+          "description": "Dead styling surface, two independently-normalized terms summed and capped\nat 20pt: (a) unused `@theme` tokens as a share of the total `@theme` token\npopulation (size-independent, so a declaration-sparse Tailwind project is\nnot penalized for a few dead tokens); plus (b) the other dead entities\n(unreferenced classes, unused `@property`/`@layer` at-rules, dead\n`@font-face` families) as a share of `total_declarations`."
         },
         "broken_references": {
           "type": "number",
@@ -17333,6 +17345,21 @@
         "structural"
       ],
       "description": "Per-category penalty breakdown for the styling-health score. Each field is the\nnumber of points subtracted from a starting 100 for one CSS signal family,\nalready capped at its category ceiling. A `0.0` field means \"the signal was\nevaluated and clean\"; the whole struct is only ever built when CSS analytics\nwere produced, so there is no \"missing pipeline\" ambiguity to model with\n`Option` here (the parent `StylingHealth` is itself `Option` on the report)."
+    },
+    "StylingHealthConfidence": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "high",
+          "description": "The analyzed CSS surface is large enough for the grade to be reliable."
+        },
+        {
+          "type": "string",
+          "const": "low",
+          "description": "The grade was computed from a thin authored-CSS surface, so it is\nindicative rather than authoritative. NOT a signal that fallow's analysis\nfailed: the rubric simply had little authored CSS to measure."
+        }
+      ],
+      "description": "Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier\n`high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON\nPURPOSE: styling confidence is a binary sample-size knee (the authored-CSS\nsurface is either large enough for the declaration-normalized rubric to be\nreliable or it is not), not three distinct evidence tiers, so a never-emitted\n`Medium` would be dead surface. Serializes lowercase (`\"high\"` / `\"low\"`),\nmatching the sibling confidence enums' vocabulary."
     }
   }
 }

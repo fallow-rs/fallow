@@ -55,17 +55,35 @@
 //! signals stay available in the raw `CssAnalyticsReport` for descriptive
 //! surfaces, but they do not move the grade.
 //!
-//! Two related robustness improvements are deferred upstream follow-ups, NOT
-//! rubric changes: (a) confidence-gating the styling grade when `files_analyzed`
-//! is tiny (so a 2-file sample is not graded with the same authority as a full
-//! design system), and (b) emitting an explicit reason when `css_analytics` is
-//! empty because module resolution failed (so an empty report is not silently
-//! scored as a clean 100). Both live in the analytics/pipeline layer, above this
-//! pure-function rubric.
+//! ## Confidence (descriptive metadata, NOT part of the formula)
+//!
+//! The grade carries a [`StylingHealthConfidence`] marking it `Low` when the
+//! authored-declaration count is below `MIN_CONFIDENT_DECLARATIONS` (with a
+//! stated reason), so a grade computed from a thin CSS surface is not presented
+//! with the same authority as one from a full design system. Confidence NEVER
+//! feeds the score: `score` / `grade` / `penalties` are byte-identical whether it
+//! is high or low. The framing is "thin authored-CSS surface", not "unreliable
+//! analysis": a utility-first Tailwind project legitimately authors little CSS,
+//! so a low mark means the declaration-normalized rubric had little to measure,
+//! not that fallow's analysis failed. The EMPTY case (no import-reachable
+//! stylesheet, so `css_analytics` and `styling_health` are both `None`) is the
+//! strongest form of withholding and is handled one layer up by the human "No
+//! stylesheets analyzed" note; this function only ever runs on a non-empty report.
+//!
+//! ## Calibration (v2, corpus-locked)
+//!
+//! The v2 weights were validated against a 10-project corpus (3 design systems /
+//! SCSS, 4 Tailwind apps, 3 empty / CSS-in-JS) and left UNCHANGED:
+//! [`STYLING_HEALTH_FORMULA_VERSION`] stays 2 because no rubric constant moved
+//! (bumping it would falsely signal a scoring change to consumers diffing scores
+//! across versions). Design systems grade A (utrecht 99.1, rijkshuisstijl 97.6),
+//! the worst app a B (82.2, from a genuine ~48% `!important` density), and the new
+//! jsonforms-adapter-vue3 data point grades 96.7 A. The confidence marker, not a
+//! constant change, is what closes the sparse-grade credibility gap.
 
 use fallow_output::{
-    CssAnalyticsReport, STYLING_HEALTH_FORMULA_VERSION, StylingHealth, StylingHealthPenalties,
-    letter_grade,
+    CssAnalyticsReport, STYLING_HEALTH_FORMULA_VERSION, StylingHealth, StylingHealthConfidence,
+    StylingHealthPenalties, letter_grade,
 };
 
 const DUPLICATION_CAP: f64 = 20.0;
@@ -73,6 +91,20 @@ const DEAD_SURFACE_CAP: f64 = 20.0;
 const BROKEN_REFERENCES_CAP: f64 = 15.0;
 const TOKEN_EROSION_CAP: f64 = 10.0;
 const STRUCTURAL_CAP: f64 = 10.0;
+
+/// Authored-CSS declaration floor below which the grade is marked low-confidence.
+/// Below this, the declaration-normalized penalty ratios are hypersensitive: a
+/// single minimal duplicate block (4 declarations appearing twice = 4 removable)
+/// contributes `4 / total * 200` to duplication, which is the full 20pt cap at 40
+/// declarations and 16pt at 50, and a handful of `!important` declarations
+/// likewise pushes the structural penalty to its cap. So below ~50 authored
+/// declarations a single finding can move an entire penalty category to its
+/// ceiling and the grade reflects sampling noise rather than systematic quality;
+/// above it, individual findings contribute proportionally. Empirically separates
+/// the calibration corpus: fallow-tools (24 declarations) and leenders-coaching
+/// (38) read as thin authored surfaces, while every design system and the
+/// `>= 145`-declaration Tailwind apps stay confident.
+const MIN_CONFIDENT_DECLARATIONS: u32 = 50;
 
 /// `!important` density (as a percentage of declarations) below which no
 /// structural penalty accrues. A small amount of `!important` is normal.
@@ -153,13 +185,37 @@ pub fn compute_styling_health(
     let penalties = compute_styling_penalties(report, theme_tokens_defined);
     let score = apply_styling_penalties(&penalties);
     let grade = letter_grade(score);
+    let (confidence, confidence_reason) = styling_confidence(report);
 
     StylingHealth {
         formula_version: STYLING_HEALTH_FORMULA_VERSION,
         score,
         grade,
         penalties,
+        confidence,
+        confidence_reason,
     }
+}
+
+/// Classify the grade's confidence from the analyzed CSS surface. `Low` when the
+/// authored-declaration count is below [`MIN_CONFIDENT_DECLARATIONS`], with a
+/// human-readable reason naming the declaration and stylesheet counts the grade
+/// was computed from; `High` (no reason) otherwise. Descriptive metadata only: it
+/// never feeds the score. See the module docs for why the framing is "thin
+/// authored-CSS surface", not "unreliable analysis".
+fn styling_confidence(report: &CssAnalyticsReport) -> (StylingHealthConfidence, Option<String>) {
+    let s = &report.summary;
+    if s.total_declarations >= MIN_CONFIDENT_DECLARATIONS {
+        return (StylingHealthConfidence::High, None);
+    }
+    let reason = format!(
+        "graded from only {} declaration{} across {} stylesheet{}",
+        s.total_declarations,
+        if s.total_declarations == 1 { "" } else { "s" },
+        s.files_analyzed,
+        if s.files_analyzed == 1 { "" } else { "s" },
+    );
+    (StylingHealthConfidence::Low, Some(reason))
 }
 
 fn compute_styling_penalties(

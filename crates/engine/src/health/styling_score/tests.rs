@@ -295,6 +295,76 @@ fn score_floors_at_rubric_minimum_for_pathological_report() {
 }
 
 #[test]
+fn clean_report_is_high_confidence() {
+    // clean_report() has 50 declarations, exactly at MIN_CONFIDENT_DECLARATIONS,
+    // so it is High confidence with no reason.
+    let styling = score(&clean_report());
+    assert_eq!(styling.confidence, StylingHealthConfidence::High);
+    assert!(styling.confidence_reason.is_none());
+}
+
+#[test]
+fn sparse_report_is_low_confidence_with_reason() {
+    // The fallow-tools shape: 24 declarations across 2 stylesheets is below the
+    // floor, so the grade is marked low-confidence and the reason names both counts.
+    let mut report = clean_report();
+    report.summary.total_declarations = 24;
+    report.summary.files_analyzed = 2;
+    let styling = score(&report);
+    assert_eq!(styling.confidence, StylingHealthConfidence::Low);
+    let reason = styling
+        .confidence_reason
+        .expect("low confidence carries a reason");
+    assert!(reason.contains("24 declarations"), "reason: {reason}");
+    assert!(reason.contains("2 stylesheets"), "reason: {reason}");
+}
+
+#[test]
+fn confidence_reason_is_singular_for_one_of_each() {
+    let mut report = clean_report();
+    report.summary.total_declarations = 1;
+    report.summary.files_analyzed = 1;
+    let reason = score(&report)
+        .confidence_reason
+        .expect("low confidence carries a reason");
+    assert!(reason.contains("1 declaration across"), "reason: {reason}");
+    assert!(reason.contains("1 stylesheet"), "reason: {reason}");
+    assert!(!reason.contains("declarations"), "reason: {reason}");
+    assert!(!reason.contains("stylesheets"), "reason: {reason}");
+}
+
+#[test]
+fn confidence_boundary_is_at_min_declarations() {
+    // 49 declarations -> Low; 50 -> High. The boundary is inclusive on High.
+    let mut report = clean_report();
+    report.summary.total_declarations = 49;
+    assert_eq!(score(&report).confidence, StylingHealthConfidence::Low);
+    report.summary.total_declarations = 50;
+    assert_eq!(score(&report).confidence, StylingHealthConfidence::High);
+}
+
+#[test]
+fn confidence_does_not_change_score_or_grade() {
+    // Two reports identical except for declaration count straddling the floor:
+    // their penalties are computed from the same ratios, and confidence is pure
+    // metadata, so flipping confidence must not perturb the score or grade beyond
+    // what the declaration-count denominator itself implies. Here both have zero
+    // findings, so both score a clean 100 / A regardless of confidence.
+    let mut sparse = clean_report();
+    sparse.summary.total_declarations = 24;
+    let mut solid = clean_report();
+    solid.summary.total_declarations = 500;
+    let a = score(&sparse);
+    let b = score(&solid);
+    assert_eq!(a.confidence, StylingHealthConfidence::Low);
+    assert_eq!(b.confidence, StylingHealthConfidence::High);
+    approx(a.score, 100.0);
+    approx(b.score, 100.0);
+    assert_eq!(a.grade, "A");
+    assert_eq!(b.grade, "A");
+}
+
+#[test]
 fn apply_styling_penalties_clamps_below_zero() {
     // Penalties whose sum exceeds 100 can only arise from an uncapped category;
     // construct that case directly to exercise the clamp branch in
