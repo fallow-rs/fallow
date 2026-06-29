@@ -96,7 +96,10 @@ fn viewed_files(input: &WalkthroughHumanInput<'_>) -> Vec<String> {
 
 /// Same, but from a raw guide + viewed-state pair (used by the header/status
 /// accounting, which do not build a full `WalkthroughHumanInput`).
-fn viewed_files_for(guide: &StandardWalkthroughGuide, viewed: &ViewedState) -> Vec<String> {
+pub(in crate::report) fn viewed_files_for(
+    guide: &StandardWalkthroughGuide,
+    viewed: &ViewedState,
+) -> Vec<String> {
     guide
         .direction
         .order
@@ -151,11 +154,12 @@ fn push_stage(
 }
 
 /// Render one file's row: the header line (path + badges) and the one-line fact
-/// beneath it. The raw "(score N)" is intentionally NOT shown: it is an internal
-/// composite that does not explain the visible within-stage order (Stage 1 is
-/// ordered by out-of-diff consumer count, Stage 2 by that same composite), so
-/// surfacing the number contradicted the order. The fact line carries the real
-/// ordering signal (consumer count / fan-in) instead.
+/// beneath it. The raw composite "(score N)" is intentionally NOT shown: it is an
+/// opaque attention total that did not explain the within-stage order. The fact
+/// line is the concrete "why" each row already carries (out-of-diff consumer
+/// count, importer count, decision question), which is also the number the
+/// within-stage order follows, so a row's position is explained by the count it
+/// shows.
 fn push_file_row(lines: &mut Vec<String>, unit: &DirectionUnit, input: &WalkthroughHumanInput<'_>) {
     let badges = synthesize_badges(unit, input);
     let badge_suffix = if badges.is_empty() {
@@ -164,13 +168,14 @@ fn push_file_row(lines: &mut Vec<String>, unit: &DirectionUnit, input: &Walkthro
         format!(" {}", badges.join(" "))
     };
     lines.push(format!("  {}{badge_suffix}", format_path(&unit.file)));
-    lines.push(format!("    {}", fact_line(unit, input.guide).dimmed()));
+    lines.push(format!("    {}", fact_why(unit, input.guide).dimmed()));
 }
 
-/// The one-line "why" for a file: the strongest available signal. Decision
-/// question (anchored at this file) > out-of-diff consumers > focus reason >
-/// orientation-only.
-fn fact_line(unit: &DirectionUnit, guide: &StandardWalkthroughGuide) -> String {
+/// The one-line "why" for a file: the strongest available signal. The cascade is
+/// decision question (anchored at this file) > out-of-diff consumers > focus
+/// reason > orientation-only. The concrete count it carries (consumers, importers)
+/// is the same number the within-stage order follows.
+fn fact_why(unit: &DirectionUnit, guide: &StandardWalkthroughGuide) -> String {
     if let Some(decision) = guide
         .digest
         .decisions
@@ -313,7 +318,7 @@ fn push_cleared_panel(lines: &mut Vec<String>, input: &WalkthroughHumanInput<'_>
     if !input.show_cleared {
         lines.push(
             format!(
-                "\u{25b8} Cleared ({} de-prioritized, {} viewed) \u{2014} pass --show-cleared to expand",
+                "\u{25b8} Cleared ({} de-prioritized, {} viewed) \u{00b7} pass --show-cleared to expand",
                 deprioritized.len(),
                 viewed_count,
             )
@@ -402,7 +407,7 @@ pub(in crate::report) fn build_focus_header(
         "{} {}",
         "\u{25cf}".cyan(),
         format!(
-            "Review Focus \u{2014} {} risk \u{00b7} {} \u{00b7} {} file{}",
+            "Review Focus: {} risk \u{00b7} {} \u{00b7} {} file{}",
             risk_label(triage.risk_class),
             effort_label(triage.review_effort),
             total,
@@ -467,16 +472,26 @@ fn focus_subline(guide: &StandardWalkthroughGuide) -> Option<String> {
 /// The final green status line (rendered to stderr by the entry point). Never a
 /// failure glyph; the walkthrough always exits 0. The count is the files visible
 /// in stages (de-prioritized + viewed already collapsed into Cleared), so it
-/// reconciles with the header's `staged` bucket.
+/// reconciles with the header's `staged` bucket. The stage count reflects the
+/// stages ACTUALLY rendered (a Stage-1-only or empty change no longer claims a
+/// hardcoded "2 stages"), and the clause is dropped entirely when nothing staged.
 #[must_use]
 pub(in crate::report) fn build_status_line(
     guide: &StandardWalkthroughGuide,
     viewed: &ViewedState,
 ) -> String {
-    let acc = WalkthroughAccounting::compute(guide, &viewed_files_for(guide, viewed));
+    let viewed_in_order = viewed_files_for(guide, viewed);
+    let acc = WalkthroughAccounting::compute(guide, &viewed_in_order);
     let files = acc.staged;
+    let (stage1, stage2) = partition_stages(guide, &viewed_in_order);
+    let stages = usize::from(!stage1.is_empty()) + usize::from(!stage2.is_empty());
+    let across = if stages == 0 {
+        String::new()
+    } else {
+        format!(" across {stages} stage{}", plural(stages))
+    };
     format!(
-        "{} Walkthrough ready \u{2014} {} file{} across 2 stages",
+        "{} Walkthrough ready: {} file{}{across}",
         "\u{2713}".green(),
         files,
         plural(files),
@@ -852,10 +867,12 @@ mod tests {
             header.contains("3 non-source not reviewed"),
             "excluded: {header}"
         );
-        // The status line agrees with the staged bucket (not the total).
+        // The status line agrees with the staged bucket (not the total). Both
+        // staged units are orientation-only, so a single Stage 2 renders and the
+        // status reports "1 stage", not a hardcoded "2 stages".
         let status = crate::report::human::strip_ansi(&build_status_line(&guide, &viewed));
         assert!(
-            status.contains("2 files across 2 stages"),
+            status.contains("2 files across 1 stage"),
             "status: {status}"
         );
     }
@@ -947,12 +964,10 @@ mod tests {
             body.contains("fresh.ts"),
             "the un-viewed file stays staged: {body}"
         );
-        // Header staged count drops the viewed file; status agrees.
+        // Header staged count drops the viewed file; status agrees. The remaining
+        // staged unit is orientation-only, so one Stage 2 renders ("1 stage").
         let status = crate::report::human::strip_ansi(&build_status_line(&guide, &viewed));
-        assert!(
-            status.contains("1 file across 2 stages"),
-            "status: {status}"
-        );
+        assert!(status.contains("1 file across 1 stage"), "status: {status}");
     }
 
     // F4/F5/F7: the contract member list is capped and the trailing guidance

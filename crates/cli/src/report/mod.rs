@@ -48,6 +48,18 @@ pub struct WalkthroughHumanRender {
     pub status: String,
 }
 
+/// The root-relative files (in `direction.order`) the local ledger marked viewed
+/// against the guide's current hash. Exposed so the markdown surface can collapse
+/// the same viewed files into Cleared that the human surface does, keeping the two
+/// formats consistent on the same on-disk `--mark-viewed` state.
+#[must_use]
+pub fn walkthrough_viewed_files(
+    guide: &fallow_output::StandardWalkthroughGuide,
+    viewed: &crate::walkthrough_state::ViewedState,
+) -> Vec<String> {
+    human::walkthrough::viewed_files_for(guide, viewed)
+}
+
 /// Build the human walkthrough tour from the in-memory guide. Pure: no IO, no
 /// mutation. `viewed` decorates each file row; `show_cleared` expands the
 /// Cleared panel.

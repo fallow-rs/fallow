@@ -2059,21 +2059,28 @@ fn write_metric_legend(out: &mut String, report: &fallow_output::HealthReport) {
 /// Stage 2 (mechanical) sections partitioned by `concern_lens`, with synthesized
 /// badges as inline code spans, then a collapsible Cleared panel. The JSON guide
 /// path is untouched; this is the only NEW walkthrough markdown surface. No ANSI.
+///
+/// `viewed` is the root-relative file list the local ledger marked viewed (the
+/// `--mark-viewed` state). Viewed files collapse out of their stage and into the
+/// Cleared panel, and the Cleared summary reports the viewed count, so the
+/// markdown surface honors `--mark-viewed` the same way the human surface does
+/// instead of silently ignoring it.
 #[must_use]
 pub fn build_walkthrough_markdown(
     guide: &fallow_output::StandardWalkthroughGuide,
     root: &Path,
+    viewed: &[String],
 ) -> String {
     let mut out = String::new();
-    out.push_str("## Fallow Review \u{2014} Walkthrough\n\n");
-    push_walkthrough_focus(&mut out, guide);
+    out.push_str("## Fallow Review: Walkthrough\n\n");
+    push_walkthrough_focus(&mut out, guide, viewed);
 
     if guide.direction.order.is_empty() {
         out.push_str("_No reviewable units in this change (orientation only)._\n");
         return out;
     }
 
-    let (stage1, stage2) = partition_walkthrough_stages(guide);
+    let (stage1, stage2) = partition_walkthrough_stages(guide, viewed);
     push_walkthrough_stage(
         &mut out,
         "Stage 1 \u{00b7} Load-bearing",
@@ -2088,18 +2095,20 @@ pub fn build_walkthrough_markdown(
         guide,
         root,
     );
-    push_walkthrough_cleared(&mut out, guide, root);
+    push_walkthrough_cleared(&mut out, guide, root, viewed);
     out
 }
 
 /// Push the `**Focus:**` line built from the guide's triage, with the reconciled
 /// file accounting (staged + cleared + excluded) so the count matches the real
 /// changed set and non-source files are surfaced, not silently dropped.
-fn push_walkthrough_focus(out: &mut String, guide: &fallow_output::StandardWalkthroughGuide) {
+fn push_walkthrough_focus(
+    out: &mut String,
+    guide: &fallow_output::StandardWalkthroughGuide,
+    viewed: &[String],
+) {
     let triage = &guide.digest.triage;
-    // The markdown surface is a paste artifact with no local viewed-state, so the
-    // only collapse is de-prioritized; pass an empty viewed list.
-    let acc = fallow_output::WalkthroughAccounting::compute(guide, &[]);
+    let acc = fallow_output::WalkthroughAccounting::compute(guide, viewed);
     let total = acc.header_total();
     let _ = write!(
         out,
@@ -2122,17 +2131,19 @@ fn push_walkthrough_focus(out: &mut String, guide: &fallow_output::StandardWalkt
     out.push_str("\n\n");
 }
 
-/// Partition the guide's VISIBLE stage units (de-prioritized files collapsed out
-/// into Cleared) into (contract-break, orientation), each in `direction.order`.
-fn partition_walkthrough_stages(
-    guide: &fallow_output::StandardWalkthroughGuide,
+/// Partition the guide's VISIBLE stage units (de-prioritized AND viewed files
+/// collapsed out into Cleared) into (contract-break, orientation), each in
+/// `direction.order`.
+fn partition_walkthrough_stages<'a>(
+    guide: &'a fallow_output::StandardWalkthroughGuide,
+    viewed: &[String],
 ) -> (
-    Vec<&fallow_output::DirectionUnit>,
-    Vec<&fallow_output::DirectionUnit>,
+    Vec<&'a fallow_output::DirectionUnit>,
+    Vec<&'a fallow_output::DirectionUnit>,
 ) {
     let mut load_bearing = Vec::new();
     let mut mechanical = Vec::new();
-    for unit in fallow_output::visible_stage_units(guide, &[]) {
+    for unit in fallow_output::visible_stage_units(guide, viewed) {
         if unit.concern_lens == "contract-break" {
             load_bearing.push(unit);
         } else {
@@ -2162,14 +2173,12 @@ fn push_walkthrough_stage(
         } else {
             format!("  {}", badges.join(" "))
         };
-        // The raw "(score N)" is intentionally omitted: it is an internal composite
-        // that does not explain the visible within-stage order, so showing it
-        // contradicted the order. The fact carries the real ordering signal.
-        let _ = writeln!(
-            out,
-            "- `{rel}` \u{2014} {}{suffix}",
-            walkthrough_fact(unit, guide),
-        );
+        // The raw composite "(score N)" is omitted: it is an opaque attention total
+        // that did not explain the within-stage order. `walkthrough_fact` is the
+        // concrete "why" each row carries (out-of-diff count, importer count), which
+        // is also the number the within-stage order follows, so a row's position is
+        // explained by the count it shows.
+        let _ = writeln!(out, "- `{rel}`: {}{suffix}", walkthrough_fact(unit, guide));
     }
     out.push('\n');
 }
@@ -2212,8 +2221,10 @@ fn walkthrough_markdown_badges(
     badges
 }
 
-/// The one-line "why" for a markdown file row: decision question > out-of-diff
-/// count > focus reason > orientation only.
+/// The one-line "why" for a markdown file row. The cascade is decision question >
+/// out-of-diff count > focus reason > orientation only. The concrete count it
+/// carries (consumers, importers) is the same number the within-stage order
+/// follows, so the order mirrors the human surface (the count it shows).
 fn walkthrough_fact(
     unit: &fallow_output::DirectionUnit,
     guide: &fallow_output::StandardWalkthroughGuide,
@@ -2278,27 +2289,45 @@ fn walkthrough_weakened(file: &str, guide: &fallow_output::StandardWalkthroughGu
     guide.digest.weakening.iter().any(|w| w.file == file)
 }
 
-/// Push the collapsible Cleared `<details>` panel.
+/// Push the collapsible Cleared `<details>` panel: de-prioritized files plus any
+/// `--mark-viewed` files (collapsed out of their stage), with both counts in the
+/// summary so the panel reports the same `N de-prioritized, M viewed` split the
+/// human surface does.
 fn push_walkthrough_cleared(
     out: &mut String,
     guide: &fallow_output::StandardWalkthroughGuide,
     root: &Path,
+    viewed: &[String],
 ) {
     let deprioritized = &guide.digest.focus.deprioritized;
-    if deprioritized.is_empty() {
+    // Viewed files NOT already de-prioritized, so a viewed-and-de-prioritized file
+    // lands in exactly one bucket (no double count), mirroring the human surface.
+    let viewed_only: Vec<&String> = viewed
+        .iter()
+        .filter(|file| !deprioritized.iter().any(|u| &u.file == *file))
+        .collect();
+    if deprioritized.is_empty() && viewed_only.is_empty() {
         return;
     }
     let _ = write!(
         out,
-        "<details><summary>Cleared ({} de-prioritized)</summary>\n\n",
+        "<details><summary>Cleared ({} de-prioritized, {} viewed)</summary>\n\n",
         deprioritized.len(),
+        viewed_only.len(),
     );
     for unit in deprioritized {
         let _ = writeln!(
             out,
-            "- `{}` \u{2014} {}",
+            "- `{}`: {}",
             markdown_relative_path_str(&unit.file, root),
             escape_backticks(&unit.reason),
+        );
+    }
+    for file in viewed_only {
+        let _ = writeln!(
+            out,
+            "- `{}`: \u{2713} viewed",
+            markdown_relative_path_str(file, root),
         );
     }
     out.push_str("\n</details>\n");
@@ -2430,12 +2459,46 @@ mod walkthrough_markdown_tests {
     #[test]
     fn renders_header_stage_and_code_span_badges() {
         let guide = guide_with_question("src/page.ts", "Couple ui to db?");
-        let md = build_walkthrough_markdown(&guide, Path::new("/project"));
+        let md = build_walkthrough_markdown(&guide, Path::new("/project"), &[]);
         assert!(md.starts_with("## Fallow Review"), "got: {md}");
         assert!(md.contains("### Stage 1"), "got: {md}");
         assert!(md.contains("`COUPLING`"), "badges are code spans: {md}");
         assert!(md.contains("`OUT-OF-DIFF`"), "got: {md}");
         assert!(!md.contains('\u{1b}'), "no ANSI in markdown");
+        // The file->description separator is a colon, not the house-style-banned
+        // em-dash that the list items used to lead with.
+        assert!(
+            md.contains("- `src/page.ts`: "),
+            "list items use a colon separator: {md}"
+        );
+        assert!(
+            !md.contains("- `src/page.ts` \u{2014} "),
+            "no em-dash file separator: {md}"
+        );
+    }
+
+    // The markdown surface honors `--mark-viewed`: a viewed file collapses out of
+    // its stage into the Cleared panel, and the summary reports the viewed count
+    // (the same on-disk state the human surface reads), no longer ignored.
+    #[test]
+    fn viewed_file_collapses_into_cleared_in_markdown() {
+        let guide = guide_with_question("src/page.ts", "Couple ui to db?");
+        let viewed = vec!["src/page.ts".to_string()];
+        let md = build_walkthrough_markdown(&guide, Path::new("/project"), &viewed);
+        // The viewed file is no longer rendered in a stage section.
+        assert!(
+            !md.contains("### Stage 1"),
+            "viewed file left its stage: {md}"
+        );
+        // The Cleared panel reports the viewed count and lists the viewed file.
+        assert!(
+            md.contains("Cleared (0 de-prioritized, 1 viewed)"),
+            "cleared reports viewed count: {md}"
+        );
+        assert!(
+            md.contains("- `src/page.ts`: \u{2713} viewed"),
+            "viewed file listed under cleared: {md}"
+        );
     }
 
     // F5/F7: a coordination question must NOT re-print the anchor path inside the
@@ -2445,7 +2508,7 @@ mod walkthrough_markdown_tests {
     fn fact_does_not_reprint_path_or_emit_escaped_backticks() {
         let q = "`src/page.ts` changes a contract (a, b, c, d, e, f, g, h, i) consumed by 9 modules NOT in this diff. Coordinate the change, or is the contract stable?";
         let guide = guide_with_question("src/page.ts", q);
-        let md = build_walkthrough_markdown(&guide, Path::new("/project"));
+        let md = build_walkthrough_markdown(&guide, Path::new("/project"), &[]);
         // No backslash-backtick anywhere (the F5 corruption).
         assert!(
             !md.contains("\\`"),
@@ -2472,7 +2535,7 @@ mod walkthrough_markdown_tests {
         let mut guide = guide_with_question("src/page.ts", "q");
         guide.direction.order.clear();
         guide.direction.units.clear();
-        let md = build_walkthrough_markdown(&guide, Path::new("/project"));
+        let md = build_walkthrough_markdown(&guide, Path::new("/project"), &[]);
         assert!(md.contains("orientation only"), "got: {md}");
     }
 }

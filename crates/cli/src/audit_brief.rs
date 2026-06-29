@@ -930,13 +930,19 @@ pub fn print_walkthrough_human_result(
     let guide = crate::audit_walkthrough::build_guide_from_result(result);
     record_walkthrough_marks(&guide, root, cache_dir, mark_viewed);
 
+    // Load the viewed-state ledger ONCE and share it across both surfaces, so the
+    // markdown render honors `--mark-viewed` the same way the human render does
+    // (the two formats agree on the same on-disk state instead of markdown
+    // silently ignoring it).
+    let viewed = crate::walkthrough_state::load_viewed_state(cache_dir);
+
     if matches!(result.output, OutputFormat::Markdown) {
-        let markdown = fallow_api::build_walkthrough_markdown(&guide, root);
+        let viewed_files = crate::report::walkthrough_viewed_files(&guide, &viewed);
+        let markdown = fallow_api::build_walkthrough_markdown(&guide, root, &viewed_files);
         outln!("{markdown}");
         return ExitCode::SUCCESS;
     }
 
-    let viewed = crate::walkthrough_state::load_viewed_state(cache_dir);
     let render = crate::report::build_walkthrough_human(&guide, &viewed, show_cleared);
     if !quiet {
         for line in &render.header {

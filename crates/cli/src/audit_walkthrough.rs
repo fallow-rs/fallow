@@ -239,6 +239,31 @@ fn is_reviewable_source_unit(file: &str) -> bool {
     )
 }
 
+/// Read the displayed fan-in (importer) and fan-out counts back out of a focus
+/// unit's reason string. The reason is the canonical rendered "why" both surfaces
+/// print verbatim for a Stage-2 row ("high fan-in (N importers), fan-out M, ..."),
+/// built in `audit_focus::build_reason` straight from the raw
+/// `facts.fan_in` / `facts.fan_out`. Sorting on these parsed counts makes the
+/// within-stage order EQUAL the number on the row, instead of the hidden, capped
+/// `fan_io` blend the composite feeds on (which undersells a high-fan-in file
+/// past the cap). Returns `(0, 0)` when neither phrase is present (the reason has
+/// no fan signal), so such a unit sorts last and falls to the path tiebreak.
+fn parse_fan_counts(reason: &str) -> (u32, u32) {
+    let fan_in = extract_count(reason, "high fan-in (");
+    let fan_out = extract_count(reason, "fan-out ");
+    (fan_in, fan_out)
+}
+
+/// Parse the leading run of decimal digits immediately following `marker` in
+/// `text`. Returns `0` when the marker is absent or is not followed by a digit.
+fn extract_count(text: &str, marker: &str) -> u32 {
+    let Some(rest) = text.find(marker).map(|i| &text[i + marker.len()..]) else {
+        return 0;
+    };
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().unwrap_or(0)
+}
+
 /// Build the review direction. The SPINE is the change itself: every reviewable
 /// focus unit (`review_here` + the `deprioritized` escape hatch), so the
 /// direction is never empty when there is code to review. Ownership routing is a
@@ -299,12 +324,31 @@ pub fn build_direction(
         .collect();
 
     // Review the load-bearing units first: contract-breakers (out-of-diff
-    // consumers) ahead of the rest, then by budget (riskiest first), then path.
+    // consumers) ahead of the rest, ordered by their consumer count (the number
+    // each Stage-1 row shows as "consumed by N modules"). Within the
+    // non-contract-break tier (Stage 2, out-of-diff empty) the order follows the
+    // exact importer count each row displays as "high fan-in (N importers)" --
+    // descending fan-in, then descending fan-out, then path. We read those counts
+    // back out of the focus reason string (the canonical rendered text both
+    // surfaces print), so the top-to-bottom order is always the visible number,
+    // not the hidden, capped `fan_io` blend (a 60-importer file outranks a
+    // 5-importer file even though both cap to the same `fan_io`).
+    let fan_counts_by_file: FxHashMap<&str, (u32, u32)> = focus
+        .review_here
+        .iter()
+        .chain(focus.deprioritized.iter())
+        .map(|fu| (fu.file.as_str(), parse_fan_counts(&fu.reason)))
+        .collect();
+    let fan_counts =
+        |file: &str| -> (u32, u32) { fan_counts_by_file.get(file).copied().unwrap_or((0, 0)) };
     units.sort_by(|a, b| {
+        let (a_in, a_out) = fan_counts(&a.file);
+        let (b_in, b_out) = fan_counts(&b.file);
         b.out_of_diff
             .len()
             .cmp(&a.out_of_diff.len())
-            .then_with(|| b.scoring_budget.cmp(&a.scoring_budget))
+            .then_with(|| b_in.cmp(&a_in))
+            .then_with(|| b_out.cmp(&a_out))
             .then_with(|| a.file.cmp(&b.file))
     });
 
@@ -640,6 +684,113 @@ mod tests {
             reason: String::new(),
             confidence: Vec::new(),
         }
+    }
+
+    /// A focus unit whose `reason` carries a displayed importer count (the exact
+    /// "high fan-in (N importers)" phrasing `build_reason` emits) AND a deliberately
+    /// disagreeing, capped `fan_io` + composite `total`, so a test can prove the
+    /// within-stage order follows the DISPLAYED importer count, not the hidden blend.
+    fn focus_unit_fan(
+        file: &str,
+        importers: u32,
+        fan_io: u32,
+        total: u32,
+    ) -> crate::audit_focus::FocusUnit {
+        let s = if importers == 1 { "" } else { "s" };
+        crate::audit_focus::FocusUnit {
+            file: file.to_string(),
+            score: crate::audit_focus::FocusScore {
+                fan_io,
+                total,
+                ..Default::default()
+            },
+            label: crate::audit_focus::FocusLabel::ReviewHere,
+            reason: format!("high fan-in ({importers} importer{s})"),
+            confidence: Vec::new(),
+        }
+    }
+
+    // ORDERING PRINCIPLE: within Stage 2 the order is the DISPLAYED importer count
+    // ("high fan-in (N importers)"), NOT the hidden, capped `fan_io` blend. Here
+    // a.ts shows 5 importers, b.ts shows 60 -- but both cap to the SAME `fan_io`
+    // and a.ts even has the larger composite `total`. Neither has out-of-diff
+    // consumers (both Stage 2), so the order must follow the shown importer count:
+    // the 60-importer file first.
+    #[test]
+    fn within_stage_order_follows_visible_fan_io_not_hidden_total() {
+        let focus = FocusMap {
+            review_here: vec![
+                // a.ts: 5 importers shown, fan_io capped to 8, total 99 (hidden high).
+                focus_unit_fan("src/a.ts", 5, 8, 99),
+                // b.ts: 60 importers shown, fan_io ALSO capped to 8, total 1.
+                focus_unit_fan("src/b.ts", 60, 8, 1),
+            ],
+            deprioritized: vec![],
+        };
+        let direction = build_direction(&focus, &FxHashMap::default(), &RoutingFacts::default());
+        // The displayed importer count decides: b.ts (60 importers) before a.ts (5),
+        // even though they share a `fan_io` and a.ts has the larger composite total.
+        assert_eq!(direction.order, vec!["src/b.ts", "src/a.ts"]);
+    }
+
+    // Reading top-to-bottom, the shown importer count is non-increasing, and
+    // fan-out breaks ties among equal-importer files (here zero-importer files).
+    #[test]
+    fn stage_two_orders_by_importer_then_fanout_then_path() {
+        let focus = FocusMap {
+            review_here: vec![
+                // Two zero-importer files separated only by fan-out, plus one
+                // high-importer file that must lead regardless.
+                crate::audit_focus::FocusUnit {
+                    file: "src/zlo.ts".to_string(),
+                    score: crate::audit_focus::FocusScore::default(),
+                    label: crate::audit_focus::FocusLabel::ReviewHere,
+                    reason: "fan-out 1".to_string(),
+                    confidence: Vec::new(),
+                },
+                crate::audit_focus::FocusUnit {
+                    file: "src/zhi.ts".to_string(),
+                    score: crate::audit_focus::FocusScore::default(),
+                    label: crate::audit_focus::FocusLabel::ReviewHere,
+                    reason: "fan-out 9".to_string(),
+                    confidence: Vec::new(),
+                },
+                focus_unit_fan("src/top.ts", 12, 8, 1),
+            ],
+            deprioritized: vec![],
+        };
+        let direction = build_direction(&focus, &FxHashMap::default(), &RoutingFacts::default());
+        // top.ts (12 importers) leads; then the zero-importer files by fan-out
+        // (9 before 1), so the displayed counts are non-increasing top to bottom.
+        assert_eq!(
+            direction.order,
+            vec!["src/top.ts", "src/zhi.ts", "src/zlo.ts"]
+        );
+    }
+
+    // Contract-breakers (out-of-diff consumers) remain the strict first priority
+    // class regardless of importer count: an out-of-diff unit sorts ahead of a
+    // higher-fan-in orientation unit.
+    #[test]
+    fn out_of_diff_units_sort_ahead_of_higher_fan_io_orientation_units() {
+        let focus = FocusMap {
+            review_here: vec![
+                // contract.ts shows just 1 importer; orient.ts shows 9.
+                focus_unit_fan("src/contract.ts", 1, 1, 1),
+                focus_unit_fan("src/orient.ts", 9, 9, 9),
+            ],
+            deprioritized: vec![],
+        };
+        let mut out_of_diff = FxHashMap::default();
+        out_of_diff.insert(
+            "src/contract.ts".to_string(),
+            vec!["src/consumer.ts".to_string()],
+        );
+        let direction = build_direction(&focus, &out_of_diff, &RoutingFacts::default());
+        // contract.ts breaks a contract -> sorts first even with the lower importer
+        // count.
+        assert_eq!(direction.order, vec!["src/contract.ts", "src/orient.ts"]);
+        assert_eq!(direction.units[0].concern_lens, "contract-break");
     }
 
     #[test]
