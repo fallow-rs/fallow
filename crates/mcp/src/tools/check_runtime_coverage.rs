@@ -1,4 +1,4 @@
-use crate::params::CheckRuntimeCoverageParams;
+use crate::params::{CheckRuntimeCoverageParams, GetTokenBlastRadiusParams};
 
 use super::{push_global, push_scope};
 
@@ -72,4 +72,30 @@ pub fn build_get_importance_args(params: &CheckRuntimeCoverageParams) -> Vec<Str
 /// Build CLI arguments for `get_cleanup_candidates`.
 pub fn build_get_cleanup_candidates_args(params: &CheckRuntimeCoverageParams) -> Vec<String> {
     build_check_runtime_coverage_args(params)
+}
+
+/// Build CLI arguments for `get_token_blast_radius`.
+///
+/// Forces `--css` (the reverse index lives in the `--css` health section) and
+/// emits `health --css --format json` plus the shared root/config and global
+/// `--no-cache` / `--threads` plumbing. No scope flags: `token_consumers`
+/// abstains on partial scope, so workspace/changed-since would only ever
+/// return an empty index.
+pub fn build_get_token_blast_radius_args(params: &GetTokenBlastRadiusParams) -> Vec<String> {
+    let mut args = vec![
+        "health".to_string(),
+        "--css".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+    ];
+
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
+
+    args
 }

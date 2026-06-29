@@ -195,6 +195,15 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         read_only: true,
     },
     McpToolInfo {
+        name: "get_token_blast_radius",
+        kind: "analysis",
+        description: "Tailwind v4 design-token blast radius: per `@theme` token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply; descriptive context for sizing a token change, never a deletion gate (the dead-token verdict stays on unused_theme_tokens)",
+        key_params: &[],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+    },
+    McpToolInfo {
         name: "audit",
         kind: "analysis",
         description: "Combined dead-code, complexity, and duplication audit for changed files with a pass/warn/fail verdict",

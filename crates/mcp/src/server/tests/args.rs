@@ -4,10 +4,10 @@ use crate::tools::{
     build_check_changed_args, build_check_runtime_coverage_args, build_explain_args,
     build_feature_flags_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_health_args, build_impact_all_args, build_impact_args,
-    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
-    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args,
+    build_get_importance_args, build_get_token_blast_radius_args, build_health_args,
+    build_impact_all_args, build_impact_args, build_list_boundaries_args, build_project_info_args,
+    build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
+    build_trace_export_args, build_trace_file_args,
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
@@ -1815,6 +1815,45 @@ fn runtime_context_split_tools_share_runtime_coverage_pipeline() {
     assert_eq!(build_get_blast_radius_args(&params), expected);
     assert_eq!(build_get_importance_args(&params), expected);
     assert_eq!(build_get_cleanup_candidates_args(&params), expected);
+}
+
+#[test]
+fn get_token_blast_radius_emits_css_health_json() {
+    let args = build_get_token_blast_radius_args(&GetTokenBlastRadiusParams::default());
+    assert_eq!(
+        args,
+        vec![
+            "health".to_string(),
+            "--css".to_string(),
+            "--format".to_string(),
+            "json".to_string(),
+        ],
+        "get_token_blast_radius must force `health --css --format json`"
+    );
+}
+
+#[test]
+fn get_token_blast_radius_threads_root_and_config() {
+    let params = GetTokenBlastRadiusParams {
+        root: Some("/repo".to_string()),
+        config: Some("fallow.toml".to_string()),
+        no_cache: Some(true),
+        threads: Some(4),
+    };
+    let args = build_get_token_blast_radius_args(&params);
+    assert!(args.starts_with(&[
+        "health".to_string(),
+        "--css".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+    ]));
+    assert!(args.contains(&"--root".to_string()));
+    assert!(args.contains(&"/repo".to_string()));
+    assert!(args.contains(&"--config".to_string()));
+    assert!(args.contains(&"fallow.toml".to_string()));
+    assert!(args.contains(&"--no-cache".to_string()));
+    assert!(args.contains(&"--threads".to_string()));
+    assert!(args.contains(&"4".to_string()));
 }
 
 #[test]

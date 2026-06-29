@@ -6,19 +6,19 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
     DecisionSurfaceParams, ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams,
-    HealthParams, ImpactAllParams, ImpactParams, InspectTargetParams, ListBoundariesParams,
-    ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams, TraceDependencyParams,
-    TraceExportParams, TraceFileParams,
+    GetTokenBlastRadiusParams, HealthParams, ImpactAllParams, ImpactParams, InspectTargetParams,
+    ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams,
+    TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 use crate::tools::{
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_decision_surface_args, build_explain_args,
     build_feature_flags_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_health_args, build_impact_all_args, build_impact_args,
-    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
-    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args, execute_code_mode, inspect_target, run_tool,
+    build_get_importance_args, build_get_token_blast_radius_args, build_health_args,
+    build_impact_all_args, build_impact_args, build_list_boundaries_args, build_project_info_args,
+    build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
+    build_trace_export_args, build_trace_file_args, execute_code_mode, inspect_target, run_tool,
     run_tool_with_top_level_warnings,
 };
 
@@ -390,6 +390,18 @@ impl FallowMcp {
         let args = build_get_cleanup_candidates_args(&params.0);
         run_tool_with_top_level_warnings(&self.binary, "get_cleanup_candidates", &args).await
     }
+
+    #[tool(
+        description = "Return Tailwind v4 design-token blast radius from static analysis. Runs `fallow health --css --format json`; agents should read `css_analytics.token_consumers`, a reverse index keyed by each `@theme` token of its defining site plus a `consumer_count` and a capped located `consumers[]` sample of `{path,line,kind}` with `kind` in `theme-var` / `css-var` / `utility` / `apply`. Tailwind v4 only (the index is empty or absent on other projects). `consumer_count` is a STATIC lower bound (a computed class name like `bg-${c}` is not counted), so it is descriptive context for sizing a token change, NOT a deletion gate; a `consumer_count` of 0 mirrors the unused-theme-token population. The dead-token verdict stays on `unused_theme_tokens` via check_health; use this tool to scope the impact of editing or renaming a token, not to decide deletion.",
+        annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false)
+    )]
+    async fn get_token_blast_radius(
+        &self,
+        params: Parameters<GetTokenBlastRadiusParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = build_get_token_blast_radius_args(&params.0);
+        run_tool_with_top_level_warnings(&self.binary, "get_token_blast_radius", &args).await
+    }
 }
 
 #[rmcp::tool_handler]
@@ -412,6 +424,7 @@ impl ServerHandler for FallowMcp {
                  check_health (code complexity metrics), \
                  check_runtime_coverage (paid; merges a V8 or Istanbul runtime coverage dump into the health report), \
                  get_hot_paths / get_blast_radius / get_importance / get_cleanup_candidates (paid runtime context slices), \
+                 get_token_blast_radius (free; Tailwind v4 design-token blast radius via health --css token_consumers), \
                  audit (combined dead-code + complexity + duplication for changed files, returns verdict), \
                  decision_surface (the few consequential structural decisions a change embeds, ranked, capped, and signal_id-anchored, each as a judgment question with the routed expert), \
                  fallow_explain (rule rationale and fix guidance without running analysis), \

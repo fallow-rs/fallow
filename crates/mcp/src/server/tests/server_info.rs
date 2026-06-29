@@ -44,10 +44,11 @@ fn all_tools_registered() {
     assert!(names.contains(&"get_blast_radius".to_string()));
     assert!(names.contains(&"get_importance".to_string()));
     assert!(names.contains(&"get_cleanup_candidates".to_string()));
+    assert!(names.contains(&"get_token_blast_radius".to_string()));
     assert!(names.contains(&"impact".to_string()));
     assert!(names.contains(&"impact_all".to_string()));
     assert!(names.contains(&"decision_surface".to_string()));
-    assert_eq!(tools.len(), 26);
+    assert_eq!(tools.len(), 27);
 }
 
 #[test]
@@ -78,6 +79,7 @@ fn read_only_tools_have_annotations() {
         "get_blast_radius",
         "get_importance",
         "get_cleanup_candidates",
+        "get_token_blast_radius",
         "impact",
         "impact_all",
     ];

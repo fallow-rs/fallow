@@ -22,6 +22,7 @@ pub use check_changed::build_check_changed_args;
 pub use check_runtime_coverage::{
     build_check_runtime_coverage_args, build_get_blast_radius_args,
     build_get_cleanup_candidates_args, build_get_hot_paths_args, build_get_importance_args,
+    build_get_token_blast_radius_args,
 };
 pub use code_mode::execute_code_mode;
 pub use decision_surface::build_decision_surface_args;

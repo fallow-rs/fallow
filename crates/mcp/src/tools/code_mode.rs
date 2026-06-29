@@ -12,19 +12,19 @@ use serde_json::json;
 
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
-    ExplainParams, FeatureFlagsParams, FindDupesParams, HealthParams, ImpactParams,
-    ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams,
-    TraceDependencyParams, TraceExportParams, TraceFileParams,
+    ExplainParams, FeatureFlagsParams, FindDupesParams, GetTokenBlastRadiusParams, HealthParams,
+    ImpactParams, ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams,
+    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 
 use super::{
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
     build_find_dupes_args, build_get_blast_radius_args, build_get_cleanup_candidates_args,
-    build_get_hot_paths_args, build_get_importance_args, build_health_args, build_impact_args,
-    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
-    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args,
+    build_get_hot_paths_args, build_get_importance_args, build_get_token_blast_radius_args,
+    build_health_args, build_impact_args, build_list_boundaries_args, build_project_info_args,
+    build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
+    build_trace_export_args, build_trace_file_args,
 };
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
@@ -417,6 +417,7 @@ enum CodeModeTool {
     GetBlastRadius,
     GetImportance,
     GetCleanupCandidates,
+    GetTokenBlastRadius,
 }
 
 impl CodeModeTool {
@@ -442,6 +443,7 @@ impl CodeModeTool {
             "get_blast_radius" => Ok(Self::GetBlastRadius),
             "get_importance" => Ok(Self::GetImportance),
             "get_cleanup_candidates" => Ok(Self::GetCleanupCandidates),
+            "get_token_blast_radius" => Ok(Self::GetTokenBlastRadius),
             "fix_preview" | "fix_apply" => Err(
                 "code mode does not expose fix tools; use standalone MCP tools for previews"
                     .to_string(),
@@ -472,6 +474,7 @@ impl CodeModeTool {
             Self::GetBlastRadius => "get_blast_radius",
             Self::GetImportance => "get_importance",
             Self::GetCleanupCandidates => "get_cleanup_candidates",
+            Self::GetTokenBlastRadius => "get_token_blast_radius",
         }
     }
 }
@@ -497,6 +500,7 @@ const CODE_MODE_ALIASES: &[(&str, &str)] = &[
     ("getBlastRadius", "get_blast_radius"),
     ("getImportance", "get_importance"),
     ("getCleanupCandidates", "get_cleanup_candidates"),
+    ("getTokenBlastRadius", "get_token_blast_radius"),
 ];
 
 fn merge_default_root(
@@ -541,7 +545,8 @@ fn build_tool_args(tool: CodeModeTool, params: serde_json::Value) -> Result<Vec<
         | CodeModeTool::GetHotPaths
         | CodeModeTool::GetBlastRadius
         | CodeModeTool::GetImportance
-        | CodeModeTool::GetCleanupCandidates => build_runtime_coverage_tool_args(tool, params),
+        | CodeModeTool::GetCleanupCandidates
+        | CodeModeTool::GetTokenBlastRadius => build_runtime_coverage_tool_args(tool, params),
     }
 }
 
@@ -656,6 +661,10 @@ fn build_runtime_coverage_tool_args(
         CodeModeTool::GetCleanupCandidates => {
             let params: CheckRuntimeCoverageParams = parse_params(params)?;
             Ok(build_get_cleanup_candidates_args(&params))
+        }
+        CodeModeTool::GetTokenBlastRadius => {
+            let params: GetTokenBlastRadiusParams = parse_params(params)?;
+            Ok(build_get_token_blast_radius_args(&params))
         }
         _ => unreachable!("runtime coverage helper called with unrelated tool"),
     }
@@ -908,6 +917,7 @@ mod tests {
             "get_blast_radius",
             "get_importance",
             "get_cleanup_candidates",
+            "get_token_blast_radius",
         ];
         for name in valid {
             assert!(
@@ -974,6 +984,7 @@ mod tests {
             ("get_blast_radius", "get_blast_radius"),
             ("get_importance", "get_importance"),
             ("get_cleanup_candidates", "get_cleanup_candidates"),
+            ("get_token_blast_radius", "get_token_blast_radius"),
         ];
         for (input, expected_name) in pairs {
             let tool = CodeModeTool::from_name(input).unwrap();
@@ -1414,6 +1425,22 @@ mod tests {
         let args = build_tool_args(CodeModeTool::GetCleanupCandidates, params)
             .expect("get_cleanup_candidates args should build");
         assert!(args.contains(&"--runtime-coverage".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_get_token_blast_radius_includes_css_health_flags() {
+        let params = serde_json::json!({});
+        let args = build_tool_args(CodeModeTool::GetTokenBlastRadius, params)
+            .expect("get_token_blast_radius args should build");
+        assert_eq!(
+            args,
+            vec![
+                "health".to_string(),
+                "--css".to_string(),
+                "--format".to_string(),
+                "json".to_string(),
+            ]
+        );
     }
 
     // ---- build_tool_args invalid-params rejection --------------------------

@@ -870,3 +870,24 @@ pub struct DecisionSurfaceParams {
     /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
 }
+
+/// Parameters for `get_token_blast_radius`, a thin wrapper around
+/// `fallow health --css --format json` that steers agents to the Tailwind
+/// v4 `css_analytics.token_consumers` reverse index. Narrow surface: only
+/// root/config plus the global cache knobs apply. `token_consumers` abstains
+/// on partial scope, so `workspace` / `changed_since` are intentionally
+/// omitted (they would only ever return empty).
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct GetTokenBlastRadiusParams {
+    /// Root directory of the project to analyze. Defaults to current working directory.
+    pub root: Option<String>,
+
+    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    pub config: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
