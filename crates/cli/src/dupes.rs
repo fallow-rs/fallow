@@ -358,12 +358,15 @@ fn execute_dupes_inner(
     );
 
     if let Some(trace_spec) = opts.trace {
-        return Err(run_clone_trace(
-            &report,
-            &config.root,
-            trace_spec,
-            opts.output,
-        ));
+        // The trace view ran the full duplication analysis; record its find-state
+        // for telemetry before the focused early-return so the Dupes workflow's
+        // findings_present stays populated regardless of the output view (issue
+        // #1650). A trace error (exit 2) is a failed run and is left unset.
+        let code = run_clone_trace(&report, &config.root, trace_spec, opts.output);
+        if code == ExitCode::SUCCESS {
+            crate::telemetry::note_result_count(report.clone_groups.len());
+        }
+        return Err(code);
     }
 
     save_duplication_baseline(&report, &config, opts)?;

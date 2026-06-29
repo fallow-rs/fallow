@@ -28,6 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Telemetry: `fallow flags` and `fallow watch` now record `findings_present`,
+  and a guard prevents the whole class of regression.** Both commands emit a
+  `code_quality_review` telemetry event (the same workflow as combined `fallow`,
+  which does populate the field) but never noted their find-state, so
+  `findings_present` serialized as null, the same gap fixed for the `security`
+  subcommands. `flags` now notes its feature-flag count and `watch` notes each
+  cycle's issue count. Focused `dead-code` / `dupes` trace and impact-closure
+  views also record their underlying analysis count, so `findings_present`
+  reflects what the analysis surfaced independent of the output view. A
+  debug-build invariant at the single telemetry event-emission point now fails
+  fast if any finding-surfacing workflow records a non-failing event without
+  noting find-state, so a future analysis command cannot silently reintroduce
+  the gap. No change to the telemetry payload shape.
+  (Refs [#1650](https://github.com/fallow-rs/fallow/issues/1650))
+
 - **Telemetry: the `security` workflow once again records `findings_present` for
   the `survivors` and `blind-spots` subcommands.** Both subcommands emit a
   `security` telemetry event but never noted their find-state, so the

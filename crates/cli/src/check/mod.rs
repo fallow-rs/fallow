@@ -692,13 +692,24 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let mut data = run_check_analysis(opts, &config)?;
     let elapsed = start.elapsed();
 
-    handle_trace_side_effects(
+    if let Err(code) = handle_trace_side_effects(
         opts,
         &config,
         data.trace_graph.as_ref(),
         data.trace_timings.as_ref(),
         &data.script_used_packages,
-    )?;
+    ) {
+        // A focused trace / closure view exits here without building the full
+        // CheckResult (where the normal path records find-state below). The full
+        // analysis still ran, so record its find-state for telemetry on the
+        // focused-success exit, keeping the DeadCode workflow's findings_present
+        // populated regardless of the output view (issue #1650). A trace error
+        // (exit 2) is a failed run and is left unset.
+        if code == ExitCode::SUCCESS {
+            crate::telemetry::note_result_count(data.results.total_issues());
+        }
+        return Err(code);
+    }
 
     apply_scope_filters(
         opts,

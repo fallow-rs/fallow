@@ -42,6 +42,12 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     if let Err(code) = apply_flag_scopes(&mut flags, opts) {
         return code;
     }
+    // Note find-state for telemetry before any exit (issue #1650 follow-up): the
+    // flags command emits a `code_quality_review` workflow event (the same label
+    // as combined `fallow`), so without this its findings_present serialized as
+    // null. Count the scope-filtered flags BEFORE `--top` truncation so the
+    // bucket reflects the full set, not the displayed head.
+    crate::telemetry::note_result_count(flags.len());
     sort_and_limit_flags(&mut flags, opts.top);
 
     let elapsed = start.elapsed();

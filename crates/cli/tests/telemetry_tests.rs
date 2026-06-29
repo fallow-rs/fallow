@@ -445,6 +445,23 @@ fn write_survivor_inputs(dir: &Path, verdict: &str) -> (String, String) {
     )
 }
 
+/// Write a project containing two environment-variable feature flags so
+/// `fallow flags` surfaces findings (issue #1650 follow-up find-state coverage).
+fn write_flags_project(dir: &Path) {
+    let src = dir.join("src");
+    fs::create_dir_all(&src).expect("create src");
+    fs::write(
+        dir.join("package.json"),
+        "{\n  \"name\": \"flags-fixture\"\n}\n",
+    )
+    .expect("write package.json");
+    fs::write(
+        src.join("index.ts"),
+        "export function f(): number {\n  if (process.env.FEATURE_NEW_CHECKOUT === \"true\") {\n    return 1;\n  }\n  if (process.env.FEATURE_BETA_BANNER) {\n    return 2;\n  }\n  return 0;\n}\n",
+    )
+    .expect("write flags source");
+}
+
 #[test]
 fn dupes_with_duplication_sets_findings_present_despite_success_outcome() {
     let dir = tempfile::tempdir().expect("temp project");
@@ -1019,6 +1036,48 @@ fn security_survivors_needs_human_review_sets_findings_present_true() {
         Some(true),
         "a needs-human-review candidate must report findings_present=true"
     );
+}
+
+#[test]
+fn flags_with_findings_sets_findings_present_true() {
+    // Regression for the issue #1650 follow-up: `fallow flags` emits a
+    // `code_quality_review` workflow event (the same label as combined `fallow`,
+    // which populates findings_present) but historically never noted find-state,
+    // so its findings_present serialized as null. The fixture surfaces two
+    // feature flags, so a correct run reports findings_present=true.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_flags_project(dir.path());
+
+    let (event, output) =
+        inspect_event_output(dir.path(), &["flags", "--format", "json", "--quiet"], &[]);
+
+    assert_eq!(output.code, 0, "flags should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert_eq!(event["outcome"].as_str(), Some("success"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(true),
+        "flags surfacing feature flags must report findings_present=true"
+    );
+}
+
+#[test]
+fn flags_on_clean_project_sets_findings_present_false() {
+    // The false branch: a project with no feature flags must still populate
+    // findings_present (false), never leave it null.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_clean_project(dir.path());
+
+    let (event, output) =
+        inspect_event_output(dir.path(), &["flags", "--format", "json", "--quiet"], &[]);
+
+    assert_eq!(output.code, 0, "flags should exit 0: {}", output.stderr);
+    assert_eq!(event["workflow"].as_str(), Some("code_quality_review"));
+    assert!(
+        !event["findings_present"].is_null(),
+        "flags must populate findings_present, not leave it null"
+    );
+    assert_eq!(event["findings_present"].as_bool(), Some(false));
 }
 
 #[test]

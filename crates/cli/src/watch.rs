@@ -302,6 +302,10 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
             return ExitCode::from(2);
         }
     };
+    // Note find-state for telemetry (issue #1650 follow-up): watch emits a
+    // `code_quality_review` workflow event at process exit, so each analysis
+    // cycle records its find-state (the accumulator is sticky across cycles).
+    crate::telemetry::note_result_count(results.total_issues());
     let elapsed = start.elapsed();
     let ctx = report::ReportContext {
         root: &config.root,

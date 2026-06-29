@@ -646,6 +646,81 @@ pub enum Workflow {
     Unknown,
 }
 
+impl Workflow {
+    /// Whether a non-failing run of this workflow surfaces findings and therefore
+    /// MUST populate `findings_present` on its telemetry event.
+    ///
+    /// `findings_present` decouples "found something" from the exit-code outcome,
+    /// so every exit path of a finding-surfacing workflow has to call
+    /// [`note_result_count`] or [`note_findings_present`] before the at-exit event
+    /// is recorded; otherwise the field serializes null (issue #1650). Admin,
+    /// setup, mutation, report, and reserved / non-CLI workflows return `false`.
+    ///
+    /// The match is exhaustive on purpose: a new `Workflow` variant fails to
+    /// compile until it is classified here, which keeps the
+    /// [`find_state_invariant_violated`] guard honest.
+    fn surfaces_findings(self) -> bool {
+        match self {
+            Workflow::Audit
+            | Workflow::DeadCode
+            | Workflow::Health
+            | Workflow::Dupes
+            | Workflow::CodeQualityReview
+            | Workflow::Security => true,
+            Workflow::DependencyCleanup
+            | Workflow::GithubAction
+            | Workflow::GitlabCi
+            | Workflow::EditorDiagnostic
+            | Workflow::ProgrammaticAnalysis
+            | Workflow::RuntimeCoverageSetup
+            | Workflow::Impact
+            | Workflow::Fix
+            | Workflow::Explain
+            | Workflow::ProjectInventory
+            | Workflow::Setup
+            | Workflow::License
+            | Workflow::Unknown => false,
+        }
+    }
+}
+
+/// Debug-only guard predicate: `true` when a finding-surfacing workflow recorded
+/// a non-failing event without noting its find-state (findings_present stayed
+/// `None`).
+///
+/// Pure so it can be unit-tested without the process-global accumulator. A
+/// `failed` outcome may legitimately leave findings_present unset because
+/// analysis never completed.
+fn find_state_invariant_violated(
+    workflow: Workflow,
+    outcome: &str,
+    findings_present: Option<bool>,
+) -> bool {
+    workflow.surfaces_findings() && outcome != "failed" && findings_present.is_none()
+}
+
+/// Debug-time guard at the single event-emission choke point in
+/// [`record_workflow`]: a finding-surfacing workflow that emits a non-failing
+/// event must have noted its find-state, or a dispatch arm forgot to call
+/// `note_result_count` / `note_findings_present` (the originating bug was issue
+/// #1650). Runs on every recorded workflow regardless of telemetry mode so the
+/// check is deterministic across machines. `findings_present` reflects what the
+/// analysis surfaced independent of the output view, so focused trace / closure
+/// views record their underlying analysis count rather than skipping the note.
+fn debug_assert_find_state_noted(
+    workflow: Workflow,
+    outcome: &str,
+    findings_present: Option<bool>,
+) {
+    debug_assert!(
+        !find_state_invariant_violated(workflow, outcome, findings_present),
+        "telemetry find-state invariant violated: workflow {workflow:?} surfaced findings but \
+         findings_present is unset on a non-failing run. Every exit path of a finding-surfacing \
+         workflow must call telemetry::note_result_count or note_findings_present before the \
+         event is recorded (issue #1650)."
+    );
+}
+
 #[expect(
     dead_code,
     reason = "telemetry schema reserves v1 values for LSP/editor/programmatic surfaces before every surface is wired"
@@ -949,6 +1024,7 @@ pub fn run(command: TelemetryCommand, output: OutputFormat) -> ExitCode {
 pub fn record_workflow(record: &WorkflowRecord<'_>) {
     let parent_run = parent_run_context(record.parent_run, record.workflow);
     let event = build_workflow_event(record, &parent_run);
+    debug_assert_find_state_noted(record.workflow, event.outcome, event.findings_present);
     match effective_config().mode {
         EffectiveMode::Off | EffectiveMode::DisabledByAdmin => {}
         EffectiveMode::Inspect => print_event_to_stderr(&event),
@@ -2785,6 +2861,94 @@ mod tests {
         assert_eq!(findings_present_from_state(FINDINGS_FOUND), Some(true));
         // Any unexpected value is treated as unset, never a misleading false.
         assert_eq!(findings_present_from_state(99), None);
+    }
+
+    #[test]
+    fn surfaces_findings_classification_pins_the_analysis_workflows() {
+        // Workflows whose successful runs surface findings and therefore MUST
+        // populate findings_present (each has a note_result_count/note_findings_present
+        // call on every exit path). The exhaustive match in `surfaces_findings`
+        // forces a new variant to be classified; this test pins the intent.
+        for workflow in [
+            Workflow::Audit,
+            Workflow::DeadCode,
+            Workflow::Health,
+            Workflow::Dupes,
+            Workflow::CodeQualityReview,
+            Workflow::Security,
+        ] {
+            assert!(
+                workflow.surfaces_findings(),
+                "{workflow:?} must require findings_present"
+            );
+        }
+        // The constructed non-surfacing workflows. The reserved, never-constructed
+        // variants (DependencyCleanup, EditorDiagnostic, ProgrammaticAnalysis) are
+        // intentionally omitted so they stay dead for the enum's expect(dead_code);
+        // the exhaustive match in `surfaces_findings` still forces them to be
+        // classified.
+        for workflow in [
+            Workflow::GithubAction,
+            Workflow::GitlabCi,
+            Workflow::RuntimeCoverageSetup,
+            Workflow::Impact,
+            Workflow::Fix,
+            Workflow::Explain,
+            Workflow::ProjectInventory,
+            Workflow::Setup,
+            Workflow::License,
+            Workflow::Unknown,
+        ] {
+            assert!(
+                !workflow.surfaces_findings(),
+                "{workflow:?} must not require findings_present"
+            );
+        }
+    }
+
+    #[test]
+    fn find_state_invariant_catches_unnoted_surfacing_runs() {
+        // Violation: a finding-surfacing workflow recorded a non-failing event
+        // without noting find-state (the issue #1650 / flags / watch bug shape).
+        assert!(find_state_invariant_violated(
+            Workflow::Security,
+            "success",
+            None
+        ));
+        assert!(find_state_invariant_violated(
+            Workflow::CodeQualityReview,
+            "issues_found",
+            None
+        ));
+        // Noted (clean or found): fine.
+        assert!(!find_state_invariant_violated(
+            Workflow::Security,
+            "success",
+            Some(false)
+        ));
+        assert!(!find_state_invariant_violated(
+            Workflow::Dupes,
+            "issues_found",
+            Some(true)
+        ));
+        // A failed run may legitimately leave findings_present unset (analysis
+        // never completed).
+        assert!(!find_state_invariant_violated(
+            Workflow::Security,
+            "failed",
+            None
+        ));
+        // Non-surfacing workflows never require findings_present.
+        assert!(!find_state_invariant_violated(
+            Workflow::License,
+            "success",
+            None
+        ));
+        assert!(!find_state_invariant_violated(
+            Workflow::Fix,
+            "success",
+            None
+        ));
     }
 
     #[test]
