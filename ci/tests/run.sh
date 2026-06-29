@@ -157,6 +157,42 @@ else
   fail "install: rejects dash-prefixed extra args in spec" "expected non-zero exit"
 fi
 
+# FALLOW_SKIP_INSTALL: reuse a fallow already on PATH instead of npm install.
+SKIP_BIN="$INSTALL_TMP/skip-bin"
+mkdir -p "$SKIP_BIN"
+cat > "$SKIP_BIN/fallow" <<'SH'
+#!/usr/bin/env bash
+echo "fallow 9.9.9"
+SH
+chmod +x "$SKIP_BIN/fallow"
+
+# FALLOW_INSTALL_DRY_RUN=true stays set so the assertion proves the skip path
+# short-circuits before the npm-install dry-run hook ever runs.
+OUT=$(PATH="$SKIP_BIN:$PATH" FALLOW_ROOT="$INSTALL_TMP/empty" \
+  FALLOW_SKIP_INSTALL=true FALLOW_INSTALL_DRY_RUN=true \
+  /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1)
+skip_status=$?
+if [ "$skip_status" -eq 0 ]; then
+  pass "install: FALLOW_SKIP_INSTALL succeeds when fallow is on PATH"
+else
+  fail "install: FALLOW_SKIP_INSTALL succeeds when fallow is on PATH" "exit=$skip_status: $OUT"
+fi
+assert_contains "$OUT" "using pre-installed fallow 9.9.9" "install: FALLOW_SKIP_INSTALL reuses fallow on PATH"
+assert_not_contains "$OUT" "DRY RUN: npm install" "install: FALLOW_SKIP_INSTALL skips npm install"
+
+# No fallow on PATH -> clear, early error (controlled PATH keeps this hermetic).
+OUT=$(PATH="/usr/bin:/bin" FALLOW_ROOT="$INSTALL_TMP/empty" \
+  FALLOW_SKIP_INSTALL=true FALLOW_INSTALL_DRY_RUN=true \
+  /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1)
+skip_status=$?
+if [ "$skip_status" -eq 2 ]; then
+  pass "install: FALLOW_SKIP_INSTALL fails with exit 2 when fallow is missing"
+else
+  fail "install: FALLOW_SKIP_INSTALL fails with exit 2 when fallow is missing" "expected exit 2, got $skip_status"
+fi
+assert_contains "$OUT" "no 'fallow' binary is on PATH" "install: FALLOW_SKIP_INSTALL explains missing binary"
+assert_not_contains "$OUT" "DRY RUN: npm install" "install: missing-binary path never reaches npm install"
+
 SCRIPT_PREP_TMP="$INSTALL_TMP/script-prep"
 mkdir -p "$SCRIPT_PREP_TMP/ci/scripts"
 printf '%s\n' '#!/usr/bin/env bash' 'echo comment' > "$SCRIPT_PREP_TMP/ci/scripts/comment.sh"
@@ -987,6 +1023,7 @@ assert_contains "$(cat "$CI_YAML")" '((.dupes.clone_groups // []) | length)' "co
 assert_contains "$(cat "$CI_YAML")" "project_fallow_spec" "reads package.json fallow pin"
 assert_contains "$(cat "$CI_YAML")" "is_safe_version_spec" "validates fallow install spec"
 assert_contains "$(cat "$CI_YAML")" "FALLOW_INSTALL_DRY_RUN" "supports install dry-run testing"
+assert_contains "$(cat "$CI_YAML")" "FALLOW_SKIP_INSTALL" "supports skip-install for pre-installed fallow"
 assert_contains "$(cat "$CI_YAML")" "GIT_STRATEGY" "overrides shared template git strategy"
 assert_contains "$(cat "$CI_YAML")" "GIT_DEPTH" "fetches full history for changed-since"
 assert_contains "$(cat "$CI_YAML")" "CI_MERGE_REQUEST_DIFF_BASE_SHA" "auto changed-since uses diff base SHA"

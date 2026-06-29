@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The GitLab CI template can reuse a pre-installed fallow binary.** Set
+  `FALLOW_SKIP_INSTALL: "true"` to skip `npm install -g fallow` and run the
+  `fallow` already resolvable on `PATH`, for example a version pinned through
+  a pnpm catalog and exposed on `PATH`, so CI runs the same binary as your
+  local lint gate. The job fails fast with a clear error when no `fallow` is
+  found. Default behavior is unchanged.
+
 - **Fuzzy CSS clones via CSS-aware value canonicalization (CSS program Phase 4).**
   `fallow dupes` already tokenized CSS, but the lexer was character-naive, so
   near-miss / value-drifted CSS clones (the same shadow / gradient / transition

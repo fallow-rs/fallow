@@ -76,6 +76,7 @@ variables:
 
   # Core
   FALLOW_VERSION: ""             # Empty reads package.json fallow dependency, then falls back to latest
+  FALLOW_SKIP_INSTALL: ""        # "true" skips `npm install -g fallow` and uses the fallow already on PATH (e.g. a pnpm-catalog pin installed by a prior `pnpm install`). Fails fast if no fallow is found.
   FALLOW_COMMAND: ""            # dead-code, dupes, health, audit, security, fix, or empty (runs all)
   FALLOW_ROOT: "."
   FALLOW_CONFIG: ""             # Path to .fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml
@@ -252,6 +253,27 @@ variables:
       }
       NODE
       }
+
+      # FALLOW_SKIP_INSTALL lets a pipeline reuse a fallow binary that is already
+      # on PATH (e.g. a pnpm-catalog pin installed by a prior `pnpm install`)
+      # instead of `npm install -g fallow` at pipeline time. Default empty
+      # preserves the install behavior below.
+      if [ "$(trim "${FALLOW_SKIP_INSTALL:-}")" = "true" ]; then
+        if ! command -v fallow > /dev/null 2>&1; then
+          echo "ERROR: FALLOW_SKIP_INSTALL=true but no 'fallow' binary is on PATH. Install fallow before this job (e.g. 'pnpm install' so a pinned fallow lands on PATH), or unset FALLOW_SKIP_INSTALL to let the template run 'npm install -g fallow'."
+          exit 2
+        fi
+        installed_version="$(fallow --version 2>/dev/null || echo 'unknown version')"
+        echo "Skipping install; using pre-installed ${installed_version} ($(command -v fallow))"
+        # Let the MR-integration script-prep block pin remote scripts to the
+        # matching release tag when the binary reports an exact semver (parity
+        # with the install path, which writes the resolved spec here).
+        installed_semver="$(printf '%s\n' "$installed_version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?' | head -n 1 || true)"
+        if [ -n "$installed_semver" ]; then
+          printf '%s\n' "$installed_semver" > /tmp/fallow-version-spec
+        fi
+        exit 0
+      fi
 
       requested_version="$(trim "${FALLOW_VERSION:-}")"
       root="${FALLOW_ROOT:-.}"

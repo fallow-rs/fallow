@@ -700,6 +700,7 @@ The GitLab CI template can post rich comments directly on merge requests -- summ
 | `FALLOW_GITLAB_BASE_SHA` / `FALLOW_GITLAB_START_SHA` / `FALLOW_GITLAB_HEAD_SHA` | `""` | Optional overrides for the GitLab MR `diff_refs` used to build inline discussion positions |
 | `FALLOW_SCRIPTS_REF` | `""` | Pinned tag or commit for remote MR-integration scripts; leave empty to prefer vendored local `ci/` + `action/` scripts |
 | `FALLOW_VERSION` | `""` | Fallow version to install. Empty reads the project's `package.json` `fallow` dependency, then falls back to `latest`; set explicitly to override the local pin |
+| `FALLOW_SKIP_INSTALL` | `""` | Set to `"true"` to skip `npm install -g fallow` and use the `fallow` already resolvable on `PATH` (for example a pnpm-catalog pin you expose by adding its `node_modules/.bin` to `PATH`, or a global install). The job fails fast if no `fallow` is found. Lets you run the template's MR feedback against your own pinned binary and base `image:` |
 
 In MR pipelines, `--changed-since` is set automatically to scope analysis to changed files, and the comment / review scripts derive a unified diff so inline discussions stay on touched lines by default. Fallow edits sticky comments in place and fingerprints inline review comments so repeated runs can skip duplicates. `FALLOW_SUMMARY_SCOPE=diff` keeps the sticky summary focused too: a pre-existing unused dependency in an unrelated package is hidden, while a newly added unused dependency in a changed `package.json` remains visible. If the diff cannot be fetched or read, fallow keeps the existing fail-open behavior and reports all findings.
 
@@ -715,6 +716,7 @@ GitLab setup gotchas:
 - The template sets `GIT_DEPTH: "0"` so `--changed-since` can diff against the MR base SHA without shallow-clone ambiguity.
 - For private GitLab npm registries, create `.npmrc` during the job with `${CI_PROJECT_ID}` and `${CI_JOB_TOKEN}` rather than committing tokens.
 - For pnpm projects with `minimumReleaseAge`, add `fallow` and `@fallow-cli/*` to `minimumReleaseAgeExclude` when you need to consume a just-published fallow release immediately.
+- To run the template against a fallow you install yourself (e.g. a pnpm-catalog pin), set `FALLOW_SKIP_INSTALL: "true"`, override `image:` to your base image, and make sure your install step leaves `fallow` resolvable on the job shell's `PATH`. A bare `pnpm install`/`npm install` only writes `node_modules/.bin/fallow`, which GitLab does **not** add to `PATH` automatically — prepend it in a `before_script` (e.g. `export PATH="$CI_PROJECT_DIR/node_modules/.bin:$PATH"`) or install fallow globally. The job then skips `npm install -g fallow` and runs your exact binary, so CI matches your local lint gate.
 
 ```yaml
 # .gitlab-ci.yml -- full example with rich MR comments
