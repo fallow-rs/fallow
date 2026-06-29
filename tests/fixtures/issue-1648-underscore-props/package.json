@@ -1,0 +1,9 @@
+{
+  "name": "issue-1648-underscore-props",
+  "private": true,
+  "type": "module",
+  "main": "src/main.ts",
+  "dependencies": {
+    "svelte": "^5.0.0"
+  }
+}

@@ -9,7 +9,7 @@ These interfaces are covered by semver , breaking changes only happen in major v
 ### Configuration format
 
 - **Config file names**: `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, `.fallow.toml`
-- **All documented config fields**: `extends`, `ignorePatterns`, `rules`, `overrides`, `entry`, `ignoreDependencies`, `ignoreExports`, `ignoreExportsUsedInFile`, `ignoreDecorators`, `includeEntryExports`, `autoImports`, `duplicates`, `audit`, `cache`, `fix`, `production` (boolean form `production: true` or per-analysis form `production: { deadCode, health, dupes }`), `framework`, `workspaces`, `plugins`, `rulePacks`, `boundaries` (including `boundaries.preset`, `boundaries.coverage`, and `boundaries.calls`)
+- **All documented config fields**: `extends`, `ignorePatterns`, `rules`, `overrides`, `entry`, `ignoreDependencies`, `ignoreExports`, `ignoreExportsUsedInFile`, `ignoreDecorators`, `unusedComponentProps` (with `ignorePattern`), `includeEntryExports`, `autoImports`, `duplicates`, `audit`, `cache`, `fix`, `production` (boolean form `production: true` or per-analysis form `production: { deadCode, health, dupes }`), `framework`, `workspaces`, `plugins`, `rulePacks`, `boundaries` (including `boundaries.preset`, `boundaries.coverage`, and `boundaries.calls`)
 - **Rule names and severity values**: `unused-files`, `unused-exports`, etc. with `error`/`warn`/`off`
 - **Extends and overrides semantics**: merge behavior, glob matching, override precedence, `npm:` prefix resolution, `https://` URL resolution
 - **Inline suppression comment syntax**: `fallow-ignore-next-line`, `fallow-ignore-file`

@@ -194,6 +194,9 @@
         "dynamic-segment-name-conflict": "error"
       }
     },
+    "unusedComponentProps": {
+      "$ref": "#/$defs/UnusedComponentPropsConfig"
+    },
     "boundaries": {
       "$ref": "#/$defs/BoundaryConfig",
       "default": {
@@ -1226,6 +1229,20 @@
           "const": "off"
         }
       ]
+    },
+    "UnusedComponentPropsConfig": {
+      "description": "Options for the `unused-component-props` rule.\n\nLets a project exempt component props whose local destructure binding name\nmatches a regex from `unused-component-props`, honoring the\n\"accepted-but-intentionally-unused\" leading-underscore convention (Svelte 5\n`$props()`, React destructure) that mirrors TypeScript `noUnusedParameters`\nand ESLint `@typescript-eslint/no-unused-vars` `varsIgnorePattern` /\n`argsIgnorePattern`. Opt-in; an unset `ignorePattern` leaves the rule's\nbehavior unchanged.",
+      "type": "object",
+      "properties": {
+        "ignorePattern": {
+          "description": "Regex matched against each declared prop's LOCAL destructure binding name\n(e.g. `_stage` in `let { stage: _stage } = $props()`), which falls back\nto the public prop name when there is no alias. A prop whose local name\nmatches is treated as intentionally unused and never reported as\n`unused-component-props`. Matching is unanchored (substring), like\nESLint's `RegExp.test`, so anchor with `^_` to match a leading\nunderscore. Compiled and validated at config load (an invalid regex fails\nload). Applies to Vue, Svelte, Astro, and React/Preact props.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
     },
     "BoundaryConfig": {
       "description": "Architecture boundary configuration.",

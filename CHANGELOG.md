@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`unusedComponentProps.ignorePattern`: opt-in regex to treat
+  leading-underscore (or any pattern-matched) destructured props as
+  intentionally unused.** Component frameworks often accept a prop for public-API
+  stability while not consuming it internally, aliasing the destructure with a
+  leading underscore (`let { stage: _stage } = $props()`), the convention TS
+  `noUnusedParameters` and ESLint `varsIgnorePattern` / `argsIgnorePattern`
+  honor. Set `"unusedComponentProps": { "ignorePattern": "^_" }` to exempt any
+  prop whose LOCAL destructure binding name matches the regex from
+  `unused-component-props`. Applies to Vue, Svelte, Astro, and React/Preact
+  props. Default behavior is unchanged (opt-in only). Notes: the match is on the
+  local binding name (`_stage`), not the public prop name the finding reports
+  (`stage`); matching is unanchored like ESLint's `RegExp.test`, so anchor with
+  `^_`; an invalid regex fails config load with a clear error. A human-output
+  note reports how many props were exempted so a typo'd pattern that matches
+  nothing is not silently inert.
+  (Closes [#1648](https://github.com/fallow-rs/fallow/issues/1648))
+
 ### Fixed
 
 - **Telemetry: the `security` workflow once again records `findings_present` for
