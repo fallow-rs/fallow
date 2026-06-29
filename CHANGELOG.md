@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`token_consumers`: design-token blast-radius in `fallow health --css --format
+  json`.** For a Tailwind v4 project, `css_analytics` now carries a reverse index of
+  where each `@theme` token is consumed, so an agent (or human) changing
+  `--color-brand` can see what it affects before touching it. Per token: the defining
+  `(path, line)`, a `consumer_count`, and a capped, located `consumers` sample tagged
+  by `kind`: `theme-var` (a `@theme`-interior `var()` reference), `css-var` (a
+  regular-CSS `var()` read), `utility` (a markup/className token ending in `-<name>`
+  such as `bg-brand`), or `apply` (a class inside an `@apply` body). Built from the
+  same gated candidate set as `unused_theme_tokens` (Tailwind v4, non-plugin,
+  non-published, whole-scope), so it inherits the same abstain behavior and a
+  `consumer_count` of 0 mirrors the dead-token signal. `consumer_count` is a STATIC
+  lower bound (a computed class name like `bg-${c}` is not counted), so it is
+  descriptive context, not a deletion proof; the authoritative dead-token finding
+  stays `unused_theme_tokens`. Additive and gated like `css_analytics`: a plain
+  `fallow health --format json` run is byte-unchanged, no schema-version bump.
+  Reachable over MCP via `check_health` with `css=true`.
+
 - **Styling health: a second CSS-quality health axis under `fallow health --css`,
   now confidence-aware.** `fallow health --css` reports a `styling_health` score
   (0-100) and A-F grade derived from the structural CSS analytics, scored
