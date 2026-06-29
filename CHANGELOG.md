@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`get_token_blast_radius` MCP tool: query a design token's blast radius
+  directly.** A focused, read-only MCP tool that runs `fallow health --css
+  --format json` and surfaces `css_analytics.token_consumers` (the Tailwind v4
+  token blast-radius reverse index) without the agent needing to set `css=true` on
+  `check_health` or know the data hides inside `css_analytics`. Per `@theme` token:
+  the defining site, a `consumer_count`, and a capped located `consumers` sample
+  tagged `theme-var` / `css-var` / `utility` / `apply`. Annotated read-only and
+  closed-world (deterministic static analysis); free, no runtime layer. It is a
+  scoping aid, not a deletion gate: `consumer_count` is a static lower bound and
+  the dead-token verdict stays on `unused_theme_tokens`.
+
 - **`token_consumers`: design-token blast-radius in `fallow health --css --format
   json`.** For a Tailwind v4 project, `css_analytics` now carries a reverse index of
   where each `@theme` token is consumed, so an agent (or human) changing
