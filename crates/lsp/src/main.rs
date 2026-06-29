@@ -2930,6 +2930,7 @@ export function choose(value: number): string {
                 ),
             ],
             suppression_count: 1,
+            unused_component_props_exempted: 0,
             active_suppressions: Vec::new(),
             feature_flags: vec![fallow_api::editor_results::FeatureFlag {
                 path: "/f.ts".into(),

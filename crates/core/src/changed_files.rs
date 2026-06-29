@@ -470,6 +470,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         duplicate_prop_shapes: _duplicate_prop_shapes,
         // Non-finding fields: counts and metadata, not issue collections.
         suppression_count: _suppression_count,
+        unused_component_props_exempted: _unused_component_props_exempted,
         active_suppressions: _active_suppressions,
         feature_flags: _feature_flags,
         security_findings: _security_findings,

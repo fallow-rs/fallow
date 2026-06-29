@@ -1396,6 +1396,7 @@ mod tests {
                 ),
                 used_class_members: vec![],
                 ignore_decorators: vec![],
+                unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
                 duplicates: DuplicatesConfig::default(),
                 health: HealthConfig::default(),
                 rules: RulesConfig::default(),

@@ -930,6 +930,13 @@ impl FallowConfig {
                 threshold_override_errors.join("\n  - ")
             ));
         }
+        if let Some(pattern) = &config.unused_component_props.ignore_pattern
+            && let Err(e) = regex::Regex::new(pattern)
+        {
+            return Err(miette::miette!(
+                "invalid config:\n  - unusedComponentProps.ignorePattern is not a valid regex: {e}"
+            ));
+        }
 
         Ok(config)
     }

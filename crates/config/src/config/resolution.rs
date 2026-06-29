@@ -177,6 +177,11 @@ pub struct ResolvedConfig {
     pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
     pub used_class_members: Vec<UsedClassMemberRule>,
     pub ignore_decorators: Vec<String>,
+    /// Compiled regex matched against each declared component prop's local
+    /// destructure binding name; a matching prop is exempted from
+    /// `unused-component-props`. `None` when `unusedComponentProps.ignorePattern`
+    /// is unset. Compiled from the validated raw pattern in [`Self::resolve`].
+    pub unused_component_props_ignore: Option<regex::Regex>,
     pub duplicates: DuplicatesConfig,
     pub health: HealthConfig,
     pub rules: RulesConfig,
@@ -586,6 +591,27 @@ impl FallowConfig {
 
         let path_policy = resolve_path_policy_settings(self.boundaries, self.overrides, &root);
 
+        // Compile the validated pattern defensively. `FallowConfig::load`
+        // already proved it compiles, so the error arm is unreachable on the
+        // load path; programmatic / napi / LSP callers that construct a config
+        // without going through `load` fail open to "no exemption" (default
+        // behavior) rather than panicking.
+        let unused_component_props_ignore = self
+            .unused_component_props
+            .ignore_pattern
+            .as_deref()
+            .and_then(|pattern| match regex::Regex::new(pattern) {
+                Ok(re) => Some(re),
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "ignoring invalid unusedComponentProps.ignorePattern; this config was \
+                         not validated through FallowConfig::load"
+                    );
+                    None
+                }
+            });
+
         ResolvedConfig {
             root,
             entry_patterns: self.entry,
@@ -605,6 +631,7 @@ impl FallowConfig {
             ignore_exports_used_in_file: self.ignore_exports_used_in_file,
             used_class_members: self.used_class_members,
             ignore_decorators: self.ignore_decorators,
+            unused_component_props_ignore,
             duplicates: self.duplicates,
             health: self.health,
             rules: production_rules.rules,
@@ -700,6 +727,7 @@ mod tests {
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
+            unused_component_props: crate::UnusedComponentPropsConfig::default(),
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
@@ -751,6 +779,7 @@ mod tests {
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
+            unused_component_props: crate::UnusedComponentPropsConfig::default(),
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
@@ -813,6 +842,7 @@ mod tests {
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
+            unused_component_props: crate::UnusedComponentPropsConfig::default(),
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
@@ -883,6 +913,7 @@ mod tests {
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
+            unused_component_props: crate::UnusedComponentPropsConfig::default(),
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
@@ -985,6 +1016,7 @@ mod tests {
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
+            unused_component_props: crate::UnusedComponentPropsConfig::default(),
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
@@ -1046,6 +1078,7 @@ mod tests {
             ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             ignore_decorators: vec![],
+            unused_component_props: crate::UnusedComponentPropsConfig::default(),
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),

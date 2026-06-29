@@ -430,6 +430,7 @@ mod severity_gate {
             security_unresolved_callee_diagnostics: _,
             // Suppression bookkeeping: counts, not diagnostics.
             suppression_count: _,
+            unused_component_props_exempted: _,
             active_suppressions: _,
             // Advisory metadata: feature flags are not an issue type; export
             // usages drive Code Lens; entry points are informational.

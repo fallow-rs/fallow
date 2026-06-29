@@ -33,6 +33,7 @@ fn create_boundary_config_with_entry(
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -361,6 +362,7 @@ fn no_violations_when_rule_is_off() {
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -420,6 +422,7 @@ fn preset_detects_boundary_violation() {
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -519,6 +522,7 @@ fn root_field_classifies_per_subtree() {
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -622,6 +626,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -693,6 +698,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -832,6 +838,7 @@ fn bulletproof_preset_detects_violation() {
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {
@@ -936,6 +943,7 @@ fn bulletproof_top_level_features_file_is_strict_without_barrel_false_positive()
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         duplicates: DuplicatesConfig::default(),
         health: HealthConfig::default(),
         rules: RulesConfig {

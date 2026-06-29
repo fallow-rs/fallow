@@ -25,6 +25,7 @@ schemars = { workspace = true }
 glob = { workspace = true }
 globset = { workspace = true }
 miette = { workspace = true }
+regex = { workspace = true }
 rustc-hash = { workspace = true }
 tempfile = { workspace = true }
 tracing = { workspace = true }

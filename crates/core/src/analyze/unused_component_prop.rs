@@ -29,29 +29,38 @@ use crate::results::UnusedComponentProp;
 
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
+/// Result of the SFC (Vue/Svelte/Astro) prop scan: the findings plus the count
+/// of props exempted by `unusedComponentProps.ignorePattern` (drives the
+/// human-output note so a typo'd pattern matching nothing is not a silent no-op).
+#[derive(Debug, Default)]
+pub struct SfcPropScan {
+    pub findings: Vec<UnusedComponentProp>,
+    pub exempted: usize,
+}
+
 /// Find Vue `<script setup>` `defineProps` and Svelte 5 `$props()` props
 /// referenced nowhere in their own SFC. Returns framework findings only when
 /// the matching framework dependency is declared.
-#[must_use]
 pub fn find_unused_component_props(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     declared_deps: &FxHashSet<String>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
-) -> Vec<UnusedComponentProp> {
+    ignore_pattern: Option<&regex::Regex>,
+) -> SfcPropScan {
     let vue_gated = declared_deps.contains("vue")
         || declared_deps.contains("@vue/runtime-core")
         || declared_deps.contains("nuxt");
     let svelte_gated = declared_deps.contains("svelte") || declared_deps.contains("@sveltejs/kit");
     let astro_gated = declared_deps.contains("astro");
     if !vue_gated && !svelte_gated && !astro_gated {
-        return Vec::new();
+        return SfcPropScan::default();
     }
 
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
 
-    let mut findings = Vec::new();
+    let mut scan = SfcPropScan::default();
     for node in &graph.modules {
         if !node.is_reachable() {
             continue;
@@ -68,23 +77,30 @@ pub fn find_unused_component_props(
         let Some(module) = modules_by_id.get(&node.file_id) else {
             continue;
         };
-        collect_module_unused_sfc_props(node, module, line_offsets_by_file, &mut findings);
+        collect_module_unused_sfc_props(
+            node,
+            module,
+            line_offsets_by_file,
+            ignore_pattern,
+            &mut scan,
+        );
     }
 
-    findings.sort_by(|a, b| {
+    scan.findings.sort_by(|a, b| {
         a.path
             .cmp(&b.path)
             .then(a.line.cmp(&b.line))
             .then(a.prop_name.cmp(&b.prop_name))
     });
-    findings
+    scan
 }
 
 fn collect_module_unused_sfc_props(
     node: &ModuleNode,
     module: &ModuleInfo,
     line_offsets_by_file: &LineOffsetsMap<'_>,
-    findings: &mut Vec<UnusedComponentProp>,
+    ignore_pattern: Option<&regex::Regex>,
+    scan: &mut SfcPropScan,
 ) {
     if module.component_props.is_empty() {
         return;
@@ -104,9 +120,17 @@ fn collect_module_unused_sfc_props(
         if prop.used_in_script || prop.used_in_template {
             continue;
         }
+        // Opt-in `unusedComponentProps.ignorePattern`: exempt props whose LOCAL
+        // destructure binding name matches (the ESLint `varsIgnorePattern`
+        // convention keys on the local binding, e.g. `_stage`, which falls back
+        // to the public name when there is no alias).
+        if matches_ignore_pattern(ignore_pattern, &prop.local) {
+            scan.exempted += 1;
+            continue;
+        }
         let (line, col) =
             byte_offset_to_line_col(line_offsets_by_file, node.file_id, prop.span_start);
-        findings.push(UnusedComponentProp {
+        scan.findings.push(UnusedComponentProp {
             path: node.path.clone(),
             component_name: component_name.clone(),
             prop_name: prop.name.clone(),
@@ -114,6 +138,13 @@ fn collect_module_unused_sfc_props(
             col,
         });
     }
+}
+
+/// Whether a prop's local destructure binding name matches the opt-in
+/// `unusedComponentProps.ignorePattern`. Matching is unanchored (`is_match`,
+/// substring), mirroring ESLint's `RegExp.test`; users anchor with `^_`.
+fn matches_ignore_pattern(ignore_pattern: Option<&regex::Regex>, local: &str) -> bool {
+    ignore_pattern.is_some_and(|re| re.is_match(local))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -163,6 +194,9 @@ pub struct ReactPropScan {
     pub findings: Vec<UnusedComponentProp>,
     /// React components inspected across all reachable JSX modules.
     pub components_scanned: usize,
+    /// Props exempted by `unusedComponentProps.ignorePattern` (drives the
+    /// human-output note; see [`SfcPropScan::exempted`]).
+    pub exempted: usize,
 }
 
 /// Find React/Preact component props declared on a component but read NOWHERE in
@@ -190,6 +224,7 @@ pub fn find_unused_react_props(
     modules: &[ModuleInfo],
     declared_deps: &FxHashSet<String>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
+    ignore_pattern: Option<&regex::Regex>,
 ) -> ReactPropScan {
     if !has_react_runtime_dep(declared_deps) {
         return ReactPropScan::default();
@@ -209,7 +244,13 @@ pub fn find_unused_react_props(
         let Some(module) = modules_by_id.get(&node.file_id) else {
             continue;
         };
-        collect_module_unused_react_props(node, module, line_offsets_by_file, &mut scan);
+        collect_module_unused_react_props(
+            node,
+            module,
+            line_offsets_by_file,
+            ignore_pattern,
+            &mut scan,
+        );
     }
 
     scan.findings.sort_by(|a, b| {
@@ -233,6 +274,7 @@ fn collect_module_unused_react_props(
     node: &ModuleNode,
     module: &ModuleInfo,
     line_offsets_by_file: &LineOffsetsMap<'_>,
+    ignore_pattern: Option<&regex::Regex>,
     scan: &mut ReactPropScan,
 ) {
     if module.component_functions.is_empty() {
@@ -249,6 +291,13 @@ fn collect_module_unused_react_props(
             continue;
         }
         if abstained.contains(prop.component.as_str()) {
+            continue;
+        }
+        // Opt-in `unusedComponentProps.ignorePattern`: exempt props whose local
+        // binding name matches (the React arm's `ComponentProp.local` is the
+        // destructure alias, e.g. `_props`).
+        if matches_ignore_pattern(ignore_pattern, &prop.local) {
+            scan.exempted += 1;
             continue;
         }
         let (line, col) =

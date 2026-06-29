@@ -17,6 +17,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         ignore_decorators: vec![],
+        unused_component_props: fallow_config::UnusedComponentPropsConfig::default(),
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),
         rules: RulesConfig::default(),

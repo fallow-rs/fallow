@@ -1349,15 +1349,19 @@ fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindings
         return;
     }
     // Vue/Svelte arm: one component per SFC, flagged from `component_props`.
-    input.results.unused_component_props = find_unused_component_props(
+    let sfc = find_unused_component_props(
         input.graph,
         input.modules,
         input.declared_deps,
         input.line_offsets_by_file,
-    )
-    .into_iter()
-    .map(UnusedComponentPropFinding::with_actions)
-    .collect();
+        input.config.unused_component_props_ignore.as_ref(),
+    );
+    input.results.unused_component_props_exempted += sfc.exempted;
+    input.results.unused_component_props = sfc
+        .findings
+        .into_iter()
+        .map(UnusedComponentPropFinding::with_actions)
+        .collect();
 
     append_react_unused_component_prop_findings(input);
     retain_unsuppressed_unused_component_prop_findings(input);
@@ -1372,7 +1376,9 @@ fn append_react_unused_component_prop_findings(input: &mut FrameworkSpecificFind
         input.modules,
         input.declared_deps,
         input.line_offsets_by_file,
+        input.config.unused_component_props_ignore.as_ref(),
     );
+    input.results.unused_component_props_exempted += react.exempted;
     if react.components_scanned > 0 {
         // Observability: make a silent dep-gate or silent abstain visible (a
         // scanned-but-zero-finding run is a clean bill, not a no-op). Surfaced at

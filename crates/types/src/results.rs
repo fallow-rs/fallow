@@ -499,6 +499,13 @@ pub struct AnalysisResults {
     /// machine output to avoid changing the public JSON issue contract.
     #[serde(skip)]
     pub suppression_count: usize,
+    /// Number of component props exempted from `unused-component-props` this run
+    /// because their local destructure binding name matched
+    /// `unusedComponentProps.ignorePattern`. Drives a human-output note so a
+    /// typo'd pattern (matching nothing) is not a silent no-op; skipped in
+    /// machine output, like [`Self::suppression_count`].
+    #[serde(skip)]
+    pub unused_component_props_exempted: usize,
     /// Suppression comments present in analyzed files this run (every present
     /// marker, all kinds, not only consumed ones). Internal: read in-process by
     /// `fallow impact` to distinguish a genuinely resolved finding from one
@@ -629,6 +636,7 @@ struct AnalysisResultsFrameworkMergeParts {
 
 struct AnalysisResultsMetadataMergeParts {
     suppression_count: usize,
+    unused_component_props_exempted: usize,
     active_suppressions: Vec<ActiveSuppression>,
     feature_flags: Vec<FeatureFlag>,
     security_findings: Vec<SecurityFinding>,
@@ -707,6 +715,7 @@ fn split_merge_parts(
         thin_wrappers,
         duplicate_prop_shapes,
         suppression_count,
+        unused_component_props_exempted,
         active_suppressions,
         feature_flags,
         security_findings,
@@ -775,6 +784,7 @@ fn split_merge_parts(
         },
         AnalysisResultsMetadataMergeParts {
             suppression_count,
+            unused_component_props_exempted,
             active_suppressions,
             feature_flags,
             security_findings,
@@ -1007,6 +1017,7 @@ impl AnalysisResults {
         self.export_usages.extend(parts.export_usages);
         self.active_suppressions.extend(parts.active_suppressions);
         self.suppression_count += parts.suppression_count;
+        self.unused_component_props_exempted += parts.unused_component_props_exempted;
         if self.entry_point_summary.is_none() {
             self.entry_point_summary = parts.entry_point_summary;
         }

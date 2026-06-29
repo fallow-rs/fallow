@@ -98,6 +98,37 @@ pub struct IgnoreExportsUsedInFileByKind {
     pub interface: bool,
 }
 
+/// Options for the `unused-component-props` rule.
+///
+/// Lets a project exempt component props whose local destructure binding name
+/// matches a regex from `unused-component-props`, honoring the
+/// "accepted-but-intentionally-unused" leading-underscore convention (Svelte 5
+/// `$props()`, React destructure) that mirrors TypeScript `noUnusedParameters`
+/// and ESLint `@typescript-eslint/no-unused-vars` `varsIgnorePattern` /
+/// `argsIgnorePattern`. Opt-in; an unset `ignorePattern` leaves the rule's
+/// behavior unchanged.
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct UnusedComponentPropsConfig {
+    /// Regex matched against each declared prop's LOCAL destructure binding name
+    /// (e.g. `_stage` in `let { stage: _stage } = $props()`), which falls back
+    /// to the public prop name when there is no alias. A prop whose local name
+    /// matches is treated as intentionally unused and never reported as
+    /// `unused-component-props`. Matching is unanchored (substring), like
+    /// ESLint's `RegExp.test`, so anchor with `^_` to match a leading
+    /// underscore. Compiled and validated at config load (an invalid regex fails
+    /// load). Applies to Vue, Svelte, Astro, and React/Preact props.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore_pattern: Option<String>,
+}
+
+impl UnusedComponentPropsConfig {
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.ignore_pattern.is_none()
+    }
+}
+
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FixConfig {
@@ -174,6 +205,12 @@ pub struct FallowConfig {
 
     #[serde(default)]
     pub rules: RulesConfig,
+
+    #[serde(
+        default,
+        skip_serializing_if = "UnusedComponentPropsConfig::is_default"
+    )]
+    pub unused_component_props: UnusedComponentPropsConfig,
 
     #[serde(default)]
     pub boundaries: BoundaryConfig,

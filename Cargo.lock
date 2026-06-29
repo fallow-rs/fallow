@@ -1070,6 +1070,7 @@ dependencies = [
  "jsonc-parser",
  "miette",
  "proptest",
+ "regex",
  "rustc-hash 2.1.2",
  "schemars",
  "serde",

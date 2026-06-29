@@ -503,6 +503,7 @@ impl DeadCodeKeyCollector<'_> {
             dynamic_segment_name_conflicts,
             // Non-finding fields: counts and metadata, not attributable to a key.
             suppression_count: _suppression_count,
+            unused_component_props_exempted: _unused_component_props_exempted,
             active_suppressions: _active_suppressions,
             feature_flags: _feature_flags,
             // Security findings are emitted via `fallow security`, not the audit
@@ -1246,6 +1247,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_engine::results::Analys
         // Non-finding fields: counts and metadata, not subject to base-keyed
         // filtering.
         suppression_count: _suppression_count,
+        unused_component_props_exempted: _unused_component_props_exempted,
         active_suppressions: _active_suppressions,
         feature_flags: _feature_flags,
         // Security findings are emitted via `fallow security`, not the audit

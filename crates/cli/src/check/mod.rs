@@ -804,6 +804,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
     }
 
     print_load_data_key_abstain_note(result, prepared.quiet);
+    print_unused_component_props_exempted_note(result, prepared.quiet);
     issue_severity_exit_code(result, &prepared.effective_rules)
 }
 
@@ -828,6 +829,26 @@ fn print_load_data_key_abstain_note(result: &CheckResult, quiet: bool) {
     eprintln!(
         "Note: unused-load-data-key abstained project-wide (a whole-object use of \
          page.data / $page.data was seen; any returned key could be read reflectively)."
+    );
+}
+
+/// Human-output note when `unusedComponentProps.ignorePattern` exempted at least
+/// one prop this run. Closes the silent-no-op loop (a typo'd pattern matching
+/// nothing prints nothing) and teaches that the match is on the LOCAL destructure
+/// binding name (`_stage`), not the public prop name the finding would report.
+fn print_unused_component_props_exempted_note(result: &CheckResult, quiet: bool) {
+    if result.config.unused_component_props_ignore.is_none()
+        || result.results.unused_component_props_exempted == 0
+        || quiet
+        || !matches!(result.config.output, OutputFormat::Human)
+    {
+        return;
+    }
+    let count = result.results.unused_component_props_exempted;
+    let noun = if count == 1 { "prop" } else { "props" };
+    eprintln!(
+        "Note: {count} component {noun} exempted by unusedComponentProps.ignorePattern \
+         (matched on local binding name)."
     );
 }
 
