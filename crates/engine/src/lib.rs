@@ -73,7 +73,9 @@ pub mod vital_signs;
 /// Extracted semantic types exposed through the engine boundary.
 pub mod extract {
     pub mod inventory {
-        pub use fallow_extract::inventory::{InventoryEntry, walk_source};
+        pub use fallow_extract::inventory::{
+            InventoryComplexity, InventoryEntry, walk_source, walk_source_with_complexity,
+        };
     }
 
     pub use fallow_extract::css::{

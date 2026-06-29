@@ -34,6 +34,7 @@ use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
 use oxc_semantic::ScopeFlags;
 use oxc_span::{SourceType, Span};
+use rustc_hash::FxHashMap;
 
 /// A single static-inventory entry for one function.
 ///
@@ -204,6 +205,22 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
     }
 }
 
+/// Per-function static complexity collected alongside the inventory walk.
+///
+/// Keyed to an [`InventoryEntry`] by its `source_hash`, which both this and the
+/// inventory walk derive from the identical full-span byte slice over the same
+/// parsed program (see [`InventoryEntry::source_hash`]). The hash is stable
+/// across line moves, so the pairing survives reformatting that shifts line
+/// numbers. `cyclomatic` and `cognitive` are descriptive context for downstream
+/// importance weighting, never thresholds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InventoryComplexity {
+    /// `McCabe` cyclomatic complexity (1 + decision points).
+    pub cyclomatic: u16,
+    /// `SonarSource` cognitive complexity (structural + nesting penalty).
+    pub cognitive: u16,
+}
+
 /// Parse `source` at `path` and return every function as an [`InventoryEntry`].
 ///
 /// Only plain JS/TS/JSX/TSX sources are supported. Callers should skip SFC,
@@ -215,30 +232,75 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
 /// results.
 #[must_use]
 pub fn walk_source(path: &Path, source: &str) -> Vec<InventoryEntry> {
+    walk_source_with_complexity(path, source).0
+}
+
+/// Parse `source` at `path` once and return every function as an
+/// [`InventoryEntry`] together with a `source_hash -> InventoryComplexity` map.
+///
+/// Both the inventory entries and the complexity map come from the SAME parse
+/// (including the JSX fallback retry), so the per-function `source_hash` values
+/// line up exactly and a caller can enrich each entry's metrics by a hash
+/// lookup. Functions whose span slice could not be sliced share the empty-input
+/// hash and simply don't pair; that degrades to "no metrics", never a panic.
+///
+/// Errors are swallowed, matching [`walk_source`]: the returned data covers
+/// whatever could be parsed.
+#[must_use]
+pub fn walk_source_with_complexity(
+    path: &Path,
+    source: &str,
+) -> (Vec<InventoryEntry>, FxHashMap<String, InventoryComplexity>) {
     let source_type = SourceType::from_path(path).unwrap_or_default();
-    let allocator = Allocator::default();
-    let parser_return = Parser::new(&allocator, source, source_type).parse();
-
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
-    let mut visitor = InventoryVisitor::new(source, &line_offsets);
-    visitor.visit_program(&parser_return.program);
 
-    if visitor.entries.is_empty() && !source_type.is_jsx() {
+    let primary = walk_one_parse(source, source_type, &line_offsets);
+    if primary.0.is_empty() && !source_type.is_jsx() {
         let jsx_type = if source_type.is_typescript() {
             SourceType::tsx()
         } else {
             SourceType::jsx()
         };
-        let allocator2 = Allocator::default();
-        let retry_return = Parser::new(&allocator2, source, jsx_type).parse();
-        let mut retry_visitor = InventoryVisitor::new(source, &line_offsets);
-        retry_visitor.visit_program(&retry_return.program);
-        if !retry_visitor.entries.is_empty() {
-            return retry_visitor.entries;
+        let retry = walk_one_parse(source, jsx_type, &line_offsets);
+        if !retry.0.is_empty() {
+            return retry;
         }
     }
 
-    visitor.entries
+    primary
+}
+
+/// Run both the inventory and complexity visitors over a single parse of
+/// `source` under `source_type`, pairing them by `source_hash`.
+fn walk_one_parse(
+    source: &str,
+    source_type: SourceType,
+    line_offsets: &[u32],
+) -> (Vec<InventoryEntry>, FxHashMap<String, InventoryComplexity>) {
+    let allocator = Allocator::default();
+    let parser_return = Parser::new(&allocator, source, source_type).parse();
+
+    let mut visitor = InventoryVisitor::new(source, line_offsets);
+    visitor.visit_program(&parser_return.program);
+
+    let complexity =
+        crate::complexity::compute_complexity(&parser_return.program, source, line_offsets);
+    let metrics: FxHashMap<String, InventoryComplexity> = complexity
+        .into_iter()
+        .filter_map(|fc| {
+            fc.source_hash.map(|hash| {
+                (
+                    hash,
+                    InventoryComplexity {
+                        cyclomatic: fc.cyclomatic,
+                        cognitive: fc.cognitive,
+                    },
+                )
+            })
+        })
+        .collect();
+
+    (visitor.entries, metrics)
 }
 
 #[cfg(all(test, not(miri)))]
