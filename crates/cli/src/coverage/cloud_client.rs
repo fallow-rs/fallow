@@ -135,11 +135,12 @@ pub struct CloudRuntimeSummary {
 pub struct CloudRuntimeFunction {
     pub file_path: String,
     pub function_name: String,
-    /// Cross-surface `FunctionIdentity` join key (`fallow:fn:<hash>`) when the
-    /// cloud has been migrated to emit it (fallow-cloud#63). `None` for the
-    /// current un-migrated cloud, in which case the join falls back to
-    /// `(file_path, function_name, line)` and the fuzzy line tier.
-    #[serde(default, rename = "stableId")]
+    /// Cross-surface `FunctionIdentity` join key (`fallow:fn:<hash>`), emitted by
+    /// the cloud as snake_case `stable_id` (consistent with every other field on
+    /// this struct). `None` for an older cloud that omits it, in which case the
+    /// join falls back to `(file_path, function_name, line)` and the fuzzy line
+    /// tier.
+    #[serde(default)]
     pub stable_id: Option<String>,
     #[serde(default)]
     pub line_number: Option<u32>,
@@ -160,9 +161,9 @@ pub struct CloudRuntimeFunction {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CloudRuntimeBlastRadiusEntry {
     pub id: String,
-    /// Cross-surface `FunctionIdentity` join key when the cloud emits it
-    /// (fallow-cloud#63). `None` for the current un-migrated cloud.
-    #[serde(default, rename = "stableId")]
+    /// Cross-surface `FunctionIdentity` join key, read as snake_case `stable_id`
+    /// when the cloud emits it on blast-radius entries. `None` until then.
+    #[serde(default)]
     pub stable_id: Option<String>,
     pub file: String,
     pub function: String,
@@ -192,9 +193,9 @@ pub enum CloudRuntimeRiskBand {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CloudRuntimeImportanceEntry {
     pub id: String,
-    /// Cross-surface `FunctionIdentity` join key when the cloud emits it
-    /// (fallow-cloud#63). `None` for the current un-migrated cloud.
-    #[serde(default, rename = "stableId")]
+    /// Cross-surface `FunctionIdentity` join key, read as snake_case `stable_id`
+    /// when the cloud emits it on importance entries. `None` until then.
+    #[serde(default)]
     pub stable_id: Option<String>,
     pub file: String,
     pub function: String,
