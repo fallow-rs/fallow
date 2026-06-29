@@ -2792,3 +2792,128 @@ fn w2_walkthrough_conflicts_with_guide_and_file() {
         "--walkthrough + --walkthrough-file is rejected by clap"
     );
 }
+
+/// A fixture whose HEAD diff mixes a load-bearing exported source file (consumed
+/// by an UNCHANGED consumer outside the diff), plain source churn, and a
+/// NON-source migration file. Exercises the file-accounting + membership fixes:
+/// the migration must be surfaced as excluded (not dropped), and no file may
+/// appear in both a stage and the Cleared panel.
+fn create_mixed_walkthrough_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("migrations")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "wt-mixed", "main": "src/app.ts"}"#,
+    )
+    .unwrap();
+    fs::write(dir.join(".fallowrc.json"), r#"{"entry": ["src/app.ts"]}"#).unwrap();
+
+    // The consumer imports the contract; it is NOT touched by the HEAD diff, so
+    // `lib.ts` is consumed out-of-diff -> load-bearing.
+    fs::write(
+        dir.join("src/app.ts"),
+        "import { value } from './lib';\nexport const run = () => value();\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/lib.ts"), "export const value = () => 1;\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    // HEAD: change the load-bearing contract, add plain source churn, and add a
+    // non-source migration file (which must be surfaced as excluded).
+    fs::write(
+        dir.join("src/lib.ts"),
+        "export const value = () => 2;\nexport const extra = () => 3;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/helper.ts"),
+        "export const help = () => 'x';\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("migrations/0001_init.sql"),
+        "CREATE TABLE t (id INTEGER);\n",
+    )
+    .unwrap();
+    commit_all(dir, "change lib, add helper + migration");
+    tmp
+}
+
+// F1/F2: the rendered Review Focus count reconciles staged + cleared + excluded,
+// and the non-source migration file is surfaced as excluded, never dropped.
+#[test]
+fn w2_walkthrough_surfaces_non_source_and_reconciles_counts() {
+    let tmp = create_mixed_walkthrough_fixture();
+    let output = run_walkthrough_human(tmp.path());
+    assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
+    // The non-source migration is surfaced honestly, not silently dropped.
+    assert!(
+        output.stderr.contains("non-source not reviewed"),
+        "the .sql migration must be surfaced as excluded. stderr: {}",
+        output.stderr
+    );
+    // The accounting sub-line names the staged bucket.
+    assert!(
+        output.stderr.contains("in stages"),
+        "the header breakdown names the staged bucket. stderr: {}",
+        output.stderr
+    );
+    // The migration file never appears as a reviewable stage row in the tour body.
+    assert!(
+        !output.stdout.contains("0001_init.sql"),
+        "the non-source migration is not a stage row. stdout: {}",
+        output.stdout
+    );
+}
+
+// F3: a --mark-viewed file is removed from its stage and shown only under
+// Cleared (each file in exactly one place: stage XOR cleared).
+#[test]
+fn w2_walkthrough_viewed_file_collapses_into_cleared_only() {
+    let tmp = create_mixed_walkthrough_fixture();
+    // Mark the load-bearing file viewed, then render with the Cleared panel open.
+    let marked = run_fallow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--mark-viewed",
+        "src/lib.ts",
+    ]);
+    assert_eq!(
+        marked.code, 0,
+        "mark-viewed exits 0. stderr: {}",
+        marked.stderr
+    );
+
+    let output = run_fallow_raw(&[
+        "review",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main~1",
+        "--walkthrough",
+        "--show-cleared",
+    ]);
+    assert_eq!(output.code, 0, "exits 0. stderr: {}", output.stderr);
+    let body = &output.stdout;
+    let cleared_at = body
+        .find("Cleared")
+        .unwrap_or_else(|| panic!("cleared panel present. stdout: {body}"));
+    let (stage_section, cleared_section) = body.split_at(cleared_at);
+    // The viewed file is gone from the stage section and present only in Cleared.
+    assert!(
+        !stage_section.contains("lib.ts"),
+        "the viewed file left its stage. stage section: {stage_section}"
+    );
+    assert!(
+        cleared_section.contains("lib.ts"),
+        "the viewed file shows only under Cleared. cleared section: {cleared_section}"
+    );
+}

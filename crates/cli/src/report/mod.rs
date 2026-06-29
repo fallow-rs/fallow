@@ -63,9 +63,9 @@ pub fn build_walkthrough_human(
         show_cleared,
     };
     WalkthroughHumanRender {
-        header: human::walkthrough::build_focus_header(guide),
+        header: human::walkthrough::build_focus_header(guide, viewed),
         body: human::walkthrough::build_walkthrough_human_lines(&input),
-        status: human::walkthrough::build_status_line(guide),
+        status: human::walkthrough::build_status_line(guide, viewed),
     }
 }
 

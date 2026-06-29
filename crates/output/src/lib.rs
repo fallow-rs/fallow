@@ -54,6 +54,7 @@ mod root_envelopes;
 mod sarif;
 mod security;
 mod trace_envelopes;
+mod walkthrough_render;
 
 pub use audit_brief::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
@@ -260,3 +261,7 @@ pub use security::{
     serialize_security_summary_json_output, serialize_security_survivors_json_output,
 };
 pub use trace_envelopes::serialize_trace_json_output;
+pub use walkthrough_render::{
+    MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_names, clean_decision_fact,
+    visible_stage_units,
+};

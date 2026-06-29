@@ -73,19 +73,6 @@ impl ViewedState {
         }
         self.entries.contains_key(file)
     }
-
-    /// Count of files in `order` that are currently viewed (hash-matched).
-    #[must_use]
-    pub fn viewed_count<'a>(
-        &self,
-        order: impl IntoIterator<Item = &'a str>,
-        current_hash: &str,
-    ) -> usize {
-        order
-            .into_iter()
-            .filter(|file| self.is_viewed(file, current_hash))
-            .count()
-    }
 }
 
 /// Load the viewed-state ledger from `cache_dir`, returning an empty default
@@ -221,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn viewed_count_only_counts_hash_matched() {
+    fn is_viewed_only_matches_current_hash() {
         let dir = temp_cache();
         mark_viewed(
             dir.path(),
@@ -230,9 +217,13 @@ mod tests {
         )
         .expect("mark");
         let state = load_viewed_state(dir.path());
-        let order = ["src/a.ts", "src/b.ts", "src/c.ts"];
-        assert_eq!(state.viewed_count(order.iter().copied(), "hash1"), 2);
-        assert_eq!(state.viewed_count(order.iter().copied(), "stale"), 0);
+        // Hash-matched files read as viewed; an un-marked file does not.
+        assert!(state.is_viewed("src/a.ts", "hash1"));
+        assert!(state.is_viewed("src/b.ts", "hash1"));
+        assert!(!state.is_viewed("src/c.ts", "hash1"));
+        // A stale snapshot hash matches nothing.
+        assert!(!state.is_viewed("src/a.ts", "stale"));
+        assert!(!state.is_viewed("src/b.ts", "stale"));
     }
 
     #[test]

@@ -26,7 +26,9 @@
 
 use colored::Colorize;
 use fallow_output::{
-    DecisionCategory, DirectionUnit, ReviewEffort, RiskClass, StandardWalkthroughGuide,
+    DecisionCategory, DirectionUnit, MAX_CONTRACT_MEMBERS, ReviewEffort, RiskClass,
+    StandardWalkthroughGuide, WalkthroughAccounting, cap_names, clean_decision_fact,
+    visible_stage_units,
 };
 
 use crate::walkthrough_state::ViewedState;
@@ -36,9 +38,6 @@ use crate::report::plural;
 
 /// Max out-of-diff consumers named on a per-file fact line before truncating.
 const MAX_NAMED_CONSUMERS: usize = 3;
-
-/// Max characters of a per-file "why" fact line before truncating with an ellipsis.
-const FACT_LINE_MAX: usize = 120;
 
 /// Inputs to the human tour builder, bundled so the per-file row helpers do not
 /// each take a long parameter list.
@@ -68,7 +67,8 @@ pub(in crate::report) fn build_walkthrough_human_lines(
         return lines;
     }
 
-    let (stage1, stage2) = partition_stages(guide);
+    let viewed = viewed_files(input);
+    let (stage1, stage2) = partition_stages(guide, &viewed);
     push_stage(
         &mut lines,
         "Stage 1: Load-bearing (contract-break)",
@@ -88,17 +88,34 @@ pub(in crate::report) fn build_walkthrough_human_lines(
     lines
 }
 
-/// Partition the guide's units into (contract-break, orientation), each in
-/// `direction.order`. Files in `order` with no matching unit are skipped.
-fn partition_stages(
-    guide: &StandardWalkthroughGuide,
-) -> (Vec<&DirectionUnit>, Vec<&DirectionUnit>) {
+/// The staged source files the local state has marked viewed (current hash only),
+/// so the shared membership helpers can collapse them into Cleared.
+fn viewed_files(input: &WalkthroughHumanInput<'_>) -> Vec<String> {
+    viewed_files_for(input.guide, input.viewed)
+}
+
+/// Same, but from a raw guide + viewed-state pair (used by the header/status
+/// accounting, which do not build a full `WalkthroughHumanInput`).
+fn viewed_files_for(guide: &StandardWalkthroughGuide, viewed: &ViewedState) -> Vec<String> {
+    guide
+        .direction
+        .order
+        .iter()
+        .filter(|file| viewed.is_viewed(file, &guide.graph_snapshot_hash))
+        .cloned()
+        .collect()
+}
+
+/// Partition the guide's VISIBLE stage units (de-prioritized + viewed files
+/// already collapsed out into Cleared) into (contract-break, orientation), each
+/// in `direction.order`. Each file is in exactly one place: a stage XOR Cleared.
+fn partition_stages<'a>(
+    guide: &'a StandardWalkthroughGuide,
+    viewed: &[String],
+) -> (Vec<&'a DirectionUnit>, Vec<&'a DirectionUnit>) {
     let mut load_bearing = Vec::new();
     let mut mechanical = Vec::new();
-    for file in &guide.direction.order {
-        let Some(unit) = guide.direction.units.iter().find(|u| &u.file == file) else {
-            continue;
-        };
+    for unit in visible_stage_units(guide, viewed) {
         if unit.concern_lens == "contract-break" {
             load_bearing.push(unit);
         } else {
@@ -133,20 +150,20 @@ fn push_stage(
     }
 }
 
-/// Render one file's row: the header line (path + score + badges) and the
-/// one-line fact beneath it.
+/// Render one file's row: the header line (path + badges) and the one-line fact
+/// beneath it. The raw "(score N)" is intentionally NOT shown: it is an internal
+/// composite that does not explain the visible within-stage order (Stage 1 is
+/// ordered by out-of-diff consumer count, Stage 2 by that same composite), so
+/// surfacing the number contradicted the order. The fact line carries the real
+/// ordering signal (consumer count / fan-in) instead.
 fn push_file_row(lines: &mut Vec<String>, unit: &DirectionUnit, input: &WalkthroughHumanInput<'_>) {
     let badges = synthesize_badges(unit, input);
-    let score = format!("(score {})", unit.scoring_budget).dimmed();
     let badge_suffix = if badges.is_empty() {
         String::new()
     } else {
         format!(" {}", badges.join(" "))
     };
-    lines.push(format!(
-        "  {} {score}{badge_suffix}",
-        format_path(&unit.file)
-    ));
+    lines.push(format!("  {}{badge_suffix}", format_path(&unit.file)));
     lines.push(format!("    {}", fact_line(unit, input.guide).dimmed()));
 }
 
@@ -161,13 +178,16 @@ fn fact_line(unit: &DirectionUnit, guide: &StandardWalkthroughGuide) -> String {
         .iter()
         .find(|d| d.anchor_file == unit.file)
     {
-        return truncate(&decision.question, FACT_LINE_MAX);
+        // Strip the redundant leading path (the row already shows it) and cap the
+        // contract-member list, PRESERVING the trailing guidance question instead
+        // of truncating it away.
+        return clean_decision_fact(&decision.question, &unit.file, MAX_CONTRACT_MEMBERS);
     }
     if !unit.out_of_diff.is_empty() {
         return out_of_diff_fact(unit);
     }
     if let Some(reason) = focus_reason(unit, guide) {
-        return truncate(reason, FACT_LINE_MAX);
+        return reason.to_string();
     }
     "orientation only".to_string()
 }
@@ -175,14 +195,9 @@ fn fact_line(unit: &DirectionUnit, guide: &StandardWalkthroughGuide) -> String {
 /// The out-of-diff consumer fact: a count plus the first few consumer paths.
 fn out_of_diff_fact(unit: &DirectionUnit) -> String {
     let total = unit.out_of_diff.len();
-    let named: Vec<&str> = unit
-        .out_of_diff
-        .iter()
-        .take(MAX_NAMED_CONSUMERS)
-        .map(String::as_str)
-        .collect();
-    let more = if total > named.len() {
-        format!(" (+{} more)", total - named.len())
+    let (named, more_count) = cap_names(&unit.out_of_diff, MAX_NAMED_CONSUMERS);
+    let more = if more_count > 0 {
+        format!(" (+{more_count} more)")
     } else {
         String::new()
     };
@@ -286,10 +301,9 @@ fn weakened_here(file: &str, guide: &StandardWalkthroughGuide) -> bool {
 fn push_cleared_panel(lines: &mut Vec<String>, input: &WalkthroughHumanInput<'_>) {
     let guide = input.guide;
     let deprioritized = &guide.digest.focus.deprioritized;
-    let viewed_count = input.viewed.viewed_count(
-        guide.direction.order.iter().map(String::as_str),
-        &guide.graph_snapshot_hash,
-    );
+    // Count viewed files that are NOT already in the de-prioritized bucket, so a
+    // de-prioritized-and-viewed file lands in exactly one bucket (no double count).
+    let viewed_count = viewed_only_files(input).len();
 
     if deprioritized.is_empty() && viewed_count == 0 {
         return;
@@ -344,22 +358,45 @@ fn push_cleared_detail(lines: &mut Vec<String>, input: &WalkthroughHumanInput<'_
             .dimmed()
         ));
     }
-    for file in &guide.direction.order {
-        if input.viewed.is_viewed(file, &guide.graph_snapshot_hash) {
-            lines.push(format!(
-                "    {} {}",
-                format_path(file),
-                "\u{2713} viewed".dimmed()
-            ));
-        }
+    for file in viewed_only_files(input) {
+        lines.push(format!(
+            "    {} {}",
+            format_path(&file),
+            "\u{2713} viewed".dimmed()
+        ));
     }
 }
 
+/// Files marked viewed (current hash) that are NOT already in the de-prioritized
+/// bucket, so the viewed sub-list of Cleared never re-lists a de-prioritized file.
+fn viewed_only_files(input: &WalkthroughHumanInput<'_>) -> Vec<String> {
+    let guide = input.guide;
+    viewed_files(input)
+        .into_iter()
+        .filter(|file| {
+            !guide
+                .digest
+                .focus
+                .deprioritized
+                .iter()
+                .any(|u| &u.file == file)
+        })
+        .collect()
+}
+
 /// The Review Focus orientation header lines (rendered to stderr by the entry
-/// point). Built from the guide's triage + graph facts. Never a verdict.
+/// point). Built from the guide's triage + graph facts. Never a verdict. The
+/// file count is the reconciled changed set (`staged + cleared + excluded`), so
+/// the header, the status line, and reality agree.
 #[must_use]
-pub(in crate::report) fn build_focus_header(guide: &StandardWalkthroughGuide) -> Vec<String> {
+pub(in crate::report) fn build_focus_header(
+    guide: &StandardWalkthroughGuide,
+    viewed: &ViewedState,
+) -> Vec<String> {
     let triage = &guide.digest.triage;
+    let viewed_in_order = viewed_files_for(guide, viewed);
+    let acc = WalkthroughAccounting::compute(guide, &viewed_in_order);
+    let total = acc.header_total();
     let mut lines = Vec::new();
     lines.push(format!(
         "{} {}",
@@ -368,16 +405,37 @@ pub(in crate::report) fn build_focus_header(guide: &StandardWalkthroughGuide) ->
             "Review Focus \u{2014} {} risk \u{00b7} {} \u{00b7} {} file{}",
             risk_label(triage.risk_class),
             effort_label(triage.review_effort),
-            triage.files,
-            plural(triage.files),
+            total,
+            plural(total),
         )
         .cyan()
         .bold()
     ));
+    if let Some(breakdown) = accounting_breakdown(&acc) {
+        lines.push(format!("  {}", breakdown.dimmed()));
+    }
     if let Some(sub) = focus_subline(guide) {
         lines.push(format!("  {}", sub.dimmed()));
     }
     lines
+}
+
+/// The honest accounting sub-line: how the changed set splits into staged /
+/// cleared / excluded buckets, so non-source files are surfaced, not dropped.
+/// Returns `None` when there is nothing beyond the staged files to explain.
+fn accounting_breakdown(acc: &WalkthroughAccounting) -> Option<String> {
+    let mut parts = Vec::new();
+    parts.push(format!("{} in stages", acc.staged));
+    if acc.cleared > 0 {
+        parts.push(format!("{} cleared", acc.cleared));
+    }
+    if acc.excluded > 0 {
+        parts.push(format!("{} non-source not reviewed", acc.excluded));
+    }
+    if acc.cleared == 0 && acc.excluded == 0 {
+        return None;
+    }
+    Some(parts.join(" \u{00b7} "))
 }
 
 /// The optional dim sub-line: boundaries touched + affected-not-shown counts.
@@ -407,10 +465,16 @@ fn focus_subline(guide: &StandardWalkthroughGuide) -> Option<String> {
 }
 
 /// The final green status line (rendered to stderr by the entry point). Never a
-/// failure glyph; the walkthrough always exits 0.
+/// failure glyph; the walkthrough always exits 0. The count is the files visible
+/// in stages (de-prioritized + viewed already collapsed into Cleared), so it
+/// reconciles with the header's `staged` bucket.
 #[must_use]
-pub(in crate::report) fn build_status_line(guide: &StandardWalkthroughGuide) -> String {
-    let files = guide.direction.order.len();
+pub(in crate::report) fn build_status_line(
+    guide: &StandardWalkthroughGuide,
+    viewed: &ViewedState,
+) -> String {
+    let acc = WalkthroughAccounting::compute(guide, &viewed_files_for(guide, viewed));
+    let files = acc.staged;
     format!(
         "{} Walkthrough ready \u{2014} {} file{} across 2 stages",
         "\u{2713}".green(),
@@ -435,15 +499,6 @@ fn effort_label(effort: ReviewEffort) -> &'static str {
         ReviewEffort::Review => "review",
         ReviewEffort::DeepDive => "deep-dive",
     }
-}
-
-/// Truncate `s` to at most `max` chars, appending an ellipsis when cut.
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let cut: String = s.chars().take(max.saturating_sub(1)).collect();
-    format!("{cut}\u{2026}")
 }
 
 #[cfg(test)]
@@ -485,13 +540,23 @@ mod tests {
         routing: RoutingFacts,
         weakening: Vec<WeakeningSignal>,
     ) -> StandardWalkthroughGuide {
-        let order = units.iter().map(|u| u.file.clone()).collect();
+        let order: Vec<String> = units.iter().map(|u| u.file.clone()).collect();
+        // Mirror reality: the focus map's review_here is the direction units that
+        // are NOT de-prioritized, so review_here + deprioritized == the source set
+        // and triage.files (no extra non-source churn) keeps `excluded` at 0 for
+        // the synthetic guides that don't deliberately add non-source files.
+        let review_here: Vec<FocusUnit> = order
+            .iter()
+            .filter(|f| !deprioritized.iter().any(|d| &d.file == *f))
+            .map(|f| focus_unit(f, FocusLabel::ReviewHere))
+            .collect();
+        let total_files = review_here.len() + deprioritized.len();
         let digest = StandardReviewBriefOutput {
             schema_version: ReviewBriefSchemaVersion::default(),
             version: "test".to_string(),
             command: "audit-brief".to_string(),
             triage: DiffTriage {
-                files: order_len(&units),
+                files: total_files,
                 hunks: None,
                 net_lines: None,
                 risk_class: RiskClass::Medium,
@@ -506,7 +571,7 @@ mod tests {
             partition: PartitionFacts::default(),
             impact_closure: ImpactClosureFacts::default(),
             focus: FocusMap {
-                review_here: Vec::new(),
+                review_here,
                 deprioritized,
             },
             deltas: ReviewDeltas::default(),
@@ -533,10 +598,6 @@ mod tests {
             },
             injection_note: INJECTION_NOTE,
         }
-    }
-
-    fn order_len(units: &[DirectionUnit]) -> usize {
-        units.len()
     }
 
     fn coupling_decision(file: &str) -> Decision {
@@ -752,18 +813,190 @@ mod tests {
             RoutingFacts::default(),
             Vec::new(),
         );
-        let header = plain(&build_focus_header(&guide));
+        let viewed = ViewedState::default();
+        let header = plain(&build_focus_header(&guide, &viewed));
         assert!(header.contains("Review Focus"), "got: {header}");
-        let status = crate::report::human::strip_ansi(&build_status_line(&guide));
+        let status = crate::report::human::strip_ansi(&build_status_line(&guide, &viewed));
         assert!(status.contains("Walkthrough ready"), "got: {status}");
         assert!(!status.contains('\u{2717}'), "no failure glyph");
     }
 
+    // F1/F2: the header count matches the staged set and surfaces the cleared +
+    // excluded buckets; the status count agrees with the header's staged bucket.
     #[test]
-    fn truncate_caps_long_strings() {
-        let long = "x".repeat(200);
-        let cut = truncate(&long, 50);
-        assert!(cut.chars().count() <= 50);
-        assert!(cut.ends_with('\u{2026}'));
+    fn header_and_status_counts_reconcile() {
+        // Two review-here source units in stages, one de-prioritized, and the diff
+        // also touched 3 non-source files (migrations/config) not in the focus map.
+        let units = vec![
+            unit("src/a.ts", "orientation", Vec::new()),
+            unit("src/b.ts", "orientation", Vec::new()),
+        ];
+        let deprioritized = vec![focus_unit("src/c.ts", FocusLabel::NotPrioritized)];
+        let mut guide = guide_with(
+            units,
+            Vec::new(),
+            deprioritized,
+            RoutingFacts::default(),
+            Vec::new(),
+        );
+        // a.ts + b.ts (review-here) + c.ts (deprioritized) = 3 source; +3 non-source.
+        guide.digest.triage.files = 6;
+        let viewed = ViewedState::default();
+        let header = plain(&build_focus_header(&guide, &viewed));
+        // The header total is the whole changed set, not the staged subset.
+        assert!(header.contains("6 files"), "header total: {header}");
+        // The breakdown surfaces the cleared + excluded buckets honestly.
+        assert!(header.contains("2 in stages"), "staged: {header}");
+        assert!(header.contains("1 cleared"), "cleared: {header}");
+        assert!(
+            header.contains("3 non-source not reviewed"),
+            "excluded: {header}"
+        );
+        // The status line agrees with the staged bucket (not the total).
+        let status = crate::report::human::strip_ansi(&build_status_line(&guide, &viewed));
+        assert!(
+            status.contains("2 files across 2 stages"),
+            "status: {status}"
+        );
+    }
+
+    // F3: a de-prioritized file appears ONLY under Cleared, never in a stage.
+    #[test]
+    fn deprioritized_file_is_not_double_listed() {
+        // One review-here source unit plus one DE-PRIORITIZED source unit; the
+        // engine puts both in direction.order, but the render must collapse the
+        // de-prioritized one into Cleared only.
+        let units = vec![
+            unit("src/keep.ts", "orientation", Vec::new()),
+            unit("src/drop.ts", "orientation", Vec::new()),
+        ];
+        let deprioritized = vec![focus_unit("src/drop.ts", FocusLabel::NotPrioritized)];
+        let guide = guide_with(
+            units,
+            Vec::new(),
+            deprioritized,
+            RoutingFacts::default(),
+            Vec::new(),
+        );
+        let viewed = ViewedState::default();
+        let body = plain(&build_walkthrough_human_lines(&WalkthroughHumanInput {
+            guide: &guide,
+            viewed: &viewed,
+            show_cleared: true,
+        }));
+        assert!(
+            body.contains("keep.ts"),
+            "review-here file stays staged: {body}"
+        );
+        // The de-prioritized file appears only in the Cleared section, never in the
+        // stage section above it (each file is in exactly one place).
+        let cleared_at = body.find("Cleared").expect("cleared panel present");
+        let (stage_section, cleared_section) = body.split_at(cleared_at);
+        assert!(
+            !stage_section.contains("drop.ts"),
+            "de-prioritized file must not be in a stage: {body}"
+        );
+        assert!(
+            cleared_section.contains("drop.ts"),
+            "de-prioritized file must be under Cleared: {body}"
+        );
+    }
+
+    // F3: a --mark-viewed file is removed from its stage and counted ONLY in
+    // Cleared (no double listing).
+    #[test]
+    fn viewed_file_collapses_into_cleared_only() {
+        let units = vec![
+            unit("src/seen.ts", "orientation", Vec::new()),
+            unit("src/fresh.ts", "orientation", Vec::new()),
+        ];
+        let guide = guide_with(
+            units,
+            Vec::new(),
+            Vec::new(),
+            RoutingFacts::default(),
+            Vec::new(),
+        );
+        let mut viewed = ViewedState {
+            graph_snapshot_hash: "hash1".to_string(),
+            ..Default::default()
+        };
+        viewed.entries.insert(
+            "src/seen.ts".to_string(),
+            crate::walkthrough_state::ViewedEntry {
+                viewed_at: "t".to_string(),
+            },
+        );
+        let body = plain(&build_walkthrough_human_lines(&WalkthroughHumanInput {
+            guide: &guide,
+            viewed: &viewed,
+            show_cleared: true,
+        }));
+        // seen.ts appears only under Cleared (as viewed), never in a stage row.
+        let cleared_at = body.find("Cleared").expect("cleared panel present");
+        let (stage_section, cleared_section) = body.split_at(cleared_at);
+        assert!(
+            !stage_section.contains("seen.ts"),
+            "viewed file must not be in a stage: {body}"
+        );
+        assert!(
+            cleared_section.contains("seen.ts"),
+            "viewed file must be under Cleared: {body}"
+        );
+        assert!(
+            body.contains("fresh.ts"),
+            "the un-viewed file stays staged: {body}"
+        );
+        // Header staged count drops the viewed file; status agrees.
+        let status = crate::report::human::strip_ansi(&build_status_line(&guide, &viewed));
+        assert!(
+            status.contains("1 file across 2 stages"),
+            "status: {status}"
+        );
+    }
+
+    // F4/F5/F7: the contract member list is capped and the trailing guidance
+    // question survives (not truncated away); no raw score is shown.
+    #[test]
+    fn contract_question_keeps_trailing_guidance_and_caps_members() {
+        let members =
+            "alertRules, apiKeys, auditLog, budgetAlerts, coverageAlerts, deployments, users, orgs";
+        let question = format!(
+            "`src/db/schema.ts` changes a contract ({members}) consumed by 32 modules NOT in this diff. Coordinate the change, or is the contract stable?"
+        );
+        let mut decision = coupling_decision("src/db/schema.ts");
+        decision.question = question;
+        let units = vec![unit(
+            "src/db/schema.ts",
+            "contract-break",
+            vec!["src/x.ts".to_string()],
+        )];
+        let guide = guide_with(
+            units,
+            vec![decision],
+            Vec::new(),
+            RoutingFacts::default(),
+            Vec::new(),
+        );
+        let viewed = ViewedState::default();
+        let body = plain(&build_walkthrough_human_lines(&WalkthroughHumanInput {
+            guide: &guide,
+            viewed: &viewed,
+            show_cleared: false,
+        }));
+        // The trailing actionable question is NOT truncated away.
+        assert!(
+            body.contains("Coordinate the change, or is the contract stable?"),
+            "trailing guidance must survive: {body}"
+        );
+        // The member list is capped with a "+N more".
+        assert!(body.contains("+2 more"), "member list capped: {body}");
+        // The leading path is not re-printed inside the fact text.
+        assert!(
+            !body.contains("`src/db/schema.ts` changes a contract"),
+            "fact must not re-print the path: {body}"
+        );
+        // The contradictory raw "(score N)" is gone.
+        assert!(!body.contains("(score "), "raw score removed: {body}");
     }
 }

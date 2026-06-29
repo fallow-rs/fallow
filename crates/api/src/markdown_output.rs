@@ -2092,21 +2092,38 @@ pub fn build_walkthrough_markdown(
     out
 }
 
-/// Push the `**Focus:**` line built from the guide's triage.
+/// Push the `**Focus:**` line built from the guide's triage, with the reconciled
+/// file accounting (staged + cleared + excluded) so the count matches the real
+/// changed set and non-source files are surfaced, not silently dropped.
 fn push_walkthrough_focus(out: &mut String, guide: &fallow_output::StandardWalkthroughGuide) {
     let triage = &guide.digest.triage;
+    // The markdown surface is a paste artifact with no local viewed-state, so the
+    // only collapse is de-prioritized; pass an empty viewed list.
+    let acc = fallow_output::WalkthroughAccounting::compute(guide, &[]);
+    let total = acc.header_total();
     let _ = write!(
         out,
-        "**Focus:** {} risk \u{00b7} {} \u{00b7} {} file{}\n\n",
+        "**Focus:** {} risk \u{00b7} {} \u{00b7} {} file{}",
         walkthrough_risk_label(triage.risk_class),
         walkthrough_effort_label(triage.review_effort),
-        triage.files,
-        plural(triage.files),
+        total,
+        plural(total),
     );
+    let mut parts = vec![format!("{} in stages", acc.staged)];
+    if acc.cleared > 0 {
+        parts.push(format!("{} cleared", acc.cleared));
+    }
+    if acc.excluded > 0 {
+        parts.push(format!("{} non-source not reviewed", acc.excluded));
+    }
+    if acc.cleared > 0 || acc.excluded > 0 {
+        let _ = write!(out, " ({})", parts.join(" \u{00b7} "));
+    }
+    out.push_str("\n\n");
 }
 
-/// Partition the guide's units into (contract-break, orientation), each in
-/// `direction.order`.
+/// Partition the guide's VISIBLE stage units (de-prioritized files collapsed out
+/// into Cleared) into (contract-break, orientation), each in `direction.order`.
 fn partition_walkthrough_stages(
     guide: &fallow_output::StandardWalkthroughGuide,
 ) -> (
@@ -2115,10 +2132,7 @@ fn partition_walkthrough_stages(
 ) {
     let mut load_bearing = Vec::new();
     let mut mechanical = Vec::new();
-    for file in &guide.direction.order {
-        let Some(unit) = guide.direction.units.iter().find(|u| &u.file == file) else {
-            continue;
-        };
+    for unit in fallow_output::visible_stage_units(guide, &[]) {
         if unit.concern_lens == "contract-break" {
             load_bearing.push(unit);
         } else {
@@ -2148,10 +2162,12 @@ fn push_walkthrough_stage(
         } else {
             format!("  {}", badges.join(" "))
         };
+        // The raw "(score N)" is intentionally omitted: it is an internal composite
+        // that does not explain the visible within-stage order, so showing it
+        // contradicted the order. The fact carries the real ordering signal.
         let _ = writeln!(
             out,
-            "- `{rel}` (score {}) \u{2014} {}{suffix}",
-            unit.scoring_budget,
+            "- `{rel}` \u{2014} {}{suffix}",
             walkthrough_fact(unit, guide),
         );
     }
@@ -2209,7 +2225,15 @@ fn walkthrough_fact(
         .iter()
         .find(|d| d.anchor_file == unit.file)
     {
-        return escape_backticks(&decision.question);
+        // Strip the redundant leading path (the bullet already shows it) and cap
+        // the contract-member list, PRESERVING the trailing guidance question. The
+        // result is plain prose with no backticks, so it never emits a
+        // backslash-backtick sequence and never re-prints the path.
+        return fallow_output::clean_decision_fact(
+            &decision.question,
+            &unit.file,
+            fallow_output::MAX_CONTRACT_MEMBERS,
+        );
     }
     if !unit.out_of_diff.is_empty() {
         return format!(
@@ -2311,9 +2335,10 @@ mod walkthrough_markdown_tests {
     use super::build_walkthrough_markdown;
     use fallow_output::{
         AgentSchema, Decision, DecisionCategory, DecisionSurface, DiffTriage, DirectionUnit,
-        FocusMap, GraphFacts, INJECTION_NOTE, ImpactClosureFacts, PartitionFacts,
-        ReviewBriefSchemaVersion, ReviewDeltas, ReviewDirection, ReviewEffort, RiskClass,
-        RoutingFacts, StandardReviewBriefOutput, StandardWalkthroughGuide,
+        FocusLabel, FocusMap, FocusScore, FocusUnit, GraphFacts, INJECTION_NOTE,
+        ImpactClosureFacts, PartitionFacts, ReviewBriefSchemaVersion, ReviewDeltas,
+        ReviewDirection, ReviewEffort, RiskClass, RoutingFacts, StandardReviewBriefOutput,
+        StandardWalkthroughGuide,
     };
     use std::path::Path;
 
@@ -2324,6 +2349,16 @@ mod walkthrough_markdown_tests {
             scoring_budget: 3,
             out_of_diff: vec!["src/consumer.ts".to_string()],
             expert: Vec::new(),
+        };
+        // The direction unit comes FROM the focus map's review_here in reality, so
+        // mirror that here: review_here has the one source unit and triage.files
+        // matches it, keeping the excluded bucket at 0 for this synthetic guide.
+        let review_unit = FocusUnit {
+            file: file.to_string(),
+            score: FocusScore::default(),
+            label: FocusLabel::ReviewHere,
+            reason: "reason".to_string(),
+            confidence: Vec::new(),
         };
         let decision = Decision {
             signal_id: "sig:1".to_string(),
@@ -2359,7 +2394,10 @@ mod walkthrough_markdown_tests {
             },
             partition: PartitionFacts::default(),
             impact_closure: ImpactClosureFacts::default(),
-            focus: FocusMap::default(),
+            focus: FocusMap {
+                review_here: vec![review_unit],
+                deprioritized: Vec::new(),
+            },
             deltas: ReviewDeltas::default(),
             weakening: Vec::new(),
             routing: RoutingFacts::default(),
@@ -2400,19 +2438,33 @@ mod walkthrough_markdown_tests {
         assert!(!md.contains('\u{1b}'), "no ANSI in markdown");
     }
 
+    // F5/F7: a coordination question must NOT re-print the anchor path inside the
+    // fact text, must NOT emit a backslash-backtick sequence, and must cap the
+    // contract member list while keeping the trailing guidance question.
     #[test]
-    fn escapes_backticks_in_decision_question() {
-        // A backtick-laden question must not break code fences when escaped.
-        let guide = guide_with_question("src/page.ts", "Replace `old` with `new`?");
+    fn fact_does_not_reprint_path_or_emit_escaped_backticks() {
+        let q = "`src/page.ts` changes a contract (a, b, c, d, e, f, g, h, i) consumed by 9 modules NOT in this diff. Coordinate the change, or is the contract stable?";
+        let guide = guide_with_question("src/page.ts", q);
         let md = build_walkthrough_markdown(&guide, Path::new("/project"));
+        // No backslash-backtick anywhere (the F5 corruption).
         assert!(
-            md.contains("Replace \\`old\\` with \\`new\\`?"),
-            "backticks in the question are escaped: {md}"
+            !md.contains("\\`"),
+            "fact must never emit a backslash-backtick sequence: {md}"
         );
-        // The number of UNESCAPED backticks stays balanced (even count), so no
-        // dangling code fence.
-        let unescaped = md.matches('`').count() - md.matches("\\`").count();
-        assert_eq!(unescaped % 2, 0, "code spans stay balanced: {md}");
+        // The path is printed once (the bullet lead), not a second time in the fact.
+        assert!(
+            !md.contains("`src/page.ts` changes a contract"),
+            "fact must not re-print the path: {md}"
+        );
+        // The member list is capped with a "+N more".
+        assert!(md.contains("+3 more"), "member list capped: {md}");
+        // The trailing actionable question survives in full.
+        assert!(
+            md.contains("Coordinate the change, or is the contract stable?"),
+            "trailing guidance must survive: {md}"
+        );
+        // The raw "(score N)" is gone.
+        assert!(!md.contains("(score "), "raw score removed: {md}");
     }
 
     #[test]
