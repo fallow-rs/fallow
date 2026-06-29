@@ -22,8 +22,9 @@
 //! Gated behind the `test-sidecar-key` cargo feature, which swaps in the
 //! deterministic test sidecar-signing and license keypairs and builds the
 //! `stub_sidecar` bin (a `compile_error!` blocks the feature from release
-//! builds). Run:
-//!   cargo test -p fallow-cli --features test-sidecar-key runtime_focus
+//! builds). Run (the test fn names do not contain "runtime_focus", so target the
+//! binary rather than a bare name filter, which would match zero of them):
+//!   cargo test -p fallow-cli --features test-sidecar-key --test audit_brief_runtime_focus_tests
 
 #[path = "common/mod.rs"]
 mod common;
