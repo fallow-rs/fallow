@@ -3713,6 +3713,28 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
+    /// Credit a class's `toString` when a `new Class()` flows DIRECTLY into a
+    /// string-coercion position (template-literal interpolation, `String(...)`
+    /// argument, or `+` with a string operand). Such a coercion invokes
+    /// `Class.prototype.toString` with no explicit `.toString()` call site, so
+    /// the method would otherwise report as an unused class member.
+    ///
+    /// Records a plain `Class.toString` member access; the analyze layer
+    /// resolves `Class` through the file's imports / local exports to the class
+    /// export. Scoped to the direct `new Class()` form (no bound-identifier or
+    /// typed-instance flow) to keep crediting deterministic and false-positive
+    /// free: a `new Class()` that is NOT in a coercion position never reaches
+    /// this path, and a `new Date()` / other builtin is excluded by
+    /// `new_expression_class_name`. See issue #1638.
+    fn record_string_coercion_to_string(&mut self, expr: &Expression<'a>) {
+        if let Some(class_name) = new_expression_class_name(unwrap_static_expr(expr)) {
+            self.member_accesses.push(MemberAccess {
+                object: class_name,
+                member: "toString".to_string(),
+            });
+        }
+    }
+
     /// Handle `this.member = ...` assignments: record the member access and
     /// propagate the instance-binding target name from a `new Class()` RHS, an
     /// identifier bound to a known class, and nested binding targets.
@@ -4294,6 +4316,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
         self.record_structural_class_call_candidate(expr);
+        // `String(new Class())` coerces via `toString`; credit the member.
+        if let Expression::Identifier(callee) = &expr.callee
+            && callee.name == "String"
+            && let Some(arg) = expr.arguments.first()
+            && let Some(arg_expr) = arg.as_expression()
+        {
+            self.record_string_coercion_to_string(arg_expr);
+        }
         self.clear_literal_allowlist_on_mutating_member_call(expr);
         self.record_framework_callback_param_sources(expr);
         self.react_record_hook_call(expr);
@@ -4373,6 +4403,37 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
 
         walk::walk_for_of_statement(self, stmt);
+    }
+
+    fn visit_template_literal(&mut self, tpl: &TemplateLiteral<'a>) {
+        // `` `...${new Class()}...` `` coerces each interpolated value via
+        // `toString`; credit a direct `new Class()` interpolation. A tagged
+        // template's quasi does NOT coerce (the tag function receives the raw
+        // values), so skip the credit there. Consume the flag on entry so a
+        // nested plain template inside an interpolation still coerces.
+        let suppress = self.in_tagged_template_quasi;
+        self.in_tagged_template_quasi = false;
+        if !suppress {
+            for interpolation in &tpl.expressions {
+                self.record_string_coercion_to_string(interpolation);
+            }
+        }
+        walk::walk_template_literal(self, tpl);
+    }
+
+    fn visit_binary_expression(&mut self, expr: &BinaryExpression<'a>) {
+        // `new Class() + '<string>'` (or the reverse) coerces the instance via
+        // `toString`; credit it only when the sibling operand statically proves a
+        // string context, so a numeric / ambiguous `+` does not over-credit.
+        if expr.operator == BinaryOperator::Addition {
+            if is_string_coercion_sibling(&expr.right) {
+                self.record_string_coercion_to_string(&expr.left);
+            }
+            if is_string_coercion_sibling(&expr.left) {
+                self.record_string_coercion_to_string(&expr.right);
+            }
+        }
+        walk::walk_binary_expression(self, expr);
     }
 
     fn visit_new_expression(&mut self, expr: &oxc_ast::ast::NewExpression<'a>) {
@@ -4696,7 +4757,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
         }
         self.capture_tagged_template_sink(expr);
+        // Suppress the string-coercion `toString` credit for the immediate quasi:
+        // a tagged template's tag function does not coerce interpolations via
+        // `toString`. `visit_template_literal` consumes the flag on entry, so a
+        // nested plain template literal inside an interpolation still coerces.
+        let prev_tagged = self.in_tagged_template_quasi;
+        self.in_tagged_template_quasi = true;
         walk::walk_tagged_template_expression(self, expr);
+        self.in_tagged_template_quasi = prev_tagged;
     }
 
     fn visit_jsx_attribute(&mut self, attr: &oxc_ast::ast::JSXAttribute<'a>) {
@@ -6849,6 +6917,17 @@ fn collect_idents_into(expr: &Expression<'_>, out: &mut Vec<String>) {
         }
         _ => {}
     }
+}
+
+/// Whether an operand of a `+` expression statically proves a string context,
+/// so the OTHER operand is coerced to a string. Conservative: only a string
+/// literal or a template literal counts (a numeric literal, an identifier, or
+/// any other shape is ambiguous and must not credit `toString`).
+fn is_string_coercion_sibling(expr: &Expression<'_>) -> bool {
+    matches!(
+        unwrap_static_expr(expr),
+        Expression::StringLiteral(_) | Expression::TemplateLiteral(_)
+    )
 }
 
 /// The class name in a `new Class()` expression, or `None` for a non-`new`

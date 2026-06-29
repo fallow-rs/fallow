@@ -215,6 +215,13 @@ pub(crate) struct ModuleInfoExtractor {
     playwright_fixture_types: FxHashMap<String, Vec<(String, String)>>,
     block_depth: u32,
     function_depth: u32,
+    /// True while walking the immediate quasi of a tagged template
+    /// (`` html`...` ``, `` styled.div`...` ``, `` gql`...` ``). The tag function
+    /// receives the raw parts and values and does NOT coerce interpolations via
+    /// `toString`, so the string-coercion `toString` credit must be suppressed
+    /// for that quasi (consumed on entry so nested plain template literals inside
+    /// an interpolation still coerce). See issue #1638.
+    in_tagged_template_quasi: bool,
     pub(crate) class_super_stack: Vec<Option<String>>,
     pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
     pub(crate) side_effect_registered_class_names: FxHashSet<String>,

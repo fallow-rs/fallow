@@ -680,15 +680,13 @@ use crate::MemberKind;
 /// directive sets `used_in_template`. A warm cache from 212 carries the stale
 /// (uncredited) prop-usage flags.
 ///
-/// Bumped to 214 (issue #1641, Vue side): Vue template usage now credits the
-/// 3.4+ same-name `v-bind` shorthand (`:open` = `:open="open"`, `:some-prop` =
-/// `:some-prop="someProp"`) as a reference, so a prop used only via a value-less
-/// `v-bind` sets `used_in_template`. Vue SFC `<style> v-bind(expr)` references
-/// are now scanned too, so
-/// a prop / import used only via CSS `v-bind(accent)` / `v-bind(props.x)` /
-/// `v-bind('a.b')` sets `used_in_template`. A warm cache from 213 carries the
-/// stale (uncredited) prop-usage flags.
-pub(super) const CACHE_VERSION: u32 = 214;
+/// Bumped to 215 (issue #1638, GAP 2): a `new Class()` flowing DIRECTLY into a
+/// string-coercion position (template-literal interpolation, `String(...)`
+/// argument, or `+` with a string operand) now records a `Class.toString`
+/// member access, so an implicitly-coerced `toString` is credited instead of
+/// reported as an unused class member. A warm cache from 214 lacks the
+/// synthesized `toString` accesses.
+pub(super) const CACHE_VERSION: u32 = 215;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

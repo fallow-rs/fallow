@@ -1,0 +1,7 @@
+{
+  "name": "issue-1638-openlayers-dispatch-fixture",
+  "main": "src/app.js",
+  "dependencies": {
+    "ol": "^9.0.0"
+  }
+}

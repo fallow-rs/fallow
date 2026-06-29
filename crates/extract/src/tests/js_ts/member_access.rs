@@ -205,3 +205,119 @@ function handle(a, b) {
         info.member_accesses,
     );
 }
+
+#[test]
+fn template_literal_new_class_credits_to_string() {
+    let info =
+        parse_source("import { Money } from './money';\nconst label = `Total: ${new Money(5)}`;");
+    let has_access = info
+        .member_accesses
+        .iter()
+        .any(|a| a.object == "Money" && a.member == "toString");
+    assert!(
+        has_access,
+        "`${{new Money()}}` in a template literal must credit Money.toString; \
+         got member_accesses = {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn string_call_new_class_credits_to_string() {
+    let info = parse_source("import { Money } from './money';\nconst s = String(new Money(1));");
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Money" && a.member == "toString"),
+        "String(new Money()) must credit Money.toString; got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn string_concat_new_class_credits_to_string() {
+    let info = parse_source("import { Money } from './money';\nconst s = '' + new Money(1);");
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Money" && a.member == "toString"),
+        "'' + new Money() must credit Money.toString; got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn string_concat_prefix_new_class_credits_to_string() {
+    let info =
+        parse_source("import { Money } from './money';\nconst s = new Money(1) + ' suffix';");
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Money" && a.member == "toString"),
+        "new Money() + ' suffix' must credit Money.toString; got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn numeric_plus_new_class_does_not_credit_to_string() {
+    // Sibling operand is a numeric literal, not a string: no coercion proof.
+    let info = parse_source("import { Num } from './num';\nconst n = new Num() + 5;");
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Num" && a.member == "toString"),
+        "new Num() + 5 must NOT credit Num.toString (numeric context); got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn bare_new_class_not_in_coercion_does_not_credit_to_string() {
+    // A constructed instance NOT in a coercion position must not be credited.
+    let info = parse_source("import { Money } from './money';\nconst m = new Money(1);");
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Money" && a.member == "toString"),
+        "a bare `new Money()` must NOT credit Money.toString; got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn tagged_template_new_class_does_not_credit_to_string() {
+    // A tagged template's tag function receives the raw values and does NOT
+    // coerce interpolations via toString (Lit `html`, styled-components, gql),
+    // so a direct `new Money()` interpolation must NOT credit Money.toString.
+    // Regression for #1638 (tagged-template over-credit).
+    let info = parse_source(
+        "import { Money } from './money';\nconst t = html`<span>${new Money(1)}</span>`;",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Money" && a.member == "toString"),
+        "a tagged-template interpolation must NOT credit Money.toString; got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn nested_plain_template_in_tagged_credits_to_string() {
+    // A plain template literal nested inside a tagged-template interpolation
+    // still coerces, so the inner `${new Money()}` credits Money.toString.
+    let info = parse_source(
+        "import { Money } from './money';\nconst t = html`<span>${`x ${new Money(1)}`}</span>`;",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Money" && a.member == "toString"),
+        "a plain template nested in a tagged interpolation must credit Money.toString; got {:?}",
+        info.member_accesses,
+    );
+}

@@ -72,6 +72,45 @@ fn is_error_subclass_runtime_member(
         && error_subclass_keys.contains(export_key)
 }
 
+/// Methods OpenLayers calls by convention on an `ol/interaction/*` subclass.
+///
+/// `handleEvent` is the dispatcher the `Interaction` base exposes and the map
+/// invokes per browser event; the `handle*Event` / `stopDown` set is the
+/// `PointerInteraction` template-method protocol a drag/pointer interaction
+/// overrides. None has an explicit `instance.method()` call site, so they are
+/// otherwise reported as unused. Verified against the OpenLayers
+/// `interaction/Interaction.js` and `interaction/Pointer.js` sources.
+const OL_INTERACTION_DISPATCHED_MEMBERS: &[&str] = &[
+    "handleEvent",
+    "handleDownEvent",
+    "handleDragEvent",
+    "handleMoveEvent",
+    "handleUpEvent",
+    "stopDown",
+];
+
+/// A `super_class` import source naming an OpenLayers interaction base.
+///
+/// Matches the per-class subpath imports (`ol/interaction/Pointer`,
+/// `ol/interaction/Interaction`, ...) and the barrel named import
+/// (`import {Pointer} from 'ol/interaction'`). Anything else (a same-named
+/// LOCAL `Pointer` class, an unrelated package) is not an OpenLayers base, so
+/// its dispatched-name members still report.
+fn is_ol_interaction_import_source(source: &str) -> bool {
+    source == "ol/interaction" || source.starts_with("ol/interaction/")
+}
+
+/// A dispatched method is runtime-used when its declaring class is in the
+/// OpenLayers-interaction-subclass closure.
+fn is_ol_interaction_dispatched_member(
+    member_name: &str,
+    export_key: &ExportKey,
+    ol_interaction_subclass_keys: &FxHashSet<ExportKey>,
+) -> bool {
+    OL_INTERACTION_DISPATCHED_MEMBERS.contains(&member_name)
+        && ol_interaction_subclass_keys.contains(export_key)
+}
+
 /// Find unused enum and class members in exported symbols.
 ///
 /// Collects `Identifier.member` accesses, resolves imports, and filters out
@@ -103,6 +142,7 @@ struct MemberSkipContext<'a> {
     file_self_accesses: Option<&'a FxHashSet<String>>,
     ignore_decorators: &'a IgnoreDecoratorSet,
     error_subclass_keys: &'a FxHashSet<ExportKey>,
+    ol_interaction_subclass_keys: &'a FxHashSet<ExportKey>,
     allowlist: &'a ClassMemberAllowlist<'a>,
     super_class: Option<&'a str>,
     implemented_interfaces: &'a [String],
@@ -2061,6 +2101,7 @@ struct PreparedMemberScan<'a> {
     whole_object_used_exports: FxHashSet<ExportKey>,
     entry_star_targets: FxHashSet<FileId>,
     error_subclass_keys: FxHashSet<ExportKey>,
+    ol_interaction_subclass_keys: FxHashSet<ExportKey>,
 }
 
 type MemberScanBuckets = (Vec<UnusedMember>, Vec<UnusedMember>, Vec<UnusedMember>);
@@ -2218,6 +2259,7 @@ impl MemberReportContext<'_, '_> {
                     file_self_accesses,
                     ignore_decorators: self.ignore_decorators,
                     error_subclass_keys: &self.prepared.error_subclass_keys,
+                    ol_interaction_subclass_keys: &self.prepared.ol_interaction_subclass_keys,
                     allowlist: self.allowlist,
                     super_class,
                     implemented_interfaces,
@@ -2293,6 +2335,9 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
         &heritage_context.class_heritage_by_export,
     );
 
+    let ol_interaction_subclass_keys =
+        build_ol_interaction_subclass_keys(input.resolved_modules, &parent_to_children);
+
     PreparedMemberScan {
         heritage_context,
         accessed_members,
@@ -2300,7 +2345,60 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
         whole_object_used_exports,
         entry_star_targets,
         error_subclass_keys,
+        ol_interaction_subclass_keys,
     }
+}
+
+/// Build the set of exported class `ExportKey`s whose heritage chain reaches an
+/// OpenLayers interaction base, verified by the `super_class` local name
+/// resolving through the module's imports to an `ol/interaction/*` specifier.
+///
+/// Seeds direct subclasses (the imported base is an external package, never a
+/// local export, so `parent_to_children` cannot reach it), then walks
+/// `parent_to_children` downward so a transitive local subclass
+/// (`class B extends A` where `A extends PointerInteraction`) is covered too.
+fn build_ol_interaction_subclass_keys(
+    resolved_modules: &[ResolvedModule],
+    parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
+) -> FxHashSet<ExportKey> {
+    let mut ol_keys: FxHashSet<ExportKey> = FxHashSet::default();
+
+    for resolved in resolved_modules {
+        let ol_import_locals: FxHashSet<&str> = resolved
+            .resolved_imports
+            .iter()
+            .filter(|import| is_ol_interaction_import_source(&import.info.source))
+            .map(|import| import.info.local_name.as_str())
+            .collect();
+        if ol_import_locals.is_empty() {
+            continue;
+        }
+
+        for export in &resolved.exports {
+            if let Some(super_local) = &export.super_class
+                && ol_import_locals.contains(super_local.as_str())
+            {
+                ol_keys.insert(ExportKey::new(resolved.file_id, export.name.to_string()));
+            }
+        }
+    }
+
+    if ol_keys.is_empty() {
+        return ol_keys;
+    }
+
+    let mut stack: Vec<ExportKey> = ol_keys.iter().cloned().collect();
+    while let Some(parent_key) = stack.pop() {
+        if let Some(children) = parent_to_children.get(&parent_key) {
+            for child in children {
+                if ol_keys.insert(child.clone()) {
+                    stack.push(child.clone());
+                }
+            }
+        }
+    }
+
+    ol_keys
 }
 
 /// Collect direct member accesses and run every access-propagation pass
@@ -2493,6 +2591,11 @@ fn class_member_runtime_credit_applies(member: &MemberInfo, ctx: &MemberSkipCont
                 &member.name,
                 ctx.export_key,
                 ctx.error_subclass_keys,
+            )
+            || is_ol_interaction_dispatched_member(
+                &member.name,
+                ctx.export_key,
+                ctx.ol_interaction_subclass_keys,
             )
             || ctx.allowlist.matches(
                 member.name.as_str(),

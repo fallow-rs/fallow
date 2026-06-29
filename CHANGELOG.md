@@ -34,6 +34,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Webpack / Jest config.
   (Closes [#1642](https://github.com/fallow-rs/fallow/issues/1642))
 
+- **`unused-class-members` no longer false-flags framework-dispatched OpenLayers
+  interaction methods.** A `handleEvent` (or the `PointerInteraction`
+  `handle*Event` / `stopDown` protocol) on a subclass of an `ol/interaction/*`
+  base is invoked by OpenLayers per browser event, never through an explicit
+  call site, so it was reported as an unused class member. fallow now credits
+  these dispatched methods, gated on the `super_class` resolving through the
+  file's imports to an `ol/interaction/*` specifier (so a same-named local base
+  does not credit) and walked down `extends` chains so transitive subclasses are
+  covered. Genuinely-unused non-dispatched members on the same class still
+  report.
+  (Closes [#1638](https://github.com/fallow-rs/fallow/issues/1638))
+
+- **`unused-class-members` no longer false-flags a `toString` invoked only
+  through implicit string coercion.** A `toString` used solely via a
+  template-literal interpolation (`` `${new Money(5)}` ``), `String(...)`, or `+`
+  with a string operand has no explicit `.toString()` call site, so it was
+  reported as unused. fallow now credits a class's `toString` when a
+  `new Class()` flows directly into one of those coercion positions. The scope is
+  tight to the direct `new Class()` form: a numeric `+` (`new Num() + 5`) and a
+  `new Class()` outside a coercion position do not credit, so a genuinely-unused
+  `toString` still reports.
+  (Closes [#1638](https://github.com/fallow-rs/fallow/issues/1638))
+
 ## [2.103.0] - 2026-06-28
 
 ### Added

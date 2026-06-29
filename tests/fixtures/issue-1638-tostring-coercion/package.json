@@ -1,0 +1,4 @@
+{
+  "name": "issue-1638-tostring-coercion-fixture",
+  "main": "src/app.js"
+}

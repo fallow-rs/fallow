@@ -336,6 +336,12 @@ mod ember_classic;
 #[path = "integration_test/issue_620_error_subclass_name.rs"]
 mod issue_620_error_subclass_name;
 
+#[path = "integration_test/issue_1638_openlayers_dispatch.rs"]
+mod issue_1638_openlayers_dispatch;
+
+#[path = "integration_test/issue_1638_tostring_coercion.rs"]
+mod issue_1638_tostring_coercion;
+
 #[path = "integration_test/issue_843_nestjs_lifecycle.rs"]
 mod issue_843_nestjs_lifecycle;
 
