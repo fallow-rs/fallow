@@ -66,7 +66,8 @@ pub use astro::{
     extract_astro_frontmatter, extract_astro_style_regions, extract_astro_template_regions,
 };
 pub use css::{
-    ThemeScan, ThemeTokenDef, extract_apply_tokens, extract_css_module_exports, scan_theme_blocks,
+    ThemeScan, ThemeTokenDef, extract_apply_tokens, extract_apply_tokens_located,
+    extract_css_module_exports, extract_css_var_reads_located, scan_theme_blocks,
 };
 pub use css_classes::{
     MarkupClassScan, MarkupClassToken, is_edit_distance_one, is_typo_edit, scan_markup_class_tokens,

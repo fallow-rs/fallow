@@ -13968,6 +13968,13 @@
           },
           "description": "Tailwind v4 `@theme` design tokens (`--color-brand`, `--radius-card`)\ndefined in a stylesheet but used by no generated utility, `var()` read,\n`@apply`, or arbitrary value anywhere in the project: dead design tokens\n(the `unused-export` of the token era). Present only when the project is\nTailwind v4 (a `tailwindcss` dependency plus at least one `@theme` block)\nand not a plugin / published-library / partial-scope run. Candidates,\nnever gated findings: the token may be consumed by a Tailwind plugin or a\ndownstream repo. Sorted by `(path, line, token)`."
         },
+        "token_consumers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TokenConsumers"
+          },
+          "description": "A location-aware reverse index of Tailwind v4 `@theme` token consumers:\nper token, where it is consumed (`var()` reads, `@apply` bodies, generated\nutility classes) and through which surface, plus the full `consumer_count`\n(a static lower bound) and the defining site. Built from the same gated\ncandidate set as `unused_theme_tokens` (v4 + non-plugin + non-published +\nwhole-scope), so a token with `consumer_count: 0` is the same \"nothing\nconsumes this\" signal. Sorted by token; empty when the project is not\nTailwind v4 or a plugin / published-library / partial-scope run gated the\nscan out."
+        },
         "font_size_unit_mix": {
           "anyOf": [
             {
@@ -17360,6 +17367,95 @@
         }
       ],
       "description": "Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier\n`high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON\nPURPOSE: styling confidence is a binary sample-size knee (the authored-CSS\nsurface is either large enough for the declaration-normalized rubric to be\nreliable or it is not), not three distinct evidence tiers, so a never-emitted\n`Medium` would be dead surface. Serializes lowercase (`\"high\"` / `\"low\"`),\nmatching the sibling confidence enums' vocabulary."
+    },
+    "TokenConsumers": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "The full custom property as authored, including the `--` prefix\n(`--color-brand`)."
+        },
+        "namespace": {
+          "type": "string",
+          "description": "The Tailwind v4 theme namespace the token belongs to (`color`, `radius`,\n`font-weight`, ...)."
+        },
+        "definition_path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the declaring stylesheet."
+        },
+        "definition_line": {
+          "type": "integer",
+          "description": "1-based line of the token's definition inside the `@theme` block."
+        },
+        "consumer_count": {
+          "type": "integer",
+          "description": "The FULL number of consumer locations found, a STATIC LOWER BOUND: a\ncomputed class name (`bg-${color}`) or a value read outside CSS/markup the\nscan never sees is not counted. This is the aggregate over every consumer,\ncomputed BEFORE [`consumers`](Self::consumers) is capped to a sample."
+        },
+        "consumers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TokenConsumerLocation"
+          },
+          "description": "A capped, deterministically-sorted sample of consumer locations (at most\n[`TOKEN_CONSUMER_SAMPLE_CAP`]). The full count lives in\n[`consumer_count`](Self::consumer_count); use this list to jump to\nrepresentative consumers, not to enumerate every one."
+        }
+      },
+      "required": [
+        "token",
+        "namespace",
+        "definition_path",
+        "definition_line",
+        "consumer_count",
+        "consumers"
+      ],
+      "description": "A location-aware reverse index of where one Tailwind v4 `@theme` token is\nconsumed, so an agent editing the token can see its blast radius before\nchanging or removing it. Built from the same gated candidate set as\n`unused_theme_tokens` (v4 + non-plugin + non-published + whole-scope), so a\ntoken with `consumer_count: 0` is the same actionable \"nothing consumes this\"\nsignal that also surfaces it in `unused_theme_tokens`."
+    },
+    "TokenConsumerLocation": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the consuming file."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the consuming reference in that file."
+        },
+        "kind": {
+          "description": "Which surface consumes the token at this location.",
+          "$ref": "#/definitions/ConsumerKind"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "kind"
+      ],
+      "description": "Where one Tailwind v4 `@theme` token is consumed, and through which surface.\nOne entry in a [`TokenConsumers::consumers`] sample."
+    },
+    "ConsumerKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "theme-var",
+          "description": "A `var(--token)` read inside a `@theme` block interior (a token backing\nanother token)."
+        },
+        {
+          "type": "string",
+          "const": "css-var",
+          "description": "A `var(--token)` read in regular CSS, outside any `@theme` block."
+        },
+        {
+          "type": "string",
+          "const": "utility",
+          "description": "A generated utility class ending in `-<name>` (`bg-brand` consuming\n`--color-brand`) found in markup / className strings / CSS-in-JS."
+        },
+        {
+          "type": "string",
+          "const": "apply",
+          "description": "A class-shaped token inside an `@apply` body in a stylesheet."
+        }
+      ],
+      "description": "The surface through which a Tailwind v4 `@theme` token is consumed."
     }
   }
 }

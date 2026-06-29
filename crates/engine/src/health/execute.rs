@@ -555,6 +555,21 @@ struct CssTokenSets {
     /// separately and never pollute the shared `referenced_custom_props` set
     /// the `@property` / unreferenced-custom-property candidates diff against).
     theme_var_reads: rustc_hash::FxHashSet<String>,
+    /// Located `@theme`-interior `var()` reads: `(name, path, line)` per read.
+    /// The token-consumers reverse index keys on these (kind `theme-var`); the
+    /// name-only `theme_var_reads` set above stays the untouched input to
+    /// `scan_unused_theme_tokens`. Additive, never read by the unused-token scan.
+    theme_var_reads_located: Vec<(String, String, u32)>,
+    /// Located regular-CSS `var()` reads (outside any `@theme` interior):
+    /// `(name, path, line)` per read. The token-consumers reverse index keys on
+    /// these (kind `css-var`). Additive; the unused-token scan instead diffs the
+    /// name-only `referenced_custom_props` set.
+    css_var_reads_located: Vec<(String, String, u32)>,
+    /// Located class-shaped tokens inside `@apply` bodies: `(token, path, line)`
+    /// per match. The token-consumers reverse index keys on these (kind `apply`);
+    /// the name-only `apply_tokens` set above stays the untouched unused-token
+    /// scan input. Additive.
+    apply_uses_located: Vec<(String, String, u32)>,
     /// `true` when any analyzed stylesheet declares a Tailwind `@plugin`
     /// directive: a plugin can consume theme tokens via `theme()` / `addUtilities`
     /// invisibly to the markup / CSS / `var()` scan, so the unused-theme-token
@@ -685,9 +700,22 @@ impl CssTokenSets {
                 .entry(token.name)
                 .or_insert_with(|| (rel.to_owned(), token.line));
         }
-        self.theme_var_reads.extend(scan.theme_var_reads);
+        // Name-only set: the untouched input to `scan_unused_theme_tokens`.
+        // Located list: additive, keyed by the token-consumer reverse index.
+        for (name, line) in scan.theme_var_reads {
+            self.theme_var_reads.insert(name.clone());
+            self.theme_var_reads_located
+                .push((name, rel.to_owned(), line));
+        }
         self.apply_tokens
             .extend(crate::extract::extract_apply_tokens(source));
+        for (token, line) in crate::extract::extract_apply_tokens_located(source) {
+            self.apply_uses_located.push((token, rel.to_owned(), line));
+        }
+        for (name, line) in crate::extract::extract_css_var_reads_located(source) {
+            self.css_var_reads_located
+                .push((name, rel.to_owned(), line));
+        }
         if source.contains("@plugin") {
             self.any_plugin_directive = true;
         }
@@ -2040,6 +2068,54 @@ fn collect_class_shaped_tokens(source: &str, out: &mut rustc_hash::FxHashSet<Str
     }
 }
 
+/// Location-aware sibling of [`collect_class_shaped_tokens`]: appends every
+/// Tailwind-utility-shaped token in `source` to `out` as `(token, rel, line)`,
+/// recording the 1-based line of each match start. Same shape rule (a maximal
+/// `[a-z0-9-]` run that, trimmed of `-`, still contains a `-` and starts with a
+/// lowercase letter), so the located scan credits exactly the tokens the
+/// name-only scan does, with positions added.
+fn collect_class_shaped_tokens_located(
+    source: &str,
+    rel: &str,
+    out: &mut Vec<(String, String, u32)>,
+) {
+    let bytes = source.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' {
+            let start = i;
+            while i < bytes.len() {
+                let c = bytes[i];
+                if c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-' {
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            let tok = source[start..i].trim_matches('-');
+            if tok.contains('-') && tok.as_bytes().first().is_some_and(u8::is_ascii_lowercase) {
+                out.push((
+                    tok.to_owned(),
+                    rel.to_owned(),
+                    line_at_offset(source, start),
+                ));
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// 1-based line of byte `offset` in `source`, counting `\n` up to that offset.
+/// Out-of-range offsets clamp to line 1.
+fn line_at_offset(source: &str, offset: usize) -> u32 {
+    let count = source
+        .get(..offset)
+        .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
+    u32::try_from(1 + count).unwrap_or(u32::MAX)
+}
+
 /// True when a `tailwind.config.*` text declares a non-empty `plugins` array
 /// (`plugins: [ <non-empty> ]`). Used by the unused-theme-token plugin abstain.
 /// Whitespace-tolerant, conservative (abstain-leaning): any `plugins` key whose
@@ -2259,6 +2335,173 @@ fn scan_unused_theme_tokens(
     });
     input.summary.unused_theme_tokens = saturate_len(out.len());
     out
+}
+
+/// Inputs to the token-consumer reverse index. Mirrors the gating-relevant
+/// fields of [`UnusedThemeTokenScanInput`] but carries no `&mut summary` (the
+/// reverse index is descriptive and sets no summary count).
+struct TokenConsumersInput<'a> {
+    tokens: &'a CssTokenSets,
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    config: &'a ResolvedConfig,
+    ignore_set: &'a globset::GlobSet,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+}
+
+/// Build the located `utility`-kind consumer surface: every class-shaped token
+/// in non-CSS source (markup class attributes, `clsx` args, CSS-in-JS), each as
+/// `(token, path, line)`. Mirrors the file iteration and ignore filter of
+/// `collect_theme_usage_tokens` but records positions instead of a name-only
+/// set. `@apply` bodies are deliberately excluded here (they are the distinct
+/// `apply` surface, located separately, so the two kinds never double-count one
+/// consumer).
+fn collect_located_utility_consumers(
+    input: &TokenConsumersInput<'_>,
+) -> Vec<(String, String, u32)> {
+    let mut located: Vec<(String, String, u32)> = Vec::new();
+    for file in input.files {
+        let path = &file.path;
+        let extension = path.extension().and_then(|ext| ext.to_str());
+        if !extension.is_some_and(|ext| THEME_USAGE_SOURCE_EXTS.contains(&ext)) {
+            continue;
+        }
+        let relative = path.strip_prefix(&input.config.root).unwrap_or(path);
+        if input.ignore_set.is_match(relative) {
+            continue;
+        }
+        let rel = relative.to_string_lossy().replace('\\', "/");
+        if let Ok(source) = std::fs::read_to_string(path) {
+            collect_class_shaped_tokens_located(&source, &rel, &mut located);
+        }
+    }
+    located
+}
+
+/// Build the location-aware reverse index of Tailwind v4 `@theme` token
+/// consumers. Applies the IDENTICAL gate as `scan_unused_theme_tokens` (partial
+/// scope / non-v4 / empty definers / plugin all abstain, returning empty), keys
+/// on the SAME classified candidates (so it inherits the variant /
+/// published-library filters), then for each candidate gathers consumer
+/// locations across the four surfaces (`theme-var`, `css-var`, `apply`,
+/// `utility`). `consumer_count` is the FULL count (a static lower bound), set
+/// before the per-token sample is capped. Output sorted by token; a token with
+/// zero consumers is retained (the actionable "nothing consumes this" signal).
+fn build_token_consumers(input: &TokenConsumersInput<'_>) -> Vec<fallow_output::TokenConsumers> {
+    use fallow_output::{
+        ConsumerKind, TOKEN_CONSUMER_SAMPLE_CAP, TokenConsumerLocation, TokenConsumers,
+    };
+
+    // Gate parity with `scan_unused_theme_tokens` (must abstain identically).
+    if input.changed_files.is_some() || input.ws_roots.is_some() {
+        return Vec::new();
+    }
+    if input.tokens.theme_token_definers.is_empty() || !project_uses_tailwind(&input.config.root) {
+        return Vec::new();
+    }
+    if project_uses_tailwind_plugin(input.tokens.any_plugin_directive, &input.config.root) {
+        return Vec::new();
+    }
+
+    // Reuse the exact candidate set the unused-token scan keys on, so the reverse
+    // index inherits identical variant / published-library / namespace gating.
+    let mut summary = fallow_output::CssAnalyticsSummary::default();
+    let candidates = classify_theme_token_candidates(&UnusedThemeTokenScanInput {
+        tokens: input.tokens,
+        files: input.files,
+        config: input.config,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        ws_roots: input.ws_roots,
+        summary: &mut summary,
+    });
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    let utility_located = collect_located_utility_consumers(input);
+
+    let mut out: Vec<TokenConsumers> = candidates
+        .into_iter()
+        .map(|candidate| {
+            let dash_name = format!("-{}", candidate.name);
+            // The token's own custom-property key (raw = token without `--`).
+            let raw = candidate.token.trim_start_matches('-').to_owned();
+            let mut consumers: Vec<TokenConsumerLocation> = Vec::new();
+
+            for (name, path, line) in &input.tokens.theme_var_reads_located {
+                if *name == raw {
+                    consumers.push(TokenConsumerLocation {
+                        path: path.clone(),
+                        line: *line,
+                        kind: ConsumerKind::ThemeVar,
+                    });
+                }
+            }
+            for (name, path, line) in &input.tokens.css_var_reads_located {
+                if *name == raw {
+                    consumers.push(TokenConsumerLocation {
+                        path: path.clone(),
+                        line: *line,
+                        kind: ConsumerKind::CssVar,
+                    });
+                }
+            }
+            for (token, path, line) in &input.tokens.apply_uses_located {
+                if token.len() > dash_name.len() && token.ends_with(&dash_name) {
+                    consumers.push(TokenConsumerLocation {
+                        path: path.clone(),
+                        line: *line,
+                        kind: ConsumerKind::Apply,
+                    });
+                }
+            }
+            for (token, path, line) in &utility_located {
+                if token.len() > dash_name.len() && token.ends_with(&dash_name) {
+                    consumers.push(TokenConsumerLocation {
+                        path: path.clone(),
+                        line: *line,
+                        kind: ConsumerKind::Utility,
+                    });
+                }
+            }
+
+            // Deterministic order; full count BEFORE capping the sample.
+            consumers.sort_by(|a, b| {
+                a.path
+                    .cmp(&b.path)
+                    .then_with(|| a.line.cmp(&b.line))
+                    .then_with(|| consumer_kind_rank(a.kind).cmp(&consumer_kind_rank(b.kind)))
+            });
+            let consumer_count = saturate_len(consumers.len());
+            consumers.truncate(TOKEN_CONSUMER_SAMPLE_CAP);
+
+            TokenConsumers {
+                token: candidate.token,
+                namespace: candidate.namespace,
+                definition_path: candidate.path,
+                definition_line: candidate.line,
+                consumer_count,
+                consumers,
+            }
+        })
+        .collect();
+
+    out.sort_by(|a, b| a.token.cmp(&b.token));
+    out
+}
+
+/// Stable sort rank for [`fallow_output::ConsumerKind`], so the consumer sample
+/// orders deterministically when path + line tie (the `@apply` body and the
+/// `@theme`-interior read can share a line in a single stylesheet).
+fn consumer_kind_rank(kind: fallow_output::ConsumerKind) -> u8 {
+    use fallow_output::ConsumerKind;
+    match kind {
+        ConsumerKind::ThemeVar => 0,
+        ConsumerKind::CssVar => 1,
+        ConsumerKind::Utility => 2,
+        ConsumerKind::Apply => 3,
+    }
 }
 
 /// The markup / source-derived CSS candidate lists, gathered in one pass-set so
@@ -2591,7 +2834,18 @@ fn compute_css_analytics_report(
     // which only filters `theme_token_definers` down), so this is always
     // `>= summary.unused_theme_tokens`.
     let theme_tokens_defined = saturate_len(walk.tokens.theme_token_definers.len());
-    let report = assemble_css_report(walk, metrics, candidates)?;
+    // The location-aware token-consumer reverse index, gated identically to
+    // `unused_theme_tokens` (v4 + non-plugin + non-published + whole-scope), built
+    // before `assemble_css_report` consumes `walk`.
+    let token_consumers = build_token_consumers(&TokenConsumersInput {
+        tokens: &walk.tokens,
+        files,
+        config,
+        ignore_set,
+        changed_files,
+        ws_roots,
+    });
+    let report = assemble_css_report(walk, metrics, candidates, token_consumers)?;
     Some(CssAnalyticsComputation {
         report,
         theme_tokens_defined,
@@ -2605,6 +2859,7 @@ fn assemble_css_report(
     walk: CssWalkAccum,
     metrics: CssTokenMetrics,
     candidates: MarkupCssCandidates,
+    token_consumers: Vec<fallow_output::TokenConsumers>,
 ) -> Option<fallow_output::CssAnalyticsReport> {
     use fallow_output::CssAnalyticsReport;
 
@@ -2612,7 +2867,8 @@ fn assemble_css_report(
         && candidates.unresolved_class_references.is_empty()
         && candidates.unreferenced_css_classes.is_empty()
         && metrics.unused_font_faces.is_empty()
-        && candidates.unused_theme_tokens.is_empty();
+        && candidates.unused_theme_tokens.is_empty()
+        && token_consumers.is_empty();
     if walk.summary.files_analyzed == 0 && walk.scoped_unused.is_empty() && candidates_empty {
         return None;
     }
@@ -2631,6 +2887,7 @@ fn assemble_css_report(
         unreferenced_css_classes: candidates.unreferenced_css_classes,
         unused_font_faces: metrics.unused_font_faces,
         unused_theme_tokens: candidates.unused_theme_tokens,
+        token_consumers,
         font_size_unit_mix: metrics.font_size_unit_mix,
     })
 }
@@ -8598,5 +8855,275 @@ mod tests {
         let before = findings.len();
         append_component_rollup_findings(&mut findings, None, 30, 25);
         assert_eq!(findings.len(), before);
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    reason = "tests use unwrap to keep token-consumer assertions concise"
+)]
+mod token_consumer_tests {
+    use super::*;
+    use fallow_config::{FallowConfig, OutputFormat};
+    use fallow_output::ConsumerKind;
+    use fallow_types::discover::{DiscoveredFile, FileId};
+    use std::path::Path;
+
+    /// Resolve a default config rooted at `root`.
+    fn config_at(root: &Path) -> ResolvedConfig {
+        FallowConfig::default().resolve(
+            root.to_path_buf(),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        )
+    }
+
+    /// Write `relative` under `root` with `body`, returning a `DiscoveredFile`.
+    fn write_file(root: &Path, id: u32, relative: &str, body: &str) -> DiscoveredFile {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, body).unwrap();
+        DiscoveredFile {
+            id: FileId(id),
+            size_bytes: u64::try_from(body.len()).unwrap(),
+            path,
+        }
+    }
+
+    /// A `CssTokenSets` populated from a single stylesheet's `@theme` / `@apply`
+    /// / `var()` content (exercises the real located scans in `record_theme`).
+    fn tokens_from(theme_css: &str, rel: &str) -> CssTokenSets {
+        let mut tokens = CssTokenSets::default();
+        tokens.record_theme(theme_css, rel);
+        tokens
+    }
+
+    #[test]
+    fn token_read_by_two_markup_files_counts_two_utility() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        let f1 = write_file(
+            root,
+            0,
+            "src/Button.tsx",
+            "export const Button = () => <button className=\"bg-brand\" />;",
+        );
+        let f2 = write_file(
+            root,
+            1,
+            "src/Card.tsx",
+            "export const Card = () => <div className=\"text-brand p-4\" />;",
+        );
+        let files = vec![f1, f2];
+        let config = config_at(root);
+        let tokens = tokens_from("@theme {\n  --color-brand: #f00;\n}", "src/theme.css");
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+
+        assert_eq!(out.len(), 1);
+        let entry = &out[0];
+        assert_eq!(entry.token, "--color-brand");
+        assert_eq!(entry.consumer_count, 2);
+        assert!(
+            entry
+                .consumers
+                .iter()
+                .all(|c| c.kind == ConsumerKind::Utility)
+        );
+        let paths: Vec<&str> = entry.consumers.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/Button.tsx", "src/Card.tsx"]);
+    }
+
+    #[test]
+    fn token_with_no_consumer_counts_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        // Markup uses an unrelated utility, so `--color-unused` has no consumer.
+        let files = vec![write_file(
+            root,
+            0,
+            "src/App.tsx",
+            "export const App = () => <div className=\"flex gap-2\" />;",
+        )];
+        let config = config_at(root);
+        let tokens = tokens_from("@theme {\n  --color-unused: #abc;\n}", "src/theme.css");
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].token, "--color-unused");
+        assert_eq!(out[0].consumer_count, 0);
+        assert!(out[0].consumers.is_empty());
+    }
+
+    #[test]
+    fn theme_var_and_css_var_reads_locate_distinct_kinds() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        // `--color-brand` is read once inside @theme (theme-var) and once in a
+        // regular rule (css-var); both must surface as distinct kinds.
+        let theme_css = "@theme {\n  --color-brand: #f00;\n  --color-accent: var(--color-brand);\n}\n.note {\n  color: var(--color-brand);\n}";
+        let files: Vec<DiscoveredFile> = Vec::new();
+        let config = config_at(root);
+        let tokens = tokens_from(theme_css, "src/theme.css");
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+
+        let brand = out
+            .iter()
+            .find(|t| t.token == "--color-brand")
+            .expect("--color-brand present");
+        assert_eq!(brand.consumer_count, 2);
+        let kinds: Vec<ConsumerKind> = brand.consumers.iter().map(|c| c.kind).collect();
+        assert!(kinds.contains(&ConsumerKind::ThemeVar));
+        assert!(kinds.contains(&ConsumerKind::CssVar));
+    }
+
+    #[test]
+    fn apply_body_locates_apply_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        let theme_css = "@theme {\n  --color-brand: #f00;\n}\n.btn {\n  @apply bg-brand;\n}";
+        let files: Vec<DiscoveredFile> = Vec::new();
+        let config = config_at(root);
+        let tokens = tokens_from(theme_css, "src/theme.css");
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+
+        let brand = out.iter().find(|t| t.token == "--color-brand").unwrap();
+        assert_eq!(brand.consumer_count, 1);
+        assert_eq!(brand.consumers[0].kind, ConsumerKind::Apply);
+    }
+
+    #[test]
+    fn non_tailwind_project_emits_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+        let files = vec![write_file(
+            root,
+            0,
+            "src/App.tsx",
+            "export const App = () => <div className=\"bg-brand\" />;",
+        )];
+        let config = config_at(root);
+        let tokens = tokens_from("@theme {\n  --color-brand: #f00;\n}", "src/theme.css");
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+        assert!(out.is_empty(), "non-Tailwind project must abstain");
+    }
+
+    #[test]
+    fn plugin_project_emits_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        let files: Vec<DiscoveredFile> = Vec::new();
+        let config = config_at(root);
+        // A `@plugin` directive trips the DI-blind-spot abstain.
+        let tokens = tokens_from(
+            "@plugin \"@tailwindcss/typography\";\n@theme {\n  --color-brand: #f00;\n}",
+            "src/theme.css",
+        );
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+        assert!(out.is_empty(), "plugin project must abstain");
+    }
+
+    #[test]
+    fn partial_scope_emits_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        let files: Vec<DiscoveredFile> = Vec::new();
+        let config = config_at(root);
+        let tokens = tokens_from("@theme {\n  --color-brand: #f00;\n}", "src/theme.css");
+        let changed: rustc_hash::FxHashSet<std::path::PathBuf> = rustc_hash::FxHashSet::default();
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: Some(&changed),
+            ws_roots: None,
+        });
+        assert!(out.is_empty(), "partial scope must abstain");
     }
 }

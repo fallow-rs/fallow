@@ -147,11 +147,12 @@ pub use health_coverage_intelligence::{
     CoverageIntelligenceVerdict,
 };
 pub use health_css::{
-    CssAnalyticsReport, CssAnalyticsSummary, CssBlockOccurrence, CssCandidateAction,
+    ConsumerKind, CssAnalyticsReport, CssAnalyticsSummary, CssBlockOccurrence, CssCandidateAction,
     CssCandidateActionType, CssDuplicateBlock, CssFileAnalytics, CssNotationConsistency,
-    CssNotationCount, ScopedUnusedClasses, TailwindArbitraryValue, UndefinedKeyframes,
-    UnreferencedCssClass, UnreferencedKeyframes, UnresolvedClassReference, UnusedAtRule,
-    UnusedAtRuleKind, UnusedFontFace, UnusedThemeToken,
+    CssNotationCount, ScopedUnusedClasses, TOKEN_CONSUMER_SAMPLE_CAP, TailwindArbitraryValue,
+    TokenConsumerLocation, TokenConsumers, UndefinedKeyframes, UnreferencedCssClass,
+    UnreferencedKeyframes, UnresolvedClassReference, UnusedAtRule, UnusedAtRuleKind,
+    UnusedFontFace, UnusedThemeToken,
 };
 pub use health_diagnostics::{
     FrameworkHealthDetector, FrameworkHealthDetectorStatus, FrameworkHealthDiagnostics,

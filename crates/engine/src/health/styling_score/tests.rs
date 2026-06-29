@@ -45,6 +45,7 @@ fn clean_report() -> CssAnalyticsReport {
         unreferenced_css_classes: Vec::new(),
         unused_font_faces: Vec::new(),
         unused_theme_tokens: Vec::new(),
+        token_consumers: Vec::new(),
         font_size_unit_mix: None,
     }
 }

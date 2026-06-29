@@ -308,11 +308,12 @@ pub struct ThemeScan {
     /// excluded. Deduped by name (first definition wins for the line).
     pub tokens: Vec<ThemeTokenDef>,
     /// Custom-property names (without `--`) READ via `var()` anywhere inside a
-    /// `@theme` block interior. lightningcss does not descend into the unknown
-    /// `@theme` at-rule, so these reads are invisible to `CssAnalytics`; a token
-    /// backing another token (`--color-button: var(--color-brand)`) keeps the
-    /// backing token live.
-    pub theme_var_reads: Vec<String>,
+    /// `@theme` block interior, each paired with the 1-based source line of the
+    /// `var(` token. lightningcss does not descend into the unknown `@theme`
+    /// at-rule, so these reads are invisible to `CssAnalytics`; a token backing
+    /// another token (`--color-button: var(--color-brand)`) keeps the backing
+    /// token live.
+    pub theme_var_reads: Vec<(String, u32)>,
 }
 
 /// Scan a CSS source for Tailwind v4 `@theme` blocks, returning the defined
@@ -344,7 +345,52 @@ pub fn scan_theme_blocks(source: &str) -> ThemeScan {
             &mut out.tokens,
             &mut seen,
         );
-        collect_theme_var_reads(&masked, body_start, body_end, &mut out.theme_var_reads);
+        collect_theme_var_reads(
+            source,
+            &masked,
+            body_start,
+            body_end,
+            &mut out.theme_var_reads,
+        );
+    }
+    out
+}
+
+/// Located regular-CSS `var(--token)` reads OUTSIDE any `@theme` block interior:
+/// `(name, line)` per read, with the `--` stripped from the name. `@theme`-
+/// interior reads are deliberately excluded here (they are located separately by
+/// [`scan_theme_blocks`] as the distinct `theme-var` surface), so the two read
+/// kinds never double-count. Comments / strings / `url()` are masked first, so a
+/// `var()` inside those regions is never matched.
+#[must_use]
+pub fn extract_css_var_reads_located(source: &str) -> Vec<(String, u32)> {
+    if !source.contains("var(") {
+        return Vec::new();
+    }
+    let masked = mask_theme_source(source);
+    // Byte ranges of every `@theme { ... }` interior, so reads inside them are
+    // skipped (they are the `theme-var` surface, located elsewhere).
+    let mut theme_bodies: Vec<(usize, usize)> = Vec::new();
+    if masked.contains("@theme") {
+        for open in CSS_THEME_OPEN_RE.find_iter(&masked) {
+            let body_start = open.end();
+            let body_end = find_theme_body_end(&masked, body_start);
+            theme_bodies.push((body_start, body_end));
+        }
+    }
+    let in_theme = |offset: usize| theme_bodies.iter().any(|&(s, e)| offset >= s && offset < e);
+    let mut out = Vec::new();
+    for cap in CSS_VAR_REF_RE.captures_iter(&masked) {
+        let (Some(whole), Some(name)) = (cap.get(0), cap.get(1)) else {
+            continue;
+        };
+        if in_theme(whole.start()) {
+            continue;
+        }
+        out.push((
+            name.as_str().to_owned(),
+            line_at_offset(source, whole.start()),
+        ));
     }
     out
 }
@@ -377,19 +423,33 @@ fn find_theme_body_end(masked: &str, body_start: usize) -> usize {
 }
 
 fn collect_theme_var_reads(
+    source: &str,
     masked: &str,
     body_start: usize,
     body_end: usize,
-    out: &mut Vec<String>,
+    out: &mut Vec<(String, u32)>,
 ) {
     let Some(body) = masked.get(body_start..body_end) else {
         return;
     };
     for cap in CSS_VAR_REF_RE.captures_iter(body) {
-        if let Some(name) = cap.get(1) {
-            out.push(name.as_str().to_owned());
-        }
+        let (Some(whole), Some(name)) = (cap.get(0), cap.get(1)) else {
+            continue;
+        };
+        // Absolute byte offset of the `var(` token start in the original source
+        // (masking preserves byte offsets 1:1).
+        let offset = body_start + whole.start();
+        out.push((name.as_str().to_owned(), line_at_offset(source, offset)));
     }
+}
+
+/// 1-based line number of `offset` in `source`, counting `\n` up to (but not
+/// including) the byte at `offset`. Out-of-range offsets clamp to line 1.
+fn line_at_offset(source: &str, offset: usize) -> u32 {
+    let count = source
+        .get(..offset)
+        .map_or(0, |s| s.bytes().filter(|&b| b == b'\n').count());
+    u32::try_from(1 + count).unwrap_or(u32::MAX)
 }
 
 /// Walk a masked `@theme` body collecting top-level `--ident: value` declarations
@@ -521,6 +581,31 @@ pub fn extract_apply_tokens(source: &str) -> Vec<String> {
                 continue;
             }
             out.push(token.to_owned());
+        }
+    }
+    out
+}
+
+/// Like [`extract_apply_tokens`], but pairs each class-shaped token with the
+/// 1-based source line of its `@apply` directive. Used by the token-consumer
+/// reverse index to locate `@apply`-surface consumers; masking preserves byte
+/// offsets so the directive line is recoverable from the match start.
+#[must_use]
+pub fn extract_apply_tokens_located(source: &str) -> Vec<(String, u32)> {
+    if !source.contains("@apply") {
+        return Vec::new();
+    }
+    let masked = mask_with_whitespace(&mask_css_comments(source, false), &CSS_NON_SELECTOR_RE);
+    let mut out = Vec::new();
+    for m in CSS_APPLY_RE.find_iter(&masked) {
+        let line = line_at_offset(source, m.start());
+        let body = m.as_str().trim_start_matches("@apply");
+        for token in body.split_whitespace() {
+            let token = token.trim_matches('!');
+            if token.is_empty() || token == "important" {
+                continue;
+            }
+            out.push((token.to_owned(), line));
         }
     }
     out
@@ -1699,7 +1784,24 @@ mod tests {
         let scan = scan_theme_blocks(
             "@theme {\n  --color-brand: #f00;\n  --color-button: var(--color-brand);\n}",
         );
-        assert!(scan.theme_var_reads.contains(&"color-brand".to_string()));
+        assert!(
+            scan.theme_var_reads
+                .iter()
+                .any(|(name, _)| name == "color-brand")
+        );
+    }
+
+    #[test]
+    fn theme_var_read_carries_line() {
+        // The `var(--color-brand)` read sits on line 3 of the source; the located
+        // theme-var read must carry that 1-based line for the reverse index.
+        let scan = scan_theme_blocks(
+            "@theme {\n  --color-brand: #f00;\n  --color-button: var(--color-brand);\n}",
+        );
+        assert_eq!(
+            scan.theme_var_reads,
+            vec![("color-brand".to_string(), 3u32)]
+        );
     }
 
     #[test]
@@ -1714,7 +1816,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["font-label", "color-brand", "color-button"]
         );
-        assert!(scan.theme_var_reads.contains(&"color-brand".to_string()));
+        assert!(
+            scan.theme_var_reads
+                .iter()
+                .any(|(name, _)| name == "color-brand")
+        );
     }
 
     #[test]

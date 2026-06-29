@@ -602,6 +602,10 @@ export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "co
  */
 export type UnusedAtRuleKind = ("property-registration" | "layer")
 /**
+ * The surface through which a Tailwind v4 `@theme` token is consumed.
+ */
+export type ConsumerKind = ("theme-var" | "css-var" | "utility" | "apply")
+/**
  * Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier
  * `high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON
  * PURPOSE: styling confidence is a binary sample-size knee (the authored-CSS
@@ -5903,6 +5907,18 @@ unused_font_faces?: UnusedFontFace[]
  */
 unused_theme_tokens?: UnusedThemeToken[]
 /**
+ * A location-aware reverse index of Tailwind v4 `@theme` token consumers:
+ * per token, where it is consumed (`var()` reads, `@apply` bodies, generated
+ * utility classes) and through which surface, plus the full `consumer_count`
+ * (a static lower bound) and the defining site. Built from the same gated
+ * candidate set as `unused_theme_tokens` (v4 + non-plugin + non-published +
+ * whole-scope), so a token with `consumer_count: 0` is the same "nothing
+ * consumes this" signal. Sorted by token; empty when the project is not
+ * Tailwind v4 or a plugin / published-library / partial-scope run gated the
+ * scan out.
+ */
+token_consumers?: TokenConsumers[]
+/**
  * The project authors `font-size` values in several units (`px`, `rem`,
  * `em`, `%`), with a per-unit distinct-value count: a type-scale
  * inconsistency smell (mixing `px` and `rem` for type works against
@@ -6545,6 +6561,63 @@ line: number
  * so consumers can iterate `actions` uniformly across every finding type.
  */
 actions: CssCandidateAction[]
+}
+/**
+ * A location-aware reverse index of where one Tailwind v4 `@theme` token is
+ * consumed, so an agent editing the token can see its blast radius before
+ * changing or removing it. Built from the same gated candidate set as
+ * `unused_theme_tokens` (v4 + non-plugin + non-published + whole-scope), so a
+ * token with `consumer_count: 0` is the same actionable "nothing consumes this"
+ * signal that also surfaces it in `unused_theme_tokens`.
+ */
+export interface TokenConsumers {
+/**
+ * The full custom property as authored, including the `--` prefix
+ * (`--color-brand`).
+ */
+token: string
+/**
+ * The Tailwind v4 theme namespace the token belongs to (`color`, `radius`,
+ * `font-weight`, ...).
+ */
+namespace: string
+/**
+ * Project-root-relative, forward-slash path to the declaring stylesheet.
+ */
+definition_path: string
+/**
+ * 1-based line of the token's definition inside the `@theme` block.
+ */
+definition_line: number
+/**
+ * The FULL number of consumer locations found, a STATIC LOWER BOUND: a
+ * computed class name (`bg-${color}`) or a value read outside CSS/markup the
+ * scan never sees is not counted. This is the aggregate over every consumer,
+ * computed BEFORE [`consumers`](Self::consumers) is capped to a sample.
+ */
+consumer_count: number
+/**
+ * A capped, deterministically-sorted sample of consumer locations (at most
+ * [`TOKEN_CONSUMER_SAMPLE_CAP`]). The full count lives in
+ * [`consumer_count`](Self::consumer_count); use this list to jump to
+ * representative consumers, not to enumerate every one.
+ */
+consumers: TokenConsumerLocation[]
+}
+/**
+ * Where one Tailwind v4 `@theme` token is consumed, and through which surface.
+ * One entry in a [`TokenConsumers::consumers`] sample.
+ */
+export interface TokenConsumerLocation {
+/**
+ * Project-root-relative, forward-slash path to the consuming file.
+ */
+path: string
+/**
+ * 1-based line of the consuming reference in that file.
+ */
+line: number
+kind: ConsumerKind
 }
 /**
  * A design-token notation-consistency candidate: the distinct notations used

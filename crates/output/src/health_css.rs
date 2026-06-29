@@ -81,6 +81,17 @@ pub struct CssAnalyticsReport {
     /// downstream repo. Sorted by `(path, line, token)`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_theme_tokens: Vec<UnusedThemeToken>,
+    /// A location-aware reverse index of Tailwind v4 `@theme` token consumers:
+    /// per token, where it is consumed (`var()` reads, `@apply` bodies, generated
+    /// utility classes) and through which surface, plus the full `consumer_count`
+    /// (a static lower bound) and the defining site. Built from the same gated
+    /// candidate set as `unused_theme_tokens` (v4 + non-plugin + non-published +
+    /// whole-scope), so a token with `consumer_count: 0` is the same "nothing
+    /// consumes this" signal. Sorted by token; empty when the project is not
+    /// Tailwind v4 or a plugin / published-library / partial-scope run gated the
+    /// scan out.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub token_consumers: Vec<TokenConsumers>,
     /// The project authors `font-size` values in several units (`px`, `rem`,
     /// `em`, `%`), with a per-unit distinct-value count: a type-scale
     /// inconsistency smell (mixing `px` and `rem` for type works against
@@ -261,6 +272,72 @@ pub struct UnusedThemeToken {
     /// so consumers can iterate `actions` uniformly across every finding type.
     pub actions: Vec<CssCandidateAction>,
 }
+
+/// Where one Tailwind v4 `@theme` token is consumed, and through which surface.
+/// One entry in a [`TokenConsumers::consumers`] sample.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TokenConsumerLocation {
+    /// Project-root-relative, forward-slash path to the consuming file.
+    pub path: String,
+    /// 1-based line of the consuming reference in that file.
+    pub line: u32,
+    /// Which surface consumes the token at this location.
+    pub kind: ConsumerKind,
+}
+
+/// The surface through which a Tailwind v4 `@theme` token is consumed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum ConsumerKind {
+    /// A `var(--token)` read inside a `@theme` block interior (a token backing
+    /// another token).
+    ThemeVar,
+    /// A `var(--token)` read in regular CSS, outside any `@theme` block.
+    CssVar,
+    /// A generated utility class ending in `-<name>` (`bg-brand` consuming
+    /// `--color-brand`) found in markup / className strings / CSS-in-JS.
+    Utility,
+    /// A class-shaped token inside an `@apply` body in a stylesheet.
+    Apply,
+}
+
+/// A location-aware reverse index of where one Tailwind v4 `@theme` token is
+/// consumed, so an agent editing the token can see its blast radius before
+/// changing or removing it. Built from the same gated candidate set as
+/// `unused_theme_tokens` (v4 + non-plugin + non-published + whole-scope), so a
+/// token with `consumer_count: 0` is the same actionable "nothing consumes this"
+/// signal that also surfaces it in `unused_theme_tokens`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TokenConsumers {
+    /// The full custom property as authored, including the `--` prefix
+    /// (`--color-brand`).
+    pub token: String,
+    /// The Tailwind v4 theme namespace the token belongs to (`color`, `radius`,
+    /// `font-weight`, ...).
+    pub namespace: String,
+    /// Project-root-relative, forward-slash path to the declaring stylesheet.
+    pub definition_path: String,
+    /// 1-based line of the token's definition inside the `@theme` block.
+    pub definition_line: u32,
+    /// The FULL number of consumer locations found, a STATIC LOWER BOUND: a
+    /// computed class name (`bg-${color}`) or a value read outside CSS/markup the
+    /// scan never sees is not counted. This is the aggregate over every consumer,
+    /// computed BEFORE [`consumers`](Self::consumers) is capped to a sample.
+    pub consumer_count: u32,
+    /// A capped, deterministically-sorted sample of consumer locations (at most
+    /// [`TOKEN_CONSUMER_SAMPLE_CAP`]). The full count lives in
+    /// [`consumer_count`](Self::consumer_count); use this list to jump to
+    /// representative consumers, not to enumerate every one.
+    pub consumers: Vec<TokenConsumerLocation>,
+}
+
+/// Maximum number of consumer locations sampled into [`TokenConsumers::consumers`].
+/// The full count is preserved in [`TokenConsumers::consumer_count`]
+/// (aggregate-before-truncate), so capping the sample never distorts the count.
+pub const TOKEN_CONSUMER_SAMPLE_CAP: usize = 20;
 
 /// A global CSS class defined in a plain `.css`/`.scss` rule whose literal name
 /// is referenced by no in-project markup (the CSS analogue of an unused export).
@@ -722,4 +799,108 @@ pub struct CssAnalyticsSummary {
     /// truncated at the per-file cap, so a consumer knows the per-rule detail is
     /// incomplete without walking every file.
     pub notable_truncated_files: u32,
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    reason = "tests use unwrap to keep serialization assertions concise"
+)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consumer_kind_serializes_kebab_case() {
+        let kinds = [
+            (ConsumerKind::ThemeVar, "\"theme-var\""),
+            (ConsumerKind::CssVar, "\"css-var\""),
+            (ConsumerKind::Utility, "\"utility\""),
+            (ConsumerKind::Apply, "\"apply\""),
+        ];
+        for (kind, expected) in kinds {
+            assert_eq!(serde_json::to_string(&kind).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn token_consumers_serializes_full_shape() {
+        let entry = TokenConsumers {
+            token: "--color-brand".to_string(),
+            namespace: "color".to_string(),
+            definition_path: "src/theme.css".to_string(),
+            definition_line: 4,
+            consumer_count: 2,
+            consumers: vec![
+                TokenConsumerLocation {
+                    path: "src/Button.tsx".to_string(),
+                    line: 12,
+                    kind: ConsumerKind::Utility,
+                },
+                TokenConsumerLocation {
+                    path: "src/theme.css".to_string(),
+                    line: 9,
+                    kind: ConsumerKind::CssVar,
+                },
+            ],
+        };
+        let value = serde_json::to_value(&entry).unwrap();
+        assert_eq!(value["consumer_count"], 2);
+        assert_eq!(value["definition_line"], 4);
+        assert_eq!(value["consumers"][0]["kind"], "utility");
+        assert_eq!(value["consumers"][1]["kind"], "css-var");
+    }
+
+    #[test]
+    fn token_consumers_omitted_when_empty() {
+        let report = CssAnalyticsReport {
+            files: Vec::new(),
+            summary: CssAnalyticsSummary::default(),
+            scoped_unused: Vec::new(),
+            unreferenced_keyframes: Vec::new(),
+            undefined_keyframes: Vec::new(),
+            duplicate_declaration_blocks: Vec::new(),
+            tailwind_arbitrary_values: Vec::new(),
+            unused_at_rules: Vec::new(),
+            unresolved_class_references: Vec::new(),
+            unreferenced_css_classes: Vec::new(),
+            unused_font_faces: Vec::new(),
+            unused_theme_tokens: Vec::new(),
+            token_consumers: Vec::new(),
+            font_size_unit_mix: None,
+        };
+        let value = serde_json::to_value(&report).unwrap();
+        assert!(
+            value.get("token_consumers").is_none(),
+            "empty token_consumers must be skipped"
+        );
+    }
+
+    #[test]
+    fn token_consumers_present_when_non_empty() {
+        let report = CssAnalyticsReport {
+            files: Vec::new(),
+            summary: CssAnalyticsSummary::default(),
+            scoped_unused: Vec::new(),
+            unreferenced_keyframes: Vec::new(),
+            undefined_keyframes: Vec::new(),
+            duplicate_declaration_blocks: Vec::new(),
+            tailwind_arbitrary_values: Vec::new(),
+            unused_at_rules: Vec::new(),
+            unresolved_class_references: Vec::new(),
+            unreferenced_css_classes: Vec::new(),
+            unused_font_faces: Vec::new(),
+            unused_theme_tokens: Vec::new(),
+            token_consumers: vec![TokenConsumers {
+                token: "--color-brand".to_string(),
+                namespace: "color".to_string(),
+                definition_path: "src/theme.css".to_string(),
+                definition_line: 4,
+                consumer_count: 0,
+                consumers: Vec::new(),
+            }],
+            font_size_unit_mix: None,
+        };
+        let value = serde_json::to_value(&report).unwrap();
+        assert_eq!(value["token_consumers"][0]["consumer_count"], 0);
+    }
 }
