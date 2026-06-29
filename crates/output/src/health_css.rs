@@ -309,6 +309,14 @@ pub enum ConsumerKind {
 /// `unused_theme_tokens` (v4 + non-plugin + non-published + whole-scope), so a
 /// token with `consumer_count: 0` is the same actionable "nothing consumes this"
 /// signal that also surfaces it in `unused_theme_tokens`.
+///
+/// This is DESCRIPTIVE context (a blast-radius lookup), not a finding, so it
+/// deliberately carries no `actions` array (unlike the cleanup-candidate types in
+/// this module): the authoritative dead-token signal, with its `verify-unused`
+/// action, stays on `unused_theme_tokens`. Use that finding to drive a deletion
+/// decision; `consumer_count` here is a STATIC lower bound (a computed class name
+/// like `bg-${color}` is not counted), so a `0` here corroborates but does not by
+/// itself prove a token dead.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TokenConsumers {

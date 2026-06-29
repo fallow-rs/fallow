@@ -1805,6 +1805,26 @@ mod tests {
     }
 
     #[test]
+    fn css_var_reads_locate_outside_theme_and_exclude_interior() {
+        // A regular-CSS `var(--color-brand)` read is located (css-var surface);
+        // a read inside the `@theme` interior is the distinct theme-var surface
+        // and MUST be excluded here so the two kinds never double-count.
+        let source = "@theme {\n  --color-brand: #f00;\n  --color-button: var(--color-brand);\n}\n\n.btn {\n  color: var(--color-brand);\n}\n";
+        assert_eq!(
+            extract_css_var_reads_located(source),
+            vec![("color-brand".to_string(), 7u32)],
+            "only the .btn read (line 7) is a css-var; the @theme-interior read is excluded"
+        );
+
+        // A source whose only `var()` read is inside `@theme` yields no css-var.
+        assert!(
+            extract_css_var_reads_located("@theme {\n  --a: #fff;\n  --b: var(--a);\n}",)
+                .is_empty(),
+            "a @theme-interior-only var() read is not a css-var consumer"
+        );
+    }
+
+    #[test]
     fn theme_string_braces_do_not_truncate_block() {
         let scan = scan_theme_blocks(
             "@theme {\n  --font-label: \"}\";\n  --color-brand: #f00;\n  --color-button: var(--color-brand);\n}",
