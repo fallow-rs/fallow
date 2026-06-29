@@ -2,10 +2,12 @@
 
 use serde::Serialize;
 
-/// The focus label for a review unit. EXACTLY two variants: `Skip` is NOT
-/// representable, so the type system is the guarantee that free mode never emits
-/// a `skip` label (safe explicit-skip is paid, runtime-backed only). Mirrors
-/// the decision surface's "cut category not representable" structural posture.
+/// The focus label for a review unit. `Skip` is the SAFE explicit-skip label and
+/// is runtime-backed ONLY: it is producible solely on the paid runtime path
+/// and solely for a unit runtime-proves cold with zero risk signals. Free mode
+/// (no runtime evidence) emits only `ReviewHere` / `NotPrioritized`, never `Skip`
+/// (the build-focus-map labeller cannot reach the `Skip` arm without runtime
+/// input), so the free-tier "rank but never skip" stance holds by construction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -14,6 +16,9 @@ pub enum FocusLabel {
     ReviewHere,
     /// Not prioritized, but still visible in the escape-hatch list.
     NotPrioritized,
+    /// Safe to skip: runtime evidence proves the unit cold (only `safe_to_delete`
+    /// findings, no hot path) AND it carries no risk signal. Runtime-backed only.
+    Skip,
 }
 
 impl FocusLabel {
@@ -23,6 +28,7 @@ impl FocusLabel {
         match self {
             Self::ReviewHere => "review-here",
             Self::NotPrioritized => "not-prioritized",
+            Self::Skip => "skip",
         }
     }
 }
@@ -52,9 +58,9 @@ impl ConfidenceFlag {
     }
 }
 
-/// The composite attention score, with the four deterministic component
-/// sub-scores kept on the wire so the runtime seam can re-weight `total`
-/// without recomputing the signals.
+/// The composite attention score, with the deterministic component sub-scores
+/// kept on the wire so the runtime layer adds its weight without recomputing the
+/// signals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FocusScore {
@@ -67,8 +73,27 @@ pub struct FocusScore {
     pub risk_zone: u32,
     /// Change-shape component (new/widened export, signature change proxy).
     pub change_shape: u32,
-    /// The summed total. The paid runtime layer multiplies a runtime hot/cold weight in here.
+    /// Runtime-weight component (paid): a hot path (runtime evidence of high
+    /// invocation) adds an invocation-bucketed weight so it amplifies the blast
+    /// and outranks an otherwise-equal cold unit. `0` in free mode (no runtime
+    /// input), so the free-tier total stays the four deterministic components and
+    /// is byte-identical to the no-runtime baseline.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[cfg_attr(feature = "schema", schemars(default))]
+    pub runtime: u32,
+    /// The summed total of every present component (the four deterministic ones
+    /// plus the runtime weight).
     pub total: u32,
+}
+
+/// Whether a `u32` is zero (serde skip predicate so the `runtime` component is
+/// omitted from the wire in free mode, keeping the no-runtime JSON byte-identical).
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip predicate signature"
+)]
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 /// One review unit on the focus map: its file, composite score, label, human
@@ -80,7 +105,8 @@ pub struct FocusUnit {
     pub file: String,
     /// The composite attention score and its component breakdown.
     pub score: FocusScore,
-    /// The focus label (`review-here` / `not-prioritized`; NEVER `skip`).
+    /// The focus label (`review-here` / `not-prioritized`, or the runtime-backed
+    /// `skip` on the paid path).
     pub label: FocusLabel,
     /// A human-readable reason for the label, built from the present signals.
     pub reason: String,
@@ -101,10 +127,11 @@ pub struct FocusMap {
     /// Units labeled `review-here`, ranked by composite score (descending), ties
     /// broken by path for determinism.
     pub review_here: Vec<FocusUnit>,
-    /// EVERY `not-prioritized` unit (the escape hatch). Always present and fully
+    /// EVERY de-prioritized unit (`not-prioritized`, plus runtime-backed `skip`
+    /// units on the paid path) -- the escape hatch. Always present and fully
     /// enumerated so a reviewer can always "show me what you de-prioritized"; the
     /// human brief collapses it by default and re-expands under
-    /// `--show-deprioritized`.
+    /// `--show-deprioritized`. Nothing is ever hidden, including a `skip`.
     pub deprioritized: Vec<FocusUnit>,
 }
 

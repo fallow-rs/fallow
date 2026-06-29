@@ -788,12 +788,14 @@ export type RiskClass = ("low" | "medium" | "high")
  */
 export type ReviewEffort = ("glance" | "review" | "deep_dive")
 /**
- * The focus label for a review unit. EXACTLY two variants: `Skip` is NOT
- * representable, so the type system is the guarantee that free mode never emits
- * a `skip` label (safe explicit-skip is paid, runtime-backed only). Mirrors
- * the decision surface's "cut category not representable" structural posture.
+ * The focus label for a review unit. `Skip` is the SAFE explicit-skip label and
+ * is runtime-backed ONLY: it is producible solely on the paid runtime path
+ * and solely for a unit runtime-proves cold with zero risk signals. Free mode
+ * (no runtime evidence) emits only `ReviewHere` / `NotPrioritized`, never `Skip`
+ * (the build-focus-map labeller cannot reach the `Skip` arm without runtime
+ * input), so the free-tier "rank but never skip" stance holds by construction.
  */
-export type FocusLabel = ("review-here" | "not-prioritized")
+export type FocusLabel = ("review-here" | "not-prioritized" | "skip")
 /**
  * A per-unit confidence flag. The EXACT panel-decided strings: a dynamically-
  * wired or re-export-heavy unit carries one so its static-reachability signal is
@@ -8778,10 +8780,11 @@ export interface FocusMap {
  */
 review_here: FocusUnit[]
 /**
- * EVERY `not-prioritized` unit (the escape hatch). Always present and fully
+ * EVERY de-prioritized unit (`not-prioritized`, plus runtime-backed `skip`
+ * units on the paid path) -- the escape hatch. Always present and fully
  * enumerated so a reviewer can always "show me what you de-prioritized"; the
  * human brief collapses it by default and re-expands under
- * `--show-deprioritized`.
+ * `--show-deprioritized`. Nothing is ever hidden, including a `skip`.
  */
 deprioritized: FocusUnit[]
 }
@@ -8806,9 +8809,9 @@ reason: string
 confidence?: ConfidenceFlag[]
 }
 /**
- * The composite attention score, with the four deterministic component
- * sub-scores kept on the wire so the runtime seam can re-weight `total`
- * without recomputing the signals.
+ * The composite attention score, with the deterministic component sub-scores
+ * kept on the wire so the runtime layer adds its weight without recomputing the
+ * signals.
  */
 export interface FocusScore {
 /**
@@ -8829,7 +8832,16 @@ risk_zone: number
  */
 change_shape: number
 /**
- * The summed total. The paid runtime layer multiplies a runtime hot/cold weight in here.
+ * Runtime-weight component (paid): a hot path (runtime evidence of high
+ * invocation) adds an invocation-bucketed weight so it amplifies the blast
+ * and outranks an otherwise-equal cold unit. `0` in free mode (no runtime
+ * input), so the free-tier total stays the four deterministic components and
+ * is byte-identical to the no-runtime baseline.
+ */
+runtime?: number
+/**
+ * The summed total of every present component (the four deterministic ones
+ * plus the runtime weight).
  */
 total: number
 }

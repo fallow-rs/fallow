@@ -16881,9 +16881,14 @@
           "type": "string",
           "const": "not-prioritized",
           "description": "Not prioritized, but still visible in the escape-hatch list."
+        },
+        {
+          "type": "string",
+          "const": "skip",
+          "description": "Safe to skip: runtime evidence proves the unit cold (only `safe_to_delete`\nfindings, no hot path) AND it carries no risk signal. Runtime-backed only."
         }
       ],
-      "description": "The focus label for a review unit. EXACTLY two variants: `Skip` is NOT\nrepresentable, so the type system is the guarantee that free mode never emits\na `skip` label (safe explicit-skip is paid, runtime-backed only). Mirrors\nthe decision surface's \"cut category not representable\" structural posture."
+      "description": "The focus label for a review unit. `Skip` is the SAFE explicit-skip label and\nis runtime-backed ONLY: it is producible solely on the paid runtime path\nand solely for a unit runtime-proves cold with zero risk signals. Free mode\n(no runtime evidence) emits only `ReviewHere` / `NotPrioritized`, never `Skip`\n(the build-focus-map labeller cannot reach the `Skip` arm without runtime\ninput), so the free-tier \"rank but never skip\" stance holds by construction."
     },
     "ConfidenceFlag": {
       "oneOf": [
@@ -16919,9 +16924,13 @@
           "type": "integer",
           "description": "Change-shape component (new/widened export, signature change proxy)."
         },
+        "runtime": {
+          "type": "integer",
+          "description": "Runtime-weight component (paid): a hot path (runtime evidence of high\ninvocation) adds an invocation-bucketed weight so it amplifies the blast\nand outranks an otherwise-equal cold unit. `0` in free mode (no runtime\ninput), so the free-tier total stays the four deterministic components and\nis byte-identical to the no-runtime baseline."
+        },
         "total": {
           "type": "integer",
-          "description": "The summed total. The paid runtime layer multiplies a runtime hot/cold weight in here."
+          "description": "The summed total of every present component (the four deterministic ones\nplus the runtime weight)."
         }
       },
       "required": [
@@ -16931,7 +16940,7 @@
         "change_shape",
         "total"
       ],
-      "description": "The composite attention score, with the four deterministic component\nsub-scores kept on the wire so the runtime seam can re-weight `total`\nwithout recomputing the signals."
+      "description": "The composite attention score, with the deterministic component sub-scores\nkept on the wire so the runtime layer adds its weight without recomputing the\nsignals."
     },
     "FocusUnit": {
       "type": "object",
@@ -16945,7 +16954,7 @@
           "$ref": "#/definitions/FocusScore"
         },
         "label": {
-          "description": "The focus label (`review-here` / `not-prioritized`; NEVER `skip`).",
+          "description": "The focus label (`review-here` / `not-prioritized`, or the runtime-backed\n`skip` on the paid path).",
           "$ref": "#/definitions/FocusLabel"
         },
         "reason": {
@@ -16983,7 +16992,7 @@
           "items": {
             "$ref": "#/definitions/FocusUnit"
           },
-          "description": "EVERY `not-prioritized` unit (the escape hatch). Always present and fully\nenumerated so a reviewer can always \"show me what you de-prioritized\"; the\nhuman brief collapses it by default and re-expands under\n`--show-deprioritized`."
+          "description": "EVERY de-prioritized unit (`not-prioritized`, plus runtime-backed `skip`\nunits on the paid path) -- the escape hatch. Always present and fully\nenumerated so a reviewer can always \"show me what you de-prioritized\"; the\nhuman brief collapses it by default and re-expands under\n`--show-deprioritized`. Nothing is ever hidden, including a `skip`."
         }
       },
       "required": [

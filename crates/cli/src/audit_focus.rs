@@ -25,13 +25,16 @@
 //! 4. **change shape**: new export / widened visibility / signature change (the
 //!    coordination-gap proxy, ADR-001 syntactic).
 //!
-//! ## The runtime seam (documented, NOT built)
+//! ## The runtime layer (paid, built)
 //!
-//! `FocusScore` keeps the four component sub-scores on the wire so the paid
-//! runtime layer can multiply a runtime hot/cold weight into `total` WITHOUT recomputing the
-//! deterministic signals. The single `// runtime seam` marker sits at the point the
-//! components are summed. No runtime field, no runtime read, no runtime gate here:
-//! free mode is the complete surface.
+//! When `FocusInputs::runtime` is `Some` (the paid `--runtime-coverage` path),
+//! a hot file adds an invocation-bucketed `runtime` component to its score so it
+//! amplifies the blast and outranks an otherwise-equal cold unit, and a unit the
+//! runtime proves cold AND that carries no deterministic signal earns the SAFE
+//! explicit-skip label (`FocusLabel::Skip`). When `runtime` is `None` (free
+//! mode) the layer contributes nothing: the `runtime` component is `0`, no unit
+//! can reach the `Skip` arm, and the output is byte-identical to the no-runtime baseline. The free
+//! tier ranks but never skips; safe-skip is runtime-backed only.
 
 use fallow_engine::graph::FocusFileFactsPaths;
 pub use fallow_output::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
@@ -58,12 +61,63 @@ const CHANGE_SHAPE_WEIGHT: u32 = 2;
 /// Points added when a unit sits on a security source -> sink taint trace.
 const SECURITY_TAINT_WEIGHT: u32 = 3;
 
+/// Runtime-weight floor: any hot path adds at least this, so a hot unit
+/// always outranks an otherwise-equal cold one. At/above [`REVIEW_HERE_THRESHOLD`]
+/// so a hot path alone pulls a unit into `review-here`.
+const RUNTIME_HOT_FLOOR: u32 = 3;
+/// Runtime weight for a warm path (>= [`RUNTIME_WARM_INVOCATIONS`]).
+const RUNTIME_HOT_WARM: u32 = 4;
+/// Runtime weight for a blazing path (>= [`RUNTIME_BLAZING_INVOCATIONS`]). Capped
+/// (bucketed, not the raw count) so one extreme-traffic file cannot swamp the
+/// bounded deterministic signals and the score stays deterministic.
+const RUNTIME_HOT_BLAZING: u32 = 6;
+/// Invocation count at/above which a hot path is "warm".
+const RUNTIME_WARM_INVOCATIONS: u64 = 100;
+/// Invocation count at/above which a hot path is "blazing".
+const RUNTIME_BLAZING_INVOCATIONS: u64 = 1_000;
+
+/// The bucketed runtime weight for a hot file's peak invocation count. Bucketed
+/// (three bands) rather than raw so the weight stays bounded and deterministic.
+fn runtime_weight(invocations: u64) -> u32 {
+    if invocations >= RUNTIME_BLAZING_INVOCATIONS {
+        RUNTIME_HOT_BLAZING
+    } else if invocations >= RUNTIME_WARM_INVOCATIONS {
+        RUNTIME_HOT_WARM
+    } else {
+        RUNTIME_HOT_FLOOR
+    }
+}
+
 /// A boundary-zone signal for a unit: the unit's file introduced a new cross-zone
 /// edge (it is the `from_file` of an introduced boundary edge).
 #[derive(Debug, Clone)]
 pub struct BoundaryZoneFile {
     /// Root-relative path of the importing file that introduced the edge.
     pub from_file: String,
+}
+
+/// A runtime-hot file: a changed file with a runtime hot path, paired with the
+/// file's peak invocation count (the max over the file's hot functions).
+#[derive(Debug, Clone)]
+pub struct RuntimeHotFile {
+    /// Root-relative path of the hot file (the brief's canonical path space).
+    pub file: String,
+    /// Peak invocation count across the file's hot functions; drives the band.
+    pub invocations: u64,
+}
+
+/// Per-file runtime evidence for the paid weighting layer, built from the
+/// runtime-coverage health report at the brief path. `None` in free mode; when
+/// present it adds the runtime score component and enables the safe explicit-skip
+/// label. The two lists are disjoint by construction (a hot file is never cold).
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeFocus {
+    /// Files with a runtime hot path; each adds a bucketed runtime weight.
+    pub hot_files: Vec<RuntimeHotFile>,
+    /// Files the runtime proves cold (every retained finding is `safe_to_delete`
+    /// and the file has no hot path). Eligible for safe-skip when also carrying no
+    /// deterministic signal.
+    pub cold_files: Vec<String>,
 }
 
 /// Everything the focus extractor needs, gathered from the assembled brief data.
@@ -89,6 +143,10 @@ pub struct FocusInputs<'a> {
     /// engine is the opt-in `fallow security` command); the seam lights up the
     /// moment a security pass is threaded, with no focus-map code change.
     pub taint_touched_files: &'a [String],
+    /// Per-file runtime evidence (paid). `None` in free mode, where the focus
+    /// map degrades to the deterministic no-runtime baseline byte-for-byte; `Some` on the
+    /// `--runtime-coverage` path, where it weights hot files and enables safe-skip.
+    pub runtime: Option<&'a RuntimeFocus>,
 }
 
 /// Whether a unit `file` is the `<rel_path>` prefix of any public-API delta key
@@ -131,20 +189,45 @@ fn score_unit(facts: &FocusFileFactsPaths, inputs: &FocusInputs<'_>) -> FocusSco
     let shapes = u32::from(new_export) + u32::from(sig_change);
     let change_shape = shapes * CHANGE_SHAPE_WEIGHT;
 
-    // runtime seam: the paid runtime layer multiplies a runtime hot/cold weight into `total` here,
-    // reading the per-unit runtime coverage and scaling the deterministic sum so a
-    // hot path amplifies the blast. The four component sub-scores stay on the wire
-    // so it re-weights WITHOUT recomputing the signals. Free mode is the
-    // complete surface; the paid layer degrades cleanly to it when no runtime data.
-    let total = fan_io + security_taint + risk_zone + change_shape;
+    // Runtime layer (paid): a hot file adds an invocation-bucketed weight so a
+    // hot path amplifies the blast and outranks an otherwise-equal cold unit. The
+    // deterministic components stay on the wire, so this ADDS without recomputing
+    // them. `0` when no runtime input (free mode), keeping `total` the four
+    // deterministic components and the output byte-identical to the no-runtime baseline.
+    let runtime = inputs.runtime.map_or(0, |rt| {
+        rt.hot_files
+            .iter()
+            .find(|hot| hot.file == facts.file)
+            .map_or(0, |hot| runtime_weight(hot.invocations))
+    });
+
+    let total = fan_io + security_taint + risk_zone + change_shape + runtime;
 
     FocusScore {
         fan_io,
         security_taint,
         risk_zone,
         change_shape,
+        runtime,
         total,
     }
+}
+
+/// Whether a unit is the SAFE explicit-skip case: runtime-backed ONLY. All
+/// of: the runtime proves the file cold (in [`RuntimeFocus::cold_files`]); it
+/// carries no deterministic signal (`total` is the runtime component alone, i.e.
+/// `0`, so no fan-in/out, risk-zone, change-shape, or taint); and it carries NO
+/// confidence flag (a dynamically-wired / re-export-heavy unit has uncertain
+/// reachability, so a single runtime capture is not enough to call it safe to
+/// skip). Any of those keeps the unit visible. Returns `false` whenever `runtime`
+/// is `None`, so free mode can never label a unit `skip`.
+fn is_safe_skip(facts: &FocusFileFactsPaths, score: &FocusScore, inputs: &FocusInputs<'_>) -> bool {
+    inputs.runtime.is_some_and(|rt| {
+        score.total == 0
+            && !facts.dynamic_dispatch
+            && !facts.re_export_indirection
+            && rt.cold_files.iter().any(|file| file == &facts.file)
+    })
 }
 
 /// Build the human reason for a unit from the present signals.
@@ -154,6 +237,24 @@ fn build_reason(
     inputs: &FocusInputs<'_>,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
+    // Runtime evidence first (it amplifies / disarms the static signals). On the
+    // free path `inputs.runtime` is `None`, so no runtime clause is ever added and
+    // the reason string stays byte-identical to the no-runtime baseline.
+    if let Some(rt) = inputs.runtime {
+        if let Some(hot) = rt.hot_files.iter().find(|hot| hot.file == facts.file) {
+            parts.push(format!(
+                "hot path ({} invocation{})",
+                hot.invocations,
+                if hot.invocations == 1 { "" } else { "s" }
+            ));
+        } else if rt.cold_files.iter().any(|file| file == &facts.file) {
+            // "no hot path" is the honest, file-level-true claim: the cold signal
+            // means no hot path here and the file's tracked findings are all
+            // safe-to-delete. It deliberately does NOT say "0 invocations" -- a
+            // sub-hot-threshold active function is invisible to this signal.
+            parts.push("runtime-cold (no hot path)".to_string());
+        }
+    }
     if facts.fan_in > 0 {
         parts.push(format!(
             "high fan-in ({} importer{})",
@@ -220,7 +321,12 @@ pub fn build_focus_map(inputs: &FocusInputs<'_>) -> FocusMap {
         .iter()
         .map(|facts| {
             let score = score_unit(facts, inputs);
-            let label = if score.total >= REVIEW_HERE_THRESHOLD {
+            // Safe explicit-skip wins first, but is runtime-backed only:
+            // `is_safe_skip` is always false without runtime input, so free mode
+            // falls through to the no-runtime review-here / not-prioritized split.
+            let label = if is_safe_skip(facts, &score, inputs) {
+                FocusLabel::Skip
+            } else if score.total >= REVIEW_HERE_THRESHOLD {
                 FocusLabel::ReviewHere
             } else {
                 FocusLabel::NotPrioritized
@@ -249,7 +355,9 @@ pub fn build_focus_map(inputs: &FocusInputs<'_>) -> FocusMap {
     for unit in units {
         match unit.label {
             FocusLabel::ReviewHere => review_here.push(unit),
-            FocusLabel::NotPrioritized => deprioritized.push(unit),
+            // Both not-prioritized and the runtime-backed safe-skip land in the
+            // escape hatch: nothing is hidden, a skip is just labelled safe.
+            FocusLabel::NotPrioritized | FocusLabel::Skip => deprioritized.push(unit),
         }
     }
     // The deprioritized escape hatch is path-sorted (stable enumeration order).
@@ -294,6 +402,38 @@ mod tests {
             public_api_added,
             coordination_changed_files,
             taint_touched_files,
+            runtime: None,
+        }
+    }
+
+    /// Build a `RuntimeFocus` from `(file, invocations)` hot pairs and cold files.
+    fn runtime(hot: &[(&str, u64)], cold: &[&str]) -> RuntimeFocus {
+        RuntimeFocus {
+            hot_files: hot
+                .iter()
+                .map(|(file, invocations)| RuntimeHotFile {
+                    file: (*file).to_string(),
+                    invocations: *invocations,
+                })
+                .collect(),
+            cold_files: cold.iter().map(|file| (*file).to_string()).collect(),
+        }
+    }
+
+    /// `inputs` with a runtime layer attached (the paid `--runtime-coverage` path).
+    fn inputs_rt<'a>(
+        graph_facts: &'a [FocusFileFactsPaths],
+        public_api_added: &'a [String],
+        taint_touched_files: &'a [String],
+        runtime: &'a RuntimeFocus,
+    ) -> FocusInputs<'a> {
+        FocusInputs {
+            graph_facts,
+            boundary_files: &[],
+            public_api_added,
+            coordination_changed_files: &[],
+            taint_touched_files,
+            runtime: Some(runtime),
         }
     }
 
@@ -546,8 +686,11 @@ mod tests {
             public_api_added: _,
             coordination_changed_files: _,
             taint_touched_files: _,
-            // NOTE: no `symbol_chain` / `trace` field exists. If the trace ever wired
-            // one in, this destructure would fail to compile.
+            // `runtime` is the legitimate paid weighting seam, not a ranking
+            // input the free tier reads. NOTE: no `symbol_chain` / `trace` field
+            // exists. If the trace ever wired one in, this destructure would fail
+            // to compile -- the guard that the trace stays OUT of the focus inputs.
+            runtime: _,
         } = inputs(
             empty_facts,
             empty_boundary,
@@ -569,8 +712,158 @@ mod tests {
         let score = &unit.score;
         assert_eq!(
             score.total,
-            score.fan_io + score.security_taint + score.risk_zone + score.change_shape,
-            "the focus total must be the four documented components only -- no symbol-chain term"
+            score.fan_io
+                + score.security_taint
+                + score.risk_zone
+                + score.change_shape
+                + score.runtime,
+            "the focus total must be the documented components only -- no symbol-chain term"
+        );
+        // Free-mode (no runtime input): the runtime component is 0, so the total
+        // is the four deterministic components, byte-identical to the no-runtime baseline.
+        assert_eq!(score.runtime, 0, "free mode adds no runtime weight");
+    }
+
+    // With runtime data, a HOT unit outranks a COLD unit
+    // that is otherwise identical. The hot path's bucketed runtime weight lifts it.
+    #[test]
+    fn hot_unit_outranks_cold_with_runtime_data() {
+        let gf = vec![
+            facts("src/hot.ts", 2, 0, false, false),
+            facts("src/cold.ts", 2, 0, false, false),
+        ];
+        let rt = runtime(&[("src/hot.ts", 500)], &["src/cold.ts"]);
+        let map = build_focus_map(&inputs_rt(&gf, &[], &[], &rt));
+        let find = |file: &str| {
+            map.review_here
+                .iter()
+                .chain(map.deprioritized.iter())
+                .find(|unit| unit.file == file)
+                .unwrap_or_else(|| panic!("{file} present"))
+        };
+        let hot = find("src/hot.ts");
+        let cold = find("src/cold.ts");
+        assert!(hot.score.runtime > 0, "hot unit carries a runtime weight");
+        assert_eq!(cold.score.runtime, 0, "cold unit carries no runtime weight");
+        assert!(
+            hot.score.total > cold.score.total,
+            "hot ({}) must outrank cold ({})",
+            hot.score.total,
+            cold.score.total
+        );
+        assert!(hot.reason.contains("hot path (500 invocations)"));
+    }
+
+    // A blazing path outweighs a merely-warm one (bands).
+    #[test]
+    fn runtime_weight_is_invocation_bucketed() {
+        assert_eq!(runtime_weight(0), RUNTIME_HOT_FLOOR);
+        assert_eq!(runtime_weight(50), RUNTIME_HOT_FLOOR);
+        assert_eq!(runtime_weight(100), RUNTIME_HOT_WARM);
+        assert_eq!(runtime_weight(1_000), RUNTIME_HOT_BLAZING);
+    }
+
+    // The `skip` label is emitted ONLY with runtime
+    // evidence, and ONLY for a runtime-cold unit that carries no deterministic
+    // signal. A cold unit WITH a risk signal stays visible (never skipped).
+    #[test]
+    fn safe_skip_only_with_runtime_evidence_and_zero_risk() {
+        // Fully isolated + runtime-cold -> skip.
+        let isolated = vec![facts("src/dead.ts", 0, 0, false, false)];
+        let rt = runtime(&[], &["src/dead.ts"]);
+        let map = build_focus_map(&inputs_rt(&isolated, &[], &[], &rt));
+        let unit = map
+            .review_here
+            .iter()
+            .chain(map.deprioritized.iter())
+            .next()
+            .expect("unit present");
+        assert_eq!(unit.label, FocusLabel::Skip);
+        assert_eq!(unit.label.token(), "skip");
+        assert!(unit.reason.contains("runtime-cold"));
+        // The skip unit is in the escape hatch (nothing hidden).
+        assert!(map.deprioritized.iter().any(|u| u.file == "src/dead.ts"));
+
+        // Same file but with a risk signal (public-API delta) -> NOT skipped, even
+        // though runtime says cold. A deterministic signal keeps it visible.
+        let public_api = vec!["src/dead.ts::Widget".to_string()];
+        let with_risk = build_focus_map(&inputs_rt(&isolated, &public_api, &[], &rt));
+        let risky = with_risk
+            .review_here
+            .iter()
+            .chain(with_risk.deprioritized.iter())
+            .next()
+            .expect("unit present");
+        assert_ne!(
+            risky.label,
+            FocusLabel::Skip,
+            "a risk signal blocks safe-skip"
+        );
+    }
+
+    // Safety: a confidence-flagged unit (dynamic dispatch / re-export
+    // indirection) is NOT auto-skipped even when the runtime proves it cold and it
+    // carries no other signal -- its reachability is uncertain, so one runtime
+    // capture is not proof it is safe to skip.
+    #[test]
+    fn confidence_flag_blocks_safe_skip_even_when_runtime_cold() {
+        let dyn_cold = vec![facts("src/dyn.ts", 0, 0, true, false)];
+        let rt = runtime(&[], &["src/dyn.ts"]);
+        let map = build_focus_map(&inputs_rt(&dyn_cold, &[], &[], &rt));
+        let unit = map
+            .review_here
+            .iter()
+            .chain(map.deprioritized.iter())
+            .next()
+            .expect("unit present");
+        assert_ne!(
+            unit.label,
+            FocusLabel::Skip,
+            "dynamic-dispatch reachability uncertainty blocks safe-skip"
+        );
+        assert!(unit.confidence.contains(&ConfidenceFlag::DynamicDispatch));
+    }
+
+    // With NO runtime input, the map is byte-identical to
+    // the no-runtime baseline -- no skip label, no runtime component, same JSON.
+    #[test]
+    fn no_runtime_data_is_byte_identical_to_e7() {
+        let gf = vec![
+            facts("src/a.ts", 12, 3, false, false),
+            facts("src/b.ts", 0, 0, false, false),
+            facts("src/c.ts", 2, 0, false, true),
+        ];
+        let public_api = vec!["src/c.ts::Thing".to_string()];
+        let e7 = build_focus_map(&inputs(&gf, &[], &public_api, &[], &[]));
+        let json = serde_json::to_string_pretty(&e7).expect("serialize");
+        assert!(!json.contains("\"skip\""), "free mode emits no skip label");
+        assert!(
+            !json.contains("\"runtime\""),
+            "free mode omits the runtime component from the wire"
+        );
+        for unit in e7.review_here.iter().chain(e7.deprioritized.iter()) {
+            assert_eq!(unit.score.runtime, 0);
+            assert_ne!(unit.label, FocusLabel::Skip);
+        }
+    }
+
+    // Runtime weighting + safe-skip is deterministic (byte-identical re-runs).
+    #[test]
+    fn runtime_focus_map_is_byte_identical_across_runs() {
+        let gf = vec![
+            facts("src/hot.ts", 4, 2, false, false),
+            facts("src/cold.ts", 0, 0, false, false),
+            facts("src/warm.ts", 1, 0, false, false),
+        ];
+        let rt = runtime(
+            &[("src/hot.ts", 2_000), ("src/warm.ts", 120)],
+            &["src/cold.ts"],
+        );
+        let first = build_focus_map(&inputs_rt(&gf, &[], &[], &rt));
+        let second = build_focus_map(&inputs_rt(&gf, &[], &[], &rt));
+        assert_eq!(
+            serde_json::to_string_pretty(&first).unwrap(),
+            serde_json::to_string_pretty(&second).unwrap()
         );
     }
 }

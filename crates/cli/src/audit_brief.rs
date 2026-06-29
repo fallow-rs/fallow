@@ -254,12 +254,119 @@ fn build_focus_map(result: &AuditResult, deltas: &ReviewDeltas) -> crate::audit_
     // threaded onto the brief.
     let taint_touched_files = taint_touched_files(result.check.as_ref());
 
+    // Runtime evidence (paid): `Some` only on the `--runtime-coverage` path.
+    // It weights hot files and enables safe-skip; `None` in free mode, where the
+    // focus map degrades to the deterministic no-runtime baseline byte-for-byte.
+    let runtime_focus = build_runtime_focus(result, root);
+
     build_focus_map(&FocusInputs {
         graph_facts,
         boundary_files: &boundary_files,
         public_api_added: &deltas.public_api_added,
         coordination_changed_files: &coordination_changed_files,
         taint_touched_files: &taint_touched_files,
+        runtime: runtime_focus.as_ref(),
+    })
+}
+
+/// Build the per-file [`crate::audit_focus::RuntimeFocus`] from the
+/// runtime-coverage health report, or `None` when the run carried no
+/// `--runtime-coverage` data (free mode, where the focus map stays byte-identical
+/// to the no-runtime baseline).
+///
+/// Hot files come from the report's `hot_paths` (peak invocation per file). Cold
+/// files are the runtime-proven-unused ones: a file with at least one
+/// `safe_to_delete` finding, NO finding of any other verdict, and no hot path.
+///
+/// Honest boundary: the report's `findings` omit `active` functions, so a file
+/// can carry a live, executed function this signal never sees. `hot_paths` only
+/// surfaces functions at/above the configured hot threshold (`min_invocations_hot`,
+/// default 100, raisable via `--min-invocations-hot`), so an `active` function in
+/// the `[low_traffic .. hot)` band shows up in NEITHER list:
+/// such a file, if its only retained finding is `safe_to_delete`, is classified
+/// cold here despite having run. This is why the cold signal is never trusted on
+/// its own: the safe-skip label additionally requires zero static risk and no
+/// confidence flag, applies only to a file already in the diff, and is always
+/// advisory (the skip stays in the escape-hatch list, never hidden). Paths are
+/// normalized to the brief's root-relative forward-slashed space so the
+/// focus-map joins are byte-exact.
+fn build_runtime_focus(
+    result: &AuditResult,
+    root: &std::path::Path,
+) -> Option<crate::audit_focus::RuntimeFocus> {
+    let report = result.health.as_ref()?.report.runtime_coverage.as_ref()?;
+
+    let hot_pairs: Vec<(String, u64)> = report
+        .hot_paths
+        .iter()
+        .map(|hot| {
+            (
+                crate::audit::keys::relative_key_path(&hot.path, root),
+                hot.invocations,
+            )
+        })
+        .collect();
+
+    // Partition findings into safe_to_delete (cold candidate) vs any other verdict
+    // (the disqualifier that keeps a mixed-verdict file out of the cold set).
+    let mut safe_to_delete: FxHashSet<String> = FxHashSet::default();
+    let mut other_verdict: FxHashSet<String> = FxHashSet::default();
+    for finding in &report.findings {
+        let file = crate::audit::keys::relative_key_path(&finding.path, root);
+        if matches!(
+            finding.verdict,
+            fallow_output::RuntimeCoverageVerdict::SafeToDelete
+        ) {
+            safe_to_delete.insert(file);
+        } else {
+            other_verdict.insert(file);
+        }
+    }
+
+    reconcile_runtime_focus(hot_pairs, &safe_to_delete, &other_verdict)
+}
+
+/// Reconcile the projected runtime signals into a [`crate::audit_focus::RuntimeFocus`]:
+/// peak-aggregate hot invocations per file, and keep a file cold only when it has
+/// a `safe_to_delete` finding, no other-verdict finding, and no hot path (so the
+/// hot and cold lists are disjoint by construction). Returns `None` when both
+/// lists are empty. Pure (no I/O), so the mixed-verdict exclusion, the
+/// hot-excludes-cold filter, and the peak aggregation are unit-tested without
+/// constructing a full health report.
+fn reconcile_runtime_focus(
+    hot_pairs: Vec<(String, u64)>,
+    safe_to_delete: &FxHashSet<String>,
+    other_verdict: &FxHashSet<String>,
+) -> Option<crate::audit_focus::RuntimeFocus> {
+    use crate::audit_focus::{RuntimeFocus, RuntimeHotFile};
+
+    // Peak invocation per hot file (max across the file's hot functions).
+    let mut hot_by_file: rustc_hash::FxHashMap<String, u64> = rustc_hash::FxHashMap::default();
+    for (file, invocations) in hot_pairs {
+        let entry = hot_by_file.entry(file).or_insert(0);
+        *entry = (*entry).max(invocations);
+    }
+
+    let mut hot_files: Vec<RuntimeHotFile> = hot_by_file
+        .into_iter()
+        .map(|(file, invocations)| RuntimeHotFile { file, invocations })
+        .collect();
+    hot_files.sort_by(|a, b| a.file.cmp(&b.file));
+    let hot_set: FxHashSet<&str> = hot_files.iter().map(|hot| hot.file.as_str()).collect();
+
+    let mut cold_files: Vec<String> = safe_to_delete
+        .iter()
+        .filter(|file| !other_verdict.contains(*file) && !hot_set.contains(file.as_str()))
+        .cloned()
+        .collect();
+    cold_files.sort();
+
+    if hot_files.is_empty() && cold_files.is_empty() {
+        return None;
+    }
+    Some(RuntimeFocus {
+        hot_files,
+        cold_files,
     })
 }
 
@@ -790,8 +897,47 @@ mod tests {
 
     use fallow_config::{AuditGate, OutputFormat};
     use fallow_output::REVIEW_BRIEF_SCHEMA_VERSION;
+    use rustc_hash::FxHashSet;
 
     use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
+
+    fn str_set(files: &[&str]) -> FxHashSet<String> {
+        files.iter().map(|file| (*file).to_string()).collect()
+    }
+
+    // Producer: the runtime hot/cold reconciliation. A file with a peak hot
+    // path is hot (peak = max over its functions); a file with only a
+    // safe_to_delete finding is cold; a mixed-verdict file is excluded; a file
+    // that is both safe_to_delete AND hot stays hot (disjoint lists).
+    #[test]
+    fn reconcile_runtime_focus_classifies_hot_cold_and_excludes_mixed() {
+        let hot_pairs = vec![
+            ("src/hot.ts".to_string(), 120),
+            ("src/hot.ts".to_string(), 900),  // peak wins
+            ("src/both.ts".to_string(), 300), // also safe_to_delete below -> stays hot
+        ];
+        let safe = str_set(&["src/cold.ts", "src/mixed.ts", "src/both.ts"]);
+        let other = str_set(&["src/mixed.ts"]); // mixed.ts also has a review_required -> not cold
+        let focus =
+            super::reconcile_runtime_focus(hot_pairs, &safe, &other).expect("non-empty focus");
+
+        // Hot files: peak-aggregated, sorted.
+        let hot: Vec<(&str, u64)> = focus
+            .hot_files
+            .iter()
+            .map(|hot| (hot.file.as_str(), hot.invocations))
+            .collect();
+        assert_eq!(hot, vec![("src/both.ts", 300), ("src/hot.ts", 900)]);
+
+        // Cold = safe_to_delete minus other-verdict minus hot. Only `cold.ts`.
+        assert_eq!(focus.cold_files, vec!["src/cold.ts".to_string()]);
+    }
+
+    // Producer: no signal at all -> None (free-mode fall-through).
+    #[test]
+    fn reconcile_runtime_focus_is_none_when_empty() {
+        assert!(super::reconcile_runtime_focus(Vec::new(), &str_set(&[]), &str_set(&[])).is_none());
+    }
 
     use super::*;
 
