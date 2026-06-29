@@ -984,6 +984,44 @@ fn security_survivors_all_dismissed_sets_findings_present_false() {
 }
 
 #[test]
+fn security_survivors_needs_human_review_sets_findings_present_true() {
+    // Pins the additive `needs_human_review` term in the survivors find-state: a
+    // candidate the verifier routes to human review is retained (non-dismissed)
+    // and must report findings_present=true even with zero outright survivors.
+    let dir = tempfile::tempdir().expect("temp project");
+    write_security_project(dir.path());
+    let (candidates, verdicts) = write_survivor_inputs(dir.path(), "needs-human-review");
+
+    let (event, output) = inspect_event_output(
+        dir.path(),
+        &[
+            "security",
+            "survivors",
+            "--candidates",
+            &candidates,
+            "--verdicts",
+            &verdicts,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[],
+    );
+
+    assert_eq!(
+        output.code, 0,
+        "security survivors should exit 0: {}",
+        output.stderr
+    );
+    assert_eq!(event["workflow"].as_str(), Some("security"));
+    assert_eq!(
+        event["findings_present"].as_bool(),
+        Some(true),
+        "a needs-human-review candidate must report findings_present=true"
+    );
+}
+
+#[test]
 fn review_output_reports_comment_limit_truncation() {
     let dir = tempfile::tempdir().expect("temp project");
     write_many_unused_project(dir.path());
