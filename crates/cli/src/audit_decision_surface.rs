@@ -206,7 +206,7 @@ fn boundary_question(from_zone: &str, to_zone: &str) -> String {
 /// Frame the (batch-consolidated, R1) public-API-surface decision.
 fn public_api_question(count: usize) -> String {
     format!(
-        "This change widens the public API surface by {count} export{}. These become maintained contracts. Intended surface, or should they stay internal?",
+        "This change adds {count} export{} to the public API surface. Intended as maintained contracts, or should they stay internal?",
         if count == 1 { "" } else { "s" }
     )
 }
@@ -214,7 +214,12 @@ fn public_api_question(count: usize) -> String {
 /// Frame a coordination-gap (contract consumed outside the diff) decision.
 fn coordination_question(changed_file: &str, symbols: &[String], consumers: u64) -> String {
     format!(
-        "`{changed_file}` changes exports ({}) imported by {consumers} {} outside this PR. Does this change break or alter what those callers expect?",
+        "`{changed_file}` changes {} ({}) imported by {consumers} {} outside this PR. Does this change break or alter what those callers expect?",
+        if symbols.len() == 1 {
+            "export"
+        } else {
+            "exports"
+        },
         symbols.join(", "),
         if consumers == 1 { "file" } else { "files" }
     )

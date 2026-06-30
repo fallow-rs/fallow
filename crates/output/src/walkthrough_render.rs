@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn single_member_prose_parenthetical_is_kept_question_dropped() {
-        let q = "`src/lib/env.ts` changes exports (env) imported by 22 files outside this PR. Does this change break or alter what those callers expect?";
+        let q = "`src/lib/env.ts` changes export (env) imported by 22 files outside this PR. Does this change break or alter what those callers expect?";
         let out = clean_decision_fact(q, "src/lib/env.ts", 6);
         assert!(out.contains("(env)"), "single member kept: {out}");
         assert!(!out.contains('?'), "trailing question dropped: {out}");
@@ -414,6 +414,16 @@ mod tests {
         let q = "`ui` now imports `db` for the first time. Intended coupling, or should this edge not exist?";
         let out = clean_decision_fact(q, "src/ui/page.ts", 6);
         assert_eq!(out, "`ui` now imports `db` for the first time.");
+    }
+
+    #[test]
+    fn public_api_surface_question_drops_to_one_sentence() {
+        // The consolidated public-API-surface decision has no leading path and no
+        // member parenthetical; the tour keeps only the one observation sentence,
+        // dropping the trailing "Intended as maintained contracts ...?" question.
+        let q = "This change adds 3 exports to the public API surface. Intended as maintained contracts, or should they stay internal?";
+        let out = clean_decision_fact(q, "src/lib/id.ts", 6);
+        assert_eq!(out, "This change adds 3 exports to the public API surface.");
     }
 
     #[test]
