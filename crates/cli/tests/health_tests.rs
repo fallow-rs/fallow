@@ -4694,9 +4694,12 @@ fn health_css_human_section_survives_empty_complexity_section() {
 /// CSS-in-JS library never analyzes its JS/TS files (no `files_analyzed`
 /// inflation).
 #[test]
-#[expect(
+#[allow(
     clippy::too_many_lines,
-    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern. \
+              #[allow] not #[expect] because the body sits on the 100-line threshold, so \
+              whether the lint fires is clippy-version dependent and an #[expect] is \
+              unfulfilled on some toolchains"
 )]
 fn health_css_lifts_css_in_js_tagged_templates() {
     let dir = tempdir().unwrap();
