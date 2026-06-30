@@ -608,11 +608,10 @@ export type ConsumerKind = ("theme-var" | "css-var" | "utility" | "apply")
 /**
  * Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier
  * `high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON
- * PURPOSE: styling confidence is a binary sample-size knee (the authored-CSS
- * surface is either large enough for the declaration-normalized rubric to be
- * reliable or it is not), not three distinct evidence tiers, so a never-emitted
- * `Medium` would be dead surface. Serializes lowercase (`"high"` / `"low"`),
- * matching the sibling confidence enums' vocabulary.
+ * PURPOSE: styling confidence is binary (the grade is either reliable for the
+ * analyzed surface or it is not), not three distinct evidence tiers, so a
+ * never-emitted `Medium` would be dead surface. Serializes lowercase (`"high"` /
+ * `"low"`), matching the sibling confidence enums' vocabulary.
  */
 export type StylingHealthConfidence = ("high" | "low")
 export type InspectTargetDescriptor = ({
@@ -6104,11 +6103,16 @@ nesting_depth: number
 /**
  * Project-wide CSS analytics aggregates across every analyzed stylesheet
  * (including stylesheets with no notable rule, which are not listed
- * individually).
+ * individually in `files`).
  */
 export interface CssAnalyticsSummary {
 /**
- * Stylesheets analyzed (standard CSS only; SCSS is skipped).
+ * Stylesheets analyzed: standard `.css` files, Vue/Svelte SFC `<style>`
+ * blocks, and (dep-gated) CSS-in-JS, both the tagged-template form and the
+ * object form (`style({...})` / `stylex.create({...})` / `css({...})`). SCSS
+ * is skipped. Note: flat atomic object CSS-in-JS (StyleX/Panda) is counted
+ * here and contributes to these aggregates, but has no notable rules, so its
+ * files never appear in the per-file `files` list.
  */
 files_analyzed: number
 /**
@@ -6683,10 +6687,11 @@ grade: string
 penalties: StylingHealthPenalties
 confidence: StylingHealthConfidence
 /**
- * Human-readable reason the grade is low-confidence (the declaration and
- * stylesheet counts the grade was computed from). `None` when confidence is
- * `High`. Prose, not a stable machine field: gate on `confidence` (or on the
- * raw `total_declarations`), not on this string.
+ * Human-readable reason the grade is low-confidence: either the declaration
+ * and stylesheet counts a thin grade was computed from, or that structure is
+ * not assessable for compile-time-atomic CSS-in-JS. `None` when confidence is
+ * `High`. Prose, not a stable machine field: gate on `confidence`, not on
+ * this string.
  */
 confidence_reason?: (string | null)
 }

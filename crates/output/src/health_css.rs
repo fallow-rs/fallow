@@ -705,12 +705,16 @@ pub struct CssFileAnalytics {
 
 /// Project-wide CSS analytics aggregates across every analyzed stylesheet
 /// (including stylesheets with no notable rule, which are not listed
-/// individually).
+/// individually in `files`).
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssAnalyticsSummary {
     /// Stylesheets analyzed: standard `.css` files, Vue/Svelte SFC `<style>`
-    /// blocks, and (dep-gated) CSS-in-JS tagged templates. SCSS is skipped.
+    /// blocks, and (dep-gated) CSS-in-JS, both the tagged-template form and the
+    /// object form (`style({...})` / `stylex.create({...})` / `css({...})`). SCSS
+    /// is skipped. Note: flat atomic object CSS-in-JS (StyleX/Panda) is counted
+    /// here and contributes to these aggregates, but has no notable rules, so its
+    /// files never appear in the per-file `files` list.
     pub files_analyzed: u32,
     /// Total style rules across analyzed stylesheets.
     pub total_rules: u32,

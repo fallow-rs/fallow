@@ -2780,11 +2780,13 @@ fn css_report_scan_items<'a>(
     }
 }
 
+/// Fold one virtual stylesheet's per-sheet aggregates into the running summary.
+/// `files_analyzed` is counted ONCE per source file (a single CSS-in-JS file can
+/// yield several virtual sheets), so it is incremented by the caller, not here.
 fn record_css_analytics_summary(
     summary: &mut fallow_output::CssAnalyticsSummary,
     analytics: &fallow_types::extract::CssAnalytics,
 ) {
-    summary.files_analyzed = summary.files_analyzed.saturating_add(1);
     summary.total_rules = summary.total_rules.saturating_add(analytics.rule_count);
     summary.total_declarations = summary
         .total_declarations
@@ -2891,11 +2893,15 @@ fn walk_css_files(
         // (template + object forms) are lifted into virtual stylesheets so their
         // structural metrics count the same as authored CSS. A CSS-in-JS file can
         // yield several sheets (template, object structural / partial / atomic),
-        // each with its own grade policy.
+        // each with its own grade policy. `files_analyzed` counts the SOURCE file
+        // once regardless of how many sheets it yields (so the count stays 1:1
+        // with files); the per-sheet aggregates accumulate across all sheets.
+        let mut file_had_sheet = false;
         for item in css_report_scan_items(&source, &file.path, kind) {
             let Some(mut analytics) = crate::extract::compute_css_analytics(&item.source) else {
                 continue;
             };
+            file_had_sheet = true;
             // The descriptive summary always reflects every analyzed sheet,
             // including atomic object CSS-in-JS (honest total counts).
             record_css_analytics_summary(&mut summary, &analytics);
@@ -2930,6 +2936,9 @@ fn walk_css_files(
                     }
                 }
             }
+        }
+        if file_had_sheet {
+            summary.files_analyzed = summary.files_analyzed.saturating_add(1);
         }
     }
 

@@ -35,8 +35,8 @@
 //! # Static-only serialization
 //!
 //! Only static string / number values are emitted (camelCase -> kebab-case,
-//! implicit `px` on numbers outside the unitless set, one level of selector
-//! nesting). DYNAMIC values (identifier / member / call), SPREAD, COMPUTED keys,
+//! implicit `px` on numbers outside the unitless set, selector-shaped keys become
+//! nested rules). DYNAMIC values (identifier / member / call), SPREAD, COMPUTED keys,
 //! and objects under a NON-selector key (a `cva` `variants` map, not a style
 //! block) are DROPPED, never guessed: there is no JS interpreter and no value
 //! evaluation, so a `color: theme.primary` contributes nothing rather than a
@@ -239,8 +239,12 @@ pub fn css_in_js_object_sheets(source: &str, path: &Path) -> CssInJsObjectSheets
 /// import provenance.
 struct ObjectStyleCollector<'a> {
     source: &'a str,
-    /// local-binding name -> the library it was imported from (provenance gate).
-    imports: FxHashMap<&'a str, Lib>,
+    /// local-binding name -> (library, canonical function role). The role is the
+    /// IMPORTED (canonical) name for a named import, so an alias
+    /// (`import { style as s }`) still dispatches on `style`; the local name for a
+    /// default / namespace binding (those route through the member-call arms,
+    /// where only the library matters).
+    imports: FxHashMap<&'a str, (Lib, &'a str)>,
     buckets: Vec<Bucket>,
 }
 
@@ -273,14 +277,23 @@ impl<'a> ObjectStyleCollector<'a> {
                 continue;
             };
             for specifier in specifiers {
-                let local = match specifier {
-                    ImportDeclarationSpecifier::ImportSpecifier(s) => s.local.name.as_str(),
-                    ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => s.local.name.as_str(),
+                let (local, role) = match specifier {
+                    // A named import dispatches on its CANONICAL imported name, so
+                    // `import { style as s }` still matches the `style` arm.
+                    ImportDeclarationSpecifier::ImportSpecifier(s) => {
+                        (s.local.name.as_str(), s.imported.name().as_str())
+                    }
+                    // Default / namespace bindings route through the member-call /
+                    // call arms (which match on library only); the role is the
+                    // local name (the conventional default name, e.g. `css`).
+                    ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => {
+                        (s.local.name.as_str(), s.local.name.as_str())
+                    }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
-                        s.local.name.as_str()
+                        (s.local.name.as_str(), s.local.name.as_str())
                     }
                 };
-                self.imports.insert(local, lib);
+                self.imports.insert(local, (lib, role));
             }
         }
     }
@@ -305,8 +318,8 @@ impl<'a> ObjectStyleCollector<'a> {
     fn recognize(&self, callee: &Expression<'a>) -> Option<(Lib, CallKind)> {
         match callee {
             Expression::Identifier(id) => {
-                let lib = *self.imports.get(id.name.as_str())?;
-                let kind = match (lib, id.name.as_str()) {
+                let (lib, role) = *self.imports.get(id.name.as_str())?;
+                let kind = match (lib, role) {
                     // `style(obj)` / `css(obj)`: one object -> one bucket.
                     (Lib::VanillaExtract, "style") | (Lib::Emotion | Lib::Panda, "css") => {
                         CallKind::SingleObject
@@ -327,7 +340,7 @@ impl<'a> ObjectStyleCollector<'a> {
                 let Expression::Identifier(obj) = &member.object else {
                     return None;
                 };
-                let lib = *self.imports.get(obj.name.as_str())?;
+                let (lib, _) = *self.imports.get(obj.name.as_str())?;
                 let kind = match (lib, member.property.name.as_str()) {
                     (Lib::EmotionStyled, _) => CallKind::SingleObject,
                     (Lib::StyleX, "create") => CallKind::ObjectOfObjects,
@@ -340,8 +353,11 @@ impl<'a> ObjectStyleCollector<'a> {
                 let Expression::Identifier(id) = &inner.callee else {
                     return None;
                 };
-                matches!(self.imports.get(id.name.as_str()), Some(Lib::EmotionStyled))
-                    .then_some((Lib::EmotionStyled, CallKind::SingleObject))
+                matches!(
+                    self.imports.get(id.name.as_str()),
+                    Some((Lib::EmotionStyled, _))
+                )
+                .then_some((Lib::EmotionStyled, CallKind::SingleObject))
             }
             _ => None,
         }
@@ -522,9 +538,11 @@ fn string_arg(args: &[Argument<'_>], index: usize) -> Option<String> {
 
 /// Serialize an object literal's static declarations into a CSS rule body. A
 /// selector-shaped key with an object value (`:hover`, `&:hover`, `@media ...`,
-/// vanilla-extract `selectors: {...}`) recurses ONE level into a nested rule;
-/// dynamic values, spreads, computed keys, and objects under a NON-selector key
-/// (a `cva` `variants` map) are dropped and flip `dropped`.
+/// vanilla-extract `selectors: {...}`) becomes a nested rule and recurses through
+/// further selector-shaped keys, so authored selector nesting depth is reflected
+/// (a real structural signal); dynamic values, spreads, computed keys, and
+/// objects under a NON-selector key (a `cva` `variants` map) are dropped and flip
+/// `dropped`.
 fn serialize_object_body(obj: &ObjectExpression<'_>, out: &mut String, dropped: &mut bool) {
     for prop in &obj.properties {
         let ObjectPropertyKind::ObjectProperty(prop) = prop else {
@@ -653,18 +671,16 @@ fn static_value(key: &str, value: &Expression<'_>) -> Option<String> {
 }
 
 /// Render a numeric literal for property `key`, appending `px` unless the
-/// property is unitless or the value is zero. The literal's raw source text is
-/// used when available (so `1.5` and `700` survive verbatim), falling back to the
-/// parsed `f64`.
+/// property is unitless or the value is zero. The number is rendered from its
+/// PARSED value, not the raw source text, so a hex / octal / binary / scientific
+/// literal (`0xFF`, `1e3`) becomes a valid CSS decimal (`255`, `1000`) rather
+/// than a non-CSS token; `format_f64` preserves `1.5` / `700` exactly.
 fn render_number(key: &str, num: &NumericLiteral<'_>) -> String {
-    let raw = num
-        .raw
-        .as_ref()
-        .map_or_else(|| format_f64(num.value), |r| r.as_str().to_string());
+    let value = format_f64(num.value);
     if is_unitless(key) || num.value == 0.0 {
-        raw
+        value
     } else {
-        format!("{raw}px")
+        format!("{value}px")
     }
 }
 
@@ -688,13 +704,23 @@ fn static_key(key: &PropertyKey<'_>) -> Option<String> {
 }
 
 /// Convert a camelCase CSS property name to kebab-case. A leading uppercase
-/// (vendor prefix `WebkitBoxShadow`) becomes a leading `-` (`-webkit-box-shadow`).
-/// Custom properties (`--x`) and already-kebab names pass through unchanged.
+/// (vendor prefix `WebkitBoxShadow`) becomes a leading `-` (`-webkit-box-shadow`),
+/// and the lowercase `ms` Microsoft prefix (`msFlexAlign`, the one React/emotion
+/// write lowercase) becomes `-ms-`. Custom properties (`--x`) and already-kebab
+/// names pass through unchanged.
 fn kebab_case(name: &str) -> String {
     if name.starts_with("--") || name.contains('-') {
         return name.to_string();
     }
     let mut out = String::with_capacity(name.len() + 2);
+    // The `ms` vendor prefix is authored lowercase (unlike `Webkit`/`Moz`/`O`),
+    // so prepend the leading `-` an uppercase boundary would otherwise add
+    // (`msTransform` -> `-ms-transform`).
+    if let Some(rest) = name.strip_prefix("ms")
+        && rest.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+    {
+        out.push('-');
+    }
     for ch in name.chars() {
         if ch.is_ascii_uppercase() {
             out.push('-');
@@ -948,6 +974,59 @@ mod tests {
         // Every value dynamic -> body empty -> bucket dropped entirely, no empty
         // `.fallow-css-in-js{}` rule in any sheet.
         assert!(s.is_empty(), "all-dynamic bucket dropped entirely: {s:?}");
+    }
+
+    #[test]
+    fn aliased_named_import_still_recognized() {
+        // `import { style as s }` dispatches on the canonical name, not the alias.
+        let src = "import { style as s, globalStyle as gs } from '@vanilla-extract/css';\n\
+                   export const a = s({ color: 'red' });\n\
+                   gs('html', { margin: 0 });\n";
+        let s = sheets(src);
+        let css = s.structural.expect("aliased style/globalStyle recognized");
+        assert!(css.contains("color:red;"), "aliased style fired: {css:?}");
+        assert!(
+            css.contains("html{margin:0;}"),
+            "aliased globalStyle fired: {css:?}"
+        );
+    }
+
+    #[test]
+    fn emotion_css_default_import_recognized() {
+        // `@emotion/css` default export IS the css function.
+        let src = "import css from '@emotion/css';\n\
+                   const a = css({ color: 'red' });\n";
+        let css = sheets(src)
+            .structural
+            .expect("default css import recognized");
+        assert!(css.contains("color:red;"), "css={css:?}");
+    }
+
+    #[test]
+    fn non_decimal_numeric_literals_become_valid_css() {
+        // Hex / scientific literals render from their parsed value, never the raw
+        // `0xFF` / `1e3` source text (which the CSS parser would reject).
+        let src = "import { style } from '@vanilla-extract/css';\n\
+                   const x = style({ padding: 0xFF, zIndex: 1e3 });\n";
+        let css = sheets(src).structural.expect("structural");
+        assert!(
+            css.contains("padding:255px;"),
+            "hex -> decimal px: css={css:?}"
+        );
+        assert!(
+            css.contains("z-index:1000;"),
+            "scientific -> decimal: css={css:?}"
+        );
+        assert!(compute_css_analytics(&css).is_some(), "valid CSS");
+    }
+
+    #[test]
+    fn ms_vendor_prefix_kebabs_with_leading_dash() {
+        assert_eq!(kebab_case("msFlexAlign"), "-ms-flex-align");
+        assert_eq!(kebab_case("WebkitBoxShadow"), "-webkit-box-shadow");
+        assert_eq!(kebab_case("backgroundColor"), "background-color");
+        // `msg`-prefixed non-vendor names are not mangled.
+        assert_eq!(kebab_case("msgType"), "msg-type");
     }
 
     #[test]

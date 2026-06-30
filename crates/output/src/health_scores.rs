@@ -93,39 +93,47 @@ pub struct StylingHealth {
     pub score: f64,
     pub grade: &'static str,
     pub penalties: StylingHealthPenalties,
-    /// How much to trust the grade. `Low` when the analyzed CSS surface is too
-    /// thin for the declaration-normalized penalty rubric to be reliable (see
-    /// `confidence_reason`); `High` otherwise. This is descriptive metadata that
-    /// NEVER feeds the score: `score`/`grade`/`penalties` are byte-identical
-    /// whether confidence is high or low. An agent reads `confidence` as a
-    /// convenience flag and `css_analytics.summary.total_declarations` (always
-    /// co-emitted under `--css`) as the raw substrate to apply its own threshold;
-    /// the current rule is `Low` when `total_declarations` is below 50.
+    /// How much to trust the grade. `Low` in either of two cases, `High`
+    /// otherwise (see `confidence_reason` for which): (1) the analyzed CSS surface
+    /// is too thin for the declaration-normalized penalty rubric to be reliable
+    /// (the gradeable, non-atomic declaration count is below 50); or (2) the
+    /// project's CSS is predominantly flat compile-time-atomic CSS-in-JS
+    /// (StyleX/Panda), whose structure is not assessable, so the grade reflects
+    /// token hygiene only regardless of declaration count. This is descriptive
+    /// metadata that NEVER feeds the score: `score`/`grade`/`penalties` are
+    /// byte-identical whether confidence is high or low. Gate on this `confidence`
+    /// flag, which is the complete signal; do NOT reconstruct it from
+    /// `total_declarations`, since that summary count includes atomic declarations
+    /// the grade excludes (a large all-atomic project is `Low` despite a high
+    /// `total_declarations`).
     pub confidence: StylingHealthConfidence,
-    /// Human-readable reason the grade is low-confidence (the declaration and
-    /// stylesheet counts the grade was computed from). `None` when confidence is
-    /// `High`. Prose, not a stable machine field: gate on `confidence` (or on the
-    /// raw `total_declarations`), not on this string.
+    /// Human-readable reason the grade is low-confidence: either the declaration
+    /// and stylesheet counts a thin grade was computed from, or that structure is
+    /// not assessable for compile-time-atomic CSS-in-JS. `None` when confidence is
+    /// `High`. Prose, not a stable machine field: gate on `confidence`, not on
+    /// this string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confidence_reason: Option<String>,
 }
 
 /// Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier
 /// `high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON
-/// PURPOSE: styling confidence is a binary sample-size knee (the authored-CSS
-/// surface is either large enough for the declaration-normalized rubric to be
-/// reliable or it is not), not three distinct evidence tiers, so a never-emitted
-/// `Medium` would be dead surface. Serializes lowercase (`"high"` / `"low"`),
-/// matching the sibling confidence enums' vocabulary.
+/// PURPOSE: styling confidence is binary (the grade is either reliable for the
+/// analyzed surface or it is not), not three distinct evidence tiers, so a
+/// never-emitted `Medium` would be dead surface. Serializes lowercase (`"high"` /
+/// `"low"`), matching the sibling confidence enums' vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum StylingHealthConfidence {
-    /// The analyzed CSS surface is large enough for the grade to be reliable.
+    /// The analyzed CSS surface is large enough, and structurally assessable
+    /// enough, for the grade to be reliable.
     High,
-    /// The grade was computed from a thin authored-CSS surface, so it is
-    /// indicative rather than authoritative. NOT a signal that fallow's analysis
-    /// failed: the rubric simply had little authored CSS to measure.
+    /// The grade is indicative rather than authoritative, for one of two reasons
+    /// (named in `confidence_reason`): a thin authored-CSS surface (little to
+    /// measure), or predominantly flat compile-time-atomic CSS-in-JS
+    /// (StyleX/Panda) whose structure is not assessable. NOT a signal that
+    /// fallow's analysis failed.
     Low,
 }
 

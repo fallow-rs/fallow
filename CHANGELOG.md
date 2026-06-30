@@ -35,6 +35,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Template-literal form only (the object form `css({...})` is a deferred follow-up);
   descriptive-only, no `CACHE_VERSION` bump, no new wire field. (PR #1668)
 
+- **Object-notation CSS-in-JS in `fallow health --css` (CSS program Phase 3c).**
+  The growing zero-runtime camp writes its CSS as an object (`style({...})`,
+  `stylex.create({...})`, `css({...})`, `styled.div({...})`), which the
+  template-literal lifter could not reach, so vanilla-extract / StyleX / Panda /
+  emotion-object apps still got `null` `css_analytics`. A new AST object-to-CSS
+  serializer lifts those style objects into the same virtual-stylesheet pipeline,
+  so both CSS-in-JS forms now converge on one analyzer. Recognition is gated on
+  import binding (a call only fires when its name was imported from a recognized
+  CSS-in-JS module), so a local `style`/`css` helper or an unrelated `cva` never
+  fires; static values only (camelCase to kebab-case, implicit-px outside the
+  unitless set, one level of selector nesting), with dynamic / spread /
+  computed-key values dropped rather than guessed (no false positives).
+  Flat-by-construction atomic CSS (StyleX, Panda) is kept out of the
+  styling-health structural grade and duplicate-block detection and its grade is
+  marked low-confidence, so atomic CSS-in-JS never inflates the grade, while
+  token sprawl and duplicate blocks are surfaced for every library. Dep-gated
+  (adds `@vanilla-extract/css`, `@pandacss/dev`, `@stylexjs/stylex`), so a project
+  with none of the object deps is byte-identical; descriptive-only, no
+  `CACHE_VERSION` bump, no new wire field. The CSS-in-JS design-token graph
+  (StyleX `defineVars`, vanilla-extract `createTheme`) is a deferred follow-up.
+
 - **`get_token_blast_radius` MCP tool: query a design token's blast radius
   directly.** A focused, read-only MCP tool that runs `fallow health --css
   --format json` and surfaces `css_analytics.token_consumers` (the Tailwind v4
