@@ -861,10 +861,11 @@ pub struct DecisionSurfaceParams {
 }
 
 /// Parameters for `get_token_blast_radius`, a thin wrapper around
-/// `fallow health --css --format json` that steers agents to the Tailwind
-/// v4 `css_analytics.token_consumers` reverse index. Narrow surface: only
-/// root/config plus the global cache knobs apply. `token_consumers` abstains
-/// on partial scope, so `workspace` / `changed_since` are intentionally
+/// `fallow health --css --format json` that steers agents to the
+/// `css_analytics.token_consumers` reverse index (Tailwind v4 `@theme` tokens
+/// plus CSS-in-JS `defineVars` / `createTheme`-family token definitions). Narrow
+/// surface: only root/config plus the global cache knobs apply. `token_consumers`
+/// abstains on partial scope, so `workspace` / `changed_since` are intentionally
 /// omitted (they would only ever return empty).
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct GetTokenBlastRadiusParams {

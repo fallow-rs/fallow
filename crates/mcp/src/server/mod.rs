@@ -347,7 +347,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Return Tailwind v4 design-token blast radius from static analysis. Runs `fallow health --css --format json`; agents should read `css_analytics.token_consumers`, a reverse index keyed by each `@theme` token of its defining site plus a `consumer_count` and a capped located `consumers[]` sample of `{path,line,kind}` with `kind` in `theme-var` / `css-var` / `utility` / `apply`. Tailwind v4 only (the index is empty or absent on other projects). `consumer_count` is a static lower bound, so it is descriptive context for sizing a token change, not a deletion gate; a `consumer_count` of 0 mirrors the unused-theme-token population. The dead-token verdict stays on `unused_theme_tokens` via check_health; use this tool to scope the impact of editing or renaming a token, not to decide deletion.",
+        description = "Return design-token blast radius from static analysis. Runs `fallow health --css --format json`; agents should read `css_analytics.token_consumers`, a reverse index keyed by each token of its defining site plus a `consumer_count` and a capped located `consumers[]` sample of `{path,line,kind}`. Covers TWO token origins, disambiguated by the consumer `kind`: Tailwind v4 `@theme` tokens (`token` is the `--`-prefixed custom property like `--color-brand`; `kind` in `theme-var` / `css-var` / `utility` / `apply`) AND CSS-in-JS token definitions (StyleX `defineVars`, vanilla-extract `createTheme` / `createThemeContract` / `createGlobalTheme`; `token` is the binding-qualified dotted access path like `vars.color.primary`, `namespace` is the defining binding, `kind` is `js-member`). The index is empty or absent on projects using neither. `consumer_count` is a static lower bound (a computed class name like `bg-${c}`, or a CSS-in-JS access through a path-aliased / bare-package import the relative-import resolver does not follow, is not counted), so it is descriptive context for sizing a token change, not a deletion gate. For Tailwind a `consumer_count` of 0 mirrors the unused-theme-token population (the dead-token verdict stays on `unused_theme_tokens` via check_health); CSS-in-JS tokens have no corroborating dead-token finding, so treat a CSS-in-JS 0 as weaker. Use this tool to scope the impact of editing or renaming a token, not to decide deletion.",
         annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false)
     )]
     async fn get_token_blast_radius(
@@ -378,7 +378,7 @@ impl ServerHandler for FallowMcp {
                  check_health (code complexity metrics), \
                  check_runtime_coverage (paid; merges a V8 or Istanbul runtime coverage dump into the health report), \
                  get_hot_paths / get_blast_radius / get_importance / get_cleanup_candidates (paid runtime context slices), \
-                 get_token_blast_radius (free; Tailwind v4 design-token blast radius via health --css token_consumers), \
+                 get_token_blast_radius (free; design-token blast radius for Tailwind v4 @theme + CSS-in-JS defineVars/createTheme tokens via health --css token_consumers), \
                  audit (combined dead-code + complexity + duplication for changed files, returns verdict), \
                  decision_surface (the few consequential structural decisions a change embeds, ranked, capped, and signal_id-anchored, each as a judgment question with the routed expert), \
                  fallow_explain (rule rationale and fix guidance without running analysis), \

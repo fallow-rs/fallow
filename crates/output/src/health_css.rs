@@ -286,7 +286,12 @@ pub struct TokenConsumerLocation {
     pub kind: ConsumerKind,
 }
 
-/// The surface through which a Tailwind v4 `@theme` token is consumed.
+/// The surface through which a design token is consumed. The `theme-var` /
+/// `css-var` / `utility` / `apply` kinds are Tailwind v4 `@theme` consumption; the
+/// `js-member` kind is CSS-in-JS consumption (a cross-module member access on an
+/// imported StyleX/vanilla-extract token binding). The kind is the disjoint origin
+/// signal that distinguishes a Tailwind token entry from a CSS-in-JS token entry in
+/// the shared `token_consumers` list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -301,34 +306,59 @@ pub enum ConsumerKind {
     Utility,
     /// A class-shaped token inside an `@apply` body in a stylesheet.
     Apply,
+    /// A cross-module JS member access on an imported CSS-in-JS token binding
+    /// (`import { vars } from './tokens'; vars.color.primary`), for StyleX
+    /// `defineVars` / vanilla-extract `createTheme` family tokens.
+    JsMember,
 }
 
-/// A location-aware reverse index of where one Tailwind v4 `@theme` token is
-/// consumed, so an agent editing the token can see its blast radius before
-/// changing or removing it. Built from the same gated candidate set as
-/// `unused_theme_tokens` (v4 + non-plugin + non-published + whole-scope), so a
-/// token with `consumer_count: 0` is the same actionable "nothing consumes this"
-/// signal that also surfaces it in `unused_theme_tokens`.
+/// A location-aware reverse index of where one design token is consumed, so an
+/// agent editing the token can see its blast radius before changing or removing
+/// it. Covers TWO token origins. The always-available discriminator is the `token`
+/// SHAPE: a Tailwind token is the `--`-prefixed custom property (`--color-brand`),
+/// a CSS-in-JS token is a dotted access path with no `--` prefix
+/// (`vars.color.primary`). The per-consumer `kind` also discriminates origin, but
+/// only when `consumer_count > 0` (a `consumer_count: 0` entry has an empty
+/// `consumers` array and thus no `kind`), so branch on the `token` prefix for the
+/// zero-consumer case. The two origins:
+///
+/// - Tailwind v4 `@theme` tokens (kinds `theme-var` / `css-var` / `utility` /
+///   `apply`), built from the same gated candidate set as `unused_theme_tokens`
+///   (v4 + non-plugin + non-published + whole-scope), so a `consumer_count: 0`
+///   corroborates the `unused_theme_tokens` "nothing consumes this" finding.
+/// - CSS-in-JS tokens (kind `js-member`) from StyleX `defineVars` /
+///   vanilla-extract `createTheme` family definitions, consumed via cross-module
+///   member access. NOTE: CSS-in-JS has NO corroborating dead-token finding (there
+///   is no `unused_theme_tokens` analogue), so a CSS-in-JS `consumer_count: 0` is a
+///   weaker signal than the Tailwind case (and the cross-file scan is relative-import
+///   only, so alias / bare-package imports are not counted).
 ///
 /// This is DESCRIPTIVE context (a blast-radius lookup), not a finding, so it
 /// deliberately carries no `actions` array (unlike the cleanup-candidate types in
-/// this module): the authoritative dead-token signal, with its `verify-unused`
-/// action, stays on `unused_theme_tokens`. Use that finding to drive a deletion
-/// decision; `consumer_count` here is a STATIC lower bound (a computed class name
-/// like `bg-${color}` is not counted), so a `0` here corroborates but does not by
-/// itself prove a token dead.
+/// this module). `consumer_count` is always a STATIC lower bound (a computed class
+/// name like `bg-${color}`, or a CSS-in-JS access through an unresolved alias
+/// import, is not counted).
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct TokenConsumers {
-    /// The full custom property as authored, including the `--` prefix
-    /// (`--color-brand`).
+    /// The token identity. For a Tailwind `@theme` token this is the full custom
+    /// property as authored, INCLUDING the `--` prefix (`--color-brand`). For a
+    /// CSS-in-JS token (kind `js-member`) this is the binding-qualified dotted
+    /// access path, NO `--` prefix (`vars.color.primary`), matching how consumers
+    /// read it. The presence of the `--` prefix distinguishes the two origins.
     pub token: String,
-    /// The Tailwind v4 theme namespace the token belongs to (`color`, `radius`,
-    /// `font-weight`, ...).
+    /// For a Tailwind token, the v4 theme namespace (`color`, `radius`,
+    /// `font-weight`, ...). For a CSS-in-JS token (kind `js-member`), the defining
+    /// export BINDING the token set is accessed through (`vars`), which identifies
+    /// the token set, NOT a semantic group. (The field is thus overloaded by
+    /// origin; branch on `consumers[].kind` or the `token` shape.)
     pub namespace: String,
-    /// Project-root-relative, forward-slash path to the declaring stylesheet.
+    /// Project-root-relative, forward-slash path to the declaring stylesheet
+    /// (Tailwind) or the JS/TS token-definition file (CSS-in-JS).
     pub definition_path: String,
-    /// 1-based line of the token's definition inside the `@theme` block.
+    /// 1-based line of the token's definition (inside the `@theme` block for
+    /// Tailwind; the token key inside the `defineVars`/`createTheme` object for
+    /// CSS-in-JS).
     pub definition_line: u32,
     /// The FULL number of consumer locations found, a STATIC LOWER BOUND: a
     /// computed class name (`bg-${color}`) or a value read outside CSS/markup the

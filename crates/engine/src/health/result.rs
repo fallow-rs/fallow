@@ -24,6 +24,10 @@ struct HealthReportSideEffectsInput<'a> {
     opts: &'a HealthExecutionOptions<'a>,
     report: &'a mut HealthReport,
     files: &'a [DiscoveredFile],
+    /// The per-file extraction output (always present, graph-independent). Used by
+    /// the `--css` path to derive the CSS-in-JS design-token blast-radius from
+    /// imports + member accesses without a resolved graph (Phase 3d).
+    modules: &'a [fallow_types::extract::ModuleInfo],
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -34,6 +38,7 @@ pub(super) struct HealthFinalizeInput<'a, R> {
     pub(super) opts: &'a HealthExecutionOptions<'a>,
     pub(super) config: ResolvedConfig,
     pub(super) files: &'a [DiscoveredFile],
+    pub(super) modules: &'a [fallow_types::extract::ModuleInfo],
     pub(super) scope: HealthScope<'a, R>,
     pub(super) output: HealthOutputParts,
     pub(super) elapsed: Duration,
@@ -60,6 +65,7 @@ pub(super) fn finalize_health_result<R>(
         opts,
         config,
         files,
+        modules,
         scope,
         output,
         elapsed,
@@ -77,6 +83,7 @@ pub(super) fn finalize_health_result<R>(
         opts,
         report: &mut report,
         files,
+        modules,
         config: &config,
         ignore_set: &scope.ignore_set,
         changed_files: scope.changed_files.as_ref(),
@@ -100,6 +107,7 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
     if input.opts.css {
         let computation = compute_css_analytics_report(
             input.files,
+            input.modules,
             HealthScanCtx {
                 config: input.config,
                 ignore_set: input.ignore_set,

@@ -144,7 +144,7 @@ const UNITLESS_PROPERTIES: &[&str] = &[
 /// whether a library's synthetic rules count toward the styling-health structural
 /// grade and duplicate-block fingerprints.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Lib {
+pub(crate) enum Lib {
     /// vanilla-extract (`@vanilla-extract/css` / `/recipes`): real selectors via
     /// `globalStyle` / `selectors`, structure is meaningful.
     VanillaExtract,
@@ -504,7 +504,7 @@ enum CallKind {
 /// than a package name, so any specifier whose path contains a `styled-system`
 /// segment is treated as Panda (still behind the engine's `@pandacss/dev` dep
 /// gate, which decides whether the file is scanned at all).
-fn module_library(specifier: &str) -> Option<Lib> {
+pub(crate) fn module_library(specifier: &str) -> Option<Lib> {
     match specifier {
         "@vanilla-extract/css" | "@vanilla-extract/recipes" => Some(Lib::VanillaExtract),
         "@emotion/react" | "@emotion/css" => Some(Lib::Emotion),

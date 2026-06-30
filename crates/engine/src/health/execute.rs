@@ -110,6 +110,7 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
         opts,
         config,
         files: &files,
+        modules: &modules,
         scope,
         output,
         elapsed: start.elapsed(),

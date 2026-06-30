@@ -6,6 +6,7 @@ use super::package_json::{
     class_matches_dependency_prefix, dependency_class_prefixes, project_uses_tailwind,
     project_uses_tailwind_plugin, published_css_paths,
 };
+use super::runtime_filter::relative_to_root;
 use super::tailwind_theme;
 
 /// The per-run scan filters shared by every CSS and markup health scanner:
@@ -1781,6 +1782,292 @@ fn build_token_consumers(input: &TokenConsumersInput<'_>) -> Vec<fallow_output::
     out
 }
 
+/// A CSS-in-JS token-definition site discovered during the definer pass: the
+/// root-relative definition file, the access binding consumers read through, and
+/// its flattened leaf tokens.
+struct CssInJsDefiner {
+    rel_path: String,
+    binding: String,
+    leaves: Vec<fallow_extract::CssInJsToken>,
+}
+
+/// The definer-pass result: every `(file, binding)` token-definition site plus the
+/// lookups the consumer pass keys on (normalized definer path + binding -> entry
+/// index, and the set of normalized definer paths for relative-import resolution).
+struct CssInJsDefiners {
+    entries: Vec<CssInJsDefiner>,
+    index: rustc_hash::FxHashMap<(std::path::PathBuf, String), usize>,
+    paths: rustc_hash::FxHashSet<std::path::PathBuf>,
+}
+
+/// Whether a specifier names a CSS-in-JS token-DEFINITION library (cut 1: StyleX +
+/// vanilla-extract). `@vanilla-extract/recipes` is excluded: it exports no
+/// token-definition function (`createTheme` family lives in `@vanilla-extract/css`),
+/// so it is not a definer-pass pre-filter source. Panda's `defineTokens` is deferred
+/// (3e), so it is not a definer source here even though `project_uses_css_in_js`
+/// admits Panda projects.
+fn is_css_in_js_token_lib(specifier: &str) -> bool {
+    matches!(specifier, "@stylexjs/stylex" | "@vanilla-extract/css")
+}
+
+/// A cheap source pre-filter: only re-parse a token-lib-importing file as a
+/// potential definer if its source mentions a token-definition function, so a
+/// StyleX file that only calls `stylex.create` (no `defineVars`) is not parsed.
+fn source_mentions_token_definer(source: &str) -> bool {
+    source.contains("defineVars")
+        || source.contains("createThemeContract")
+        || source.contains("createGlobalTheme")
+        || source.contains("createTheme")
+}
+
+/// Whether an import specifier is a relative path (the only shape the light
+/// resolver handles; alias / bare-package / workspace specifiers are not resolved,
+/// keeping `consumer_count` a documented lower bound).
+fn is_relative_specifier(specifier: &str) -> bool {
+    specifier.starts_with('.')
+}
+
+/// Lexically normalize a path (resolve `.` / `..` without touching the
+/// filesystem), so a consumer-relative join compares equal to a definer's
+/// discovered absolute path regardless of `./` / `../` segments.
+fn lexical_normalize(path: &std::path::Path) -> std::path::PathBuf {
+    let mut out = std::path::PathBuf::new();
+    for comp in path.components() {
+        match comp {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Resolve a relative import specifier from a consuming file to a known definer
+/// path (extension + `/index` candidates, lexically normalized). Returns the
+/// matched, normalized definer path or `None`. Zero-FP for relative imports: a
+/// specifier that resolves to a non-definer path yields `None`, so an unrelated
+/// `import { vars } from './other'` is never matched against a design-token `vars`.
+fn resolve_relative_specifier(
+    consumer_abs: &std::path::Path,
+    specifier: &str,
+    definer_paths: &rustc_hash::FxHashSet<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    const EXTS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
+    let base = lexical_normalize(&consumer_abs.parent()?.join(specifier));
+    // 1. Exact (specifier already carried a resolvable filename).
+    if definer_paths.contains(&base) {
+        return Some(base);
+    }
+    // 2. `<base>.<ext>` (`./tokens` -> `./tokens.ts`; `./theme.css` -> `./theme.css.ts`).
+    for ext in EXTS {
+        let mut candidate = base.clone().into_os_string();
+        candidate.push(".");
+        candidate.push(ext);
+        let candidate = std::path::PathBuf::from(candidate);
+        if definer_paths.contains(&candidate) {
+            return Some(candidate);
+        }
+    }
+    // 3. `<base>/index.<ext>`.
+    for ext in EXTS {
+        let candidate = base.join(format!("index.{ext}"));
+        if definer_paths.contains(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Definer pass: re-parse every token-lib-importing file that mentions a
+/// token-definition function, collecting each `(file, binding)` token-definition
+/// site plus the lookup structures the consumer pass needs.
+fn collect_css_in_js_definers(
+    modules: &[fallow_types::extract::ModuleInfo],
+    path_by_id: &rustc_hash::FxHashMap<fallow_types::discover::FileId, &std::path::Path>,
+    config: &ResolvedConfig,
+) -> CssInJsDefiners {
+    let mut definers: Vec<CssInJsDefiner> = Vec::new();
+    let mut definer_index: rustc_hash::FxHashMap<(std::path::PathBuf, String), usize> =
+        rustc_hash::FxHashMap::default();
+    let mut definer_paths: rustc_hash::FxHashSet<std::path::PathBuf> =
+        rustc_hash::FxHashSet::default();
+
+    for module in modules {
+        let imports_token_lib = module
+            .imports
+            .iter()
+            .any(|i| !i.is_type_only && is_css_in_js_token_lib(&i.source));
+        if !imports_token_lib {
+            continue;
+        }
+        let Some(abs) = path_by_id.get(&module.file_id).copied() else {
+            continue;
+        };
+        let Ok(source) = std::fs::read_to_string(abs) else {
+            continue;
+        };
+        if !source_mentions_token_definer(&source) {
+            continue;
+        }
+        let defs = fallow_extract::css_in_js_token_defs(&source, abs);
+        if defs.is_empty() {
+            continue;
+        }
+        let Some(rel) = relative_to_root(abs, &config.root) else {
+            continue;
+        };
+        let norm = lexical_normalize(abs);
+        for def in defs {
+            let idx = definers.len();
+            definer_index.insert((norm.clone(), def.binding.clone()), idx);
+            definer_paths.insert(norm.clone());
+            definers.push(CssInJsDefiner {
+                rel_path: rel.clone(),
+                binding: def.binding,
+                leaves: def.tokens,
+            });
+        }
+    }
+    CssInJsDefiners {
+        entries: definers,
+        index: definer_index,
+        paths: definer_paths,
+    }
+}
+
+/// Consumer pass: for each file whose relative named imports resolve to a definer
+/// binding, re-parse it and collect located member-access reads, deduped by
+/// `(consumer file, line)` per `(definer, leaf token path)`.
+fn collect_css_in_js_consumers(
+    modules: &[fallow_types::extract::ModuleInfo],
+    path_by_id: &rustc_hash::FxHashMap<fallow_types::discover::FileId, &std::path::Path>,
+    config: &ResolvedConfig,
+    definers: &CssInJsDefiners,
+) -> rustc_hash::FxHashMap<(usize, String), rustc_hash::FxHashSet<(String, u32)>> {
+    use fallow_types::extract::ImportedName;
+    let mut hits: rustc_hash::FxHashMap<(usize, String), rustc_hash::FxHashSet<(String, u32)>> =
+        rustc_hash::FxHashMap::default();
+
+    for module in modules {
+        let Some(consumer_abs) = path_by_id.get(&module.file_id).copied() else {
+            continue;
+        };
+        // (definer index, local alias the file imported the binding under).
+        let mut matches: Vec<(usize, &str)> = Vec::new();
+        for import in &module.imports {
+            if import.is_type_only {
+                continue;
+            }
+            let ImportedName::Named(name) = &import.imported_name else {
+                continue;
+            };
+            if !is_relative_specifier(&import.source) {
+                continue;
+            }
+            let Some(resolved) =
+                resolve_relative_specifier(consumer_abs, &import.source, &definers.paths)
+            else {
+                continue;
+            };
+            if let Some(&idx) = definers.index.get(&(resolved, name.clone())) {
+                matches.push((idx, import.local_name.as_str()));
+            }
+        }
+        if matches.is_empty() {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(consumer_abs) else {
+            continue;
+        };
+        let Some(consumer_rel) = relative_to_root(consumer_abs, &config.root) else {
+            continue;
+        };
+        for (idx, alias) in matches {
+            let leaf_set: rustc_hash::FxHashSet<String> = definers.entries[idx]
+                .leaves
+                .iter()
+                .map(|t| t.path.clone())
+                .collect();
+            for hit in
+                fallow_extract::css_in_js_token_consumers(&source, consumer_abs, alias, &leaf_set)
+            {
+                hits.entry((idx, hit.token_path))
+                    .or_default()
+                    .insert((consumer_rel.clone(), hit.line));
+            }
+        }
+    }
+    hits
+}
+
+/// Build the CSS-in-JS design-token blast-radius (Phase 3d): for StyleX
+/// `defineVars` / vanilla-extract `createTheme`-family token definitions, a reverse
+/// index of cross-module member-access consumers, in the same `TokenConsumers`
+/// wire shape as the Tailwind `@theme` index (kind `js-member`). Graph-independent:
+/// uses `ModuleInfo` imports + member accesses plus a bounded re-parse for lines.
+fn build_css_in_js_token_consumers(
+    files: &[fallow_types::discover::DiscoveredFile],
+    modules: &[fallow_types::extract::ModuleInfo],
+    config: &ResolvedConfig,
+) -> Vec<fallow_output::TokenConsumers> {
+    use fallow_output::{
+        ConsumerKind, TOKEN_CONSUMER_SAMPLE_CAP, TokenConsumerLocation, TokenConsumers,
+    };
+
+    if !project_uses_css_in_js(&config.root) {
+        return Vec::new();
+    }
+    let path_by_id: rustc_hash::FxHashMap<fallow_types::discover::FileId, &std::path::Path> =
+        files.iter().map(|f| (f.id, f.path.as_path())).collect();
+
+    let definers = collect_css_in_js_definers(modules, &path_by_id, config);
+    if definers.entries.is_empty() {
+        return Vec::new();
+    }
+    let hits = collect_css_in_js_consumers(modules, &path_by_id, config, &definers);
+
+    let mut out: Vec<TokenConsumers> = Vec::new();
+    for (idx, definer) in definers.entries.iter().enumerate() {
+        for leaf in &definer.leaves {
+            let mut consumers: Vec<TokenConsumerLocation> = hits
+                .get(&(idx, leaf.path.clone()))
+                .map(|set| {
+                    set.iter()
+                        .map(|(path, line)| TokenConsumerLocation {
+                            path: path.clone(),
+                            line: *line,
+                            kind: ConsumerKind::JsMember,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            consumers.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.line.cmp(&b.line)));
+            let consumer_count = saturate_len(consumers.len());
+            consumers.truncate(TOKEN_CONSUMER_SAMPLE_CAP);
+            out.push(TokenConsumers {
+                token: format!("{}.{}", definer.binding, leaf.path),
+                namespace: definer.binding.clone(),
+                definition_path: definer.rel_path.clone(),
+                definition_line: leaf.def_line,
+                consumer_count,
+                consumers,
+            });
+        }
+    }
+    // Deterministic order among the CSS-in-JS entries. The caller
+    // (`compute_css_analytics_report`) applies a final sort over the COMBINED
+    // Tailwind + CSS-in-JS list, so the emitted `token_consumers` is globally
+    // ordered by `(token, definition_path)`.
+    out.sort_by(|a, b| {
+        a.token
+            .cmp(&b.token)
+            .then_with(|| a.definition_path.cmp(&b.definition_path))
+    });
+    out
+}
+
 fn consumer_kind_rank(kind: fallow_output::ConsumerKind) -> u8 {
     use fallow_output::ConsumerKind;
     match kind {
@@ -1788,6 +2075,7 @@ fn consumer_kind_rank(kind: fallow_output::ConsumerKind) -> u8 {
         ConsumerKind::CssVar => 1,
         ConsumerKind::Utility => 2,
         ConsumerKind::Apply => 3,
+        ConsumerKind::JsMember => 4,
     }
 }
 
@@ -2222,6 +2510,7 @@ fn finalize_css_token_metrics(
 
 pub(super) fn compute_css_analytics_report(
     files: &[fallow_types::discover::DiscoveredFile],
+    modules: &[fallow_types::extract::ModuleInfo],
     ctx: HealthScanCtx<'_>,
 ) -> Option<CssAnalyticsComputation> {
     let HealthScanCtx {
@@ -2248,13 +2537,26 @@ pub(super) fn compute_css_analytics_report(
         ws_roots,
         summary: &mut walk.summary,
     });
-    let token_consumers = build_token_consumers(&TokenConsumersInput {
+    let mut token_consumers = build_token_consumers(&TokenConsumersInput {
         tokens: &walk.tokens,
         files,
         config,
         ignore_set,
         changed_files,
         ws_roots,
+    });
+    // Phase 3d: additively append the CSS-in-JS design-token blast-radius (StyleX
+    // `defineVars` / vanilla-extract `createTheme` family), derived from the
+    // graph-independent `ModuleInfo` imports + a bounded re-parse, gated on the same
+    // `project_uses_css_in_js` dep gate the CSS-in-JS walk uses (a non-CSS-in-JS
+    // project appends nothing, so Tailwind output is byte-identical). The combined
+    // list is then sorted globally by `(token, definition_path)` so the contract is
+    // a single ordered list, not a Tailwind block then a CSS-in-JS block.
+    token_consumers.extend(build_css_in_js_token_consumers(files, modules, config));
+    token_consumers.sort_by(|a, b| {
+        a.token
+            .cmp(&b.token)
+            .then_with(|| a.definition_path.cmp(&b.definition_path))
     });
     let scoring_inputs = super::styling_score::StylingScoringInputs {
         theme_tokens_defined: saturate_len(walk.tokens.theme_token_definers.len()),
@@ -2308,4 +2610,760 @@ fn assemble_css_report(
         token_consumers,
         font_size_unit_mix: metrics.font_size_unit_mix,
     })
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    reason = "tests use unwrap to keep token-consumer assertions concise"
+)]
+mod token_consumer_tests {
+    use super::*;
+    use fallow_config::{FallowConfig, OutputFormat};
+    use fallow_output::ConsumerKind;
+    use fallow_types::discover::{DiscoveredFile, FileId};
+    use std::path::Path;
+
+    /// Resolve a default config rooted at `root`.
+    fn config_at(root: &Path) -> ResolvedConfig {
+        FallowConfig::default().resolve(
+            root.to_path_buf(),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        )
+    }
+
+    /// Write `relative` under `root` with `body`, returning a `DiscoveredFile`.
+    fn write_file(root: &Path, id: u32, relative: &str, body: &str) -> DiscoveredFile {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, body).unwrap();
+        DiscoveredFile {
+            id: FileId(id),
+            size_bytes: u64::try_from(body.len()).unwrap(),
+            path,
+        }
+    }
+
+    /// A `CssTokenSets` populated from a single stylesheet's `@theme` / `@apply`
+    /// / `var()` content (exercises the real located scans in `record_theme`).
+    fn tokens_from(theme_css: &str, rel: &str) -> CssTokenSets {
+        let mut tokens = CssTokenSets::default();
+        tokens.record_theme(theme_css, rel);
+        tokens
+    }
+
+    #[test]
+    fn token_read_by_two_markup_files_counts_two_utility() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        let f1 = write_file(
+            root,
+            0,
+            "src/Button.tsx",
+            "export const Button = () => <button className=\"bg-brand\" />;",
+        );
+        let f2 = write_file(
+            root,
+            1,
+            "src/Card.tsx",
+            "export const Card = () => <div className=\"text-brand p-4\" />;",
+        );
+        let files = vec![f1, f2];
+        let config = config_at(root);
+        let tokens = tokens_from("@theme {\n  --color-brand: #f00;\n}", "src/theme.css");
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+
+        assert_eq!(out.len(), 1);
+        let entry = &out[0];
+        assert_eq!(entry.token, "--color-brand");
+        assert_eq!(entry.consumer_count, 2);
+        assert!(
+            entry
+                .consumers
+                .iter()
+                .all(|c| c.kind == ConsumerKind::Utility)
+        );
+        let paths: Vec<&str> = entry.consumers.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/Button.tsx", "src/Card.tsx"]);
+    }
+
+    #[test]
+    fn token_with_no_consumer_counts_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        // Markup uses an unrelated utility, so `--color-unused` has no consumer.
+        let files = vec![write_file(
+            root,
+            0,
+            "src/App.tsx",
+            "export const App = () => <div className=\"flex gap-2\" />;",
+        )];
+        let config = config_at(root);
+        let tokens = tokens_from("@theme {\n  --color-unused: #abc;\n}", "src/theme.css");
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].token, "--color-unused");
+        assert_eq!(out[0].consumer_count, 0);
+        assert!(out[0].consumers.is_empty());
+    }
+
+    #[test]
+    fn theme_var_and_css_var_reads_locate_distinct_kinds() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        // `--color-brand` is read once inside @theme (theme-var) and once in a
+        // regular rule (css-var); both must surface as distinct kinds.
+        let theme_css = "@theme {\n  --color-brand: #f00;\n  --color-accent: var(--color-brand);\n}\n.note {\n  color: var(--color-brand);\n}";
+        let files: Vec<DiscoveredFile> = Vec::new();
+        let config = config_at(root);
+        let tokens = tokens_from(theme_css, "src/theme.css");
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+
+        let brand = out
+            .iter()
+            .find(|t| t.token == "--color-brand")
+            .expect("--color-brand present");
+        assert_eq!(brand.consumer_count, 2);
+        let kinds: Vec<ConsumerKind> = brand.consumers.iter().map(|c| c.kind).collect();
+        assert!(kinds.contains(&ConsumerKind::ThemeVar));
+        assert!(kinds.contains(&ConsumerKind::CssVar));
+    }
+
+    #[test]
+    fn apply_body_locates_apply_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        let theme_css = "@theme {\n  --color-brand: #f00;\n}\n.btn {\n  @apply bg-brand;\n}";
+        let files: Vec<DiscoveredFile> = Vec::new();
+        let config = config_at(root);
+        let tokens = tokens_from(theme_css, "src/theme.css");
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+
+        let brand = out.iter().find(|t| t.token == "--color-brand").unwrap();
+        assert_eq!(brand.consumer_count, 1);
+        assert_eq!(brand.consumers[0].kind, ConsumerKind::Apply);
+    }
+
+    #[test]
+    fn non_tailwind_project_emits_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+        let files = vec![write_file(
+            root,
+            0,
+            "src/App.tsx",
+            "export const App = () => <div className=\"bg-brand\" />;",
+        )];
+        let config = config_at(root);
+        let tokens = tokens_from("@theme {\n  --color-brand: #f00;\n}", "src/theme.css");
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+        assert!(out.is_empty(), "non-Tailwind project must abstain");
+    }
+
+    #[test]
+    fn plugin_project_emits_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        let files: Vec<DiscoveredFile> = Vec::new();
+        let config = config_at(root);
+        // A `@plugin` directive trips the DI-blind-spot abstain.
+        let tokens = tokens_from(
+            "@plugin \"@tailwindcss/typography\";\n@theme {\n  --color-brand: #f00;\n}",
+            "src/theme.css",
+        );
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: None,
+            ws_roots: None,
+        });
+        assert!(out.is_empty(), "plugin project must abstain");
+    }
+
+    #[test]
+    fn partial_scope_emits_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0"}}"#,
+        )
+        .unwrap();
+        let files: Vec<DiscoveredFile> = Vec::new();
+        let config = config_at(root);
+        let tokens = tokens_from("@theme {\n  --color-brand: #f00;\n}", "src/theme.css");
+        let changed: rustc_hash::FxHashSet<std::path::PathBuf> = rustc_hash::FxHashSet::default();
+
+        let out = build_token_consumers(&TokenConsumersInput {
+            tokens: &tokens,
+            files: &files,
+            config: &config,
+            ignore_set: &globset::GlobSet::empty(),
+            changed_files: Some(&changed),
+            ws_roots: None,
+        });
+        assert!(out.is_empty(), "partial scope must abstain");
+    }
+
+    // --- CSS program Phase 3c: object-notation CSS-in-JS engine wiring ---
+
+    /// Run the CSS analytics walk over a temp project and return the computation
+    /// (report + scoring inputs), or `None` when nothing analyzable was found.
+    fn css_computation(root: &Path, files: &[DiscoveredFile]) -> Option<CssAnalyticsComputation> {
+        let config = config_at(root);
+        // The 3c CSS-analytics tests do not exercise the Phase 3d CSS-in-JS token
+        // blast-radius (which needs `ModuleInfo`), so pass an empty module slice;
+        // the token-consumer driver then no-ops (no definers).
+        compute_css_analytics_report(
+            files,
+            &[],
+            HealthScanCtx {
+                config: &config,
+                ignore_set: &globset::GlobSet::empty(),
+                changed_files: None,
+                ws_roots: None,
+            },
+        )
+    }
+
+    // --- CSS program Phase 3d: CSS-in-JS design-token blast-radius ---
+
+    /// Like [`css_computation`] but parses each file into a `ModuleInfo` so the
+    /// Phase 3d CSS-in-JS token-consumer driver (which reads imports +
+    /// member-access) actually runs.
+    fn css_computation_3d(root: &Path, files: &[DiscoveredFile]) -> CssAnalyticsComputation {
+        let config = config_at(root);
+        let modules: Vec<fallow_types::extract::ModuleInfo> = files
+            .iter()
+            .map(|f| {
+                let src = std::fs::read_to_string(&f.path).unwrap_or_default();
+                fallow_extract::parse_source_to_module(f.id, &f.path, &src, 0, false)
+            })
+            .collect();
+        compute_css_analytics_report(
+            files,
+            &modules,
+            HealthScanCtx {
+                config: &config,
+                ignore_set: &globset::GlobSet::empty(),
+                changed_files: None,
+                ws_roots: None,
+            },
+        )
+        .expect("css_analytics is non-null")
+    }
+
+    /// The CSS-in-JS (`js-member`) token-consumer entries from a computation.
+    fn js_token_consumers(
+        computation: &CssAnalyticsComputation,
+    ) -> Vec<&fallow_output::TokenConsumers> {
+        computation
+            .report
+            .token_consumers
+            .iter()
+            .filter(|t| {
+                t.consumers
+                    .iter()
+                    .all(|c| c.kind == fallow_output::ConsumerKind::JsMember)
+                    && t.token.contains('.')
+                    && !t.token.starts_with("--")
+            })
+            .collect()
+    }
+
+    fn find_token<'a>(
+        computation: &'a CssAnalyticsComputation,
+        token: &str,
+    ) -> Option<&'a fallow_output::TokenConsumers> {
+        computation
+            .report
+            .token_consumers
+            .iter()
+            .find(|t| t.token == token)
+    }
+
+    #[test]
+    fn stylex_define_vars_blast_radius_located_js_member_consumers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@stylexjs/stylex":"0.1.0"}}"#,
+        )
+        .unwrap();
+        let def = write_file(
+            root,
+            0,
+            "src/tokens.stylex.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const vars = stylex.defineVars({ color: { primary: '#000', secondary: '#fff' } });\n",
+        );
+        let consumer = write_file(
+            root,
+            1,
+            "src/card.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             import { vars } from './tokens.stylex';\n\
+             export const s = stylex.create({ root: { color: vars.color.primary } });\n",
+        );
+        let computation = css_computation_3d(root, &[def, consumer]);
+        let primary = find_token(&computation, "vars.color.primary")
+            .expect("vars.color.primary blast radius present");
+        assert_eq!(primary.namespace, "vars");
+        assert_eq!(primary.definition_path, "src/tokens.stylex.ts");
+        assert_eq!(primary.consumer_count, 1);
+        assert_eq!(primary.consumers.len(), 1);
+        assert_eq!(
+            primary.consumers[0].kind,
+            fallow_output::ConsumerKind::JsMember
+        );
+        assert_eq!(primary.consumers[0].path, "src/card.ts");
+        // Defined-but-unconsumed leaf -> count 0 (criterion 6).
+        let secondary =
+            find_token(&computation, "vars.color.secondary").expect("secondary present");
+        assert_eq!(secondary.consumer_count, 0);
+    }
+
+    #[test]
+    fn both_tailwind_and_css_in_js_tokens_merge_in_deterministic_global_order() {
+        // A project using BOTH Tailwind v4 @theme tokens AND StyleX defineVars: the
+        // combined token_consumers carries both origins and is globally sorted by
+        // (token, definition_path), not Tailwind-block-then-CSS-in-JS-block.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"tailwindcss":"4.0.0","@stylexjs/stylex":"0.1.0"}}"#,
+        )
+        .unwrap();
+        let theme = write_file(
+            root,
+            0,
+            "src/theme.css",
+            "@theme {\n  --color-brand: #3b82f6;\n}\n",
+        );
+        // A markup consumer of the Tailwind token (utility class `text-brand`).
+        let markup = write_file(
+            root,
+            1,
+            "src/App.tsx",
+            "export const A = () => <p className=\"text-brand\">x</p>;\n",
+        );
+        let tokens_file = write_file(
+            root,
+            2,
+            "src/tokens.stylex.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const vars = stylex.defineVars({ accent: '#000' });\n",
+        );
+        let card = write_file(
+            root,
+            3,
+            "src/Card.ts",
+            "import { vars } from './tokens.stylex';\nexport const x = vars.accent;\n",
+        );
+        let computation = css_computation_3d(root, &[theme, markup, tokens_file, card]);
+        let tokens: Vec<&str> = computation
+            .report
+            .token_consumers
+            .iter()
+            .map(|t| t.token.as_str())
+            .collect();
+        // Both origins present.
+        assert!(
+            tokens.iter().any(|t| t.starts_with("--")),
+            "Tailwind @theme token present: {tokens:?}"
+        );
+        assert!(
+            tokens.iter().any(|t| t == &"vars.accent"),
+            "CSS-in-JS token present: {tokens:?}"
+        );
+        // Globally sorted by token (the combined-list contract).
+        let mut sorted = tokens.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            tokens, sorted,
+            "combined token_consumers is globally token-sorted"
+        );
+    }
+
+    #[test]
+    fn vanilla_extract_create_theme_tuple_blast_radius() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@vanilla-extract/css":"1.0.0"}}"#,
+        )
+        .unwrap();
+        let def = write_file(
+            root,
+            0,
+            "src/theme.css.ts",
+            "import { createTheme } from '@vanilla-extract/css';\n\
+             export const [themeClass, vars] = createTheme({ color: { brand: 'red' } });\n",
+        );
+        let consumer = write_file(
+            root,
+            1,
+            "src/box.css.ts",
+            "import { style } from '@vanilla-extract/css';\n\
+             import { vars } from './theme.css';\n\
+             export const box = style({ color: vars.color.brand });\n",
+        );
+        let computation = css_computation_3d(root, &[def, consumer]);
+        let brand =
+            find_token(&computation, "vars.color.brand").expect("brand blast radius present");
+        assert_eq!(brand.consumer_count, 1);
+        assert_eq!(brand.consumers[0].path, "src/box.css.ts");
+        assert_eq!(
+            brand.consumers[0].kind,
+            fallow_output::ConsumerKind::JsMember
+        );
+    }
+
+    #[test]
+    fn zero_false_consumer_same_name_from_unrelated_module() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@stylexjs/stylex":"0.1.0"}}"#,
+        )
+        .unwrap();
+        let def = write_file(
+            root,
+            0,
+            "src/tokens.stylex.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const vars = stylex.defineVars({ color: { primary: '#000' } });\n",
+        );
+        // A DIFFERENT module also exporting `vars`, read as `vars.color.primary`,
+        // must NOT be counted against the design-token `vars`.
+        let other = write_file(
+            root,
+            1,
+            "src/other.ts",
+            "export const vars = { color: { primary: 1 } };\n",
+        );
+        let consumer = write_file(
+            root,
+            2,
+            "src/use-other.ts",
+            "import { vars } from './other';\n\
+             export const x = vars.color.primary;\n",
+        );
+        let computation = css_computation_3d(root, &[def, other, consumer]);
+        let primary = find_token(&computation, "vars.color.primary").expect("token present");
+        assert_eq!(
+            primary.consumer_count, 0,
+            "import of same-named `vars` from an unrelated module must not be a consumer",
+        );
+    }
+
+    #[test]
+    fn zero_double_count_one_site_counts_once_and_intermediate_not_counted() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@stylexjs/stylex":"0.1.0"}}"#,
+        )
+        .unwrap();
+        let def = write_file(
+            root,
+            0,
+            "src/t.stylex.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const vars = stylex.defineVars({ color: { primary: '#000' } });\n",
+        );
+        // One access site reads `vars.color.primary` (which records TWO member-access
+        // records: {vars.color, primary} + {vars, color}). It must count ONCE, and
+        // the intermediate `vars.color` group must not be a separate consumer.
+        let consumer = write_file(
+            root,
+            1,
+            "src/c.ts",
+            "import { vars } from './t.stylex';\nexport const x = vars.color.primary;\n",
+        );
+        let computation = css_computation_3d(root, &[def, consumer]);
+        let primary = find_token(&computation, "vars.color.primary").expect("token present");
+        assert_eq!(primary.consumer_count, 1, "one access site counts once");
+        // `vars.color` (intermediate group) is not a defined leaf, so no entry.
+        assert!(find_token(&computation, "vars.color").is_none());
+    }
+
+    #[test]
+    fn aliased_import_and_multi_file_counting() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@stylexjs/stylex":"0.1.0"}}"#,
+        )
+        .unwrap();
+        let def = write_file(
+            root,
+            0,
+            "src/t.stylex.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const vars = stylex.defineVars({ color: { primary: '#000' } });\n",
+        );
+        let c1 = write_file(
+            root,
+            1,
+            "src/a.ts",
+            "import { vars as v } from './t.stylex';\nexport const x = v.color.primary;\n",
+        );
+        let c2 = write_file(
+            root,
+            2,
+            "src/b.ts",
+            "import { vars } from './t.stylex';\nexport const y = vars.color.primary;\n",
+        );
+        let computation = css_computation_3d(root, &[def, c1, c2]);
+        let primary = find_token(&computation, "vars.color.primary").expect("token present");
+        assert_eq!(
+            primary.consumer_count, 2,
+            "aliased + plain imports both counted across files"
+        );
+        let paths: Vec<&str> = primary.consumers.iter().map(|c| c.path.as_str()).collect();
+        assert!(paths.contains(&"src/a.ts") && paths.contains(&"src/b.ts"));
+    }
+
+    #[test]
+    fn non_css_in_js_project_emits_no_js_member_consumers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"react":"18.0.0"}}"#,
+        )
+        .unwrap();
+        let f = write_file(
+            root,
+            0,
+            "src/x.ts",
+            "export const vars = { color: { primary: '#000' } };\nexport const y = vars.color.primary;\n",
+        );
+        let modules = vec![fallow_extract::parse_source_to_module(
+            f.id,
+            &f.path,
+            &std::fs::read_to_string(&f.path).unwrap(),
+            0,
+            false,
+        )];
+        let config = config_at(root);
+        let computation = compute_css_analytics_report(
+            &[f],
+            &modules,
+            HealthScanCtx {
+                config: &config,
+                ignore_set: &globset::GlobSet::empty(),
+                changed_files: None,
+                ws_roots: None,
+            },
+        );
+        // No CSS-in-JS deps -> the gate is closed; whether or not css_analytics is
+        // None, there are no js-member token consumers.
+        if let Some(computation) = computation {
+            assert!(js_token_consumers(&computation).is_empty());
+        }
+    }
+
+    #[test]
+    fn vanilla_extract_object_styles_feed_css_analytics_and_grade() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@vanilla-extract/css":"1.0.0"}}"#,
+        )
+        .unwrap();
+        // Two identical 4-declaration style() buckets -> a duplicate block; two
+        // distinct colors -> token sprawl. vanilla-extract is non-atomic.
+        let file = write_file(
+            root,
+            0,
+            "src/styles.css.ts",
+            "import { style } from '@vanilla-extract/css';\n\
+             export const a = style({ color: 'red', padding: 8, margin: 4, top: 1 });\n\
+             export const b = style({ color: 'red', padding: 8, margin: 4, top: 1 });\n\
+             export const c = style({ color: 'blue' });\n",
+        );
+        let computation = css_computation(root, &[file]).expect("css_analytics is non-null");
+        let report = &computation.report;
+        assert!(
+            report.summary.files_analyzed >= 1,
+            "object styles analyzed: {:?}",
+            report.summary
+        );
+        assert!(
+            report.summary.unique_colors >= 2,
+            "distinct colors counted from object styles: {:?}",
+            report.summary
+        );
+        assert!(
+            !report.duplicate_declaration_blocks.is_empty(),
+            "identical object buckets surface a duplicate block",
+        );
+        // Non-atomic: the declarations feed the grade inputs, no atomic.
+        assert!(computation.scoring_inputs.non_atomic_declarations >= 8);
+        assert_eq!(computation.scoring_inputs.atomic_declarations, 0);
+        let styling = crate::health::styling_score::compute_styling_health_with_inputs(
+            report,
+            &computation.scoring_inputs,
+        );
+        // A real (non-inflated) grade with a real duplication penalty.
+        assert!(styling.penalties.duplication > 0.0, "duplication penalized");
+    }
+
+    #[test]
+    fn stylex_atomic_styles_do_not_inflate_grade() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@stylexjs/stylex":"0.1.0"}}"#,
+        )
+        .unwrap();
+        let file = write_file(
+            root,
+            0,
+            "src/styles.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const s = stylex.create({\n\
+             root: { color: 'red', padding: 16, margin: 8, fontSize: 14 },\n\
+             card: { color: 'blue', display: 'flex' },\n\
+             });\n",
+        );
+        let computation = css_computation(root, &[file]).expect("css_analytics is non-null");
+        let report = &computation.report;
+        // Token sprawl IS fed for atomic CSS (two distinct colors).
+        assert!(
+            report.summary.unique_colors >= 2,
+            "atomic token sprawl counted: {:?}",
+            report.summary
+        );
+        // Atomic declarations are tracked but excluded from the grade inputs.
+        assert!(computation.scoring_inputs.atomic_declarations >= 4);
+        assert_eq!(
+            computation.scoring_inputs.non_atomic_declarations, 0,
+            "no non-atomic gradeable surface in a pure-StyleX project",
+        );
+        let styling = crate::health::styling_score::compute_styling_health_with_inputs(
+            report,
+            &computation.scoring_inputs,
+        );
+        // The structural penalty is not driven up OR down by the flat atomic
+        // rules (computed over the empty non-atomic surface), and the grade is
+        // marked low-confidence with the atomic reason rather than a confident A.
+        assert_eq!(
+            styling.confidence,
+            fallow_output::StylingHealthConfidence::Low,
+            "predominantly-atomic project is low-confidence",
+        );
+        let reason = styling.confidence_reason.expect("atomic caveat");
+        assert!(
+            reason.contains("compile-time-atomic"),
+            "atomic reason names non-assessability: {reason:?}",
+        );
+    }
+
+    #[test]
+    fn non_object_css_in_js_project_is_byte_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // No CSS-in-JS dependency declared at all.
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+        // A local `style({...})` helper that LOOKS like vanilla-extract but is not
+        // gated in: the JS/TS arm is never scanned, so there is nothing to analyze.
+        let file = write_file(
+            root,
+            0,
+            "src/styles.ts",
+            "const style = (o) => o;\n\
+             export const a = style({ color: 'red', padding: 8, margin: 4, top: 1 });\n",
+        );
+        assert!(
+            css_computation(root, &[file]).is_none(),
+            "a project with no CSS-in-JS deps yields no CSS analytics (byte-identical to pre-3c)",
+        );
+    }
 }
