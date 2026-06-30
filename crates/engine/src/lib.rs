@@ -84,6 +84,7 @@ pub mod extract {
     };
     pub use fallow_extract::css_classes::{is_typo_edit, scan_markup_class_tokens};
     pub use fallow_extract::css_in_js::css_in_js_virtual_stylesheet;
+    pub use fallow_extract::css_in_js_object::css_in_js_object_sheets;
     pub use fallow_extract::css_metrics::compute_css_analytics;
     pub use fallow_extract::parse_all_files;
     pub use fallow_extract::sfc::extract_sfc_styles;

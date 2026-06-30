@@ -450,14 +450,14 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
         // Styling health is the SECOND health axis: a separate score + grade
         // derived from the CSS analytics, surfaced only alongside `css_analytics`
         // (the same `--css` condition) so a plain `fallow health` run stays
-        // byte-identical. It never affects the code `health_score`. The
-        // `@theme`-token population (`theme_tokens_defined`) is an internal scoring
-        // input only (the per-population token-death denominator); it is NOT
-        // serialized, so the report wire contract is unchanged.
+        // byte-identical. It never affects the code `health_score`. The scoring
+        // inputs (`@theme`-token population + the atomic / non-atomic declaration
+        // split) are internal only; they are NOT serialized, so the report wire
+        // contract is unchanged.
         input.report.styling_health = computation.as_ref().map(|computation| {
-            crate::health::styling_score::compute_styling_health(
+            crate::health::styling_score::compute_styling_health_with_inputs(
                 &computation.report,
-                computation.theme_tokens_defined,
+                &computation.scoring_inputs,
             )
         });
         input.report.css_analytics = computation.map(|computation| computation.report);
@@ -1023,18 +1023,28 @@ fn project_uses_tailwind(root: &std::path::Path) -> bool {
         })
 }
 
-/// Whether the project declares a CSS-in-JS runtime library whose tagged-template
-/// CSS the lifter ([`fallow_extract::css_in_js_virtual_stylesheet`]) understands.
-/// Gates the JS/TS arm of the CSS walk so a non-CSS-in-JS project never scans
-/// `.js` / `.ts` files for styling analytics (no `files_analyzed` inflation).
+/// Whether the project declares a CSS-in-JS library whose CSS the lifters
+/// understand: the template-literal form
+/// ([`fallow_extract::css_in_js_virtual_stylesheet`], Phase 3b) and/or the object
+/// form ([`fallow_extract::css_in_js_object_sheets`], Phase 3c). Gates the JS/TS
+/// arm of the CSS walk so a non-CSS-in-JS project never scans `.js` / `.ts` files
+/// for styling analytics (no `files_analyzed` inflation). A project declaring
+/// NONE of these is byte-identical to pre-CSS-in-JS output.
 fn project_uses_css_in_js(root: &std::path::Path) -> bool {
     const CSS_IN_JS_DEPS: &[&str] = &[
+        // Template-literal form (Phase 3b).
         "styled-components",
         "@emotion/styled",
         "@emotion/react",
         "@emotion/css",
         "@linaria/core",
         "@linaria/react",
+        // Object form (Phase 3c): vanilla-extract, Panda, StyleX. The object
+        // serializer's import-binding provenance does the per-call recognition;
+        // these gate whether the JS/TS files are scanned at all.
+        "@vanilla-extract/css",
+        "@pandacss/dev",
+        "@stylexjs/stylex",
     ];
     let Ok(text) = std::fs::read_to_string(root.join("package.json")) else {
         return false;
@@ -2679,17 +2689,93 @@ fn record_scoped_unused_classes(
     });
 }
 
-fn css_report_stylesheet_source(
-    source: &str,
+/// How a lifted virtual stylesheet contributes to the styling-health grade and
+/// duplicate-block detection (CSS program Phase 3c).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GradePolicy {
+    /// Authored `.css`, SFC `<style>`, template-literal CSS-in-JS, and
+    /// object-form CSS-in-JS with real selectors (vanilla-extract / emotion):
+    /// full structural grade inputs + duplicate fingerprints.
+    Structural,
+    /// Object CSS-in-JS buckets that DROPPED a dynamic declaration: structural
+    /// grade inputs, but duplicate fingerprints suppressed (a dropped declaration
+    /// could have distinguished two otherwise-identical blocks).
+    StructuralNoDedup,
+    /// StyleX / Panda atomic object CSS: descriptive token-sprawl only; excluded
+    /// from the structural grade inputs AND duplicate fingerprints (flat by
+    /// construction; structure is a build-output property, not authored).
+    Atomic,
+}
+
+/// One lifted virtual stylesheet plus its grade policy and whether its notable
+/// rules feed the per-file report list. Object CSS-in-JS sheets feed the summary,
+/// tokens, and grade inputs but not the per-file notable list (deferred).
+struct CssScanItem<'a> {
+    source: std::borrow::Cow<'a, str>,
+    policy: GradePolicy,
+    report_notable: bool,
+}
+
+/// Gather every virtual stylesheet a CSS-walk target yields. A standalone `.css`
+/// file and a Vue/Svelte SFC each yield one structural sheet; a CSS-in-JS file
+/// yields the template-literal sheet (Phase 3b, structural) plus up to three
+/// object-form sheets (Phase 3c: structural, structural-no-dedup, atomic).
+fn css_report_scan_items<'a>(
+    source: &'a str,
+    path: &std::path::Path,
     kind: CssScanKind,
-) -> Option<std::borrow::Cow<'_, str>> {
+) -> Vec<CssScanItem<'a>> {
+    use std::borrow::Cow;
     match kind {
-        CssScanKind::Css => Some(std::borrow::Cow::Borrowed(source)),
-        CssScanKind::Sfc => {
-            crate::extract::sfc_virtual_stylesheet(source).map(std::borrow::Cow::Owned)
-        }
+        CssScanKind::Css => vec![CssScanItem {
+            source: Cow::Borrowed(source),
+            policy: GradePolicy::Structural,
+            report_notable: true,
+        }],
+        CssScanKind::Sfc => crate::extract::sfc_virtual_stylesheet(source)
+            .map(|virtual_css| {
+                vec![CssScanItem {
+                    source: Cow::Owned(virtual_css),
+                    policy: GradePolicy::Structural,
+                    report_notable: true,
+                }]
+            })
+            .unwrap_or_default(),
         CssScanKind::CssInJs => {
-            crate::extract::css_in_js_virtual_stylesheet(source).map(std::borrow::Cow::Owned)
+            let mut items = Vec::new();
+            // Phase 3b: template-literal CSS-in-JS, real selectors -> structural.
+            if let Some(virtual_css) = crate::extract::css_in_js_virtual_stylesheet(source) {
+                items.push(CssScanItem {
+                    source: Cow::Owned(virtual_css),
+                    policy: GradePolicy::Structural,
+                    report_notable: true,
+                });
+            }
+            // Phase 3c: object-form CSS-in-JS, three streams. These feed the
+            // summary, tokens, and grade inputs but not the per-file notable list.
+            let sheets = crate::extract::css_in_js_object_sheets(source, path);
+            if let Some(structural) = sheets.structural {
+                items.push(CssScanItem {
+                    source: Cow::Owned(structural),
+                    policy: GradePolicy::Structural,
+                    report_notable: false,
+                });
+            }
+            if let Some(partial) = sheets.structural_partial {
+                items.push(CssScanItem {
+                    source: Cow::Owned(partial),
+                    policy: GradePolicy::StructuralNoDedup,
+                    report_notable: false,
+                });
+            }
+            if let Some(atomic) = sheets.atomic {
+                items.push(CssScanItem {
+                    source: Cow::Owned(atomic),
+                    policy: GradePolicy::Atomic,
+                    report_notable: false,
+                });
+            }
+            items
         }
     }
 }
@@ -2716,12 +2802,43 @@ fn record_css_analytics_summary(
 }
 
 /// The per-file CSS walk accumulator: structural file reports, the project-wide
-/// token sets, scoped SFC unused-class findings, and the running summary.
+/// token sets, scoped SFC unused-class findings, the running summary, and the
+/// atomic / non-atomic declaration split that feeds the styling-health grade.
 struct CssWalkAccum {
     file_reports: Vec<fallow_output::CssFileAnalytics>,
     summary: fallow_output::CssAnalyticsSummary,
     scoped_unused: Vec<fallow_output::ScopedUnusedClasses>,
     tokens: CssTokenSets,
+    scoring: CssGradeScoring,
+}
+
+/// The atomic / non-atomic declaration split accumulated across the CSS walk,
+/// fed into the styling-health grade so flat atomic object CSS-in-JS does not
+/// dilute the declaration-normalized penalties or inflate confidence
+/// (CSS program Phase 3c). For a project with no atomic object CSS-in-JS the
+/// non-atomic counts equal the summary aggregates and `atomic_declarations` is 0,
+/// so the grade is byte-identical to the pre-3c behavior.
+#[derive(Default)]
+struct CssGradeScoring {
+    non_atomic_declarations: u32,
+    non_atomic_important_declarations: u32,
+    non_atomic_max_nesting_depth: u8,
+    atomic_declarations: u32,
+}
+
+impl CssGradeScoring {
+    /// Fold a non-atomic stylesheet's structural metrics into the grade inputs.
+    fn add_non_atomic(&mut self, analytics: &fallow_types::extract::CssAnalytics) {
+        self.non_atomic_declarations = self
+            .non_atomic_declarations
+            .saturating_add(analytics.total_declarations);
+        self.non_atomic_important_declarations = self
+            .non_atomic_important_declarations
+            .saturating_add(analytics.important_declarations);
+        self.non_atomic_max_nesting_depth = self
+            .non_atomic_max_nesting_depth
+            .max(analytics.max_nesting_depth);
+    }
 }
 
 /// The finalized whole-project token metrics (keyframes, duplicate blocks, unused
@@ -2750,6 +2867,8 @@ fn walk_css_files(
     // unioned across every analyzed stylesheet (including ones with no notable
     // rule, which are not listed individually), finalized after the walk.
     let mut tokens = CssTokenSets::default();
+    // The atomic / non-atomic declaration split for the styling-health grade.
+    let mut scoring = CssGradeScoring::default();
 
     // Read the CSS-in-JS dep gate once; it admits the JS/TS arm of the walk.
     let css_in_js = project_uses_css_in_js(&ctx.config.root);
@@ -2766,28 +2885,51 @@ fn walk_css_files(
             record_scoped_unused_classes(&source, relative, &mut summary, &mut scoped_unused);
         }
 
-        // Vue/Svelte SFC `<style>` blocks and JS/TS CSS-in-JS tagged templates are
-        // folded into a virtual stylesheet so their structural metrics
-        // (specificity, !important, design tokens) count the same as a standalone
-        // .css file; an SFC with only SCSS blocks or a JS/TS file with no
-        // CSS-in-JS template yields None and is skipped.
-        let Some(css_source) = css_report_stylesheet_source(&source, kind) else {
-            continue;
-        };
-        let Some(analytics) = crate::extract::compute_css_analytics(&css_source) else {
-            continue;
-        };
-
         let rel = relative.to_string_lossy().replace('\\', "/");
-        record_css_analytics_summary(&mut summary, &analytics);
-        tokens.record(&analytics, &rel);
-        tokens.record_theme(css_source.as_ref(), &rel);
 
-        if !analytics.notable_rules.is_empty() {
-            file_reports.push(CssFileAnalytics {
-                path: rel,
-                analytics,
-            });
+        // A standalone `.css` is used verbatim; SFC `<style>` and CSS-in-JS
+        // (template + object forms) are lifted into virtual stylesheets so their
+        // structural metrics count the same as authored CSS. A CSS-in-JS file can
+        // yield several sheets (template, object structural / partial / atomic),
+        // each with its own grade policy.
+        for item in css_report_scan_items(&source, &file.path, kind) {
+            let Some(mut analytics) = crate::extract::compute_css_analytics(&item.source) else {
+                continue;
+            };
+            // The descriptive summary always reflects every analyzed sheet,
+            // including atomic object CSS-in-JS (honest total counts).
+            record_css_analytics_summary(&mut summary, &analytics);
+            tokens.record_theme(item.source.as_ref(), &rel);
+
+            match item.policy {
+                GradePolicy::Atomic => {
+                    // Atomic flat CSS: token-sprawl only. Suppress its
+                    // duplicate-block fingerprints and keep it out of the
+                    // non-atomic grade inputs; record its declarations for the
+                    // predominantly-atomic confidence caveat.
+                    analytics.declaration_blocks.clear();
+                    tokens.record(&analytics, &rel);
+                    scoring.atomic_declarations = scoring
+                        .atomic_declarations
+                        .saturating_add(analytics.total_declarations);
+                }
+                GradePolicy::Structural | GradePolicy::StructuralNoDedup => {
+                    // A bucket that dropped a dynamic declaration must not
+                    // fingerprint (the drop could have distinguished it from
+                    // another block); clear its blocks before recording.
+                    if item.policy == GradePolicy::StructuralNoDedup {
+                        analytics.declaration_blocks.clear();
+                    }
+                    tokens.record(&analytics, &rel);
+                    scoring.add_non_atomic(&analytics);
+                    if item.report_notable && !analytics.notable_rules.is_empty() {
+                        file_reports.push(CssFileAnalytics {
+                            path: rel.clone(),
+                            analytics,
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -2796,6 +2938,7 @@ fn walk_css_files(
         summary,
         scoped_unused,
         tokens,
+        scoring,
     }
 }
 
@@ -2845,16 +2988,14 @@ fn finalize_css_token_metrics(
     }
 }
 
-/// The CSS analytics report plus the internal scoring inputs that are NOT part of
-/// the serialized report. `theme_tokens_defined` is the total number of Tailwind
-/// `@theme` tokens defined across the project (the population `summary.unused_theme_tokens`
-/// is a subset of); the styling-health `dead_surface` penalty normalizes the
-/// unused-token count by it (a per-population death ratio) without adding a wire
-/// field. It is captured from `CssTokenSets::theme_token_definers` before the
-/// walk accumulator is consumed by report assembly.
+/// The CSS analytics report plus the internal styling-health scoring inputs that
+/// are NOT part of the serialized report (the `@theme` token population for the
+/// per-population token-death ratio, plus the atomic / non-atomic declaration
+/// split that keeps flat atomic object CSS-in-JS out of the grade). Captured from
+/// the walk accumulator before report assembly consumes it; adds no wire field.
 struct CssAnalyticsComputation {
     report: fallow_output::CssAnalyticsReport,
-    theme_tokens_defined: u32,
+    scoring_inputs: crate::health::styling_score::StylingScoringInputs,
 }
 
 fn compute_css_analytics_report(
@@ -2892,6 +3033,17 @@ fn compute_css_analytics_report(
     // which only filters `theme_token_definers` down), so this is always
     // `>= summary.unused_theme_tokens`.
     let theme_tokens_defined = saturate_len(walk.tokens.theme_token_definers.len());
+    // The atomic / non-atomic declaration split for the styling-health grade,
+    // captured before `assemble_css_report` consumes `walk`. With no atomic object
+    // CSS-in-JS these counts equal the summary aggregates, so the grade is
+    // byte-identical to the pre-3c behavior.
+    let scoring_inputs = crate::health::styling_score::StylingScoringInputs {
+        theme_tokens_defined,
+        non_atomic_declarations: walk.scoring.non_atomic_declarations,
+        non_atomic_important_declarations: walk.scoring.non_atomic_important_declarations,
+        non_atomic_max_nesting_depth: walk.scoring.non_atomic_max_nesting_depth,
+        atomic_declarations: walk.scoring.atomic_declarations,
+    };
     // The location-aware token-consumer reverse index, gated identically to
     // `unused_theme_tokens` (v4 + non-plugin + non-published + whole-scope), built
     // before `assemble_css_report` consumes `walk`.
@@ -2906,7 +3058,7 @@ fn compute_css_analytics_report(
     let report = assemble_css_report(walk, metrics, candidates, token_consumers)?;
     Some(CssAnalyticsComputation {
         report,
-        theme_tokens_defined,
+        scoring_inputs,
     })
 }
 
@@ -9183,5 +9335,142 @@ mod token_consumer_tests {
             ws_roots: None,
         });
         assert!(out.is_empty(), "partial scope must abstain");
+    }
+
+    // --- CSS program Phase 3c: object-notation CSS-in-JS engine wiring ---
+
+    /// Run the CSS analytics walk over a temp project and return the computation
+    /// (report + scoring inputs), or `None` when nothing analyzable was found.
+    fn css_computation(root: &Path, files: &[DiscoveredFile]) -> Option<CssAnalyticsComputation> {
+        let config = config_at(root);
+        compute_css_analytics_report(
+            files,
+            HealthScanCtx {
+                config: &config,
+                ignore_set: &globset::GlobSet::empty(),
+                changed_files: None,
+                ws_roots: None,
+            },
+        )
+    }
+
+    #[test]
+    fn vanilla_extract_object_styles_feed_css_analytics_and_grade() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@vanilla-extract/css":"1.0.0"}}"#,
+        )
+        .unwrap();
+        // Two identical 4-declaration style() buckets -> a duplicate block; two
+        // distinct colors -> token sprawl. vanilla-extract is non-atomic.
+        let file = write_file(
+            root,
+            0,
+            "src/styles.css.ts",
+            "import { style } from '@vanilla-extract/css';\n\
+             export const a = style({ color: 'red', padding: 8, margin: 4, top: 1 });\n\
+             export const b = style({ color: 'red', padding: 8, margin: 4, top: 1 });\n\
+             export const c = style({ color: 'blue' });\n",
+        );
+        let computation = css_computation(root, &[file]).expect("css_analytics is non-null");
+        let report = &computation.report;
+        assert!(
+            report.summary.files_analyzed >= 1,
+            "object styles analyzed: {:?}",
+            report.summary
+        );
+        assert!(
+            report.summary.unique_colors >= 2,
+            "distinct colors counted from object styles: {:?}",
+            report.summary
+        );
+        assert!(
+            !report.duplicate_declaration_blocks.is_empty(),
+            "identical object buckets surface a duplicate block",
+        );
+        // Non-atomic: the declarations feed the grade inputs, no atomic.
+        assert!(computation.scoring_inputs.non_atomic_declarations >= 8);
+        assert_eq!(computation.scoring_inputs.atomic_declarations, 0);
+        let styling = crate::health::styling_score::compute_styling_health_with_inputs(
+            report,
+            &computation.scoring_inputs,
+        );
+        // A real (non-inflated) grade with a real duplication penalty.
+        assert!(styling.penalties.duplication > 0.0, "duplication penalized");
+    }
+
+    #[test]
+    fn stylex_atomic_styles_do_not_inflate_grade() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@stylexjs/stylex":"0.1.0"}}"#,
+        )
+        .unwrap();
+        let file = write_file(
+            root,
+            0,
+            "src/styles.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const s = stylex.create({\n\
+             root: { color: 'red', padding: 16, margin: 8, fontSize: 14 },\n\
+             card: { color: 'blue', display: 'flex' },\n\
+             });\n",
+        );
+        let computation = css_computation(root, &[file]).expect("css_analytics is non-null");
+        let report = &computation.report;
+        // Token sprawl IS fed for atomic CSS (two distinct colors).
+        assert!(
+            report.summary.unique_colors >= 2,
+            "atomic token sprawl counted: {:?}",
+            report.summary
+        );
+        // Atomic declarations are tracked but excluded from the grade inputs.
+        assert!(computation.scoring_inputs.atomic_declarations >= 4);
+        assert_eq!(
+            computation.scoring_inputs.non_atomic_declarations, 0,
+            "no non-atomic gradeable surface in a pure-StyleX project",
+        );
+        let styling = crate::health::styling_score::compute_styling_health_with_inputs(
+            report,
+            &computation.scoring_inputs,
+        );
+        // The structural penalty is not driven up OR down by the flat atomic
+        // rules (computed over the empty non-atomic surface), and the grade is
+        // marked low-confidence with the atomic reason rather than a confident A.
+        assert_eq!(
+            styling.confidence,
+            fallow_output::StylingHealthConfidence::Low,
+            "predominantly-atomic project is low-confidence",
+        );
+        let reason = styling.confidence_reason.expect("atomic caveat");
+        assert!(
+            reason.contains("compile-time-atomic"),
+            "atomic reason names non-assessability: {reason:?}",
+        );
+    }
+
+    #[test]
+    fn non_object_css_in_js_project_is_byte_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // No CSS-in-JS dependency declared at all.
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+        // A local `style({...})` helper that LOOKS like vanilla-extract but is not
+        // gated in: the JS/TS arm is never scanned, so there is nothing to analyze.
+        let file = write_file(
+            root,
+            0,
+            "src/styles.ts",
+            "const style = (o) => o;\n\
+             export const a = style({ color: 'red', padding: 8, margin: 4, top: 1 });\n",
+        );
+        assert!(
+            css_computation(root, &[file]).is_none(),
+            "a project with no CSS-in-JS deps yields no CSS analytics (byte-identical to pre-3c)",
+        );
     }
 }

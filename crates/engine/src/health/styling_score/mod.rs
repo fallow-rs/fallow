@@ -106,6 +106,15 @@ const STRUCTURAL_CAP: f64 = 10.0;
 /// `>= 145`-declaration Tailwind apps stay confident.
 const MIN_CONFIDENT_DECLARATIONS: u32 = 50;
 
+/// Share of analyzed declarations originating from flat-by-construction atomic
+/// object CSS-in-JS (StyleX/Panda) at or above which the grade is marked
+/// low-confidence: the structural axis (nesting, `!important` density) is inert
+/// for compile-time-atomic CSS, so a predominantly-atomic project's grade
+/// reflects token hygiene only. Distinct from [`MIN_CONFIDENT_DECLARATIONS`]
+/// (a thin-surface caveat); when both fire the atomic caveat is the more
+/// informative one and wins the single `confidence_reason` slot.
+const ATOMIC_CONFIDENCE_SHARE: f64 = 0.7;
+
 /// `!important` density (as a percentage of declarations) below which no
 /// structural penalty accrues. A small amount of `!important` is normal.
 const IMPORTANT_DENSITY_FLOOR: f64 = 5.0;
@@ -166,26 +175,90 @@ const ARBITRARY_VALUE_DIVISOR: f64 = 18.0;
 /// contribution so the unit term still has room within the 10pt category cap.
 const ARBITRARY_VALUE_TERM_CAP: f64 = 8.0;
 
-/// Compute the styling-health score from the structural CSS analytics.
+/// Internal scoring inputs threaded into the styling-health grade, NOT serialized
+/// (mirrors the prior `theme_tokens_defined` parameter, so the wire contract /
+/// schema is unchanged). The declaration counts are split into an atomic and a
+/// non-atomic share so flat-by-construction atomic object CSS-in-JS (StyleX,
+/// Panda) does not dilute the declaration-normalized penalties or invert the
+/// confidence knee: every penalty that divides by a declaration count divides by
+/// the NON-ATOMIC count, and the confidence trigger reads the non-atomic count
+/// plus the atomic share. For authored `.css` / SFC / non-atomic CSS-in-JS the
+/// non-atomic counts equal the summary aggregates and `atomic_declarations` is 0,
+/// so the grade is byte-identical to the pre-object-CSS-in-JS behavior.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StylingScoringInputs {
+    /// Total Tailwind `@theme` tokens DEFINED across the project (the population
+    /// from which `summary.unused_theme_tokens` is a subset). Denominator for the
+    /// per-population token-death ratio in `dead_surface`.
+    pub theme_tokens_defined: u32,
+    /// Declarations from CSS whose structure is meaningful: authored `.css`, SFC
+    /// `<style>`, and non-atomic CSS-in-JS (vanilla-extract / emotion, object +
+    /// template). The denominator for every declaration-normalized penalty and
+    /// the confidence trigger.
+    pub non_atomic_declarations: u32,
+    /// `!important` declarations from the non-atomic surface (structural numerator).
+    pub non_atomic_important_declarations: u32,
+    /// Deepest nesting from the non-atomic surface (structural nesting term).
+    pub non_atomic_max_nesting_depth: u8,
+    /// Declarations from flat atomic object CSS-in-JS (StyleX/Panda). Excluded
+    /// from the penalties; drives the predominantly-atomic confidence caveat.
+    pub atomic_declarations: u32,
+}
+
+impl StylingScoringInputs {
+    /// Build inputs for a report with no atomic object CSS-in-JS: the non-atomic
+    /// surface IS the whole summary, so the grade matches the pre-3c behavior.
+    /// Used by the back-compat [`compute_styling_health`] entry and unit tests.
+    #[must_use]
+    pub fn from_report(report: &CssAnalyticsReport, theme_tokens_defined: u32) -> Self {
+        let s = &report.summary;
+        Self {
+            theme_tokens_defined,
+            non_atomic_declarations: s.total_declarations,
+            non_atomic_important_declarations: s.important_declarations,
+            non_atomic_max_nesting_depth: s.max_nesting_depth,
+            atomic_declarations: 0,
+        }
+    }
+}
+
+/// Compute the styling-health score from the structural CSS analytics, treating
+/// the whole report as the gradeable surface (no atomic object CSS-in-JS split).
 ///
 /// Mirrors the code score: penalties subtract from a starting 100, the result is
 /// rounded and clamped, and the grade reuses the shared [`letter_grade`]
 /// thresholds. See the module docs for the per-category rubric (v2).
 ///
 /// `theme_tokens_defined` is the total number of Tailwind `@theme` tokens DEFINED
-/// across the project (the population from which `summary.unused_theme_tokens` is
-/// a subset). It is the denominator for the per-population token-death ratio in
-/// `dead_surface`; it is an internal scoring input only, NOT a serialized field
-/// on any output struct, so the wire contract / schema is unchanged.
+/// across the project. It is an internal scoring input only, NOT a serialized
+/// field, so the wire contract / schema is unchanged.
 #[must_use]
 pub fn compute_styling_health(
     report: &CssAnalyticsReport,
     theme_tokens_defined: u32,
 ) -> StylingHealth {
-    let penalties = compute_styling_penalties(report, theme_tokens_defined);
+    compute_styling_health_with_inputs(
+        report,
+        &StylingScoringInputs::from_report(report, theme_tokens_defined),
+    )
+}
+
+/// Compute the styling-health score from the structural CSS analytics plus the
+/// atomic / non-atomic declaration split (CSS program Phase 3c). The
+/// declaration-normalized penalties and the confidence trigger read the
+/// non-atomic counts in `inputs`, so flat atomic object CSS-in-JS does not dilute
+/// the grade nor inflate confidence. The descriptive `report` is still the source
+/// for the non-ratio signals (`token_erosion`, `broken_references`) and the
+/// serialized aggregates.
+#[must_use]
+pub fn compute_styling_health_with_inputs(
+    report: &CssAnalyticsReport,
+    inputs: &StylingScoringInputs,
+) -> StylingHealth {
+    let penalties = compute_styling_penalties(report, inputs);
     let score = apply_styling_penalties(&penalties);
     let grade = letter_grade(score);
-    let (confidence, confidence_reason) = styling_confidence(report);
+    let (confidence, confidence_reason) = styling_confidence(report, inputs);
 
     StylingHealth {
         formula_version: STYLING_HEALTH_FORMULA_VERSION,
@@ -197,37 +270,70 @@ pub fn compute_styling_health(
     }
 }
 
-/// Classify the grade's confidence from the analyzed CSS surface. `Low` when the
-/// authored-declaration count is below [`MIN_CONFIDENT_DECLARATIONS`], with a
-/// human-readable reason naming the declaration and stylesheet counts the grade
-/// was computed from; `High` (no reason) otherwise. Descriptive metadata only: it
-/// never feeds the score. See the module docs for why the framing is "thin
-/// authored-CSS surface", not "unreliable analysis".
-fn styling_confidence(report: &CssAnalyticsReport) -> (StylingHealthConfidence, Option<String>) {
-    let s = &report.summary;
-    if s.total_declarations >= MIN_CONFIDENT_DECLARATIONS {
+/// Classify the grade's confidence from the analyzed CSS surface. `Low` in two
+/// cases, with the more informative reason winning the single slot:
+///
+/// 1. **Predominantly atomic** (precedence): at least [`ATOMIC_CONFIDENCE_SHARE`]
+///    of analyzed declarations come from flat compile-time-atomic object
+///    CSS-in-JS (StyleX/Panda), whose structure (nesting, `!important` density)
+///    is inert, so the grade reflects token hygiene only, not structure.
+/// 2. **Thin authored surface**: the non-atomic (gradeable) declaration count is
+///    below [`MIN_CONFIDENT_DECLARATIONS`], so the declaration-normalized ratios
+///    are hypersensitive.
+///
+/// `High` (no reason) otherwise. Descriptive metadata only: it never feeds the
+/// score. See the module docs for why the framing is a property of the CSS
+/// surface, not "unreliable analysis".
+fn styling_confidence(
+    report: &CssAnalyticsReport,
+    inputs: &StylingScoringInputs,
+) -> (StylingHealthConfidence, Option<String>) {
+    let total = inputs
+        .non_atomic_declarations
+        .saturating_add(inputs.atomic_declarations);
+    if inputs.atomic_declarations > 0
+        && total > 0
+        && f64::from(inputs.atomic_declarations) / f64::from(total) >= ATOMIC_CONFIDENCE_SHARE
+    {
+        // Atomic CSS is flat at the COMPILED layer; the source rules fallow lifts
+        // are not representative of structure, so the structural axis is inert.
+        let reason = "structure (nesting, !important density) is not assessable for \
+                      compile-time-atomic CSS-in-JS (StyleX/Panda); this grade reflects \
+                      token hygiene only"
+            .to_string();
+        return (StylingHealthConfidence::Low, Some(reason));
+    }
+    if inputs.non_atomic_declarations >= MIN_CONFIDENT_DECLARATIONS {
         return (StylingHealthConfidence::High, None);
     }
     let reason = format!(
         "graded from only {} declaration{} across {} stylesheet{}",
-        s.total_declarations,
-        if s.total_declarations == 1 { "" } else { "s" },
-        s.files_analyzed,
-        if s.files_analyzed == 1 { "" } else { "s" },
+        inputs.non_atomic_declarations,
+        if inputs.non_atomic_declarations == 1 {
+            ""
+        } else {
+            "s"
+        },
+        report.summary.files_analyzed,
+        if report.summary.files_analyzed == 1 {
+            ""
+        } else {
+            "s"
+        },
     );
     (StylingHealthConfidence::Low, Some(reason))
 }
 
 fn compute_styling_penalties(
     report: &CssAnalyticsReport,
-    theme_tokens_defined: u32,
+    inputs: &StylingScoringInputs,
 ) -> StylingHealthPenalties {
     StylingHealthPenalties {
-        duplication: duplication_penalty(report),
-        dead_surface: dead_surface_penalty(report, theme_tokens_defined),
+        duplication: duplication_penalty(report, inputs),
+        dead_surface: dead_surface_penalty(report, inputs),
         broken_references: broken_references_penalty(report),
         token_erosion: token_erosion_penalty(report),
-        structural: structural_penalty(report),
+        structural: structural_penalty(inputs),
     }
 }
 
@@ -243,9 +349,14 @@ fn apply_styling_penalties(penalties: &StylingHealthPenalties) -> f64 {
 
 /// Copy-paste declaration blocks: penalize by the share of all declarations that
 /// could be removed by consolidating duplicate blocks. ~10% removable -> full cap.
-fn duplication_penalty(report: &CssAnalyticsReport) -> f64 {
+///
+/// Atomic object CSS-in-JS (StyleX/Panda) is excluded from duplicate-block
+/// fingerprinting upstream, so `duplicate_declarations_total` is already a
+/// non-atomic numerator; dividing by the non-atomic declaration count keeps the
+/// ratio from being diluted by flat atomic declarations flooding the denominator.
+fn duplication_penalty(report: &CssAnalyticsReport, inputs: &StylingScoringInputs) -> f64 {
     let removable = f64::from(report.summary.duplicate_declarations_total);
-    let total = f64::from(report.summary.total_declarations).max(1.0);
+    let total = f64::from(inputs.non_atomic_declarations).max(1.0);
     round1((removable / total * 200.0).min(DUPLICATION_CAP))
 }
 
@@ -266,11 +377,14 @@ fn duplication_penalty(report: &CssAnalyticsReport) -> f64 {
 ///    them; only the `@theme` tokens needed the per-population treatment.
 ///
 /// The two terms are summed and capped at [`DEAD_SURFACE_CAP`]. Both `@theme`
-/// tokens are EXCLUDED from the other-dead term (they live only in term 1).
-fn dead_surface_penalty(report: &CssAnalyticsReport, theme_tokens_defined: u32) -> f64 {
+/// tokens are EXCLUDED from the other-dead term (they live only in term 1). The
+/// other-dead entities are authored-CSS constructs (no atomic object CSS-in-JS
+/// contributes a class / at-rule / `@font-face` to them), so the term is
+/// normalized by the non-atomic declaration count to avoid atomic dilution.
+fn dead_surface_penalty(report: &CssAnalyticsReport, inputs: &StylingScoringInputs) -> f64 {
     let s = &report.summary;
 
-    let token_population = f64::from(theme_tokens_defined).max(1.0);
+    let token_population = f64::from(inputs.theme_tokens_defined).max(1.0);
     let token_death_ratio = f64::from(s.unused_theme_tokens) / token_population;
     let token_term = (token_death_ratio * TOKEN_DEATH_SCALE).min(TOKEN_DEATH_TERM_CAP);
 
@@ -280,7 +394,7 @@ fn dead_surface_penalty(report: &CssAnalyticsReport, theme_tokens_defined: u32) 
             .saturating_add(s.unused_layers)
             .saturating_add(s.unused_font_faces),
     );
-    let total = f64::from(s.total_declarations).max(1.0);
+    let total = f64::from(inputs.non_atomic_declarations).max(1.0);
     let other_term = (other_dead / total * OTHER_DEAD_SCALE).min(OTHER_DEAD_TERM_CAP);
 
     round1((token_term + other_term).min(DEAD_SURFACE_CAP))
@@ -323,15 +437,21 @@ fn token_erosion_penalty(report: &CssAnalyticsReport) -> f64 {
 
 /// Structural smells: `!important` density above a healthy floor and deep
 /// style-rule nesting past a shallow floor.
-fn structural_penalty(report: &CssAnalyticsReport) -> f64 {
-    let s = &report.summary;
-    let important_pct = if s.total_declarations > 0 {
-        f64::from(s.important_declarations) / f64::from(s.total_declarations) * 100.0
+///
+/// Computed over the NON-ATOMIC surface only: flat compile-time-atomic object
+/// CSS-in-JS (StyleX/Panda) has zero `!important` and minimal nesting by
+/// construction, so including it would dilute the `!important` density (lowering
+/// the penalty) and never raise nesting, trivially inflating the grade.
+fn structural_penalty(inputs: &StylingScoringInputs) -> f64 {
+    let important_pct = if inputs.non_atomic_declarations > 0 {
+        f64::from(inputs.non_atomic_important_declarations)
+            / f64::from(inputs.non_atomic_declarations)
+            * 100.0
     } else {
         0.0
     };
     let important = (important_pct - IMPORTANT_DENSITY_FLOOR).max(0.0);
-    let nesting = (f64::from(s.max_nesting_depth) - NESTING_DEPTH_FLOOR).max(0.0);
+    let nesting = (f64::from(inputs.non_atomic_max_nesting_depth) - NESTING_DEPTH_FLOOR).max(0.0);
     round1((important + nesting).min(STRUCTURAL_CAP))
 }
 

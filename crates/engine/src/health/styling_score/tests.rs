@@ -387,3 +387,112 @@ fn apply_styling_penalties_clamps_below_zero() {
         assert_eq!(score, 0.0);
     }
 }
+
+// --- CSS program Phase 3c: atomic object CSS-in-JS exclusion ---
+
+/// A report whose duplicate-block numerator is set, for the duplication-dilution
+/// test. The summary `total_declarations` is the descriptive (full) count; the
+/// grade reads the non-atomic count from `StylingScoringInputs` instead.
+fn report_with_duplicates(duplicate_total: u32, summary_total: u32) -> CssAnalyticsReport {
+    let mut report = clean_report();
+    report.summary.total_declarations = summary_total;
+    report.summary.duplicate_declarations_total = duplicate_total;
+    report
+}
+
+#[test]
+fn duplication_uses_non_atomic_denominator_not_total() {
+    // 8 removable declarations over a real 50-declaration authored surface is a
+    // full-cap duplication smell. 400 atomic StyleX declarations in the SAME
+    // project must NOT dilute it (8/450 would read ~3.6pt and bury the signal).
+    let report = report_with_duplicates(8, 450);
+    let inputs = StylingScoringInputs {
+        theme_tokens_defined: MANY_TOKENS,
+        non_atomic_declarations: 50,
+        non_atomic_important_declarations: 0,
+        non_atomic_max_nesting_depth: 0,
+        atomic_declarations: 400,
+    };
+    let styling = compute_styling_health_with_inputs(&report, &inputs);
+    // 8 / 50 * 200 = 32, capped at the 20pt category ceiling.
+    approx(styling.penalties.duplication, 20.0);
+}
+
+#[test]
+fn structural_penalty_reads_non_atomic_inputs_only() {
+    // The descriptive summary carries flat atomic numbers (0 important, 0
+    // nesting). The structural penalty must come from the non-atomic inputs (a
+    // real 12% !important density + depth 6), not the diluted summary.
+    let report = clean_report();
+    let inputs = StylingScoringInputs {
+        theme_tokens_defined: MANY_TOKENS,
+        non_atomic_declarations: 100,
+        non_atomic_important_declarations: 12,
+        non_atomic_max_nesting_depth: 6,
+        atomic_declarations: 500,
+    };
+    let styling = compute_styling_health_with_inputs(&report, &inputs);
+    // important: (12% - 5) = 7; nesting: (6 - 4) = 2; sum 9, under the 10pt cap.
+    approx(styling.penalties.structural, 9.0);
+}
+
+#[test]
+fn predominantly_atomic_is_low_confidence_with_atomic_reason() {
+    // 80% atomic declarations, but a non-thin (>= 50) non-atomic surface: the
+    // sample-size trigger does NOT fire, proving the atomic trigger is
+    // independent and wins the reason slot.
+    let report = clean_report();
+    let inputs = StylingScoringInputs {
+        theme_tokens_defined: MANY_TOKENS,
+        non_atomic_declarations: 60,
+        non_atomic_important_declarations: 0,
+        non_atomic_max_nesting_depth: 0,
+        atomic_declarations: 240,
+    };
+    let styling = compute_styling_health_with_inputs(&report, &inputs);
+    assert_eq!(styling.confidence, StylingHealthConfidence::Low);
+    let reason = styling.confidence_reason.expect("atomic caveat reason");
+    assert!(
+        reason.contains("compile-time-atomic") && reason.contains("token hygiene"),
+        "atomic reason names non-assessability: {reason:?}"
+    );
+    assert!(
+        !reason.contains("graded from only"),
+        "atomic reason wins over the sample-size reason: {reason:?}"
+    );
+}
+
+#[test]
+fn mostly_non_atomic_with_a_little_atomic_stays_high_confidence() {
+    // 100 authored + 20 atomic = 17% atomic, below the 0.7 share: the grade is
+    // graded normally and stays High confidence.
+    let report = clean_report();
+    let inputs = StylingScoringInputs {
+        theme_tokens_defined: MANY_TOKENS,
+        non_atomic_declarations: 100,
+        non_atomic_important_declarations: 0,
+        non_atomic_max_nesting_depth: 0,
+        atomic_declarations: 20,
+    };
+    let styling = compute_styling_health_with_inputs(&report, &inputs);
+    assert_eq!(styling.confidence, StylingHealthConfidence::High);
+    assert!(styling.confidence_reason.is_none());
+}
+
+#[test]
+fn no_atomic_split_matches_back_compat_entry() {
+    // With no atomic declarations, `compute_styling_health_with_inputs` built via
+    // `from_report` must equal the back-compat `compute_styling_health`.
+    let mut report = clean_report();
+    report.summary.important_declarations = 15;
+    report.summary.total_declarations = 100;
+    report.summary.max_nesting_depth = 4;
+    let via_wrapper = compute_styling_health(&report, MANY_TOKENS);
+    let via_inputs = compute_styling_health_with_inputs(
+        &report,
+        &StylingScoringInputs::from_report(&report, MANY_TOKENS),
+    );
+    approx(via_wrapper.score, via_inputs.score);
+    assert_eq!(via_wrapper.grade, via_inputs.grade);
+    assert_eq!(via_wrapper.confidence, via_inputs.confidence);
+}
