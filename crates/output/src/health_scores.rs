@@ -164,9 +164,11 @@ pub struct StylingHealthPenalties {
     /// (`unresolved_class_references`) and animations referencing a `@keyframes`
     /// defined nowhere (`undefined_keyframes`). Capped at 15pt.
     pub broken_references: f64,
-    /// Design-token erosion: mixed `font-size` units (`font_size_unit_mix`) and
-    /// Tailwind arbitrary-value bypasses (`tailwind_arbitrary_values`). Capped at
-    /// 10pt.
+    /// Design-token erosion: mixed `font-size` units (`font_size_unit_mix`),
+    /// Tailwind arbitrary-value bypasses (`tailwind_arbitrary_values`), and
+    /// distinct HARDCODED `box-shadow`/`border-radius`/`line-height` values above
+    /// per-axis baselines (the v3 value-sprawl drift sub-term; `var(--*)`-
+    /// referenced values are not counted). Capped at 10pt.
     pub token_erosion: f64,
     /// Structural smells from the summary aggregates: `!important` density and
     /// deep style-rule nesting. Capped at 10pt.

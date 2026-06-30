@@ -695,8 +695,14 @@ fn render_css_value_sprawl(lines: &mut Vec<String>, summary: &fallow_output::Css
         ));
     }
     if !extra.is_empty() {
+        // Shadow / radius / line-height sprawl feeds the styling-health
+        // `token_erosion` drift sub-term (formula v3), so this line carries the
+        // same tokenization-candidate suffix its siblings do (the `font sizes mix`
+        // and `Tailwind arbitrary values` lines), bridging the "value sprawl" ->
+        // "token erosion" vocabulary gap. Soft advisory (renders for any count > 0,
+        // even below the scoring baseline), never a penalty claim.
         lines.push(format!(
-            "  value sprawl (cont.): {}",
+            "  value sprawl (cont.): {} (candidates; tokenize repeated values via custom properties)",
             extra.join(" \u{00b7} ")
         ));
     }

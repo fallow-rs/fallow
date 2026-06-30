@@ -17,7 +17,7 @@
 //!
 //! | Category | Cap | Signal | Scaling |
 //! |---|---|---|---|
-//! | `duplication` | 20pt | `summary.duplicate_declarations_total` (removable declarations from copy-paste blocks) | `total / max(total_declarations, 1) * 80`, capped (v3 down-weighted from `* 200`: exact CSS duplication is the least-harmful pattern, so ~25% of declarations removable = full 20pt, a soft hint not a dominant term) |
+//! | `duplication` | 20pt | `summary.duplicate_declarations_total` (removable declarations from copy-paste blocks) | `total / max(non_atomic_declarations, 1) * 80`, capped (v3 down-weighted from `* 200`: exact CSS duplication is the least-harmful pattern, so ~25% of declarations removable = full 20pt, a soft hint not a dominant term; the non-atomic denominator is the 3c atomic-exclusion behavior) |
 //! | `dead_surface` | 20pt | (a) unused `@theme` tokens, as a share of all defined `@theme` tokens; (b) unreferenced classes + unused at-rules + dead `@font-face`, as a share of `total_declarations` | token term `min(unused_theme_tokens / max(theme_tokens_defined, 1) * 15, 15)` + other term `min(other_dead / max(total_declarations, 1) * 150, 8)`, summed then capped at 20 (the token term is a *per-population* death ratio so a handful of dead tokens in a declaration-sparse Tailwind project no longer explodes the penalty) |
 //! | `broken_references` | 15pt | `unresolved_class_references` + `keyframes_undefined` | `count * 3`, capped (so 5 broken refs = full 15pt) |
 //! | `token_erosion` | 10pt | mixed `font-size` units (above 2) + distinct Tailwind arbitrary-value tokens + distinct HARDCODED `box-shadow`/`border-radius`/`line-height` values (v3 sprawl/drift sub-term) | `min((extra_units * 2), 4)` unit term + `min(arbitrary / 18, 8)` arbitrary term + `min(sum_per_axis_excess / 6, 5)` sprawl term (per-axis excess above baselines 10/8/6), summed then capped at 10 |
@@ -535,10 +535,14 @@ fn token_erosion_penalty(report: &CssAnalyticsReport) -> f64 {
 /// `summary.unique_*` (recomputed at health time, never cached); see the module
 /// docs and the [`SHADOW_SPRAWL_BASELINE`] / [`SPRAWL_DIVISOR`] rationale.
 fn value_sprawl_term(s: &fallow_output::CssAnalyticsSummary) -> f64 {
-    let excess = s.unique_box_shadows.saturating_sub(SHADOW_SPRAWL_BASELINE)
-        + s.unique_border_radii.saturating_sub(RADIUS_SPRAWL_BASELINE)
-        + s.unique_line_heights
-            .saturating_sub(LINE_HEIGHT_SPRAWL_BASELINE);
+    let excess = s
+        .unique_box_shadows
+        .saturating_sub(SHADOW_SPRAWL_BASELINE)
+        .saturating_add(s.unique_border_radii.saturating_sub(RADIUS_SPRAWL_BASELINE))
+        .saturating_add(
+            s.unique_line_heights
+                .saturating_sub(LINE_HEIGHT_SPRAWL_BASELINE),
+        );
     (f64::from(excess) / SPRAWL_DIVISOR).min(SPRAWL_TERM_CAP)
 }
 
