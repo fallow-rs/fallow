@@ -11,9 +11,9 @@
 //! The guide has no literal stage array, so two ordered stages are synthesized
 //! from `direction.units` partitioned by `concern_lens`, preserving
 //! `direction.order` within each:
-//!   - **Stage 1, load-bearing** (`concern_lens == "contract-break"`): units with
-//!     out-of-diff consumers.
-//!   - **Stage 2, mechanical** (the rest): orientation-only units.
+//!   - **Stage 1, affects code outside this PR** (`concern_lens == "contract-break"`):
+//!     units with out-of-diff consumers.
+//!   - **Stage 2, self-contained** (the rest): units with no out-of-diff consumers.
 //!
 //! ## Badges
 //!
@@ -71,18 +71,12 @@ pub(in crate::report) fn build_walkthrough_human_lines(
     let (stage1, stage2) = partition_stages(guide, &viewed);
     push_stage(
         &mut lines,
-        "Stage 1: Load-bearing (contract-break)",
+        "Stage 1: Affects code outside this PR",
         &stage1,
         input,
         true,
     );
-    push_stage(
-        &mut lines,
-        "Stage 2: Mechanical (orientation)",
-        &stage2,
-        input,
-        false,
-    );
+    push_stage(&mut lines, "Stage 2: Self-contained", &stage2, input, false);
     push_cleared_panel(&mut lines, input);
 
     lines
@@ -676,15 +670,18 @@ mod tests {
             show_cleared: false,
         });
         let text = plain(&lines);
-        assert!(text.contains("Stage 1: Load-bearing"), "got: {text}");
-        assert!(text.contains("Stage 2: Mechanical"), "got: {text}");
+        assert!(
+            text.contains("Stage 1: Affects code outside this PR"),
+            "got: {text}"
+        );
+        assert!(text.contains("Stage 2: Self-contained"), "got: {text}");
         assert!(text.contains("page.ts"));
         assert!(text.contains("util.ts"));
         // Stage 1 appears before Stage 2.
         let s1 = text.find("Stage 1").unwrap();
         let s2 = text.find("Stage 2").unwrap();
         assert!(s1 < s2);
-        // The coupling decision badge renders on the load-bearing file.
+        // The coupling decision badge renders on the Stage 1 file.
         assert!(text.contains("COUPLING"), "got: {text}");
         assert!(text.contains("OUT-OF-DIFF"), "got: {text}");
     }

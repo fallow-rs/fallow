@@ -2055,8 +2055,8 @@ fn write_metric_legend(out: &mut String, report: &fallow_output::HealthReport) {
 
 /// Build a paste-into-PR markdown rendering of the existing walkthrough guide.
 ///
-/// Mirrors the human terminal tour: a Focus line, Stage 1 (load-bearing) and
-/// Stage 2 (mechanical) sections partitioned by `concern_lens`, with synthesized
+/// Mirrors the human terminal tour: a Focus line, Stage 1 (affects code outside the
+/// PR) and Stage 2 (self-contained) sections partitioned by `concern_lens`, with synthesized
 /// badges as inline code spans, then a collapsible Cleared panel. The JSON guide
 /// path is untouched; this is the only NEW walkthrough markdown surface. No ANSI.
 ///
@@ -2083,14 +2083,14 @@ pub fn build_walkthrough_markdown(
     let (stage1, stage2) = partition_walkthrough_stages(guide, viewed);
     push_walkthrough_stage(
         &mut out,
-        "Stage 1 \u{00b7} Load-bearing",
+        "Stage 1 \u{00b7} Affects code outside this PR",
         &stage1,
         guide,
         root,
     );
     push_walkthrough_stage(
         &mut out,
-        "Stage 2 \u{00b7} Mechanical",
+        "Stage 2 \u{00b7} Self-contained",
         &stage2,
         guide,
         root,
