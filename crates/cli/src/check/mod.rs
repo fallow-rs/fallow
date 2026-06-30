@@ -2,7 +2,9 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use fallow_config::{OutputFormat, ResolvedConfig, RulesConfig, Severity};
-use fallow_engine::results::AnalysisResults;
+use fallow_types::discover::DiscoveredFile;
+use fallow_types::extract::ModuleInfo;
+use fallow_types::results::AnalysisResults;
 
 use crate::baseline::{BaselineData, filter_new_issues};
 use crate::error::emit_error;
@@ -108,7 +110,7 @@ impl IssueFilters {
     }
 
     /// When any filter is active, clear issue types that were NOT requested.
-    pub fn apply(&self, results: &mut fallow_engine::results::AnalysisResults) {
+    pub fn apply(&self, results: &mut fallow_types::results::AnalysisResults) {
         if !self.any_active() {
             return;
         }
@@ -119,7 +121,7 @@ impl IssueFilters {
         self.apply_catalog_filters(results);
     }
 
-    fn apply_core_filters(&self, results: &mut fallow_engine::results::AnalysisResults) {
+    fn apply_core_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
         if !self.unused_files {
             results.unused_files.clear();
         }
@@ -153,7 +155,7 @@ impl IssueFilters {
         }
     }
 
-    fn apply_component_filters(&self, results: &mut fallow_engine::results::AnalysisResults) {
+    fn apply_component_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
         if !self.unprovided_injects {
             results.unprovided_injects.clear();
         }
@@ -201,7 +203,7 @@ impl IssueFilters {
         }
     }
 
-    fn apply_graph_filters(&self, results: &mut fallow_engine::results::AnalysisResults) {
+    fn apply_graph_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
         if !self.duplicate_exports {
             results.duplicate_exports.clear();
         }
@@ -218,7 +220,7 @@ impl IssueFilters {
         }
     }
 
-    fn apply_policy_filters(&self, results: &mut fallow_engine::results::AnalysisResults) {
+    fn apply_policy_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
         if !self.policy_violations {
             results.policy_violations.clear();
         }
@@ -227,7 +229,7 @@ impl IssueFilters {
         }
     }
 
-    fn apply_catalog_filters(&self, results: &mut fallow_engine::results::AnalysisResults) {
+    fn apply_catalog_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
         if !self.unused_catalog_entries {
             results.unused_catalog_entries.clear();
         }
@@ -250,10 +252,8 @@ pub struct TraceOptions {
     pub trace_export: Option<String>,
     pub trace_file: Option<String>,
     pub trace_dependency: Option<String>,
-    /// Impact closure for a single file as the seed: walk `reverse_deps` +
-    /// re-export chains to the transitive affected set and report the
-    /// coordination gap. Powers the `inspect_target` MCP tool's `impact_closure`
-    /// evidence section.
+    /// Impact closure for a single file as the seed. Powers the
+    /// `inspect_target` MCP tool's `impact_closure` evidence section.
     pub impact_closure: Option<String>,
     pub performance: bool,
 }
@@ -318,7 +318,7 @@ pub struct CheckResult {
     pub baseline_deltas: Option<crate::baseline::BaselineDeltas>,
     /// When a baseline was loaded: (total entries in baseline, entries that matched current issues).
     pub baseline_matched: Option<(usize, usize)>,
-    pub timings: Option<fallow_engine::trace::PipelineTimings>,
+    pub timings: Option<fallow_types::trace::PipelineTimings>,
     /// Retained parse data for sharing with health (only populated when retain_modules_for_health=true).
     pub shared_parse: Option<fallow_engine::HealthSharedParseData>,
     /// Impact closure for the review brief: the transitive
@@ -326,7 +326,7 @@ pub struct CheckResult {
     /// audit brief path from the retained graph against the changed-file set;
     /// `None` outside the brief path. Holds root-relative paths so it survives
     /// the graph drop and serializes directly.
-    pub impact_closure: Option<fallow_engine::graph::ImpactClosurePaths>,
+    pub impact_closure: Option<fallow_engine::ImpactClosurePaths>,
     /// Exports-aware public-export key set for the review brief: the
     /// `<rel_path>::<name>` keys reachable through `package.json` `exports` +
     /// re-export reachability. Computed from the retained graph on the brief
@@ -340,14 +340,14 @@ pub struct CheckResult {
     /// changed-file set, before the graph is dropped; `None` outside the brief
     /// path. Holds root-relative paths so it survives the graph drop and
     /// serializes directly.
-    pub partition_order: Option<fallow_engine::graph::PartitionOrderPaths>,
+    pub partition_order: Option<fallow_engine::PartitionOrderPaths>,
     /// Per-changed-file graph facts for the review brief's stage 4 weighted
     /// focus map: fan-in/out (blast radius) plus the dynamic-dispatch and
     /// re-export-indirection confidence-flag signals. Computed from the retained
     /// graph on the brief path against the changed-file set, before the graph is
     /// dropped; `None` outside the brief path. Holds root-relative paths so it
     /// survives the graph drop.
-    pub focus_facts: Option<Vec<fallow_engine::graph::FocusFileFactsPaths>>,
+    pub focus_facts: Option<Vec<fallow_engine::FocusFileFactsPaths>>,
     /// Per-changed-file `rel_path -> [(exported-symbol, 1-based declaration line)]`
     /// map for the decision surface, so a coordination / public-API decision can
     /// anchor an inline comment to the exact export line. Computed from the
@@ -363,10 +363,10 @@ pub struct CheckResult {
 
 struct CheckAnalysisData {
     results: AnalysisResults,
-    trace_graph: Option<fallow_engine::graph::ModuleGraph>,
-    trace_timings: Option<fallow_engine::trace::PipelineTimings>,
-    retained_modules: Option<Vec<fallow_engine::ModuleInfo>>,
-    retained_files: Option<Vec<fallow_engine::DiscoveredFile>>,
+    trace_graph: Option<fallow_engine::RetainedModuleGraph>,
+    trace_timings: Option<fallow_types::trace::PipelineTimings>,
+    retained_modules: Option<Vec<ModuleInfo>>,
+    retained_files: Option<Vec<DiscoveredFile>>,
     script_used_packages: rustc_hash::FxHashSet<String>,
 }
 
@@ -437,8 +437,8 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
 fn handle_trace_side_effects(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
-    trace_graph: Option<&fallow_engine::graph::ModuleGraph>,
-    trace_timings: Option<&fallow_engine::trace::PipelineTimings>,
+    trace_graph: Option<&fallow_engine::RetainedModuleGraph>,
+    trace_timings: Option<&fallow_types::trace::PipelineTimings>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
 ) -> Result<(), ExitCode> {
     if let Some(timings) = trace_timings
@@ -582,9 +582,9 @@ fn regression_config_path(opts: &CheckOptions<'_>) -> std::path::PathBuf {
 
 fn build_shared_parse_data(
     results: &AnalysisResults,
-    trace_graph: Option<fallow_engine::graph::ModuleGraph>,
-    retained_modules: Option<Vec<fallow_engine::ModuleInfo>>,
-    retained_files: Option<Vec<fallow_engine::DiscoveredFile>>,
+    trace_graph: Option<fallow_engine::RetainedModuleGraph>,
+    retained_modules: Option<Vec<ModuleInfo>>,
+    retained_files: Option<Vec<DiscoveredFile>>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
 ) -> Option<fallow_engine::HealthSharedParseData> {
     fallow_engine::health_shared_parse_data_from_artifacts(
@@ -918,7 +918,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
 /// `Ok(None)` when no baseline was loaded, `Ok(Some((entries, matched)))` when
 /// a baseline was loaded, or `Err(ExitCode)` on fatal errors.
 fn handle_baseline(
-    results: &mut fallow_engine::results::AnalysisResults,
+    results: &mut fallow_types::results::AnalysisResults,
     save_path: Option<&std::path::Path>,
     load_path: Option<&std::path::Path>,
     root: &std::path::Path,
@@ -938,7 +938,7 @@ fn handle_baseline(
 
 /// Serialize the current results to a baseline file, creating parent dirs.
 fn save_baseline_file(
-    results: &fallow_engine::results::AnalysisResults,
+    results: &fallow_types::results::AnalysisResults,
     baseline_path: &std::path::Path,
     root: &std::path::Path,
     quiet: bool,
@@ -974,7 +974,7 @@ fn save_baseline_file(
 /// Load a baseline file, filter out matched issues, and return
 /// `(baseline_entries, matched)`.
 fn load_and_compare_baseline(
-    results: &mut fallow_engine::results::AnalysisResults,
+    results: &mut fallow_types::results::AnalysisResults,
     baseline_path: &std::path::Path,
     root: &std::path::Path,
     quiet: bool,
@@ -1006,8 +1006,9 @@ fn load_and_compare_baseline(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_engine::results::*;
     use fallow_types::extract::MemberKind;
+    use fallow_types::output_dead_code::*;
+    use fallow_types::results::*;
     use std::path::PathBuf;
 
     fn no_filters() -> IssueFilters {
@@ -1309,7 +1310,7 @@ mod tests {
         let mut results = make_results();
         results.circular_dependencies.push(
             fallow_types::output_dead_code::CircularDependencyFinding::with_actions(
-                fallow_engine::results::CircularDependency {
+                fallow_types::results::CircularDependency {
                     files: vec![
                         PathBuf::from("/project/src/a.ts"),
                         PathBuf::from("/project/src/b.ts"),
@@ -1406,7 +1407,7 @@ mod tests {
         let mut results = make_results();
         results.boundary_violations.push(
             fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
-                fallow_engine::results::BoundaryViolation {
+                fallow_types::results::BoundaryViolation {
                     from_path: PathBuf::from("/project/src/bad.ts"),
                     to_path: PathBuf::from("/project/lib/secret.ts"),
                     from_zone: "src".to_string(),
@@ -1433,7 +1434,7 @@ mod tests {
         let mut results = make_results();
         results.circular_dependencies.push(
             fallow_types::output_dead_code::CircularDependencyFinding::with_actions(
-                fallow_engine::results::CircularDependency {
+                fallow_types::results::CircularDependency {
                     files: vec![
                         PathBuf::from("/project/src/a.ts"),
                         PathBuf::from("/project/src/b.ts"),
@@ -1448,7 +1449,7 @@ mod tests {
         );
         results.boundary_violations.push(
             fallow_types::output_dead_code::BoundaryViolationFinding::with_actions(
-                fallow_engine::results::BoundaryViolation {
+                fallow_types::results::BoundaryViolation {
                     from_path: PathBuf::from("/project/src/x.ts"),
                     to_path: PathBuf::from("/project/lib/y.ts"),
                     from_zone: "src".to_string(),
@@ -1517,11 +1518,13 @@ mod tests {
                 },
             ));
         results.type_only_dependencies.push(
-            fallow_engine::results::TypeOnlyDependencyFinding::with_actions(TypeOnlyDependency {
-                package_name: "zod".into(),
-                path: PathBuf::from("/project/package.json"),
-                line: 8,
-            }),
+            fallow_types::output_dead_code::TypeOnlyDependencyFinding::with_actions(
+                TypeOnlyDependency {
+                    package_name: "zod".into(),
+                    path: PathBuf::from("/project/package.json"),
+                    line: 8,
+                },
+            ),
         );
 
         let mut f = no_filters();

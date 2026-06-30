@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 pub fn validate_git_ref(s: &str) -> Result<&str, String> {
-    crate::changed_files::validate_git_ref(s)
+    crate::validate_git_ref(s)
 }
 
 pub fn validate_root(root: &std::path::Path) -> Result<PathBuf, String> {

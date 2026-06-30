@@ -818,19 +818,8 @@ pub struct FeatureFlagsParams {
     /// root. Passed through to the CLI's `--workspace` flag.
     pub workspace: Option<String>,
 
-    /// Filter by flag type: "environment_variable", "sdk_call", or "config_object".
-    #[expect(
-        dead_code,
-        reason = "exposed via JSON Schema for agent discovery; CLI filter pending"
-    )]
-    pub flag_type: Option<String>,
-
-    /// Filter by detection confidence: "high", "medium", or "low".
-    #[expect(
-        dead_code,
-        reason = "exposed via JSON Schema for agent discovery; CLI filter pending"
-    )]
-    pub confidence: Option<String>,
+    /// Show only the top N flags.
+    pub top: Option<usize>,
 
     /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,

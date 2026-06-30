@@ -8,7 +8,7 @@ use fallow_api::{
     DuplicationGrouping, DuplicationJsonOutputInput, GroupedCheckJsonOutputInput,
     GroupedDuplicationJsonOutputInput,
 };
-use fallow_engine::duplicates::DuplicationReport;
+use fallow_types::duplicates::DuplicationReport;
 #[cfg(test)]
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::results::AnalysisResults;
@@ -213,14 +213,6 @@ pub fn api_check_json_payload_with_config_fixable_and_extras(
 
 fn workspace_diagnostics_for_output(root: &Path) -> Vec<WorkspaceDiagnostic> {
     crate::runtime_support::workspace_diagnostics_for(root)
-}
-
-#[allow(
-    clippy::redundant_pub_crate,
-    reason = "used through report module re-export by audit.rs"
-)]
-pub(crate) fn harmonize_multi_kind_suppress_line_actions(output: &mut serde_json::Value) {
-    fallow_api::harmonize_multi_kind_suppress_line_actions(output);
 }
 
 pub fn check_json_extras(
@@ -1931,51 +1923,6 @@ mod tests {
         assert_eq!(
             type_actions[1]["comment"],
             "// fallow-ignore-next-line unused-export, unused-type"
-        );
-    }
-
-    #[test]
-    fn audit_like_json_shares_suppression_comment_across_dead_code_and_complexity() {
-        let mut output = serde_json::json!({
-            "dead_code": {
-                "unused_exports": [{
-                    "path": "src/main.ts",
-                    "line": 1,
-                    "actions": [
-                        { "type": "remove-export", "auto_fixable": true },
-                        {
-                            "type": "suppress-line",
-                            "auto_fixable": false,
-                            "comment": "// fallow-ignore-next-line unused-export"
-                        }
-                    ]
-                }]
-            },
-            "complexity": {
-                "findings": [{
-                    "path": "src/main.ts",
-                    "line": 1,
-                    "actions": [
-                        { "type": "refactor-function", "auto_fixable": false },
-                        {
-                            "type": "suppress-line",
-                            "auto_fixable": false,
-                            "comment": "// fallow-ignore-next-line complexity"
-                        }
-                    ]
-                }]
-            }
-        });
-
-        harmonize_multi_kind_suppress_line_actions(&mut output);
-
-        assert_eq!(
-            output["dead_code"]["unused_exports"][0]["actions"][1]["comment"],
-            "// fallow-ignore-next-line unused-export, complexity"
-        );
-        assert_eq!(
-            output["complexity"]["findings"][0]["actions"][1]["comment"],
-            "// fallow-ignore-next-line unused-export, complexity"
         );
     }
 

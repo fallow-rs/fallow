@@ -1,37 +1,76 @@
-//! Typed health result contracts exposed through the engine boundary.
+//! Command-neutral health execution options and runners.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Duration;
 
-use fallow_config::{EmailMode, OutputFormat, ResolvedConfig};
+use fallow_config::EmailMode;
 use fallow_output::{
-    DiffIndex, EffortEstimate, FindingSeverity, GroupByMode, HealthGrouping, HealthReport,
-    HealthTimings, RuntimeCoverageReport, RuntimeCoverageWatermark,
+    DiffIndex, EffortEstimate, FindingSeverity, GroupByMode, RuntimeCoverageReport,
+    RuntimeCoverageWatermark,
 };
+use fallow_types::output_format::OutputFormat;
 use fallow_types::path_util::is_absolute_path_any_platform;
 
+mod actions;
+mod analysis_data;
 mod assembly;
+mod baseline_io;
+mod churn_file;
+mod component_rollup;
+mod core_pipeline;
 mod coverage_gaps;
 mod coverage_intelligence;
+mod coverage_settings;
+mod css_analytics;
+mod derived_sections;
 mod execute;
+mod file_scores;
+mod filters;
+mod finding_sort;
+mod findings;
+mod findings_pipeline;
+mod framework_health;
 mod grouping;
 mod hotspots;
+mod ignore;
+mod large_functions;
+mod output_build;
 pub mod ownership;
+mod package_json;
+mod pipeline;
 mod react_hooks;
+mod result;
+mod runner;
 mod runtime_filter;
+mod runtime_sections;
+mod scope;
 pub mod scoring;
 pub mod styling_score;
 mod tailwind_theme;
 mod targets;
+mod threshold_overrides;
+mod timings;
+mod vital_data;
+mod vital_signs_scope;
 
-pub(crate) use execute::{
-    HealthOptions, HealthReportAssembly, SubsetFilter, VitalSignsAndCountsInput,
-    apply_duplication_metrics, compute_vital_signs_and_counts,
+pub use crate::results::HealthAnalysisResult;
+pub use churn_file::validate_health_churn_file;
+use derived_sections::{
+    HealthDerivedSectionInput, HealthDerivedSections, prepare_health_derived_sections,
 };
-pub use execute::{
-    HealthPipelineInputs, HealthResultGeneric, HealthScopeInputs, execute_health_inner,
-    validate_health_churn_file,
+use execute::HealthOptions;
+pub use execute::execute_health_inner;
+use file_scores::{
+    FileScoresAndChurnInput, compute_file_scores_and_churn, health_file_scores_slice,
+    print_slow_churn_note,
+};
+use finding_sort::sort_findings;
+pub use pipeline::{HealthPipelineInputs, HealthScopeInputs};
+pub use runner::run_ungrouped_health;
+use vital_data::{HealthVitalData, HealthVitalDataInput, prepare_health_vital_data};
+use vital_signs_scope::{
+    SubsetFilter, VitalSignsAndCountsInput, apply_duplication_metrics,
+    compute_vital_signs_and_counts,
 };
 
 /// Command-neutral grouping resolver contract for `--group-by` health output.
@@ -107,17 +146,6 @@ pub struct HealthSeams<'a> {
     /// the CLI's process-global telemetry sinks. Best-effort; the engine never
     /// owns telemetry state.
     pub note_graph_structure: &'a dyn Fn(usize, usize),
-}
-
-/// Telemetry facts the engine surfaces for the CLI to record.
-///
-/// Telemetry sinks are process-global CLI state; the engine accumulates the raw
-/// counts so the CLI wrapper can feed `telemetry::note_*` without the engine
-/// depending on the CLI telemetry module.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct HealthTelemetryFacts {
-    /// Module-graph node and edge counts when a graph was built.
-    pub graph_structure: Option<(usize, usize)>,
 }
 
 /// Command-neutral sort criteria for health complexity findings.
@@ -462,6 +490,7 @@ pub struct ComplexityRunOptions<'a> {
     pub thresholds: HealthThresholdOverrides,
     pub top: Option<usize>,
     pub sort: HealthSort,
+    pub complexity_breakdown: bool,
     pub sections: DerivedComplexityOptions,
     pub ownership_emails: Option<EmailMode>,
     pub effort: Option<EffortEstimate>,
@@ -497,47 +526,6 @@ pub struct HealthSharedParseData {
     pub analysis_output: Option<crate::DeadCodeAnalysisArtifacts>,
 }
 
-/// Typed health analysis result shared by CLI, API, NAPI, and future embedders.
-///
-/// The result contract belongs at the engine boundary so downstream callers can
-/// depend on a command-neutral shape.
-#[derive(Debug)]
-pub struct HealthAnalysisResult<GroupResolver = ()> {
-    pub report: HealthReport,
-    /// Per-group health output when grouping is active.
-    ///
-    /// `None` for the default run; `Some` for any grouped invocation. The
-    /// top-level report reflects the active run scope; consumers that want
-    /// per-group metrics read from `grouping.groups`.
-    pub grouping: Option<HealthGrouping>,
-    /// Optional grouping resolver retained by callers that need to tag findings
-    /// after analysis without rediscovering ownership or package metadata.
-    pub group_resolver: Option<GroupResolver>,
-    pub config: ResolvedConfig,
-    pub elapsed: Duration,
-    pub timings: Option<HealthTimings>,
-    pub coverage_gaps_has_findings: bool,
-    pub should_fail_on_coverage_gaps: bool,
-}
-
-impl<GroupResolver> HealthAnalysisResult<GroupResolver> {
-    /// Drop presentation-only grouping resolver state while preserving the
-    /// command-neutral health analysis payload.
-    #[must_use]
-    pub fn without_group_resolver(self) -> HealthAnalysisResult<()> {
-        HealthAnalysisResult {
-            report: self.report,
-            grouping: self.grouping,
-            group_resolver: None,
-            config: self.config,
-            elapsed: self.elapsed,
-            timings: self.timings,
-            coverage_gaps_has_findings: self.coverage_gaps_has_findings,
-            should_fail_on_coverage_gaps: self.should_fail_on_coverage_gaps,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -566,41 +554,6 @@ mod tests {
             coverage_inputs: HealthCoverageInputs::default(),
             runtime_coverage: None,
         }
-    }
-
-    #[test]
-    fn health_analysis_result_drops_presentation_resolver() {
-        let project = tempfile::tempdir().expect("temp dir");
-        let project_config = crate::config_for_project_analysis(
-            project.path(),
-            None,
-            crate::ProjectConfigOptions {
-                output: OutputFormat::Json,
-                no_cache: true,
-                threads: 1,
-                production_override: None,
-                quiet: true,
-                analysis: fallow_config::ProductionAnalysis::Health,
-            },
-        )
-        .expect("project config loads");
-        let result = HealthAnalysisResult {
-            report: HealthReport::default(),
-            grouping: None,
-            group_resolver: Some("resolver"),
-            config: project_config.config,
-            elapsed: Duration::from_millis(7),
-            timings: None,
-            coverage_gaps_has_findings: true,
-            should_fail_on_coverage_gaps: true,
-        };
-
-        let neutral = result.without_group_resolver();
-
-        assert!(neutral.group_resolver.is_none());
-        assert_eq!(neutral.elapsed, Duration::from_millis(7));
-        assert!(neutral.coverage_gaps_has_findings);
-        assert!(neutral.should_fail_on_coverage_gaps);
     }
 
     #[test]

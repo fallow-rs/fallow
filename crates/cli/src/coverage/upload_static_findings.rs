@@ -528,7 +528,7 @@ fn display_endpoint_url(override_endpoint: Option<&str>, project_id: &str) -> St
     format!("{base}/v1/coverage/{project_id}/static-findings")
 }
 
-/// A minimal view over [`fallow_engine::results::AnalysisResults`] that exposes
+/// A minimal view over [`fallow_types::results::AnalysisResults`] that exposes
 /// only the two finding categories this command maps. Defined as a trait so
 /// the mapping in [`collect_findings`] can be unit-tested against an in-memory
 /// stub without constructing a full `AnalysisResults`.
@@ -540,7 +540,7 @@ trait AnalysisLike {
     fn unused_exports(&self) -> Vec<(&Path, String, u32)>;
 }
 
-impl AnalysisLike for fallow_engine::results::AnalysisResults {
+impl AnalysisLike for fallow_types::results::AnalysisResults {
     fn unused_files(&self) -> Vec<&Path> {
         self.unused_files
             .iter()

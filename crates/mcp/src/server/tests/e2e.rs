@@ -11,7 +11,8 @@ use rmcp::model::RawContent;
 use crate::tools::{
     build_analyze_args, build_health_args, build_project_info_args, build_security_candidates_args,
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args, execute_code_mode, inspect_target, run_fallow,
+    build_trace_file_args, execute_code_mode, inspect_target, run_fallow, run_trace_clone_tool,
+    run_trace_export_tool,
 };
 
 /// Resolve the fallow binary from `FALLOW_BIN`, or the workspace target dir.
@@ -286,6 +287,32 @@ async fn e2e_trace_export_returns_json() {
 }
 
 #[tokio::test]
+async fn api_backed_trace_export_tool_returns_json() {
+    let root = fixture_path("basic-project");
+    let result = run_trace_export_tool(crate::params::TraceExportParams {
+        file: "src/utils.ts".to_string(),
+        export_name: "usedFunction".to_string(),
+        root: Some(root.to_string_lossy().to_string()),
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(result.is_error, Some(false));
+
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+    assert_eq!(json["file"].as_str(), Some("src/utils.ts"));
+    assert_eq!(json["export_name"].as_str(), Some("usedFunction"));
+    assert_eq!(json["is_used"].as_bool(), Some(true));
+}
+
+#[tokio::test]
 async fn e2e_trace_file_returns_json() {
     let bin = fallow_binary();
     let root = fixture_path("basic-project");
@@ -484,6 +511,41 @@ async fn e2e_trace_clone_returns_json() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn api_backed_trace_clone_tool_returns_json() {
+    let root = fixture_path("duplicate-code");
+    let result = run_trace_clone_tool(crate::params::TraceCloneParams {
+        file: Some("src/original.ts".to_string()),
+        line: Some(2),
+        fingerprint: None,
+        root: Some(root.to_string_lossy().to_string()),
+        config: None,
+        workspace: None,
+        mode: None,
+        min_tokens: None,
+        min_lines: None,
+        threshold: None,
+        skip_local: None,
+        cross_language: None,
+        ignore_imports: None,
+        no_cache: None,
+        threads: None,
+        min_occurrences: None,
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(result.is_error, Some(false));
+
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+    assert_eq!(json["file"].as_str(), Some("src/original.ts"));
+    assert_eq!(json["line"].as_u64(), Some(2));
+    assert!(json["matched_instance"].is_object());
+    assert!(json["clone_groups"].is_array());
 }
 
 #[tokio::test]

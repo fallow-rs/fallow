@@ -211,6 +211,7 @@ When using fallow via MCP (`fallow-mcp`), the following tools are available:
 | `get_blast_radius` | runtime-coverage | freemium | `coverage`, `group_by` | Runtime-context slice for blast-radius review. Same params as `check_runtime_coverage`; read `runtime_coverage.blast_radius` for stable `fallow:blast:<hash>` IDs, caller counts, traffic-weighted caller reach, optional cloud deploy touch counts, and low/medium/high risk bands. |
 | `get_importance` | runtime-coverage | freemium | `coverage`, `group_by` | Runtime-context slice for production-importance review. Same params as `check_runtime_coverage`; read `runtime_coverage.importance` for stable `fallow:importance:<hash>` IDs, invocations, cyclomatic complexity, owner count, 0-100 score, and templated reason. |
 | `get_cleanup_candidates` | runtime-coverage | freemium | `coverage`, `group_by` | Runtime-context slice for cleanup review. Same params as `check_runtime_coverage`; read `runtime_coverage.findings` for `safe_to_delete`, `review_required`, `low_traffic`, and `coverage_unavailable`. |
+| `get_token_blast_radius` | analysis | free | - | Tailwind v4 design-token blast radius: per `@theme` token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply; descriptive context for sizing a token change, never a deletion gate (the dead-token verdict stays on unused_theme_tokens) |
 | `audit` | analysis | free | `gate`, `base`, `max_crap`, `coverage`, `runtime_coverage` | Combined dead-code + complexity + duplication for changed files, returns verdict. Set `gate` to `"new-only"` or `"all"`. Optional `runtime_coverage` (V8 dir / V8 JSON / Istanbul JSON) folds runtime findings into the same call; `min_invocations_hot` tunes the hot-path threshold (default 100). Runtime evidence appears under the audit `complexity` sub-result, including `coverage_intelligence` when combined evidence yields actionable recommendations. |
 | `decision_surface` | analysis | free | `base`, `max_decisions`, `workspace` | Surface the few consequential structural decisions a change embeds (coupling, public API, dependency), each as a judgment question with the routed expert; ranked, capped, and signal_id-anchored |
 | `fallow_explain` | introspection | free | `issue_type` | Explain one issue type without running analysis. Required `issue_type`; returns rationale, examples, fix guidance, and docs URL |
@@ -493,7 +494,6 @@ For the full list with examples, see [references/gotchas.md](references/gotchas.
 2. **Run the appropriate command** with `--format json --quiet`
 3. **Use filter flags** to limit output when the user asks about specific issue types
 4. **Always dry-run before fix.** Show the user what will change, then apply
-5. **Report results clearly.** Summarize issue counts, list specific findings, suggest next steps
-6. **For false positives,** suggest inline suppression comments or config rule adjustments
+5. **For false positives,** suggest inline suppression comments or config rule adjustments
 
 If `$ARGUMENTS` is provided, use it as the `--root` path or pass it as the target for the appropriate fallow command.

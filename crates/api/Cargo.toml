@@ -11,6 +11,9 @@ categories.workspace = true
 description = "Programmatic API contract types for fallow"
 readme = "../../README.md"
 
+[lib]
+doctest = false
+
 [dependencies]
 fallow-config = { workspace = true }
 fallow-engine = { workspace = true }

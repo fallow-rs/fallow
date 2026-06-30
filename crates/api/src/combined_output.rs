@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CombinedMeta, CombinedOutput, HealthReport, RootEnvelopeMode, check_meta,
-    dupes_meta, health_meta, serialize_combined_json_output, strip_root_prefix,
+    dupes_meta, harmonize_dead_code_health_suppress_line_actions, health_meta,
+    serialize_combined_json_output, strip_root_prefix,
 };
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
@@ -45,9 +46,24 @@ pub struct CombinedJsonOutputInput<'a> {
 pub fn serialize_combined_json(
     input: CombinedJsonOutputInput<'_>,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let check = input.check.map(serialize_combined_check_json).transpose()?;
+    let mut check_results = input.check.as_ref().map(|section| section.results.clone());
+    let mut health_report = input.health.cloned();
+    harmonize_dead_code_health_suppress_line_actions(
+        check_results.as_mut(),
+        health_report.as_mut(),
+    );
+
+    let check = if let Some(section) = input.check {
+        if let Some(results) = check_results.as_ref() {
+            Some(serialize_combined_check_json(section, results)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let dupes = serialize_combined_dupes_json(input.dupes, input.root)?;
-    let health = serialize_combined_health_json(input.health, input.root)?;
+    let health = serialize_combined_health_json(health_report.as_ref(), input.root)?;
 
     let output = CombinedOutput {
         schema_version: SchemaVersion(CHECK_SCHEMA_VERSION),
@@ -67,9 +83,10 @@ pub fn serialize_combined_json(
 
 fn serialize_combined_check_json(
     section: CombinedCheckJsonSection<'_>,
+    results: &AnalysisResults,
 ) -> Result<serde_json::Value, serde_json::Error> {
     serialize_check_json_payload(CheckJsonPayloadInput {
-        results: section.results,
+        results,
         root: section.root,
         elapsed: section.elapsed,
         config_fixable: section.config_fixable,
@@ -136,9 +153,15 @@ fn combined_meta_for_output(
 mod tests {
     use std::time::Duration;
 
-    use fallow_output::RootEnvelopeMode;
+    use fallow_output::{
+        ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
+        RootEnvelopeMode,
+    };
+    use fallow_types::output_dead_code::UnusedExportFinding;
+    use fallow_types::output_health::{HealthFindingAction, HealthFindingActionType};
+    use fallow_types::results::{AnalysisResults, UnusedExport};
 
-    use super::{CombinedJsonOutputInput, serialize_combined_json};
+    use super::{CombinedCheckJsonSection, CombinedJsonOutputInput, serialize_combined_json};
 
     #[test]
     fn combined_json_root_contains_stable_envelope_fields() {
@@ -165,5 +188,92 @@ mod tests {
         );
         assert!(root.get("schema_version").is_some());
         assert!(root.get("version").is_some());
+    }
+
+    #[test]
+    fn combined_json_harmonizes_dead_code_and_health_suppress_actions_before_serialization() {
+        let root = std::path::Path::new("/project");
+        let path = root.join("src/shared.ts");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "value".to_string(),
+                is_type_only: false,
+                line: 7,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+            }));
+        let health = HealthReport {
+            findings: vec![HealthFinding::new(
+                ComplexityViolation {
+                    path,
+                    name: "expensive".to_string(),
+                    line: 7,
+                    col: 0,
+                    cyclomatic: 22,
+                    cognitive: 18,
+                    line_count: 40,
+                    param_count: 1,
+                    react_hook_count: 0,
+                    react_jsx_max_depth: 0,
+                    react_prop_count: 0,
+                    react_hook_profile: None,
+                    exceeded: ExceededThreshold::Both,
+                    severity: FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
+                    coverage_tier: None,
+                    coverage_source: None,
+                    inherited_from: None,
+                    component_rollup: None,
+                    contributions: Vec::new(),
+                    effective_thresholds: None,
+                    threshold_source: None,
+                },
+                vec![HealthFindingAction {
+                    kind: HealthFindingActionType::SuppressLine,
+                    auto_fixable: false,
+                    description: "Suppress with an inline comment above the function declaration"
+                        .to_string(),
+                    note: None,
+                    comment: Some("// fallow-ignore-next-line complexity".to_string()),
+                    placement: Some("above-function-declaration".to_string()),
+                    target_path: None,
+                }],
+                None,
+            )],
+            ..HealthReport::default()
+        };
+
+        let output = serialize_combined_json(CombinedJsonOutputInput {
+            check: Some(CombinedCheckJsonSection {
+                results: &results,
+                root,
+                elapsed: Duration::ZERO,
+                config_fixable: false,
+                extras: crate::CheckJsonExtraOutputs::default(),
+            }),
+            dupes: None,
+            health: Some(&health),
+            root,
+            elapsed: Duration::ZERO,
+            explain: false,
+            next_steps: Vec::new(),
+            envelope_mode: RootEnvelopeMode::Tagged,
+            telemetry_analysis_run_id: None,
+        })
+        .expect("combined JSON");
+
+        assert_eq!(
+            output["check"]["unused_exports"][0]["actions"][1]["comment"],
+            "// fallow-ignore-next-line unused-export, complexity"
+        );
+        assert_eq!(
+            output["health"]["findings"][0]["actions"][0]["comment"],
+            "// fallow-ignore-next-line unused-export, complexity"
+        );
     }
 }

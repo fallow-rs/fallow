@@ -313,6 +313,16 @@ impl HiddenDirScope {
         Self { root, dirs }
     }
 
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    #[must_use]
+    pub fn dirs(&self) -> &[String] {
+        &self.dirs
+    }
+
     fn allows(&self, path: &Path, name: &OsStr) -> bool {
         path.starts_with(&self.root) && self.dirs.iter().any(|dir| OsStr::new(dir) == name)
     }

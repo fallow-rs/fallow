@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use fallow_api::{AnalysisOptions, DeadCodeOptions, detect_dead_code};
+use fallow_api::{AnalysisOptions, DeadCodeOptions, run_dead_code};
 use fallow_core::{
     discover::{DiscoveredFile, FileId},
     extract::parse_single_file,
@@ -152,7 +152,7 @@ fn representative_types_dead_code(c: &mut Criterion) {
                     include_entry_exports: true,
                     ..DeadCodeOptions::default()
                 };
-                detect_dead_code(&options)
+                run_dead_code(&options)
             },
             BatchSize::LargeInput,
         );

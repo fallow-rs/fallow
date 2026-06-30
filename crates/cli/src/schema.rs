@@ -541,7 +541,7 @@ fn mcp_tools_schema() -> serde_json::Value {
 }
 
 fn plugins_schema() -> serde_json::Value {
-    let names = fallow_engine::plugins::registry::builtin_plugin_names();
+    let names = fallow_engine::builtin_plugin_names();
     serde_json::json!({
         "count": names.len(),
         "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
@@ -1379,10 +1379,7 @@ mod tests {
         let names = block["names"].as_array().unwrap();
         let count = usize::try_from(block["count"].as_u64().unwrap()).unwrap();
         assert_eq!(names.len(), count);
-        assert_eq!(
-            count,
-            fallow_engine::plugins::registry::builtin_plugin_names().len()
-        );
+        assert_eq!(count, fallow_engine::builtin_plugin_names().len());
         assert!(count >= 110, "plugin registry shrank unexpectedly");
     }
 

@@ -7433,9 +7433,9 @@ export const useS = defineStore('s', {
 }
 
 // ---------------------------------------------------------------------------
-// Range 5357-5378: is_sveltekit_load_type_name / ts_type_reference_base_name
-// (these are exercised transitively when a `satisfies PageLoad` annotation is
-// recognized and the load is extracted correctly)
+// SvelteKit load type helpers are exercised transitively when a
+// `satisfies PageLoad` annotation is recognized and the load is extracted
+// correctly.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -7482,8 +7482,8 @@ fn sveltekit_load_with_pageserverload_type_annotation_harvests_keys() {
 }
 
 // ---------------------------------------------------------------------------
-// Range 5396-5425: count_returns_in_statement control-flow branches
-// (multi-return inside if/for/try/switch causes abstain)
+// Return-statement control-flow traversal: multi-return inside if/for/try/switch
+// causes SvelteKit load harvesting to abstain.
 // ---------------------------------------------------------------------------
 
 #[test]

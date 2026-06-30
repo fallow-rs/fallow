@@ -4,13 +4,12 @@
 //! lives here, upstream of both `fallow-config` (which owns the registry and
 //! emission logic and re-exports these types for back-compat) and
 //! `fallow-output` (which embeds `Vec<WorkspaceDiagnostic>` in its JSON
-//! envelopes). Keeping the DATA types in `fallow-types` lets the output layer
+//! envelopes). Keeping the data types in `fallow-types` lets the output layer
 //! reference the real, schema-bearing type instead of an opaque
 //! `serde_json::Value` newtype, so `workspace_diagnostics[]` keeps its typed
 //! `kind`/`path`/`message` shape (and the 7-variant `kind` oneOf) in
-//! `docs/output-schema.json`. `fallow-config` cannot be imported by
-//! `fallow-output` (config depends on output), so the type could not stay in
-//! config without re-introducing the empty-schema DTO workaround.
+//! `docs/output-schema.json` without coupling output contracts to config
+//! loading.
 
 use std::path::{Path, PathBuf};
 

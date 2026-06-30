@@ -15,10 +15,10 @@ use crate::error::emit_error;
 /// Any issue whose path starts with one of the roots passes; dependency-level
 /// issues are scoped to the matching workspaces' own `package.json` files.
 pub fn filter_to_workspaces(
-    results: &mut fallow_engine::results::AnalysisResults,
+    results: &mut fallow_types::results::AnalysisResults,
     ws_roots: &[PathBuf],
 ) {
-    fallow_engine::dead_code::filter_to_workspaces(results, ws_roots);
+    fallow_engine::filter_to_workspaces(results, ws_roots);
 }
 
 /// Resolve `--workspace <patterns...>` to a set of workspace roots, or exit with
@@ -235,7 +235,7 @@ fn find_matches(
     Ok(hits)
 }
 
-pub use fallow_engine::changed_files::{
+pub use fallow_engine::{
     filter_results_by_changed_files as filter_changed_files, get_changed_files,
     try_get_changed_files,
 };
@@ -261,7 +261,7 @@ pub use fallow_engine::changed_files::{
 /// escape), the finding is RETAINED rather than silently dropped: an
 /// unfilterable path is better surfaced than silently hidden.
 pub fn filter_results_by_diff(
-    results: &mut fallow_engine::results::AnalysisResults,
+    results: &mut fallow_types::results::AnalysisResults,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &Path,
 ) {
@@ -290,7 +290,7 @@ pub fn filter_results_by_diff(
 }
 
 fn filter_diff_source_findings(
-    results: &mut fallow_engine::results::AnalysisResults,
+    results: &mut fallow_types::results::AnalysisResults,
     touches_file: &dyn Fn(&Path) -> bool,
     line_in_diff: &dyn Fn(&Path, u32) -> bool,
 ) {
@@ -347,7 +347,7 @@ fn filter_diff_source_findings(
 }
 
 fn filter_diff_security_findings(
-    results: &mut fallow_engine::results::AnalysisResults,
+    results: &mut fallow_types::results::AnalysisResults,
     touches_file: &dyn Fn(&Path) -> bool,
     line_in_diff: &dyn Fn(&Path, u32) -> bool,
 ) {
@@ -355,7 +355,7 @@ fn filter_diff_security_findings(
         line_in_diff(&f.path, f.line)
             || f.trace.iter().any(|hop| {
                 line_in_diff(&hop.path, hop.line)
-                    || (matches!(hop.role, fallow_engine::results::TraceHopRole::SecretSource)
+                    || (matches!(hop.role, fallow_types::results::TraceHopRole::SecretSource)
                         && touches_file(&hop.path))
             })
             || f.reachability.as_ref().is_some_and(|reachability| {
@@ -376,7 +376,7 @@ fn filter_diff_security_findings(
 }
 
 fn filter_diff_dependency_findings(
-    results: &mut fallow_engine::results::AnalysisResults,
+    results: &mut fallow_types::results::AnalysisResults,
     line_in_diff: &dyn Fn(&Path, u32) -> bool,
 ) {
     for unlisted in &mut results.unlisted_dependencies {
@@ -391,7 +391,7 @@ fn filter_diff_dependency_findings(
 }
 
 fn filter_diff_graph_findings(
-    results: &mut fallow_engine::results::AnalysisResults,
+    results: &mut fallow_types::results::AnalysisResults,
     touches_file: &dyn Fn(&Path) -> bool,
     line_in_diff: &dyn Fn(&Path, u32) -> bool,
 ) {
@@ -420,7 +420,7 @@ fn filter_diff_graph_findings(
 }
 
 fn filter_diff_framework_findings(
-    results: &mut fallow_engine::results::AnalysisResults,
+    results: &mut fallow_types::results::AnalysisResults,
     line_in_diff: &dyn Fn(&Path, u32) -> bool,
 ) {
     results
@@ -468,12 +468,12 @@ fn filter_diff_framework_findings(
 /// (`line_in_diff` returns `true` for them): a candidate the gate cannot prove is
 /// old fails conservatively, the safe direction for a security gate.
 pub fn retain_gate_new(
-    results: &mut fallow_engine::results::AnalysisResults,
+    results: &mut fallow_types::results::AnalysisResults,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &Path,
 ) {
     use crate::report::ci::diff_filter::relative_to_diff_path;
-    use fallow_engine::results::TraceHopRole;
+    use fallow_types::results::TraceHopRole;
 
     let line_in_diff = |path: &Path, line: u32| -> bool {
         match relative_to_diff_path(path, root) {
@@ -597,9 +597,10 @@ pub fn resolve_workspace_scope(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_engine::results::*;
     use fallow_types::extract::MemberKind;
     use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
+    use fallow_types::output_dead_code::*;
+    use fallow_types::results::*;
     use fallow_types::results::{SecurityReachability, SecuritySeverity};
     use std::path::PathBuf;
 

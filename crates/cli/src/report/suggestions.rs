@@ -104,7 +104,7 @@ fn default_workspace_ref_for_next_step(root: &Path) -> Option<String> {
 /// `audit-changed`: gate only the files the current branch changed. `fallow
 /// audit` auto-detects its base, so no ref needs embedding.
 pub fn audit_changed_applicable(root: &Path) -> bool {
-    fallow_engine::churn::is_git_repo(root)
+    fallow_engine::is_git_repo(root)
 }
 
 // ---------------------------------------------------------------------------
@@ -305,12 +305,12 @@ pub fn top_combined_next_step(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_engine::duplicates::{
-        CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
-    };
     use fallow_output::build_health_next_steps as build_health_next_steps_contract;
     use fallow_output::{
         ComplexityViolation, ExceededThreshold, FindingSeverity, HealthFinding, HealthReport,
+    };
+    use fallow_types::duplicates::{
+        CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
     };
     use fallow_types::output_dead_code::UnusedExportFinding;
     use fallow_types::results::{AnalysisResults, UnusedExport};

@@ -11,9 +11,11 @@ categories.workspace = true
 description = "Configuration types and workspace discovery for fallow codebase intelligence"
 readme = "../../README.md"
 
+[lib]
+doctest = false
+
 [dependencies]
 dunce = { workspace = true }
-fallow-output = { workspace = true }
 fallow-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

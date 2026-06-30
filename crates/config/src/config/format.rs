@@ -1,1 +1,1 @@
-pub use fallow_output::OutputFormat;
+pub use fallow_types::output_format::OutputFormat;

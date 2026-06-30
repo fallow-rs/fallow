@@ -8,6 +8,7 @@ use fallow_api::{
 };
 use fallow_config::{AuditGate, OutputFormat};
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use fallow_types::results::AnalysisResults;
 
 use crate::error::emit_error;
 use crate::report;
@@ -334,30 +335,38 @@ fn print_audit_status_line(result: &AuditResult) {
 }
 
 fn print_audit_json(result: &AuditResult) -> ExitCode {
-    let mut output = match build_audit_json_output(result) {
+    let output = match build_audit_json_output(result) {
         Ok(output) => output,
         Err(code) => return code,
     };
-    report::harmonize_multi_kind_suppress_line_actions(&mut output);
     report::emit_json(&output, "audit")
 }
 
 fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {
-    let dead_code = result
-        .check
-        .as_ref()
-        .map(|check| build_audit_dead_code_json(result, check))
-        .transpose()?;
+    let mut check_results = result.check.as_ref().map(|check| check.results.clone());
+    let mut health_report = result.health.as_ref().map(|health| health.report.clone());
+    fallow_output::harmonize_dead_code_health_suppress_line_actions(
+        check_results.as_mut(),
+        health_report.as_mut(),
+    );
+
+    let dead_code = match (result.check.as_ref(), check_results.as_ref()) {
+        (Some(check), Some(results)) => Some(build_audit_dead_code_json_with_results(
+            result, check, results,
+        )?),
+        _ => None,
+    };
     let duplication = result
         .dupes
         .as_ref()
         .map(|dupes| build_audit_duplication_json(result, dupes))
         .transpose()?;
-    let complexity = result
-        .health
-        .as_ref()
-        .map(|health| build_audit_health_json(result, health))
-        .transpose()?;
+    let complexity = match (result.health.as_ref(), health_report.as_ref()) {
+        (Some(health), Some(report)) => {
+            Some(build_audit_health_json_with_report(result, health, report)?)
+        }
+        _ => None,
+    };
 
     fallow_api::serialize_audit_json(
         AuditJsonOutputInput {
@@ -367,7 +376,7 @@ fn build_audit_json_output(result: &AuditResult) -> Result<serde_json::Value, Ex
             complexity,
             next_steps: audit_next_steps(result),
         },
-        fallow_output::RootEnvelopeMode::Tagged,
+        crate::output_runtime::current_root_envelope_mode(),
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     )
     .map_err(|err| {
@@ -417,20 +426,23 @@ fn build_audit_dead_code_json(
     result: &AuditResult,
     check: &crate::check::CheckResult,
 ) -> Result<serde_json::Value, ExitCode> {
+    build_audit_dead_code_json_with_results(result, check, &check.results)
+}
+
+fn build_audit_dead_code_json_with_results(
+    result: &AuditResult,
+    check: &crate::check::CheckResult,
+    results: &AnalysisResults,
+) -> Result<serde_json::Value, ExitCode> {
     match report::api_check_json_payload_with_config_fixable(
-        &check.results,
+        results,
         &check.config.root,
         check.elapsed,
         check.config_fixable,
     ) {
         Ok(mut json) => {
             if let Some(ref base) = result.base_snapshot {
-                annotate_dead_code_json(
-                    &mut json,
-                    &check.results,
-                    &check.config.root,
-                    &base.dead_code,
-                );
+                annotate_dead_code_json(&mut json, results, &check.config.root, &base.dead_code);
             }
             Ok(json)
         }
@@ -488,12 +500,20 @@ fn build_audit_health_json(
     result: &AuditResult,
     health: &crate::health::HealthResult,
 ) -> Result<serde_json::Value, ExitCode> {
-    match serde_json::to_value(&health.report) {
+    build_audit_health_json_with_report(result, health, &health.report)
+}
+
+fn build_audit_health_json_with_report(
+    result: &AuditResult,
+    health: &crate::health::HealthResult,
+    report: &fallow_output::HealthReport,
+) -> Result<serde_json::Value, ExitCode> {
+    match serde_json::to_value(report) {
         Ok(mut json) => {
             let root_prefix = format!("{}/", health.config.root.display());
             report::strip_root_prefix(&mut json, &root_prefix);
             if let Some(ref base) = result.base_snapshot {
-                annotate_health_json(&mut json, &health.report, &health.config.root, &base.health);
+                annotate_health_json(&mut json, report, &health.config.root, &base.health);
             }
             Ok(json)
         }

@@ -10,7 +10,7 @@ use std::process::{Command, ExitCode};
 use std::time::SystemTime;
 
 use colored::Colorize as _;
-use fallow_engine::git_env::clear_ambient_git_env;
+use fallow_engine::clear_ambient_git_env;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};

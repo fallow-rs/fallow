@@ -23,7 +23,7 @@ bitcode = { workspace = true }
 
 # JSON Schema generation for the public JSON output contract.
 # Gated by the `schema` feature so consumers (fallow-graph, fallow-extract,
-# fallow-core, fallow-cli, fallow-napi) do not pay the schemars compile cost
+# fallow-cli, fallow-napi) do not pay the schemars compile cost
 # unless they explicitly opt in (only the schema-emit binary needs it).
 schemars = { workspace = true, optional = true }
 # `serde_json` carries the free-form rule-object payload on

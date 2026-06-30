@@ -19,11 +19,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
-use fallow_engine::results::{
-    AnalysisResults, SecurityAttackSurfaceEntry, SecurityDeadCodeKind, SecurityFinding,
-    SecurityFindingKind, TraceHop, TraceHopRole,
-};
-use fallow_engine::security::{derive_security_severity, security_catalogue_title};
+use fallow_engine::{derive_security_severity, security_catalogue_title};
 pub use fallow_output::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
     SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
@@ -35,6 +31,10 @@ pub use fallow_output::{
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::envelope::{ElapsedMs, ToolVersion};
 use fallow_types::extract::ModuleInfo;
+use fallow_types::results::{
+    AnalysisResults, SecurityAttackSurfaceEntry, SecurityDeadCodeKind, SecurityFinding,
+    SecurityFindingKind, TraceHop, TraceHopRole,
+};
 use fallow_types::results::{
     SecurityRuntimeContext, SecurityRuntimeState, SecuritySeverity,
     SecurityUnresolvedCalleeDiagnostic, TaintConfidence,
@@ -664,9 +664,9 @@ fn security_output_config(
 
 fn apply_changed_scope(opts: &SecurityOptions<'_>, results: &mut AnalysisResults) {
     if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = fallow_engine::changed_files::get_changed_files(opts.root, git_ref)
+        && let Some(changed) = fallow_engine::get_changed_files(opts.root, git_ref)
     {
-        fallow_engine::changed_files::filter_results_by_changed_files(results, &changed);
+        fallow_engine::filter_results_by_changed_files(results, &changed);
     }
     if opts.use_shared_diff_index
         && let Some(diff_index) = crate::report::ci::diff_filter::shared_diff_index()
@@ -720,7 +720,7 @@ fn apply_security_gate(
         if let Some(shared) = crate::report::ci::diff_filter::shared_diff_index() {
             shared
         } else if let Some(git_ref) = opts.changed_since {
-            match fallow_engine::changed_files::try_get_changed_diff(opts.root, git_ref) {
+            match fallow_engine::try_get_changed_diff(opts.root, git_ref) {
                 Ok(text) => owned_gate_diff
                     .insert(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
                 Err(err) => {
@@ -1558,7 +1558,7 @@ fn filter_to_files(results: &mut AnalysisResults, root: &Path, files: &[PathBuf]
     }
 
     let file_set: rustc_hash::FxHashSet<PathBuf> = resolved_files.into_iter().collect();
-    fallow_engine::changed_files::filter_results_by_changed_files(results, &file_set);
+    fallow_engine::filter_results_by_changed_files(results, &file_set);
 }
 
 fn prepare_findings(
@@ -2798,7 +2798,7 @@ fn sarif_location(path: &Path, line: u32, col: u32) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_engine::results::{
+    use fallow_types::results::{
         SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink,
         SecurityDeadCodeContext, SecurityDeadCodeKind, SecurityFinding, SecurityFindingKind,
         TraceHop, TraceHopRole,

@@ -123,5 +123,11 @@ ignored = [
     "proc-macro2",  # feature-only dep: activates `span-locations` so syn-returned `.span().start().line` reports real source positions in the schema-drift gate (crates/cli/tests/schema_tests.rs); no explicit import
 ]
 
+[package.metadata.cargo-machete]
+ignored = [
+    "miette", # feature-only dep: activates fancy rendering for fallow-config's miette::Report
+    "proc-macro2", # feature-only dev-dep: activates `span-locations` for schema drift source-position tests
+]
+
 [lints]
 workspace = true

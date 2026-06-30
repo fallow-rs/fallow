@@ -92,7 +92,7 @@ pub fn gather_pnpm_catalog_state(
 /// workspace `package.json` via the `catalog:` protocol.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalogEntry> {
     if state.data.catalogs.is_empty() {
@@ -136,7 +136,7 @@ pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalo
 /// intentionally ignored.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGroup> {
     state
@@ -162,7 +162,7 @@ pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGr
 /// Findings matching any rule in `ignore_rules` are suppressed.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn find_unresolved_catalog_references(
     state: &PnpmCatalogState,

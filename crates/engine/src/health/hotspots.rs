@@ -23,9 +23,9 @@ pub(super) fn is_test_path(relative: &std::path::Path) -> bool {
 }
 
 /// Result of fetching churn data, including cache hit/miss info and timing.
-pub(super) struct ChurnFetchResult {
-    pub result: crate::churn::ChurnResult,
-    pub since: crate::churn::SinceDuration,
+pub struct ChurnFetchResult {
+    pub result: crate::ChurnResult,
+    pub since: crate::SinceDuration,
     pub cache_hit: bool,
     pub git_log_ms: f64,
 }
@@ -41,8 +41,6 @@ pub(super) fn fetch_churn_data(
     opts: &HealthOptions<'_>,
     cache_dir: &std::path::Path,
 ) -> Option<ChurnFetchResult> {
-    use crate::churn;
-
     // `--churn-file` imports change history from a normalized JSON file and
     // bypasses git entirely, so projects on a non-git VCS (Yandex Arc,
     // Mercurial, Perforce) still get hotspots / ownership. The file is
@@ -52,7 +50,7 @@ pub(super) fn fetch_churn_data(
         let resolved =
             crate::health::scoring::resolve_relative_to_root(churn_file, Some(opts.root));
         let t = std::time::Instant::now();
-        let result = match churn::analyze_churn_from_file(&resolved, opts.root) {
+        let result = match crate::analyze_churn_from_file(&resolved, opts.root) {
             Ok(r) => r,
             Err(e) => {
                 // The up-front `health::validate_churn_file` gate already
@@ -73,7 +71,7 @@ pub(super) fn fetch_churn_data(
         });
     }
 
-    if !churn::is_git_repo(opts.root) {
+    if !crate::is_git_repo(opts.root) {
         if !opts.quiet {
             eprintln!("note: hotspot analysis skipped: no git repository found at project root");
         }
@@ -85,7 +83,7 @@ pub(super) fn fetch_churn_data(
         let _ = emit_error(&e, 2, opts.output);
         return None;
     }
-    let since = match churn::parse_since(since_input) {
+    let since = match crate::parse_since(since_input) {
         Ok(s) => s,
         Err(e) => {
             let _ = emit_error(&format!("invalid --since: {e}"), 2, opts.output);
@@ -95,7 +93,7 @@ pub(super) fn fetch_churn_data(
 
     let t = std::time::Instant::now();
     let (churn_result, cache_hit) =
-        churn::analyze_churn_cached(opts.root, &since, cache_dir, opts.no_cache)?;
+        crate::analyze_churn_cached(opts.root, &since, cache_dir, opts.no_cache)?;
     let git_log_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     Some(ChurnFetchResult {
@@ -109,8 +107,8 @@ pub(super) fn fetch_churn_data(
 /// Header label for imported churn (`--churn-file`). The imported window is
 /// whatever the wrapper exported, so reusing the `--since` duration ("since 6
 /// months") would misdescribe it. `git_after` is unused on the import path.
-fn imported_since() -> crate::churn::SinceDuration {
-    crate::churn::SinceDuration {
+fn imported_since() -> crate::SinceDuration {
+    crate::SinceDuration {
         git_after: String::new(),
         display: "imported churn".to_string(),
     }
@@ -121,7 +119,7 @@ fn imported_since() -> crate::churn::SinceDuration {
 /// Used to normalize hotspot scores into the 0-100 range.
 pub(super) fn compute_normalization_maxima(
     file_scores: &[FileHealthScore],
-    churn_files: &rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn>,
+    churn_files: &rustc_hash::FxHashMap<std::path::PathBuf, crate::FileChurn>,
     min_commits: u32,
 ) -> (f64, f64) {
     let mut max_weighted: f64 = 0.0;
@@ -305,7 +303,7 @@ struct HotspotEntryCtx<'a> {
     root: &'a std::path::Path,
     ignore_set: &'a globset::GlobSet,
     ws_roots: Option<&'a [std::path::PathBuf]>,
-    churn_files: &'a rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn>,
+    churn_files: &'a rustc_hash::FxHashMap<std::path::PathBuf, crate::FileChurn>,
     min_commits: u32,
     max_weighted: f64,
     max_density: f64,
@@ -477,17 +475,17 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
         }];
-        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
+        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::FileChurn> =
             rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/foo.ts"),
-            crate::churn::FileChurn {
+            crate::FileChurn {
                 path: std::path::PathBuf::from("/src/foo.ts"),
                 commits: 5,
                 weighted_commits: 4.2,
                 lines_added: 100,
                 lines_deleted: 20,
-                trend: crate::churn::ChurnTrend::Stable,
+                trend: crate::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -513,17 +511,17 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
         }];
-        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
+        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::FileChurn> =
             rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/foo.ts"),
-            crate::churn::FileChurn {
+            crate::FileChurn {
                 path: std::path::PathBuf::from("/src/foo.ts"),
                 commits: 2, // below min_commits=3
                 weighted_commits: 4.2,
                 lines_added: 100,
                 lines_deleted: 20,
-                trend: crate::churn::ChurnTrend::Stable,
+                trend: crate::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -549,17 +547,17 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
         }];
-        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
+        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::FileChurn> =
             rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/foo.ts"),
-            crate::churn::FileChurn {
+            crate::FileChurn {
                 path: std::path::PathBuf::from("/src/foo.ts"),
                 commits: 5,
                 weighted_commits: 0.0,
                 lines_added: 0,
                 lines_deleted: 0,
-                trend: crate::churn::ChurnTrend::Stable,
+                trend: crate::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -645,41 +643,41 @@ mod tests {
                 crap_above_threshold: 0,
             },
         ];
-        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
+        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::FileChurn> =
             rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/a.ts"),
-            crate::churn::FileChurn {
+            crate::FileChurn {
                 path: std::path::PathBuf::from("/src/a.ts"),
                 commits: 5,
                 weighted_commits: 3.0,
                 lines_added: 50,
                 lines_deleted: 10,
-                trend: crate::churn::ChurnTrend::Stable,
+                trend: crate::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
         churn_files.insert(
             std::path::PathBuf::from("/src/b.ts"),
-            crate::churn::FileChurn {
+            crate::FileChurn {
                 path: std::path::PathBuf::from("/src/b.ts"),
                 commits: 10,
                 weighted_commits: 8.5, // highest weighted
                 lines_added: 200,
                 lines_deleted: 50,
-                trend: crate::churn::ChurnTrend::Accelerating,
+                trend: crate::ChurnTrend::Accelerating,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
         churn_files.insert(
             std::path::PathBuf::from("/src/c.ts"),
-            crate::churn::FileChurn {
+            crate::FileChurn {
                 path: std::path::PathBuf::from("/src/c.ts"),
                 commits: 7,
                 weighted_commits: 5.0,
                 lines_added: 100,
                 lines_deleted: 30,
-                trend: crate::churn::ChurnTrend::Cooling,
+                trend: crate::ChurnTrend::Cooling,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -721,29 +719,29 @@ mod tests {
                 crap_above_threshold: 0,
             },
         ];
-        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
+        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::FileChurn> =
             rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/frequent.ts"),
-            crate::churn::FileChurn {
+            crate::FileChurn {
                 path: std::path::PathBuf::from("/src/frequent.ts"),
                 commits: 10,
                 weighted_commits: 7.0,
                 lines_added: 150,
                 lines_deleted: 40,
-                trend: crate::churn::ChurnTrend::Stable,
+                trend: crate::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
         churn_files.insert(
             std::path::PathBuf::from("/src/rare.ts"),
-            crate::churn::FileChurn {
+            crate::FileChurn {
                 path: std::path::PathBuf::from("/src/rare.ts"),
                 commits: 1, // below min_commits=5
                 weighted_commits: 0.9,
                 lines_added: 10,
                 lines_deleted: 2,
-                trend: crate::churn::ChurnTrend::Cooling,
+                trend: crate::ChurnTrend::Cooling,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -769,7 +767,7 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
         }];
-        let churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
+        let churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::FileChurn> =
             rustc_hash::FxHashMap::default();
 
         let (max_w, max_d) = compute_normalization_maxima(&scores, &churn_files, 1);
@@ -793,17 +791,17 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
         }];
-        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
+        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::FileChurn> =
             rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/foo.ts"),
-            crate::churn::FileChurn {
+            crate::FileChurn {
                 path: std::path::PathBuf::from("/src/foo.ts"),
                 commits: 0,
                 weighted_commits: 0.0,
                 lines_added: 0,
                 lines_deleted: 0,
-                trend: crate::churn::ChurnTrend::Stable,
+                trend: crate::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );
@@ -829,17 +827,17 @@ mod tests {
             crap_max: 0.0,
             crap_above_threshold: 0,
         }];
-        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::churn::FileChurn> =
+        let mut churn_files: rustc_hash::FxHashMap<std::path::PathBuf, crate::FileChurn> =
             rustc_hash::FxHashMap::default();
         churn_files.insert(
             std::path::PathBuf::from("/src/foo.ts"),
-            crate::churn::FileChurn {
+            crate::FileChurn {
                 path: std::path::PathBuf::from("/src/foo.ts"),
                 commits: 3, // exactly at min_commits=3
                 weighted_commits: 2.8,
                 lines_added: 60,
                 lines_deleted: 15,
-                trend: crate::churn::ChurnTrend::Stable,
+                trend: crate::ChurnTrend::Stable,
                 authors: rustc_hash::FxHashMap::default(),
             },
         );

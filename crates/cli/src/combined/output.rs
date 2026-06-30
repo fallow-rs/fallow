@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use colored::Colorize;
 use fallow_api::{CombinedCheckJsonSection, CombinedJsonOutputInput, DupesReportPayload};
 use fallow_config::OutputFormat;
-use fallow_output::{CodeClimateIssue, RootEnvelopeMode, codeclimate_issues_to_value};
+use fallow_output::{CodeClimateIssue, codeclimate_issues_to_value};
 
 use crate::check::CheckResult;
 use crate::dupes::DupesResult;
@@ -450,7 +450,7 @@ fn print_combined_json(input: CombinedJsonPrintInput<'_>) -> ExitCode {
         Ok(output) => output,
         Err(code) => return code,
     };
-    emit_combined_json_output(output)
+    emit_combined_json_output(&output)
 }
 
 fn build_combined_json_output(
@@ -480,7 +480,7 @@ fn build_combined_json_output(
         elapsed: input.elapsed,
         explain: input.explain,
         next_steps,
-        envelope_mode: RootEnvelopeMode::Tagged,
+        envelope_mode: crate::output_runtime::current_root_envelope_mode(),
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
     })
     .map_err(|err| json_output_error(&err))
@@ -502,10 +502,8 @@ fn combined_next_steps(
     )
 }
 
-fn emit_combined_json_output(mut output: serde_json::Value) -> ExitCode {
-    report::harmonize_multi_kind_suppress_line_actions(&mut output);
-
-    match serde_json::to_string_pretty(&output) {
+fn emit_combined_json_output(output: &serde_json::Value) -> ExitCode {
+    match serde_json::to_string_pretty(output) {
         Ok(json) => {
             outln!("{json}");
             ExitCode::SUCCESS
@@ -737,6 +735,6 @@ mod tests {
             "elapsed_ms": 0,
         });
 
-        assert_eq!(emit_combined_json_output(combined), ExitCode::SUCCESS);
+        assert_eq!(emit_combined_json_output(&combined), ExitCode::SUCCESS);
     }
 }

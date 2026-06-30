@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use fallow_config::{OutputFormat, PackageJson, WorkspaceInfo, atomic_write, discover_workspaces};
-use fallow_engine::git_env::clear_ambient_git_env;
+use fallow_engine::clear_ambient_git_env;
 use fallow_license::{DEFAULT_HARD_FAIL_DAYS, LicenseStatus};
 use fallow_types::serde_path;
 use serde::{Deserialize, Serialize};

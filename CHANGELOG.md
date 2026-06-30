@@ -156,6 +156,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for some projects at the version boundary, so re-baseline or gate on
   `formula_version`; the one-time step-change is expected, not a regression.
 
+- **Typed architecture boundaries across engine, output, and API callers.**
+  `fallow-engine`, `fallow-output`, and `fallow-api` now own the command-neutral
+  analysis runners, output contracts, and programmatic Rust boundary instead of
+  treating `fallow-cli` as the implicit API surface. LSP, MCP, NAPI, and Rust
+  callers consume typed engine/API results and serialize JSON only at protocol
+  boundaries; the old `fallow-programmatic-cli` compatibility crate has been
+  removed. The extraction pipeline now exposes typed semantic facts while
+  domain-specific adapters remain where the analysis still needs them.
+
 ### Fixed
 
 - **Telemetry: `fallow flags` and `fallow watch` now record `findings_present`,

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ProductionAnalysis};
-use fallow_engine::trace_chain::{SymbolChainQuery, SymbolChainTrace, TraceDirections};
+use fallow_types::trace_chain::{SymbolChainQuery, SymbolChainTrace, TraceDirections};
 
 use crate::error::emit_error;
 use crate::report;

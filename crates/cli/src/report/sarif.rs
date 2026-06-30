@@ -4,8 +4,8 @@ use std::process::ExitCode;
 use fallow_config::RulesConfig;
 #[cfg(test)]
 use fallow_config::Severity;
-use fallow_engine::duplicates::DuplicationReport;
 use fallow_output::{SarifRuleInput, build_sarif_rule};
+use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
 
 use super::emit_json;

@@ -1,6 +1,26 @@
 use crate::params::{ImpactAllParams, ImpactParams};
 
-use super::push_str_flag;
+use rmcp::ErrorData as McpError;
+use rmcp::model::CallToolResult;
+
+use super::{push_str_flag, run_tool};
+
+/// Run the read-only `impact` value report through the CLI-backed local store
+/// reader. It is not an analysis tool, and the store lifecycle remains CLI-owned.
+pub async fn run_impact(binary: &str, params: ImpactParams) -> Result<CallToolResult, McpError> {
+    let args = build_impact_args(&params);
+    run_tool(binary, "impact", &args).await
+}
+
+/// Run the read-only cross-repo `impact_all` aggregate through the CLI-backed
+/// local store reader.
+pub async fn run_impact_all(
+    binary: &str,
+    params: ImpactAllParams,
+) -> Result<CallToolResult, McpError> {
+    let args = build_impact_all_args(&params);
+    run_tool(binary, "impact_all", &args).await
+}
 
 /// Build CLI arguments for the `impact` tool.
 ///

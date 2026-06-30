@@ -19,6 +19,8 @@ pub mod audit_cache;
 pub mod churn;
 /// File discovery types: discovered files, file IDs, and entry points.
 pub mod discover;
+/// Shared duplicate-code output contracts.
+pub mod duplicates;
 /// JSON-output envelope and utility types: `SchemaVersion`, `ToolVersion`,
 /// `ElapsedMs`, `AuditIntroduced`, plus the shared `Meta`, `BaselineDeltas`,
 /// `BaselineMatch`, `RegressionResult`, `EntryPoints`, and `CheckSummary`
@@ -52,6 +54,8 @@ pub mod output;
 /// is `None` when serialized directly from Rust. The `schemars::JsonSchema`
 /// derive is gated per-struct on the `schema` feature.
 pub mod output_dead_code;
+/// Shared output-format selector used by CLI, config, output, and API layers.
+pub mod output_format;
 /// Per-action types attached to health findings, hotspots, refactoring
 /// targets, and coverage-gap entries. Separated from the generic
 /// `IssueAction` tree in the `output` module so the health-specific
@@ -70,6 +74,10 @@ pub mod serde_path;
 pub mod source_fingerprint;
 /// Inline suppression comment types and issue kind definitions.
 pub mod suppress;
+/// Trace output contracts shared by core, engine, CLI, API, and MCP.
+pub mod trace;
+/// Symbol-level trace-chain output contracts.
+pub mod trace_chain;
 /// Workspace and source-discovery diagnostic data types
 /// (`WorkspaceDiagnostic`, `WorkspaceDiagnosticKind`). Re-exported by
 /// `fallow-config` for back-compat; embedded directly by `fallow-output` so

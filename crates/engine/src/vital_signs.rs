@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::git_env::clear_ambient_git_env;
+use crate::clear_ambient_git_env;
 
 /// Number of seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;
@@ -23,7 +23,7 @@ use fallow_output::{
 /// Fields are `Option` because not all pipelines run in every health invocation.
 pub struct VitalSignsInput<'a> {
     /// All parsed modules (always available).
-    pub modules: &'a [crate::extract::ModuleInfo],
+    pub modules: &'a [crate::source::ModuleInfo],
     /// Optional file-id allowlist used to restrict per-module aggregates
     /// (cyclomatic distribution, total LOC, unit profiles) to a subset.
     /// Used by `--workspace` and `--group-by` to scope project-wide metrics
@@ -45,7 +45,7 @@ pub struct VitalSignsInput<'a> {
 
 impl<'a> VitalSignsInput<'a> {
     /// Iterate the modules selected by `module_filter`.
-    fn selected_modules(&self) -> impl Iterator<Item = &'a crate::extract::ModuleInfo> + '_ {
+    fn selected_modules(&self) -> impl Iterator<Item = &'a crate::source::ModuleInfo> + '_ {
         let filter = self.module_filter;
         self.modules
             .iter()
@@ -601,7 +601,7 @@ pub fn build_counts(input: &VitalSignsInput<'_>) -> VitalSignsCounts {
 /// Get the current git SHA (short form).
 #[expect(
     clippy::disallowed_methods,
-    reason = "trusted git spawn with ambient repo-state env stripped, mirrors fallow_core::spawn::git"
+    reason = "trusted git spawn with ambient repo-state env stripped, matching the core git spawn policy"
 )]
 fn git_sha(root: &Path) -> Option<String> {
     let mut command = std::process::Command::new("git");
@@ -619,7 +619,7 @@ fn git_sha(root: &Path) -> Option<String> {
 /// Get the current git branch name.
 #[expect(
     clippy::disallowed_methods,
-    reason = "trusted git spawn with ambient repo-state env stripped, mirrors fallow_core::spawn::git"
+    reason = "trusted git spawn with ambient repo-state env stripped, matching the core git spawn policy"
 )]
 fn git_branch(root: &Path) -> Option<String> {
     let mut command = std::process::Command::new("git");
@@ -1117,8 +1117,8 @@ impl RoundTo for f64 {
 mod tests {
     use super::*;
 
-    fn make_module(id: u32, cyclomatic: u16) -> crate::extract::ModuleInfo {
-        crate::extract::ModuleInfo {
+    fn make_module(id: u32, cyclomatic: u16) -> crate::source::ModuleInfo {
+        crate::source::ModuleInfo {
             file_id: crate::discover::FileId(id),
             exports: Vec::new(),
             imports: Vec::new(),
@@ -1212,7 +1212,7 @@ mod tests {
         clippy::cast_possible_truncation,
         reason = "test values are trivially small"
     )]
-    fn make_modules() -> Vec<crate::extract::ModuleInfo> {
+    fn make_modules() -> Vec<crate::source::ModuleInfo> {
         (0..10)
             .map(|i| make_module(i, (i as u16 + 1) * 2))
             .collect()
@@ -1282,7 +1282,7 @@ mod tests {
                 lines_deleted: 50,
                 complexity_density: 0.5,
                 fan_in: 5,
-                trend: crate::churn::ChurnTrend::Stable,
+                trend: crate::ChurnTrend::Stable,
                 ownership: None,
                 is_test_path: false,
             },
@@ -1295,7 +1295,7 @@ mod tests {
                 lines_deleted: 20,
                 complexity_density: 0.2,
                 fan_in: 2,
-                trend: crate::churn::ChurnTrend::Cooling,
+                trend: crate::ChurnTrend::Cooling,
                 ownership: None,
                 is_test_path: false,
             },
@@ -1308,7 +1308,7 @@ mod tests {
                 lines_deleted: 30,
                 complexity_density: 0.4,
                 fan_in: 3,
-                trend: crate::churn::ChurnTrend::Accelerating,
+                trend: crate::ChurnTrend::Accelerating,
                 ownership: None,
                 is_test_path: false,
             },

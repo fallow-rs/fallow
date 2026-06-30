@@ -56,7 +56,7 @@ pub struct FileScoreOutput {
 }
 
 struct FileScoreOutputParts<'a> {
-    graph: &'a crate::graph::ModuleGraph,
+    graph: &'a fallow_graph::graph::ModuleGraph,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     results: &'a crate::results::AnalysisResults,
     scores: Vec<FileHealthScore>,
@@ -184,7 +184,7 @@ fn dep_in_subset(subset: &crate::health::SubsetFilter<'_>, dep_path: &std::path:
     clippy::cast_possible_truncation,
     reason = "line count is bounded by source file size"
 )]
-pub(super) fn aggregate_complexity(module: &crate::extract::ModuleInfo) -> (u32, u32, usize, u32) {
+pub(super) fn aggregate_complexity(module: &crate::source::ModuleInfo) -> (u32, u32, usize, u32) {
     let cyc: u32 = module
         .complexity
         .iter()
@@ -209,7 +209,7 @@ pub(super) fn aggregate_complexity(module: &crate::extract::ModuleInfo) -> (u32,
 /// value exports.
 pub(super) fn compute_dead_code_ratio(
     path: &std::path::Path,
-    exports: &[crate::graph::ExportSymbol],
+    exports: &[fallow_graph::graph::ExportSymbol],
     unused_files: &rustc_hash::FxHashSet<&std::path::Path>,
     unused_exports_by_path: &rustc_hash::FxHashMap<&std::path::Path, usize>,
 ) -> f64 {
@@ -530,8 +530,8 @@ pub(super) struct TemplateInheritContext {
 /// Templates with zero non-test `.ts` owners receive no entry, so the
 /// scoring loop falls through to the existing path unchanged.
 fn build_template_inherit_contexts(
-    graph: &crate::graph::ModuleGraph,
-    module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::extract::ModuleInfo>,
+    graph: &fallow_graph::graph::ModuleGraph,
+    module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<crate::discover::FileId, TemplateInheritContext> {
     let mut out = rustc_hash::FxHashMap::default();
@@ -546,9 +546,9 @@ fn build_template_inherit_contexts(
 }
 
 fn template_inherit_context_for_node(
-    node: &crate::graph::ModuleNode,
-    graph: &crate::graph::ModuleGraph,
-    module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::extract::ModuleInfo>,
+    node: &fallow_graph::graph::ModuleNode,
+    graph: &fallow_graph::graph::ModuleGraph,
+    module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> Option<TemplateInheritContext> {
     if !is_template_inherit_candidate(node, module_by_id, file_paths) {
@@ -559,8 +559,8 @@ fn template_inherit_context_for_node(
 }
 
 fn is_template_inherit_candidate(
-    node: &crate::graph::ModuleNode,
-    module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::extract::ModuleInfo>,
+    node: &fallow_graph::graph::ModuleNode,
+    module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> bool {
     let Some(path) = file_paths.get(&node.file_id) else {
@@ -583,8 +583,8 @@ fn is_template_inherit_candidate(
 
 fn template_inherit_context_from_importers(
     importers: &[crate::discover::FileId],
-    graph: &crate::graph::ModuleGraph,
-    module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::extract::ModuleInfo>,
+    graph: &fallow_graph::graph::ModuleGraph,
+    module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> Option<TemplateInheritContext> {
     let mut any_reachable = false;
@@ -619,10 +619,10 @@ fn template_inherit_context_from_importers(
 
 fn template_owner<'a>(
     importer_id: crate::discover::FileId,
-    graph: &'a crate::graph::ModuleGraph,
-    module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::extract::ModuleInfo>,
+    graph: &'a fallow_graph::graph::ModuleGraph,
+    module_by_id: &rustc_hash::FxHashMap<crate::discover::FileId, &crate::source::ModuleInfo>,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
-) -> Option<(&'a crate::graph::ModuleNode, &'a std::path::PathBuf)> {
+) -> Option<(&'a fallow_graph::graph::ModuleNode, &'a std::path::PathBuf)> {
     let owner_node = graph.modules.get(importer_id.0 as usize)?;
     let owner_path = *file_paths.get(&importer_id)?;
     if !is_template_owner_path(owner_path) || graph.test_entry_points.contains(&importer_id) {
@@ -650,8 +650,8 @@ fn is_template_owner_path(path: &std::path::Path) -> bool {
 /// This is the per-function signal: if an export named "foo" has a reference from
 /// a test-reachable module, the function "foo" is considered directly tested.
 fn build_test_referenced_exports(
-    exports: &[crate::graph::ExportSymbol],
-    graph_modules: &[crate::graph::ModuleNode],
+    exports: &[fallow_graph::graph::ExportSymbol],
+    graph_modules: &[fallow_graph::graph::ModuleNode],
 ) -> rustc_hash::FxHashSet<String> {
     let mut set = rustc_hash::FxHashSet::default();
     for export in exports {
@@ -661,7 +661,7 @@ fn build_test_referenced_exports(
         let has_test_ref = export.references.iter().any(|reference| {
             graph_modules
                 .get(reference.from_file.0 as usize)
-                .is_some_and(crate::graph::ModuleNode::is_test_reachable)
+                .is_some_and(fallow_graph::graph::ModuleNode::is_test_reachable)
         });
         if has_test_ref {
             set.insert(export.name.to_string());
@@ -671,7 +671,7 @@ fn build_test_referenced_exports(
 }
 
 fn collect_direct_callers(
-    graph: &crate::graph::ModuleGraph,
+    graph: &fallow_graph::graph::ModuleGraph,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<DirectCallerEvidence>> {
     let mut callers_by_target = rustc_hash::FxHashMap::default();
@@ -1149,20 +1149,21 @@ fn compare_file_score_triage(a: &FileHealthScore, b: &FileHealthScore) -> std::c
 /// so this function does not need to re-run the analysis pipeline. Complexity
 /// density is derived from the already-parsed modules.
 pub(super) fn compute_file_scores(
-    modules: &[crate::extract::ModuleInfo],
+    modules: &[crate::source::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     analysis_output: crate::DeadCodeAnalysisArtifacts,
     istanbul_coverage: Option<&IstanbulCoverage>,
     root: &std::path::Path,
 ) -> Result<FileScoreOutput, String> {
-    let graph = analysis_output.graph.ok_or("graph not available")?;
+    let retained_graph = analysis_output.graph.ok_or("graph not available")?;
+    let graph = retained_graph.as_graph();
     let results = &analysis_output.results;
 
     let circular_files = collect_circular_files(results);
     let top_complex_fns = collect_top_complex_fns(modules, file_paths);
     let cycle_members = collect_cycle_members(results);
-    let direct_callers = collect_direct_callers(&graph, file_paths);
+    let direct_callers = collect_direct_callers(graph, file_paths);
     let unused_export_names = collect_unused_export_names(results);
 
     let unused_files: rustc_hash::FxHashSet<&std::path::Path> = results
@@ -1176,14 +1177,14 @@ pub(super) fn compute_file_scores(
     let FileScoreCoverageSetup {
         module_by_id,
         coverage,
-    } = prepare_file_score_coverage_setup(modules, file_paths, results, &graph, root);
+    } = prepare_file_score_coverage_setup(modules, file_paths, results, graph, root);
 
-    let template_inherit = build_template_inherit_contexts(&graph, &module_by_id, file_paths);
+    let template_inherit = build_template_inherit_contexts(graph, &module_by_id, file_paths);
 
     let mut acc = accumulate_file_scores(
         unused_export_names,
         &FileScoreLoopCtx {
-            graph: &graph,
+            graph,
             file_paths,
             module_by_id: &module_by_id,
             unused_files: &unused_files,
@@ -1195,7 +1196,7 @@ pub(super) fn compute_file_scores(
     acc.scores = finalize_file_score_list(acc.scores, changed_files);
 
     Ok(build_file_score_output(FileScoreOutputParts {
-        graph: &graph,
+        graph,
         file_paths,
         results,
         scores: acc.scores,
@@ -1216,10 +1217,9 @@ pub(super) fn compute_file_scores(
 
 /// Read-only inputs threaded into the per-node file-score loop.
 struct FileScoreLoopCtx<'a> {
-    graph: &'a crate::graph::ModuleGraph,
+    graph: &'a fallow_graph::graph::ModuleGraph,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
-    module_by_id:
-        &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a crate::extract::ModuleInfo>,
+    module_by_id: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a crate::source::ModuleInfo>,
     unused_files: &'a rustc_hash::FxHashSet<&'a std::path::Path>,
     unused_exports_by_path: &'a rustc_hash::FxHashMap<&'a std::path::Path, usize>,
     template_inherit: &'a rustc_hash::FxHashMap<crate::discover::FileId, TemplateInheritContext>,
@@ -1291,7 +1291,7 @@ fn finalize_file_score_list(
 fn compute_one_file_score(
     acc: &mut FileScoreAccumulator,
     ctx: &FileScoreLoopCtx<'_>,
-    node: &crate::graph::ModuleNode,
+    node: &fallow_graph::graph::ModuleNode,
     path: &std::path::Path,
 ) -> FileHealthScore {
     let fan_in = ctx
@@ -1351,7 +1351,7 @@ fn compute_one_file_score(
 /// Compute the rounded dead-code-ratio, complexity-density, and
 /// maintainability-index metrics for one file.
 fn compute_file_score_metrics(
-    node: &crate::graph::ModuleNode,
+    node: &fallow_graph::graph::ModuleNode,
     path: &std::path::Path,
     ctx: &FileScoreLoopCtx<'_>,
     total_cyclomatic: u32,
@@ -1446,7 +1446,7 @@ fn build_template_inherit_provenance(
 
 fn record_entry_point(
     entry_points: &mut rustc_hash::FxHashSet<std::path::PathBuf>,
-    node: &crate::graph::ModuleNode,
+    node: &fallow_graph::graph::ModuleNode,
     path: &std::path::Path,
 ) {
     if node.is_entry_point() {
@@ -1456,7 +1456,7 @@ fn record_entry_point(
 
 fn record_unused_file_export_names(
     path: &std::path::Path,
-    exports: &[crate::graph::ExportSymbol],
+    exports: &[fallow_graph::graph::ExportSymbol],
     unused_files: &rustc_hash::FxHashSet<&std::path::Path>,
     unused_export_names: &mut rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
 ) {
@@ -1515,9 +1515,9 @@ impl FileScoreCrap {
 }
 
 fn compute_file_score_crap(
-    node: &crate::graph::ModuleNode,
-    module: Option<&crate::extract::ModuleInfo>,
-    graph: &crate::graph::ModuleGraph,
+    node: &fallow_graph::graph::ModuleNode,
+    module: Option<&crate::source::ModuleInfo>,
+    graph: &fallow_graph::graph::ModuleGraph,
     template_inherit: Option<&TemplateInheritContext>,
     istanbul_coverage: Option<&IstanbulCoverage>,
     path: &std::path::Path,
@@ -1546,7 +1546,7 @@ fn compute_file_score_crap(
 }
 
 fn compute_template_inherited_crap(
-    module: &crate::extract::ModuleInfo,
+    module: &crate::source::ModuleInfo,
     inherit_ctx: &TemplateInheritContext,
 ) -> FileScoreCrap {
     FileScoreCrap::estimated(compute_crap_scores_estimated(
@@ -1558,7 +1558,7 @@ fn compute_template_inherited_crap(
 }
 
 fn compute_istanbul_file_crap(
-    module: &crate::extract::ModuleInfo,
+    module: &crate::source::ModuleInfo,
     file_coverage: Option<&IstanbulFileCoverage>,
     is_test_reachable: bool,
 ) -> FileScoreCrap {
@@ -1570,9 +1570,9 @@ fn compute_istanbul_file_crap(
 }
 
 fn compute_static_file_crap(
-    module: &crate::extract::ModuleInfo,
-    exports: &[crate::graph::ExportSymbol],
-    graph_modules: &[crate::graph::ModuleNode],
+    module: &crate::source::ModuleInfo,
+    exports: &[fallow_graph::graph::ExportSymbol],
+    graph_modules: &[fallow_graph::graph::ModuleNode],
     is_test_reachable: bool,
 ) -> FileScoreCrap {
     let test_refs = build_test_referenced_exports(exports, graph_modules);
@@ -1595,15 +1595,15 @@ fn record_per_function_crap(
 }
 
 struct FileScoreCoverageSetup<'a> {
-    module_by_id: rustc_hash::FxHashMap<crate::discover::FileId, &'a crate::extract::ModuleInfo>,
+    module_by_id: rustc_hash::FxHashMap<crate::discover::FileId, &'a crate::source::ModuleInfo>,
     coverage: CoverageGapData,
 }
 
 fn prepare_file_score_coverage_setup<'a>(
-    modules: &'a [crate::extract::ModuleInfo],
+    modules: &'a [crate::source::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
     results: &crate::results::AnalysisResults,
-    graph: &crate::graph::ModuleGraph,
+    graph: &fallow_graph::graph::ModuleGraph,
     root: &std::path::Path,
 ) -> FileScoreCoverageSetup<'a> {
     let module_by_id: rustc_hash::FxHashMap<_, _> =
@@ -1636,7 +1636,7 @@ fn collect_circular_files(
 }
 
 fn collect_top_complex_fns(
-    modules: &[crate::extract::ModuleInfo],
+    modules: &[crate::source::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
 ) -> rustc_hash::FxHashMap<std::path::PathBuf, Vec<(String, u32, u16)>> {
     let mut top_complex_fns = rustc_hash::FxHashMap::default();
@@ -1703,7 +1703,7 @@ fn collect_unused_export_names(
 }
 
 fn build_analysis_counts_snapshot(
-    graph: &crate::graph::ModuleGraph,
+    graph: &fallow_graph::graph::ModuleGraph,
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
     results: &crate::results::AnalysisResults,
     unused_deps: usize,
@@ -1904,7 +1904,7 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let unused_map = rustc_hash::FxHashMap::default();
         let path = std::path::Path::new("/src/foo.ts");
-        let exports: Vec<crate::graph::ExportSymbol> = vec![];
+        let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
 
         let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_map);
         assert!((ratio).abs() < f64::EPSILON);
@@ -1917,7 +1917,7 @@ mod tests {
         let path = std::path::Path::new("/src/foo.ts");
         unused_files.insert(path);
         let unused_map = rustc_hash::FxHashMap::default();
-        let exports: Vec<crate::graph::ExportSymbol> = vec![];
+        let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
 
         let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_map);
         assert!((ratio - 1.0).abs() < f64::EPSILON);
@@ -1929,41 +1929,41 @@ mod tests {
         let path = std::path::Path::new("/src/foo.ts");
 
         let exports = vec![
-            crate::graph::ExportSymbol {
-                name: crate::extract::ExportName::Named("a".into()),
+            fallow_graph::graph::ExportSymbol {
+                name: crate::source::ExportName::Named("a".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
                 members: vec![],
             },
-            crate::graph::ExportSymbol {
-                name: crate::extract::ExportName::Named("b".into()),
+            fallow_graph::graph::ExportSymbol {
+                name: crate::source::ExportName::Named("b".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
                 members: vec![],
             },
-            crate::graph::ExportSymbol {
-                name: crate::extract::ExportName::Named("c".into()),
+            fallow_graph::graph::ExportSymbol {
+                name: crate::source::ExportName::Named("c".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
                 members: vec![],
             },
-            crate::graph::ExportSymbol {
-                name: crate::extract::ExportName::Named("MyType".into()),
+            fallow_graph::graph::ExportSymbol {
+                name: crate::source::ExportName::Named("MyType".into()),
                 is_type_only: true,
                 is_side_effect_used: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
@@ -1984,11 +1984,11 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let path = std::path::Path::new("/src/types.ts");
 
-        let exports = vec![crate::graph::ExportSymbol {
-            name: crate::extract::ExportName::Named("Foo".into()),
+        let exports = vec![fallow_graph::graph::ExportSymbol {
+            name: crate::source::ExportName::Named("Foo".into()),
             is_type_only: true,
             is_side_effect_used: false,
-            visibility: crate::extract::VisibilityTag::None,
+            visibility: crate::source::VisibilityTag::None,
             expected_unused_reason: None,
             span: oxc_span::Span::empty(0),
             references: vec![],
@@ -2002,7 +2002,7 @@ mod tests {
 
     #[test]
     fn aggregate_complexity_empty_module() {
-        let module = crate::extract::ModuleInfo {
+        let module = crate::source::ModuleInfo {
             file_id: crate::discover::FileId(0),
             exports: vec![],
             imports: vec![],
@@ -2087,7 +2087,7 @@ mod tests {
 
     #[test]
     fn aggregate_complexity_single_function() {
-        let module = crate::extract::ModuleInfo {
+        let module = crate::source::ModuleInfo {
             file_id: crate::discover::FileId(0),
             exports: vec![],
             imports: vec![],
@@ -2189,7 +2189,7 @@ mod tests {
         reason = "test fixture; linear setup/assert, length is not a maintainability concern"
     )]
     fn aggregate_complexity_multiple_functions() {
-        let module = crate::extract::ModuleInfo {
+        let module = crate::source::ModuleInfo {
             file_id: crate::discover::FileId(0),
             exports: vec![],
             imports: vec![],
@@ -2350,21 +2350,21 @@ mod tests {
         let path = std::path::Path::new("/src/foo.ts");
 
         let exports = vec![
-            crate::graph::ExportSymbol {
-                name: crate::extract::ExportName::Named("a".into()),
+            fallow_graph::graph::ExportSymbol {
+                name: crate::source::ExportName::Named("a".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
                 members: vec![],
             },
-            crate::graph::ExportSymbol {
-                name: crate::extract::ExportName::Named("b".into()),
+            fallow_graph::graph::ExportSymbol {
+                name: crate::source::ExportName::Named("b".into()),
                 is_type_only: false,
                 is_side_effect_used: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
@@ -2385,11 +2385,11 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let path = std::path::Path::new("/src/foo.ts");
 
-        let exports = vec![crate::graph::ExportSymbol {
-            name: crate::extract::ExportName::Named("a".into()),
+        let exports = vec![fallow_graph::graph::ExportSymbol {
+            name: crate::source::ExportName::Named("a".into()),
             is_type_only: false,
             is_side_effect_used: false,
-            visibility: crate::extract::VisibilityTag::None,
+            visibility: crate::source::VisibilityTag::None,
             expected_unused_reason: None,
             span: oxc_span::Span::empty(0),
             references: vec![],
@@ -2409,11 +2409,11 @@ mod tests {
         let unused_files = rustc_hash::FxHashSet::default();
         let path = std::path::Path::new("/src/clean.ts");
 
-        let exports = vec![crate::graph::ExportSymbol {
-            name: crate::extract::ExportName::Named("used".into()),
+        let exports = vec![fallow_graph::graph::ExportSymbol {
+            name: crate::source::ExportName::Named("used".into()),
             is_type_only: false,
             is_side_effect_used: false,
-            visibility: crate::extract::VisibilityTag::None,
+            visibility: crate::source::VisibilityTag::None,
             expected_unused_reason: None,
             span: oxc_span::Span::empty(0),
             references: vec![],
@@ -2487,8 +2487,8 @@ mod tests {
     fn build_test_graph(
         files: &[crate::discover::DiscoveredFile],
         entry_point_paths: &[std::path::PathBuf],
-        resolved_modules: &[crate::resolve::ResolvedModule],
-    ) -> crate::graph::ModuleGraph {
+        resolved_modules: &[fallow_graph::resolve::ResolvedModule],
+    ) -> fallow_graph::graph::ModuleGraph {
         let entry_points: Vec<crate::discover::EntryPoint> = entry_point_paths
             .iter()
             .map(|p| crate::discover::EntryPoint {
@@ -2496,7 +2496,7 @@ mod tests {
                 source: crate::discover::EntryPointSource::PackageJsonMain,
             })
             .collect();
-        crate::graph::ModuleGraph::build(resolved_modules, &entry_points, files)
+        fallow_graph::graph::ModuleGraph::build(resolved_modules, &entry_points, files)
     }
 
     /// Helper to create a `ModuleInfo` with given complexity and line count.
@@ -2504,8 +2504,8 @@ mod tests {
         file_id: u32,
         line_count: usize,
         functions: Vec<fallow_types::extract::FunctionComplexity>,
-    ) -> crate::extract::ModuleInfo {
-        crate::extract::ModuleInfo {
+    ) -> crate::source::ModuleInfo {
+        crate::source::ModuleInfo {
             file_id: crate::discover::FileId(file_id),
             exports: vec![],
             imports: vec![],
@@ -2691,13 +2691,13 @@ mod tests {
     fn compute_file_scores_empty_graph() {
         let files: Vec<crate::discover::DiscoveredFile> = vec![];
         let graph = build_test_graph(&files, &[], &[]);
-        let modules: Vec<crate::extract::ModuleInfo> = vec![];
+        let modules: Vec<crate::source::ModuleInfo> = vec![];
         let file_paths = rustc_hash::FxHashMap::default();
 
         let output = crate::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -2723,7 +2723,7 @@ mod tests {
 
     #[test]
     fn compute_file_scores_no_graph_returns_error() {
-        let modules: Vec<crate::extract::ModuleInfo> = vec![];
+        let modules: Vec<crate::source::ModuleInfo> = vec![];
         let file_paths = rustc_hash::FxHashMap::default();
 
         let output = crate::DeadCodeAnalysisArtifacts {
@@ -2760,14 +2760,14 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![crate::resolve::ResolvedModule {
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![fallow_types::extract::ExportInfo {
-                name: crate::extract::ExportName::Named("foo".into()),
+                name: crate::source::ExportName::Named("foo".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
@@ -2805,7 +2805,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -2843,7 +2843,7 @@ mod tests {
             size_bytes: 50,
         }];
 
-        let resolved_modules = vec![crate::resolve::ResolvedModule {
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
@@ -2860,7 +2860,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -2897,12 +2897,12 @@ mod tests {
         ];
 
         let resolved_modules = vec![
-            crate::resolve::ResolvedModule {
+            fallow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(0),
                 path: path_a,
                 ..Default::default()
             },
-            crate::resolve::ResolvedModule {
+            fallow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(1),
                 path: path_b.clone(),
                 ..Default::default()
@@ -2962,7 +2962,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -3000,12 +3000,12 @@ mod tests {
         ];
 
         let resolved_modules = vec![
-            crate::resolve::ResolvedModule {
+            fallow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(0),
                 path: path_a.clone(),
                 ..Default::default()
             },
-            crate::resolve::ResolvedModule {
+            fallow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(1),
                 path: path_b,
                 ..Default::default()
@@ -3061,7 +3061,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -3091,14 +3091,14 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![crate::resolve::ResolvedModule {
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![fallow_types::extract::ExportInfo {
-                name: crate::extract::ExportName::Named("orphan".into()),
+                name: crate::source::ExportName::Named("orphan".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
@@ -3145,7 +3145,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -3182,7 +3182,7 @@ mod tests {
             size_bytes: 500,
         }];
 
-        let resolved_modules = vec![crate::resolve::ResolvedModule {
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
@@ -3260,7 +3260,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -3309,12 +3309,12 @@ mod tests {
         ];
 
         let resolved_modules = vec![
-            crate::resolve::ResolvedModule {
+            fallow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(0),
                 path: path_a.clone(),
                 ..Default::default()
             },
-            crate::resolve::ResolvedModule {
+            fallow_graph::resolve::ResolvedModule {
                 file_id: crate::discover::FileId(1),
                 path: path_b.clone(),
                 ..Default::default()
@@ -3384,7 +3384,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -3422,15 +3422,15 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![crate::resolve::ResolvedModule {
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![
                 fallow_types::extract::ExportInfo {
-                    name: crate::extract::ExportName::Named("foo".into()),
+                    name: crate::source::ExportName::Named("foo".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: crate::extract::VisibilityTag::None,
+                    visibility: crate::source::VisibilityTag::None,
                     expected_unused_reason: None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
@@ -3438,10 +3438,10 @@ mod tests {
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
-                    name: crate::extract::ExportName::Named("bar".into()),
+                    name: crate::source::ExportName::Named("bar".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: crate::extract::VisibilityTag::None,
+                    visibility: crate::source::VisibilityTag::None,
                     expected_unused_reason: None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
@@ -3474,10 +3474,10 @@ mod tests {
         );
         module.exports = vec![
             fallow_types::extract::ExportInfo {
-                name: crate::extract::ExportName::Named("foo".into()),
+                name: crate::source::ExportName::Named("foo".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
@@ -3485,10 +3485,10 @@ mod tests {
                 super_class: None,
             },
             fallow_types::extract::ExportInfo {
-                name: crate::extract::ExportName::Named("bar".into()),
+                name: crate::source::ExportName::Named("bar".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
@@ -3544,7 +3544,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -3579,15 +3579,15 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![crate::resolve::ResolvedModule {
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![
                 fallow_types::extract::ExportInfo {
-                    name: crate::extract::ExportName::Named("foo".into()),
+                    name: crate::source::ExportName::Named("foo".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: crate::extract::VisibilityTag::None,
+                    visibility: crate::source::VisibilityTag::None,
                     expected_unused_reason: None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
@@ -3595,10 +3595,10 @@ mod tests {
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
-                    name: crate::extract::ExportName::Named("bar".into()),
+                    name: crate::source::ExportName::Named("bar".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: crate::extract::VisibilityTag::None,
+                    visibility: crate::source::VisibilityTag::None,
                     expected_unused_reason: None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
@@ -3606,10 +3606,10 @@ mod tests {
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
-                    name: crate::extract::ExportName::Named("baz".into()),
+                    name: crate::source::ExportName::Named("baz".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: crate::extract::VisibilityTag::None,
+                    visibility: crate::source::VisibilityTag::None,
                     expected_unused_reason: None,
                     span: oxc_span::Span::new(0, 0),
                     members: vec![],
@@ -3642,10 +3642,10 @@ mod tests {
         );
         module.exports = vec![
             fallow_types::extract::ExportInfo {
-                name: crate::extract::ExportName::Named("foo".into()),
+                name: crate::source::ExportName::Named("foo".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
@@ -3653,10 +3653,10 @@ mod tests {
                 super_class: None,
             },
             fallow_types::extract::ExportInfo {
-                name: crate::extract::ExportName::Named("bar".into()),
+                name: crate::source::ExportName::Named("bar".into()),
                 local_name: None,
                 is_type_only: false,
-                visibility: crate::extract::VisibilityTag::None,
+                visibility: crate::source::VisibilityTag::None,
                 expected_unused_reason: None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
@@ -3690,7 +3690,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -3719,7 +3719,7 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![crate::resolve::ResolvedModule {
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a,
             ..Default::default()
@@ -3752,7 +3752,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -3780,7 +3780,7 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![crate::resolve::ResolvedModule {
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
@@ -3814,7 +3814,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -3844,15 +3844,15 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![crate::resolve::ResolvedModule {
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             exports: vec![
                 fallow_types::extract::ExportInfo {
-                    name: crate::extract::ExportName::Named("a".into()),
+                    name: crate::source::ExportName::Named("a".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: crate::extract::VisibilityTag::None,
+                    visibility: crate::source::VisibilityTag::None,
                     expected_unused_reason: None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
@@ -3860,10 +3860,10 @@ mod tests {
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
-                    name: crate::extract::ExportName::Named("b".into()),
+                    name: crate::source::ExportName::Named("b".into()),
                     local_name: None,
                     is_type_only: false,
-                    visibility: crate::extract::VisibilityTag::None,
+                    visibility: crate::source::VisibilityTag::None,
                     expected_unused_reason: None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
@@ -3871,10 +3871,10 @@ mod tests {
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
-                    name: crate::extract::ExportName::Named("T".into()),
+                    name: crate::source::ExportName::Named("T".into()),
                     local_name: None,
                     is_type_only: true,
-                    visibility: crate::extract::VisibilityTag::None,
+                    visibility: crate::source::VisibilityTag::None,
                     expected_unused_reason: None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
@@ -3913,7 +3913,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -3941,7 +3941,7 @@ mod tests {
             size_bytes: 100,
         }];
 
-        let resolved_modules = vec![crate::resolve::ResolvedModule {
+        let resolved_modules = vec![fallow_graph::resolve::ResolvedModule {
             file_id: crate::discover::FileId(0),
             path: path_a.clone(),
             ..Default::default()
@@ -3975,7 +3975,7 @@ mod tests {
         let output = crate::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
-            graph: Some(graph),
+            graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
             modules: None,
             files: None,
             script_used_packages: rustc_hash::FxHashSet::default(),
@@ -4203,12 +4203,12 @@ mod tests {
         assert_eq!(above, 0);
     }
 
-    fn make_export(name: &str, is_type_only: bool) -> crate::graph::ExportSymbol {
-        crate::graph::ExportSymbol {
+    fn make_export(name: &str, is_type_only: bool) -> fallow_graph::graph::ExportSymbol {
+        fallow_graph::graph::ExportSymbol {
             name: fallow_types::extract::ExportName::Named(name.into()),
             is_type_only,
             is_side_effect_used: false,
-            visibility: crate::extract::VisibilityTag::None,
+            visibility: crate::source::VisibilityTag::None,
             expected_unused_reason: None,
             span: oxc_span::Span::default(),
             references: vec![],
@@ -4617,16 +4617,16 @@ mod tests {
 
     #[test]
     fn build_test_refs_empty() {
-        let exports: Vec<crate::graph::ExportSymbol> = vec![];
-        let modules: Vec<crate::graph::ModuleNode> = vec![];
+        let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
+        let modules: Vec<fallow_graph::graph::ModuleNode> = vec![];
         let refs = build_test_referenced_exports(&exports, &modules);
         assert!(refs.is_empty());
     }
 
     #[test]
     fn build_test_refs_empty_inputs() {
-        let exports: Vec<crate::graph::ExportSymbol> = vec![];
-        let modules: Vec<crate::graph::ModuleNode> = vec![];
+        let exports: Vec<fallow_graph::graph::ExportSymbol> = vec![];
+        let modules: Vec<fallow_graph::graph::ModuleNode> = vec![];
         let refs = build_test_referenced_exports(&exports, &modules);
         assert!(refs.is_empty());
     }

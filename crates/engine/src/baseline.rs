@@ -1524,11 +1524,7 @@ pub fn filter_new_clone_groups(
         !baseline_keys.contains(key.as_str())
     });
 
-    report.clone_families =
-        crate::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories =
-        crate::duplicates::families::detect_mirrored_directories(&report.clone_families, root);
-
+    crate::duplicates::refresh_clone_families(&mut report, root);
     report.stats = recompute_stats(&report);
 
     report
@@ -1539,41 +1535,7 @@ pub fn filter_new_clone_groups(
 /// Uses per-file line deduplication (matching `compute_stats` in `detect.rs`)
 /// so overlapping clone instances don't inflate the duplicated line count.
 pub fn recompute_stats(report: &DuplicationReport) -> crate::duplicates::DuplicationStats {
-    let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
-    let mut file_dup_lines: FxHashMap<&Path, FxHashSet<usize>> = FxHashMap::default();
-    let mut duplicated_tokens = 0usize;
-    let mut clone_instances = 0usize;
-
-    for group in &report.clone_groups {
-        for instance in &group.instances {
-            files_with_clones.insert(&instance.file);
-            clone_instances += 1;
-            let lines = file_dup_lines.entry(&instance.file).or_default();
-            for line in instance.start_line..=instance.end_line {
-                lines.insert(line);
-            }
-        }
-        duplicated_tokens += group.token_count * group.instances.len();
-    }
-
-    let duplicated_lines: usize = file_dup_lines.values().map(FxHashSet::len).sum();
-
-    crate::duplicates::DuplicationStats {
-        total_files: report.stats.total_files,
-        files_with_clones: files_with_clones.len(),
-        total_lines: report.stats.total_lines,
-        duplicated_lines,
-        total_tokens: report.stats.total_tokens,
-        duplicated_tokens,
-        clone_groups: report.clone_groups.len(),
-        clone_instances,
-        duplication_percentage: if report.stats.total_lines > 0 {
-            (duplicated_lines as f64 / report.stats.total_lines as f64) * 100.0
-        } else {
-            0.0
-        },
-        clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
-    }
+    crate::duplicates::recompute_stats(report)
 }
 
 /// Baseline data for health (complexity) comparison.
@@ -2928,8 +2890,8 @@ mod tests {
         reason = "test fixture; linear setup/assert, length is not a maintainability concern"
     )]
     fn make_full_results() -> AnalysisResults {
-        use crate::extract::MemberKind;
         use crate::results::*;
+        use crate::source::MemberKind;
 
         let mut r = make_results();
         r.circular_dependencies
@@ -3255,8 +3217,8 @@ mod tests {
 
     /// Build results with absolute paths rooted at the given prefix.
     fn make_absolute_results(root: &str) -> AnalysisResults {
-        use crate::extract::MemberKind;
         use crate::results::*;
+        use crate::source::MemberKind;
 
         let p = |rel: &str| PathBuf::from(format!("{root}/{rel}"));
 

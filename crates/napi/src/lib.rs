@@ -89,6 +89,23 @@ pub struct DuplicationOptions {
 
 #[napi(object)]
 #[derive(Default)]
+pub struct FeatureFlagsOptions {
+    pub root: Option<String>,
+    pub config_path: Option<String>,
+    pub no_cache: Option<bool>,
+    pub threads: Option<u32>,
+    pub diff_file: Option<String>,
+    pub production: Option<bool>,
+    pub changed_since: Option<String>,
+    pub workspace: Option<Vec<String>>,
+    pub changed_workspaces: Option<String>,
+    pub explain: Option<bool>,
+    pub legacy_envelope: Option<bool>,
+    pub top: Option<u32>,
+}
+
+#[napi(object)]
+#[derive(Default)]
 pub struct ComplexityOptions {
     pub root: Option<String>,
     pub config_path: Option<String>,
@@ -106,6 +123,7 @@ pub struct ComplexityOptions {
     pub max_crap: Option<f64>,
     pub top: Option<u32>,
     pub sort: Option<String>,
+    pub complexity_breakdown: Option<bool>,
     pub complexity: Option<bool>,
     pub file_scores: Option<bool>,
     pub coverage_gaps: Option<bool>,
@@ -178,15 +196,15 @@ fn normalize_enum_literal(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
 
-fn parse_duplication_mode(value: Option<String>) -> napi::Result<api::DuplicationMode> {
+fn parse_duplication_mode(value: Option<String>) -> napi::Result<Option<api::DuplicationMode>> {
     let Some(value) = value else {
-        return Ok(api::DuplicationMode::Mild);
+        return Ok(None);
     };
     match normalize_enum_literal(&value).as_str() {
-        "strict" => Ok(api::DuplicationMode::Strict),
-        "mild" => Ok(api::DuplicationMode::Mild),
-        "weak" => Ok(api::DuplicationMode::Weak),
-        "semantic" => Ok(api::DuplicationMode::Semantic),
+        "strict" => Ok(Some(api::DuplicationMode::Strict)),
+        "mild" => Ok(Some(api::DuplicationMode::Mild)),
+        "weak" => Ok(Some(api::DuplicationMode::Weak)),
+        "semantic" => Ok(Some(api::DuplicationMode::Semantic)),
         _ => Err(invalid_enum_value(
             "mode",
             &value,
@@ -323,7 +341,6 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
     type Error = napi::Error;
 
     fn try_from(value: DuplicationOptions) -> Result<Self, Self::Error> {
-        let defaults = api::DuplicationOptions::default();
         Ok(Self {
             analysis: map_common_options(CommonOptionsInput {
                 root: value.root,
@@ -339,24 +356,47 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
                 legacy_envelope: value.legacy_envelope,
             })?,
             mode: parse_duplication_mode(value.mode)?,
-            min_tokens: value.min_tokens.map_or(defaults.min_tokens, |n| n as usize),
-            min_lines: value.min_lines.map_or(defaults.min_lines, |n| n as usize),
+            min_tokens: value.min_tokens.map(|n| n as usize),
+            min_lines: value.min_lines.map(|n| n as usize),
             min_occurrences: match value.min_occurrences {
                 Some(n) if n < 2 => {
                     return Err(napi::Error::from_reason(format!(
                         "min_occurrences must be at least 2 (got {n})"
                     )));
                 }
-                Some(n) => n as usize,
-                None => defaults.min_occurrences,
+                Some(n) => Some(n as usize),
+                None => None,
             },
-            threshold: value.threshold.unwrap_or(defaults.threshold),
-            skip_local: value.skip_local.unwrap_or(defaults.skip_local),
-            cross_language: value.cross_language.unwrap_or(defaults.cross_language),
+            threshold: value.threshold,
+            skip_local: value.skip_local,
+            cross_language: value.cross_language,
             // `None` defers to the project config (default `true`); `Some(false)`
             // forces import blocks to be counted. No `unwrap_or` so the
             // defer-to-config semantics survive (#1224).
             ignore_imports: value.ignore_imports,
+            top: value.top.map(|n| n as usize),
+        })
+    }
+}
+
+impl TryFrom<FeatureFlagsOptions> for api::FeatureFlagsOptions {
+    type Error = napi::Error;
+
+    fn try_from(value: FeatureFlagsOptions) -> Result<Self, Self::Error> {
+        Ok(Self {
+            analysis: map_common_options(CommonOptionsInput {
+                root: value.root,
+                config_path: value.config_path,
+                no_cache: value.no_cache,
+                threads: value.threads,
+                diff_file: value.diff_file,
+                production: value.production,
+                changed_since: value.changed_since,
+                workspace: value.workspace,
+                changed_workspaces: value.changed_workspaces,
+                explain: value.explain,
+                legacy_envelope: value.legacy_envelope,
+            })?,
             top: value.top.map(|n| n as usize),
         })
     }
@@ -391,6 +431,7 @@ impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
             max_crap: value.max_crap,
             top: value.top.map(|n| n as usize),
             sort: parse_complexity_sort(value.sort)?,
+            complexity_breakdown: value.complexity_breakdown.unwrap_or(false),
             complexity: value.complexity.unwrap_or(false),
             file_scores: value.file_scores.unwrap_or(false),
             coverage_gaps: value.coverage_gaps.unwrap_or(false),
@@ -445,16 +486,26 @@ fn to_napi_error(env: Env, error: api::ProgrammaticError) -> napi::Error {
 #[doc(hidden)]
 pub enum ProgrammaticOutput {
     DeadCode(Box<api::DeadCodeProgrammaticOutput>),
+    CircularDependencies(Box<api::CircularDependenciesProgrammaticOutput>),
+    BoundaryViolations(Box<api::BoundaryViolationsProgrammaticOutput>),
     Duplication(Box<api::DuplicationProgrammaticOutput>),
+    FeatureFlags(Box<api::FeatureFlagsProgrammaticOutput>),
     Health(Box<api::HealthProgrammaticOutput>),
 }
 
 impl ProgrammaticOutput {
-    fn into_json(self) -> Result<serde_json::Value, api::ProgrammaticError> {
+    fn serialize_json_compat(self) -> Result<serde_json::Value, api::ProgrammaticError> {
         match self {
-            Self::DeadCode(output) => output.into_json(),
-            Self::Duplication(output) => output.into_json(),
-            Self::Health(output) => output.into_json(),
+            Self::DeadCode(output) => api::serialize_dead_code_programmatic_json(*output),
+            Self::CircularDependencies(output) => {
+                api::serialize_circular_dependencies_programmatic_json(*output)
+            }
+            Self::BoundaryViolations(output) => {
+                api::serialize_boundary_violations_programmatic_json(*output)
+            }
+            Self::Duplication(output) => api::serialize_duplication_programmatic_json(*output),
+            Self::FeatureFlags(output) => api::serialize_feature_flags_programmatic_json(*output),
+            Self::Health(output) => api::serialize_health_programmatic_json(*output),
         }
     }
 }
@@ -504,7 +555,7 @@ impl<'task> ScopedTask<'task> for ProgrammaticTask {
 
     fn resolve(&mut self, env: &'task Env, output: Self::Output) -> napi::Result<Self::JsValue> {
         let json = output
-            .into_json()
+            .serialize_json_compat()
             .map_err(|error| to_napi_error(*env, error))?;
         env.to_js_value(&json)
     }
@@ -537,7 +588,7 @@ pub fn detect_circular_dependencies(
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_circular_dependencies(&options)
             .map(Box::new)
-            .map(ProgrammaticOutput::DeadCode)
+            .map(ProgrammaticOutput::CircularDependencies)
     })))
 }
 
@@ -549,7 +600,7 @@ pub fn detect_boundary_violations(
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_boundary_violations(&options)
             .map(Box::new)
-            .map(ProgrammaticOutput::DeadCode)
+            .map(ProgrammaticOutput::BoundaryViolations)
     })))
 }
 
@@ -562,6 +613,18 @@ pub fn detect_duplication(
         api::run_duplication(&options)
             .map(Box::new)
             .map(ProgrammaticOutput::Duplication)
+    })))
+}
+
+#[napi(js_name = "detectFeatureFlags")]
+pub fn detect_feature_flags(
+    options: Option<FeatureFlagsOptions>,
+) -> napi::Result<AsyncTask<ProgrammaticTask>> {
+    let options = api::FeatureFlagsOptions::try_from(options.unwrap_or_default())?;
+    Ok(AsyncTask::new(ProgrammaticTask::new(move || {
+        api::run_feature_flags(&options)
+            .map(Box::new)
+            .map(ProgrammaticOutput::FeatureFlags)
     })))
 }
 
@@ -725,7 +788,7 @@ mod tests {
         let project = tiny_dead_code_project();
         let root = project.path();
 
-        let json = api::detect_dead_code(&api::DeadCodeOptions {
+        let json = api::run_dead_code(&api::DeadCodeOptions {
             analysis: api::AnalysisOptions {
                 root: Some(root.to_path_buf()),
                 explain: true,
@@ -737,6 +800,7 @@ mod tests {
             },
             ..api::DeadCodeOptions::default()
         })
+        .and_then(api::serialize_dead_code_programmatic_json)
         .expect("api runtime succeeds");
 
         assert!(json["_meta"].is_object());
@@ -753,7 +817,7 @@ mod tests {
         )
         .expect("diff");
 
-        let json = api::detect_dead_code(&api::DeadCodeOptions {
+        let json = api::run_dead_code(&api::DeadCodeOptions {
             analysis: api::AnalysisOptions {
                 root: Some(root.to_path_buf()),
                 diff_file: Some(Path::new("feature.diff").to_path_buf()),
@@ -765,6 +829,7 @@ mod tests {
             },
             ..api::DeadCodeOptions::default()
         })
+        .and_then(api::serialize_dead_code_programmatic_json)
         .expect("api diff runtime succeeds");
 
         assert!(json.get("_meta").is_none());
@@ -783,8 +848,12 @@ mod tests {
             ..api::DeadCodeOptions::default()
         };
 
-        let circular = api::detect_circular_dependencies(&options).expect("circular helper");
-        let boundary = api::detect_boundary_violations(&options).expect("boundary helper");
+        let circular = api::run_circular_dependencies(&options)
+            .and_then(api::serialize_circular_dependencies_programmatic_json)
+            .expect("circular helper");
+        let boundary = api::run_boundary_violations(&options)
+            .and_then(api::serialize_boundary_violations_programmatic_json)
+            .expect("boundary helper");
 
         assert_eq!(circular["kind"], "dead-code");
         assert_eq!(circular["total_issues"], 0);
@@ -912,15 +981,70 @@ mod tests {
         })
         .expect("options should map");
 
-        assert!(matches!(options.mode, api::DuplicationMode::Semantic));
-        assert_eq!(options.min_tokens, 30);
-        assert_eq!(options.min_lines, 4);
-        assert_eq!(options.min_occurrences, 3);
-        assert!((options.threshold - 2.5).abs() < f64::EPSILON);
-        assert!(options.skip_local);
-        assert!(options.cross_language);
+        assert!(matches!(options.mode, Some(api::DuplicationMode::Semantic)));
+        assert_eq!(options.min_tokens, Some(30));
+        assert_eq!(options.min_lines, Some(4));
+        assert_eq!(options.min_occurrences, Some(3));
+        assert_eq!(options.threshold, Some(2.5));
+        assert_eq!(options.skip_local, Some(true));
+        assert_eq!(options.cross_language, Some(true));
         assert_eq!(options.ignore_imports, Some(true));
         assert_eq!(options.top, Some(7));
+    }
+
+    #[test]
+    fn feature_flags_options_map_common_fields_and_top() {
+        let options = api::FeatureFlagsOptions::try_from(FeatureFlagsOptions {
+            root: Some("/repo".to_string()),
+            config_path: Some("/repo/fallow.toml".to_string()),
+            no_cache: Some(true),
+            threads: Some(2),
+            diff_file: Some("/tmp/flags.diff".to_string()),
+            production: Some(false),
+            changed_since: Some("HEAD".to_string()),
+            workspace: Some(vec!["apps/web".to_string()]),
+            changed_workspaces: Some("origin/main".to_string()),
+            explain: Some(true),
+            legacy_envelope: Some(true),
+            top: Some(3),
+        })
+        .expect("feature flag options should map");
+
+        assert_eq!(options.analysis.root.as_deref(), Some(Path::new("/repo")));
+        assert_eq!(
+            options.analysis.config_path.as_deref(),
+            Some(Path::new("/repo/fallow.toml"))
+        );
+        assert!(options.analysis.no_cache);
+        assert_eq!(options.analysis.threads, Some(2));
+        assert_eq!(
+            options.analysis.diff_file.as_deref(),
+            Some(Path::new("/tmp/flags.diff"))
+        );
+        assert!(!options.analysis.production);
+        assert_eq!(options.analysis.production_override, Some(false));
+        assert_eq!(options.analysis.changed_since.as_deref(), Some("HEAD"));
+        assert_eq!(
+            options.analysis.workspace,
+            Some(vec!["apps/web".to_string()])
+        );
+        assert_eq!(
+            options.analysis.changed_workspaces.as_deref(),
+            Some("origin/main")
+        );
+        assert!(options.analysis.explain);
+        assert!(options.analysis.legacy_envelope);
+        assert_eq!(options.top, Some(3));
+    }
+
+    #[test]
+    fn detect_feature_flags_returns_async_task() {
+        let task = detect_feature_flags(Some(FeatureFlagsOptions {
+            top: Some(1),
+            ..FeatureFlagsOptions::default()
+        }));
+
+        assert!(task.is_ok());
     }
 
     #[test]
@@ -955,6 +1079,7 @@ mod tests {
             max_crap: Some(18.5),
             top: Some(5),
             sort: Some(" Severity ".to_string()),
+            complexity_breakdown: Some(true),
             complexity: Some(true),
             file_scores: Some(true),
             coverage_gaps: Some(true),
@@ -977,6 +1102,7 @@ mod tests {
         assert_eq!(options.max_crap, Some(18.5));
         assert_eq!(options.top, Some(5));
         assert!(matches!(options.sort, api::ComplexitySort::Severity));
+        assert!(options.complexity_breakdown);
         assert!(options.complexity);
         assert!(options.file_scores);
         assert!(options.coverage_gaps);
@@ -1076,7 +1202,9 @@ mod tests {
         });
 
         let output = task.compute().expect("task should succeed");
-        let json = output.into_json().expect("typed output should serialize");
+        let json = output
+            .serialize_json_compat()
+            .expect("typed output should serialize");
         assert_eq!(json["kind"], "dead-code");
         assert_eq!(unused_export_names(&json), vec!["dead"]);
 
@@ -1108,7 +1236,8 @@ mod tests {
         })
         .expect("health options should map");
 
-        let json = api::compute_health_with_runner(&options, &api::EngineHealthRunner)
+        let json = api::run_health_with_runner(&options, &api::EngineHealthRunner)
+            .and_then(api::serialize_health_programmatic_json)
             .expect("health should run through programmatic health boundary");
 
         assert_eq!(json["kind"], "health");

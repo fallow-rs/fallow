@@ -1221,8 +1221,7 @@ fn feature_flags_schema_contains_expected_properties() {
         "config",
         "production",
         "workspace",
-        "flag_type",
-        "confidence",
+        "top",
         "no_cache",
         "threads",
     ] {

@@ -1440,13 +1440,10 @@ pub fn angular_template_member_names(module: &ModuleInfo) -> impl Iterator<Item 
     angular_template_member_names_from_parts(&module.semantic_facts)
 }
 
-/// Return true when the fact/member-access slices contain any Angular template
-/// member reference.
+/// Return true when the fact slice contains any Angular template member
+/// reference.
 #[must_use]
-fn has_angular_template_members_from_parts(
-    semantic_facts: &[SemanticFact],
-    _member_accesses: &[MemberAccess],
-) -> bool {
+fn has_angular_template_members_from_parts(semantic_facts: &[SemanticFact]) -> bool {
     angular_template_member_names_from_parts(semantic_facts)
         .next()
         .is_some()
@@ -1455,7 +1452,7 @@ fn has_angular_template_members_from_parts(
 /// Return true when the module contains any Angular template member reference.
 #[must_use]
 pub fn has_angular_template_members(module: &ModuleInfo) -> bool {
-    has_angular_template_members_from_parts(&module.semantic_facts, &module.member_accesses)
+    has_angular_template_members_from_parts(&module.semantic_facts)
 }
 
 /// Return true when a module spreads `this` in Angular template context.
@@ -1485,8 +1482,8 @@ pub struct SemanticFactView<'a> {
 }
 
 impl<'a> SemanticFactView<'a> {
-    /// Create a typed semantic fact view from current facts plus legacy cache
-    /// member accesses.
+    /// Create a typed semantic fact view from current semantic facts plus
+    /// ordinary source member accesses.
     #[must_use]
     pub const fn new(
         semantic_facts: &'a [SemanticFact],
@@ -1535,6 +1532,7 @@ impl<'a> SemanticFactView<'a> {
     }
 
     /// Alias for [`Self::instance_export_bindings`].
+    #[deprecated(since = "2.103.0", note = "use instance_export_bindings")]
     pub fn typed_instance_export_bindings(self) -> Vec<InstanceExportBindingFact> {
         self.instance_export_bindings()
     }
@@ -1547,6 +1545,7 @@ impl<'a> SemanticFactView<'a> {
     }
 
     /// Alias for [`Self::factory_call_member_accesses`].
+    #[deprecated(since = "2.103.0", note = "use factory_call_member_accesses")]
     pub fn typed_factory_call_member_accesses(self) -> Vec<FactoryCallMemberAccessFact> {
         self.factory_call_member_accesses()
     }
@@ -1559,6 +1558,7 @@ impl<'a> SemanticFactView<'a> {
     }
 
     /// Alias for [`Self::factory_fn_member_accesses`].
+    #[deprecated(since = "2.103.0", note = "use factory_fn_member_accesses")]
     pub fn typed_factory_fn_member_accesses(self) -> Vec<FactoryFnMemberAccessFact> {
         self.factory_fn_member_accesses()
     }
@@ -1571,6 +1571,7 @@ impl<'a> SemanticFactView<'a> {
     }
 
     /// Alias for [`Self::fluent_chain_member_accesses`].
+    #[deprecated(since = "2.103.0", note = "use fluent_chain_member_accesses")]
     pub fn typed_fluent_chain_member_accesses(self) -> Vec<FluentChainMemberAccessFact> {
         self.fluent_chain_member_accesses()
     }
@@ -1583,6 +1584,7 @@ impl<'a> SemanticFactView<'a> {
     }
 
     /// Alias for [`Self::fluent_chain_new_member_accesses`].
+    #[deprecated(since = "2.103.0", note = "use fluent_chain_new_member_accesses")]
     pub fn typed_fluent_chain_new_member_accesses(self) -> Vec<FluentChainNewMemberAccessFact> {
         self.fluent_chain_new_member_accesses()
     }
@@ -1595,6 +1597,7 @@ impl<'a> SemanticFactView<'a> {
     }
 
     /// Alias for [`Self::playwright_fixture_uses`].
+    #[deprecated(since = "2.103.0", note = "use playwright_fixture_uses")]
     pub fn typed_playwright_fixture_uses(self) -> Vec<PlaywrightFixtureUseFact> {
         self.playwright_fixture_uses()
     }
@@ -1607,6 +1610,7 @@ impl<'a> SemanticFactView<'a> {
     }
 
     /// Alias for [`Self::playwright_fixture_definitions`].
+    #[deprecated(since = "2.103.0", note = "use playwright_fixture_definitions")]
     pub fn typed_playwright_fixture_definitions(self) -> Vec<PlaywrightFixtureDefinitionFact> {
         self.playwright_fixture_definitions()
     }
@@ -1619,6 +1623,7 @@ impl<'a> SemanticFactView<'a> {
     }
 
     /// Alias for [`Self::playwright_fixture_aliases`].
+    #[deprecated(since = "2.103.0", note = "use playwright_fixture_aliases")]
     pub fn typed_playwright_fixture_aliases(self) -> Vec<PlaywrightFixtureAliasFact> {
         self.playwright_fixture_aliases()
     }
@@ -1631,6 +1636,7 @@ impl<'a> SemanticFactView<'a> {
     }
 
     /// Alias for [`Self::playwright_fixture_types`].
+    #[deprecated(since = "2.103.0", note = "use playwright_fixture_types")]
     pub fn typed_playwright_fixture_types(self) -> Vec<PlaywrightFixtureTypeFact> {
         self.playwright_fixture_types()
     }

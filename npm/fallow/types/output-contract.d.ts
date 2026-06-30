@@ -6725,9 +6725,11 @@ dead_surface: number
  */
 broken_references: number
 /**
- * Design-token erosion: mixed `font-size` units (`font_size_unit_mix`) and
- * Tailwind arbitrary-value bypasses (`tailwind_arbitrary_values`). Capped at
- * 10pt.
+ * Design-token erosion: mixed `font-size` units (`font_size_unit_mix`),
+ * Tailwind arbitrary-value bypasses (`tailwind_arbitrary_values`), and
+ * distinct HARDCODED `box-shadow`/`border-radius`/`line-height` values above
+ * per-axis baselines (the v3 value-sprawl drift sub-term; `var(--*)`-
+ * referenced values are not counted). Capped at 10pt.
  */
 token_erosion: number
 /**

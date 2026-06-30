@@ -1,6 +1,19 @@
 use crate::params::DecisionSurfaceParams;
 
-use super::{push_global, push_scope, push_str_flag};
+use rmcp::ErrorData as McpError;
+use rmcp::model::CallToolResult;
+
+use super::{push_global, push_scope, push_str_flag, run_tool};
+
+/// Run the `decision_surface` tool. It is intentionally CLI-backed until the
+/// audit brief/decision-surface runner is exposed from `fallow-api`.
+pub async fn run_decision_surface(
+    binary: &str,
+    params: DecisionSurfaceParams,
+) -> Result<CallToolResult, McpError> {
+    let args = build_decision_surface_args(&params);
+    run_tool(binary, "decision_surface", &args).await
+}
 
 /// Build CLI arguments for the `decision_surface` tool: `fallow decision-surface
 /// --format json --quiet`. The separable, cheap apex; reuses the changed-code

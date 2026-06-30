@@ -58,16 +58,9 @@ indicatif = { workspace = true }
 # Logging
 tracing = { workspace = true }
 
-# JSON Schema generation for duplication result types. Gated by the `schema`
-# feature so this only compiles when the schema-emit binary asks for it.
-schemars = { workspace = true, optional = true }
-
 [features]
 codspeed = ["criterion2/codspeed"]
-# Mirrors fallow-types' `schema` feature: enables `#[derive(schemars::JsonSchema)]`
-# on `DuplicationReport` and friends so the public JSON output contract can be
-# regenerated from the Rust source of truth.
-schema = ["dep:schemars", "fallow-types/schema"]
+schema = ["fallow-types/schema"]
 
 [dev-dependencies]
 criterion2 = { workspace = true }

@@ -1,6 +1,21 @@
 use crate::params::AuditParams;
 
-use super::{VALID_AUDIT_GATES, push_global, push_scope, push_str_flag, validation_error_body};
+use rmcp::ErrorData as McpError;
+use rmcp::model::{CallToolResult, Content};
+
+use super::{
+    VALID_AUDIT_GATES, push_global, push_scope, push_str_flag, run_tool, validation_error_body,
+};
+
+/// Run the `audit` tool. This remains CLI-backed until `fallow-api` exposes a
+/// command-neutral audit runner; the fallback is owned here so the server
+/// handler does not know how audit is executed.
+pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResult, McpError> {
+    match build_audit_args(&params) {
+        Ok(args) => run_tool(binary, "audit", &args).await,
+        Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+    }
+}
 
 /// Build CLI arguments for the `audit` tool.
 pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {

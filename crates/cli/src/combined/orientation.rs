@@ -271,7 +271,7 @@ pub(super) fn is_test_path(path: &std::path::Path) -> bool {
 /// Shows a dimmed informational line so users can verify that fallow found the
 /// right entry points. When zero entry points are detected, emits a warning
 /// with a remediation command.
-pub fn print_entry_point_summary(results: &fallow_engine::results::AnalysisResults) {
+pub fn print_entry_point_summary(results: &fallow_types::results::AnalysisResults) {
     let Some(ref summary) = results.entry_point_summary else {
         return;
     };

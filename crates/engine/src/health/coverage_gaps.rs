@@ -1,9 +1,5 @@
-use crate::{
-    discover::FileId,
-    extract::ModuleInfo,
-    graph::{ModuleGraph, ModuleNode},
-    suppress,
-};
+use crate::{discover::FileId, source::ModuleInfo, suppress};
+use fallow_graph::graph::{ModuleGraph, ModuleNode};
 use fallow_output::{CoverageGapSummary, CoverageGaps, UntestedExport, UntestedFile};
 
 pub struct CoverageGapData {

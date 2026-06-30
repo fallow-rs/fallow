@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::Command;
 
 use fallow_config::{FallowConfig, OutputFormat, ResolvedConfig};
-use fallow_engine::git_env::clear_ambient_git_env;
+use fallow_engine::clear_ambient_git_env;
 
 pub(super) const GIT_SHA_MAX_LEN: usize = 64;
 

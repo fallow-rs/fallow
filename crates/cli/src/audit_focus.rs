@@ -14,7 +14,7 @@
 //! (no floats, matching the partition + order engine's determinism posture) of four deterministic signals,
 //! each derived from data the brief already retains:
 //!
-//! 1. **fan-in / fan-out** (graph blast): from `ModuleGraph::focus_file_facts`.
+//! 1. **fan-in / fan-out** (graph blast): from engine-owned focus fact helpers.
 //! 2. **security taint touch**: a source -> sink taint trace touches the unit
 //!    (reuse `SecurityFinding.trace`). Built as a pure function of a security-
 //!    finding slice; the brief path carries an EMPTY slice today (security is the
@@ -36,7 +36,7 @@
 //! can reach the `Skip` arm, and the output is byte-identical to the no-runtime baseline. The free
 //! tier ranks but never skips; safe-skip is runtime-backed only.
 
-use fallow_engine::graph::FocusFileFactsPaths;
+use fallow_engine::FocusFileFactsPaths;
 pub use fallow_output::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
 
 /// A unit's score at or above this threshold is labeled [`FocusLabel::ReviewHere`];
@@ -125,7 +125,7 @@ pub struct RuntimeFocus {
 /// space), so signal joins are byte-exact.
 pub struct FocusInputs<'a> {
     /// Per-file graph facts (fan-in/out + confidence-flag signals) from
-    /// `ModuleGraph::focus_file_facts`, path-resolved. The unit spine.
+    /// Engine focus facts, path-resolved. The unit spine.
     pub graph_facts: &'a [FocusFileFactsPaths],
     /// Root-relative `from_file`s of introduced boundary edges. A unit file
     /// in this set carries the boundary risk-zone signal.

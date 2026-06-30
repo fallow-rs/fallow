@@ -1,5 +1,5 @@
 use colored::Colorize;
-use fallow_engine::trace::PipelineTimings;
+use fallow_types::trace::PipelineTimings;
 
 /// Stages below this wall-clock time are too cheap to annotate as parallel;
 /// the multiplier would be noise.

@@ -20,9 +20,11 @@ use std::time::Duration;
 
 use fallow_api::DuplicationGrouping;
 use fallow_config::{OutputFormat, RulesConfig, Severity};
-use fallow_engine::duplicates::DuplicationReport;
-use fallow_engine::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
+use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
+use fallow_types::trace::{
+    CloneTrace, DependencyTrace, ExportTrace, FileTrace, ImpactClosureTrace, PipelineTimings,
+};
 
 use crate::report::sink::outln;
 
@@ -630,7 +632,7 @@ fn warn_grouping_unsupported(grouping: Option<&fallow_output::HealthGrouping>, f
 ///
 /// Only emits output in human format to avoid corrupting structured JSON/SARIF output.
 pub fn print_cross_reference_findings(
-    cross_ref: &fallow_engine::cross_reference::CrossReferenceResult,
+    cross_ref: &fallow_engine::CrossReferenceResult,
     root: &Path,
     quiet: bool,
     output: OutputFormat,
@@ -672,10 +674,7 @@ pub fn print_clone_trace(trace: &CloneTrace, root: &Path, format: OutputFormat) 
 
 /// Print impact-closure trace results. JSON only emits the structured
 /// closure; human renders a short summary.
-pub fn print_impact_closure_trace(
-    trace: &fallow_engine::trace::ImpactClosureTrace,
-    format: OutputFormat,
-) {
+pub fn print_impact_closure_trace(trace: &ImpactClosureTrace, format: OutputFormat) {
     match format {
         OutputFormat::Json => json::print_trace_json(trace),
         _ => {
@@ -750,15 +749,6 @@ pub(crate) use json::SCHEMA_VERSION;
     reason = "target-dependent: report is public in lib, private in bin, but this adapter remains crate-internal"
 )]
 pub(crate) use json::api_check_json_payload_with_config_fixable;
-#[allow(
-    unused_imports,
-    reason = "target-dependent: used in bin audit.rs, unused in lib"
-)]
-#[allow(
-    clippy::redundant_pub_crate,
-    reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
-)]
-pub(crate) use json::harmonize_multi_kind_suppress_line_actions;
 #[allow(
     clippy::redundant_pub_crate,
     reason = "target-dependent: report is public in lib, private in bin, but these adapters remain crate-internal"

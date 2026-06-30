@@ -12,11 +12,10 @@
     )
 )]
 
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 
 mod api;
 mod audit;
@@ -31,12 +30,16 @@ mod cache_notice;
 mod check;
 mod ci;
 mod ci_template;
+mod cli_format;
+mod cli_hooks;
+mod cli_impact;
+mod cli_production;
+mod cli_startup;
 use fallow_engine::codeowners;
 mod combined;
 mod config;
 mod coverage;
 mod dupes;
-use fallow_engine::error;
 mod explain;
 mod fix;
 mod flags;
@@ -57,6 +60,7 @@ mod report;
 mod runtime_support;
 mod schema;
 mod security;
+mod security_help;
 mod setup_hooks;
 mod signal;
 mod task_matrix;
@@ -65,9 +69,30 @@ mod trace_chain;
 mod update_check;
 use fallow_engine::validate;
 use fallow_engine::vital_signs;
+mod cli_telemetry;
 mod watch;
 
 use check::{CheckOptions, IssueFilters, TraceOptions};
+mod error {
+    pub use fallow_engine::emit_error;
+}
+#[cfg(test)]
+use cli_format::parse_format_arg;
+use cli_format::{Format, FormatConfig, apply_ci_defaults};
+use cli_hooks::{HooksCli, run_hooks_command};
+use cli_impact::{ImpactCli, ImpactCrossRepoOpts, ImpactSortCli, dispatch_impact};
+use cli_production::{ProductionModes, resolve_production_modes};
+#[cfg(test)]
+use cli_startup::build_tracing_filter;
+use cli_startup::{
+    bare_coverage_subcommand_error_message, cli_has_bare_coverage_input, parse_cli_args,
+    run_pre_dispatch_checks, setup_tracing, validate_inputs,
+};
+#[cfg(test)]
+use cli_telemetry::TelemetryRun;
+#[cfg(test)]
+use cli_telemetry::{fallback_failure_reason_for, telemetry_workflow_for_command};
+use cli_telemetry::{record_run_epilogue, start_telemetry_run};
 use dupes::{DupesMode, DupesOptions};
 use error::emit_error;
 use health::{HealthOptions, SortBy};
@@ -77,28 +102,9 @@ pub(crate) use runtime_support::{
     ConfigLoadOptions, LoadConfigArgs, build_ownership_resolver, load_config,
     load_config_for_analysis,
 };
-
-const SECURITY_UNSUPPORTED_GLOBAL_LONGS: &[&str] = &[
-    "baseline",
-    "save-baseline",
-    "production",
-    "no-production",
-    "group-by",
-    "performance",
-    "explain-skipped",
-    "fail-on-regression",
-    "regression-baseline",
-    "save-regression-baseline",
-    "dupes-mode",
-    "dupes-threshold",
-    "dupes-min-tokens",
-    "dupes-min-lines",
-    "dupes-min-occurrences",
-    "dupes-skip-local",
-    "dupes-cross-language",
-    "dupes-ignore-imports",
-    "include-entry-exports",
-];
+#[cfg(test)]
+use security_help::{SECURITY_UNSUPPORTED_GLOBAL_LONGS, SecurityHelpTarget};
+use security_help::{render_security_help, security_help_target};
 
 const DEFAULT_MIN_INVOCATIONS_HOT: u64 = 100;
 
@@ -315,7 +321,7 @@ struct Cli {
     #[arg(long, global = true)]
     explain: bool,
 
-    /// Emit legacy JSON root envelopes without the top-level `kind` discriminator.
+    /// Emit migration-only JSON root envelopes without the top-level `kind`.
     #[arg(long, global = true)]
     legacy_envelope: bool,
 
@@ -1496,74 +1502,6 @@ enum SecuritySubcommand {
     },
 }
 
-#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
-enum HooksTargetArg {
-    /// Shell-level Git pre-commit hook under .git/hooks/ or .husky/.
-    Git,
-    /// Agent-level Claude Code / Codex gate.
-    Agent,
-}
-
-#[derive(clap::Subcommand)]
-enum HooksCli {
-    /// Show installed hook state for Git, Claude, and Codex surfaces.
-    Status,
-
-    /// Install a fallow-managed hook.
-    Install {
-        /// Hook surface to install.
-        #[arg(long, value_enum)]
-        target: HooksTargetArg,
-
-        /// Fallback base branch/ref for Git pre-commit hooks when no upstream is set.
-        #[arg(long)]
-        branch: Option<String>,
-
-        /// Target a specific agent surface when --target agent is used.
-        #[arg(long, value_enum)]
-        agent: Option<setup_hooks::HookAgentArg>,
-
-        /// Print what would be written without touching the filesystem.
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Overwrite an existing managed or user-edited hook.
-        #[arg(long)]
-        force: bool,
-
-        /// Write agent hooks to the user's home directory instead of the project root.
-        #[arg(long)]
-        user: bool,
-
-        /// Append `.claude/` to the project's `.gitignore` for Claude agent hooks.
-        #[arg(long)]
-        gitignore_claude: bool,
-    },
-
-    /// Remove a fallow-managed hook.
-    Uninstall {
-        /// Hook surface to remove.
-        #[arg(long, value_enum)]
-        target: HooksTargetArg,
-
-        /// Target a specific agent surface when --target agent is used.
-        #[arg(long, value_enum)]
-        agent: Option<setup_hooks::HookAgentArg>,
-
-        /// Print what would be removed without touching the filesystem.
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Remove a user-edited hook script or Git hook instead of preserving it.
-        #[arg(long)]
-        force: bool,
-
-        /// Remove agent hooks from the user's home directory instead of the project root.
-        #[arg(long)]
-        user: bool,
-    },
-}
-
 #[derive(clap::Subcommand)]
 enum LicenseCli {
     /// Activate a license JWT.
@@ -1618,60 +1556,6 @@ enum TelemetryCli {
         #[arg(long)]
         example: bool,
     },
-}
-
-#[derive(Clone, Copy, clap::Subcommand)]
-enum ImpactCli {
-    /// Enable local Impact tracking for this project.
-    Enable,
-    /// Disable Impact tracking (existing history is retained).
-    Disable,
-    /// Set the user-global default for new projects (on or off). A per-project
-    /// `enable`/`disable` always wins over this default.
-    Default {
-        /// `on` to record in every project by default, `off` to require an
-        /// explicit per-project `enable`.
-        #[arg(value_enum)]
-        state: ToggleState,
-    },
-    /// Delete this project's stored history (or all projects with `--all`).
-    Reset {
-        /// Delete every project's Impact history, not just this one.
-        #[arg(long)]
-        all: bool,
-    },
-    /// Show whether Impact tracking is enabled and how much history exists.
-    Status,
-}
-
-#[derive(Clone, Copy, clap::ValueEnum)]
-enum ToggleState {
-    On,
-    Off,
-}
-
-/// Row ordering for `fallow impact --all`.
-#[derive(Clone, Copy, clap::ValueEnum)]
-enum ImpactSortCli {
-    /// Most recently recorded project first (default).
-    Recent,
-    /// Most findings resolved first.
-    Resolved,
-    /// Most commits contained first.
-    Contained,
-    /// Alphabetical by project label.
-    Name,
-}
-
-impl ImpactSortCli {
-    const fn to_impact(self) -> impact::CrossRepoSort {
-        match self {
-            Self::Recent => impact::CrossRepoSort::Recent,
-            Self::Resolved => impact::CrossRepoSort::Resolved,
-            Self::Contained => impact::CrossRepoSort::Contained,
-            Self::Name => impact::CrossRepoSort::Name,
-        }
-    }
 }
 
 #[derive(clap::Subcommand)]
@@ -1993,30 +1877,6 @@ enum CoverageCli {
     },
 }
 
-#[derive(Clone, Copy, clap::ValueEnum)]
-enum Format {
-    Human,
-    Json,
-    Sarif,
-    Compact,
-    Markdown,
-    #[value(
-        name = "codeclimate",
-        alias = "gitlab-codequality",
-        alias = "gitlab-code-quality"
-    )]
-    CodeClimate,
-    #[value(name = "pr-comment-github")]
-    PrCommentGithub,
-    #[value(name = "pr-comment-gitlab")]
-    PrCommentGitlab,
-    #[value(name = "review-github")]
-    ReviewGithub,
-    #[value(name = "review-gitlab")]
-    ReviewGitlab,
-    Badge,
-}
-
 #[derive(Subcommand)]
 enum CiCli {
     /// Validate a rendered review envelope and compute a stable reconcile plan.
@@ -2059,24 +1919,6 @@ enum CiCli {
 enum CiProviderArg {
     Github,
     Gitlab,
-}
-
-impl From<Format> for fallow_config::OutputFormat {
-    fn from(f: Format) -> Self {
-        match f {
-            Format::Human => Self::Human,
-            Format::Json => Self::Json,
-            Format::Sarif => Self::Sarif,
-            Format::Compact => Self::Compact,
-            Format::Markdown => Self::Markdown,
-            Format::CodeClimate => Self::CodeClimate,
-            Format::PrCommentGithub => Self::PrCommentGithub,
-            Format::PrCommentGitlab => Self::PrCommentGitlab,
-            Format::ReviewGithub => Self::ReviewGithub,
-            Format::ReviewGitlab => Self::ReviewGitlab,
-            Format::Badge => Self::Badge,
-        }
-    }
 }
 
 /// Filter refactoring targets by effort level.
@@ -2180,43 +2022,6 @@ fn parse_min_occurrences(s: &str) -> Result<usize, String> {
     Ok(value)
 }
 
-/// Read `FALLOW_FORMAT` env var and parse it into a Format value.
-fn format_from_env() -> Option<Format> {
-    let val = std::env::var("FALLOW_FORMAT").ok()?;
-    parse_format_arg(&val)
-}
-
-fn parse_format_arg(value: &str) -> Option<Format> {
-    match value.to_lowercase().as_str() {
-        "json" => Some(Format::Json),
-        "human" => Some(Format::Human),
-        "sarif" => Some(Format::Sarif),
-        "compact" => Some(Format::Compact),
-        "markdown" | "md" => Some(Format::Markdown),
-        "codeclimate" | "gitlab-codequality" | "gitlab-code-quality" => Some(Format::CodeClimate),
-        "pr-comment-github" => Some(Format::PrCommentGithub),
-        "pr-comment-gitlab" => Some(Format::PrCommentGitlab),
-        "review-github" => Some(Format::ReviewGithub),
-        "review-gitlab" => Some(Format::ReviewGitlab),
-        "badge" => Some(Format::Badge),
-        _ => None,
-    }
-}
-
-/// Read `FALLOW_QUIET` env var: "1" or "true" (case-insensitive) means quiet.
-fn quiet_from_env() -> bool {
-    std::env::var("FALLOW_QUIET").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-}
-
-fn bool_from_env(name: &str) -> Option<bool> {
-    let value = std::env::var(name).ok()?;
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
-    }
-}
-
 /// Resolve an audit baseline path using CLI > config precedence.
 ///
 /// Both sources resolve relative paths against the project root. This keeps
@@ -2242,175 +2047,6 @@ fn resolve_audit_baseline_path(
     } else {
         Some(root.join(path))
     }
-}
-
-struct FormatConfig {
-    output: fallow_config::OutputFormat,
-    quiet: bool,
-    cli_format_was_explicit: bool,
-}
-
-fn resolve_format(cli: &Cli) -> FormatConfig {
-    let cli_format_was_explicit = std::env::args()
-        .any(|a| a == "--format" || a == "--output" || a.starts_with("--format=") || a == "-f");
-    let format: Format = if cli_format_was_explicit {
-        cli.format
-    } else {
-        format_from_env().unwrap_or(cli.format)
-    };
-
-    let quiet = cli.quiet || quiet_from_env();
-
-    FormatConfig {
-        output: format.into(),
-        quiet,
-        cli_format_was_explicit,
-    }
-}
-
-/// Build the tracing filter for the CLI.
-///
-/// Human output should stay clean by default, even when stderr is redirected to a
-/// file or captured by an agent. Internal INFO-level tracing is therefore opt-in
-/// via `RUST_LOG`, while warnings remain visible. An explicitly empty `RUST_LOG`
-/// disables tracing entirely, which keeps the test harness deterministic.
-fn build_tracing_filter(rust_log: Option<&str>) -> tracing_subscriber::EnvFilter {
-    use tracing_subscriber::filter::LevelFilter;
-
-    let builder = tracing_subscriber::EnvFilter::builder();
-    match rust_log.map(str::trim) {
-        Some("") => builder
-            .with_default_directive(LevelFilter::OFF.into())
-            .parse_lossy("off"),
-        Some(value) => builder
-            .with_default_directive(LevelFilter::OFF.into())
-            .parse_lossy(value),
-        None => builder
-            .with_default_directive(LevelFilter::WARN.into())
-            .parse_lossy(""),
-    }
-}
-
-/// Set up tracing for the CLI.
-fn setup_tracing() {
-    let rust_log = std::env::var("RUST_LOG").ok();
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(build_tracing_filter(rust_log.as_deref()))
-        .with_target(false)
-        .with_timer(tracing_subscriber::fmt::time::uptime())
-        .init();
-}
-
-fn validate_inputs(
-    cli: &Cli,
-    output: fallow_config::OutputFormat,
-) -> Result<(PathBuf, usize), ExitCode> {
-    validate_input_flags(cli, output)?;
-    let root = resolve_validated_root(cli, output)?;
-    validate_input_git_refs(cli, output)?;
-
-    let threads = cli
-        .threads
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, std::num::NonZero::get));
-
-    rayon_pool::configure_global_pool(threads);
-
-    Ok((root, threads))
-}
-
-/// Reject unsupported security globals, control characters in path-shaped flags,
-/// and the `--workspace`/`--changed-workspaces` mutual exclusion.
-fn validate_input_flags(cli: &Cli, output: fallow_config::OutputFormat) -> Result<(), ExitCode> {
-    let validation_failure = |message: &str| {
-        emit_known_failure(message, 2, output, telemetry::FailureReason::Validation)
-    };
-
-    if matches!(&cli.command, Some(Command::Security { .. }))
-        && let Some(flag) = unsupported_security_global(cli)
-    {
-        return Err(validation_failure(&format!(
-            "{flag} is not valid with `fallow security`."
-        )));
-    }
-
-    if let Some(ref config_path) = cli.config
-        && let Some(s) = config_path.to_str()
-        && let Err(e) = validate::validate_no_control_chars(s, "--config")
-    {
-        return Err(validation_failure(&e));
-    }
-    if let Some(ref ws_patterns) = cli.workspace {
-        for ws in ws_patterns {
-            if let Err(e) = validate::validate_no_control_chars(ws, "--workspace") {
-                return Err(validation_failure(&e));
-            }
-        }
-    }
-    if let Some(ref git_ref) = cli.changed_since
-        && let Err(e) = validate::validate_no_control_chars(git_ref, "--changed-since")
-    {
-        return Err(validation_failure(&e));
-    }
-    if let Some(ref git_ref) = cli.changed_workspaces
-        && let Err(e) = validate::validate_no_control_chars(git_ref, "--changed-workspaces")
-    {
-        return Err(validation_failure(&e));
-    }
-
-    if cli.workspace.is_some() && cli.changed_workspaces.is_some() {
-        return Err(validation_failure(
-            "--workspace and --changed-workspaces are mutually exclusive. \
-             Pick one: --workspace for explicit package names/globs, \
-             --changed-workspaces for git-derived monorepo CI scoping.",
-        ));
-    }
-
-    Ok(())
-}
-
-/// Resolve `--root` (or cwd), then validate it as an analysis root.
-fn resolve_validated_root(
-    cli: &Cli,
-    output: fallow_config::OutputFormat,
-) -> Result<PathBuf, ExitCode> {
-    let raw_root = if let Some(root) = cli.root.clone() {
-        root
-    } else {
-        std::env::current_dir().map_err(|err| {
-            emit_known_failure(
-                &format!("Failed to get current directory: {err}"),
-                2,
-                output,
-                telemetry::FailureReason::Config,
-            )
-        })?
-    };
-    validate::validate_root(&raw_root)
-        .map_err(|e| emit_known_failure(&e, 2, output, telemetry::FailureReason::Config))
-}
-
-/// Validate `--changed-since` / `--changed-workspaces` as well-formed git refs.
-fn validate_input_git_refs(cli: &Cli, output: fallow_config::OutputFormat) -> Result<(), ExitCode> {
-    let validation_failure = |message: &str| {
-        emit_known_failure(message, 2, output, telemetry::FailureReason::Validation)
-    };
-
-    if let Some(ref git_ref) = cli.changed_since
-        && let Err(e) = validate::validate_git_ref(git_ref)
-    {
-        return Err(validation_failure(&format!("invalid --changed-since: {e}")));
-    }
-
-    if let Some(ref git_ref) = cli.changed_workspaces
-        && let Err(e) = validate::validate_git_ref(git_ref)
-    {
-        return Err(validation_failure(&format!(
-            "invalid --changed-workspaces: {e}"
-        )));
-    }
-
-    Ok(())
 }
 
 fn emit_known_failure(
@@ -2466,28 +2102,6 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--include-entry-exports")
     } else {
         None
-    }
-}
-
-/// Apply CI defaults: if `--ci` is set, override format to SARIF (unless explicit),
-/// enable fail-on-issues, and set quiet. Returns (output, quiet, `fail_on_issues`).
-fn apply_ci_defaults(
-    ci: bool,
-    mut fail_on_issues: bool,
-    output: fallow_config::OutputFormat,
-    quiet: bool,
-    cli_format_was_explicit: bool,
-) -> (fallow_config::OutputFormat, bool, bool) {
-    if ci {
-        let ci_output = if !cli_format_was_explicit && format_from_env().is_none() {
-            fallow_config::OutputFormat::Sarif
-        } else {
-            output
-        };
-        fail_on_issues = true;
-        (ci_output, true, fail_on_issues)
-    } else {
-        (output, quiet, fail_on_issues)
     }
 }
 
@@ -2550,95 +2164,6 @@ impl DispatchContext<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
-struct ProductionModes {
-    dead_code: bool,
-    health: bool,
-    dupes: bool,
-}
-
-impl ProductionModes {
-    const fn for_analysis(self, analysis: fallow_config::ProductionAnalysis) -> bool {
-        match analysis {
-            fallow_config::ProductionAnalysis::DeadCode => self.dead_code,
-            fallow_config::ProductionAnalysis::Health => self.health,
-            fallow_config::ProductionAnalysis::Dupes => self.dupes,
-        }
-    }
-}
-
-fn load_config_production(
-    root: &std::path::Path,
-    config_path: Option<&PathBuf>,
-    output: fallow_config::OutputFormat,
-) -> Result<fallow_config::ProductionConfig, ExitCode> {
-    let loaded = if let Some(path) = config_path {
-        fallow_config::FallowConfig::load(path)
-            .map(Some)
-            .map_err(|e| {
-                emit_error(
-                    &format!("failed to load config '{}': {e}", path.display()),
-                    2,
-                    output,
-                )
-            })?
-    } else {
-        fallow_config::FallowConfig::find_and_load(root)
-            .map(|found| found.map(|(config, _)| config))
-            .map_err(|e| emit_error(&e, 2, output))?
-    };
-
-    Ok(match loaded {
-        Some(config) => config.production,
-        None => fallow_config::ProductionConfig::default(),
-    })
-}
-
-fn resolve_production_modes(
-    cli: &Cli,
-    root: &std::path::Path,
-    output: fallow_config::OutputFormat,
-    production_dead_code: bool,
-    production_health: bool,
-    production_dupes: bool,
-) -> Result<ProductionModes, ExitCode> {
-    let config = load_config_production(root, cli.config.as_ref(), output)?;
-    let env_global = bool_from_env("FALLOW_PRODUCTION");
-
-    let resolve_one =
-        |analysis: fallow_config::ProductionAnalysis, cli_specific: bool, env_name: &str| {
-            if cli.production || cli_specific {
-                true
-            } else if cli.no_production {
-                false
-            } else if let Some(value) = bool_from_env(env_name) {
-                value
-            } else if let Some(value) = env_global {
-                value
-            } else {
-                config.for_analysis(analysis)
-            }
-        };
-
-    Ok(ProductionModes {
-        dead_code: resolve_one(
-            fallow_config::ProductionAnalysis::DeadCode,
-            production_dead_code,
-            "FALLOW_PRODUCTION_DEAD_CODE",
-        ),
-        health: resolve_one(
-            fallow_config::ProductionAnalysis::Health,
-            production_health,
-            "FALLOW_PRODUCTION_HEALTH",
-        ),
-        dupes: resolve_one(
-            fallow_config::ProductionAnalysis::Dupes,
-            production_dupes,
-            "FALLOW_PRODUCTION_DUPES",
-        ),
-    })
-}
-
 /// Test-only helper invoked when `FALLOW_TEST_SIGNAL_HELPER=1` is set.
 /// Spawns `sleep 30` via the `ScopedChild` registry so the child is
 /// tracked by the signal handler, prints the child PID to stdout, then
@@ -2691,8 +2216,8 @@ fn signal_test_helper() -> ExitCode {
 }
 
 fn install_spawn_hooks() {
-    fallow_engine::churn::set_spawn_hook(signal::scoped_child::output);
-    fallow_engine::changed_files::set_spawn_hook(signal::scoped_child::output);
+    fallow_engine::set_churn_spawn_hook(signal::scoped_child::output);
+    fallow_engine::set_spawn_hook(signal::scoped_child::output);
 }
 
 fn install_signal_handlers() {
@@ -2701,103 +2226,6 @@ fn install_signal_handlers() {
         let stderr = std::io::stderr();
         let mut lock = stderr.lock();
         let _ = writeln!(lock, "fallow: failed to install signal handlers: {err}");
-    }
-}
-
-/// Find the first positional (non-flag) token in argv, which is the invoked
-/// subcommand name. Skips global flags and their values so `fallow --root /p
-/// review` still resolves to `review`. Returns `None` when there is no
-/// positional token (bare `fallow`, or only flags).
-fn first_subcommand_token<I>(args: I) -> Option<String>
-where
-    I: IntoIterator<Item = String>,
-{
-    let value_options = [
-        "-r",
-        "--root",
-        "-c",
-        "--config",
-        "-f",
-        "--format",
-        "--output",
-        "--threads",
-        "--changed-since",
-        "--base",
-        "--diff-file",
-        "--baseline",
-        "--parent-run",
-        "--save-baseline",
-        "-w",
-        "--workspace",
-        "--changed-workspaces",
-        "--group-by",
-        "--file",
-        "--sarif-file",
-        "--only",
-        "--skip",
-        "--dupes-mode",
-        "--dupes-threshold",
-        "--dupes-min-tokens",
-        "--dupes-min-lines",
-        "--dupes-min-occurrences",
-        "--dupes-skip-local",
-        "--dupes-cross-language",
-        "--dupes-ignore-imports",
-        "--save-snapshot",
-        "--regression-baseline",
-        "--tolerance",
-        "--save-regression-baseline",
-    ];
-    let mut skip_next = false;
-    for arg in args.into_iter().skip(1) {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if arg == "--" {
-            break;
-        }
-        if arg.starts_with('-') {
-            let option_name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
-            if !arg.contains('=') && value_options.contains(&option_name) {
-                skip_next = true;
-            }
-            continue;
-        }
-        return Some(arg);
-    }
-    None
-}
-
-fn args_use_legacy_check_alias<I>(args: I) -> bool
-where
-    I: IntoIterator<Item = String>,
-{
-    first_subcommand_token(args).as_deref() == Some("check")
-}
-
-/// Whether argv invoked the `review` alias of the audit command. The clap
-/// `visible_alias` routes `review` to `Command::Audit` but does NOT set
-/// `--brief`; the alias implies the brief, so we detect it from raw argv and
-/// force `brief = true` post-parse.
-fn args_invoked_review_alias<I>(args: I) -> bool
-where
-    I: IntoIterator<Item = String>,
-{
-    first_subcommand_token(args).as_deref() == Some("review")
-}
-
-fn raw_args_use_legacy_check_alias() -> bool {
-    args_use_legacy_check_alias(std::env::args())
-}
-
-fn raw_args_invoked_review_alias() -> bool {
-    args_invoked_review_alias(std::env::args())
-}
-
-fn warn_legacy_check_alias_if_needed(used_legacy_check_alias: bool, quiet: bool) {
-    if used_legacy_check_alias && !quiet {
-        eprintln!("fallow: `check` is deprecated; use `dead-code` instead.");
     }
 }
 
@@ -2857,32 +2285,6 @@ fn finalize_report_file(
         eprintln!("Report written to {}", path.display());
     }
     Ok(())
-}
-
-/// Parse argv into a `Cli`, apply the legacy-alias warning and process-wide
-/// overrides (legacy envelope, max-file-size, workspace PR marker), and resolve
-/// the output format. Returns the parse error's exit code on failure.
-fn parse_cli_args() -> Result<(Cli, FormatConfig), ExitCode> {
-    let used_legacy_check_alias = raw_args_use_legacy_check_alias();
-    let mut cli = Cli::try_parse().map_err(|err| handle_cli_parse_error(&err))?;
-    warn_legacy_check_alias_if_needed(used_legacy_check_alias, cli.quiet);
-    // `fallow review` is the `visible_alias` of `audit`; it implies `--brief`.
-    if raw_args_invoked_review_alias()
-        && let Some(Command::Audit { brief, .. }) = cli.command.as_mut()
-    {
-        *brief = true;
-    }
-    output_runtime::set_legacy_envelope(cli.legacy_envelope);
-    runtime_support::set_max_file_size_override(cli.max_file_size);
-
-    if let Some(workspaces) = cli.workspace.as_ref()
-        && !workspaces.is_empty()
-    {
-        report::ci::pr_comment::set_workspace_marker_from_list(workspaces);
-    }
-
-    let fmt = resolve_format(&cli);
-    Ok((cli, fmt))
 }
 
 fn main() -> ExitCode {
@@ -2982,450 +2384,6 @@ fn dispatch_and_finalize(
     Ok(exit_code)
 }
 
-/// Run the pre-dispatch validation gates (diff filter, output-gate flags, global
-/// filter, regression tolerance). On any failure, returns the epilogue-recorded
-/// exit code so `main` can return it directly.
-fn run_pre_dispatch_checks(
-    cli: &Cli,
-    root: &std::path::Path,
-    output: fallow_config::OutputFormat,
-    quiet: bool,
-    telemetry_run: TelemetryRun,
-) -> Result<regression::Tolerance, ExitCode> {
-    let fail = |code: ExitCode, reason: telemetry::FailureReason| {
-        record_run_epilogue(telemetry_run, code, Some(reason), cli.parent_run.as_deref())
-    };
-
-    if let Err(code) = init_cli_diff_filter(cli, root, output, quiet) {
-        return Err(fail(code, telemetry::FailureReason::Diff));
-    }
-
-    if (cli.ci || cli.fail_on_issues || cli.sarif_file.is_some() || cli.output_file.is_some())
-        && command_rejects_output_gate(cli.command.as_ref())
-    {
-        let code = emit_known_failure(
-            "--ci, --fail-on-issues, --sarif-file, and --output-file are only valid with dead-code, dupes, health, security, or bare invocation",
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        );
-        return Err(fail(code, telemetry::FailureReason::Validation));
-    }
-
-    if let Some(message) = global_filter_error(cli) {
-        let code = emit_known_failure(message, 2, output, telemetry::FailureReason::Validation);
-        return Err(fail(code, telemetry::FailureReason::Validation));
-    }
-
-    parse_cli_tolerance(cli, output)
-        .map_err(|code| fail(code, telemetry::FailureReason::Validation))
-}
-
-#[derive(Clone, Copy)]
-struct TelemetryRun {
-    workflow: telemetry::Workflow,
-    output: fallow_config::OutputFormat,
-    quiet: bool,
-    start: std::time::Instant,
-    context: telemetry::WorkflowContext,
-}
-
-fn record_run_epilogue(
-    run: TelemetryRun,
-    exit_code: ExitCode,
-    failure_reason: Option<telemetry::FailureReason>,
-    parent_run: Option<&str>,
-) -> ExitCode {
-    let cache_notice_printed = cache_notice::maybe_print_created_notice();
-    let effective_failure_reason = failure_reason
-        .or_else(telemetry::noted_failure_reason)
-        .or_else(|| fallback_failure_reason_for(&run, exit_code));
-    telemetry::record_workflow(&telemetry::WorkflowRecord {
-        workflow: run.workflow,
-        output: run.output,
-        quiet: run.quiet,
-        elapsed: run.start.elapsed(),
-        exit_code,
-        failure_reason: effective_failure_reason,
-        parent_run,
-        context: run.context,
-    });
-    if exit_code == ExitCode::SUCCESS {
-        let note_printed = telemetry::maybe_print_opt_in_note(run.output, run.quiet);
-        update_check::maybe_nudge(run.output, run.quiet, note_printed || cache_notice_printed);
-    }
-    exit_code
-}
-
-fn fallback_failure_reason_for(
-    run: &TelemetryRun,
-    exit_code: ExitCode,
-) -> Option<telemetry::FailureReason> {
-    if matches!(exit_code, ExitCode::SUCCESS) || exit_code == ExitCode::from(1) {
-        return None;
-    }
-    if exit_code == ExitCode::from(api::NETWORK_EXIT_CODE) {
-        return Some(telemetry::FailureReason::Network);
-    }
-    if exit_code == ExitCode::from(12) {
-        return Some(telemetry::FailureReason::Auth);
-    }
-    if matches!(
-        run.context.analysis_mode,
-        telemetry::AnalysisMode::ProductionCoverage
-    ) && exit_code == ExitCode::from(3)
-    {
-        return Some(telemetry::FailureReason::Auth);
-    }
-    if matches!(
-        run.context.analysis_mode,
-        telemetry::AnalysisMode::Static
-            | telemetry::AnalysisMode::Security
-            | telemetry::AnalysisMode::Fix
-            | telemetry::AnalysisMode::RuntimeCoverage
-            | telemetry::AnalysisMode::ProductionCoverage
-    ) {
-        return Some(telemetry::FailureReason::Analysis);
-    }
-    Some(telemetry::FailureReason::Unknown)
-}
-
-fn start_telemetry_run(cli: &Cli, fmt: &FormatConfig) -> TelemetryRun {
-    setup_tracing();
-    let run = TelemetryRun {
-        workflow: telemetry_workflow_for_command(cli.command.as_ref(), fmt.output),
-        output: fmt.output,
-        quiet: fmt.quiet,
-        start: std::time::Instant::now(),
-        context: telemetry_context_for_command(cli, cli.command.as_ref(), fmt.output),
-    };
-    output_runtime::set_telemetry_analysis_run_id(
-        matches!(fmt.output, fallow_config::OutputFormat::Json)
-            .then(telemetry::new_analysis_run_id),
-    );
-    telemetry::flush_spool_in_background();
-    run
-}
-
-fn telemetry_context_for_command(
-    cli: &Cli,
-    command: Option<&Command>,
-    output: fallow_config::OutputFormat,
-) -> telemetry::WorkflowContext {
-    telemetry::WorkflowContext {
-        run_scope: telemetry_run_scope_for_command(cli, command),
-        config_shape: telemetry_config_shape_for_cli(cli),
-        output_destination: telemetry_output_destination_for_command(cli, command, output),
-        analysis_mode: telemetry_analysis_mode_for_command(command),
-    }
-}
-
-fn telemetry_run_scope_for_command(cli: &Cli, command: Option<&Command>) -> telemetry::RunScope {
-    if command_is_file_scoped(command) {
-        return telemetry::RunScope::FileScoped;
-    }
-    if cli
-        .workspace
-        .as_ref()
-        .is_some_and(|workspaces| !workspaces.is_empty())
-        || cli.changed_workspaces.is_some()
-    {
-        return telemetry::RunScope::WorkspaceScoped;
-    }
-    if cli.changed_since.is_some()
-        || cli.diff_file.is_some()
-        || cli.diff_stdin
-        || matches!(command, Some(Command::Audit { .. }))
-    {
-        return telemetry::RunScope::ChangedOnly;
-    }
-    if command_runs_full_project_analysis(command) {
-        return telemetry::RunScope::FullProject;
-    }
-    telemetry::RunScope::Unknown
-}
-
-fn command_is_file_scoped(command: Option<&Command>) -> bool {
-    matches!(
-        command,
-        Some(Command::Check { file, .. } | Command::Security { file, .. }) if !file.is_empty()
-    )
-}
-
-fn command_runs_full_project_analysis(command: Option<&Command>) -> bool {
-    matches!(
-        command,
-        None | Some(
-            Command::Check { .. }
-                | Command::Dupes { .. }
-                | Command::Health { .. }
-                | Command::Flags { .. }
-                | Command::Security { .. }
-                | Command::Fix { .. }
-                | Command::Watch { .. },
-        )
-    )
-}
-
-fn telemetry_config_shape_for_cli(cli: &Cli) -> telemetry::ConfigShape {
-    if cli.config.is_some() {
-        telemetry::ConfigShape::CustomConfig
-    } else {
-        telemetry::ConfigShape::Unknown
-    }
-}
-
-fn telemetry_output_destination_for_command(
-    cli: &Cli,
-    command: Option<&Command>,
-    output: fallow_config::OutputFormat,
-) -> telemetry::OutputDestination {
-    if matches!(command, Some(Command::Ci { .. }))
-        || matches!(
-            output,
-            fallow_config::OutputFormat::PrCommentGithub
-                | fallow_config::OutputFormat::PrCommentGitlab
-                | fallow_config::OutputFormat::ReviewGithub
-                | fallow_config::OutputFormat::CodeClimate
-        )
-    {
-        return telemetry::OutputDestination::CiComment;
-    }
-    if cli.output_file.is_some() || cli.sarif_file.is_some() {
-        return telemetry::OutputDestination::File;
-    }
-    telemetry::OutputDestination::Stdout
-}
-
-fn telemetry_analysis_mode_for_command(command: Option<&Command>) -> telemetry::AnalysisMode {
-    match command {
-        Some(Command::Security { .. }) => telemetry::AnalysisMode::Security,
-        Some(Command::Fix { .. }) => telemetry::AnalysisMode::Fix,
-        Some(Command::Health {
-            runtime_coverage: Some(_),
-            ..
-        })
-        | Some(Command::Audit {
-            runtime_coverage: Some(_),
-            ..
-        })
-        | Some(Command::Coverage { .. }) => telemetry::AnalysisMode::ProductionCoverage,
-        Some(Command::Health {
-            coverage: Some(_), ..
-        })
-        | Some(Command::Audit {
-            coverage: Some(_), ..
-        }) => telemetry::AnalysisMode::RuntimeCoverage,
-        None
-        | Some(
-            Command::Check { .. }
-            | Command::Dupes { .. }
-            | Command::Health { .. }
-            | Command::Audit { .. }
-            | Command::Flags { .. }
-            | Command::Watch { .. },
-        ) => telemetry::AnalysisMode::Static,
-        _ => telemetry::AnalysisMode::Unknown,
-    }
-}
-
-fn handle_cli_parse_error(err: &clap::Error) -> ExitCode {
-    let exit_code = u8::try_from(err.exit_code()).unwrap_or(2);
-    if err.kind() == clap::error::ErrorKind::DisplayHelp
-        && let Some(target) = security_help_target(std::env::args_os().skip(1))
-    {
-        print!("{}", render_security_help(target));
-        return ExitCode::SUCCESS;
-    }
-
-    if matches!(
-        parse_error_output_format(std::env::args_os().skip(1)),
-        fallow_config::OutputFormat::Json
-    ) {
-        return emit_error(
-            err.to_string().trim(),
-            exit_code,
-            fallow_config::OutputFormat::Json,
-        );
-    }
-
-    let _ = err.print();
-    ExitCode::from(exit_code)
-}
-
-fn parse_error_output_format<I, S>(args: I) -> fallow_config::OutputFormat
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let args: Vec<String> = args
-        .into_iter()
-        .map(|arg| arg.as_ref().to_string_lossy().into_owned())
-        .collect();
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        if matches!(arg.as_str(), "--format" | "--output" | "-f") {
-            return iter
-                .next()
-                .and_then(|value| parse_format_arg(value))
-                .unwrap_or(Format::Human)
-                .into();
-        }
-        let short_format_value = if arg.starts_with("--") {
-            None
-        } else {
-            arg.strip_prefix("-f")
-        };
-        if let Some(value) = arg
-            .strip_prefix("--format=")
-            .or_else(|| arg.strip_prefix("--output="))
-            .or(short_format_value)
-            .filter(|value| !value.is_empty())
-        {
-            return parse_format_arg(value).unwrap_or(Format::Human).into();
-        }
-    }
-    format_from_env().unwrap_or(Format::Human).into()
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SecurityHelpTarget {
-    Parent,
-    Survivors,
-    BlindSpots,
-}
-
-fn security_help_target<I, S>(args: I) -> Option<SecurityHelpTarget>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let args: Vec<String> = args
-        .into_iter()
-        .map(|arg| arg.as_ref().to_string_lossy().into_owned())
-        .collect();
-
-    if args.first().is_some_and(|arg| arg == "help") {
-        return match args.get(1).map(String::as_str) {
-            Some("security") if args.len() == 2 => Some(SecurityHelpTarget::Parent),
-            Some("security") if args.get(2).is_some_and(|arg| arg == "survivors") => {
-                Some(SecurityHelpTarget::Survivors)
-            }
-            Some("security") if args.get(2).is_some_and(|arg| arg == "blind-spots") => {
-                Some(SecurityHelpTarget::BlindSpots)
-            }
-            _ => None,
-        };
-    }
-
-    let mut saw_security = false;
-    let mut security_subcommand = None;
-    for arg in args {
-        if arg == "security" {
-            saw_security = true;
-            continue;
-        }
-        if saw_security && is_security_subcommand(&arg) {
-            security_subcommand = Some(arg);
-            continue;
-        }
-        if saw_security && matches!(arg.as_str(), "--help" | "-h") {
-            return match security_subcommand.as_deref() {
-                Some("survivors") => Some(SecurityHelpTarget::Survivors),
-                Some("blind-spots") => Some(SecurityHelpTarget::BlindSpots),
-                Some("help") => None,
-                _ => Some(SecurityHelpTarget::Parent),
-            };
-        }
-    }
-    None
-}
-
-fn is_security_subcommand(arg: &str) -> bool {
-    matches!(arg, "survivors" | "blind-spots" | "help")
-}
-
-fn render_security_help(target: SecurityHelpTarget) -> String {
-    match target {
-        SecurityHelpTarget::Parent => render_security_parent_help(),
-        SecurityHelpTarget::Survivors => render_security_survivors_help(),
-        SecurityHelpTarget::BlindSpots => render_security_blind_spots_help(),
-    }
-}
-
-fn render_security_parent_help() -> String {
-    let mut root = Cli::command().mut_args(|arg| {
-        if arg.get_long().is_some_and(security_unsupported_global_long) {
-            arg.hide(true)
-        } else {
-            arg
-        }
-    });
-    match root.try_get_matches_from_mut(["fallow", "security", "--help"]) {
-        Ok(_) => String::new(),
-        Err(err) => err.to_string(),
-    }
-}
-
-fn render_security_survivors_help() -> String {
-    "\
-Render verifier-retained survivor candidates from fallow output plus verifier verdicts.
-
-Usage: fallow security survivors --candidates <PATH> --verdicts <PATH> [OPTIONS]
-
-Options:
-      --candidates <PATH>                      Raw `fallow security --format json` candidate output
-      --verdicts <PATH>                        Verifier verdict JSON file
-      --require-verdict-for-each-candidate     Fail when any candidate has no matching verdict
-  -f, --format <FORMAT>                        Output format: human or json [default: human]
-  -o, --output-file <PATH>                     Write the report to a file instead of stdout
-  -h, --help                                   Print help
-
-Verdict JSON:
-  [{\"schema_version\":\"fallow-security-verdict/v1\",\"finding_id\":\"sec-a\",\"verdict\":\"survivor\"}]
-
-Repo-local docs: docs/security-agent-verification.md
-"
-    .to_owned()
-}
-
-fn render_security_blind_spots_help() -> String {
-    "\
-Group unresolved security callees into actionable blind-spot output.
-
-Usage: fallow security blind-spots [OPTIONS]
-
-Options:
-  -r, --root <ROOT>                  Project root directory
-  -c, --config <CONFIG>              Path to config file
-  -f, --format <FORMAT>              Output format: human or json [default: human]
-  -q, --quiet                        Suppress progress output
-      --no-cache                     Disable incremental caching
-      --threads <THREADS>            Number of parser threads
-      --changed-since <REF>          Scope analysis to files changed since this git ref
-      --diff-file <PATH>             Unified diff for line-level scoping
-      --diff-stdin                   Read the unified diff from stdin
-      --file <PATH>                  Scope diagnostics to selected files
-  -w, --workspace <WORKSPACE>        Scope output to selected workspaces
-      --changed-workspaces <REF>     Scope output to workspaces touched since this git ref
-  -o, --output-file <PATH>           Write the report to a file instead of stdout
-  -h, --help                         Print help
-"
-    .to_owned()
-}
-
-fn security_unsupported_global_long(long: &str) -> bool {
-    SECURITY_UNSUPPORTED_GLOBAL_LONGS.contains(&long)
-}
-
-fn cli_has_bare_coverage_input(cli: &Cli) -> bool {
-    cli.coverage.is_some() || cli.coverage_root.is_some()
-}
-
-fn bare_coverage_subcommand_error_message() -> &'static str {
-    "`--coverage` and `--coverage-root` are bare combined-mode flags. Use `fallow health --coverage <coverage-final.json>` for standalone health analysis, or omit the subcommand to run combined mode."
-}
-
 fn run_telemetry_command_if_requested(
     cli: &mut Cli,
     output: fallow_config::OutputFormat,
@@ -3448,63 +2406,6 @@ fn run_schema_command_if_requested(cli: &Cli) -> Option<ExitCode> {
     }
 }
 
-fn command_rejects_output_gate(command: Option<&Command>) -> bool {
-    matches!(
-        command,
-        Some(
-            Command::Init { .. }
-                | Command::ConfigSchema
-                | Command::PluginSchema
-                | Command::RulePackSchema
-                | Command::Schema
-                | Command::Explain { .. }
-                | Command::CiTemplate { .. }
-                | Command::Config { .. }
-                | Command::Ci { .. }
-                | Command::List { .. }
-                | Command::Inspect { .. }
-                | Command::Trace { .. }
-                | Command::Flags { .. }
-                | Command::Migrate { .. }
-                | Command::License { .. }
-                | Command::Coverage { .. }
-                | Command::Hooks { .. }
-                | Command::SetupHooks { .. }
-        )
-    )
-}
-
-fn global_filter_error(cli: &Cli) -> Option<&'static str> {
-    if (!cli.only.is_empty() || !cli.skip.is_empty()) && cli.command.is_some() {
-        return Some("--only and --skip can only be used without a subcommand");
-    }
-    if (cli.production_dead_code || cli.production_health || cli.production_dupes)
-        && cli.command.is_some()
-    {
-        return Some(
-            "--production-dead-code, --production-health, and --production-dupes can only be used without a subcommand. For audit, pass them after `audit`",
-        );
-    }
-    if !cli.only.is_empty() && !cli.skip.is_empty() {
-        return Some("--only and --skip are mutually exclusive");
-    }
-    None
-}
-
-fn parse_cli_tolerance(
-    cli: &Cli,
-    output: fallow_config::OutputFormat,
-) -> Result<regression::Tolerance, ExitCode> {
-    regression::Tolerance::parse(&cli.tolerance).map_err(|e| {
-        emit_known_failure(
-            &format!("invalid --tolerance: {e}"),
-            2,
-            output,
-            telemetry::FailureReason::Validation,
-        )
-    })
-}
-
 fn regression_save_targets(cli: &Cli) -> (Option<std::path::PathBuf>, bool) {
     let save_file = cli.save_regression_baseline.as_ref().and_then(|opt| {
         opt.as_ref()
@@ -3513,34 +2414,6 @@ fn regression_save_targets(cli: &Cli) -> (Option<std::path::PathBuf>, bool) {
     });
     let save_to_config = cli.save_regression_baseline.is_some() && save_file.is_none();
     (save_file, save_to_config)
-}
-
-fn init_cli_diff_filter(
-    cli: &Cli,
-    root: &std::path::Path,
-    output: fallow_config::OutputFormat,
-    quiet: bool,
-) -> Result<(), ExitCode> {
-    let diff_source = report::ci::diff_filter::resolve_diff_source(
-        cli.diff_file.as_deref(),
-        cli.diff_stdin,
-        root,
-    )
-    .map_err(|msg| emit_known_failure(&msg, 2, output, telemetry::FailureReason::Diff))?;
-    if diff_source.is_some() && cli.changed_since.is_some() && !quiet {
-        eprintln!(
-            "fallow: --diff-file precedes --changed-since for line-level \
-             filtering; --changed-since still scopes file discovery. Drop \
-             one of them to disable this combination."
-        );
-    }
-    let suppress_warnings = quiet
-        && matches!(
-            diff_source,
-            Some(report::ci::diff_filter::DiffSource::EnvVar(_)) | None
-        );
-    let _ = report::ci::diff_filter::init_shared_diff(diff_source.as_ref(), suppress_warnings);
-    Ok(())
 }
 
 fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
@@ -3910,7 +2783,7 @@ fn dispatch_trace_command(
         target: symbol,
         callers,
         callees,
-        depth: depth.unwrap_or(fallow_engine::trace_chain::DEFAULT_TRACE_DEPTH),
+        depth: depth.unwrap_or(fallow_types::trace_chain::DEFAULT_TRACE_DEPTH),
     })
 }
 
@@ -4461,381 +3334,6 @@ fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) ->
         explain: cli.explain,
         top,
     })
-}
-
-/// The `fallow impact --all` cross-repo view options, bundled so
-/// `dispatch_impact` takes one parameter instead of three.
-#[derive(Clone, Copy)]
-struct ImpactCrossRepoOpts {
-    all: bool,
-    sort: ImpactSortCli,
-    limit: Option<usize>,
-}
-
-fn dispatch_impact(
-    root: &std::path::Path,
-    quiet: bool,
-    output: fallow_config::OutputFormat,
-    subcommand: Option<ImpactCli>,
-    cross_repo: ImpactCrossRepoOpts,
-) -> ExitCode {
-    let ImpactCrossRepoOpts { all, sort, limit } = cross_repo;
-    if all {
-        if subcommand.is_some() {
-            return emit_known_failure(
-                "`fallow impact --all` is a read-only cross-repo view and cannot be combined \
-                 with a subcommand (enable/disable/default/reset)",
-                2,
-                output,
-                telemetry::FailureReason::Validation,
-            );
-        }
-        return render_impact_all(quiet, output, sort, limit);
-    }
-    match subcommand {
-        Some(ImpactCli::Enable) => impact_enable(root, quiet),
-        Some(ImpactCli::Disable) => impact_disable(root, quiet),
-        Some(ImpactCli::Default { state }) => impact_set_default(state, quiet),
-        Some(ImpactCli::Reset { all }) => impact_reset(root, all, quiet),
-        Some(ImpactCli::Status) | None => render_impact_status(root, quiet, output),
-    }
-}
-
-/// Enable Fallow Impact for this project; print the first-enable guidance.
-fn impact_enable(root: &std::path::Path, quiet: bool) -> ExitCode {
-    let newly = impact::enable(root);
-    if !quiet {
-        if newly {
-            println!(
-                "Fallow Impact enabled for this project. Each `fallow audit` / pre-commit \
-                 gate run is recorded in your user config dir (never written into the \
-                 repo, never uploaded)."
-            );
-            println!(
-                "Tip: run `fallow init --hooks` (or add `--gate-marker pre-commit` to \
-                 your existing hook's `fallow audit` line) so blocked-then-fixed \
-                 commits are recorded as contained."
-            );
-        } else {
-            println!("Fallow Impact is already enabled.");
-        }
-    }
-    ExitCode::SUCCESS
-}
-
-/// Disable Fallow Impact for this project; history is retained.
-fn impact_disable(root: &std::path::Path, quiet: bool) -> ExitCode {
-    let was_enabled = impact::disable(root);
-    if !quiet {
-        println!(
-            "{}",
-            if was_enabled {
-                "Fallow Impact disabled. Existing history is retained."
-            } else {
-                "Fallow Impact was already disabled."
-            }
-        );
-    }
-    ExitCode::SUCCESS
-}
-
-/// Set the user-global Impact default for new projects.
-fn impact_set_default(state: ToggleState, quiet: bool) -> ExitCode {
-    let on = matches!(state, ToggleState::On);
-    let changed = impact::set_global_default(on);
-    if !quiet {
-        let verb = if on { "on" } else { "off" };
-        let body = if on {
-            "New projects now record Impact by default. A per-project `fallow impact \
-             disable` still opts that repo out."
-        } else {
-            "New projects no longer record by default; run `fallow impact enable` per \
-             project to opt in."
-        };
-        if changed {
-            println!("Fallow Impact default set to {verb}. {body}");
-        } else {
-            println!("Fallow Impact default was already {verb}.");
-        }
-    }
-    ExitCode::SUCCESS
-}
-
-/// Reset Impact history for this project, or every project with `--all`.
-fn impact_reset(root: &std::path::Path, all: bool, quiet: bool) -> ExitCode {
-    if all {
-        let removed = impact::reset_all();
-        if !quiet {
-            println!(
-                "{}",
-                if removed {
-                    "Removed all Fallow Impact history."
-                } else {
-                    "No Fallow Impact history to remove."
-                }
-            );
-        }
-    } else {
-        let removed = impact::reset(root);
-        if !quiet {
-            println!(
-                "{}",
-                if removed {
-                    "Removed this project's Fallow Impact history."
-                } else {
-                    "No Fallow Impact history for this project."
-                }
-            );
-        }
-    }
-    ExitCode::SUCCESS
-}
-
-fn render_impact_status(
-    root: &std::path::Path,
-    quiet: bool,
-    output: fallow_config::OutputFormat,
-) -> ExitCode {
-    let store = impact::load(root);
-    let report = impact::build_report(&store);
-    let is_human = matches!(output, fallow_config::OutputFormat::Human);
-    let rendered = match output {
-        fallow_config::OutputFormat::Json => impact::render_json(&report),
-        fallow_config::OutputFormat::Markdown => impact::render_markdown(&report),
-        fallow_config::OutputFormat::Human => impact::render_human(&report),
-        fallow_config::OutputFormat::Sarif
-        | fallow_config::OutputFormat::Compact
-        | fallow_config::OutputFormat::CodeClimate
-        | fallow_config::OutputFormat::PrCommentGithub
-        | fallow_config::OutputFormat::PrCommentGitlab
-        | fallow_config::OutputFormat::ReviewGithub
-        | fallow_config::OutputFormat::ReviewGitlab
-        | fallow_config::OutputFormat::Badge => {
-            return emit_known_failure(
-                "impact supports human, json, and markdown output",
-                2,
-                output,
-                telemetry::FailureReason::UnsupportedFormat,
-            );
-        }
-    };
-    println!("{rendered}");
-    // Human-only footer so a user can find / inspect / reset the store and see
-    // which key this project resolved to (the JSON shape stays clean and never
-    // leaks the absolute user-config path).
-    if is_human && !quiet {
-        println!("  Store key: {}", impact::resolved_project_key(root));
-        match impact::resolved_store_path(root) {
-            Some(path) => println!("  Store file: {}", path.display()),
-            None => println!("  Store file: (no user config dir resolved; not persisted)"),
-        }
-    }
-    ExitCode::SUCCESS
-}
-
-/// Render the cross-repo `fallow impact --all` roll-up. Reads the user config
-/// dir; never reads `--root`. Human output adds ONE store-dir discoverability
-/// line gated on `is_human && !quiet`; JSON/markdown stay path-free.
-fn render_impact_all(
-    quiet: bool,
-    output: fallow_config::OutputFormat,
-    sort: ImpactSortCli,
-    limit: Option<usize>,
-) -> ExitCode {
-    let report = impact::aggregate(sort.to_impact());
-    let is_human = matches!(output, fallow_config::OutputFormat::Human);
-    let rendered = match output {
-        fallow_config::OutputFormat::Json => impact::render_cross_repo_json(&report),
-        fallow_config::OutputFormat::Markdown => impact::render_cross_repo_markdown(&report),
-        fallow_config::OutputFormat::Human => impact::render_cross_repo_human(&report, limit),
-        fallow_config::OutputFormat::Sarif
-        | fallow_config::OutputFormat::Compact
-        | fallow_config::OutputFormat::CodeClimate
-        | fallow_config::OutputFormat::PrCommentGithub
-        | fallow_config::OutputFormat::PrCommentGitlab
-        | fallow_config::OutputFormat::ReviewGithub
-        | fallow_config::OutputFormat::ReviewGitlab
-        | fallow_config::OutputFormat::Badge => {
-            return emit_known_failure(
-                "impact --all supports human, json, and markdown output",
-                2,
-                output,
-                telemetry::FailureReason::UnsupportedFormat,
-            );
-        }
-    };
-    println!("{rendered}");
-    if is_human
-        && !quiet
-        && let Some(dir) = impact::store_dir()
-    {
-        println!("  Stores: {}", dir.display());
-    }
-    ExitCode::SUCCESS
-}
-
-fn telemetry_workflow_for_command(
-    command: Option<&Command>,
-    output: fallow_config::OutputFormat,
-) -> telemetry::Workflow {
-    match command {
-        None | Some(Command::Flags { .. } | Command::Watch { .. }) => {
-            telemetry::Workflow::CodeQualityReview
-        }
-        Some(Command::Check { .. }) => telemetry::Workflow::DeadCode,
-        Some(Command::Dupes { .. }) => telemetry::Workflow::Dupes,
-        Some(Command::Health { .. }) => telemetry::Workflow::Health,
-        Some(Command::Audit { .. } | Command::DecisionSurface { .. }) => telemetry::Workflow::Audit,
-        Some(Command::Ci { .. }) => match output {
-            fallow_config::OutputFormat::ReviewGitlab
-            | fallow_config::OutputFormat::PrCommentGitlab
-            | fallow_config::OutputFormat::CodeClimate => telemetry::Workflow::GitlabCi,
-            _ => telemetry::Workflow::GithubAction,
-        },
-        Some(Command::Coverage { .. }) => telemetry::Workflow::RuntimeCoverageSetup,
-        Some(Command::Impact { .. }) => telemetry::Workflow::Impact,
-        Some(Command::Security { .. }) => telemetry::Workflow::Security,
-        Some(Command::Fix { .. }) => telemetry::Workflow::Fix,
-        Some(Command::Explain { .. }) => telemetry::Workflow::Explain,
-        Some(
-            Command::Inspect { .. }
-            | Command::Trace { .. }
-            | Command::List { .. }
-            | Command::Workspaces
-            | Command::Schema,
-        ) => telemetry::Workflow::ProjectInventory,
-        Some(Command::License { .. }) => telemetry::Workflow::License,
-        Some(
-            Command::Init { .. }
-            | Command::Hooks { .. }
-            | Command::ConfigSchema
-            | Command::PluginSchema
-            | Command::RulePackSchema
-            | Command::Config { .. }
-            | Command::CiTemplate { .. }
-            | Command::Migrate { .. }
-            | Command::Telemetry { .. }
-            | Command::SetupHooks { .. },
-        ) => telemetry::Workflow::Setup,
-    }
-}
-
-fn run_hooks_command(
-    root: &std::path::Path,
-    subcommand: HooksCli,
-    output: fallow_config::OutputFormat,
-) -> ExitCode {
-    match subcommand {
-        HooksCli::Status => setup_hooks::run_hooks_status(root, output),
-        install @ HooksCli::Install { .. } => run_hooks_install(root, install, output),
-        uninstall @ HooksCli::Uninstall { .. } => run_hooks_uninstall(root, &uninstall, output),
-    }
-}
-
-/// Handle `fallow hooks install` for both the git and agent targets.
-fn run_hooks_install(
-    root: &std::path::Path,
-    install: HooksCli,
-    output: fallow_config::OutputFormat,
-) -> ExitCode {
-    let HooksCli::Install {
-        target,
-        branch,
-        agent,
-        dry_run,
-        force,
-        user,
-        gitignore_claude,
-    } = install
-    else {
-        unreachable!("hooks install handler only handles install commands");
-    };
-
-    match target {
-        HooksTargetArg::Git => {
-            if agent.is_some() || user || gitignore_claude {
-                return emit_error(
-                    "--agent, --user, and --gitignore-claude are only valid with `fallow hooks install --target agent`",
-                    2,
-                    output,
-                );
-            }
-            init::run_git_hooks_install(&init::GitHooksInstallOptions {
-                root,
-                branch: branch.as_deref(),
-                dry_run,
-                force,
-            })
-        }
-        HooksTargetArg::Agent => {
-            if branch.is_some() {
-                return emit_error(
-                    "--branch is only valid with `fallow hooks install --target git`",
-                    2,
-                    output,
-                );
-            }
-            setup_hooks::run_setup_hooks_with_label(
-                &setup_hooks::SetupHooksOptions {
-                    root,
-                    agent,
-                    dry_run,
-                    force,
-                    user,
-                    gitignore_claude,
-                    uninstall: false,
-                },
-                "fallow hooks install --target agent",
-            )
-        }
-    }
-}
-
-/// Handle `fallow hooks uninstall` for both the git and agent targets.
-fn run_hooks_uninstall(
-    root: &std::path::Path,
-    uninstall: &HooksCli,
-    output: fallow_config::OutputFormat,
-) -> ExitCode {
-    let HooksCli::Uninstall {
-        target,
-        agent,
-        dry_run,
-        force,
-        user,
-    } = *uninstall
-    else {
-        unreachable!("hooks uninstall handler only handles uninstall commands");
-    };
-
-    match target {
-        HooksTargetArg::Git => {
-            if agent.is_some() || user {
-                return emit_error(
-                    "--agent and --user are only valid with `fallow hooks uninstall --target agent`",
-                    2,
-                    output,
-                );
-            }
-            init::run_git_hooks_uninstall(&init::GitHooksUninstallOptions {
-                root,
-                dry_run,
-                force,
-            })
-        }
-        HooksTargetArg::Agent => setup_hooks::run_setup_hooks_with_label(
-            &setup_hooks::SetupHooksOptions {
-                root,
-                agent,
-                dry_run,
-                force,
-                user,
-                gitignore_claude: false,
-                uninstall: true,
-            },
-            "fallow hooks uninstall --target agent",
-        ),
-    }
 }
 
 fn map_license_subcommand(sub: LicenseCli) -> license::LicenseSubcommand {
@@ -6258,75 +4756,48 @@ mod tests {
     }
 
     #[test]
-    fn legacy_check_alias_detection_ignores_option_values() {
-        assert!(args_use_legacy_check_alias(vec![
-            "fallow".to_string(),
-            "check".to_string(),
-            "--summary".to_string(),
-        ]));
-        assert!(!args_use_legacy_check_alias(vec![
-            "fallow".to_string(),
-            "--root".to_string(),
-            "check".to_string(),
-            "dead-code".to_string(),
-        ]));
-        assert!(!args_use_legacy_check_alias(vec![
-            "fallow".to_string(),
-            "dead-code".to_string(),
-            "--file".to_string(),
-            "check".to_string(),
-        ]));
-    }
-
-    #[test]
     fn format_parsing_covers_all_variants() {
-        let parse = |s: &str| -> Option<Format> {
-            match s.to_lowercase().as_str() {
-                "json" => Some(Format::Json),
-                "human" => Some(Format::Human),
-                "sarif" => Some(Format::Sarif),
-                "compact" => Some(Format::Compact),
-                "markdown" | "md" => Some(Format::Markdown),
-                "codeclimate" | "gitlab-codequality" | "gitlab-code-quality" => {
-                    Some(Format::CodeClimate)
-                }
-                "pr-comment-github" => Some(Format::PrCommentGithub),
-                "pr-comment-gitlab" => Some(Format::PrCommentGitlab),
-                "review-github" => Some(Format::ReviewGithub),
-                "review-gitlab" => Some(Format::ReviewGitlab),
-                "badge" => Some(Format::Badge),
-                _ => None,
-            }
-        };
-        assert!(matches!(parse("json"), Some(Format::Json)));
-        assert!(matches!(parse("JSON"), Some(Format::Json)));
-        assert!(matches!(parse("human"), Some(Format::Human)));
-        assert!(matches!(parse("sarif"), Some(Format::Sarif)));
-        assert!(matches!(parse("compact"), Some(Format::Compact)));
-        assert!(matches!(parse("markdown"), Some(Format::Markdown)));
-        assert!(matches!(parse("md"), Some(Format::Markdown)));
-        assert!(matches!(parse("codeclimate"), Some(Format::CodeClimate)));
+        assert!(matches!(parse_format_arg("json"), Some(Format::Json)));
+        assert!(matches!(parse_format_arg("JSON"), Some(Format::Json)));
+        assert!(matches!(parse_format_arg("human"), Some(Format::Human)));
+        assert!(matches!(parse_format_arg("sarif"), Some(Format::Sarif)));
+        assert!(matches!(parse_format_arg("compact"), Some(Format::Compact)));
         assert!(matches!(
-            parse("gitlab-codequality"),
+            parse_format_arg("markdown"),
+            Some(Format::Markdown)
+        ));
+        assert!(matches!(parse_format_arg("md"), Some(Format::Markdown)));
+        assert!(matches!(
+            parse_format_arg("codeclimate"),
             Some(Format::CodeClimate)
         ));
         assert!(matches!(
-            parse("gitlab-code-quality"),
+            parse_format_arg("gitlab-codequality"),
             Some(Format::CodeClimate)
         ));
         assert!(matches!(
-            parse("pr-comment-github"),
+            parse_format_arg("gitlab-code-quality"),
+            Some(Format::CodeClimate)
+        ));
+        assert!(matches!(
+            parse_format_arg("pr-comment-github"),
             Some(Format::PrCommentGithub)
         ));
         assert!(matches!(
-            parse("pr-comment-gitlab"),
+            parse_format_arg("pr-comment-gitlab"),
             Some(Format::PrCommentGitlab)
         ));
-        assert!(matches!(parse("review-github"), Some(Format::ReviewGithub)));
-        assert!(matches!(parse("review-gitlab"), Some(Format::ReviewGitlab)));
-        assert!(matches!(parse("badge"), Some(Format::Badge)));
-        assert!(parse("xml").is_none());
-        assert!(parse("").is_none());
+        assert!(matches!(
+            parse_format_arg("review-github"),
+            Some(Format::ReviewGithub)
+        ));
+        assert!(matches!(
+            parse_format_arg("review-gitlab"),
+            Some(Format::ReviewGitlab)
+        ));
+        assert!(matches!(parse_format_arg("badge"), Some(Format::Badge)));
+        assert!(parse_format_arg("xml").is_none());
+        assert!(parse_format_arg("").is_none());
     }
 
     #[test]

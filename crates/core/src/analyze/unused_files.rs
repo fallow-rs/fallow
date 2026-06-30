@@ -25,7 +25,7 @@ use super::predicates::{
 /// import directly from the source files rather than through the barrel.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn find_unused_files(
     graph: &ModuleGraph,

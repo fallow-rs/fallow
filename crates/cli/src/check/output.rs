@@ -2,7 +2,7 @@ use std::io::{BufWriter, Write};
 use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_engine::graph::ModuleGraph;
+use fallow_engine::RetainedModuleGraph;
 use rustc_hash::FxHashSet;
 
 use super::TraceOptions;
@@ -10,7 +10,7 @@ use crate::{error::emit_error, report};
 
 /// Handle `--trace`, `--trace-file`, and `--trace-dependency` early returns.
 pub(super) fn handle_trace_output(
-    graph: &ModuleGraph,
+    graph: &RetainedModuleGraph,
     trace_opts: &TraceOptions,
     root: &std::path::Path,
     output: OutputFormat,
@@ -24,7 +24,7 @@ pub(super) fn handle_trace_output(
                 output,
             ));
         };
-        match fallow_engine::trace::trace_export(graph, root, file_path, export_name) {
+        match fallow_engine::trace_export(graph, root, file_path, export_name) {
             Some(trace) => {
                 report::print_export_trace(&trace, output);
                 return Some(ExitCode::SUCCESS);
@@ -40,7 +40,7 @@ pub(super) fn handle_trace_output(
     }
 
     if let Some(ref file_path) = trace_opts.trace_file {
-        match fallow_engine::trace::trace_file(graph, root, file_path) {
+        match fallow_engine::trace_file(graph, root, file_path) {
             Some(trace) => {
                 report::print_file_trace(&trace, output);
                 return Some(ExitCode::SUCCESS);
@@ -56,14 +56,13 @@ pub(super) fn handle_trace_output(
     }
 
     if let Some(ref pkg_name) = trace_opts.trace_dependency {
-        let trace =
-            fallow_engine::trace::trace_dependency(graph, root, pkg_name, script_used_packages);
+        let trace = fallow_engine::trace_dependency(graph, root, pkg_name, script_used_packages);
         report::print_dependency_trace(&trace, output);
         return Some(ExitCode::SUCCESS);
     }
 
     if let Some(ref file_path) = trace_opts.impact_closure {
-        match fallow_engine::trace::trace_impact_closure(graph, root, file_path) {
+        match fallow_engine::trace_impact_closure(graph, root, file_path) {
             Some(trace) => {
                 report::print_impact_closure_trace(&trace, output);
                 return Some(ExitCode::SUCCESS);
@@ -83,7 +82,7 @@ pub(super) fn handle_trace_output(
 
 /// Write SARIF output to a file if `--sarif-file` was specified.
 pub fn write_sarif_file(
-    results: &fallow_engine::results::AnalysisResults,
+    results: &fallow_types::results::AnalysisResults,
     config: &ResolvedConfig,
     sarif_path: &std::path::Path,
     quiet: bool,
@@ -124,14 +123,12 @@ pub fn write_sarif_file(
 /// Run duplication cross-reference and print combined findings.
 pub fn run_cross_reference(
     config: &ResolvedConfig,
-    unfiltered_results: &fallow_engine::results::AnalysisResults,
+    unfiltered_results: &fallow_types::results::AnalysisResults,
     quiet: bool,
 ) {
-    let files = fallow_engine::discover::discover_files_with_plugin_scopes(config);
-    let dupe_report =
-        fallow_engine::duplicates::find_duplicates(&config.root, &files, &config.duplicates);
-    let cross_ref =
-        fallow_engine::cross_reference::cross_reference(&dupe_report, unfiltered_results);
+    let files = fallow_engine::discover_files_with_plugin_scopes(config);
+    let dupe_report = fallow_engine::find_duplicates(&config.root, &files, &config.duplicates);
+    let cross_ref = fallow_engine::cross_reference(&dupe_report, unfiltered_results);
 
     if cross_ref.has_findings() {
         report::print_cross_reference_findings(&cross_ref, &config.root, quiet, config.output);
@@ -252,7 +249,7 @@ mod tests {
 
     #[test]
     fn write_sarif_file_creates_output() {
-        let results = fallow_engine::results::AnalysisResults::default();
+        let results = fallow_types::results::AnalysisResults::default();
         let config = make_resolved_config();
 
         let dir = tempfile::tempdir().expect("create temp dir");
@@ -269,7 +266,7 @@ mod tests {
 
     #[test]
     fn write_sarif_file_creates_parent_directories() {
-        let results = fallow_engine::results::AnalysisResults::default();
+        let results = fallow_types::results::AnalysisResults::default();
         let config = make_resolved_config();
 
         let dir = tempfile::tempdir().expect("create temp dir");

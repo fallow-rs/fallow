@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::fmt::Write;
 use std::path::Path;
 
-use fallow_engine::duplicates::DuplicationReport;
+use fallow_types::duplicates::DuplicationReport;
 use fallow_types::output_dead_code::*;
 use fallow_types::results::{AnalysisResults, UnusedExport, UnusedMember};
 

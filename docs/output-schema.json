@@ -4830,7 +4830,7 @@
         "token_count",
         "line_count"
       ],
-      "description": "A group of code clones -- the same (or normalized-equivalent) code appearing in multiple places."
+      "description": "A group of code clones -- the same (or normalized-equivalent) code appearing\nin multiple places."
     },
     "CloneInstance": {
       "type": "object",
@@ -4910,7 +4910,7 @@
         "total_duplicated_tokens",
         "suggestions"
       ],
-      "description": "A clone family: a set of clone groups that share the same file set.\n\nWhen multiple clone groups are all duplicated between the same set of files,\nthey form a family , indicating a deeper structural relationship that should\nbe refactored together rather than group-by-group."
+      "description": "A clone family: a set of clone groups that share the same file set.\n\nWhen multiple clone groups are all duplicated between the same set of files,\nthey form a family, indicating a deeper structural relationship that should\nbe refactored together rather than group-by-group."
     },
     "RefactoringSuggestion": {
       "type": "object",
@@ -17284,89 +17284,253 @@
       ],
       "description": "Provenance of a runtime-coverage report (fallow-rs/fallow-cloud#319), mirroring\nthe cloud runtime-context `provenance` block so the local-capture and cloud\nsurfaces present one portable shape. F4: provenance is context only; it never\ngates a verdict or confidence."
     },
-    "StylingHealth": {
+    "FeatureFlagFinding": {
       "type": "object",
       "properties": {
-        "formula_version": {
-          "type": "integer"
-        },
-        "score": {
-          "type": "number"
-        },
-        "grade": {
+        "path": {
           "type": "string"
         },
-        "penalties": {
-          "$ref": "#/definitions/StylingHealthPenalties"
+        "flag_name": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/FeatureFlagKind"
         },
         "confidence": {
-          "description": "How much to trust the grade. `Low` in either of two cases, `High`\notherwise (see `confidence_reason` for which): (1) the analyzed CSS surface\nis too thin for the declaration-normalized penalty rubric to be reliable\n(the gradeable, non-atomic declaration count is below 50); or (2) the\nproject's CSS is predominantly flat compile-time-atomic CSS-in-JS\n(StyleX/Panda), whose structure is not assessable, so the grade reflects\ntoken hygiene only regardless of declaration count. This is descriptive\nmetadata that NEVER feeds the score: `score`/`grade`/`penalties` are\nbyte-identical whether confidence is high or low. Gate on this `confidence`\nflag, which is the complete signal; do NOT reconstruct it from\n`total_declarations`, since that summary count includes atomic declarations\nthe grade excludes (a large all-atomic project is `Low` despite a high\n`total_declarations`).",
-          "$ref": "#/definitions/StylingHealthConfidence"
+          "$ref": "#/definitions/FeatureFlagConfidence"
         },
-        "confidence_reason": {
+        "line": {
+          "type": "integer"
+        },
+        "col": {
+          "type": "integer"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FeatureFlagAction"
+          }
+        },
+        "sdk_name": {
           "type": [
             "string",
             "null"
-          ],
-          "description": "Human-readable reason the grade is low-confidence: either the declaration\nand stylesheet counts a thin grade was computed from, or that structure is\nnot assessable for compile-time-atomic CSS-in-JS. `None` when confidence is\n`High`. Prose, not a stable machine field: gate on `confidence`, not on\nthis string."
+          ]
+        },
+        "dead_code_overlap": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FeatureFlagDeadCodeOverlap"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "formula_version",
-        "score",
-        "grade",
-        "penalties",
-        "confidence"
+        "path",
+        "flag_name",
+        "kind",
+        "confidence",
+        "line",
+        "col",
+        "actions"
       ],
-      "description": "Project-level styling-health score: a SECOND health axis computed purely from\nthe structural CSS analytics (`CssAnalyticsReport`), orthogonal to the JS/TS\ncode-health [`HealthScore`]. Surfaced only alongside the `--css` analytics, so\na plain `fallow health` run is byte-unchanged. The code score and grade stay\nuntouched: styling health is additive, never folded into the code score.\n\nLike [`HealthScore`], the score starts at 100 and subtracts capped per-category\npenalties; the grade reuses the shared [`letter_grade`] thresholds verbatim\n(A>=85, B>=70, C>=55, D>=40, F<40), so the two axes are read on one scale."
+      "description": "One feature flag finding in JSON output."
     },
-    "StylingHealthPenalties": {
+    "FeatureFlagKind": {
+      "type": "string",
+      "enum": [
+        "environment_variable",
+        "sdk_call",
+        "config_object"
+      ],
+      "description": "Feature flag kind values emitted in JSON."
+    },
+    "FeatureFlagConfidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "description": "Feature flag confidence values emitted in JSON."
+    },
+    "FeatureFlagAction": {
       "type": "object",
       "properties": {
-        "duplication": {
-          "type": "number",
-          "description": "Copy-paste declaration blocks (`duplicate_declaration_blocks`), scaled by\ntotal removable declarations. Capped at 20pt."
+        "type": {
+          "$ref": "#/definitions/FeatureFlagActionType"
         },
-        "dead_surface": {
-          "type": "number",
-          "description": "Dead styling surface, two independently-normalized terms summed and capped\nat 20pt: (a) unused `@theme` tokens as a share of the total `@theme` token\npopulation (size-independent, so a declaration-sparse Tailwind project is\nnot penalized for a few dead tokens); plus (b) the other dead entities\n(unreferenced classes, unused `@property`/`@layer` at-rules, dead\n`@font-face` families) as a share of `total_declarations`."
+        "auto_fixable": {
+          "type": "boolean"
         },
-        "broken_references": {
-          "type": "number",
-          "description": "Broken references: markup classes one edit from a defined class\n(`unresolved_class_references`) and animations referencing a `@keyframes`\ndefined nowhere (`undefined_keyframes`). Capped at 15pt."
+        "description": {
+          "type": "string"
         },
-        "token_erosion": {
-          "type": "number",
-          "description": "Design-token erosion: mixed `font-size` units (`font_size_unit_mix`) and\nTailwind arbitrary-value bypasses (`tailwind_arbitrary_values`). Capped at\n10pt."
-        },
-        "structural": {
-          "type": "number",
-          "description": "Structural smells from the summary aggregates: `!important` density and\ndeep style-rule nesting. Capped at 10pt."
+        "comment": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "duplication",
-        "dead_surface",
-        "broken_references",
-        "token_erosion",
-        "structural"
+        "type",
+        "auto_fixable",
+        "description"
       ],
-      "description": "Per-category penalty breakdown for the styling-health score. Each field is the\nnumber of points subtracted from a starting 100 for one CSS signal family,\nalready capped at its category ceiling. A `0.0` field means \"the signal was\nevaluated and clean\"; the whole struct is only ever built when CSS analytics\nwere produced, so there is no \"missing pipeline\" ambiguity to model with\n`Option` here (the parent `StylingHealth` is itself `Option` on the report)."
+      "description": "Per-finding action emitted for feature flag findings."
     },
-    "StylingHealthConfidence": {
-      "oneOf": [
-        {
-          "type": "string",
-          "const": "high",
-          "description": "The analyzed CSS surface is large enough, and structurally assessable\nenough, for the grade to be reliable."
-        },
-        {
-          "type": "string",
-          "const": "low",
-          "description": "The grade is indicative rather than authoritative, for one of two reasons\n(named in `confidence_reason`): a thin authored-CSS surface (little to\nmeasure), or predominantly flat compile-time-atomic CSS-in-JS\n(StyleX/Panda) whose structure is not assessable. NOT a signal that\nfallow's analysis failed."
-        }
+    "FeatureFlagActionType": {
+      "type": "string",
+      "enum": [
+        "investigate-flag",
+        "suppress-line"
       ],
-      "description": "Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier\n`high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON\nPURPOSE: styling confidence is binary (the grade is either reliable for the\nanalyzed surface or it is not), not three distinct evidence tiers, so a\nnever-emitted `Medium` would be dead surface. Serializes lowercase (`\"high\"` /\n`\"low\"`), matching the sibling confidence enums' vocabulary."
+      "description": "Feature flag action discriminants."
+    },
+    "FeatureFlagDeadCodeOverlap": {
+      "type": "object",
+      "properties": {
+        "guarded_lines": {
+          "type": "integer"
+        },
+        "dead_export_count": {
+          "type": "integer"
+        },
+        "dead_exports": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "guarded_lines",
+        "dead_export_count",
+        "dead_exports"
+      ],
+      "description": "Dead-code overlap block attached when a flag guards unused exports."
+    },
+    "FeatureFlagsMeta": {
+      "type": "object",
+      "properties": {
+        "feature_flags": {
+          "$ref": "#/definitions/FeatureFlagsMetaDetails"
+        }
+      },
+      "required": [
+        "feature_flags"
+      ],
+      "description": "`_meta.feature_flags` details emitted with `--explain`."
+    },
+    "FeatureFlagsMetaDetails": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "kinds": {
+          "$ref": "#/definitions/FeatureFlagsKindMeta"
+        },
+        "confidence": {
+          "$ref": "#/definitions/FeatureFlagsConfidenceMeta"
+        },
+        "docs": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "kinds",
+        "confidence",
+        "docs"
+      ],
+      "description": "Feature flag explanatory metadata."
+    },
+    "FeatureFlagsKindMeta": {
+      "type": "object",
+      "properties": {
+        "environment_variable": {
+          "type": "string"
+        },
+        "sdk_call": {
+          "type": "string"
+        },
+        "config_object": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment_variable",
+        "sdk_call",
+        "config_object"
+      ],
+      "description": "Feature flag kind explanations."
+    },
+    "FeatureFlagsConfidenceMeta": {
+      "type": "object",
+      "properties": {
+        "high": {
+          "type": "string"
+        },
+        "medium": {
+          "type": "string"
+        },
+        "low": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "description": "Feature flag confidence explanations."
+    },
+    "FeatureFlagsOutput": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "$ref": "#/definitions/SchemaVersion"
+        },
+        "version": {
+          "$ref": "#/definitions/ToolVersion"
+        },
+        "elapsed_ms": {
+          "$ref": "#/definitions/ElapsedMs"
+        },
+        "feature_flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FeatureFlagFinding"
+          }
+        },
+        "total_flags": {
+          "type": "integer"
+        },
+        "_meta": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FeatureFlagsMeta"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "version",
+        "elapsed_ms",
+        "feature_flags",
+        "total_flags"
+      ],
+      "title": "fallow flags --format json",
+      "description": "Envelope emitted by `fallow flags --format json`."
     },
     "TokenConsumers": {
       "type": "object",
@@ -17456,6 +17620,90 @@
         }
       ],
       "description": "The surface through which a Tailwind v4 `@theme` token is consumed."
+    },
+    "StylingHealth": {
+      "type": "object",
+      "properties": {
+        "formula_version": {
+          "type": "integer"
+        },
+        "score": {
+          "type": "number"
+        },
+        "grade": {
+          "type": "string"
+        },
+        "penalties": {
+          "$ref": "#/definitions/StylingHealthPenalties"
+        },
+        "confidence": {
+          "description": "How much to trust the grade. `Low` in either of two cases, `High`\notherwise (see `confidence_reason` for which): (1) the analyzed CSS surface\nis too thin for the declaration-normalized penalty rubric to be reliable\n(the gradeable, non-atomic declaration count is below 50); or (2) the\nproject's CSS is predominantly flat compile-time-atomic CSS-in-JS\n(StyleX/Panda), whose structure is not assessable, so the grade reflects\ntoken hygiene only regardless of declaration count. This is descriptive\nmetadata that NEVER feeds the score: `score`/`grade`/`penalties` are\nbyte-identical whether confidence is high or low. Gate on this `confidence`\nflag, which is the complete signal; do NOT reconstruct it from\n`total_declarations`, since that summary count includes atomic declarations\nthe grade excludes (a large all-atomic project is `Low` despite a high\n`total_declarations`).",
+          "$ref": "#/definitions/StylingHealthConfidence"
+        },
+        "confidence_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Human-readable reason the grade is low-confidence: either the declaration\nand stylesheet counts a thin grade was computed from, or that structure is\nnot assessable for compile-time-atomic CSS-in-JS. `None` when confidence is\n`High`. Prose, not a stable machine field: gate on `confidence`, not on\nthis string."
+        }
+      },
+      "required": [
+        "formula_version",
+        "score",
+        "grade",
+        "penalties",
+        "confidence"
+      ],
+      "description": "Project-level styling-health score: a SECOND health axis computed purely from\nthe structural CSS analytics (`CssAnalyticsReport`), orthogonal to the JS/TS\ncode-health [`HealthScore`]. Surfaced only alongside the `--css` analytics, so\na plain `fallow health` run is byte-unchanged. The code score and grade stay\nuntouched: styling health is additive, never folded into the code score.\n\nLike [`HealthScore`], the score starts at 100 and subtracts capped per-category\npenalties; the grade reuses the shared [`letter_grade`] thresholds verbatim\n(A>=85, B>=70, C>=55, D>=40, F<40), so the two axes are read on one scale."
+    },
+    "StylingHealthPenalties": {
+      "type": "object",
+      "properties": {
+        "duplication": {
+          "type": "number",
+          "description": "Copy-paste declaration blocks (`duplicate_declaration_blocks`), scaled by\ntotal removable declarations. Capped at 20pt."
+        },
+        "dead_surface": {
+          "type": "number",
+          "description": "Dead styling surface, two independently-normalized terms summed and capped\nat 20pt: (a) unused `@theme` tokens as a share of the total `@theme` token\npopulation (size-independent, so a declaration-sparse Tailwind project is\nnot penalized for a few dead tokens); plus (b) the other dead entities\n(unreferenced classes, unused `@property`/`@layer` at-rules, dead\n`@font-face` families) as a share of `total_declarations`."
+        },
+        "broken_references": {
+          "type": "number",
+          "description": "Broken references: markup classes one edit from a defined class\n(`unresolved_class_references`) and animations referencing a `@keyframes`\ndefined nowhere (`undefined_keyframes`). Capped at 15pt."
+        },
+        "token_erosion": {
+          "type": "number",
+          "description": "Design-token erosion: mixed `font-size` units (`font_size_unit_mix`),\nTailwind arbitrary-value bypasses (`tailwind_arbitrary_values`), and\ndistinct HARDCODED `box-shadow`/`border-radius`/`line-height` values above\nper-axis baselines (the v3 value-sprawl drift sub-term; `var(--*)`-\nreferenced values are not counted). Capped at 10pt."
+        },
+        "structural": {
+          "type": "number",
+          "description": "Structural smells from the summary aggregates: `!important` density and\ndeep style-rule nesting. Capped at 10pt."
+        }
+      },
+      "required": [
+        "duplication",
+        "dead_surface",
+        "broken_references",
+        "token_erosion",
+        "structural"
+      ],
+      "description": "Per-category penalty breakdown for the styling-health score. Each field is the\nnumber of points subtracted from a starting 100 for one CSS signal family,\nalready capped at its category ceiling. A `0.0` field means \"the signal was\nevaluated and clean\"; the whole struct is only ever built when CSS analytics\nwere produced, so there is no \"missing pipeline\" ambiguity to model with\n`Option` here (the parent `StylingHealth` is itself `Option` on the report)."
+    },
+    "StylingHealthConfidence": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "high",
+          "description": "The analyzed CSS surface is large enough, and structurally assessable\nenough, for the grade to be reliable."
+        },
+        {
+          "type": "string",
+          "const": "low",
+          "description": "The grade is indicative rather than authoritative, for one of two reasons\n(named in `confidence_reason`): a thin authored-CSS surface (little to\nmeasure), or predominantly flat compile-time-atomic CSS-in-JS\n(StyleX/Panda) whose structure is not assessable. NOT a signal that\nfallow's analysis failed."
+        }
+      ],
+      "description": "Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier\n`high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON\nPURPOSE: styling confidence is binary (the grade is either reliable for the\nanalyzed surface or it is not), not three distinct evidence tiers, so a\nnever-emitted `Medium` would be dead surface. Serializes lowercase (`\"high\"` /\n`\"low\"`), matching the sibling confidence enums' vocabulary."
     }
   }
 }

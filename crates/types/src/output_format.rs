@@ -1,9 +1,8 @@
 /// Output format for fallow results.
 ///
-/// This is command-line metadata, not stored in config files. Keeping it in
-/// `fallow-output` lets config, CLI, MCP, and future API layers agree on the
-/// same output contract without making `fallow-config` own presentation
-/// concepts.
+/// This is command-line and integration metadata, not stored in config files.
+/// Keeping it in `fallow-types` lets config, output, CLI, MCP, and API layers
+/// agree on the same contract without creating a config-to-output dependency.
 #[derive(Debug, Default, Clone, Copy)]
 pub enum OutputFormat {
     /// Human-readable terminal output with source context.

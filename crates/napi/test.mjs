@@ -11,6 +11,7 @@ import {
   detectCircularDependencies,
   detectDeadCode,
   detectDuplication,
+  detectFeatureFlags,
 } from "./index.js";
 
 function makeFixture() {
@@ -52,6 +53,10 @@ import './cycle-a';
 import './domain/model';
 
 export function run() {
+  if (process.env.FEATURE_ALPHA) {
+    console.log('flag on');
+  }
+
   return usedThing();
 }
 
@@ -154,6 +159,7 @@ export function duplicatedTwo(items: number[]) {
     cwd: root,
     stdio: "ignore",
   });
+  execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: root, stdio: "ignore" });
   execFileSync("git", ["add", "."], { cwd: root, stdio: "ignore" });
   execFileSync("git", ["commit", "-m", "fixture"], { cwd: root, stdio: "ignore" });
 
@@ -235,6 +241,15 @@ writeFileSync(
   });
   assert.ok(report.clone_groups.length >= 1);
   console.log("  [PASS] detectDuplication");
+}
+
+{
+  const report = await detectFeatureFlags({ root, top: 1 });
+  assert.equal(report.kind, "feature-flags");
+  assert.equal(report.total_flags, 1);
+  assert.equal(report.feature_flags.length, 1);
+  assert.equal(report.feature_flags[0].flag_name, "FEATURE_ALPHA");
+  console.log("  [PASS] detectFeatureFlags");
 }
 
 {

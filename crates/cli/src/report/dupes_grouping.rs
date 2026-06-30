@@ -14,7 +14,7 @@
 use std::path::Path;
 
 use fallow_api::DuplicationGrouping;
-use fallow_engine::duplicates::{CloneGroup, DuplicationReport};
+use fallow_types::duplicates::{CloneGroup, DuplicationReport};
 
 use super::grouping::OwnershipResolver;
 use super::relative_path;
@@ -49,7 +49,7 @@ pub fn build_duplication_grouping(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_engine::duplicates::{CloneInstance, DuplicationStats};
+    use fallow_types::duplicates::{CloneInstance, DuplicationStats};
 
     use super::*;
     use crate::codeowners::{CodeOwners, UNOWNED_LABEL};

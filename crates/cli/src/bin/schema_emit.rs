@@ -32,10 +32,6 @@ use fallow_api::{
     SecurityGate, SecurityGateMode, SecurityOutput, SecuritySummaryOutput, WorkspacesOutput,
 };
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
-use fallow_engine::duplicates::{
-    CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
-    RefactoringKind, RefactoringSuggestion,
-};
 use fallow_output::{
     AcceptedJudgment, AgentSchema, AuditCommand, BoundariesListRule, BoundariesListZone,
     ChangeAnchor, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, ComplexityViolation,
@@ -76,6 +72,10 @@ use fallow_output::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,
     CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
     CodeClimateOutput, CodeClimateSeverity,
+};
+use fallow_types::duplicates::{
+    CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
+    RefactoringKind, RefactoringSuggestion,
 };
 use fallow_types::envelope::{
     AuditIntroduced, BaselineCategoryDelta, BaselineDeltas, BaselineMatch, CheckSummary, ElapsedMs,
@@ -793,10 +793,10 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<InspectSectionStatus>();
     let _ = generator.subschema_for::<InspectEvidenceScope>();
     // Symbol-level call chain (`fallow trace`, `FallowOutput::Trace`).
-    let _ = generator.subschema_for::<fallow_engine::trace_chain::SymbolChainTrace>();
-    let _ = generator.subschema_for::<fallow_engine::trace_chain::ChainHop>();
-    let _ = generator.subschema_for::<fallow_engine::trace_chain::UnresolvedCallee>();
-    let _ = generator.subschema_for::<fallow_engine::trace_chain::UnresolvedReason>();
+    let _ = generator.subschema_for::<fallow_types::trace_chain::SymbolChainTrace>();
+    let _ = generator.subschema_for::<fallow_types::trace_chain::ChainHop>();
+    let _ = generator.subschema_for::<fallow_types::trace_chain::UnresolvedCallee>();
+    let _ = generator.subschema_for::<fallow_types::trace_chain::UnresolvedReason>();
     let _ = generator.subschema_for::<CodeClimateOutput>();
     let _ = generator.subschema_for::<CodeClimateIssue>();
     let _ = generator.subschema_for::<CodeClimateIssueKind>();
@@ -1323,6 +1323,7 @@ mod drift_tests {
             ("SecurityBlindSpots", "SecurityBlindSpotsOutput"),
             ("Check", "CheckOutput"),
             ("Combined", "CombinedOutput"),
+            ("FeatureFlags", "FeatureFlagsOutput"),
             ("AuditBrief", "ReviewBriefOutput"),
             ("DecisionSurface", "DecisionSurfaceOutput"),
             ("WalkthroughGuide", "WalkthroughGuide"),
@@ -1356,6 +1357,7 @@ mod drift_tests {
                 FallowOutput::SecurityBlindSpots(_) => "SecurityBlindSpots",
                 FallowOutput::Check(_) => "Check",
                 FallowOutput::Combined(_) => "Combined",
+                FallowOutput::FeatureFlags(_) => "FeatureFlags",
                 FallowOutput::AuditBrief(_) => "AuditBrief",
                 FallowOutput::DecisionSurface(_) => "DecisionSurface",
                 FallowOutput::WalkthroughGuide(_) => "WalkthroughGuide",

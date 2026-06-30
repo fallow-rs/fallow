@@ -1,11 +1,10 @@
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
-use fallow_engine::{discover, plugins};
 
 use crate::report::format_display_path;
 use crate::runtime_support::{LoadConfigArgs, load_config};
-use fallow_api::{ListJsonEnvelope, ListJsonOutputInput};
+use fallow_api::{BoundaryData, ListJsonEnvelope, ListJsonOutputInput};
 use fallow_output::WorkspaceInfo;
 
 pub struct ListOptions<'a> {
@@ -26,9 +25,9 @@ pub struct ListOptions<'a> {
 /// JSON / human renderers.
 struct ListData {
     show_all: bool,
-    plugin_result: Option<plugins::AggregatedPluginResult>,
-    discovered: Option<Vec<discover::DiscoveredFile>>,
-    entry_points: Option<Vec<discover::EntryPoint>>,
+    plugin_result: Option<fallow_engine::AggregatedPluginResult>,
+    discovered: Option<Vec<fallow_engine::DiscoveredFile>>,
+    entry_points: Option<Vec<fallow_engine::EntryPoint>>,
     boundary_data: Option<BoundaryData>,
     workspace_data: Option<WorkspaceData>,
 }
@@ -90,7 +89,7 @@ fn collect_list_data(
     let need_plugin_result = opts.plugins || opts.entry_points || show_all;
     let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
     let discovered = if need_files || need_plugin_result {
-        Some(discover::discover_files_with_plugin_scopes(config))
+        Some(fallow_engine::discover_files_with_plugin_scopes(config))
     } else {
         None
     };
@@ -106,7 +105,10 @@ fn collect_list_data(
     );
 
     let boundary_data = if opts.boundaries {
-        Some(compute_boundary_data(config, discovered.as_deref()))
+        Some(fallow_api::compute_boundary_data(
+            config,
+            discovered.as_deref(),
+        ))
     } else {
         None
     };
@@ -127,21 +129,21 @@ fn collect_list_entry_points(
     opts: &ListOptions<'_>,
     config: &fallow_config::ResolvedConfig,
     show_all: bool,
-    discovered: Option<&[discover::DiscoveredFile]>,
-    plugin_result: Option<&plugins::AggregatedPluginResult>,
-) -> Option<Vec<discover::EntryPoint>> {
+    discovered: Option<&[fallow_engine::DiscoveredFile]>,
+    plugin_result: Option<&fallow_engine::AggregatedPluginResult>,
+) -> Option<Vec<fallow_engine::EntryPoint>> {
     if !(opts.entry_points || show_all) {
         return None;
     }
     let disc = discovered?;
-    let mut entries = discover::discover_entry_points(config, disc);
+    let mut entries = fallow_engine::discover_entry_points(config, disc);
     let workspaces = fallow_config::discover_workspaces(opts.root);
     for ws in &workspaces {
-        let ws_entries = discover::discover_workspace_entry_points(&ws.root, config, disc);
+        let ws_entries = fallow_engine::discover_workspace_entry_points(&ws.root, config, disc);
         entries.extend(ws_entries);
     }
     if let Some(pr) = plugin_result {
-        let plugin_entries = discover::discover_plugin_entry_points(pr, config, disc);
+        let plugin_entries = fallow_engine::discover_plugin_entry_points(pr, config, disc);
         entries.extend(plugin_entries);
     }
     Some(entries)
@@ -220,8 +222,8 @@ fn collect_plugin_result(
     opts: &ListOptions<'_>,
     config: &fallow_config::ResolvedConfig,
     show_all: bool,
-    discovered: Option<&[discover::DiscoveredFile]>,
-) -> Result<Option<plugins::AggregatedPluginResult>, ExitCode> {
+    discovered: Option<&[fallow_engine::DiscoveredFile]>,
+) -> Result<Option<fallow_engine::AggregatedPluginResult>, ExitCode> {
     if !(opts.plugins || opts.entry_points || show_all) {
         return Ok(None);
     }
@@ -229,12 +231,12 @@ fn collect_plugin_result(
     let disc = match discovered {
         Some(discovered) => discovered,
         None => {
-            fallback_discovered = discover::discover_files_with_plugin_scopes(config);
+            fallback_discovered = fallow_engine::discover_files_with_plugin_scopes(config);
             &fallback_discovered
         }
     };
     let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
-    let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
+    let registry = fallow_engine::PluginRegistry::new(config.external_plugins.clone());
     let mut result = run_package_plugins(
         &registry,
         &opts.root.join("package.json"),
@@ -248,12 +250,12 @@ fn collect_plugin_result(
 }
 
 fn run_package_plugins(
-    registry: &plugins::PluginRegistry,
+    registry: &fallow_engine::PluginRegistry,
     package_path: &std::path::Path,
     root: &std::path::Path,
     file_paths: &[std::path::PathBuf],
     output: OutputFormat,
-) -> Result<Option<plugins::AggregatedPluginResult>, ExitCode> {
+) -> Result<Option<fallow_engine::AggregatedPluginResult>, ExitCode> {
     let Ok(pkg) = fallow_config::PackageJson::load(package_path) else {
         return Ok(None);
     };
@@ -261,16 +263,16 @@ fn run_package_plugins(
         .try_run(&pkg, root, file_paths)
         .map(Some)
         .map_err(|errors| {
-            let message = plugins::registry::format_plugin_regex_errors(&errors);
+            let message = fallow_engine::format_plugin_regex_errors(&errors);
             crate::error::emit_error(&message, 2, output)
         })
 }
 
 fn merge_workspace_plugins(
     opts: &ListOptions<'_>,
-    registry: &plugins::PluginRegistry,
+    registry: &fallow_engine::PluginRegistry,
     file_paths: &[std::path::PathBuf],
-    result: &mut plugins::AggregatedPluginResult,
+    result: &mut fallow_engine::AggregatedPluginResult,
 ) -> Result<(), ExitCode> {
     for ws in &fallow_config::discover_workspaces(opts.root) {
         let Some(ws_result) = run_package_plugins(
@@ -283,11 +285,7 @@ fn merge_workspace_plugins(
         else {
             continue;
         };
-        for plugin_name in &ws_result.active_plugins {
-            if !result.active_plugins.contains(plugin_name) {
-                result.active_plugins.push(plugin_name.clone());
-            }
-        }
+        result.merge_active_plugins_from(&ws_result);
     }
     Ok(())
 }
@@ -296,9 +294,9 @@ fn merge_workspace_plugins(
 struct ListJsonInput<'a> {
     opts: &'a ListOptions<'a>,
     show_all: bool,
-    plugin_result: Option<&'a plugins::AggregatedPluginResult>,
-    discovered: Option<&'a [discover::DiscoveredFile]>,
-    entry_points: Option<&'a [discover::EntryPoint]>,
+    plugin_result: Option<&'a fallow_engine::AggregatedPluginResult>,
+    discovered: Option<&'a [fallow_engine::DiscoveredFile]>,
+    entry_points: Option<&'a [fallow_engine::EntryPoint]>,
     boundary_data: Option<&'a BoundaryData>,
     workspace_data: Option<&'a WorkspaceData>,
 }
@@ -353,7 +351,7 @@ fn build_list_json_output_input(
     let plugins = if opts.plugins || show_all {
         input
             .plugin_result
-            .map(|plugin_result| plugin_result.active_plugins.clone())
+            .map(|plugin_result| plugin_result.active_plugins().to_vec())
     } else {
         None
     };
@@ -383,7 +381,7 @@ fn build_list_json_output_input(
         plugins,
         files,
         entry_points,
-        boundaries: input.boundary_data.map(boundary_data_to_output),
+        boundaries: input.boundary_data.map(fallow_api::boundary_data_to_output),
         workspaces: input
             .workspace_data
             .map(|workspaces| workspace_data_to_output(opts.root, workspaces)),
@@ -417,9 +415,9 @@ fn workspace_data_to_output(
 struct ListHumanInput<'a> {
     opts: &'a ListOptions<'a>,
     show_all: bool,
-    plugin_result: Option<&'a plugins::AggregatedPluginResult>,
-    discovered: Option<&'a [discover::DiscoveredFile]>,
-    entry_points: Option<&'a [discover::EntryPoint]>,
+    plugin_result: Option<&'a fallow_engine::AggregatedPluginResult>,
+    discovered: Option<&'a [fallow_engine::DiscoveredFile]>,
+    entry_points: Option<&'a [fallow_engine::EntryPoint]>,
     boundary_data: Option<&'a BoundaryData>,
     workspace_data: Option<&'a WorkspaceData>,
 }
@@ -436,7 +434,7 @@ fn print_list_human(input: &ListHumanInput<'_>) {
         && let Some(pr) = plugin_result
     {
         eprintln!("Active plugins:");
-        for name in &pr.active_plugins {
+        for name in pr.active_plugins() {
             eprintln!("  - {name}");
         }
     }
@@ -521,255 +519,11 @@ struct WorkspaceData {
     diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 }
 
-struct BoundaryData {
-    zones: Vec<ZoneInfo>,
-    rules: Vec<RuleInfo>,
-    logical_groups: Vec<LogicalGroupInfo>,
-    is_empty: bool,
-}
-
-struct ZoneInfo {
-    name: String,
-    patterns: Vec<String>,
-    file_count: usize,
-}
-
-struct RuleInfo {
-    from: String,
-    allow: Vec<String>,
-}
-
-/// View-model mirror of [`fallow_config::LogicalGroup`] with the summed
-/// `file_count` derived from `zones[]`. The config-layer type stops at
-/// "what did the user write?"; this struct adds the analytical view "how
-/// many files does the group reach?" so the JSON consumer (Sankey
-/// renderer, dashboard, agent tooling) does not have to re-aggregate.
-struct LogicalGroupInfo {
-    name: String,
-    children: Vec<String>,
-    auto_discover: Vec<String>,
-    authored_rule: Option<fallow_config::AuthoredRule>,
-    fallback_zone: Option<String>,
-    source_zone_index: usize,
-    status: fallow_config::LogicalGroupStatus,
-    /// Sum of `file_count` across `children` PLUS the fallback zone's
-    /// `file_count` when present. The two halves are kept separately in
-    /// [`Self::child_file_count`] and [`Self::fallback_file_count`] so the
-    /// human renderer can show the split when a fallback exists.
-    file_count: usize,
-    /// Subtotal: sum of `file_count` across `children` only. Equals
-    /// [`Self::file_count`] when there is no fallback zone.
-    child_file_count: usize,
-    /// Subtotal: `file_count` of the `fallback_zone`. `0` when there is
-    /// no fallback zone.
-    fallback_file_count: usize,
-    /// Parent zone indices merged into this group when the user declared
-    /// the same parent name twice. Mirrors
-    /// [`fallow_config::LogicalGroup::merged_from`].
-    merged_from: Option<Vec<usize>>,
-    /// Parent zone's `root` (subtree scope) as the user authored it.
-    /// Mirrors [`fallow_config::LogicalGroup::original_zone_root`].
-    original_zone_root: Option<String>,
-    /// Parallel to `children`: source path indices. Empty when only one
-    /// `auto_discover` path was authored. Mirrors
-    /// [`fallow_config::LogicalGroup::child_source_indices`].
-    child_source_indices: Vec<usize>,
-}
-
-fn compute_boundary_data(
-    config: &fallow_config::ResolvedConfig,
-    discovered: Option<&[discover::DiscoveredFile]>,
-) -> BoundaryData {
-    let boundaries = &config.boundaries;
-
-    if boundaries.is_empty() {
-        return BoundaryData {
-            zones: vec![],
-            rules: vec![],
-            logical_groups: vec![],
-            is_empty: true,
-        };
-    }
-
-    let zones = build_boundary_zones(config, discovered);
-    let rules = build_boundary_rules(boundaries);
-    let logical_groups = build_logical_groups(boundaries, &zones);
-
-    BoundaryData {
-        zones,
-        rules,
-        logical_groups,
-        is_empty: false,
-    }
-}
-
-fn build_boundary_zones(
-    config: &fallow_config::ResolvedConfig,
-    discovered: Option<&[discover::DiscoveredFile]>,
-) -> Vec<ZoneInfo> {
-    config
-        .boundaries
-        .zones
-        .iter()
-        .map(|zone| ZoneInfo {
-            name: zone.name.clone(),
-            patterns: zone.matchers.iter().map(|m| m.glob().to_string()).collect(),
-            file_count: count_boundary_zone_files(config, discovered, &zone.name),
-        })
-        .collect()
-}
-
-fn count_boundary_zone_files(
-    config: &fallow_config::ResolvedConfig,
-    discovered: Option<&[discover::DiscoveredFile]>,
-    zone_name: &str,
-) -> usize {
-    discovered.map_or(0, |files| {
-        files
-            .iter()
-            .filter(|f| {
-                let rel = f
-                    .path
-                    .strip_prefix(&config.root)
-                    .ok()
-                    .map(|p| p.to_string_lossy().replace('\\', "/"));
-                rel.is_some_and(|p| config.boundaries.classify_zone(&p) == Some(zone_name))
-            })
-            .count()
-    })
-}
-
-fn build_boundary_rules(boundaries: &fallow_config::ResolvedBoundaryConfig) -> Vec<RuleInfo> {
-    boundaries
-        .rules
-        .iter()
-        .map(|rule| RuleInfo {
-            from: rule.from_zone.clone(),
-            allow: rule.allowed_zones.clone(),
-        })
-        .collect()
-}
-
-fn build_logical_groups(
-    boundaries: &fallow_config::ResolvedBoundaryConfig,
-    zones: &[ZoneInfo],
-) -> Vec<LogicalGroupInfo> {
-    let zone_count_by_name: rustc_hash::FxHashMap<&str, usize> = zones
-        .iter()
-        .map(|zone| (zone.name.as_str(), zone.file_count))
-        .collect();
-
-    boundaries
-        .logical_groups
-        .iter()
-        .map(|group| logical_group_info(group, &zone_count_by_name))
-        .collect()
-}
-
-fn logical_group_info(
-    group: &fallow_config::LogicalGroup,
-    zone_count_by_name: &rustc_hash::FxHashMap<&str, usize>,
-) -> LogicalGroupInfo {
-    let child_file_count: usize = group
-        .children
-        .iter()
-        .filter_map(|child| zone_count_by_name.get(child.as_str()).copied())
-        .sum();
-    let fallback_file_count = group
-        .fallback_zone
-        .as_deref()
-        .and_then(|fallback| zone_count_by_name.get(fallback).copied())
-        .unwrap_or(0);
-
-    LogicalGroupInfo {
-        name: group.name.clone(),
-        children: group.children.clone(),
-        auto_discover: group.auto_discover.clone(),
-        authored_rule: group.authored_rule.clone(),
-        fallback_zone: group.fallback_zone.clone(),
-        source_zone_index: group.source_zone_index,
-        status: group.status,
-        file_count: child_file_count + fallback_file_count,
-        child_file_count,
-        fallback_file_count,
-        merged_from: group.merged_from.clone(),
-        original_zone_root: group.original_zone_root.clone(),
-        child_source_indices: group.child_source_indices.clone(),
-    }
-}
-
-fn boundary_data_to_output(bd: &BoundaryData) -> fallow_api::BoundariesListing {
-    if bd.is_empty {
-        return fallow_api::BoundariesListing {
-            configured: false,
-            zone_count: 0,
-            zones: Vec::new(),
-            rule_count: 0,
-            rules: Vec::new(),
-            logical_group_count: 0,
-            logical_groups: Vec::new(),
-        };
-    }
-
-    let zones = bd
-        .zones
-        .iter()
-        .map(|zone| fallow_api::BoundariesListZone {
-            name: zone.name.clone(),
-            patterns: zone.patterns.clone(),
-            file_count: zone.file_count,
-        })
-        .collect();
-
-    let rules = bd
-        .rules
-        .iter()
-        .map(|rule| fallow_api::BoundariesListRule {
-            from: rule.from.clone(),
-            allow: rule.allow.clone(),
-        })
-        .collect();
-
-    let logical_groups = bd
-        .logical_groups
-        .iter()
-        .map(logical_group_info_to_output)
-        .collect();
-
-    fallow_api::BoundariesListing {
-        configured: true,
-        zone_count: bd.zones.len(),
-        zones,
-        rule_count: bd.rules.len(),
-        rules,
-        logical_group_count: bd.logical_groups.len(),
-        logical_groups,
-    }
-}
-
 #[cfg(test)]
 fn boundary_data_to_json(bd: &BoundaryData) -> serde_json::Value {
-    match serde_json::to_value(boundary_data_to_output(bd)) {
+    match serde_json::to_value(fallow_api::boundary_data_to_output(bd)) {
         Ok(value) => value,
         Err(error) => panic!("boundary list output should serialize: {error}"),
-    }
-}
-
-fn logical_group_info_to_output(
-    group: &LogicalGroupInfo,
-) -> fallow_api::BoundariesListLogicalGroup {
-    fallow_api::BoundariesListLogicalGroup {
-        name: group.name.clone(),
-        children: group.children.clone(),
-        auto_discover: group.auto_discover.clone(),
-        status: group.status,
-        source_zone_index: group.source_zone_index,
-        file_count: group.file_count,
-        authored_rule: group.authored_rule.clone(),
-        fallback_zone: group.fallback_zone.clone(),
-        merged_from: group.merged_from.clone(),
-        original_zone_root: group.original_zone_root.clone(),
-        child_source_indices: group.child_source_indices.clone(),
     }
 }
 
@@ -802,7 +556,7 @@ fn print_boundary_header(bd: &BoundaryData) {
 }
 
 /// Print the per-zone name / file-count / patterns section.
-fn print_boundary_zones(zones: &[ZoneInfo]) {
+fn print_boundary_zones(zones: &[fallow_api::ZoneInfo]) {
     if zones.is_empty() {
         return;
     }
@@ -819,7 +573,7 @@ fn print_boundary_zones(zones: &[ZoneInfo]) {
 }
 
 /// Print the per-rule from-zone / allowed-zones section.
-fn print_boundary_rules(rules: &[RuleInfo]) {
+fn print_boundary_rules(rules: &[fallow_api::RuleInfo]) {
     if rules.is_empty() {
         return;
     }
@@ -834,12 +588,12 @@ fn print_boundary_rules(rules: &[RuleInfo]) {
 }
 
 /// Print the status-ordered logical-groups section.
-fn print_boundary_logical_groups(logical_groups: &[LogicalGroupInfo]) {
+fn print_boundary_logical_groups(logical_groups: &[fallow_api::LogicalGroupInfo]) {
     if logical_groups.is_empty() {
         return;
     }
     eprintln!("\nLogical groups:");
-    let mut ordered: Vec<&LogicalGroupInfo> = logical_groups.iter().collect();
+    let mut ordered: Vec<&fallow_api::LogicalGroupInfo> = logical_groups.iter().collect();
     ordered.sort_by_key(|g| match g.status {
         fallow_config::LogicalGroupStatus::InvalidPath => 0,
         fallow_config::LogicalGroupStatus::Empty => 1,
@@ -851,7 +605,7 @@ fn print_boundary_logical_groups(logical_groups: &[LogicalGroupInfo]) {
 }
 
 /// Print one logical-group row plus its optional children line.
-fn print_logical_group_row(g: &LogicalGroupInfo) {
+fn print_logical_group_row(g: &fallow_api::LogicalGroupInfo) {
     let status_suffix = match g.status {
         fallow_config::LogicalGroupStatus::Ok => String::new(),
         fallow_config::LogicalGroupStatus::Empty => " (empty)".to_owned(),
@@ -893,6 +647,8 @@ fn pluralize(noun: &str, count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use fallow_api::{LogicalGroupInfo, ZoneInfo};
+
     use super::*;
 
     fn make_opts(

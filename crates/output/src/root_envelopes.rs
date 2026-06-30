@@ -4,6 +4,23 @@ use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, Tool
 use fallow_types::output::NextStep;
 use serde::Serialize;
 
+/// Compatibility window label for `--legacy-envelope`.
+///
+/// The flag exists only to let consumers migrate from root-shape probing to the
+/// top-level `kind` discriminator. New integrations must use the tagged shape.
+pub const LEGACY_ENVELOPE_COMPATIBILITY_WINDOW: &str = "one-cycle";
+
+/// Planned removal target for `--legacy-envelope`.
+///
+/// This stays a string instead of a semver parser input so docs, CLI help, and
+/// generated schemas can quote the same policy without pulling version logic
+/// into the output-contract crate.
+pub const LEGACY_ENVELOPE_REMOVAL_TARGET: &str = "next breaking-compatible cleanup release";
+
+/// Release-process requirement before `--legacy-envelope` is removed.
+pub const LEGACY_ENVELOPE_DEPRECATION_REQUIREMENT: &str =
+    "one minor release with a deprecation notice before removal";
+
 /// Whether a JSON root envelope keeps the top-level `kind` discriminator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootEnvelopeMode {
@@ -298,6 +315,7 @@ pub enum FallowOutput<
     SecurityBlindSpots,
     Check,
     Combined,
+    FeatureFlags,
     AuditBrief,
     DecisionSurface,
     WalkthroughGuide,
@@ -366,6 +384,9 @@ pub enum FallowOutput<
     /// Bare `fallow --format json`.
     #[serde(rename = "combined")]
     Combined(Combined),
+    /// `fallow flags --format json`.
+    #[serde(rename = "feature-flags")]
+    FeatureFlags(FeatureFlags),
     /// `fallow audit --brief --format json`.
     #[serde(rename = "audit-brief")]
     AuditBrief(AuditBrief),
@@ -540,6 +561,19 @@ mod tests {
         assert_eq!(
             value["_meta"]["telemetry"]["analysis_run_id"],
             "run-combined"
+        );
+    }
+
+    #[test]
+    fn legacy_envelope_policy_is_explicit() {
+        assert_eq!(LEGACY_ENVELOPE_COMPATIBILITY_WINDOW, "one-cycle");
+        assert_eq!(
+            LEGACY_ENVELOPE_REMOVAL_TARGET,
+            "next breaking-compatible cleanup release"
+        );
+        assert_eq!(
+            LEGACY_ENVELOPE_DEPRECATION_REQUIREMENT,
+            "one minor release with a deprecation notice before removal"
         );
     }
 }

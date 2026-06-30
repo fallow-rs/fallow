@@ -1,11 +1,26 @@
 use crate::params::SecurityCandidatesParams;
 
-use super::{push_global, push_str_flag, validation_error_body};
+use rmcp::ErrorData as McpError;
+use rmcp::model::{CallToolResult, Content};
+
+use super::{push_global, push_str_flag, run_tool, validation_error_body};
 
 const VALID_SECURITY_GATES: &[&str] = &["new", "newly-reachable"];
 
 fn has_value(value: Option<&str>) -> bool {
     value.is_some_and(|s| !s.is_empty())
+}
+
+/// Run `security_candidates`. This remains CLI-backed until the security
+/// candidate surface has a command-neutral programmatic API.
+pub async fn run_security_candidates(
+    binary: &str,
+    params: SecurityCandidatesParams,
+) -> Result<CallToolResult, McpError> {
+    match build_security_candidates_args(&params) {
+        Ok(args) => run_tool(binary, "security_candidates", &args).await,
+        Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+    }
 }
 
 /// Build CLI arguments for the `security_candidates` tool.

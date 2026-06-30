@@ -215,12 +215,9 @@ pub(crate) struct ModuleInfoExtractor {
     playwright_fixture_types: FxHashMap<String, Vec<(String, String)>>,
     block_depth: u32,
     function_depth: u32,
-    /// True while walking the immediate quasi of a tagged template
-    /// (`` html`...` ``, `` styled.div`...` ``, `` gql`...` ``). The tag function
-    /// receives the raw parts and values and does NOT coerce interpolations via
-    /// `toString`, so the string-coercion `toString` credit must be suppressed
-    /// for that quasi (consumed on entry so nested plain template literals inside
-    /// an interpolation still coerce). See issue #1638.
+    /// True while walking the immediate quasi of a tagged template. Tagged
+    /// templates receive raw values, so interpolation should not credit
+    /// `toString` coercion for the quasi itself.
     in_tagged_template_quasi: bool,
     pub(crate) class_super_stack: Vec<Option<String>>,
     pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
@@ -1347,7 +1344,7 @@ impl ModuleInfoExtractor {
             return;
         }
         let candidates = std::mem::take(&mut self.factory_return_candidates);
-        let mut sentinel_facts: Vec<(String, String)> = Vec::new();
+        let mut deferred_factory_facts: Vec<(String, String)> = Vec::new();
         for candidate in candidates {
             // Same-file factory returning `new Class()`: bind the local to the
             // class so `resolve_bound_member_accesses` credits `x.member` directly.
@@ -1376,11 +1373,12 @@ impl ModuleInfoExtractor {
             }
             for access in &self.member_accesses {
                 if access.object == candidate.local_name {
-                    sentinel_facts.push((candidate.callee_name.clone(), access.member.clone()));
+                    deferred_factory_facts
+                        .push((candidate.callee_name.clone(), access.member.clone()));
                 }
             }
         }
-        for (callee_name, member) in sentinel_facts {
+        for (callee_name, member) in deferred_factory_facts {
             self.record_factory_fn_member_fact(callee_name, member);
         }
     }

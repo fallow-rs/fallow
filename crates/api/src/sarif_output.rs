@@ -2,13 +2,13 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_engine::duplicates::{CloneGroup, DuplicationReport};
 use fallow_output::{
     CoverageIntelligenceRecommendation, CoverageIntelligenceReport, CoverageIntelligenceVerdict,
     ExceededThreshold, FindingSeverity, HealthReport, RuntimeCoverageReport,
     RuntimeCoverageVerdict, SarifDocumentInput, SarifResultInput, build_sarif_document,
     build_sarif_result, normalize_uri,
 };
+use fallow_types::duplicates::{CloneGroup, DuplicationReport};
 use rustc_hash::FxHashMap;
 
 type SarifRuleBuilder<'a> = dyn Fn(&str, &str, &str) -> serde_json::Value + 'a;
@@ -600,8 +600,8 @@ fn relative_uri(path: &Path, root: &Path) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_engine::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_output::{SarifRuleInput, build_sarif_rule};
+    use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
 
     use super::*;
 

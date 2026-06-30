@@ -21,7 +21,6 @@ crates/
     duplicates/ -- Clone detection (families, normalize, tokenize)
   engine/   -- Command-neutral analysis runners and typed engine results
   api/      -- Programmatic API boundary for JS/native callers
-  programmatic-cli/ -- Compatibility crate for programmatic API contracts and smoke coverage
   napi/     -- napi-rs native Node addon (cdylib, #[napi] bindings) behind the @fallow/node package
   cli/      -- CLI binary, split into per-command modules
     audit.rs, check.rs, dupes.rs, health/, watch.rs, fix/, init.rs, list.rs, schema.rs, validate.rs, regression/, impact.rs, security.rs
@@ -31,7 +30,7 @@ crates/
     migrate/    -- Config migration (mod.rs, knip.rs, jscpd.rs)
   lsp/      -- LSP server, split into modules
     main.rs, diagnostics/, code_actions/, code_lens.rs, hover.rs
-  mcp/      -- MCP server for AI agent integration (stdio transport, wraps CLI)
+  mcp/      -- MCP server for AI agent integration (stdio transport, API-backed analysis with CLI fallback)
 editors/
   vscode/   -- VS Code extension (LSP client, tree views, status bar, auto-download)
 npm/

@@ -579,6 +579,22 @@ impl Suppression {
     }
 }
 
+/// Check if a specific issue at a given line should be suppressed.
+#[must_use]
+pub fn is_suppressed(suppressions: &[Suppression], line: u32, kind: IssueKind) -> bool {
+    suppressions
+        .iter()
+        .any(|suppression| suppression.matches_issue_kind(line, kind))
+}
+
+/// Check if the entire file is suppressed for issue types that do not have line numbers.
+#[must_use]
+pub fn is_file_suppressed(suppressions: &[Suppression], kind: IssueKind) -> bool {
+    suppressions
+        .iter()
+        .any(|suppression| suppression.line == 0 && suppression.matches_issue_kind(0, kind))
+}
+
 /// A suppression token that did not parse to any known `IssueKind`.
 ///
 /// Emitted alongside `Suppression` when a `// fallow-ignore-*` marker contains
@@ -1076,6 +1092,18 @@ mod tests {
         assert_eq!(s.line, 42);
         assert_eq!(s.comment_line, 41);
         assert_eq!(s.issue_kind_target(), Some(IssueKind::UnusedExport));
+    }
+
+    #[test]
+    fn suppression_predicates_match_lines_and_file_wide_markers() {
+        let suppressions = vec![
+            Suppression::issue(42, 41, IssueKind::UnusedExport),
+            Suppression::all(0, 1),
+        ];
+
+        assert!(is_suppressed(&suppressions, 42, IssueKind::UnusedExport));
+        assert!(is_suppressed(&suppressions, 10, IssueKind::UnusedType));
+        assert!(is_file_suppressed(&suppressions, IssueKind::UnusedFile));
     }
 
     #[test]

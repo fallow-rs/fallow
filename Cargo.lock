@@ -1063,7 +1063,6 @@ name = "fallow-config"
 version = "2.103.0"
 dependencies = [
  "dunce",
- "fallow-output",
  "fallow-types",
  "glob",
  "globset",
@@ -1112,7 +1111,6 @@ dependencies = [
  "rayon",
  "regex",
  "rustc-hash 2.1.2",
- "schemars",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -1237,6 +1235,7 @@ dependencies = [
 name = "fallow-mcp"
 version = "2.103.0"
 dependencies = [
+ "fallow-api",
  "fallow-types",
  "regex",
  "rmcp",
@@ -1270,15 +1269,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "fallow-programmatic-cli"
-version = "2.103.0"
-dependencies = [
- "fallow-api",
- "serde_json",
- "tempfile",
 ]
 
 [[package]]

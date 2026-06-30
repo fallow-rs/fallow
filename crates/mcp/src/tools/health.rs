@@ -1,6 +1,59 @@
 use crate::params::HealthParams;
 
-use super::{push_baseline, push_global, push_scope, push_str_flag};
+use fallow_api::{
+    AnalysisOptions, ComplexityOptions, ComplexitySort, OwnershipEmailMode, TargetEffort,
+    run_health as run_api_health, serialize_health_programmatic_json,
+};
+use rmcp::ErrorData as McpError;
+use rmcp::model::{CallToolResult, Content};
+
+use super::{
+    api_runtime::{
+        env_diff_file, json_success, non_empty_path, non_empty_string, programmatic_error_body,
+        run_api_blocking,
+    },
+    fallback_policy::{
+        CliFallbackReason, baseline_fallback_reason, filled, grouped_fallback_reason,
+    },
+    push_baseline, push_global, push_scope, push_str_flag, run_tool, validation_error_body,
+};
+
+/// Run `check_health` through the typed API when parameters map cleanly to the
+/// programmatic contract, falling back to the CLI for CLI-only surfaces.
+pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolResult, McpError> {
+    if requires_cli_fallback(&params) {
+        let args = build_health_args(&params);
+        return run_tool(binary, "check_health", &args).await;
+    }
+
+    let options = match health_options_from_params(&params) {
+        Ok(options) => options,
+        Err(msg) => return Ok(CallToolResult::error(vec![Content::text(msg)])),
+    };
+
+    let result = run_api_blocking("check_health", move || {
+        run_api_health(&options).and_then(serialize_health_programmatic_json)
+    })
+    .await?
+    .map_or_else(
+        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |value| json_success(&value),
+    );
+    Ok(result)
+}
+
+pub fn run_health_api_value(params: &HealthParams) -> Result<Option<serde_json::Value>, String> {
+    if requires_cli_fallback(params) {
+        return Ok(None);
+    }
+
+    let options = health_options_from_params(params)?;
+    let value = run_api_health(&options)
+        .and_then(serialize_health_programmatic_json)
+        .map_err(|err| programmatic_error_body(&err))?;
+
+    Ok(Some(value))
+}
 
 /// Build CLI arguments for the `check_health` tool.
 pub fn build_health_args(params: &HealthParams) -> Vec<String> {
@@ -212,5 +265,310 @@ impl HealthArgsBuilder<'_> {
                 format!("{low_traffic_threshold}"),
             ]);
         }
+    }
+}
+
+fn requires_cli_fallback(params: &HealthParams) -> bool {
+    cli_fallback_reason(params).is_some()
+}
+
+fn cli_fallback_reason(params: &HealthParams) -> Option<CliFallbackReason> {
+    if params.min_score.is_some() {
+        return Some(CliFallbackReason::HealthMinScoreGate);
+    }
+    if filled(params.min_severity.as_deref()) {
+        return Some(CliFallbackReason::HealthMinSeverity);
+    }
+    if filled(params.churn_file.as_deref()) {
+        return Some(CliFallbackReason::HealthChurnFile);
+    }
+    if params.save_snapshot.is_some() {
+        return Some(CliFallbackReason::HealthSnapshot);
+    }
+    if let Some(reason) =
+        baseline_fallback_reason(params.baseline.as_deref(), params.save_baseline.as_deref())
+    {
+        return Some(reason);
+    }
+    if params.trend == Some(true) {
+        return Some(CliFallbackReason::HealthTrend);
+    }
+    if params.summary == Some(true) {
+        return Some(CliFallbackReason::HealthSummary);
+    }
+    if filled(params.runtime_coverage.as_deref())
+        || params.min_invocations_hot.is_some()
+        || params.min_observation_volume.is_some()
+        || params.low_traffic_threshold.is_some()
+    {
+        return Some(CliFallbackReason::HealthRuntimeCoverage);
+    }
+    grouped_fallback_reason(params.group_by.as_deref())
+}
+
+fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions, String> {
+    Ok(ComplexityOptions {
+        analysis: AnalysisOptions {
+            root: non_empty_path(params.root.as_deref()),
+            config_path: non_empty_path(params.config.as_deref()),
+            no_cache: params.no_cache.unwrap_or(false),
+            threads: params.threads,
+            production: params.production.unwrap_or(false),
+            production_override: params.production,
+            changed_since: non_empty_string(params.changed_since.as_deref()),
+            diff_file: env_diff_file(),
+            workspace: non_empty_string(params.workspace.as_deref())
+                .map(|workspace| vec![workspace]),
+            explain: true,
+            ..AnalysisOptions::default()
+        },
+        max_cyclomatic: params.max_cyclomatic,
+        max_cognitive: params.max_cognitive,
+        max_crap: params.max_crap,
+        top: params.top,
+        sort: complexity_sort_from_param(params.sort.as_deref())?,
+        complexity_breakdown: params.complexity_breakdown.unwrap_or(false),
+        complexity: params.complexity.unwrap_or(false),
+        file_scores: params.file_scores.unwrap_or(false),
+        coverage_gaps: params.coverage_gaps.unwrap_or(false),
+        hotspots: params.hotspots.unwrap_or(false),
+        ownership: params.ownership.unwrap_or(false),
+        ownership_emails: params
+            .ownership_email_mode
+            .map(ownership_email_mode_from_param),
+        targets: params.targets.unwrap_or(false),
+        css: params.css.unwrap_or(false),
+        effort: target_effort_from_param(params.effort.as_deref())?,
+        score: params.score.unwrap_or(false),
+        since: non_empty_string(params.since.as_deref()),
+        min_commits: params.min_commits,
+        coverage: non_empty_path(params.coverage.as_deref()),
+        coverage_root: non_empty_path(params.coverage_root.as_deref()),
+    })
+}
+
+fn complexity_sort_from_param(value: Option<&str>) -> Result<ComplexitySort, String> {
+    match value {
+        None | Some("") | Some("cyclomatic") => Ok(ComplexitySort::Cyclomatic),
+        Some("cognitive") => Ok(ComplexitySort::Cognitive),
+        Some("lines") => Ok(ComplexitySort::Lines),
+        Some("severity") => Ok(ComplexitySort::Severity),
+        Some(value) => Err(validation_error_body(format!(
+            "Invalid sort '{value}'. Valid values: cyclomatic, cognitive, lines, severity"
+        ))),
+    }
+}
+
+const fn ownership_email_mode_from_param(
+    value: crate::params::EmailModeParam,
+) -> OwnershipEmailMode {
+    match value {
+        crate::params::EmailModeParam::Raw => OwnershipEmailMode::Raw,
+        crate::params::EmailModeParam::Handle => OwnershipEmailMode::Handle,
+        crate::params::EmailModeParam::Anonymized => OwnershipEmailMode::Anonymized,
+        crate::params::EmailModeParam::Hash => OwnershipEmailMode::Hash,
+    }
+}
+
+fn target_effort_from_param(value: Option<&str>) -> Result<Option<TargetEffort>, String> {
+    match value {
+        None | Some("") => Ok(None),
+        Some("low") => Ok(Some(TargetEffort::Low)),
+        Some("medium") => Ok(Some(TargetEffort::Medium)),
+        Some("high") => Ok(Some(TargetEffort::High)),
+        Some(value) => Err(validation_error_body(format!(
+            "Invalid effort '{value}'. Valid values: low, medium, high"
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use rmcp::model::RawContent;
+
+    use super::*;
+
+    #[test]
+    fn api_path_maps_supported_health_params() {
+        let params = HealthParams {
+            root: Some(String::new()),
+            config: Some(String::new()),
+            max_cyclomatic: Some(9),
+            max_cognitive: Some(8),
+            max_crap: Some(24.5),
+            top: Some(5),
+            sort: Some("severity".to_string()),
+            changed_since: Some("main".to_string()),
+            complexity_breakdown: Some(true),
+            complexity: Some(true),
+            css: Some(true),
+            file_scores: Some(true),
+            hotspots: Some(true),
+            ownership: Some(true),
+            ownership_email_mode: Some(crate::params::EmailModeParam::Anonymized),
+            targets: Some(true),
+            coverage_gaps: Some(true),
+            score: Some(true),
+            since: Some("90d".to_string()),
+            min_commits: Some(2),
+            workspace: Some("apps/web".to_string()),
+            production: Some(false),
+            no_cache: Some(true),
+            threads: Some(3),
+            coverage: Some("coverage/coverage-final.json".to_string()),
+            coverage_root: Some("/tmp/project".to_string()),
+            effort: Some("high".to_string()),
+            ..HealthParams::default()
+        };
+
+        assert!(!requires_cli_fallback(&params));
+        let options = health_options_from_params(&params).expect("options");
+        assert!(options.analysis.root.is_none());
+        assert!(options.analysis.config_path.is_none());
+        assert_eq!(options.analysis.changed_since.as_deref(), Some("main"));
+        assert_eq!(
+            options.analysis.workspace,
+            Some(vec!["apps/web".to_string()])
+        );
+        assert_eq!(options.analysis.production_override, Some(false));
+        assert!(options.analysis.no_cache);
+        assert_eq!(options.analysis.threads, Some(3));
+        assert_eq!(options.max_cyclomatic, Some(9));
+        assert_eq!(options.max_cognitive, Some(8));
+        assert_eq!(options.max_crap, Some(24.5));
+        assert_eq!(options.top, Some(5));
+        assert!(matches!(options.sort, ComplexitySort::Severity));
+        assert!(options.complexity_breakdown);
+        assert!(options.complexity);
+        assert!(options.css);
+        assert!(options.file_scores);
+        assert!(options.hotspots);
+        assert!(options.ownership);
+        assert!(matches!(
+            options.ownership_emails,
+            Some(OwnershipEmailMode::Anonymized)
+        ));
+        assert!(options.targets);
+        assert!(options.coverage_gaps);
+        assert!(options.score);
+        assert_eq!(options.since.as_deref(), Some("90d"));
+        assert_eq!(options.min_commits, Some(2));
+        assert_eq!(
+            options.coverage,
+            Some(PathBuf::from("coverage/coverage-final.json"))
+        );
+        assert_eq!(options.coverage_root, Some(PathBuf::from("/tmp/project")));
+        assert!(matches!(options.effort, Some(TargetEffort::High)));
+    }
+
+    #[test]
+    fn api_path_reuses_cli_validation_for_bad_sort_and_effort() {
+        let bad_sort = HealthParams {
+            sort: Some("weighted".to_string()),
+            ..HealthParams::default()
+        };
+        let err = health_options_from_params(&bad_sort).expect_err("invalid sort");
+        assert!(err.contains("Invalid sort"));
+
+        let bad_effort = HealthParams {
+            effort: Some("extreme".to_string()),
+            ..HealthParams::default()
+        };
+        let err = health_options_from_params(&bad_effort).expect_err("invalid effort");
+        assert!(err.contains("Invalid effort"));
+    }
+
+    #[test]
+    fn cli_fallback_keeps_cli_only_health_surfaces() {
+        for params in [
+            HealthParams {
+                min_score: Some(80.0),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                min_severity: Some("high".to_string()),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                churn_file: Some("churn.json".to_string()),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                save_snapshot: Some(String::new()),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                baseline: Some("baseline.json".to_string()),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                save_baseline: Some("baseline.json".to_string()),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                trend: Some(true),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                summary: Some(true),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                runtime_coverage: Some("coverage".to_string()),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                min_invocations_hot: Some(1),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                min_observation_volume: Some(1),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                low_traffic_threshold: Some(0.1),
+                ..HealthParams::default()
+            },
+            HealthParams {
+                group_by: Some("owner".to_string()),
+                ..HealthParams::default()
+            },
+        ] {
+            assert!(requires_cli_fallback(&params));
+        }
+    }
+
+    #[tokio::test]
+    async fn run_health_api_path_returns_json_without_cli_binary() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("index.ts"),
+            "export function score(value: number) {\n  if (value > 1) {\n    return value;\n  }\n  return 0;\n}\n",
+        )
+        .expect("write source");
+
+        let result = run_health(
+            "unused-binary-on-api-path",
+            HealthParams {
+                root: Some(project.path().display().to_string()),
+                complexity: Some(true),
+                no_cache: Some(true),
+                ..HealthParams::default()
+            },
+        )
+        .await
+        .expect("mcp result");
+
+        assert!(!result.is_error.unwrap_or(false));
+        let [content] = result.content.as_slice() else {
+            panic!("expected one content item");
+        };
+        let RawContent::Text(text) = &content.raw else {
+            panic!("expected text content");
+        };
+        let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");
+        assert_eq!(json["kind"], "health");
     }
 }

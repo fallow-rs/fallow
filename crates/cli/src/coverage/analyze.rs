@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use fallow_config::OutputFormat;
 use fallow_cov_protocol::function_identity_id;
-use fallow_engine::git_env::clear_ambient_git_env;
+use fallow_engine::clear_ambient_git_env;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
@@ -426,9 +426,7 @@ fn build_index_from_analysis(
             continue;
         };
         let rel = normalize_runtime_path(path.strip_prefix(root).unwrap_or(path));
-        let caller_count = graph
-            .and_then(|g| g.reverse_deps.get(module.file_id.0 as usize))
-            .map_or(0_usize, Vec::len);
+        let caller_count = graph.map_or(0_usize, |g| g.direct_importer_count(module.file_id));
         let caller_count = u32::try_from(caller_count).unwrap_or(u32::MAX);
         let owner_count = codeowners.map(|co| co.owner_count_of(Path::new(&rel)).unwrap_or(0));
         for function in &module.complexity {

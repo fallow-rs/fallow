@@ -33,7 +33,7 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    let analysis = fallow_engine::flags::analyze_feature_flags(&config);
+    let analysis = fallow_engine::analyze_feature_flags(&config);
     if analysis.files_scanned == 0 {
         return emit_error("no files discovered", 2, opts.output);
     }
@@ -259,12 +259,12 @@ fn print_empty_flags_custom_hint(
 fn print_empty_flags_default_hint(files_scanned: usize, files_label: &str) {
     use colored::Colorize;
 
-    let env_prefixes = fallow_engine::flags::builtin_env_prefixes()
+    let env_prefixes = fallow_engine::builtin_env_prefixes()
         .iter()
         .map(|p| format!("{p}*"))
         .collect::<Vec<_>>()
         .join(", ");
-    let providers = fallow_engine::flags::builtin_sdk_providers().join(", ");
+    let providers = fallow_engine::builtin_sdk_providers().join(", ");
 
     eprintln!(
         "  {}",

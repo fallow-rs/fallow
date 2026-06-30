@@ -1,7 +1,8 @@
 use std::path::Path;
 
-use fallow_engine::duplicates::{CloneFingerprintSet, DuplicationReport};
+use fallow_engine::CloneFingerprintSet;
 use fallow_output::normalize_uri;
+use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::{AnalysisResults, UnusedExport, UnusedMember};
 
 use crate::ResultGroup;
@@ -941,7 +942,7 @@ pub fn build_duplication_compact_lines(report: &DuplicationReport, root: &Path) 
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_engine::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_types::output_dead_code::UnusedFileFinding;
     use fallow_types::results::{AnalysisResults, UnusedFile};
 

@@ -14,26 +14,33 @@
     )
 )]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use fallow_config::EmailMode;
 use fallow_output::EffortEstimate;
 use serde::Serialize;
 
+mod analysis_context;
 pub mod audit_output;
 pub mod combined_output;
 pub mod compact_output;
 pub mod dead_code_codeclimate;
 pub mod dead_code_sarif;
 pub mod dupes_output;
+mod duplication_filters;
 pub mod editor;
+pub mod explain;
 pub mod grouped_output;
 pub mod health_codeclimate;
 pub mod json_output;
 pub mod list_output;
+mod list_runtime;
 pub mod markdown_output;
+mod next_steps;
 pub mod output_contracts;
 pub mod runtime;
+mod runtime_json;
+mod runtime_output;
 pub mod sarif_output;
 pub mod security_output;
 pub mod ci_output {
@@ -51,6 +58,7 @@ pub mod ci_output {
         render_review_envelope, review_label_from_codeclimate, summary_fingerprint, summary_label,
     };
 }
+pub use analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 pub use audit_output::{
     AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
     AuditSarifOutputInput, AuditSummary, AuditVerdict, build_audit_codeclimate,
@@ -84,11 +92,24 @@ pub use dupes_output::{
 };
 pub use editor::{
     ChangedFilesError, EditorAnalysisOutput, EditorAnalysisResults, EditorAnalysisSession,
-    EditorDeadCodeAnalysisOutput, EditorDuplicationReport, EditorInlineComplexityExceeded,
-    EditorInlineComplexityFinding, EditorProjectAnalysisOutput, collect_inline_complexity,
-    editor_duplicates, editor_extract, editor_results, editor_security, editor_suppress,
-    filter_inline_complexity_by_changed_files, resolve_git_toplevel,
+    EditorCloneFamily, EditorCloneFingerprintSet, EditorCloneGroup, EditorCloneInstance,
+    EditorDeadCodeAnalysisOutput, EditorDuplicationReport, EditorDuplicationStats,
+    EditorInlineComplexityExceeded, EditorInlineComplexityFinding, EditorMirroredDirectory,
+    EditorProjectAnalysisOutput, EditorRefactoringKind, EditorRefactoringSuggestion,
+    collect_inline_complexity, editor_duplicates, editor_extract, editor_results, editor_security,
+    editor_suppress, filter_inline_complexity_by_changed_files, resolve_git_toplevel,
     try_get_changed_files_with_toplevel,
+};
+pub use explain::{
+    CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, RuleGuide, SECURITY_RULES,
+    coverage_analyze_meta, coverage_setup_meta, explain_issue_type, rule_by_id, rule_by_token,
+    rule_docs_url, rule_guide, security_meta, serialize_explain_programmatic_json,
+    unknown_explain_error,
+};
+pub use fallow_output::RootEnvelopeMode;
+pub use fallow_types::trace::{
+    CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
+    TracedCloneGroup, TracedExport, TracedReExport,
 };
 pub use grouped_output::{
     ResultGroup, UNOWNED_GROUP_LABEL, build_duplication_grouping_with, group_analysis_results_with,
@@ -97,12 +118,18 @@ pub use grouped_output::{
 pub use health_codeclimate::build_health_codeclimate;
 pub use json_output::{
     CheckJsonExtraOutputs, CheckJsonOutputInput, CheckJsonPayloadInput, DuplicationJsonOutputInput,
-    GroupedCheckJsonOutputInput, GroupedDuplicationJsonOutputInput,
-    harmonize_multi_kind_suppress_line_actions, serialize_check_json, serialize_check_json_payload,
-    serialize_duplication_json, serialize_grouped_check_json, serialize_grouped_duplication_json,
+    GroupedCheckJsonOutputInput, GroupedDuplicationJsonOutputInput, serialize_check_json,
+    serialize_check_json_payload, serialize_duplication_json, serialize_grouped_check_json,
+    serialize_grouped_duplication_json,
 };
 pub use list_output::{
     ListJsonEnvelope, ListJsonOutputInput, build_list_json_output, serialize_list_json_output,
+};
+pub use list_runtime::{
+    BoundaryData, ListBoundariesOptions, ListBoundariesProgrammaticOutput, LogicalGroupInfo,
+    ProjectInfoOptions, ProjectInfoProgrammaticOutput, RuleInfo, ZoneInfo, boundary_data_to_output,
+    compute_boundary_data, run_list_boundaries, run_project_info,
+    serialize_list_boundaries_programmatic_json, serialize_project_info_programmatic_json,
 };
 pub use markdown_output::{
     build_duplication_markdown, build_grouped_markdown, build_health_markdown, build_markdown,
@@ -115,15 +142,25 @@ pub use output_contracts::{
     SecuritySummaryOutput, WorkspacesOutput,
 };
 pub use runtime::{
-    DeadCodeProgrammaticOutput, DuplicationProgrammaticOutput, EngineHealthRunner,
-    HealthJsonReportInput, HealthProgrammaticOutput, ProgrammaticAnalysisContext,
-    ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun, ProgrammaticHealthRunner,
-    compute_complexity_with_runner, compute_health, compute_health_with_runner,
-    derive_programmatic_health_execution_options, detect_boundary_violations,
-    detect_circular_dependencies, detect_dead_code, detect_duplication,
-    resolve_programmatic_analysis_context, run_boundary_violations, run_circular_dependencies,
-    run_complexity_with_runner, run_dead_code, run_duplication, run_health, run_health_with_runner,
-    serialize_health_report_json,
+    BoundaryViolationsOutput, BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
+    CircularDependenciesProgrammaticOutput, DeadCodeOutput, DeadCodeProgrammaticOutput,
+    DuplicationOutput, DuplicationProgrammaticOutput, EngineHealthRunner, FeatureFlagsOutput,
+    FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
+    ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun,
+    ProgrammaticHealthRunner, TraceCloneOutput, TraceCloneProgrammaticOutput,
+    TraceDependencyOutput, TraceDependencyProgrammaticOutput, TraceExportOutput,
+    TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
+    run_boundary_violations, run_circular_dependencies, run_complexity_with_runner, run_dead_code,
+    run_duplication, run_feature_flags, run_health, run_health_with_runner, run_trace_clone,
+    run_trace_dependency, run_trace_export, run_trace_file, serialize_health_report_json,
+};
+pub use runtime_json::{
+    serialize_boundary_violations_programmatic_json,
+    serialize_circular_dependencies_programmatic_json, serialize_dead_code_programmatic_json,
+    serialize_duplication_programmatic_json, serialize_feature_flags_programmatic_json,
+    serialize_health_programmatic_json, serialize_trace_clone_programmatic_json,
+    serialize_trace_dependency_programmatic_json, serialize_trace_export_programmatic_json,
+    serialize_trace_file_programmatic_json,
 };
 pub use sarif_output::{
     annotate_sarif_results, build_duplication_sarif, build_grouped_duplication_sarif,
@@ -212,7 +249,10 @@ pub struct AnalysisOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: bool,
-    /// Return the one-cycle legacy root envelope without top-level `kind`.
+    /// Return the legacy root envelope without top-level `kind`.
+    ///
+    /// This is a migration-only compatibility flag. New consumers should branch
+    /// on `kind`; see `fallow_output::LEGACY_ENVELOPE_REMOVAL_TARGET`.
     pub legacy_envelope: bool,
 }
 
@@ -260,6 +300,13 @@ pub struct DeadCodeOptions {
     pub include_entry_exports: bool,
 }
 
+/// Options for feature-flag analysis.
+#[derive(Debug, Clone, Default)]
+pub struct FeatureFlagsOptions {
+    pub analysis: AnalysisOptions,
+    pub top: Option<usize>,
+}
+
 /// Programmatic duplication mode selection.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum DuplicationMode {
@@ -271,43 +318,62 @@ pub enum DuplicationMode {
 }
 
 /// Options for duplication analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DuplicationOptions {
     pub analysis: AnalysisOptions,
-    pub mode: DuplicationMode,
-    pub min_tokens: usize,
-    pub min_lines: usize,
+    pub mode: Option<DuplicationMode>,
+    pub min_tokens: Option<usize>,
+    pub min_lines: Option<usize>,
     /// Minimum number of occurrences before a clone group is reported.
     /// Values below 2 are silently treated as 2 by the engine-facing adapter.
-    pub min_occurrences: usize,
-    pub threshold: f64,
-    pub skip_local: bool,
-    pub cross_language: bool,
+    pub min_occurrences: Option<usize>,
+    pub threshold: Option<f64>,
+    pub skip_local: Option<bool>,
+    pub cross_language: Option<bool>,
     /// Exclude module wiring from clone detection. `None` defers to the project
     /// config.
     pub ignore_imports: Option<bool>,
     pub top: Option<usize>,
 }
 
-impl Default for DuplicationOptions {
-    fn default() -> Self {
-        Self {
-            analysis: AnalysisOptions::default(),
-            mode: DuplicationMode::Mild,
-            min_tokens: 50,
-            min_lines: 5,
-            min_occurrences: 2,
-            threshold: 0.0,
-            skip_local: false,
-            cross_language: false,
-            ignore_imports: None,
-            top: None,
-        }
-    }
+/// Options for export trace analysis.
+#[derive(Debug, Clone, Default)]
+pub struct TraceExportOptions {
+    pub analysis: AnalysisOptions,
+    pub file: String,
+    pub export_name: String,
+}
+
+/// Options for file trace analysis.
+#[derive(Debug, Clone, Default)]
+pub struct TraceFileOptions {
+    pub analysis: AnalysisOptions,
+    pub file: String,
+}
+
+/// Options for dependency trace analysis.
+#[derive(Debug, Clone, Default)]
+pub struct TraceDependencyOptions {
+    pub analysis: AnalysisOptions,
+    pub package_name: String,
+}
+
+/// Duplicate-code trace target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TraceCloneTarget {
+    Location { file: String, line: usize },
+    Fingerprint(String),
+}
+
+/// Options for duplicate-code trace analysis.
+#[derive(Debug, Clone)]
+pub struct TraceCloneOptions {
+    pub duplication: DuplicationOptions,
+    pub target: TraceCloneTarget,
 }
 
 /// Sort criteria for complexity findings.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ComplexitySort {
     #[default]
     Cyclomatic,
@@ -317,7 +383,7 @@ pub enum ComplexitySort {
 }
 
 /// Privacy mode for ownership-aware hotspot output.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OwnershipEmailMode {
     Raw,
     #[default]
@@ -328,7 +394,7 @@ pub enum OwnershipEmailMode {
 }
 
 /// Effort filter for refactoring targets.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetEffort {
     Low,
     Medium,
@@ -344,6 +410,7 @@ pub struct ComplexityOptions {
     pub max_crap: Option<f64>,
     pub top: Option<usize>,
     pub sort: ComplexitySort,
+    pub complexity_breakdown: bool,
     pub complexity: bool,
     pub file_scores: bool,
     pub coverage_gaps: bool,
@@ -360,11 +427,174 @@ pub struct ComplexityOptions {
     pub coverage_root: Option<PathBuf>,
 }
 
-pub use fallow_engine::{
-    ComplexityRunOptions, ComplexitySectionOptions, DerivedComplexityOptions,
-    DerivedHealthSections, HealthSectionOptions, derive_complexity_sections,
-    derive_health_sections,
-};
+/// Health threshold overrides accepted by the programmatic API.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ComplexityThresholdOverrides {
+    pub max_cyclomatic: Option<u16>,
+    pub max_cognitive: Option<u16>,
+    pub max_crap: Option<f64>,
+}
+
+/// Coverage inputs accepted by the programmatic API.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ComplexityCoverageInputs<'a> {
+    pub coverage: Option<&'a Path>,
+    pub coverage_root: Option<&'a Path>,
+}
+
+/// Input for deriving effective health sections from API-owned flags.
+#[derive(Debug, Clone)]
+pub struct HealthSectionOptions {
+    pub output: fallow_types::output_format::OutputFormat,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub targets: bool,
+    pub css: bool,
+    pub score: bool,
+    pub score_gate: bool,
+    pub snapshot_requested: bool,
+    pub trend: bool,
+}
+
+/// Derived section selection for health runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedHealthSections {
+    pub any_section: bool,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub targets: bool,
+    pub css: bool,
+    pub score: bool,
+    pub force_full: bool,
+    pub score_only_output: bool,
+}
+
+/// Input for deriving effective programmatic complexity sections.
+#[derive(Debug, Clone)]
+pub struct ComplexitySectionOptions {
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub ownership: bool,
+    pub targets: bool,
+    pub css: bool,
+    pub score: bool,
+}
+
+/// Derived section selection for programmatic health / complexity runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DerivedComplexityOptions {
+    pub any_section: bool,
+    pub complexity: bool,
+    pub file_scores: bool,
+    pub coverage_gaps: bool,
+    pub hotspots: bool,
+    pub ownership: bool,
+    pub targets: bool,
+    pub force_full: bool,
+    pub score_only_output: bool,
+    pub score: bool,
+}
+
+/// Normalized programmatic complexity / health inputs owned by `fallow-api`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComplexityRunOptions<'a> {
+    pub thresholds: ComplexityThresholdOverrides,
+    pub top: Option<usize>,
+    pub sort: ComplexitySort,
+    pub complexity_breakdown: bool,
+    pub sections: DerivedComplexityOptions,
+    pub ownership_emails: Option<OwnershipEmailMode>,
+    pub effort: Option<TargetEffort>,
+    pub css: bool,
+    pub since: Option<&'a str>,
+    pub min_commits: Option<u32>,
+    pub coverage_inputs: ComplexityCoverageInputs<'a>,
+}
+
+/// Derive effective health section flags for API consumers.
+#[must_use]
+pub fn derive_health_sections(options: &HealthSectionOptions) -> DerivedHealthSections {
+    let score = options.score
+        || options.score_gate
+        || options.trend
+        || matches!(
+            options.output,
+            fallow_types::output_format::OutputFormat::Badge
+        );
+    let any_section = options.complexity
+        || options.file_scores
+        || options.coverage_gaps
+        || options.hotspots
+        || options.targets
+        || score;
+    let effective_score = if any_section { score } else { true } || options.snapshot_requested;
+    let force_full = options.snapshot_requested || effective_score;
+
+    DerivedHealthSections {
+        any_section,
+        complexity: if any_section {
+            options.complexity
+        } else {
+            true
+        },
+        file_scores: if any_section {
+            options.file_scores
+        } else {
+            true
+        } || force_full,
+        coverage_gaps: if any_section {
+            options.coverage_gaps
+        } else {
+            false
+        },
+        hotspots: if any_section { options.hotspots } else { true }
+            || options.snapshot_requested
+            || options.trend,
+        targets: if any_section { options.targets } else { true },
+        css: options.css,
+        score: effective_score,
+        force_full,
+        score_only_output: is_health_score_only_output(options, score),
+    }
+}
+
+/// Derive effective programmatic health / complexity section flags.
+#[must_use]
+pub fn derive_complexity_sections(options: &ComplexitySectionOptions) -> DerivedComplexityOptions {
+    let requested_hotspots = options.hotspots || options.ownership;
+    let sections = derive_health_sections(&HealthSectionOptions {
+        output: fallow_types::output_format::OutputFormat::Human,
+        complexity: options.complexity,
+        file_scores: options.file_scores,
+        coverage_gaps: options.coverage_gaps,
+        hotspots: requested_hotspots,
+        targets: options.targets,
+        css: options.css,
+        score: options.score,
+        score_gate: false,
+        snapshot_requested: false,
+        trend: false,
+    });
+
+    DerivedComplexityOptions {
+        any_section: sections.any_section,
+        complexity: sections.complexity,
+        file_scores: sections.file_scores,
+        coverage_gaps: sections.coverage_gaps,
+        hotspots: sections.hotspots,
+        ownership: options.ownership && sections.hotspots,
+        targets: sections.targets,
+        force_full: sections.force_full,
+        score_only_output: sections.score_only_output,
+        score: sections.score,
+    }
+}
 
 /// Derive effective programmatic health / complexity section flags.
 #[must_use]
@@ -376,20 +606,21 @@ pub fn derive_complexity_options(options: &ComplexityOptions) -> DerivedComplexi
 #[must_use]
 pub fn derive_complexity_run_options(options: &ComplexityOptions) -> ComplexityRunOptions<'_> {
     ComplexityRunOptions {
-        thresholds: fallow_engine::HealthThresholdOverrides {
+        thresholds: ComplexityThresholdOverrides {
             max_cyclomatic: options.max_cyclomatic,
             max_cognitive: options.max_cognitive,
             max_crap: options.max_crap,
         },
         top: options.top,
-        sort: complexity_sort_to_engine(options.sort),
+        sort: options.sort,
+        complexity_breakdown: options.complexity_breakdown,
         sections: derive_complexity_options(options),
-        ownership_emails: options.ownership_emails.map(ownership_email_mode_to_config),
-        effort: options.effort.map(target_effort_to_output),
+        ownership_emails: options.ownership_emails,
+        effort: options.effort,
         css: options.css,
         since: options.since.as_deref(),
         min_commits: options.min_commits,
-        coverage_inputs: fallow_engine::HealthCoverageInputs {
+        coverage_inputs: ComplexityCoverageInputs {
             coverage: options.coverage.as_deref(),
             coverage_root: options.coverage_root.as_deref(),
         },
@@ -443,12 +674,41 @@ fn complexity_section_options(options: &ComplexityOptions) -> ComplexitySectionO
     }
 }
 
+fn is_health_score_only_output(options: &HealthSectionOptions, score: bool) -> bool {
+    score
+        && !options.complexity
+        && !options.file_scores
+        && !options.coverage_gaps
+        && !options.hotspots
+        && !options.targets
+        && !options.trend
+}
+
+const fn thresholds_to_engine(
+    thresholds: ComplexityThresholdOverrides,
+) -> fallow_engine::HealthThresholdOverrides {
+    fallow_engine::HealthThresholdOverrides {
+        max_cyclomatic: thresholds.max_cyclomatic,
+        max_cognitive: thresholds.max_cognitive,
+        max_crap: thresholds.max_crap,
+    }
+}
+
 const fn complexity_sort_to_engine(sort: ComplexitySort) -> fallow_engine::HealthSort {
     match sort {
         ComplexitySort::Severity => fallow_engine::HealthSort::Severity,
         ComplexitySort::Cyclomatic => fallow_engine::HealthSort::Cyclomatic,
         ComplexitySort::Cognitive => fallow_engine::HealthSort::Cognitive,
         ComplexitySort::Lines => fallow_engine::HealthSort::Lines,
+    }
+}
+
+const fn coverage_inputs_to_engine(
+    coverage_inputs: ComplexityCoverageInputs<'_>,
+) -> fallow_engine::HealthCoverageInputs<'_> {
+    fallow_engine::HealthCoverageInputs {
+        coverage: coverage_inputs.coverage,
+        coverage_root: coverage_inputs.coverage_root,
     }
 }
 
@@ -476,10 +736,10 @@ mod tests {
     #[test]
     fn duplication_defaults_match_cli_contract() {
         let options = DuplicationOptions::default();
-        assert!(matches!(options.mode, DuplicationMode::Mild));
-        assert_eq!(options.min_tokens, 50);
-        assert_eq!(options.min_lines, 5);
-        assert_eq!(options.min_occurrences, 2);
+        assert!(options.mode.is_none());
+        assert!(options.min_tokens.is_none());
+        assert!(options.min_lines.is_none());
+        assert!(options.min_occurrences.is_none());
     }
 
     #[test]
@@ -550,6 +810,7 @@ mod tests {
             max_crap: Some(18.5),
             top: Some(7),
             sort: ComplexitySort::Severity,
+            complexity_breakdown: true,
             ownership_emails: Some(OwnershipEmailMode::Hash),
             effort: Some(TargetEffort::High),
             coverage: Some(PathBuf::from("coverage/coverage-final.json")),
@@ -565,18 +826,16 @@ mod tests {
         assert_eq!(run.thresholds.max_cognitive, Some(21));
         assert_eq!(run.thresholds.max_crap, Some(18.5));
         assert_eq!(run.top, Some(7));
-        assert!(matches!(run.sort, fallow_engine::HealthSort::Severity));
+        assert!(matches!(run.sort, ComplexitySort::Severity));
+        assert!(run.complexity_breakdown);
         assert!(run.sections.hotspots);
         assert!(run.sections.ownership);
         assert!(run.sections.targets);
         assert!(matches!(
             run.ownership_emails,
-            Some(fallow_config::EmailMode::Hash)
+            Some(OwnershipEmailMode::Hash)
         ));
-        assert!(matches!(
-            run.effort,
-            Some(fallow_output::EffortEstimate::High)
-        ));
+        assert!(matches!(run.effort, Some(TargetEffort::High)));
         assert_eq!(run.since, Some("30d"));
         assert_eq!(run.min_commits, Some(4));
         assert_eq!(run.coverage_inputs.coverage, options.coverage.as_deref());
@@ -630,7 +889,7 @@ mod tests {
     #[test]
     fn default_health_sections_match_full_health_output() {
         let derived = derive_health_sections(&HealthSectionOptions {
-            output: fallow_config::OutputFormat::Human,
+            output: fallow_types::output_format::OutputFormat::Human,
             complexity: false,
             file_scores: false,
             coverage_gaps: false,
@@ -657,7 +916,7 @@ mod tests {
     #[test]
     fn health_score_gate_requests_score_only_output() {
         let derived = derive_health_sections(&HealthSectionOptions {
-            output: fallow_config::OutputFormat::Human,
+            output: fallow_types::output_format::OutputFormat::Human,
             complexity: false,
             file_scores: false,
             coverage_gaps: false,
@@ -683,7 +942,7 @@ mod tests {
     #[test]
     fn health_snapshot_keeps_full_hidden_inputs_without_section_request() {
         let derived = derive_health_sections(&HealthSectionOptions {
-            output: fallow_config::OutputFormat::Human,
+            output: fallow_types::output_format::OutputFormat::Human,
             complexity: false,
             file_scores: false,
             coverage_gaps: false,

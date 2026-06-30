@@ -16,7 +16,7 @@ use super::{
     compute_vital_signs_and_counts,
 };
 use crate::vital_signs;
-use crate::{discover::FileId, duplicates, extract::ModuleInfo};
+use crate::{discover::FileId, duplicates, source::ModuleInfo};
 use fallow_output::{
     ComplexityViolation, FileHealthScore, HealthActionsMeta, HealthFinding, HealthGroup,
     HealthGrouping, HotspotEntry, HotspotFinding, LargeFunctionEntry, RefactoringTarget,

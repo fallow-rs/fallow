@@ -299,6 +299,10 @@ impl StylingScoringInputs {
     /// Build inputs for a report with no atomic object CSS-in-JS: the non-atomic
     /// surface IS the whole summary, so the grade matches the pre-3c behavior.
     /// Used by the back-compat [`compute_styling_health`] entry and unit tests.
+    #[allow(
+        dead_code,
+        reason = "back-compat test helper; production uses explicit StylingScoringInputs"
+    )]
     #[must_use]
     pub fn from_report(report: &CssAnalyticsReport, theme_tokens_defined: u32) -> Self {
         let s = &report.summary;
@@ -322,6 +326,10 @@ impl StylingScoringInputs {
 /// `theme_tokens_defined` is the total number of Tailwind `@theme` tokens DEFINED
 /// across the project. It is an internal scoring input only, NOT a serialized
 /// field, so the wire contract / schema is unchanged.
+#[allow(
+    dead_code,
+    reason = "back-compat test helper; production uses compute_styling_health_with_inputs"
+)]
 #[must_use]
 pub fn compute_styling_health(
     report: &CssAnalyticsReport,

@@ -4,7 +4,8 @@ use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 pub use fallow_types::suppress::{
-    IssueKind, PolicyRuleSuppression, Suppression, UnknownSuppressionKind, issue_kind_to_kebab,
+    IssueKind, PolicyRuleSuppression, Suppression, UnknownSuppressionKind, is_file_suppressed,
+    is_suppressed, issue_kind_to_kebab,
 };
 
 pub use fallow_extract::suppress::parse_suppressions_from_source;
@@ -403,27 +404,6 @@ impl<'a> SuppressionContext<'a> {
         }
         active
     }
-}
-
-/// Check if a specific issue at a given line should be suppressed.
-///
-/// Standalone predicate for callers outside `find_dead_code_full`
-/// (e.g., CLI health/flags commands) that don't need tracking.
-#[must_use]
-pub fn is_suppressed(suppressions: &[Suppression], line: u32, kind: IssueKind) -> bool {
-    suppressions
-        .iter()
-        .any(|s| s.matches_issue_kind(line, kind))
-}
-
-/// Check if the entire file is suppressed (for issue types that don't have line numbers).
-///
-/// Standalone predicate for callers outside `find_dead_code_full`.
-#[must_use]
-pub fn is_file_suppressed(suppressions: &[Suppression], kind: IssueKind) -> bool {
-    suppressions
-        .iter()
-        .any(|s| s.line == 0 && s.matches_issue_kind(0, kind))
 }
 
 /// Build the [`StaleSuppression`] entry for an unconsumed suppression, or `None`

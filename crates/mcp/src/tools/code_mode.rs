@@ -1,31 +1,16 @@
 use std::cell::RefCell;
+#[cfg(test)]
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
-use std::process::{Command, Stdio};
+#[cfg(test)]
+use std::process::Command;
 use std::rc::Rc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use rquickjs::prelude::{Func, MutFn};
 use rquickjs::{Context, Ctx, Error as JsError, Exception, FromJs, Object, Runtime, Value};
 use serde_json::json;
 
-use crate::params::{
-    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
-    ExplainParams, FeatureFlagsParams, FindDupesParams, GetTokenBlastRadiusParams, HealthParams,
-    ImpactParams, ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams,
-    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
-};
-
-use super::{
-    build_analyze_args, build_audit_args, build_check_changed_args,
-    build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
-    build_find_dupes_args, build_get_blast_radius_args, build_get_cleanup_candidates_args,
-    build_get_hot_paths_args, build_get_importance_args, build_get_token_blast_radius_args,
-    build_health_args, build_impact_args, build_list_boundaries_args, build_project_info_args,
-    build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
-    build_trace_export_args, build_trace_file_args,
-};
+use crate::params::CodeExecuteParams;
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 const MAX_TIMEOUT_MS: u64 = 30_000;
@@ -35,8 +20,18 @@ const MAX_OUTPUT_BYTES: usize = 4_000_000;
 const MEMORY_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 const MAX_STACK_BYTES: usize = 512 * 1024;
 const MAX_HOST_CALLS: usize = 8;
-const STDERR_LIMIT_BYTES: usize = 64 * 1024;
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[path = "code_mode_subprocess.rs"]
+mod code_mode_subprocess;
+#[path = "code_mode_tools.rs"]
+mod code_mode_tools;
+
+#[cfg(test)]
+use code_mode_subprocess::normalize_output;
+use code_mode_subprocess::run_fallow_sync;
+use code_mode_tools::{
+    CODE_MODE_ALIASES, CodeModeTool, build_tool_args, merge_default_root, run_api_tool,
+};
 
 pub fn execute_code_mode(binary: String, params: CodeExecuteParams) -> Result<String, String> {
     let timeout_ms = params
@@ -334,7 +329,6 @@ impl CodeModeState {
         let tool = CodeModeTool::from_name(tool)?;
         call.tool = tool.name().to_string();
         let params = merge_default_root(params_json, self.default_root.as_deref())?;
-        let args = build_tool_args(tool, params)?;
         let remaining_output_bytes = self.max_output_bytes.saturating_sub(self.output_bytes);
         if remaining_output_bytes == 0 {
             return Err(format!(
@@ -342,13 +336,18 @@ impl CodeModeState {
                 self.max_output_bytes
             ));
         }
-        let stdout = run_fallow_sync(
-            &self.binary,
-            "code_execute",
-            &args,
-            self.deadline,
-            remaining_output_bytes,
-        )?;
+        let stdout = if let Some(value) = run_api_tool(tool, params.clone())? {
+            serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
+        } else {
+            let args = build_tool_args(tool, params)?;
+            run_fallow_sync(
+                &self.binary,
+                "code_execute",
+                &args,
+                self.deadline,
+                remaining_output_bytes,
+            )?
+        };
         call.output_bytes = stdout.len();
         self.output_bytes = self
             .output_bytes
@@ -393,403 +392,6 @@ fn classify_host_error(message: &str) -> &'static str {
         return "invalid_params";
     }
     "subprocess"
-}
-
-#[derive(Clone, Copy)]
-enum CodeModeTool {
-    Analyze,
-    CheckChanged,
-    SecurityCandidates,
-    FindDupes,
-    ProjectInfo,
-    TraceExport,
-    TraceFile,
-    TraceDependency,
-    TraceClone,
-    CheckHealth,
-    Audit,
-    FallowExplain,
-    ListBoundaries,
-    FeatureFlags,
-    Impact,
-    CheckRuntimeCoverage,
-    GetHotPaths,
-    GetBlastRadius,
-    GetImportance,
-    GetCleanupCandidates,
-    GetTokenBlastRadius,
-}
-
-impl CodeModeTool {
-    fn from_name(name: &str) -> Result<Self, String> {
-        match name {
-            "analyze" => Ok(Self::Analyze),
-            "check_changed" => Ok(Self::CheckChanged),
-            "security_candidates" => Ok(Self::SecurityCandidates),
-            "find_dupes" => Ok(Self::FindDupes),
-            "project_info" => Ok(Self::ProjectInfo),
-            "trace_export" => Ok(Self::TraceExport),
-            "trace_file" => Ok(Self::TraceFile),
-            "trace_dependency" => Ok(Self::TraceDependency),
-            "trace_clone" => Ok(Self::TraceClone),
-            "check_health" => Ok(Self::CheckHealth),
-            "audit" => Ok(Self::Audit),
-            "fallow_explain" => Ok(Self::FallowExplain),
-            "list_boundaries" => Ok(Self::ListBoundaries),
-            "feature_flags" => Ok(Self::FeatureFlags),
-            "impact" => Ok(Self::Impact),
-            "check_runtime_coverage" => Ok(Self::CheckRuntimeCoverage),
-            "get_hot_paths" => Ok(Self::GetHotPaths),
-            "get_blast_radius" => Ok(Self::GetBlastRadius),
-            "get_importance" => Ok(Self::GetImportance),
-            "get_cleanup_candidates" => Ok(Self::GetCleanupCandidates),
-            "get_token_blast_radius" => Ok(Self::GetTokenBlastRadius),
-            "fix_preview" | "fix_apply" => Err(
-                "code mode does not expose fix tools; use standalone MCP tools for previews"
-                    .to_string(),
-            ),
-            _ => Err(format!("unsupported code mode fallow tool '{name}'")),
-        }
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Analyze => "analyze",
-            Self::CheckChanged => "check_changed",
-            Self::SecurityCandidates => "security_candidates",
-            Self::FindDupes => "find_dupes",
-            Self::ProjectInfo => "project_info",
-            Self::TraceExport => "trace_export",
-            Self::TraceFile => "trace_file",
-            Self::TraceDependency => "trace_dependency",
-            Self::TraceClone => "trace_clone",
-            Self::CheckHealth => "check_health",
-            Self::Audit => "audit",
-            Self::FallowExplain => "fallow_explain",
-            Self::ListBoundaries => "list_boundaries",
-            Self::FeatureFlags => "feature_flags",
-            Self::Impact => "impact",
-            Self::CheckRuntimeCoverage => "check_runtime_coverage",
-            Self::GetHotPaths => "get_hot_paths",
-            Self::GetBlastRadius => "get_blast_radius",
-            Self::GetImportance => "get_importance",
-            Self::GetCleanupCandidates => "get_cleanup_candidates",
-            Self::GetTokenBlastRadius => "get_token_blast_radius",
-        }
-    }
-}
-
-const CODE_MODE_ALIASES: &[(&str, &str)] = &[
-    ("analyze", "analyze"),
-    ("checkChanged", "check_changed"),
-    ("securityCandidates", "security_candidates"),
-    ("findDupes", "find_dupes"),
-    ("projectInfo", "project_info"),
-    ("traceExport", "trace_export"),
-    ("traceFile", "trace_file"),
-    ("traceDependency", "trace_dependency"),
-    ("traceClone", "trace_clone"),
-    ("checkHealth", "check_health"),
-    ("audit", "audit"),
-    ("explain", "fallow_explain"),
-    ("listBoundaries", "list_boundaries"),
-    ("featureFlags", "feature_flags"),
-    ("impact", "impact"),
-    ("checkRuntimeCoverage", "check_runtime_coverage"),
-    ("getHotPaths", "get_hot_paths"),
-    ("getBlastRadius", "get_blast_radius"),
-    ("getImportance", "get_importance"),
-    ("getCleanupCandidates", "get_cleanup_candidates"),
-    ("getTokenBlastRadius", "get_token_blast_radius"),
-];
-
-fn merge_default_root(
-    params_json: &str,
-    default_root: Option<&str>,
-) -> Result<serde_json::Value, String> {
-    let mut params: serde_json::Value =
-        serde_json::from_str(params_json).map_err(|err| format!("invalid params JSON: {err}"))?;
-    if !params.is_object() {
-        return Err("fallow host call params must be an object".to_string());
-    }
-    if let Some(root) = default_root
-        && params.get("root").is_none()
-        && let Some(object) = params.as_object_mut()
-    {
-        object.insert(
-            "root".to_string(),
-            serde_json::Value::String(root.to_string()),
-        );
-    }
-    Ok(params)
-}
-
-fn build_tool_args(tool: CodeModeTool, params: serde_json::Value) -> Result<Vec<String>, String> {
-    match tool {
-        CodeModeTool::Analyze
-        | CodeModeTool::CheckChanged
-        | CodeModeTool::SecurityCandidates
-        | CodeModeTool::FindDupes
-        | CodeModeTool::ProjectInfo => build_project_tool_args(tool, params),
-        CodeModeTool::TraceExport
-        | CodeModeTool::TraceFile
-        | CodeModeTool::TraceDependency
-        | CodeModeTool::TraceClone => build_trace_tool_args(tool, params),
-        CodeModeTool::CheckHealth
-        | CodeModeTool::Audit
-        | CodeModeTool::FallowExplain
-        | CodeModeTool::ListBoundaries
-        | CodeModeTool::FeatureFlags
-        | CodeModeTool::Impact => build_health_and_config_tool_args(tool, params),
-        CodeModeTool::CheckRuntimeCoverage
-        | CodeModeTool::GetHotPaths
-        | CodeModeTool::GetBlastRadius
-        | CodeModeTool::GetImportance
-        | CodeModeTool::GetCleanupCandidates
-        | CodeModeTool::GetTokenBlastRadius => build_runtime_coverage_tool_args(tool, params),
-    }
-}
-
-fn build_project_tool_args(
-    tool: CodeModeTool,
-    params: serde_json::Value,
-) -> Result<Vec<String>, String> {
-    match tool {
-        CodeModeTool::Analyze => {
-            let params: AnalyzeParams = parse_params(params)?;
-            build_analyze_args(&params)
-        }
-        CodeModeTool::CheckChanged => {
-            let params: CheckChangedParams = parse_params(params)?;
-            Ok(build_check_changed_args(params))
-        }
-        CodeModeTool::SecurityCandidates => {
-            let params: SecurityCandidatesParams = parse_params(params)?;
-            build_security_candidates_args(&params)
-        }
-        CodeModeTool::FindDupes => {
-            let params: FindDupesParams = parse_params(params)?;
-            build_find_dupes_args(&params)
-        }
-        CodeModeTool::ProjectInfo => {
-            let params: ProjectInfoParams = parse_params(params)?;
-            Ok(build_project_info_args(&params))
-        }
-        _ => unreachable!("project tool helper called with non-project tool"),
-    }
-}
-
-fn build_trace_tool_args(
-    tool: CodeModeTool,
-    params: serde_json::Value,
-) -> Result<Vec<String>, String> {
-    match tool {
-        CodeModeTool::TraceExport => {
-            let params: TraceExportParams = parse_params(params)?;
-            build_trace_export_args(&params)
-        }
-        CodeModeTool::TraceFile => {
-            let params: TraceFileParams = parse_params(params)?;
-            build_trace_file_args(&params)
-        }
-        CodeModeTool::TraceDependency => {
-            let params: TraceDependencyParams = parse_params(params)?;
-            build_trace_dependency_args(&params)
-        }
-        CodeModeTool::TraceClone => {
-            let params: TraceCloneParams = parse_params(params)?;
-            build_trace_clone_args(&params)
-        }
-        _ => unreachable!("trace tool helper called with non-trace tool"),
-    }
-}
-
-fn build_health_and_config_tool_args(
-    tool: CodeModeTool,
-    params: serde_json::Value,
-) -> Result<Vec<String>, String> {
-    match tool {
-        CodeModeTool::CheckHealth => {
-            let params: HealthParams = parse_params(params)?;
-            Ok(build_health_args(&params))
-        }
-        CodeModeTool::Audit => {
-            let params: AuditParams = parse_params(params)?;
-            build_audit_args(&params)
-        }
-        CodeModeTool::FallowExplain => {
-            let params: ExplainParams = parse_params(params)?;
-            Ok(build_explain_args(&params))
-        }
-        CodeModeTool::ListBoundaries => {
-            let params: ListBoundariesParams = parse_params(params)?;
-            Ok(build_list_boundaries_args(&params))
-        }
-        CodeModeTool::FeatureFlags => {
-            let params: FeatureFlagsParams = parse_params(params)?;
-            Ok(build_feature_flags_args(&params))
-        }
-        CodeModeTool::Impact => {
-            let params: ImpactParams = parse_params(params)?;
-            Ok(build_impact_args(&params))
-        }
-        _ => unreachable!("health/config helper called with unrelated tool"),
-    }
-}
-
-fn build_runtime_coverage_tool_args(
-    tool: CodeModeTool,
-    params: serde_json::Value,
-) -> Result<Vec<String>, String> {
-    match tool {
-        CodeModeTool::CheckRuntimeCoverage => {
-            let params: CheckRuntimeCoverageParams = parse_params(params)?;
-            Ok(build_check_runtime_coverage_args(&params))
-        }
-        CodeModeTool::GetHotPaths => {
-            let params: CheckRuntimeCoverageParams = parse_params(params)?;
-            Ok(build_get_hot_paths_args(&params))
-        }
-        CodeModeTool::GetBlastRadius => {
-            let params: CheckRuntimeCoverageParams = parse_params(params)?;
-            Ok(build_get_blast_radius_args(&params))
-        }
-        CodeModeTool::GetImportance => {
-            let params: CheckRuntimeCoverageParams = parse_params(params)?;
-            Ok(build_get_importance_args(&params))
-        }
-        CodeModeTool::GetCleanupCandidates => {
-            let params: CheckRuntimeCoverageParams = parse_params(params)?;
-            Ok(build_get_cleanup_candidates_args(&params))
-        }
-        CodeModeTool::GetTokenBlastRadius => {
-            let params: GetTokenBlastRadiusParams = parse_params(params)?;
-            Ok(build_get_token_blast_radius_args(&params))
-        }
-        _ => unreachable!("runtime coverage helper called with unrelated tool"),
-    }
-}
-
-fn parse_params<T>(params: serde_json::Value) -> Result<T, String>
-where
-    T: serde::de::DeserializeOwned,
-{
-    serde_json::from_value(params).map_err(|err| format!("invalid tool params: {err}"))
-}
-
-fn run_fallow_sync(
-    binary: &str,
-    tool: &'static str,
-    args: &[String],
-    deadline: Instant,
-    max_output_bytes: usize,
-) -> Result<String, String> {
-    let mut stdout_file = tempfile::NamedTempFile::new()
-        .map_err(|err| format!("failed to create stdout temp file: {err}"))?;
-    let mut stderr_file = tempfile::NamedTempFile::new()
-        .map_err(|err| format!("failed to create stderr temp file: {err}"))?;
-    let mut child = Command::new(binary)
-        .args(args)
-        .stdout(Stdio::from(
-            stdout_file
-                .reopen()
-                .map_err(|err| format!("failed to reopen stdout temp file: {err}"))?,
-        ))
-        .stderr(Stdio::from(
-            stderr_file
-                .reopen()
-                .map_err(|err| format!("failed to reopen stderr temp file: {err}"))?,
-        ))
-        .env("FALLOW_INTEGRATION_SURFACE", "mcp")
-        .env("FALLOW_MCP_TOOL", tool)
-        .spawn()
-        .map_err(|err| {
-            format!(
-                "failed to execute fallow binary '{binary}': {err}. Ensure fallow is installed and available in PATH, or set FALLOW_BIN."
-            )
-        })?;
-
-    loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|err| format!("failed to wait for fallow subprocess: {err}"))?
-        {
-            let stdout_len = file_len(stdout_file.as_file())?;
-            if stdout_len > max_output_bytes as u64 {
-                return Err(format!(
-                    "code mode host output exceeded {max_output_bytes} bytes"
-                ));
-            }
-
-            let stdout = read_file(stdout_file.as_file_mut(), "stdout")?;
-            let stderr = read_limited_file(stderr_file.as_file_mut(), STDERR_LIMIT_BYTES)?;
-            return normalize_output(status.code().unwrap_or(-1), &stdout, &stderr);
-        }
-
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("code mode execution timed out while running fallow".to_string());
-        }
-        if file_len(stdout_file.as_file())? > max_output_bytes as u64 {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!(
-                "code mode host output exceeded {max_output_bytes} bytes"
-            ));
-        }
-
-        thread::sleep(POLL_INTERVAL);
-    }
-}
-
-fn file_len(file: &fs::File) -> Result<u64, String> {
-    file.metadata()
-        .map(|metadata| metadata.len())
-        .map_err(|err| format!("failed to inspect fallow output file: {err}"))
-}
-
-fn read_file(file: &mut fs::File, label: &str) -> Result<Vec<u8>, String> {
-    file.seek(SeekFrom::Start(0))
-        .map_err(|err| format!("failed to rewind fallow {label}: {err}"))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|err| format!("failed to read fallow {label}: {err}"))?;
-    Ok(bytes)
-}
-
-fn read_limited_file(file: &mut fs::File, limit: usize) -> Result<Vec<u8>, String> {
-    let len = file_len(file)?;
-    if len > limit as u64 {
-        return Ok(format!("stderr exceeded {limit} bytes").into_bytes());
-    }
-    read_file(file, "stderr")
-}
-
-fn normalize_output(exit_code: i32, stdout: &[u8], stderr: &[u8]) -> Result<String, String> {
-    let stdout = String::from_utf8_lossy(stdout).to_string();
-    let stderr = String::from_utf8_lossy(stderr).trim().to_string();
-
-    match exit_code {
-        0 | 1 => Ok(if stdout.is_empty() {
-            "{}".to_string()
-        } else {
-            stdout
-        }),
-        _ if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(&stdout).is_ok() => {
-            Err(stdout)
-        }
-        _ => Err(json!({
-            "error": true,
-            "message": if stderr.is_empty() {
-                format!("fallow exited with code {exit_code}")
-            } else {
-                stderr
-            },
-            "exit_code": exit_code
-        })
-        .to_string()),
-    }
 }
 
 #[cfg(test)]
@@ -871,6 +473,292 @@ mod tests {
     }
 
     #[test]
+    fn api_backed_analyze_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-api-test","type":"module"}"#,
+        )
+        .expect("package json");
+        fs::write(
+            temp.path().join("src/index.ts"),
+            "export const unused = 1;\n",
+        )
+        .expect("source");
+
+        let output = execute_code_mode(
+            "/definitely/not/fallow".to_string(),
+            CodeExecuteParams {
+                code:
+                    r#"return fallow.analyze({ issue_types: ["unused-exports"], no_cache: true });"#
+                        .to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed analyze should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("dead-code"));
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("analyze"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_analyze_circular_only_uses_family_output() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-circular-test","type":"module","main":"src/a.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(temp.path().join("src/a.ts"), "import './b';\n").expect("source a");
+        fs::write(temp.path().join("src/b.ts"), "import './a';\n").expect("source b");
+
+        let output = execute_code_mode(
+            "/definitely/not/fallow".to_string(),
+            CodeExecuteParams {
+                code:
+                    r#"return fallow.analyze({ issue_types: ["circular-deps"], no_cache: true });"#
+                        .to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed circular analyze should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("dead-code"));
+        assert!(json["result"]["circular_dependencies"].is_array());
+        assert_eq!(
+            json["result"]["unused_exports"].as_array().map(Vec::len),
+            Some(0)
+        );
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("analyze"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_check_changed_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-changed-test","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(temp.path().join("src/index.ts"), "console.log('entry');\n").expect("source");
+        fs::write(
+            temp.path().join("src/feature.ts"),
+            "export const used = 1;\n",
+        )
+        .expect("feature source");
+        git(temp.path(), &["init"]);
+        git(temp.path(), &["add", "."]);
+        git(
+            temp.path(),
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        fs::write(
+            temp.path().join("src/feature.ts"),
+            "export const unused = 1;\n",
+        )
+        .expect("changed source");
+
+        let output = execute_code_mode(
+            "/definitely/not/fallow".to_string(),
+            CodeExecuteParams {
+                code: r#"return fallow.checkChanged({ since: "HEAD", no_cache: true });"#
+                    .to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed checkChanged should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("dead-code"));
+        assert!(json["result"]["summary"].is_object());
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("check_changed"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_feature_flags_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-flags-test","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(
+            temp.path().join("src/index.ts"),
+            "if (process.env.FEATURE_ALPHA) {\n  console.log('on');\n}\n",
+        )
+        .expect("source");
+
+        let output = execute_code_mode(
+            "/definitely/not/fallow".to_string(),
+            CodeExecuteParams {
+                code: "return fallow.featureFlags({ no_cache: true });".to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed feature flags should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("feature-flags"));
+        assert_eq!(
+            json["result"]["feature_flags"][0]["flag_name"].as_str(),
+            Some("FEATURE_ALPHA")
+        );
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("feature_flags"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_list_boundaries_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join("src/app")).expect("app dir");
+        fs::create_dir_all(temp.path().join("src/shared")).expect("shared dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-boundaries-test","type":"module","main":"src/app/index.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(
+            temp.path().join(".fallowrc.json"),
+            r#"{
+                "boundaries": {
+                    "zones": [
+                        { "name": "app", "patterns": ["src/app/**"] },
+                        { "name": "shared", "patterns": ["src/shared/**"] }
+                    ],
+                    "rules": [
+                        { "from": "app", "allow": ["shared"] }
+                    ]
+                }
+            }"#,
+        )
+        .expect("config");
+        fs::write(
+            temp.path().join("src/app/index.ts"),
+            "export const app = 1;\n",
+        )
+        .expect("app source");
+        fs::write(
+            temp.path().join("src/shared/index.ts"),
+            "export const shared = 1;\n",
+        )
+        .expect("shared source");
+
+        let output = execute_code_mode(
+            "/definitely/not/fallow".to_string(),
+            CodeExecuteParams {
+                code: "return fallow.listBoundaries({ no_cache: true });".to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed list boundaries should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("list-boundaries"));
+        assert_eq!(json["result"]["boundaries"]["zone_count"], 2);
+        assert_eq!(json["result"]["boundaries"]["rule_count"], 1);
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("list_boundaries"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn api_backed_explain_does_not_spawn_binary() {
+        let output = execute_code_mode(
+            "/definitely/not/fallow".to_string(),
+            CodeExecuteParams {
+                code: "return fallow.explain({ issue_type: 'unused-export' });".to_string(),
+                root: None,
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed explain should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("explain"));
+        assert_eq!(json["result"]["id"].as_str(), Some("fallow/unused-export"));
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("fallow_explain"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    fn git(root: &std::path::Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .status()
+            .expect("git command starts");
+        assert!(status.success(), "git command failed: {args:?}");
+    }
+
+    #[test]
+    fn api_backed_project_info_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-project-info-test","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(
+            temp.path().join("src/index.ts"),
+            "export const value = 1;\n",
+        )
+        .expect("source");
+
+        let output = execute_code_mode(
+            "/definitely/not/fallow".to_string(),
+            CodeExecuteParams {
+                code: "return fallow.projectInfo({ files: true, no_cache: true });".to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed projectInfo should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["file_count"], 1);
+        assert_eq!(json["result"]["files"][0], "src/index.ts");
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("project_info"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
     fn cpu_bound_snippets_report_timeout() {
         let output = execute_code_mode(
             "fallow".to_string(),
@@ -917,7 +805,6 @@ mod tests {
             "get_blast_radius",
             "get_importance",
             "get_cleanup_candidates",
-            "get_token_blast_radius",
         ];
         for name in valid {
             assert!(
@@ -984,7 +871,6 @@ mod tests {
             ("get_blast_radius", "get_blast_radius"),
             ("get_importance", "get_importance"),
             ("get_cleanup_candidates", "get_cleanup_candidates"),
-            ("get_token_blast_radius", "get_token_blast_radius"),
         ];
         for (input, expected_name) in pairs {
             let tool = CodeModeTool::from_name(input).unwrap();
@@ -1427,22 +1313,6 @@ mod tests {
         assert!(args.contains(&"--runtime-coverage".to_string()));
     }
 
-    #[test]
-    fn build_tool_args_get_token_blast_radius_includes_css_health_flags() {
-        let params = serde_json::json!({});
-        let args = build_tool_args(CodeModeTool::GetTokenBlastRadius, params)
-            .expect("get_token_blast_radius args should build");
-        assert_eq!(
-            args,
-            vec![
-                "health".to_string(),
-                "--css".to_string(),
-                "--format".to_string(),
-                "json".to_string(),
-            ]
-        );
-    }
-
     // ---- build_tool_args invalid-params rejection --------------------------
 
     #[test]
@@ -1708,7 +1578,7 @@ mod tests {
         let output = execute_code_mode(
             "nonexistent-binary-xyz-12345".to_string(),
             CodeExecuteParams {
-                code: r#"return fallow.run("project_info", {});"#.to_string(),
+                code: r#"return fallow.run("impact", {});"#.to_string(),
                 root: Some("/tmp".to_string()),
                 timeout_ms: Some(5_000),
                 max_output_bytes: Some(10_000),
@@ -1720,7 +1590,7 @@ mod tests {
         assert_eq!(json["ok"].as_bool(), Some(false));
         assert_eq!(json["calls"].as_array().map(Vec::len), Some(1));
         let call = &json["calls"][0];
-        assert_eq!(call["tool"], "project_info");
+        assert_eq!(call["tool"], "impact");
         assert_eq!(call["ok"], false);
         assert_eq!(call["error_kind"], "subprocess");
     }

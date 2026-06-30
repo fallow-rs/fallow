@@ -1,16 +1,16 @@
 //! Shared JSON output assembly for CLI and programmatic consumers.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-use fallow_engine::duplicates::DuplicationReport;
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
     DupesOutput, DupesOutputInput, GroupByMode, RootEnvelopeMode,
     apply_config_fixable_to_duplicate_exports, build_check_output, build_dupes_output,
+    harmonize_multi_kind_suppress_line_actions as harmonize_typed_suppress_line_actions,
     strip_root_prefix,
 };
+use fallow_types::duplicates::DuplicationReport;
 use fallow_types::envelope::{
     BaselineDeltas, BaselineMatch, ElapsedMs, Meta, RegressionResult, SchemaVersion, ToolVersion,
 };
@@ -19,8 +19,6 @@ use fallow_types::results::AnalysisResults;
 use fallow_types::workspace::WorkspaceDiagnostic;
 
 use crate::{DupesReportPayload, DuplicationGroup, DuplicationGrouping, ResultGroup};
-
-type SuppressAnchor = (String, u64);
 
 /// Inputs for `fallow dead-code --format json` output assembly.
 pub struct CheckJsonOutputInput<'a> {
@@ -128,7 +126,7 @@ pub fn serialize_check_json(
         input.envelope_mode,
         input.telemetry_analysis_run_id,
     )?;
-    postprocess_check_json(&mut output, input.root);
+    strip_json_root_prefix(&mut output, input.root);
     Ok(output)
 }
 
@@ -150,7 +148,7 @@ pub fn serialize_check_json_payload(
         next_steps: Vec::new(),
     });
     let mut output = serde_json::to_value(envelope)?;
-    postprocess_check_json(&mut output, input.root);
+    strip_json_root_prefix(&mut output, input.root);
     Ok(output)
 }
 
@@ -168,6 +166,7 @@ pub fn serialize_grouped_check_json(
         .map(|group| {
             let mut results = group.results.clone();
             apply_config_fixable_to_duplicate_exports(&mut results, input.config_fixable);
+            harmonize_typed_suppress_line_actions(&mut results);
             CheckGroupedEntry {
                 key: group.key.clone(),
                 owners: group.owners.clone(),
@@ -200,7 +199,6 @@ pub fn serialize_grouped_check_json(
     {
         for entry in arr {
             strip_root_prefix(entry, &root_prefix);
-            harmonize_multi_kind_suppress_line_actions(entry);
         }
     }
     Ok(output)
@@ -303,153 +301,9 @@ fn build_check_json_envelope(input: CheckJsonEnvelopeInput<'_>) -> CheckOutput {
     output
 }
 
-fn postprocess_check_json(output: &mut serde_json::Value, root: &Path) {
+fn strip_json_root_prefix(output: &mut serde_json::Value, root: &Path) {
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(output, &root_prefix);
-    harmonize_multi_kind_suppress_line_actions(output);
-}
-
-/// Merge same-line suppress actions so multi-kind findings share one comment.
-pub fn harmonize_multi_kind_suppress_line_actions(output: &mut serde_json::Value) {
-    let mut anchors: BTreeMap<SuppressAnchor, Vec<String>> = BTreeMap::new();
-    collect_suppress_line_anchors(output, &mut anchors);
-
-    anchors.retain(|_, kinds| {
-        sort_suppression_kinds(kinds);
-        kinds.dedup();
-        kinds.len() > 1
-    });
-    if anchors.is_empty() {
-        return;
-    }
-
-    rewrite_suppress_line_actions(output, &anchors);
-}
-
-fn collect_suppress_line_anchors(
-    value: &serde_json::Value,
-    anchors: &mut BTreeMap<SuppressAnchor, Vec<String>>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(anchor) = suppression_anchor(map)
-                && let Some(actions) = map.get("actions").and_then(serde_json::Value::as_array)
-            {
-                for action in actions {
-                    if let Some(comment) = suppress_line_comment(action) {
-                        for kind in parse_suppress_line_comment(comment) {
-                            let kinds = anchors.entry(anchor.clone()).or_default();
-                            if !kinds.iter().any(|existing| existing == &kind) {
-                                kinds.push(kind);
-                            }
-                        }
-                    }
-                }
-            }
-
-            for child in map.values() {
-                collect_suppress_line_anchors(child, anchors);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_suppress_line_anchors(item, anchors);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn rewrite_suppress_line_actions(
-    value: &mut serde_json::Value,
-    anchors: &BTreeMap<SuppressAnchor, Vec<String>>,
-) {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(anchor) = suppression_anchor(map)
-                && let Some(kinds) = anchors.get(&anchor)
-            {
-                let comment = format!("// fallow-ignore-next-line {}", kinds.join(", "));
-                if let Some(actions) = map
-                    .get_mut("actions")
-                    .and_then(serde_json::Value::as_array_mut)
-                {
-                    for action in actions {
-                        if suppress_line_comment(action).is_some()
-                            && let serde_json::Value::Object(action_map) = action
-                        {
-                            action_map.insert("comment".to_string(), serde_json::json!(comment));
-                        }
-                    }
-                }
-            }
-
-            for child in map.values_mut() {
-                rewrite_suppress_line_actions(child, anchors);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                rewrite_suppress_line_actions(item, anchors);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn suppression_anchor(map: &serde_json::Map<String, serde_json::Value>) -> Option<SuppressAnchor> {
-    let path = map
-        .get("path")
-        .or_else(|| map.get("from_path"))
-        .and_then(serde_json::Value::as_str)?;
-    let line = map.get("line").and_then(serde_json::Value::as_u64)?;
-    Some((path.to_string(), line))
-}
-
-fn suppress_line_comment(action: &serde_json::Value) -> Option<&str> {
-    (action.get("type").and_then(serde_json::Value::as_str) == Some("suppress-line"))
-        .then_some(())
-        .and_then(|()| action.get("comment").and_then(serde_json::Value::as_str))
-}
-
-fn parse_suppress_line_comment(comment: &str) -> Vec<String> {
-    comment
-        .strip_prefix("// fallow-ignore-next-line ")
-        .map(|rest| {
-            rest.split(|c: char| c == ',' || c.is_whitespace())
-                .filter(|token| !token.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn sort_suppression_kinds(kinds: &mut [String]) {
-    kinds.sort_by_key(|kind| suppression_kind_rank(kind));
-}
-
-fn suppression_kind_rank(kind: &str) -> usize {
-    match kind {
-        "unused-file" => 0,
-        "unused-export" => 1,
-        "unused-type" => 2,
-        "private-type-leak" => 3,
-        "unused-enum-member" => 4,
-        "unused-class-member" => 5,
-        "unused-store-member" => 6,
-        "unresolved-import" => 7,
-        "unlisted-dependency" => 8,
-        "duplicate-export" => 9,
-        "circular-dependency" => 10,
-        "re-export-cycle" => 11,
-        "boundary-violation" => 12,
-        "code-duplication" => 13,
-        "complexity" => 14,
-        "unprovided-inject" => 15,
-        "unrendered-component" => 16,
-        "unused-server-action" => 17,
-        _ => usize::MAX,
-    }
 }
 
 fn group_by_mode_from_label(label: &str) -> GroupByMode {
@@ -458,45 +312,5 @@ fn group_by_mode_from_label(label: &str) -> GroupByMode {
         "package" => GroupByMode::Package,
         "section" => GroupByMode::Section,
         _ => GroupByMode::Owner,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn harmonize_suppress_actions_merges_same_line_issue_kinds() {
-        let mut output = json!({
-            "unused_exports": [{
-                "path": "src/api.ts",
-                "line": 4,
-                "actions": [{
-                    "type": "suppress-line",
-                    "comment": "// fallow-ignore-next-line unused-export"
-                }]
-            }],
-            "unused_types": [{
-                "path": "src/api.ts",
-                "line": 4,
-                "actions": [{
-                    "type": "suppress-line",
-                    "comment": "// fallow-ignore-next-line unused-type"
-                }]
-            }]
-        });
-
-        harmonize_multi_kind_suppress_line_actions(&mut output);
-
-        assert_eq!(
-            output["unused_exports"][0]["actions"][0]["comment"],
-            "// fallow-ignore-next-line unused-export, unused-type"
-        );
-        assert_eq!(
-            output["unused_types"][0]["actions"][0]["comment"],
-            "// fallow-ignore-next-line unused-export, unused-type"
-        );
     }
 }

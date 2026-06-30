@@ -1,10 +1,10 @@
 //! Shared audit JSON payload contracts for programmatic consumers.
 
 use fallow_config::AuditGate;
-use fallow_engine::duplicates::DuplicationReport;
 use fallow_output::{
     AuditCommand, CodeClimateIssue, RootEnvelopeMode, codeclimate_issues_to_value,
 };
+use fallow_types::duplicates::DuplicationReport;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::output::NextStep;
 use serde::Serialize;
@@ -341,9 +341,9 @@ mod tests {
     #[test]
     fn audit_sarif_combines_runs_and_duplication_run() {
         let duplication = DuplicationReport {
-            clone_groups: vec![fallow_engine::duplicates::CloneGroup {
+            clone_groups: vec![fallow_types::duplicates::CloneGroup {
                 instances: vec![
-                    fallow_engine::duplicates::CloneInstance {
+                    fallow_types::duplicates::CloneInstance {
                         file: "src/a.ts".into(),
                         start_line: 1,
                         end_line: 12,
@@ -351,7 +351,7 @@ mod tests {
                         end_col: 1,
                         fragment: "duplicated();".to_string(),
                     },
-                    fallow_engine::duplicates::CloneInstance {
+                    fallow_types::duplicates::CloneInstance {
                         file: "src/b.ts".into(),
                         start_line: 1,
                         end_line: 12,

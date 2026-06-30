@@ -240,7 +240,7 @@ fn package_name_from_lock_key(raw_key: &str) -> Option<String> {
 #[must_use]
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn find_unused_dependency_overrides(
     state: &PnpmOverrideState,
@@ -336,7 +336,7 @@ fn collect_unused_from_source(input: &mut UnusedOverrideSourceInput<'_>) {
 #[must_use]
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn find_misconfigured_dependency_overrides(
     state: &PnpmOverrideState,

@@ -6,7 +6,8 @@ use colored::Colorize;
 use fallow_api::{
     AttributedCloneGroupFinding, AttributedInstance, DuplicationGroup, DuplicationGrouping,
 };
-use fallow_engine::duplicates::{CloneFamily, CloneFingerprintSet, CloneGroup, DuplicationReport};
+use fallow_engine::CloneFingerprintSet;
+use fallow_types::duplicates::{CloneFamily, CloneGroup, DuplicationReport};
 
 use super::{
     MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, split_dir_filename, thousands,
@@ -359,11 +360,11 @@ pub(super) struct MirroredDirs {
 ///
 /// Minimum 3 families must share a pattern to qualify as "mirrored".
 pub(super) fn detect_mirrored_families<'a>(
-    families: &'a [fallow_engine::duplicates::CloneFamily],
+    families: &'a [fallow_types::duplicates::CloneFamily],
     root: &Path,
 ) -> (
     Vec<MirroredDirs>,
-    Vec<&'a fallow_engine::duplicates::CloneFamily>,
+    Vec<&'a fallow_types::duplicates::CloneFamily>,
 ) {
     const MIN_MIRROR_FAMILIES: usize = 3;
 
@@ -394,7 +395,7 @@ pub(super) fn detect_mirrored_families<'a>(
 
     mirrors.sort_by_key(|b| std::cmp::Reverse(b.total_lines));
 
-    let non_mirrored: Vec<&fallow_engine::duplicates::CloneFamily> = families
+    let non_mirrored: Vec<&fallow_types::duplicates::CloneFamily> = families
         .iter()
         .enumerate()
         .filter(|(idx, _)| !mirrored_indices.contains(idx))
@@ -411,7 +412,7 @@ type MirrorPairMap = rustc_hash::FxHashMap<(String, String), Vec<(usize, String,
 /// Map normalized directory-pair keys to the two-file clone families that share
 /// the same filename across both directories (candidates for mirror detection).
 fn build_mirror_pair_map(
-    families: &[fallow_engine::duplicates::CloneFamily],
+    families: &[fallow_types::duplicates::CloneFamily],
     root: &Path,
 ) -> MirrorPairMap {
     let mut pair_map: MirrorPairMap = rustc_hash::FxHashMap::default();
@@ -694,7 +695,7 @@ fn print_grouped_duplication_footer(
 mod tests {
     use super::super::plain;
     use super::*;
-    use fallow_engine::duplicates::{
+    use fallow_types::duplicates::{
         CloneFamily, CloneGroup, CloneInstance, DuplicationStats, RefactoringKind,
         RefactoringSuggestion,
     };

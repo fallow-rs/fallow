@@ -11,6 +11,9 @@ categories.workspace = true
 description = "Typed analysis engine facade for fallow consumers"
 readme = "../../README.md"
 
+[lib]
+doctest = false
+
 [dependencies]
 fallow-config = { workspace = true }
 fallow-core = { workspace = true }
@@ -30,7 +33,7 @@ tracing = { workspace = true }
 xxhash-rust = { workspace = true }
 
 [features]
-schema = ["fallow-core/schema", "fallow-output/schema", "fallow-types/schema"]
+schema = ["fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
 oxc_span = { workspace = true }

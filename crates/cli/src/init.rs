@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::{ExternalPluginDef, FallowConfig, PackageJson};
-use fallow_engine::git_env::clear_ambient_git_env;
+use fallow_engine::clear_ambient_git_env;
 
 use crate::validate;
 

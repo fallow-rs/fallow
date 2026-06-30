@@ -1,9 +1,10 @@
 //! Reusable output contract types for fallow.
 //!
-//! This crate owns stable report DTOs and output-format metadata that are not
-//! tied to CLI rendering. Higher-level output assemblers live above this crate
-//! in `fallow-api` or the CLI, while this crate remains the shared typed
-//! boundary those builders and non-CLI consumers can use.
+//! This crate owns stable report DTOs that are not tied to CLI rendering.
+//! Higher-level output assemblers live above this crate in `fallow-api` or the
+//! CLI, while this crate remains the shared typed boundary those builders and
+//! non-CLI consumers can use. Shared selectors such as `OutputFormat` live in
+//! `fallow-types` and are re-exported here for compatibility.
 #![cfg_attr(
     test,
     allow(
@@ -26,7 +27,6 @@ mod diff;
 mod dupes;
 mod feature_flags;
 mod fix;
-mod format;
 mod health;
 mod health_actions;
 mod health_coverage;
@@ -81,7 +81,9 @@ pub use audit_weakening::{WeakeningKind, WeakeningSignal};
 pub use check::{
     CHECK_SCHEMA_VERSION, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CheckOutputInput,
     GroupByMode, apply_config_fixable_to_duplicate_exports, build_check_output,
-    build_check_summary, serialize_check_grouped_json_output, serialize_check_json_output,
+    build_check_summary, harmonize_dead_code_health_suppress_line_actions,
+    harmonize_multi_kind_suppress_line_actions, serialize_check_grouped_json_output,
+    serialize_check_json_output,
 };
 pub use ci_output::{
     CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
@@ -117,6 +119,7 @@ pub use dupes::{
 pub use fallow_types::envelope;
 pub use fallow_types::output;
 pub use fallow_types::output_dead_code;
+pub use fallow_types::output_format::OutputFormat;
 pub use fallow_types::output_health;
 pub use feature_flags::{
     FeatureFlagAction, FeatureFlagActionType, FeatureFlagConfidence, FeatureFlagDeadCodeOverlap,
@@ -128,7 +131,6 @@ pub use fix::{
     FixJsonOutput, FixJsonOutputInput, build_fix_json_output, count_applied_fixes,
     count_reported_fix_skips, serialize_fix_json_output,
 };
-pub use format::OutputFormat;
 pub use health::{
     HealthJsonOutputInput, HealthOutput, HealthOutputInput, build_health_output,
     serialize_health_json_output,
@@ -240,9 +242,11 @@ pub use review_envelopes::{
     serialize_review_envelope_json_output, serialize_review_reconcile_json_output,
 };
 pub use root_envelopes::{
-    AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, FallowOutput, RootEnvelopeMode,
-    apply_root_kind, attach_telemetry_meta, remove_root_kind, serialize_audit_json_output,
-    serialize_combined_json_output, serialize_json_root_output, serialize_named_json_output,
+    AuditCommand, AuditOutput, CombinedMeta, CombinedOutput, FallowOutput,
+    LEGACY_ENVELOPE_COMPATIBILITY_WINDOW, LEGACY_ENVELOPE_DEPRECATION_REQUIREMENT,
+    LEGACY_ENVELOPE_REMOVAL_TARGET, RootEnvelopeMode, apply_root_kind, attach_telemetry_meta,
+    remove_root_kind, serialize_audit_json_output, serialize_combined_json_output,
+    serialize_json_root_output, serialize_named_json_output,
 };
 pub use sarif::{
     GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifResultInput,

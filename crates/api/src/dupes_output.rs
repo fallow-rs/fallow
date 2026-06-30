@@ -2,15 +2,17 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_engine::duplicates::{
-    CloneFamily, CloneFingerprintSet, CloneGroup, CloneInstance, DuplicationReport,
-    DuplicationStats, MirroredDirectory, RefactoringSuggestion, clone_fingerprint,
-    dominant_identifier, fingerprint_for_fragment,
+use fallow_engine::{
+    CloneFingerprintSet, clone_fingerprint, dominant_identifier, fingerprint_for_fragment,
 };
 use fallow_output::{
     CloneFamilyAction, CloneGroupAction, CodeClimateIssue, CodeClimateIssueInput,
     CodeClimateSeverity, clone_family_actions, clone_group_actions, codeclimate_fingerprint_hash,
     normalize_uri,
+};
+use fallow_types::duplicates::{
+    CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
+    RefactoringSuggestion,
 };
 use fallow_types::envelope::AuditIntroduced;
 use fallow_types::serde_path;
@@ -415,10 +417,10 @@ fn codeclimate_path(path: &Path, root: &Path) -> String {
 mod tests {
     use std::path::Path;
 
-    use fallow_engine::duplicates::{
+    use fallow_output::{CloneFamilyActionType, CloneGroupActionType};
+    use fallow_types::duplicates::{
         CloneInstance, DuplicationStats, RefactoringKind, RefactoringSuggestion,
     };
-    use fallow_output::{CloneFamilyActionType, CloneGroupActionType};
 
     use super::*;
 

@@ -11,6 +11,9 @@ categories.workspace = true
 description = "Output contract types for fallow reports"
 readme = "../../README.md"
 
+[lib]
+doctest = false
+
 [dependencies]
 fallow-types = { workspace = true }
 serde = { workspace = true }

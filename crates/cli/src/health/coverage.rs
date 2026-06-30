@@ -818,9 +818,7 @@ fn build_static_files(
         let canonical_path = input
             .istanbul_coverage
             .map(|_| dunce::canonicalize(path).unwrap_or_else(|_| path.clone()));
-        let caller_count = graph
-            .and_then(|g| g.reverse_deps.get(module.file_id.0 as usize))
-            .map_or(0_usize, Vec::len);
+        let caller_count = graph.map_or(0_usize, |g| g.direct_importer_count(module.file_id));
         let caller_count = u32::try_from(caller_count).unwrap_or(u32::MAX);
         let owner_count = codeowners
             .as_ref()
@@ -958,15 +956,14 @@ fn build_static_signal_index(
         .iter()
         .map(|module| (module.file_id, module))
         .collect();
-    for node in &graph.modules {
-        let Some(&path) = file_paths.get(&node.file_id) else {
+    for export in fallow_engine::module_value_exports(graph) {
+        let Some(&path) = file_paths.get(&export.file_id) else {
             continue;
         };
-        index_node_exports(
+        index_graph_value_export(
             &mut index,
-            graph,
-            node,
-            module_by_id.get(&node.file_id).copied(),
+            &export,
+            module_by_id.get(&export.file_id).copied(),
             path,
         );
     }
@@ -996,54 +993,39 @@ fn index_dead_code_signals(
     }
 }
 
-/// Index the value exports of one graph node, including test-referenced ones.
-fn index_node_exports(
+/// Index one graph value export, including test-referenced state.
+fn index_graph_value_export(
     index: &mut StaticSignalIndex,
-    graph: &fallow_engine::graph::ModuleGraph,
-    node: &fallow_engine::graph::ModuleNode,
+    export: &fallow_engine::ModuleValueExport,
     module: Option<&fallow_types::extract::ModuleInfo>,
     path: &Path,
 ) {
-    for export in &node.exports {
-        if export.is_type_only {
-            continue;
-        }
+    index
+        .exported_names
+        .entry(path.to_path_buf())
+        .or_default()
+        .insert(export.name.clone());
 
+    if let Some(module) = module {
+        let (line, _) =
+            fallow_types::extract::byte_offset_to_line_col(&module.line_offsets, export.span_start);
         index
-            .exported_names
+            .exported_lines
             .entry(path.to_path_buf())
             .or_default()
-            .insert(export.name.to_string());
+            .insert(line);
 
-        if let Some(module) = module {
-            let (line, _) = fallow_types::extract::byte_offset_to_line_col(
-                &module.line_offsets,
-                export.span.start,
-            );
+        if export.test_referenced {
             index
-                .exported_lines
+                .test_referenced_export_names
+                .entry(path.to_path_buf())
+                .or_default()
+                .insert(export.name.clone());
+            index
+                .test_referenced_export_lines
                 .entry(path.to_path_buf())
                 .or_default()
                 .insert(line);
-
-            let has_test_ref = export.references.iter().any(|reference| {
-                graph
-                    .modules
-                    .get(reference.from_file.0 as usize)
-                    .is_some_and(fallow_engine::graph::ModuleNode::is_test_reachable)
-            });
-            if has_test_ref {
-                index
-                    .test_referenced_export_names
-                    .entry(path.to_path_buf())
-                    .or_default()
-                    .insert(export.name.to_string());
-                index
-                    .test_referenced_export_lines
-                    .entry(path.to_path_buf())
-                    .or_default()
-                    .insert(line);
-            }
         }
     }
 }
@@ -2260,7 +2242,7 @@ mod tests {
 
     fn empty_analysis_output() -> fallow_engine::DeadCodeAnalysisArtifacts {
         fallow_engine::DeadCodeAnalysisArtifacts {
-            results: fallow_engine::results::AnalysisResults::default(),
+            results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: None,
             modules: None,
@@ -3314,11 +3296,13 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("failed to write app.test.ts: {err}"));
 
-        let config =
-            FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None);
-        let files = fallow_engine::discover::discover_files(&config);
-        let parse_result = fallow_engine::extract::parse_all_files(&files, None, true);
-        let modules = parse_result.modules;
+        let parsed = fallow_engine::AnalysisSession::from_resolved_config(
+            FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
+        )
+        .into_parsed_parts(true);
+        let config = parsed.config;
+        let files = parsed.files;
+        let modules = parsed.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
         let analysis_output = fallow_engine::analyze_with_parse_result(&config, &modules)
             .unwrap_or_else(|err| panic!("failed to analyze temp project: {err}"));
@@ -3445,11 +3429,12 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("failed to write other.ts: {err}"));
 
-        let config =
-            FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None);
-        let files = fallow_engine::discover::discover_files(&config);
-        let parse_result = fallow_engine::extract::parse_all_files(&files, None, true);
-        let modules = parse_result.modules;
+        let parsed = fallow_engine::AnalysisSession::from_resolved_config(
+            FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
+        )
+        .into_parsed_parts(true);
+        let files = parsed.files;
+        let modules = parsed.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
         let analysis_output = empty_analysis_output();
         let mut changed_files = FxHashSet::default();

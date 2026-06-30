@@ -106,7 +106,9 @@ mod combined;
 mod dupes;
 
 /// Structured error output for CLI and JSON formats.
-pub use fallow_engine::error;
+pub mod error {
+    pub use fallow_engine::emit_error;
+}
 
 #[allow(
     dead_code,
@@ -145,6 +147,8 @@ mod license;
 mod telemetry;
 
 /// Test-only coverage for the JSON output contract aliases.
+#[cfg(test)]
+mod architecture_boundaries;
 #[cfg(test)]
 pub mod output_envelope;
 pub(crate) mod output_runtime;

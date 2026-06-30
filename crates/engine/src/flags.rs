@@ -5,8 +5,13 @@ use std::path::Path;
 use fallow_config::ResolvedConfig;
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, ParseResult};
-use fallow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
+use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
 use rustc_hash::FxHashMap;
+
+use crate::dead_code::analyze_with_parse_result;
+use crate::discover::discover_files_with_plugin_scopes;
+use crate::session::parse_files_for_config;
+use crate::suppress::{IssueKind, is_file_suppressed, is_suppressed};
 
 /// Typed result from running feature flag analysis.
 #[derive(Debug, Clone)]
@@ -18,7 +23,7 @@ pub struct FeatureFlagsAnalysis {
 /// Run feature flag analysis for a resolved project config.
 #[must_use]
 pub fn analyze_feature_flags(config: &ResolvedConfig) -> FeatureFlagsAnalysis {
-    let files = crate::discover_files_with_plugin_scopes(config);
+    let files = discover_files_with_plugin_scopes(config);
     let flags = collect_flags_for_files(config, &files);
     FeatureFlagsAnalysis {
         flags,
@@ -29,26 +34,17 @@ pub fn analyze_feature_flags(config: &ResolvedConfig) -> FeatureFlagsAnalysis {
 /// Built-in environment variable prefixes treated as feature flags.
 #[must_use]
 pub fn builtin_env_prefixes() -> &'static [&'static str] {
-    fallow_core::extract::flags::builtin_env_prefixes()
+    crate::feature_flags::builtin_env_prefixes()
 }
 
 /// Distinct built-in SDK provider labels, in declaration order.
 #[must_use]
 pub fn builtin_sdk_providers() -> Vec<&'static str> {
-    fallow_core::extract::flags::builtin_sdk_providers()
+    crate::feature_flags::builtin_sdk_providers()
 }
 
 fn collect_flags_for_files(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<FeatureFlag> {
-    let cache_store = if config.no_cache {
-        None
-    } else {
-        fallow_core::cache::CacheStore::load(
-            &config.cache_dir,
-            config.cache_config_hash,
-            fallow_core::resolve_cache_max_size_bytes(config),
-        )
-    };
-    let parse_result = fallow_core::extract::parse_all_files(files, cache_store.as_ref(), false);
+    let parse_result = parse_files_for_config(config, files, false);
 
     let mut flags = collect_flags_from_parse_result(config, files, &parse_result);
     correlate_flags_with_dead_code(&mut flags, config, &parse_result);
@@ -60,21 +56,41 @@ fn correlate_flags_with_dead_code(
     config: &ResolvedConfig,
     parse_result: &ParseResult,
 ) {
-    #[expect(
-        deprecated,
-        reason = "fallow-engine is the typed migration boundary over the internal core backend"
-    )]
-    if let Ok(analysis_output) =
-        fallow_core::analyze_with_parse_result(config, &parse_result.modules)
-    {
-        #[expect(
-            deprecated,
-            reason = "fallow-engine is the typed migration boundary over the internal core backend"
-        )]
-        fallow_core::analyze::feature_flags::correlate_with_dead_code(
-            flags,
-            &analysis_output.results,
-        );
+    if let Ok(analysis_output) = analyze_with_parse_result(config, &parse_result.modules) {
+        correlate_with_dead_code(flags, &analysis_output.results);
+    }
+}
+
+fn correlate_with_dead_code(flags: &mut [FeatureFlag], results: &AnalysisResults) {
+    if results.unused_exports.is_empty() && results.unused_types.is_empty() {
+        return;
+    }
+
+    for flag in flags.iter_mut() {
+        let (Some(guard_start), Some(guard_end)) = (flag.guard_line_start, flag.guard_line_end)
+        else {
+            continue;
+        };
+
+        for export in &results.unused_exports {
+            if export.export.path == flag.path
+                && export.export.line >= guard_start
+                && export.export.line <= guard_end
+            {
+                flag.guarded_dead_exports
+                    .push(export.export.export_name.clone());
+            }
+        }
+
+        for export in &results.unused_types {
+            if export.export.path == flag.path
+                && export.export.line >= guard_start
+                && export.export.line <= guard_end
+            {
+                flag.guarded_dead_exports
+                    .push(export.export.export_name.clone());
+            }
+        }
     }
 }
 
@@ -116,17 +132,10 @@ fn collect_flags_from_parse_result(
 }
 
 fn collect_builtin_flags(flags: &mut Vec<FeatureFlag>, module: &ModuleInfo, path: &Path) {
-    let file_suppressed = fallow_core::suppress::is_file_suppressed(
-        &module.suppressions,
-        fallow_core::suppress::IssueKind::FeatureFlag,
-    );
+    let file_suppressed = is_file_suppressed(&module.suppressions, IssueKind::FeatureFlag);
     for flag_use in &module.flag_uses {
         if file_suppressed
-            || fallow_core::suppress::is_suppressed(
-                &module.suppressions,
-                flag_use.line,
-                fallow_core::suppress::IssueKind::FeatureFlag,
-            )
+            || is_suppressed(&module.suppressions, flag_use.line, IssueKind::FeatureFlag)
         {
             continue;
         }
@@ -145,7 +154,7 @@ fn collect_custom_flags(
         return;
     };
 
-    let custom_flags = fallow_core::extract::flags::extract_flags_from_source(
+    let custom_flags = crate::feature_flags::extract_flags_from_source(
         &source,
         path,
         extra_sdk,
@@ -157,11 +166,7 @@ fn collect_custom_flags(
             existing.line == flag_use.line && existing.flag_name == flag_use.flag_name
         });
         if !already_found
-            && !fallow_core::suppress::is_suppressed(
-                &module.suppressions,
-                flag_use.line,
-                fallow_core::suppress::IssueKind::FeatureFlag,
-            )
+            && !is_suppressed(&module.suppressions, flag_use.line, IssueKind::FeatureFlag)
         {
             flags.push(flag_use_to_feature_flag(flag_use, module, path));
         }

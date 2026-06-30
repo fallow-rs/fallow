@@ -2432,8 +2432,7 @@ fn feature_flags_args_with_all_options() {
         config: Some(".fallowrc.json".to_string()),
         production: Some(true),
         workspace: Some("@app/core".to_string()),
-        flag_type: None,
-        confidence: None,
+        top: Some(5),
         no_cache: Some(true),
         threads: Some(4),
     });
@@ -2447,4 +2446,6 @@ fn feature_flags_args_with_all_options() {
     assert!(args.contains(&"--no-cache".to_string()));
     assert!(args.contains(&"--threads".to_string()));
     assert!(args.contains(&"4".to_string()));
+    assert!(args.contains(&"--top".to_string()));
+    assert!(args.contains(&"5".to_string()));
 }

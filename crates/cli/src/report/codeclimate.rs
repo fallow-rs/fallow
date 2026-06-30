@@ -4,13 +4,13 @@ use std::process::ExitCode;
 use fallow_config::RulesConfig;
 #[cfg(test)]
 use fallow_config::Severity;
-use fallow_engine::duplicates::DuplicationReport;
 use fallow_output::{
     CodeClimateAnnotationField, CodeClimateIssue, HealthReport, annotate_codeclimate_issues,
     codeclimate_issues_to_value,
 };
 #[cfg(test)]
 use fallow_output::{CodeClimateSeverity, codeclimate_fingerprint_hash};
+use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
 
 use super::grouping::{self, OwnershipResolver};
@@ -2318,7 +2318,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_one_issue_per_instance() {
-        use fallow_engine::duplicates::{
+        use fallow_types::duplicates::{
             CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         };
         let root = PathBuf::from("/project");
@@ -2364,7 +2364,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_description_includes_group_number_and_line_count() {
-        use fallow_engine::duplicates::{
+        use fallow_types::duplicates::{
             CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         };
         let root = PathBuf::from("/project");
@@ -2416,7 +2416,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_empty_report_produces_empty_array() {
-        use fallow_engine::duplicates::{DuplicationReport, DuplicationStats};
+        use fallow_types::duplicates::{DuplicationReport, DuplicationStats};
         let root = PathBuf::from("/project");
         let report = DuplicationReport {
             clone_groups: vec![],
@@ -2431,7 +2431,7 @@ mod tests {
 
     #[test]
     fn duplication_codeclimate_fingerprints_are_unique_across_instances() {
-        use fallow_engine::duplicates::{
+        use fallow_types::duplicates::{
             CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         };
         let root = PathBuf::from("/project");

@@ -19,6 +19,7 @@ path = "src/main.rs"
 [dependencies]
 rmcp = { version = "1.7", features = ["transport-io"] }
 rquickjs = "0.12"
+fallow-api.workspace = true
 fallow-types.workspace = true
 tokio.workspace = true
 serde.workspace = true

@@ -3,9 +3,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use fallow_engine::duplicates::{
-    CloneFingerprintSet, CloneGroup, DuplicationReport, DuplicationStats,
-};
+use fallow_engine::CloneFingerprintSet;
+use fallow_types::duplicates::{CloneGroup, DuplicationReport, DuplicationStats};
 use fallow_types::results::AnalysisResults;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -441,7 +440,7 @@ fn duplication_group(
     fingerprints: &CloneFingerprintSet,
 ) -> DuplicationGroup {
     let mut subset = duplication_subset_report(&attributed_groups, report);
-    subset.stats = recompute_duplication_stats(&subset);
+    subset.stats = fallow_engine::recompute_stats(&subset);
     let clone_families = clone_families_for_bucket(&attributed_groups, report, fingerprints);
     let clone_groups = attributed_groups
         .into_iter()
@@ -514,44 +513,6 @@ fn clone_families_for_bucket(
         })
         .map(|family| CloneFamilyFinding::with_fingerprints(family.clone(), fingerprints))
         .collect()
-}
-
-fn recompute_duplication_stats(report: &DuplicationReport) -> DuplicationStats {
-    let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
-    let mut file_dup_lines: FxHashMap<&Path, FxHashSet<usize>> = FxHashMap::default();
-    let mut duplicated_tokens = 0usize;
-    let mut clone_instances = 0usize;
-
-    for group in &report.clone_groups {
-        for instance in &group.instances {
-            files_with_clones.insert(&instance.file);
-            clone_instances += 1;
-            let lines = file_dup_lines.entry(&instance.file).or_default();
-            for line in instance.start_line..=instance.end_line {
-                lines.insert(line);
-            }
-        }
-        duplicated_tokens += group.token_count * group.instances.len();
-    }
-
-    let duplicated_lines: usize = file_dup_lines.values().map(FxHashSet::len).sum();
-
-    DuplicationStats {
-        total_files: report.stats.total_files,
-        files_with_clones: files_with_clones.len(),
-        total_lines: report.stats.total_lines,
-        duplicated_lines,
-        total_tokens: report.stats.total_tokens,
-        duplicated_tokens,
-        clone_groups: report.clone_groups.len(),
-        clone_instances,
-        duplication_percentage: if report.stats.total_lines > 0 {
-            (duplicated_lines as f64 / report.stats.total_lines as f64) * 100.0
-        } else {
-            0.0
-        },
-        clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
-    }
 }
 
 fn sort_duplication_groups(groups: &mut [DuplicationGroup]) {

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use colored::Colorize;
-use fallow_engine::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace};
+use fallow_types::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, TracedCloneGroup};
 
 use super::{plural, relative_path};
 
@@ -272,7 +272,7 @@ fn build_clone_trace_human_lines(trace: &CloneTrace, root: &Path) -> Vec<String>
 fn push_clone_group_lines(
     lines: &mut Vec<String>,
     index: usize,
-    group: &fallow_engine::trace::TracedCloneGroup,
+    group: &TracedCloneGroup,
     trace: &CloneTrace,
     root: &Path,
 ) {
@@ -325,11 +325,11 @@ fn push_clone_group_lines(
 mod tests {
     use std::path::PathBuf;
 
-    use fallow_engine::duplicates::{CloneInstance, RefactoringKind, RefactoringSuggestion};
-    use fallow_engine::trace::{
+    use fallow_engine::{
         CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
         TracedCloneGroup, TracedExport, TracedReExport,
     };
+    use fallow_types::duplicates::{CloneInstance, RefactoringKind, RefactoringSuggestion};
 
     use super::*;
 

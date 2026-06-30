@@ -1,4 +1,5 @@
 mod analyze;
+mod api_runtime;
 mod audit;
 mod check_changed;
 mod check_runtime_coverage;
@@ -6,6 +7,7 @@ mod code_mode;
 mod decision_surface;
 mod dupes;
 mod explain;
+mod fallback_policy;
 mod fix;
 mod flags;
 mod health;
@@ -16,29 +18,37 @@ mod project_info;
 mod security;
 mod trace;
 
-pub use analyze::build_analyze_args;
-pub use audit::build_audit_args;
-pub use check_changed::build_check_changed_args;
+pub use analyze::{build_analyze_args, run_analyze};
+pub use audit::{build_audit_args, run_audit};
+pub use check_changed::{build_check_changed_args, run_check_changed};
+#[cfg(test)]
+pub use check_runtime_coverage::build_get_token_blast_radius_args;
 pub use check_runtime_coverage::{
     build_check_runtime_coverage_args, build_get_blast_radius_args,
     build_get_cleanup_candidates_args, build_get_hot_paths_args, build_get_importance_args,
-    build_get_token_blast_radius_args,
+    run_check_runtime_coverage, run_get_blast_radius, run_get_cleanup_candidates,
+    run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
 };
 pub use code_mode::execute_code_mode;
-pub use decision_surface::build_decision_surface_args;
-pub use dupes::build_find_dupes_args;
-pub use explain::build_explain_args;
+pub use decision_surface::run_decision_surface;
+pub use dupes::{build_find_dupes_args, run_find_dupes};
+pub use explain::{build_explain_args, run_explain};
+#[cfg(test)]
 pub use fix::{build_fix_apply_args, build_fix_preview_args};
-pub use flags::build_feature_flags_args;
-pub use health::build_health_args;
-pub use impact::{build_impact_all_args, build_impact_args};
+pub use fix::{run_fix_apply, run_fix_preview};
+pub use flags::{build_feature_flags_args, run_feature_flags};
+pub use health::{build_health_args, run_health};
+#[cfg(test)]
+pub use impact::build_impact_all_args;
+pub use impact::{build_impact_args, run_impact, run_impact_all};
 pub use inspect_target::inspect_target;
-pub use list_boundaries::build_list_boundaries_args;
-pub use project_info::build_project_info_args;
-pub use security::build_security_candidates_args;
+pub use list_boundaries::{build_list_boundaries_args, run_list_boundaries};
+pub use project_info::{build_project_info_args, run_project_info};
+pub use security::{build_security_candidates_args, run_security_candidates};
 pub use trace::{
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args,
+    build_trace_file_args, run_trace_clone_tool, run_trace_dependency_tool, run_trace_export_tool,
+    run_trace_file_tool,
 };
 
 use std::process::Stdio;

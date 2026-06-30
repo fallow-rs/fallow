@@ -17,7 +17,7 @@ use rustc_hash::FxHashSet;
 use crate::codeowners::CodeOwners;
 use crate::health::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
 use fallow_config::ResolvedConfig;
-use fallow_engine::churn::{self, SinceDuration};
+use fallow_engine::{ChurnResult, SinceDuration, analyze_churn};
 
 /// Default churn window for routing: one year of history is enough to identify
 /// the per-file experts without an unbounded `git log`.
@@ -40,7 +40,7 @@ pub fn compute_routing(
         git_after: ROUTING_CHURN_WINDOW.to_string(),
         display: "1 year".to_string(),
     };
-    let Some(churn_result) = churn::analyze_churn(root, &since) else {
+    let Some(churn_result) = analyze_churn(root, &since) else {
         return RoutingFacts::default();
     };
 
@@ -120,7 +120,7 @@ fn expert_is_self(expert: &str, self_ids: &[String]) -> bool {
 fn route_one(
     abs: &Path,
     root: &Path,
-    churn_result: &churn::ChurnResult,
+    churn_result: &ChurnResult,
     ctx: &OwnershipContext<'_>,
     self_ids: &[String],
 ) -> Option<RoutingUnit> {

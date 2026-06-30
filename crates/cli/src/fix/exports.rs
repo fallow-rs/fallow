@@ -79,7 +79,7 @@ pub(super) struct ExportFix {
 pub(super) struct ExportFixInput<'a, 'export> {
     pub(super) root: &'a Path,
     pub(super) exports_by_file:
-        &'a FxHashMap<PathBuf, Vec<&'export fallow_engine::results::UnusedExport>>,
+        &'a FxHashMap<PathBuf, Vec<&'export fallow_types::results::UnusedExport>>,
     pub(super) hashes: &'a CapturedHashes,
     pub(super) unresolved_import_files: &'a FxHashSet<PathBuf>,
     pub(super) plan: &'a mut FixPlan,
@@ -251,7 +251,7 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
 
 fn collect_export_line_fixes(
     lines: &[&str],
-    file_exports: &[&fallow_engine::results::UnusedExport],
+    file_exports: &[&fallow_types::results::UnusedExport],
 ) -> Vec<ExportFix> {
     file_exports
         .iter()
@@ -261,7 +261,7 @@ fn collect_export_line_fixes(
 
 fn export_line_fix(
     lines: &[&str],
-    export: &fallow_engine::results::UnusedExport,
+    export: &fallow_types::results::UnusedExport,
 ) -> Option<ExportFix> {
     let line_idx = export.line.saturating_sub(1) as usize;
     let line = *lines.get(line_idx)?;
@@ -451,7 +451,7 @@ fn delete_export_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_engine::results::UnusedExport;
+    use fallow_types::results::UnusedExport;
 
     #[expect(
         clippy::too_many_arguments,

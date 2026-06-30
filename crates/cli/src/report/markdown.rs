@@ -2,7 +2,7 @@ use crate::report::sink::outln;
 use std::path::Path;
 
 use fallow_api::ResultGroup;
-use fallow_engine::duplicates::DuplicationReport;
+use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
 
 pub(super) fn print_markdown(results: &AnalysisResults, root: &Path) {

@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_api::{
     AnalysisOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode, DuplicationOptions,
-    EngineHealthRunner, compute_health_with_runner, detect_circular_dependencies, detect_dead_code,
-    detect_duplication,
+    EngineHealthRunner, run_circular_dependencies, run_dead_code, run_duplication,
+    run_health_with_runner,
 };
 use fallow_core::{
     cache::{CacheStore, module_to_cached},
@@ -740,7 +740,7 @@ fn create_warm_metadata_workspace_project() -> CommandInput {
         analysis: analysis_options(&input.root, false),
         ..DeadCodeOptions::default()
     };
-    let _ = detect_dead_code(&options).expect("warm cache priming succeeds");
+    let _ = run_dead_code(&options).expect("warm cache priming succeeds");
     input
 }
 
@@ -778,7 +778,7 @@ fn create_warm_complexity_health_project() -> CommandInput {
         targets: true,
         ..ComplexityOptions::default()
     };
-    let _ = compute_health_with_runner(&options, &EngineHealthRunner)
+    let _ = run_health_with_runner(&options, &EngineHealthRunner)
         .expect("warm complexity cache priming succeeds");
     input
 }
@@ -792,7 +792,7 @@ fn dead_code_package_library_exports(c: &mut Criterion) {
                     analysis: analysis_options(&input.root, true),
                     ..DeadCodeOptions::default()
                 };
-                detect_dead_code(&options)
+                run_dead_code(&options)
             },
             BatchSize::LargeInput,
         );
@@ -808,7 +808,7 @@ fn dead_code_next_app_router_segments(c: &mut Criterion) {
                     analysis: analysis_options(&input.root, true),
                     ..DeadCodeOptions::default()
                 };
-                detect_dead_code(&options)
+                run_dead_code(&options)
             },
             BatchSize::LargeInput,
         );
@@ -824,7 +824,7 @@ fn dead_code_workspace_monorepo_cross_package(c: &mut Criterion) {
                     analysis: analysis_options(&input.root, true),
                     ..DeadCodeOptions::default()
                 };
-                detect_dead_code(&options)
+                run_dead_code(&options)
             },
             BatchSize::LargeInput,
         );
@@ -842,7 +842,7 @@ fn dead_code_workspace_monorepo_cross_package_warm_metadata_hit(c: &mut Criterio
                         analysis: analysis_options(&input.root, false),
                         ..DeadCodeOptions::default()
                     };
-                    detect_dead_code(&options)
+                    run_dead_code(&options)
                 },
                 BatchSize::LargeInput,
             );
@@ -874,13 +874,13 @@ fn duplication_next_route_callbacks_repeated_auth(c: &mut Criterion) {
                 |input| {
                     let options = DuplicationOptions {
                         analysis: analysis_options(&input.root, true),
-                        mode: DuplicationMode::Mild,
-                        min_tokens: 35,
-                        min_lines: 5,
-                        min_occurrences: 2,
+                        mode: Some(DuplicationMode::Mild),
+                        min_tokens: Some(35),
+                        min_lines: Some(5),
+                        min_occurrences: Some(2),
                         ..DuplicationOptions::default()
                     };
-                    detect_duplication(&options)
+                    run_duplication(&options)
                 },
                 BatchSize::LargeInput,
             );
@@ -897,7 +897,7 @@ fn circular_dependencies_domain_graph_cycles(c: &mut Criterion) {
                     analysis: analysis_options(&input.root, true),
                     ..DeadCodeOptions::default()
                 };
-                detect_circular_dependencies(&options)
+                run_circular_dependencies(&options)
             },
             BatchSize::LargeInput,
         );
@@ -917,7 +917,7 @@ fn health_complex_service_scoring(c: &mut Criterion) {
                     targets: true,
                     ..ComplexityOptions::default()
                 };
-                compute_health_with_runner(&options, &EngineHealthRunner)
+                run_health_with_runner(&options, &EngineHealthRunner)
             },
             BatchSize::LargeInput,
         );
@@ -937,7 +937,7 @@ fn health_complex_service_warm_complexity_hit(c: &mut Criterion) {
                     targets: true,
                     ..ComplexityOptions::default()
                 };
-                compute_health_with_runner(&options, &EngineHealthRunner)
+                run_health_with_runner(&options, &EngineHealthRunner)
             },
             BatchSize::LargeInput,
         );
@@ -955,7 +955,7 @@ fn health_css_tailwind_design_system(c: &mut Criterion) {
                     score: true,
                     ..ComplexityOptions::default()
                 };
-                compute_health_with_runner(&options, &EngineHealthRunner)
+                run_health_with_runner(&options, &EngineHealthRunner)
             },
             BatchSize::LargeInput,
         );

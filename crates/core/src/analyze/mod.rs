@@ -788,7 +788,7 @@ fn build_dead_code_run_context<'a>(
 /// Find all dead code, with optional resolved module data, plugin context, and workspace info.
 #[deprecated(
     since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::detect_dead_code instead. NOTE: replacement returns serde_json::Value, not typed AnalysisResults. See docs/fallow-core-migration.md and ADR-008."
+    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
 )]
 #[expect(
     clippy::too_many_arguments,

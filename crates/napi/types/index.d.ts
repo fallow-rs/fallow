@@ -43,6 +43,30 @@ export interface DuplicationOptions extends AnalysisOptions {
   top?: number;
 }
 
+export interface FeatureFlagsOptions extends AnalysisOptions {
+  top?: number;
+}
+
+export interface FeatureFlagFinding {
+  flag_name: string;
+  kind: string;
+  confidence: string;
+  path: string;
+  line: number;
+  col: number;
+  [key: string]: unknown;
+}
+
+export interface FeatureFlagsReport {
+  kind: 'feature-flags';
+  schema_version: number;
+  version: string;
+  elapsed_ms: number;
+  feature_flags: FeatureFlagFinding[];
+  total_flags: number;
+  _meta?: Record<string, unknown>;
+}
+
 export type ComplexitySort = 'cyclomatic' | 'cognitive' | 'lines' | 'severity';
 export type OwnershipEmailMode = 'raw' | 'handle' | 'anonymized' | 'hash';
 export type TargetEffort = 'low' | 'medium' | 'high';
@@ -53,6 +77,7 @@ export interface ComplexityOptions extends AnalysisOptions {
   maxCrap?: number;
   top?: number;
   sort?: ComplexitySort;
+  complexityBreakdown?: boolean;
   complexity?: boolean;
   fileScores?: boolean;
   coverageGaps?: boolean;
@@ -376,5 +401,6 @@ export function detectDeadCode(options?: DeadCodeOptions): Promise<DeadCodeRepor
 export function detectCircularDependencies(options?: DeadCodeOptions): Promise<DeadCodeReport>;
 export function detectBoundaryViolations(options?: DeadCodeOptions): Promise<DeadCodeReport>;
 export function detectDuplication(options?: DuplicationOptions): Promise<DuplicationReport>;
+export function detectFeatureFlags(options?: FeatureFlagsOptions): Promise<FeatureFlagsReport>;
 export function computeComplexity(options?: ComplexityOptions): Promise<HealthReport>;
 export function computeHealth(options?: ComplexityOptions): Promise<HealthReport>;

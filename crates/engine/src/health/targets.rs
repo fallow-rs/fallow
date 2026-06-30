@@ -313,9 +313,9 @@ fn push_runtime_target_factors(
                 h.score,
                 h.commits,
                 match h.trend {
-                    crate::churn::ChurnTrend::Accelerating => "accelerating",
-                    crate::churn::ChurnTrend::Cooling => "cooling",
-                    crate::churn::ChurnTrend::Stable => "stable",
+                    crate::ChurnTrend::Accelerating => "accelerating",
+                    crate::ChurnTrend::Cooling => "cooling",
+                    crate::ChurnTrend::Stable => "stable",
                 }
             ),
         });
@@ -411,7 +411,7 @@ fn match_churn_complexity(
 ) -> Option<(RecommendationCategory, String)> {
     let h = hotspot?;
     if h.score < 50.0
-        || !matches!(h.trend, crate::churn::ChurnTrend::Accelerating)
+        || !matches!(h.trend, crate::ChurnTrend::Accelerating)
         || score.complexity_density <= 0.5
     {
         return None;
@@ -1345,7 +1345,7 @@ mod tests {
             lines_deleted: 100,
             complexity_density: 0.8,
             fan_in: 5,
-            trend: crate::churn::ChurnTrend::Accelerating,
+            trend: crate::ChurnTrend::Accelerating,
             ownership: None,
             is_test_path: false,
         };
@@ -1599,7 +1599,7 @@ mod tests {
             lines_deleted: 100,
             complexity_density: 0.8,
             fan_in: 10,
-            trend: crate::churn::ChurnTrend::Accelerating,
+            trend: crate::ChurnTrend::Accelerating,
             ownership: None,
             is_test_path: false,
         };
@@ -1671,7 +1671,7 @@ mod tests {
             lines_deleted: 50,
             complexity_density: 0.5,
             fan_in: 15,
-            trend: crate::churn::ChurnTrend::Stable,
+            trend: crate::ChurnTrend::Stable,
             ownership: None,
             is_test_path: false,
         }];

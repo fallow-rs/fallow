@@ -23,9 +23,8 @@
 use std::path::Path;
 
 use fallow_config::{CatalogPrecedingCommentPolicy, OutputFormat};
-use fallow_engine::results::{
-    EmptyCatalogGroup, EmptyCatalogGroupFinding, UnusedCatalogEntry, UnusedCatalogEntryFinding,
-};
+use fallow_types::output_dead_code::{EmptyCatalogGroupFinding, UnusedCatalogEntryFinding};
+use fallow_types::results::{EmptyCatalogGroup, UnusedCatalogEntry};
 
 use super::plan::{CapturedHashes, FixPlan, read_source_with_hash_check};
 

@@ -39,7 +39,7 @@ use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
-use crate::churn::{AuthorContribution, FileChurn};
+use crate::{AuthorContribution, FileChurn};
 use fallow_config::EmailMode;
 
 use crate::codeowners::CodeOwners;
@@ -65,7 +65,7 @@ const DECLARED_OWNER_ACTIVE_DAYS: u64 = 90;
 /// Inputs needed to compute ownership for one file. Built once per analysis
 /// run and reused for every hotspot.
 pub struct OwnershipContext<'a> {
-    /// Author email pool from [`crate::churn::ChurnResult::author_pool`].
+    /// Author email pool from [`crate::ChurnResult::author_pool`].
     pub author_pool: &'a [String],
     /// Compiled bot-author globs from the ownership config's `bot_patterns`.
     pub bot_globs: &'a GlobSet,
@@ -520,7 +520,7 @@ mod tests {
             weighted_commits: authors.iter().map(|a| a.2).sum(),
             lines_added: 0,
             lines_deleted: 0,
-            trend: crate::churn::ChurnTrend::Stable,
+            trend: crate::ChurnTrend::Stable,
             authors: map,
         }
     }

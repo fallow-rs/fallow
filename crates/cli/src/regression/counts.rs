@@ -1,4 +1,4 @@
-use fallow_engine::results::AnalysisResults;
+use fallow_types::results::AnalysisResults;
 
 /// Regression baseline: stores issue counts per type for comparison.
 ///
@@ -287,7 +287,8 @@ pub struct DupesCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fallow_engine::results::*;
+    use fallow_types::output_dead_code::*;
+    use fallow_types::results::*;
     use std::path::PathBuf;
 
     #[test]

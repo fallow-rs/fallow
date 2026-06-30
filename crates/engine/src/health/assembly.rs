@@ -1,5 +1,37 @@
-use super::{HealthOptions, HealthReportAssembly, coverage_intelligence};
-use fallow_output::{ComplexityViolation, HealthReport, HealthSummary};
+use super::{HealthOptions, coverage_intelligence, scoring};
+use fallow_output::{
+    ComplexityViolation, HealthReport, HealthSummary, HotspotEntry, HotspotSummary,
+    LargeFunctionEntry, RefactoringTarget, TargetThresholds,
+};
+
+pub(super) struct HealthReportAssembly {
+    pub(super) report_coverage_gaps: bool,
+    pub(super) findings: Vec<ComplexityViolation>,
+    pub(super) threshold_overrides: Vec<fallow_output::ThresholdOverrideState>,
+    pub(super) files_analyzed: usize,
+    pub(super) total_functions: usize,
+    pub(super) total_above_threshold: usize,
+    pub(super) max_cyclomatic: u16,
+    pub(super) max_cognitive: u16,
+    pub(super) max_crap: f64,
+    pub(super) files_scored: Option<usize>,
+    pub(super) average_maintainability: Option<f64>,
+    pub(super) vital_signs: fallow_output::VitalSigns,
+    pub(super) health_score: Option<fallow_output::HealthScore>,
+    pub(super) score_output: Option<scoring::FileScoreOutput>,
+    pub(super) hotspots: Vec<HotspotEntry>,
+    pub(super) hotspot_summary: Option<HotspotSummary>,
+    pub(super) targets: Vec<RefactoringTarget>,
+    pub(super) target_thresholds: Option<TargetThresholds>,
+    pub(super) health_trend: Option<fallow_output::HealthTrend>,
+    pub(super) has_istanbul_coverage: bool,
+    pub(super) runtime_coverage: Option<fallow_output::RuntimeCoverageReport>,
+    pub(super) framework_health: Option<fallow_output::FrameworkHealthDiagnostics>,
+    pub(super) large_functions: Vec<LargeFunctionEntry>,
+    pub(super) sev_critical: usize,
+    pub(super) sev_high: usize,
+    pub(super) sev_moderate: usize,
+}
 
 struct HealthSummaryAssembly<'a> {
     findings: &'a [ComplexityViolation],

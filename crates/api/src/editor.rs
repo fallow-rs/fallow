@@ -4,16 +4,167 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
-pub use fallow_engine::changed_files::{
-    ChangedFilesError, resolve_git_toplevel, try_get_changed_files_with_toplevel,
-};
+use fallow_types::{discover::DiscoveredFile, extract::ModuleInfo};
+
+pub type EditorCloneFamily = fallow_types::duplicates::CloneFamily;
+pub type EditorCloneGroup = fallow_types::duplicates::CloneGroup;
+pub type EditorCloneInstance = fallow_types::duplicates::CloneInstance;
+pub type EditorDuplicationReport = fallow_types::duplicates::DuplicationReport;
+pub type EditorDuplicationStats = fallow_types::duplicates::DuplicationStats;
+pub type EditorMirroredDirectory = fallow_types::duplicates::MirroredDirectory;
+pub type EditorRefactoringKind = fallow_types::duplicates::RefactoringKind;
+pub type EditorRefactoringSuggestion = fallow_types::duplicates::RefactoringSuggestion;
+
+/// Report-scoped clone fingerprint assignment for editor-facing duplication output.
+#[derive(Debug, Clone)]
+pub struct EditorCloneFingerprintSet {
+    inner: fallow_engine::CloneFingerprintSet,
+}
+
+impl EditorCloneFingerprintSet {
+    /// Assign collision-free fingerprints for clone groups in one report.
+    #[must_use]
+    pub fn from_groups(groups: &[EditorCloneGroup]) -> Self {
+        Self {
+            inner: fallow_engine::CloneFingerprintSet::from_groups(groups),
+        }
+    }
+
+    /// Return the assigned fingerprint for a clone group.
+    #[must_use]
+    pub fn fingerprint_for_group(&self, group: &EditorCloneGroup) -> String {
+        self.inner.fingerprint_for_group(group)
+    }
+
+    /// Return the assigned fingerprint for clone-group parts.
+    #[must_use]
+    pub fn fingerprint_for_parts(
+        &self,
+        instances: &[EditorCloneInstance],
+        token_count: usize,
+        line_count: usize,
+    ) -> String {
+        self.inner
+            .fingerprint_for_parts(instances, token_count, line_count)
+    }
+
+    /// Find the group addressed by an assigned fingerprint.
+    #[must_use]
+    pub fn find_group<'a>(
+        &self,
+        groups: &'a [EditorCloneGroup],
+        fingerprint: &str,
+    ) -> Option<&'a EditorCloneGroup> {
+        self.inner.find_group(groups, fingerprint)
+    }
+}
 
 pub mod editor_duplicates {
-    pub use fallow_engine::duplicates::*;
+    pub use crate::editor::{
+        EditorCloneFamily as CloneFamily, EditorCloneFingerprintSet as CloneFingerprintSet,
+        EditorCloneGroup as CloneGroup, EditorCloneInstance as CloneInstance,
+        EditorDuplicationReport as DuplicationReport, EditorDuplicationStats as DuplicationStats,
+        EditorMirroredDirectory as MirroredDirectory, EditorRefactoringKind as RefactoringKind,
+        EditorRefactoringSuggestion as RefactoringSuggestion,
+    };
+}
+
+/// Classification of a changed-file git failure for editor integrations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChangedFilesError {
+    /// Git ref failed validation before invoking `git`.
+    InvalidRef(String),
+    /// `git` binary not found or not executable.
+    GitMissing(String),
+    /// Command ran but the directory is not a git repository.
+    NotARepository,
+    /// Command ran but the ref is invalid or another git error occurred.
+    GitFailed(String),
+}
+
+impl ChangedFilesError {
+    /// Human-readable clause suitable for embedding in an error message.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        match self {
+            Self::InvalidRef(err) => format!("invalid git ref: {err}"),
+            Self::GitMissing(err) => format!("failed to run git: {err}"),
+            Self::NotARepository => "not a git repository".to_owned(),
+            Self::GitFailed(stderr) => {
+                let lower = stderr.to_ascii_lowercase();
+                if lower.contains("not a valid object name")
+                    || lower.contains("unknown revision")
+                    || lower.contains("ambiguous argument")
+                {
+                    format!(
+                        "{stderr} (shallow clone? try `git fetch --unshallow`, or set `fetch-depth: 0` on actions/checkout / `GIT_DEPTH: 0` in GitLab CI)"
+                    )
+                } else {
+                    stderr.clone()
+                }
+            }
+        }
+    }
+}
+
+impl From<fallow_engine::ChangedFilesError> for ChangedFilesError {
+    fn from(error: fallow_engine::ChangedFilesError) -> Self {
+        match error {
+            fallow_engine::ChangedFilesError::InvalidRef(err) => Self::InvalidRef(err),
+            fallow_engine::ChangedFilesError::GitMissing(err) => Self::GitMissing(err),
+            fallow_engine::ChangedFilesError::NotARepository => Self::NotARepository,
+            fallow_engine::ChangedFilesError::GitFailed(stderr) => Self::GitFailed(stderr),
+        }
+    }
+}
+
+/// Resolve the canonical git toplevel for `cwd`.
+///
+/// # Errors
+///
+/// Returns an API-owned changed-file error when git cannot inspect the
+/// repository.
+pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
+    fallow_engine::resolve_git_toplevel(cwd).map_err(ChangedFilesError::from)
+}
+
+/// Get changed files and the git toplevel used to resolve them.
+///
+/// # Errors
+///
+/// Returns an API-owned changed-file error when git cannot resolve the ref or
+/// repository state.
+pub fn try_get_changed_files_with_toplevel(
+    cwd: &Path,
+    toplevel: &Path,
+    git_ref: &str,
+) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+    fallow_engine::try_get_changed_files_with_toplevel(cwd, toplevel, git_ref)
+        .map_err(ChangedFilesError::from)
 }
 
 pub mod editor_extract {
-    pub use fallow_types::extract::*;
+    pub use fallow_types::extract::{
+        AngularComponentSelector, AngularInputMember, AngularOutputMember,
+        AngularTemplateMemberAccessFact, AngularThisSpreadFact, CalleeUse, ClassHeritageInfo,
+        ComplexityContribution, ComplexityContributionKind, ComplexityMetric, ComponentEmit,
+        ComponentFunction, ComponentFunctionKind, ComponentProp, CssAnalytics, CssDeclarationBlock,
+        CssRuleMetric, DiFramework, DiKeySite, DiRole, DispatchedEvent,
+        DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
+        ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryReturnExport,
+        FlagUse, FlagUseKind, FluentChainMemberAccessFact, FluentChainNewMemberAccessFact,
+        ForwardAttr, FunctionComplexity, HookUse, HookUseKind, ImportInfo, ImportedName,
+        InstanceExportBindingFact, LoadReturnKey, LocalTypeDeclaration, MemberAccess, MemberInfo,
+        MemberKind, MisplacedDirectiveSite, ModuleInfo, NamespaceObjectAlias, PUBLIC_ENV_EXACT,
+        PUBLIC_ENV_METADATA_TOKENS, PUBLIC_ENV_PREFIXES, ParseResult, PlaywrightFixtureAliasFact,
+        PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
+        PublicSignatureTypeReference, ReExportInfo, RegisteredCustomElement, RenderEdge,
+        RequireCallInfo, SECRET_ENV_TOKENS, SanitizedSinkArg, SanitizerScope, SecurityControlKind,
+        SecurityControlSite, SecurityUrlShape, SemanticFact, SemanticFactView, SinkArgKind,
+        SinkLiteralValue, SinkObjectProperty, SinkShape, SinkSite,
+        SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason,
+        SkippedSecurityCalleeSite, TaintedBinding, VisibilityTag,
+    };
 }
 
 pub mod editor_results {
@@ -23,30 +174,77 @@ pub mod editor_results {
         DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
         MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
         MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
-        ReExportCycleFinding, RouteCollisionFinding, TestOnlyDependencyFinding,
-        TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
-        UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
-        UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
-        UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
-        UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
-        UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+        PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
+        TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
+        UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
+        UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
+        UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
+        UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
+        UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
+        UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
         UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
         UnusedSvelteEventFinding, UnusedTypeFinding,
     };
-    pub use fallow_types::results::*;
+    pub use fallow_types::results::{
+        ActiveSuppression, AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation,
+        BoundaryViolation, CircularDependency, CircularDependencyEdge, DependencyLocation,
+        DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
+        DuplicateLocation, DuplicatePropShape, DuplicatePropShapeMember,
+        DynamicSegmentNameConflict, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
+        FlagConfidence, FlagKind, ImportSite, InvalidClientExport, MisconfiguredDependencyOverride,
+        MisplacedDirective, MixedClientServerBarrel, PolicyRuleKind, PolicyViolation,
+        PolicyViolationSeverity, PrivateTypeLeak, PropDrillHop, PropDrillingChain, ReExportCycle,
+        ReExportCycleKind, ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel,
+        ReferenceLocation, RenderFanInComponent, RenderFanInMetric, RouteCollision,
+        SecurityAttackSurfaceEntry, SecurityCandidate, SecurityCandidateBoundary,
+        SecurityCandidateSink, SecurityDeadCodeContext, SecurityDeadCodeKind,
+        SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding, SecurityFindingKind,
+        SecurityNetworkContext, SecurityReachability, SecurityRuntimeContext, SecurityRuntimeState,
+        SecuritySeverity, SecurityTaintFlow, SecurityUnresolvedCalleeDiagnostic,
+        SecurityZoneCrossing, StaleSuppression, SuppressionOrigin, TaintConfidence, TaintEndpoint,
+        TaintPath, TestOnlyDependency, ThinWrapper, TraceHop, TraceHopRole, TypeOnlyDependency,
+        UnlistedDependency, UnprovidedInject, UnrenderedComponent, UnresolvedCatalogReference,
+        UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit, UnusedComponentInput,
+        UnusedComponentOutput, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
+        UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember, UnusedServerAction,
+        UnusedSvelteEvent,
+    };
 }
 
 pub mod editor_security {
-    pub use fallow_engine::security::security_catalogue_title;
+    /// Return the human-readable security catalogue title for a finding kind.
+    #[must_use]
+    pub fn security_catalogue_title(kind: &str) -> Option<&'static str> {
+        fallow_engine::security_catalogue_title(kind)
+    }
 }
 
 pub mod editor_suppress {
-    pub use fallow_engine::suppress::{IssueKind, is_suppressed};
+    pub use fallow_types::suppress::{IssueKind, is_suppressed};
 }
 
 pub type EditorAnalysisResults = fallow_types::results::AnalysisResults;
-pub type EditorDeadCodeAnalysisOutput = fallow_engine::DeadCodeAnalysisOutput;
-pub type EditorDuplicationReport = fallow_engine::DuplicationReport;
+
+/// Dead-code output retained for editor integrations.
+///
+/// The engine produces the data, but the editor API owns this public contract
+/// so LSP and future editor adapters do not depend on engine result structs.
+#[derive(Debug)]
+pub struct EditorDeadCodeAnalysisOutput {
+    pub results: EditorAnalysisResults,
+    pub modules: Option<Vec<ModuleInfo>>,
+    pub files: Option<Vec<DiscoveredFile>>,
+}
+
+impl EditorDeadCodeAnalysisOutput {
+    fn from_engine(output: fallow_engine::DeadCodeAnalysisOutput) -> Self {
+        Self {
+            results: output.results,
+            modules: output.modules,
+            files: output.files,
+        }
+    }
+}
 
 /// Editor-facing inline complexity signal for code lens and similar surfaces.
 ///
@@ -103,10 +301,10 @@ pub fn collect_inline_complexity(
         }
 
         for function in &module.complexity {
-            if fallow_engine::suppress::is_suppressed(
+            if fallow_types::suppress::is_suppressed(
                 &module.suppressions,
                 function.line,
-                fallow_engine::suppress::IssueKind::Complexity,
+                fallow_types::suppress::IssueKind::Complexity,
             ) {
                 continue;
             }
@@ -240,7 +438,7 @@ pub struct EditorProjectAnalysisOutput {
 impl EditorProjectAnalysisOutput {
     fn from_engine(output: fallow_engine::ProjectAnalysisOutput) -> Self {
         Self {
-            dead_code: output.dead_code,
+            dead_code: EditorDeadCodeAnalysisOutput::from_engine(output.dead_code),
             duplication: output.duplication,
         }
     }
@@ -304,11 +502,8 @@ impl EditorAnalysisOutput {
     }
 
     pub fn filter_by_changed_files(&mut self, changed_files: &FxHashSet<PathBuf>, root: &Path) {
-        fallow_engine::changed_files::filter_results_by_changed_files(
-            &mut self.results,
-            changed_files,
-        );
-        fallow_engine::changed_files::filter_duplication_by_changed_files(
+        fallow_engine::filter_results_by_changed_files(&mut self.results, changed_files);
+        fallow_engine::filter_duplication_by_changed_files(
             &mut self.duplication,
             changed_files,
             root,
@@ -332,7 +527,7 @@ impl EditorAnalysisOutput {
 mod tests {
     use super::*;
 
-    use fallow_engine::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
+    use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
 
     #[test]
     fn merges_duplication_stats_and_recomputes_percentage() {

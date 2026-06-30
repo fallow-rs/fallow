@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{RulesConfig, Severity};
 use fallow_output::{
-    SarifDocumentInput, SarifResultInput, build_sarif_document, build_sarif_result, normalize_uri,
+    SarifDocumentInput, SarifResultInput, build_sarif_document, build_sarif_result,
+    issue_output_contract_by_code, normalize_uri,
 };
 use fallow_types::output_dead_code::*;
 use fallow_types::results::{
@@ -1029,33 +1030,93 @@ fn build_sarif_rules(
     specs.extend(sarif_workspace_rule_specs(rules));
     specs
         .into_iter()
-        .map(|(id, description, rule_severity)| {
-            rule_builder(id, description, configured_sarif_level(rule_severity))
+        .map(|spec| {
+            let rule_id = spec.rule_id();
+            rule_builder(
+                &rule_id,
+                spec.description,
+                configured_sarif_level(spec.severity),
+            )
         })
         .collect()
 }
 
-type SarifRuleSpec = (&'static str, &'static str, Severity);
+#[derive(Debug, Clone, Copy)]
+struct SarifRuleSpec {
+    issue_code: &'static str,
+    rule_id_override: Option<&'static str>,
+    description: &'static str,
+    severity: Severity,
+}
+
+impl SarifRuleSpec {
+    fn rule_id(self) -> String {
+        let canonical_rule_id = format!("fallow/{}", self.issue_code);
+        let Some(contract) = issue_output_contract_by_code(self.issue_code) else {
+            panic!(
+                "dead-code SARIF rule spec must reference an output contract: {}",
+                self.issue_code
+            );
+        };
+        let expected = self.rule_id_override.unwrap_or(canonical_rule_id.as_str());
+        assert!(
+            contract
+                .sarif_rule_ids
+                .iter()
+                .any(|rule_id| rule_id == expected),
+            "dead-code SARIF rule id {expected} is missing from issue contract {}",
+            self.issue_code
+        );
+        expected.to_string()
+    }
+}
+
+const fn sarif_rule_spec(
+    issue_code: &'static str,
+    description: &'static str,
+    severity: Severity,
+) -> SarifRuleSpec {
+    SarifRuleSpec {
+        issue_code,
+        rule_id_override: None,
+        description,
+        severity,
+    }
+}
+
+const fn sarif_rule_spec_with_id(
+    issue_code: &'static str,
+    rule_id: &'static str,
+    description: &'static str,
+    severity: Severity,
+) -> SarifRuleSpec {
+    SarifRuleSpec {
+        issue_code,
+        rule_id_override: Some(rule_id),
+        description,
+        severity,
+    }
+}
 
 fn sarif_core_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
     [
-        (
-            "fallow/unused-file",
+        sarif_rule_spec(
+            "unused-file",
             "File is not reachable from any entry point",
             rules.unused_files,
         ),
-        (
-            "fallow/unused-export",
+        sarif_rule_spec(
+            "unused-export",
             "Export is never imported",
             rules.unused_exports,
         ),
-        (
-            "fallow/unused-type",
+        sarif_rule_spec(
+            "unused-type",
             "Type export is never imported",
             rules.unused_types,
         ),
-        (
-            "fallow/private-type-leak",
+        sarif_rule_spec(
+            "private-type-leak",
             "Exported signature references a same-file private type",
             rules.private_type_leaks,
         ),
@@ -1065,28 +1126,28 @@ fn sarif_core_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
 
 fn sarif_dependency_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
     [
-        (
-            "fallow/unused-dependency",
+        sarif_rule_spec(
+            "unused-dependency",
             "Dependency listed but never imported",
             rules.unused_dependencies,
         ),
-        (
-            "fallow/unused-dev-dependency",
+        sarif_rule_spec(
+            "unused-dev-dependency",
             "Dev dependency listed but never imported",
             rules.unused_dev_dependencies,
         ),
-        (
-            "fallow/unused-optional-dependency",
+        sarif_rule_spec(
+            "unused-optional-dependency",
             "Optional dependency listed but never imported",
             rules.unused_optional_dependencies,
         ),
-        (
-            "fallow/type-only-dependency",
+        sarif_rule_spec(
+            "type-only-dependency",
             "Production dependency only used via type-only imports",
             rules.type_only_dependencies,
         ),
-        (
-            "fallow/test-only-dependency",
+        sarif_rule_spec(
+            "test-only-dependency",
             "Production dependency only imported by test files",
             rules.test_only_dependencies,
         ),
@@ -1096,33 +1157,33 @@ fn sarif_dependency_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
 
 fn sarif_member_import_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
     [
-        (
-            "fallow/unused-enum-member",
+        sarif_rule_spec(
+            "unused-enum-member",
             "Enum member is never referenced",
             rules.unused_enum_members,
         ),
-        (
-            "fallow/unused-class-member",
+        sarif_rule_spec(
+            "unused-class-member",
             "Class member is never referenced",
             rules.unused_class_members,
         ),
-        (
-            "fallow/unused-store-member",
+        sarif_rule_spec(
+            "unused-store-member",
             "Store member is never referenced",
             rules.unused_store_members,
         ),
-        (
-            "fallow/unresolved-import",
+        sarif_rule_spec(
+            "unresolved-import",
             "Import could not be resolved",
             rules.unresolved_imports,
         ),
-        (
-            "fallow/unlisted-dependency",
+        sarif_rule_spec(
+            "unlisted-dependency",
             "Dependency used but not in package.json",
             rules.unlisted_dependencies,
         ),
-        (
-            "fallow/duplicate-export",
+        sarif_rule_spec(
+            "duplicate-export",
             "Export name appears in multiple modules",
             rules.duplicate_exports,
         ),
@@ -1135,12 +1196,13 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
     specs.extend(sarif_boundary_rule_specs(rules));
     specs.extend(sarif_framework_rule_specs(rules));
     specs.extend(sarif_component_rule_specs(rules));
-    specs.push((
-        "fallow/stale-suppression",
+    specs.push(sarif_rule_spec(
+        "stale-suppression",
         "Suppression comment or tag no longer matches any issue",
         rules.stale_suppressions,
     ));
-    specs.push((
+    specs.push(sarif_rule_spec_with_id(
+        "stale-suppression",
         "fallow/missing-suppression-reason",
         "Suppression comment or tag is missing a required reason",
         rules.require_suppression_reason,
@@ -1150,13 +1212,13 @@ fn sarif_graph_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
 
 fn sarif_cycle_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
     vec![
-        (
-            "fallow/circular-dependency",
+        sarif_rule_spec(
+            "circular-dependency",
             "Circular dependency chain detected",
             rules.circular_dependencies,
         ),
-        (
-            "fallow/re-export-cycle",
+        sarif_rule_spec(
+            "re-export-cycle",
             "Two or more barrel files re-export from each other in a loop",
             rules.re_export_cycle,
         ),
@@ -1165,23 +1227,23 @@ fn sarif_cycle_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
 
 fn sarif_boundary_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
     vec![
-        (
-            "fallow/boundary-violation",
+        sarif_rule_spec(
+            "boundary-violation",
             "Import crosses an architecture boundary",
             rules.boundary_violation,
         ),
-        (
-            "fallow/boundary-coverage",
+        sarif_rule_spec(
+            "boundary-coverage",
             "Source file matches no architecture boundary zone",
             rules.boundary_violation,
         ),
-        (
-            "fallow/boundary-call-violation",
+        sarif_rule_spec(
+            "boundary-call-violation",
             "Zoned file calls a callee its zone forbids",
             rules.boundary_violation,
         ),
-        (
-            "fallow/policy-violation",
+        sarif_rule_spec(
+            "policy-violation",
             "Banned usage matched a rule-pack rule",
             rules.policy_violation,
         ),
@@ -1190,18 +1252,18 @@ fn sarif_boundary_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
 
 fn sarif_framework_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
     vec![
-        (
-            "fallow/invalid-client-export",
+        sarif_rule_spec(
+            "invalid-client-export",
             "\"use client\" file exports a server-only / route-config name",
             rules.invalid_client_export,
         ),
-        (
-            "fallow/mixed-client-server-barrel",
+        sarif_rule_spec(
+            "mixed-client-server-barrel",
             "Barrel re-exports both a \"use client\" module and a server-only module",
             rules.mixed_client_server_barrel,
         ),
-        (
-            "fallow/misplaced-directive",
+        sarif_rule_spec(
+            "misplaced-directive",
             "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
             rules.misplaced_directive,
         ),
@@ -1210,73 +1272,73 @@ fn sarif_framework_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
 
 fn sarif_component_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
     vec![
-        (
-            "fallow/unprovided-inject",
+        sarif_rule_spec(
+            "unprovided-inject",
             "A Vue inject / Svelte getContext whose key is provided nowhere in the project",
             rules.unprovided_injects,
         ),
-        (
-            "fallow/unrendered-component",
+        sarif_rule_spec(
+            "unrendered-component",
             "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project",
             rules.unrendered_components,
         ),
-        (
-            "fallow/unused-component-prop",
+        sarif_rule_spec(
+            "unused-component-prop",
             "A Vue <script setup> defineProps prop referenced nowhere inside its own component",
             rules.unused_component_props,
         ),
-        (
-            "fallow/unused-component-emit",
+        sarif_rule_spec(
+            "unused-component-emit",
             "A Vue <script setup> defineEmits event emitted nowhere inside its own component",
             rules.unused_component_emits,
         ),
-        (
-            "fallow/unused-component-input",
+        sarif_rule_spec(
+            "unused-component-input",
             "An Angular @Input() / signal input() / model() input read nowhere inside its own component",
             rules.unused_component_inputs,
         ),
-        (
-            "fallow/unused-component-output",
+        sarif_rule_spec(
+            "unused-component-output",
             "An Angular @Output() / signal output() output emitted nowhere inside its own component",
             rules.unused_component_outputs,
         ),
-        (
-            "fallow/unused-svelte-event",
+        sarif_rule_spec(
+            "unused-svelte-event",
             "A Svelte component dispatching a createEventDispatcher event whose name is listened to nowhere in the project",
             rules.unused_svelte_events,
         ),
-        (
-            "fallow/unused-server-action",
+        sarif_rule_spec(
+            "unused-server-action",
             "A Next.js Server Action exported from a \"use server\" file that no code in the project references",
             rules.unused_server_actions,
         ),
-        (
-            "fallow/unused-load-data-key",
+        sarif_rule_spec(
+            "unused-load-data-key",
             "A SvelteKit load() return-object key that no consumer reads (sibling +page.svelte data.<key> or project-wide page.data.<key>)",
             rules.unused_load_data_keys,
         ),
-        (
-            "fallow/prop-drilling",
+        sarif_rule_spec(
+            "prop-drilling",
             "A React/Preact prop forwarded unchanged through 3+ pass-through components to a distant consumer",
             rules.prop_drilling,
         ),
-        (
-            "fallow/thin-wrapper",
+        sarif_rule_spec(
+            "thin-wrapper",
             "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
             rules.thin_wrapper,
         ),
-        (
-            "fallow/duplicate-prop-shape",
+        sarif_rule_spec(
+            "duplicate-prop-shape",
             "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
             rules.duplicate_prop_shape,
         ),
-        (
-            "fallow/route-collision",
+        sarif_rule_spec(
+            "route-collision",
             "Two or more Next.js App Router route files resolve to the same URL",
             rules.route_collision,
         ),
-        (
-            "fallow/dynamic-segment-name-conflict",
+        sarif_rule_spec(
+            "dynamic-segment-name-conflict",
             "Sibling Next.js dynamic route segments use different slug names at the same position",
             rules.dynamic_segment_name_conflict,
         ),
@@ -1285,28 +1347,28 @@ fn sarif_component_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
 
 fn sarif_workspace_rule_specs(rules: &RulesConfig) -> Vec<SarifRuleSpec> {
     [
-        (
-            "fallow/unused-catalog-entry",
+        sarif_rule_spec(
+            "unused-catalog-entry",
             "pnpm catalog entry not referenced by any workspace package",
             rules.unused_catalog_entries,
         ),
-        (
-            "fallow/empty-catalog-group",
+        sarif_rule_spec(
+            "empty-catalog-group",
             "pnpm named catalog group has no entries",
             rules.empty_catalog_groups,
         ),
-        (
-            "fallow/unresolved-catalog-reference",
+        sarif_rule_spec(
+            "unresolved-catalog-reference",
             "package.json catalog reference points at a catalog that does not declare the package",
             rules.unresolved_catalog_references,
         ),
-        (
-            "fallow/unused-dependency-override",
+        sarif_rule_spec(
+            "unused-dependency-override",
             "pnpm dependency override target is not declared or lockfile-resolved",
             rules.unused_dependency_overrides,
         ),
-        (
-            "fallow/misconfigured-dependency-override",
+        sarif_rule_spec(
+            "misconfigured-dependency-override",
             "pnpm dependency override key or value is malformed",
             rules.misconfigured_dependency_overrides,
         ),
@@ -2091,4 +2153,47 @@ fn push_dependency_override_sarif_results(
             )
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    use fallow_config::RulesConfig;
+    use fallow_types::results::AnalysisResults;
+
+    use super::*;
+
+    fn test_rule_builder(id: &str, description: &str, level: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "shortDescription": { "text": description },
+            "defaultConfiguration": { "level": level }
+        })
+    }
+
+    #[test]
+    fn sarif_rule_list_is_backed_by_issue_contracts() {
+        let sarif = build_sarif(
+            &AnalysisResults::default(),
+            Path::new("."),
+            &RulesConfig::default(),
+            &test_rule_builder,
+        );
+        let Some(rules) = sarif
+            .pointer("/runs/0/tool/driver/rules")
+            .and_then(serde_json::Value::as_array)
+        else {
+            panic!("SARIF document should contain driver rules");
+        };
+
+        let ids = rules
+            .iter()
+            .filter_map(|rule| rule.get("id").and_then(serde_json::Value::as_str))
+            .collect::<BTreeSet<_>>();
+
+        assert!(ids.contains("fallow/unused-file"));
+        assert!(ids.contains("fallow/missing-suppression-reason"));
+    }
 }

@@ -355,7 +355,7 @@ fn build_combined_dupes_options<'a>(
 fn shared_dupes_files(
     opts: &CombinedOptions<'_>,
     check_result: Option<&CheckResult>,
-) -> Option<Vec<fallow_engine::discover::DiscoveredFile>> {
+) -> Option<Vec<fallow_engine::DiscoveredFile>> {
     let check_production = opts.production_dead_code.unwrap_or(opts.production);
     let health_production = opts.production_health.unwrap_or(opts.production);
     let dupes_production = opts.production_dupes.unwrap_or(opts.production);

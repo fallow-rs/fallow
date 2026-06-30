@@ -2,30 +2,30 @@
 //!
 //! The command-neutral analysis pipeline (scoring, hotspots, targets, grouping,
 //! coverage gaps, vital signs, report assembly) lives in
-//! `fallow_engine::health`. This module owns the CLI orchestration that the
-//! engine intentionally does not: config loading, file discovery and parsing,
-//! workspace / changed-file / shared-diff scope resolution, CODEOWNERS-backed
-//! grouping-resolver construction, the runtime coverage sidecar seam, telemetry
-//! recording, exit-code gating, and human / machine rendering.
+//! `fallow_engine` health root API. This module owns the CLI orchestration that the
+//! engine intentionally does not: command option validation, workspace /
+//! changed-file / shared-diff scope resolution, CODEOWNERS-backed
+//! grouping-resolver construction, the runtime coverage sidecar seam,
+//! telemetry recording, exit-code gating, and human / machine rendering.
 
 pub mod coverage;
 
 /// Ownership analysis helpers, re-exported from the engine.
-pub use fallow_engine::health::ownership;
+pub use fallow_engine::health_ownership as ownership;
 /// Health scoring helpers, re-exported from the engine for CLI consumers that
 /// still address them through `crate::health::scoring`.
-pub use fallow_engine::health::scoring;
+pub use fallow_engine::health_scoring as scoring;
 
 use std::process::ExitCode;
 use std::time::Instant;
 
 use colored::Colorize;
 use fallow_config::OutputFormat;
-use fallow_engine::health::{
-    HealthGroupResolver, HealthPipelineInputs, HealthScopeInputs, HealthSeams,
-    RuntimeCoverageSeamInput, execute_health_inner, validate_health_churn_file,
+use fallow_engine::{
+    HealthExecutionOptions, HealthGateOptions, HealthGroupResolver, HealthPipelineInputs,
+    HealthScopeInputs, HealthSeams, HealthSharedParseData, HealthSort, RuntimeCoverageSeamInput,
+    execute_health_inner, validate_health_churn_file,
 };
-use fallow_engine::{HealthExecutionOptions, HealthGateOptions, HealthSharedParseData, HealthSort};
 
 use crate::check::{get_changed_files, resolve_workspace_scope};
 use crate::error::emit_error;
@@ -208,6 +208,7 @@ pub fn execute_health_with_shared_parse(
 ) -> Result<HealthResult, ExitCode> {
     let (config, config_ms) = load_health_config(opts)?;
     let scope_inputs = build_health_scope_inputs(opts, &config)?;
+    let workspace_diagnostics = fallow_config::workspace_diagnostics_for(&config.root);
     let seams = health_seams();
     let result = execute_health_inner(
         opts,
@@ -221,6 +222,7 @@ pub fn execute_health_with_shared_parse(
             parse_cpu_ms: 0.0,
             shared_parse: true,
             pre_computed_analysis: shared.analysis_output,
+            workspace_diagnostics,
         },
         scope_inputs,
         &seams,
@@ -234,24 +236,14 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
 
     let t = Instant::now();
     let session = fallow_engine::AnalysisSession::from_resolved_config(config);
-    let session = session.into_parts();
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let session = session.into_parsed_parts(true);
     let config = session.config;
     let files = session.files;
-
-    let cache = if config.no_cache {
-        None
-    } else {
-        fallow_engine::cache::CacheStore::load(
-            &config.cache_dir,
-            config.cache_config_hash,
-            fallow_engine::resolve_cache_max_size_bytes(&config),
-        )
-    };
-    let t = Instant::now();
-    let parse_result = fallow_engine::extract::parse_all_files(&files, cache.as_ref(), true);
-    let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
-    let parse_cpu_ms = parse_result.parse_cpu_ms;
+    let modules = session.modules;
+    let workspace_diagnostics = session.workspace_diagnostics;
+    let parse_ms = session.parse_ms;
+    let parse_cpu_ms = session.parse_cpu_ms;
 
     let scope_inputs = build_health_scope_inputs(opts, &config)?;
     let seams = health_seams();
@@ -260,13 +252,14 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
         HealthPipelineInputs {
             config,
             files,
-            modules: parse_result.modules,
+            modules,
             config_ms,
             discover_ms,
             parse_ms,
             parse_cpu_ms,
             shared_parse: false,
             pre_computed_analysis: None,
+            workspace_diagnostics,
         },
         scope_inputs,
         &seams,
@@ -299,8 +292,7 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
 }
 
 /// Result of executing health analysis without printing.
-pub type HealthResult =
-    fallow_engine::health::HealthAnalysisResult<crate::report::OwnershipResolver>;
+pub type HealthResult = fallow_engine::HealthAnalysisResult<crate::report::OwnershipResolver>;
 
 /// Print health results and return appropriate exit code.
 ///
@@ -597,6 +589,7 @@ mod tests {
             grouping: None,
             group_resolver: None,
             config: test_resolved_config(),
+            workspace_diagnostics: Vec::new(),
             elapsed: Duration::default(),
             timings: None,
             coverage_gaps_has_findings: false,
@@ -782,6 +775,7 @@ mod tests {
             grouping: None,
             group_resolver: None,
             config: test_resolved_config(),
+            workspace_diagnostics: Vec::new(),
             elapsed: Duration::default(),
             timings: None,
             coverage_gaps_has_findings: false,
