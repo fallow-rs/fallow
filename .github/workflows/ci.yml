@@ -565,7 +565,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: taiki-e/install-action@9b29ffac42f36c4efe76140737435c61cfb92383 # cargo-audit
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # cargo-audit
       # RUSTSEC-2026-0097: `rand` 0.9.2 unsoundness with a custom logger via
       # `rand::rng()`. Reaches the tree only through the `proptest` dev-dependency
       # (test-only, never shipped in a fallow binary) and fallow does not use the
@@ -596,7 +596,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: taiki-e/install-action@b9da40722b5dc25d162879fdf6a098f2d71926cc # cargo-shear
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # cargo-shear
       - run: cargo shear
 
   zizmor:
