@@ -873,6 +873,6 @@
     "rolldown": "1.1.0",
     "ovsx": "1.0.1",
     "typescript": "6.0.3",
-    "vitest": "4.1.8"
+    "vitest": "4.1.9"
   }
 }
