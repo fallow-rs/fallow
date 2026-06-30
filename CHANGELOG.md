@@ -133,6 +133,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marks). The renderer is pure presentation over the in-memory guide; it never
   re-derives ordering or facts, and the review path still always exits 0.
 
+### Changed
+
+- **Styling-health now weights CSS value DRIFT over byte-identical repetition
+  (formula v3).** Research is clear that exact CSS duplication is the
+  least-harmful CSS pattern (repeated declarations gzip away, graphical properties
+  are loosely coupled, CSS has no native abstraction so some repetition is
+  unavoidable), while the real maintenance harm is design-token inconsistency. So
+  the styling-health grade's `duplication` exact-block penalty is down-weighted to
+  a soft hint (scale `200` -> `80`, the 20pt cap unchanged, the detector kept), and
+  the `token_erosion` penalty gains a hardcoded-value-sprawl drift sub-term sourced
+  from the count of distinct un-tokenized `box-shadow` / `border-radius` /
+  `line-height` values (per-axis baselines 10/8/6, gently saturating, sub-capped at
+  5pt inside the unchanged 10pt category). A system that tokenizes its scales via
+  `var(--*)` scores 0 sprawl regardless of how many tokens it defines (var-
+  referenced and `@theme`-defined values are not counted); only hardcoded literals
+  contribute. `STYLING_HEALTH_FORMULA_VERSION` bumps `2` -> `3`. This is
+  descriptive-only: no exit code, badge, gate, regression baseline, or trend
+  snapshot consumes the styling score, and the JS/TS code `health_score` is
+  byte-unchanged. **Consumers diffing `styling_health.score`/`grade` over time**
+  (raw `--format json` snapshot CIs, styling-grade trend dashboards): grades move
+  for some projects at the version boundary, so re-baseline or gate on
+  `formula_version`; the one-time step-change is expected, not a regression.
+
 ### Fixed
 
 - **Telemetry: `fallow flags` and `fallow watch` now record `findings_present`,

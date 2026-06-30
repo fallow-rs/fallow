@@ -56,11 +56,11 @@
 //! duplication FAMILY toward drift and away from byte-identical repetition:
 //!
 //! - `duplication` exact-block scale dropped from `* 200` to `* 80` (see
-//!   [`EXACT_DUP_SCALE`]). The notation-canonical exact-block detector is kept
+//!   `EXACT_DUP_SCALE`). The notation-canonical exact-block detector is kept
 //!   (lightningcss already collapses `0px`/`#fff`/`rgb()`), just down-weighted to
 //!   a soft hint. The 20pt cap is unchanged.
 //! - `token_erosion` gains a HARDCODED-value-sprawl drift sub-term (see
-//!   [`value_sprawl_term`]) sourced from the previously-descriptive-only
+//!   `value_sprawl_term`) sourced from the previously-descriptive-only
 //!   `summary.unique_box_shadows` / `unique_border_radii` / `unique_line_heights`
 //!   distinct-value counts. It counts only HARDCODED literals: a system that
 //!   tokenizes its scales via `var(--*)` scores 0 (lightningcss parses
