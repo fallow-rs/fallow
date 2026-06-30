@@ -1,4 +1,5 @@
 mod basic_tokenization;
+mod css_canonicalization;
 mod edge_cases;
 mod es_modules;
 mod expressions;

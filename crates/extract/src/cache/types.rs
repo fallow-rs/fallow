@@ -701,7 +701,12 @@ pub(super) const CACHE_VERSION: u32 = 215;
 /// Bumped to 8: duplicate token hashes now include the active source namespace
 /// (`js`, `style`, or `markup`) so structurally similar code from unrelated
 /// formats does not form cross-format clone groups.
-pub const DUPES_CACHE_VERSION: u32 = 8;
+///
+/// Bumped to 9: CSS-family / SFC `<style>` tokens are now value-canonicalized
+/// (zero-unit collapse `0px`/`0em`/`0%` -> `0`, hex-color expansion `#fff` ->
+/// `#ffffff`) so near-miss / value-drifted CSS clones match. Warm v8 caches carry
+/// the un-canonicalized CSS token stream and must invalidate.
+pub const DUPES_CACHE_VERSION: u32 = 9;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.

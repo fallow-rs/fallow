@@ -398,3 +398,35 @@ fn duplicate_ignore_defaults_false_replaces_defaults_with_user_ignore() {
     );
     assert_eq!(skips.total, 0);
 }
+
+/// CSS program Phase 4: a near-miss / value-drifted CSS clone (two rule blocks
+/// with the same recipe but `0`/`0px` and `#fff`/`#ffffff` drift) now forms a
+/// clone group, where the pre-change character-naive tokenizer produced different
+/// token streams and reported nothing. Proves the CSS-aware canonicalization
+/// reaches the SA-IS engine end to end.
+#[test]
+fn fuzzy_css_clones_surface_via_value_canonicalization() {
+    let root = fixture_path("css-fuzzy-clones");
+    let config = create_config(root.clone());
+    let files = fallow_core::discover::discover_files(&config);
+
+    let dupes_config = fallow_core::duplicates::DuplicatesConfig {
+        min_tokens: 20,
+        min_lines: 3,
+        ..fallow_core::duplicates::DuplicatesConfig::default()
+    };
+
+    let report = fallow_core::duplicates::find_duplicates(&root, &files, &dupes_config);
+
+    let cloned_files: FxHashSet<String> = report
+        .clone_groups
+        .iter()
+        .flat_map(|g| g.instances.iter())
+        .map(|inst| inst.file.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+
+    assert!(
+        cloned_files.contains("card.css") && cloned_files.contains("panel.css"),
+        "value-drifted CSS recipe should form a cross-file clone group: {cloned_files:?}"
+    );
+}

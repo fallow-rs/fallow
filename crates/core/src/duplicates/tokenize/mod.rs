@@ -217,7 +217,7 @@ fn empty_tokens(source: &str) -> FileTokens {
 fn tokenize_style_source(source: &str) -> FileTokens {
     let mut tokens = Vec::with_capacity(source.len().min(64));
     tokens.push(lexical::boundary_token("style", 0));
-    tokens.extend(lexical::tokenize_lexical_region(source, 0));
+    tokens.extend(lexical::tokenize_lexical_region(source, 0, true));
     FileTokens {
         tokens,
         atomic_invocation_spans: Vec::new(),
@@ -264,10 +264,13 @@ fn tokenize_js_section(
 }
 
 fn tokenize_lexical_section(name: &'static str, source: &str, byte_offset: usize) -> TokenSection {
+    // CSS value canonicalization is scoped to the `"style"` section so markup
+    // tokens (and, transitively, JS) are provably untouched.
+    let css = name == "style";
     TokenSection {
         name,
         start: byte_offset,
-        tokens: lexical::tokenize_lexical_region(source, byte_offset),
+        tokens: lexical::tokenize_lexical_region(source, byte_offset, css),
         atomic_invocation_spans: Vec::new(),
     }
 }

@@ -1,0 +1,9 @@
+.panel {
+  box-shadow: 0px 1px 2px #000000;
+  border-radius: 4px;
+  transition: all 0.2s ease-in-out;
+  padding: 16px;
+  margin: 0px;
+  color: #ffffff;
+  background: #aabbcc;
+}

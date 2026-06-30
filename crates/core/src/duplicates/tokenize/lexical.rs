@@ -3,8 +3,20 @@ use oxc_span::Span;
 use crate::duplicates::tokenize::{OperatorType, PunctuationType, SourceToken, TokenKind};
 
 /// Tokenize authored non-JS regions such as CSS-family source and markup.
+///
+/// When `css` is true the value scanner canonicalizes CSS values so that
+/// semantically-equal CSS hashes equal: a zero-valued numeric collapses its unit
+/// (`0px`/`0em`/`0%`/`0.0` -> `0`) and a hex color is expanded to its long,
+/// lowercased form (`#FFF`/`#fff` -> `#ffffff`, `#abcd` -> `#aabbccdd`). This is
+/// the layer that lets the SA-IS clone engine catch near-miss / value-drifted CSS
+/// clones. It is reachable ONLY from the `"style"` path (CSS-family files and SFC
+/// `<style>` regions), so JS and markup tokenization is provably untouched.
 #[must_use]
-pub(super) fn tokenize_lexical_region(source: &str, byte_offset: usize) -> Vec<SourceToken> {
+pub(super) fn tokenize_lexical_region(
+    source: &str,
+    byte_offset: usize,
+    css: bool,
+) -> Vec<SourceToken> {
     let mut tokens = Vec::new();
     let mut cursor = 0;
 
@@ -19,7 +31,7 @@ pub(super) fn tokenize_lexical_region(source: &str, byte_offset: usize) -> Vec<S
             continue;
         }
 
-        if let Some((tok, next)) = scan_lexical_token(source, cursor, ch, byte_offset) {
+        if let Some((tok, next)) = scan_lexical_token(source, cursor, ch, byte_offset, css) {
             tokens.push(tok);
             cursor = next;
             continue;
@@ -62,8 +74,9 @@ fn scan_lexical_token(
     cursor: usize,
     ch: char,
     byte_offset: usize,
+    css: bool,
 ) -> Option<(SourceToken, usize)> {
-    if let Some(scanned) = scan_value_token(source, cursor, ch, byte_offset) {
+    if let Some(scanned) = scan_value_token(source, cursor, ch, byte_offset, css) {
         return Some(scanned);
     }
 
@@ -102,6 +115,7 @@ fn scan_value_token(
     cursor: usize,
     ch: char,
     byte_offset: usize,
+    css: bool,
 ) -> Option<(SourceToken, usize)> {
     if matches!(ch, '"' | '\'' | '`') {
         let (literal, next) = scan_string(source, cursor, ch);
@@ -115,11 +129,35 @@ fn scan_value_token(
         ));
     }
 
-    if ch.is_ascii_digit() {
-        let next = scan_number(source, cursor);
+    // CSS hex color: `#` followed by 3/4/6/8 hex digits, canonicalized to the
+    // long lowercased form so `#fff` and `#ffffff` hash equal. Only in CSS mode;
+    // otherwise `#` is not an identifier start and is skipped as before (so an
+    // id selector `#main` keeps its current tokenization).
+    if css
+        && ch == '#'
+        && let Some((color, next)) = scan_css_hex_color(source, cursor)
+    {
         return Some((
             token(
-                TokenKind::NumericLiteral(source[cursor..next].to_string()),
+                TokenKind::Identifier(color),
+                byte_offset + cursor,
+                byte_offset + next,
+            ),
+            next,
+        ));
+    }
+
+    if ch.is_ascii_digit() {
+        let next = scan_number(source, cursor);
+        let raw = &source[cursor..next];
+        let value = if css {
+            canonicalize_css_numeric(raw)
+        } else {
+            raw.to_string()
+        };
+        return Some((
+            token(
+                TokenKind::NumericLiteral(value),
                 byte_offset + cursor,
                 byte_offset + next,
             ),
@@ -189,6 +227,59 @@ fn scan_number(source: &str, start: usize) -> usize {
                 .then_some(start + idx)
         })
         .unwrap_or(source.len())
+}
+
+/// Canonicalize a CSS numeric token so zero-with-unit collapses to a bare `0`:
+/// `0px` / `0em` / `0%` / `0.0` all hash as `0`, while a non-zero value keeps its
+/// unit verbatim (`16px` stays `16px`). `scan_number` folds the trailing unit into
+/// the token, so the unit lives in `raw`; the leading numeric run is parsed to
+/// decide zeroness.
+fn canonicalize_css_numeric(raw: &str) -> String {
+    let numeric_len = raw
+        .char_indices()
+        .find_map(|(idx, ch)| (!ch.is_ascii_digit() && ch != '.').then_some(idx))
+        .unwrap_or(raw.len());
+    if raw[..numeric_len]
+        .parse::<f64>()
+        .is_ok_and(|value| value == 0.0)
+    {
+        "0".to_string()
+    } else {
+        raw.to_string()
+    }
+}
+
+/// Scan a CSS hex color whose `#` is at `start`. A valid color is `#` followed by
+/// exactly 3, 4, 6, or 8 hex digits and then a non-identifier boundary. Returns
+/// the canonical long, lowercased form (`#fff` -> `#ffffff`, `#abcd` ->
+/// `#aabbccdd`, `#FFFFFF` -> `#ffffff`) plus the end cursor, or `None` when the
+/// `#` does not begin a hex color (e.g. an id selector `#main`), so the caller
+/// falls back to the existing `#`-skipping behavior.
+fn scan_css_hex_color(source: &str, start: usize) -> Option<(String, usize)> {
+    let after_hash = start + 1;
+    let digits_len = source[after_hash..]
+        .char_indices()
+        .find_map(|(idx, ch)| (!ch.is_ascii_hexdigit()).then_some(idx))
+        .unwrap_or(source.len() - after_hash);
+    let end = after_hash + digits_len;
+    // The hex run must end at a token boundary, not mid-identifier (so `#deadbeef9`
+    // or `#aabbccddee` are not misread as colors).
+    if let Some(next) = source[end..].chars().next()
+        && is_identifier_continue(next)
+    {
+        return None;
+    }
+    if !matches!(digits_len, 3 | 4 | 6 | 8) {
+        return None;
+    }
+    let digits = source[after_hash..end].to_ascii_lowercase();
+    let canonical = if matches!(digits_len, 3 | 4) {
+        // Expand each shorthand digit to a pair: `fab` -> `ffaabb`.
+        digits.chars().flat_map(|c| [c, c]).collect::<String>()
+    } else {
+        digits
+    };
+    Some((format!("#{canonical}"), end))
 }
 
 fn is_identifier_start(ch: char, source: &str, start: usize) -> bool {
