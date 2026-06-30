@@ -65,16 +65,24 @@ fn clean_report_scores_100_grade_a() {
 }
 
 #[test]
-fn duplication_penalty_scales_and_caps() {
-    // 5 removable declarations out of 100 = 5% -> 5/100 * 200 = 10pt.
+fn duplication_penalty_is_down_weighted_and_caps() {
+    // v3 down-weight: exact CSS dup is the least-harmful pattern, so the scale
+    // dropped from `* 200` to `* 80`. 5 removable out of 100 = 5% -> 5/100 * 80 =
+    // 4pt (was 10pt under v2).
     let mut report = clean_report();
     report.summary.total_declarations = 100;
     report.summary.duplicate_declarations_total = 5;
     let styling = score(&report);
-    approx(styling.penalties.duplication, 10.0);
+    approx(styling.penalties.duplication, 4.0);
 
-    // 20 removable out of 100 = 20% -> 40pt uncapped, capped at 20pt.
+    // 20 removable out of 100 = 20% -> 20/100 * 80 = 16pt, still UNDER the 20pt cap
+    // (would have capped at 20pt under v2's `* 200`).
     report.summary.duplicate_declarations_total = 20;
+    let styling = score(&report);
+    approx(styling.penalties.duplication, 16.0);
+
+    // Cap now needs ~25% removable: 30 out of 100 -> 24pt uncapped, capped at 20pt.
+    report.summary.duplicate_declarations_total = 30;
     let styling = score(&report);
     approx(styling.penalties.duplication, DUPLICATION_CAP);
 }
@@ -229,6 +237,76 @@ fn token_erosion_penalty_saturates_gently() {
 }
 
 #[test]
+fn value_sprawl_below_per_axis_baselines_is_zero() {
+    // A real design system's hardcoded-value counts (utrecht: 5 shadows / 4 radii
+    // / 2 line-heights, all below the 10 / 8 / 6 baselines) contribute NO sprawl
+    // penalty, so token_erosion stays 0 (the FP-safety property the corpus pins).
+    let mut report = clean_report();
+    report.summary.unique_box_shadows = 5;
+    report.summary.unique_border_radii = 4;
+    report.summary.unique_line_heights = 2;
+    let styling = score(&report);
+    approx(styling.penalties.token_erosion, 0.0);
+
+    // jsonforms' 7 radii sit exactly under the radius baseline of 8 -> still 0.
+    report.summary.unique_border_radii = 7;
+    report.summary.unique_line_heights = 4;
+    report.summary.unique_box_shadows = 1;
+    let styling = score(&report);
+    approx(styling.penalties.token_erosion, 0.0);
+}
+
+#[test]
+fn value_sprawl_fires_above_baselines_saturates_and_caps() {
+    // Per-axis excess above the 10 / 8 / 6 baselines, summed and divided by 6.
+    // Heavy drift 16/16/16 -> excess 6 + 8 + 10 = 24 -> 24 / 6 = 4pt.
+    let mut report = clean_report();
+    report.summary.unique_box_shadows = 16;
+    report.summary.unique_border_radii = 16;
+    report.summary.unique_line_heights = 16;
+    let styling = score(&report);
+    approx(styling.penalties.token_erosion, 4.0);
+
+    // A single sprawled axis still fires: 20 shadows -> excess 10 -> 10/6 = 1.67pt.
+    let mut single = clean_report();
+    single.summary.unique_box_shadows = 20;
+    let styling = score(&single);
+    approx(styling.penalties.token_erosion, 1.7);
+
+    // Extreme sprawl saturates at the 5pt sub-cap (well inside the 10pt category):
+    // 40/40/40 -> excess 30 + 32 + 34 = 96 -> 16 uncapped, capped at 5pt.
+    let mut extreme = clean_report();
+    extreme.summary.unique_box_shadows = 40;
+    extreme.summary.unique_border_radii = 40;
+    extreme.summary.unique_line_heights = 40;
+    let styling = score(&extreme);
+    approx(styling.penalties.token_erosion, 5.0);
+}
+
+#[test]
+fn value_sprawl_sums_with_existing_token_erosion_terms_under_category_cap() {
+    // The sprawl term sums with the unit + arbitrary terms, all bounded by the
+    // unchanged 10pt category cap. 3 font-size units (2pt) + 50 arbitrary (~2.8pt)
+    // + 16/16/16 sprawl (4pt) = ~8.8pt, under the 10pt cap.
+    let mut report = clean_report();
+    report.summary.font_size_units_used = 3;
+    report.summary.tailwind_arbitrary_values = 50;
+    report.summary.unique_box_shadows = 16;
+    report.summary.unique_border_radii = 16;
+    report.summary.unique_line_heights = 16;
+    let styling = score(&report);
+    approx(styling.penalties.token_erosion, 8.8);
+
+    // When the unit + arbitrary terms already max the category, the sprawl term is
+    // diluted by the 10pt cap (under-counts, never false-positives): 10 units (4pt)
+    // + 200 arbitrary (8pt) + any sprawl still caps at 10pt.
+    report.summary.font_size_units_used = 10;
+    report.summary.tailwind_arbitrary_values = 200;
+    let styling = score(&report);
+    approx(styling.penalties.token_erosion, TOKEN_EROSION_CAP);
+}
+
+#[test]
 fn structural_penalty_uses_important_density_and_nesting() {
     // 15% !important (10pt over the 5% floor) but nesting at the floor.
     let mut report = clean_report();
@@ -251,7 +329,7 @@ fn penalties_compound_into_the_score() {
     // 100 minus the sum of the (capped) per-category penalties.
     let mut report = clean_report();
     report.summary.total_declarations = 100;
-    report.summary.duplicate_declarations_total = 5; // 10pt duplication
+    report.summary.duplicate_declarations_total = 5; // 4pt duplication (v3: 5/100*80)
     report.summary.files_analyzed = 1;
     report.summary.unreferenced_css_classes = 1; // 1.5pt dead_surface (1/100*150)
     report.summary.unresolved_class_references = 1; // 3pt broken_references
@@ -260,15 +338,15 @@ fn penalties_compound_into_the_score() {
     report.summary.max_nesting_depth = 4;
     let styling = score(&report);
     let p = &styling.penalties;
-    approx(p.duplication, 10.0);
+    approx(p.duplication, 4.0);
     // dead_surface = token term 0 (no unused theme tokens) + other term
     // 1/100*150 = 1.5pt.
     approx(p.dead_surface, 1.5);
     approx(p.broken_references, 3.0);
     approx(p.token_erosion, 2.0);
     approx(p.structural, 10.0);
-    // 100 - (10 + 1.5 + 3 + 2 + 10) = 73.5.
-    approx(styling.score, 73.5);
+    // 100 - (4 + 1.5 + 3 + 2 + 10) = 79.5.
+    approx(styling.score, 79.5);
     assert_eq!(styling.grade, "B");
 }
 
@@ -402,9 +480,11 @@ fn report_with_duplicates(duplicate_total: u32, summary_total: u32) -> CssAnalyt
 
 #[test]
 fn duplication_uses_non_atomic_denominator_not_total() {
-    // 8 removable declarations over a real 50-declaration authored surface is a
-    // full-cap duplication smell. 400 atomic StyleX declarations in the SAME
-    // project must NOT dilute it (8/450 would read ~3.6pt and bury the signal).
+    // 8 removable declarations over a real 50-declaration authored surface. 400
+    // atomic StyleX declarations in the SAME project must NOT dilute it. A
+    // sub-cap expected value is deliberately chosen so the assertion distinguishes
+    // the non-atomic denominator (8/50) from the diluted one (8/450): both would
+    // pass if it expected the cap.
     let report = report_with_duplicates(8, 450);
     let inputs = StylingScoringInputs {
         theme_tokens_defined: MANY_TOKENS,
@@ -414,8 +494,9 @@ fn duplication_uses_non_atomic_denominator_not_total() {
         atomic_declarations: 400,
     };
     let styling = compute_styling_health_with_inputs(&report, &inputs);
-    // 8 / 50 * 200 = 32, capped at the 20pt category ceiling.
-    approx(styling.penalties.duplication, 20.0);
+    // 8 / 50 * 80 = 12.8pt (non-atomic denominator); the diluted 8 / 450 * 80
+    // would be ~1.4pt, so this value proves the non-atomic count is used.
+    approx(styling.penalties.duplication, 12.8);
 }
 
 #[test]

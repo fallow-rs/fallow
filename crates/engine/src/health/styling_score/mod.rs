@@ -4,10 +4,12 @@
 //! start at 100, subtract capped per-category penalties, map the result to a
 //! letter grade via the shared [`letter_grade`]. The code score is never touched.
 //!
-//! # Penalty rubric (v2, [`STYLING_HEALTH_FORMULA_VERSION`])
+//! # Penalty rubric (v3, [`STYLING_HEALTH_FORMULA_VERSION`])
 //!
-//! The weights below were recalibrated from v1 after running v1 across real
-//! projects (government design systems plus small Tailwind apps); any further
+//! The weights below were recalibrated from v1 (v1 -> v2 re-normalized
+//! `dead_surface` and `token_erosion`; v2 -> v3 re-weighted the duplication
+//! family toward value DRIFT, see below) after running across real projects
+//! (government design systems plus small Tailwind apps); any further
 //! recalibration bumps [`STYLING_HEALTH_FORMULA_VERSION`] (the same versioning
 //! discipline the code score uses). Every category is capped and evaluated
 //! against the analytics that are always present once `--css` ran, so there is
@@ -15,10 +17,10 @@
 //!
 //! | Category | Cap | Signal | Scaling |
 //! |---|---|---|---|
-//! | `duplication` | 20pt | `summary.duplicate_declarations_total` (removable declarations from copy-paste blocks) | `total / max(total_declarations, 1) * 200`, capped (so ~10% of declarations removable = full 20pt) |
+//! | `duplication` | 20pt | `summary.duplicate_declarations_total` (removable declarations from copy-paste blocks) | `total / max(total_declarations, 1) * 80`, capped (v3 down-weighted from `* 200`: exact CSS duplication is the least-harmful pattern, so ~25% of declarations removable = full 20pt, a soft hint not a dominant term) |
 //! | `dead_surface` | 20pt | (a) unused `@theme` tokens, as a share of all defined `@theme` tokens; (b) unreferenced classes + unused at-rules + dead `@font-face`, as a share of `total_declarations` | token term `min(unused_theme_tokens / max(theme_tokens_defined, 1) * 15, 15)` + other term `min(other_dead / max(total_declarations, 1) * 150, 8)`, summed then capped at 20 (the token term is a *per-population* death ratio so a handful of dead tokens in a declaration-sparse Tailwind project no longer explodes the penalty) |
 //! | `broken_references` | 15pt | `unresolved_class_references` + `keyframes_undefined` | `count * 3`, capped (so 5 broken refs = full 15pt) |
-//! | `token_erosion` | 10pt | mixed `font-size` units (above 2) + distinct Tailwind arbitrary-value tokens | `min((extra_units * 2), 4)` unit term + `min(arbitrary / 18, 8)` arbitrary term, summed then capped (arbitrary term saturates gently around ~50-100+ values rather than capping at 10) |
+//! | `token_erosion` | 10pt | mixed `font-size` units (above 2) + distinct Tailwind arbitrary-value tokens + distinct HARDCODED `box-shadow`/`border-radius`/`line-height` values (v3 sprawl/drift sub-term) | `min((extra_units * 2), 4)` unit term + `min(arbitrary / 18, 8)` arbitrary term + `min(sum_per_axis_excess / 6, 5)` sprawl term (per-axis excess above baselines 10/8/6), summed then capped at 10 |
 //! | `structural` | 10pt | `!important` density + deep nesting | `(important_pct - 5).clamp * 1` + `(max_nesting - 4).clamp * 1`, capped |
 //!
 //! All point values are rounded to one decimal, the final score is clamped to
@@ -42,6 +44,36 @@
 //!   distinct arbitrary values maxed the category, punishing ordinary Tailwind
 //!   apps. v2 saturates the arbitrary term via a divisor and caps the unit term
 //!   so neither sub-signal alone reaches the ceiling.
+//!
+//! ## What v2 -> v3 changed, and why
+//!
+//! Research is clear that exact CSS duplication is the LEAST-harmful CSS pattern
+//! (repeated declarations gzip away; graphical properties are loosely coupled; CSS
+//! has no native abstraction so some repetition is unavoidable), while the real
+//! maintenance harm is value DRIFT / inconsistency (the same design intent
+//! expressed with divergence: a radius `6px` here and `5px` there; a shadow
+//! `rgba(0,0,0,.1)` vs `.12`), which design tokens address. So v3 re-weights the
+//! duplication FAMILY toward drift and away from byte-identical repetition:
+//!
+//! - `duplication` exact-block scale dropped from `* 200` to `* 80` (see
+//!   [`EXACT_DUP_SCALE`]). The notation-canonical exact-block detector is kept
+//!   (lightningcss already collapses `0px`/`#fff`/`rgb()`), just down-weighted to
+//!   a soft hint. The 20pt cap is unchanged.
+//! - `token_erosion` gains a HARDCODED-value-sprawl drift sub-term (see
+//!   [`value_sprawl_term`]) sourced from the previously-descriptive-only
+//!   `summary.unique_box_shadows` / `unique_border_radii` / `unique_line_heights`
+//!   distinct-value counts. It counts only HARDCODED literals: a system that
+//!   tokenizes its scales via `var(--*)` scores 0 (lightningcss parses
+//!   `box-shadow: var(--x)` as `Property::Unparsed`, so var-referenced and
+//!   `@theme`-defined values never reach the typed-property collectors). Per-axis
+//!   baselines (10/8/6) clear every observed real design system; the term
+//!   saturates and is sub-capped at 5pt inside the unchanged 10pt category.
+//!
+//! The original v3 plan (re-canonicalize the duplicate-block fingerprint to detect
+//! drift clones) was DROPPED after a Step-0 audit found it a no-op: the css-metrics
+//! fingerprint serializes via lightningcss `to_css_string`, which already
+//! canonicalizes `0px`/`#fff`/`rgb()`, so it is notation-semantic, not byte-literal.
+//! Genuine value drift is surfaced via the un-tokenized-literal sprawl count above.
 //!
 //! ## Deliberately excluded signals
 //!
@@ -70,16 +102,27 @@
 //! strongest form of withholding and is handled one layer up by the human "No
 //! stylesheets analyzed" note; this function only ever runs on a non-empty report.
 //!
-//! ## Calibration (v2, corpus-locked)
+//! ## Calibration (v3, corpus-locked)
 //!
 //! The v2 weights were validated against a 10-project corpus (3 design systems /
-//! SCSS, 4 Tailwind apps, 3 empty / CSS-in-JS) and left UNCHANGED:
-//! [`STYLING_HEALTH_FORMULA_VERSION`] stays 2 because no rubric constant moved
-//! (bumping it would falsely signal a scoring change to consumers diffing scores
-//! across versions). Design systems grade A (utrecht 99.1, rijkshuisstijl 97.6),
-//! the worst app a B (82.2, from a genuine ~48% `!important` density), and the new
-//! jsonforms-adapter-vue3 data point grades 96.7 A. The confidence marker, not a
-//! constant change, is what closes the sparse-grade credibility gap.
+//! SCSS, 4 Tailwind apps, 3 empty / CSS-in-JS); v3 re-ran that corpus plus the 3c
+//! atomic CSS-in-JS smoke (Braid / vanilla-extract / StyleX / Panda / emotion) and
+//! drift anchors. [`STYLING_HEALTH_FORMULA_VERSION`] bumps 2 -> 3 because rubric
+//! constants moved (`EXACT_DUP_SCALE` and the new sprawl sub-term). v3 result, NO
+//! band misclassification: every real design system stays A with a 0 sprawl term
+//! (utrecht 5 distinct hardcoded shadows < baseline 10; rijkshuisstijl, jsonforms
+//! 7 radii < baseline 8, all 0pt sprawl); atomic CSS-in-JS gains no false drift
+//! penalty (<= 3 distinct values per axis); a clean token-driven system keeps a 0
+//! sprawl term (var-referenced values are uncounted). The sprawl term fires only on
+//! genuine hardcoded drift (a 16-distinct-per-axis anchor scores ~4pt). The
+//! duplication down-weight moves moderate-dup projects by ~1-2pt (no band flip).
+//!
+//! Consumer note: a v2 -> v3 bump moves `styling_health.score`/`grade` for some
+//! projects, so `--format json` snapshot diffs (including fallow's own golden
+//! snapshots) and styling-grade trend dashboards see a one-time step-change at the
+//! version boundary; gate on `formula_version`. No exit-code, badge, gate, regression
+//! baseline, or trend-snapshot consumes the styling score, so nothing fails; the
+//! code `health_score` is byte-unchanged.
 
 use fallow_output::{
     CssAnalyticsReport, STYLING_HEALTH_FORMULA_VERSION, StylingHealth, StylingHealthConfidence,
@@ -88,6 +131,16 @@ use fallow_output::{
 
 const DUPLICATION_CAP: f64 = 20.0;
 const DEAD_SURFACE_CAP: f64 = 20.0;
+
+/// Per-removable-declaration scale for the EXACT-block duplication penalty (v3).
+/// Down-weighted from the v2 `* 200` because exact (notation-canonical) CSS
+/// duplication is the LEAST-harmful CSS pattern: repeated declarations gzip away,
+/// graphical properties are loosely coupled, and CSS has no native abstraction so
+/// some repetition is unavoidable. Exact duplication therefore stays a soft hint,
+/// not a dominant term; the maintenance harm CSS tooling should weight is value
+/// DRIFT (the `token_erosion` sprawl sub-term below), not byte-identical repeats.
+/// At `* 80` the category caps at 25% removable declarations (was 10% at `* 200`).
+const EXACT_DUP_SCALE: f64 = 80.0;
 const BROKEN_REFERENCES_CAP: f64 = 15.0;
 const TOKEN_EROSION_CAP: f64 = 10.0;
 const STRUCTURAL_CAP: f64 = 10.0;
@@ -174,6 +227,43 @@ const ARBITRARY_VALUE_DIVISOR: f64 = 18.0;
 /// `token_erosion` arbitrary-value term cap (v2). Bounds the arbitrary-value
 /// contribution so the unit term still has room within the 10pt category cap.
 const ARBITRARY_VALUE_TERM_CAP: f64 = 8.0;
+
+/// `token_erosion` hardcoded-value-sprawl baselines (v3), per axis: the count of
+/// distinct HARDCODED literal values for a should-be-tokenized property below
+/// which no sprawl penalty accrues. A clean token-driven system reuses a small
+/// palette via `var(--*)` (which lightningcss parses as `Property::Unparsed`, so
+/// var-referenced and `@theme`-defined values are NOT counted), so its hardcoded
+/// distinct count is ~0; a drifted system hardcodes many ad-hoc values. Baselines
+/// are set to each property's natural FULL-SCALE cardinality and conservatively
+/// (so a legitimately rich scale is not penalized), corpus-validated to clear
+/// every real design system (utrecht 5 shadows, jsonforms 7 radii) at 0:
+/// - shadow: rich elevation systems (Material authors up to ~24 levels), the
+///   widest legit range, so the highest baseline.
+/// - radius: a complete radius scale (none/xs..2xl/full) is ~8.
+/// - line-height: a complete line-height scale (tight..loose + reset) is ~6.
+const SHADOW_SPRAWL_BASELINE: u32 = 10;
+const RADIUS_SPRAWL_BASELINE: u32 = 8;
+const LINE_HEIGHT_SPRAWL_BASELINE: u32 = 6;
+
+/// `token_erosion` sprawl divisor (v3). The summed per-axis excess (distinct
+/// hardcoded values above each baseline) is divided by this before the sprawl
+/// sub-cap, so the term saturates gently (mirroring [`ARBITRARY_VALUE_DIVISOR`]):
+/// a large multi-brand monorepo accumulates a bounded, slowly-growing penalty
+/// rather than a per-value cliff. Deliberately UN-NORMALIZED by declaration count:
+/// normalizing would rebuild the v1 size-denominator bug in reverse (20 drifted
+/// radii over 100k declarations would round to nothing, masking real drift),
+/// whereas a literals-only project-wide count is bounded by design INTENT, not
+/// file count (utrecht is 792 declarations yet only 5 distinct shadows).
+const SPRAWL_DIVISOR: f64 = 6.0;
+
+/// `token_erosion` sprawl sub-term cap (v3). Bounds the hardcoded-value-sprawl
+/// contribution within the unchanged [`TOKEN_EROSION_CAP`] (10pt), summed with
+/// the unit + arbitrary terms. The category cap is NOT raised, so the existing
+/// font-size-unit / Tailwind-arbitrary cohort is unaffected; when those terms
+/// already approach the 10pt ceiling the sprawl term is mildly diluted (it
+/// under-counts, never false-positives, the correct direction for a descriptive
+/// grade).
+const SPRAWL_TERM_CAP: f64 = 5.0;
 
 /// Internal scoring inputs threaded into the styling-health grade, NOT serialized
 /// (mirrors the prior `theme_tokens_defined` parameter, so the wire contract /
@@ -357,7 +447,7 @@ fn apply_styling_penalties(penalties: &StylingHealthPenalties) -> f64 {
 fn duplication_penalty(report: &CssAnalyticsReport, inputs: &StylingScoringInputs) -> f64 {
     let removable = f64::from(report.summary.duplicate_declarations_total);
     let total = f64::from(inputs.non_atomic_declarations).max(1.0);
-    round1((removable / total * 200.0).min(DUPLICATION_CAP))
+    round1((removable / total * EXACT_DUP_SCALE).min(DUPLICATION_CAP))
 }
 
 /// Dead styling surface, computed as two independently-normalized terms:
@@ -432,7 +522,24 @@ fn token_erosion_penalty(report: &CssAnalyticsReport) -> f64 {
     let unit_term = (extra_units * FONT_SIZE_UNIT_WEIGHT).min(FONT_SIZE_UNIT_TERM_CAP);
     let arbitrary = f64::from(s.tailwind_arbitrary_values);
     let arbitrary_term = (arbitrary / ARBITRARY_VALUE_DIVISOR).min(ARBITRARY_VALUE_TERM_CAP);
-    round1((unit_term + arbitrary_term).min(TOKEN_EROSION_CAP))
+    round1((unit_term + arbitrary_term + value_sprawl_term(s)).min(TOKEN_EROSION_CAP))
+}
+
+/// Hardcoded-value-sprawl sub-term (v3): the distinct count of hardcoded literal
+/// `box-shadow` / `border-radius` / `line-height` values above each per-axis
+/// healthy baseline, summed and saturated. This is the design-token DRIFT signal
+/// the v3 reweight shifts the duplication-family weight toward: a system that
+/// tokenizes its scales via `var(--*)` scores 0 (var-referenced values are
+/// invisible to the `unique_*` counts), while one that hardcodes many ad-hoc
+/// values accrues a bounded, gently-growing penalty. Counts come from
+/// `summary.unique_*` (recomputed at health time, never cached); see the module
+/// docs and the [`SHADOW_SPRAWL_BASELINE`] / [`SPRAWL_DIVISOR`] rationale.
+fn value_sprawl_term(s: &fallow_output::CssAnalyticsSummary) -> f64 {
+    let excess = s.unique_box_shadows.saturating_sub(SHADOW_SPRAWL_BASELINE)
+        + s.unique_border_radii.saturating_sub(RADIUS_SPRAWL_BASELINE)
+        + s.unique_line_heights
+            .saturating_sub(LINE_HEIGHT_SPRAWL_BASELINE);
+    (f64::from(excess) / SPRAWL_DIVISOR).min(SPRAWL_TERM_CAP)
 }
 
 /// Structural smells: `!important` density above a healthy floor and deep

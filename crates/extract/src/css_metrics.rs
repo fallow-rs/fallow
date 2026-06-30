@@ -728,4 +728,64 @@ mod tests {
             "!important changes the block fingerprint"
         );
     }
+
+    #[test]
+    fn var_referenced_and_token_defined_values_are_not_counted_as_distinct() {
+        // Load-bearing for the v3 styling-health sprawl drift sub-term: the
+        // distinct-value sets (box_shadows / border_radii / line_heights) count
+        // ONLY hardcoded literals. A value referenced via `var(--*)` parses as
+        // `Property::Unparsed` in lightningcss, so it never reaches the typed
+        // `Property::BoxShadow` / `BorderRadius` / `LineHeight` arms, and a token
+        // DEFINITION (`--x: 4px`) is a `Property::Custom`. Both are therefore
+        // invisible to the sprawl counts. This is what makes a well-tokenized
+        // design system score 0 sprawl regardless of how many tokens it defines;
+        // the v3 grade's entire FP-safety rests on this lightningcss behavior, so
+        // it is pinned here (a future lightningcss change that typed `var()` values
+        // would break tokenized systems silently and must trip this test).
+        let tokenized = analytics(
+            ":root { --r: 4px; --s: 0 1px 2px #0000001a; --lh: 1.5; }\n\
+             .a { border-radius: var(--r); box-shadow: var(--s); line-height: var(--lh); }\n\
+             .b { border-radius: var(--r); box-shadow: var(--s); line-height: var(--lh); }\n",
+        );
+        assert!(
+            tokenized.border_radii.is_empty(),
+            "var()-referenced radii are not counted: {:?}",
+            tokenized.border_radii
+        );
+        assert!(
+            tokenized.box_shadows.is_empty(),
+            "var()-referenced shadows are not counted: {:?}",
+            tokenized.box_shadows
+        );
+        assert!(
+            tokenized.line_heights.is_empty(),
+            "var()-referenced line-heights are not counted: {:?}",
+            tokenized.line_heights
+        );
+
+        // Control: hardcoded literal values ARE counted, so the sprawl signal is
+        // not simply inert. Two distinct hardcoded radii / shadows / line-heights.
+        let hardcoded = analytics(
+            ".a { border-radius: 4px; box-shadow: 0 1px 2px #0000001a; line-height: 1.4; }\n\
+             .b { border-radius: 6px; box-shadow: 0 2px 4px #0000001f; line-height: 1.6; }\n",
+        );
+        assert_eq!(
+            hardcoded.border_radii.len(),
+            2,
+            "distinct hardcoded radii counted: {:?}",
+            hardcoded.border_radii
+        );
+        assert_eq!(
+            hardcoded.box_shadows.len(),
+            2,
+            "distinct hardcoded shadows counted: {:?}",
+            hardcoded.box_shadows
+        );
+        assert_eq!(
+            hardcoded.line_heights.len(),
+            2,
+            "distinct hardcoded line-heights counted: {:?}",
+            hardcoded.line_heights
+        );
+    }
 }
