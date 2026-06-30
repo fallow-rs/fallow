@@ -671,13 +671,17 @@ fn static_value(key: &str, value: &Expression<'_>) -> Option<String> {
 }
 
 /// Render a numeric literal for property `key`, appending `px` unless the
-/// property is unitless or the value is zero. The number is rendered from its
-/// PARSED value, not the raw source text, so a hex / octal / binary / scientific
-/// literal (`0xFF`, `1e3`) becomes a valid CSS decimal (`255`, `1000`) rather
-/// than a non-CSS token; `format_f64` preserves `1.5` / `700` exactly.
+/// property is unitless, a custom property, or the value is zero. The number is
+/// rendered from its PARSED value, not the raw source text, so a hex / octal /
+/// binary / scientific literal (`0xFF`, `1e3`) becomes a valid CSS decimal
+/// (`255`, `1000`) rather than a non-CSS token; `format_f64` preserves `1.5` /
+/// `700` exactly. The custom-property carve-out matches the real compiled output:
+/// emotion (`!isCustomProperty(key)` in `@emotion/serialize`) and React both
+/// leave a numeric `--x` value unitless, so adding `px` would fabricate a unit
+/// the bundler never emits.
 fn render_number(key: &str, num: &NumericLiteral<'_>) -> String {
     let value = format_f64(num.value);
-    if is_unitless(key) || num.value == 0.0 {
+    if is_unitless(key) || key.starts_with("--") || num.value == 0.0 {
         value
     } else {
         format!("{value}px")
@@ -1018,6 +1022,33 @@ mod tests {
             "scientific -> decimal: css={css:?}"
         );
         assert!(compute_css_analytics(&css).is_some(), "valid CSS");
+    }
+
+    #[test]
+    fn custom_property_numeric_value_keeps_no_unit() {
+        // A numeric custom-property value must NOT gain an implicit `px`: emotion
+        // (`!isCustomProperty`) and React both leave `--x: 8` unitless, so adding
+        // `px` would fabricate a unit the bundler never emits.
+        let src = "import { css } from '@emotion/react';\n\
+                   const g = css({ ':root': { '--space': 8, '--ratio': 1.5 }, padding: 8 });\n";
+        // `:root` is a selector key -> nested rule with the custom properties.
+        let sheet = sheets(src)
+            .structural
+            .or_else(|| sheets(src).structural_partial)
+            .expect("structural output");
+        assert!(
+            sheet.contains("--space:8;"),
+            "custom prop keeps no unit: {sheet:?}"
+        );
+        assert!(
+            sheet.contains("--ratio:1.5;"),
+            "custom prop float unchanged: {sheet:?}"
+        );
+        // A normal property still gets px.
+        assert!(
+            sheet.contains("padding:8px;"),
+            "normal prop still px: {sheet:?}"
+        );
     }
 
     #[test]

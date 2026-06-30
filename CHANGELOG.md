@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   import binding (a call only fires when its name was imported from a recognized
   CSS-in-JS module), so a local `style`/`css` helper or an unrelated `cva` never
   fires; static values only (camelCase to kebab-case, implicit-px outside the
-  unitless set, one level of selector nesting), with dynamic / spread /
+  unitless set and custom properties, one level of selector nesting), with dynamic / spread /
   computed-key values dropped rather than guessed (no false positives).
   Flat-by-construction atomic CSS (StyleX, Panda) is kept out of the
   styling-health structural grade and duplicate-block detection and its grade is
