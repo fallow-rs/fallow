@@ -15,7 +15,7 @@
 //! This subcommand is a paid-tier workflow. It runs only when the user
 //! invokes it explicitly; no other fallow command touches the network.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 use std::path::Path;
 use std::process::ExitCode;
@@ -26,7 +26,7 @@ use fallow_engine::churn::{ChurnResult, ChurnTrend, FileChurn, analyze_churn_cac
 use fallow_engine::extract::inventory::{InventoryComplexity, InventoryEntry};
 use fallow_engine::{discover, extract::inventory::walk_source_with_complexity};
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 
 use colored::Colorize as _;
@@ -55,6 +55,23 @@ const INVENTORY_MAX_FUNCTIONS: usize = 200_000;
 /// fields) still validates. Older servers ignore the unknown `version` and the
 /// extra fields, so a newer CLI keeps uploading successfully.
 const INVENTORY_BLOB_VERSION: u8 = 2;
+
+/// Wire version once the payload also carries the importer-edge map (the
+/// `--with-callers` opt-in). Same additive contract: the server reads
+/// `callerEdges` by presence, so an older server ignores both the bumped version
+/// and the field. Only emitted when caller edges are actually present.
+const INVENTORY_BLOB_VERSION_WITH_CALLERS: u8 = 3;
+
+/// Cap on importer sites recorded per function. Mirrors the server's per-callee
+/// cap so a pathological fan-in (a barrel re-exported everywhere) cannot bloat
+/// the payload or trip the server bound. Truncation is deterministic: sites are
+/// ordered by importer path before the cut.
+const MAX_CALLER_SITES_PER_FN: usize = 500;
+
+/// Cap on imported symbol names recorded per importer site. Mirrors the server's
+/// per-site bound. The attribution records exactly one symbol per site today
+/// (the callee's own name), so this only guards against a future change.
+const MAX_SYMBOLS_PER_CALLER_SITE: usize = 64;
 
 /// Git-history window used to compute the per-file churn shipped alongside the
 /// inventory. Matches the default window the local hotspot analysis uses, so
@@ -113,6 +130,12 @@ pub struct UploadInventoryArgs {
     /// Soft-fail on upload errors: print the warning but return exit code 0.
     /// The default is to fail loud (exit nonzero) for any upload error.
     pub ignore_upload_errors: bool,
+    /// Also build the import graph and upload importer edges (which files import
+    /// each function) alongside the inventory. Opt-in because it runs the full
+    /// static analysis to build the graph, whereas the default upload is a fast
+    /// per-file walk. The graph is cached, so a CI step that already ran the
+    /// analysis pays little extra.
+    pub with_callers: bool,
 }
 
 impl fmt::Debug for UploadInventoryArgs {
@@ -127,6 +150,7 @@ impl fmt::Debug for UploadInventoryArgs {
             .field("path_prefix", &self.path_prefix)
             .field("dry_run", &self.dry_run)
             .field("ignore_upload_errors", &self.ignore_upload_errors)
+            .field("with_callers", &self.with_callers)
             .finish()
     }
 }
@@ -211,11 +235,26 @@ fn run_inner(args: &UploadInventoryArgs, root: &Path) -> Result<(), UploadError>
         )));
     }
 
+    // Importer edges are opt-in: building them runs the full static analysis to
+    // get the import graph, while the default upload is a fast per-file walk.
+    // Best-effort, so a graph-build failure still ships the inventory.
+    let caller_edges = if args.with_callers {
+        collect_caller_edges(&config, &functions)
+    } else {
+        BTreeMap::new()
+    };
+    let version = if caller_edges.is_empty() {
+        INVENTORY_BLOB_VERSION
+    } else {
+        INVENTORY_BLOB_VERSION_WITH_CALLERS
+    };
+
     let payload = InventoryRequest {
-        version: INVENTORY_BLOB_VERSION,
+        version,
         git_sha: &git_sha,
         functions: &functions,
         churn_by_path,
+        caller_edges,
     };
 
     if args.dry_run {
@@ -226,6 +265,12 @@ fn run_inner(args: &UploadInventoryArgs, root: &Path) -> Result<(), UploadError>
             &functions,
             args.api_endpoint.as_deref(),
         );
+        if args.with_callers {
+            println!(
+                "{LOG_PREFIX}: caller edges resolved for {} functions",
+                format_count(payload.caller_edges.len()),
+            );
+        }
         return Ok(());
     }
 
@@ -542,6 +587,161 @@ struct InventoryRequest<'a> {
     /// non-git uploads keep the exact pre-enrichment wire shape.
     #[serde(rename = "churnByPath", skip_serializing_if = "BTreeMap::is_empty")]
     churn_by_path: BTreeMap<String, FileChurnPayload>,
+    /// Importer edges keyed by the callee export's `stable_id` (the SAME value
+    /// `functions[].identity.stable_id` carries, so the server joins
+    /// stable_id == stable_id). Each entry lists the files that import the
+    /// function and the symbol names they import. Import-edge granularity, not a
+    /// file:line call-site. Skipped entirely when empty (the default upload, or a
+    /// graph build that produced no edges) so the pre-enrichment wire shape is
+    /// unchanged. Context only; never a verdict input.
+    #[serde(rename = "callerEdges", skip_serializing_if = "BTreeMap::is_empty")]
+    caller_edges: BTreeMap<String, Vec<CallerSitePayload>>,
+}
+
+/// Wire form of one importer edge: a `file` that imports the callee plus the
+/// `symbols` it imports. Repo-relative posix `file` (the `--path-prefix` shape
+/// is irrelevant here: the join is by stable_id, and the importer path is
+/// context for a human/agent). `symbols` omitted when empty.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct CallerSitePayload {
+    file: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    symbols: Vec<String>,
+}
+
+/// A raw importer edge discovered from the module graph: `importer_file` imports
+/// `symbol` from `callee_file`. All paths are repo-relative posix. Intermediate
+/// shape so the symbol-name -> function attribution stays a pure, testable step
+/// independent of the graph walk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ImporterEdge {
+    callee_file: String,
+    importer_file: String,
+    symbol: String,
+}
+
+/// Attribute raw importer edges to callee functions by matching each imported
+/// symbol name to an inventory function of the same name in the callee file,
+/// producing the `callerEdges` map keyed by callee `stable_id`.
+///
+/// Import-edge granularity, best-effort: `default` / `*` / side-effect imports
+/// and any symbol that does not name an inventory function simply contribute
+/// nothing (no false attribution). A name can repeat in a file (overloads,
+/// same-named nested functions), so an edge attributes to every matching
+/// stable_id. Pure: no graph or IO, so it is unit-tested directly.
+fn attribute_caller_edges(
+    functions: &[InventoryFunction],
+    edges: &[ImporterEdge],
+) -> BTreeMap<String, Vec<CallerSitePayload>> {
+    // (callee repo-relative file, function name) -> stable_ids of functions with
+    // that name in that file. identity.file is repo-relative, matching the edge
+    // callee_file shape.
+    let mut by_name: FxHashMap<(&str, &str), Vec<&str>> = FxHashMap::default();
+    for func in functions {
+        by_name
+            .entry((func.identity.file.as_str(), func.function_name.as_str()))
+            .or_default()
+            .push(func.identity.stable_id.as_str());
+    }
+
+    // callee stable_id -> importer file -> imported symbols (BTree for dedup +
+    // deterministic ordering of both sites and symbols).
+    let mut acc: BTreeMap<String, BTreeMap<String, BTreeSet<String>>> = BTreeMap::new();
+    for edge in edges {
+        let Some(stable_ids) = by_name.get(&(edge.callee_file.as_str(), edge.symbol.as_str()))
+        else {
+            continue;
+        };
+        for stable_id in stable_ids {
+            acc.entry((*stable_id).to_owned())
+                .or_default()
+                .entry(edge.importer_file.clone())
+                .or_default()
+                .insert(edge.symbol.clone());
+        }
+    }
+
+    acc.into_iter()
+        .map(|(stable_id, importers)| {
+            let mut sites: Vec<CallerSitePayload> = importers
+                .into_iter()
+                .map(|(file, symbols)| {
+                    // In practice exactly one symbol (the function's own name,
+                    // since the match condition is `symbol == function_name`).
+                    // The cap mirrors the server's per-site bound so a future
+                    // attribution change (e.g. alias matching) can never produce
+                    // a payload the server rejects.
+                    let mut symbols: Vec<String> = symbols.into_iter().collect();
+                    symbols.truncate(MAX_SYMBOLS_PER_CALLER_SITE);
+                    CallerSitePayload { file, symbols }
+                })
+                .collect();
+            sites.truncate(MAX_CALLER_SITES_PER_FN);
+            (stable_id, sites)
+        })
+        .collect()
+}
+
+/// Build the importer-edge map for the inventory by running the static analysis
+/// (graph retained) and attributing each import edge to a callee function.
+///
+/// Best-effort context: any failure (analysis error, no graph/files retained)
+/// yields an empty map so the upload still ships the inventory. Never a verdict
+/// input on the server side.
+fn collect_caller_edges(
+    config: &ResolvedConfig,
+    functions: &[InventoryFunction],
+) -> BTreeMap<String, Vec<CallerSitePayload>> {
+    let artifacts = match fallow_engine::analyze_retaining_modules(config, false, true) {
+        Ok(artifacts) => artifacts,
+        Err(err) => {
+            eprintln!(
+                "{LOG_PREFIX}: {}: import graph build failed, uploading without caller edges ({err})",
+                "warning".yellow().bold(),
+            );
+            return BTreeMap::new();
+        }
+    };
+    let (Some(graph), Some(files)) = (artifacts.graph.as_ref(), artifacts.files.as_ref()) else {
+        return BTreeMap::new();
+    };
+
+    // FileId -> repo-relative posix path, matching collect_inventory's shape so
+    // the callee/importer paths join the inventory functions' identity.file.
+    let mut repo_relative_by_id = FxHashMap::default();
+    for file in files {
+        let rel = file
+            .path
+            .strip_prefix(&config.root)
+            .map_or_else(|_| file.path.clone(), Path::to_path_buf);
+        repo_relative_by_id.insert(file.id, to_posix_string(&rel));
+    }
+
+    let mut edges: Vec<ImporterEdge> = Vec::new();
+    for file in files {
+        let Some(callee_file) = repo_relative_by_id.get(&file.id) else {
+            continue;
+        };
+        for summary in graph.direct_importer_summaries(file.id) {
+            let Some(importer_file) = repo_relative_by_id.get(&summary.source) else {
+                continue;
+            };
+            for symbol in &summary.symbols {
+                // Type-only imports cannot exercise a function at runtime; skip
+                // them so blast-radius reflects value-level dependents only.
+                if symbol.type_only {
+                    continue;
+                }
+                edges.push(ImporterEdge {
+                    callee_file: callee_file.clone(),
+                    importer_file: importer_file.clone(),
+                    symbol: symbol.imported.clone(),
+                });
+            }
+        }
+    }
+
+    attribute_caller_edges(functions, &edges)
 }
 
 /// Wire form of a single file's churn. All fields optional so a future
@@ -1589,6 +1789,7 @@ mod tests {
             git_sha: "deadbeef",
             functions: &functions,
             churn_by_path,
+            caller_edges: BTreeMap::new(),
         };
         let json = serde_json::to_value(&request).expect("serialize request");
         assert_eq!(json["version"], 2, "v2 version field present on the wire");
@@ -1621,6 +1822,7 @@ mod tests {
             git_sha: "deadbeef",
             functions: &functions,
             churn_by_path: BTreeMap::new(),
+            caller_edges: BTreeMap::new(),
         };
         let json = serde_json::to_value(&request).expect("serialize request");
         assert!(
@@ -1727,5 +1929,103 @@ mod tests {
             resolve_git_sha(&with_sha("bad sha!"), root).is_err(),
             "illegal characters"
         );
+    }
+
+    fn entry(name: &str, line: u32, hash: &str) -> InventoryEntry {
+        InventoryEntry {
+            name: name.to_owned(),
+            line,
+            start_column: 1,
+            end_line: line + 1,
+            end_column: 2,
+            source_hash: hash.to_owned(),
+        }
+    }
+
+    #[test]
+    fn attribute_caller_edges_matches_symbol_to_function_by_name() {
+        let foo =
+            InventoryFunction::from_entry("src/foo.ts", "src/foo.ts", entry("foo", 3, "h1"), None);
+        let bar =
+            InventoryFunction::from_entry("src/foo.ts", "src/foo.ts", entry("bar", 8, "h2"), None);
+        let functions = vec![foo.clone(), bar.clone()];
+        let edge = |importer: &str, symbol: &str| ImporterEdge {
+            callee_file: "src/foo.ts".to_owned(),
+            importer_file: importer.to_owned(),
+            symbol: symbol.to_owned(),
+        };
+        let edges = vec![
+            edge("src/a.ts", "foo"),
+            edge("src/b.ts", "foo"),
+            edge("src/c.ts", "missing"), // no function named "missing" -> ignored
+            edge("src/d.ts", "*"),       // namespace import -> ignored
+        ];
+
+        let map = attribute_caller_edges(&functions, &edges);
+
+        let foo_sites = map
+            .get(&foo.identity.stable_id)
+            .expect("foo has importer edges");
+        assert_eq!(
+            foo_sites
+                .iter()
+                .map(|s| s.file.as_str())
+                .collect::<Vec<_>>(),
+            vec!["src/a.ts", "src/b.ts"]
+        );
+        assert_eq!(foo_sites[0].symbols, vec!["foo".to_owned()]);
+        // bar is never imported -> absent (never a placeholder entry).
+        assert!(!map.contains_key(&bar.identity.stable_id));
+    }
+
+    #[test]
+    fn attribute_caller_edges_dedups_repeated_importer_symbol() {
+        let foo =
+            InventoryFunction::from_entry("src/foo.ts", "src/foo.ts", entry("foo", 1, "h1"), None);
+        let edge = ImporterEdge {
+            callee_file: "src/foo.ts".to_owned(),
+            importer_file: "src/a.ts".to_owned(),
+            symbol: "foo".to_owned(),
+        };
+        let map = attribute_caller_edges(std::slice::from_ref(&foo), &[edge.clone(), edge]);
+        let sites = map.get(&foo.identity.stable_id).expect("foo edges");
+        assert_eq!(sites.len(), 1, "same importer+symbol collapses to one site");
+        assert_eq!(sites[0].symbols, vec!["foo".to_owned()]);
+    }
+
+    #[test]
+    fn caller_edges_serialize_as_camel_case_and_skip_when_empty() {
+        let empty = InventoryRequest {
+            version: INVENTORY_BLOB_VERSION,
+            git_sha: "abc",
+            functions: &[],
+            churn_by_path: BTreeMap::new(),
+            caller_edges: BTreeMap::new(),
+        };
+        let value = serde_json::to_value(&empty).expect("serialize empty");
+        assert!(
+            value.get("callerEdges").is_none(),
+            "empty caller edges must be omitted, got: {value}"
+        );
+
+        let mut caller_edges = BTreeMap::new();
+        caller_edges.insert(
+            "sid1".to_owned(),
+            vec![CallerSitePayload {
+                file: "src/a.ts".to_owned(),
+                symbols: vec!["foo".to_owned()],
+            }],
+        );
+        let populated = InventoryRequest {
+            version: INVENTORY_BLOB_VERSION_WITH_CALLERS,
+            git_sha: "abc",
+            functions: &[],
+            churn_by_path: BTreeMap::new(),
+            caller_edges,
+        };
+        let value = serde_json::to_value(&populated).expect("serialize populated");
+        assert_eq!(value["callerEdges"]["sid1"][0]["file"], "src/a.ts");
+        assert_eq!(value["callerEdges"]["sid1"][0]["symbols"][0], "foo");
+        assert_eq!(value["version"], 3);
     }
 }

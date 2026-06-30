@@ -1856,6 +1856,14 @@ enum CoverageCli {
         #[arg(long)]
         dry_run: bool,
 
+        /// Also upload importer edges (which files import each function) so the
+        /// cloud can show change-time blast radius. Opt-in: this builds the
+        /// import graph by running the full static analysis, whereas the default
+        /// upload is a fast per-file walk. The graph is cached, so a CI step that
+        /// already ran analysis pays little extra.
+        #[arg(long)]
+        with_callers: bool,
+
         /// Treat transient upload failures as warnings instead of errors
         /// (exit 0). Validation and auth errors still fail hard; this only
         /// downgrades transport and server errors.
@@ -4966,6 +4974,7 @@ fn map_coverage_upload_inventory(sub: &CoverageCli) -> coverage::CoverageSubcomm
         exclude_paths,
         path_prefix,
         dry_run,
+        with_callers,
         ignore_upload_errors,
     } = sub
     else {
@@ -4980,6 +4989,7 @@ fn map_coverage_upload_inventory(sub: &CoverageCli) -> coverage::CoverageSubcomm
         exclude_paths: exclude_paths.clone(),
         path_prefix: path_prefix.clone(),
         dry_run: *dry_run,
+        with_callers: *with_callers,
         ignore_upload_errors: *ignore_upload_errors,
     })
 }
