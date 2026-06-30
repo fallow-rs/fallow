@@ -4685,3 +4685,170 @@ fn health_css_human_section_survives_empty_complexity_section() {
         out.stderr
     );
 }
+
+/// CSS-in-JS first-class, Phase 3b: `fallow health --css` lifts styled-components
+/// / emotion tagged-template CSS into the styling analytics so a CSS-in-JS app
+/// gets non-null `css_analytics` + `styling_health` instead of `null`, with
+/// cross-file duplicate styled blocks surfaced and notable-rule line numbers
+/// mapped back to the styled template. Also pins the dep gate: a project with no
+/// CSS-in-JS library never analyzes its JS/TS files (no `files_analyzed`
+/// inflation).
+#[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
+fn health_css_lifts_css_in_js_tagged_templates() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-in-js-health-fixture","version":"1.0.0","dependencies":{"styled-components":"^6.1.0"}}"#,
+    );
+    // Two files share an identical 4-declaration styled block (cross-file
+    // design-system erosion); a third file has a notable `!important` rule and an
+    // interpolation-heavy template.
+    write_file(
+        &root.join("src/CardA.tsx"),
+        "import styled from 'styled-components';\n\
+         export const CardA = styled.div`\n\
+         display: flex;\n\
+         align-items: center;\n\
+         justify-content: space-between;\n\
+         padding: 16px;\n\
+         `;\n",
+    );
+    write_file(
+        &root.join("src/CardB.tsx"),
+        "import styled from 'styled-components';\n\
+         export const CardB = styled.section`\n\
+         display: flex;\n\
+         align-items: center;\n\
+         justify-content: space-between;\n\
+         padding: 16px;\n\
+         `;\n",
+    );
+    write_file(
+        &root.join("src/Misc.tsx"),
+        "import styled from 'styled-components';\n\
+         export const Danger = styled.button`\n\
+         color: red !important;\n\
+         `;\n\
+         export const Interp = styled.div`\n\
+         color: ${theme.primary};\n\
+         margin: ${x}px ${y}px;\n\
+         `;\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+
+    // (criterion 6) css_analytics is non-null and analyzed the styled files.
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present for a CSS-in-JS project");
+    let files_analyzed = css["summary"]["files_analyzed"].as_u64().unwrap();
+    assert!(
+        files_analyzed >= 3,
+        "the three styled files should be analyzed: {css}"
+    );
+
+    // (criterion 7) styling_health is non-null (score + grade + confidence).
+    let sh = json
+        .get("styling_health")
+        .expect("styling_health present for a CSS-in-JS project");
+    assert!(
+        sh.get("grade").is_some(),
+        "styling_health has a grade: {sh}"
+    );
+    assert!(
+        sh.get("confidence").is_some(),
+        "styling_health has confidence: {sh}"
+    );
+
+    // (criterion 8) the duplicated 4-declaration styled block surfaces across the
+    // two files.
+    let dups = css["duplicate_declaration_blocks"].as_array().unwrap();
+    assert!(
+        dups.iter()
+            .any(|d| d["occurrence_count"].as_u64().unwrap() >= 2
+                && d["declaration_count"].as_u64().unwrap() >= 4),
+        "the cross-file duplicate styled block should surface: {css}"
+    );
+
+    // (criterion 9) the authored `!important` rule is notable and its line maps
+    // back onto the styled template in the source (not line 1).
+    let files = css["files"].as_array().unwrap();
+    let notable: Vec<_> = files
+        .iter()
+        .flat_map(|f| f["analytics"]["notable_rules"].as_array().unwrap().iter())
+        .collect();
+    assert!(
+        notable
+            .iter()
+            .any(|r| r["important_count"].as_u64().unwrap_or(0) >= 1),
+        "the authored !important declaration is a notable rule: {css}"
+    );
+    assert!(
+        notable.iter().all(|r| r["line"].as_u64().unwrap_or(0) >= 2),
+        "lifted rule line numbers map onto the styled template, not line 1: {css}"
+    );
+
+    // (criterion 11) the interpolation-heavy template did not invent !important
+    // beyond the one authored, and did not blow up the parse (css_analytics is
+    // present, asserted above). Exactly one authored !important across the corpus.
+    assert_eq!(
+        css["summary"]["important_declarations"].as_u64().unwrap(),
+        1,
+        "only the one authored !important is counted, masking invents none: {css}"
+    );
+}
+
+/// (criterion 10) A project with no CSS-in-JS library never analyzes its JS/TS
+/// files for styling analytics: `css_analytics` stays absent, so the JS/TS arm
+/// adds zero `files_analyzed` and the output is byte-identical to pre-3b.
+#[test]
+fn health_css_skips_js_ts_without_css_in_js_dep() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"no-css-in-js-fixture","version":"1.0.0","dependencies":{"react":"^18.3.0"}}"#,
+    );
+    // A .tsx file that LOOKS like CSS-in-JS but the project declares no CSS-in-JS
+    // library, so the JS/TS arm of the CSS walk is gated off.
+    write_file(
+        &root.join("src/App.tsx"),
+        "const Btn = styled.button`color: red;`;\nexport const x = 1;\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    assert!(
+        json.get("css_analytics").is_none(),
+        "no CSS-in-JS dep means no JS/TS styling analytics: {}",
+        out.stdout
+    );
+}

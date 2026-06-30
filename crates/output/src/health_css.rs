@@ -709,7 +709,8 @@ pub struct CssFileAnalytics {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct CssAnalyticsSummary {
-    /// Stylesheets analyzed (standard CSS only; SCSS is skipped).
+    /// Stylesheets analyzed: standard `.css` files, Vue/Svelte SFC `<style>`
+    /// blocks, and (dep-gated) CSS-in-JS tagged templates. SCSS is skipped.
     pub files_analyzed: u32,
     /// Total style rules across analyzed stylesheets.
     pub total_rules: u32,

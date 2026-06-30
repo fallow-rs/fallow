@@ -1023,6 +1023,34 @@ fn project_uses_tailwind(root: &std::path::Path) -> bool {
         })
 }
 
+/// Whether the project declares a CSS-in-JS runtime library whose tagged-template
+/// CSS the lifter ([`fallow_extract::css_in_js_virtual_stylesheet`]) understands.
+/// Gates the JS/TS arm of the CSS walk so a non-CSS-in-JS project never scans
+/// `.js` / `.ts` files for styling analytics (no `files_analyzed` inflation).
+fn project_uses_css_in_js(root: &std::path::Path) -> bool {
+    const CSS_IN_JS_DEPS: &[&str] = &[
+        "styled-components",
+        "@emotion/styled",
+        "@emotion/react",
+        "@emotion/css",
+        "@linaria/core",
+        "@linaria/react",
+    ];
+    let Ok(text) = std::fs::read_to_string(root.join("package.json")) else {
+        return false;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    ["dependencies", "devDependencies", "peerDependencies"]
+        .iter()
+        .any(|key| {
+            json.get(key)
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|deps| deps.keys().any(|k| CSS_IN_JS_DEPS.contains(&k.as_str())))
+        })
+}
+
 /// Scan the project's markup (`.jsx` / `.tsx` / `.html` / `.astro` / `.vue` /
 /// `.svelte`) for Tailwind arbitrary-value utility tokens, honoring the same
 /// ignore / changed / workspace filters as the CSS scan. Aggregates by token
@@ -2576,10 +2604,22 @@ fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Markup
     }
 }
 
+/// What kind of source a CSS-walk target is, deciding how its stylesheet body is
+/// obtained: a standalone `.css` file (used verbatim), a Vue/Svelte SFC (its
+/// `<style>` blocks lifted to a virtual stylesheet), or a JS/TS CSS-in-JS file
+/// (its `styled` / `css` tagged-template bodies lifted to a virtual stylesheet).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CssScanKind {
+    Css,
+    Sfc,
+    CssInJs,
+}
+
 fn css_report_scan_target<'a>(
     file: &'a fallow_types::discover::DiscoveredFile,
     ctx: HealthScanCtx<'_>,
-) -> Option<(&'a std::path::Path, bool)> {
+    css_in_js: bool,
+) -> Option<(&'a std::path::Path, CssScanKind)> {
     let HealthScanCtx {
         config,
         ignore_set,
@@ -2589,11 +2629,17 @@ fn css_report_scan_target<'a>(
 
     let path = &file.path;
     let extension = path.extension().and_then(|ext| ext.to_str());
-    let is_css = extension == Some("css");
-    let is_sfc = matches!(extension, Some("vue") | Some("svelte"));
-    if !is_css && !is_sfc {
-        return None;
-    }
+    let kind = match extension {
+        Some("css") => CssScanKind::Css,
+        Some("vue") | Some("svelte") => CssScanKind::Sfc,
+        // The JS/TS arm is admitted ONLY when the project declares a CSS-in-JS
+        // library, so a non-CSS-in-JS project pays nothing and `files_analyzed`
+        // is not inflated by ordinary `.ts` files.
+        Some("js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "mts" | "cts") if css_in_js => {
+            CssScanKind::CssInJs
+        }
+        _ => return None,
+    };
 
     let relative = path.strip_prefix(&config.root).unwrap_or(path);
     if ignore_set.is_match(relative) {
@@ -2609,7 +2655,7 @@ fn css_report_scan_target<'a>(
     {
         return None;
     }
-    Some((relative, is_sfc))
+    Some((relative, kind))
 }
 
 fn record_scoped_unused_classes(
@@ -2633,12 +2679,19 @@ fn record_scoped_unused_classes(
     });
 }
 
-fn css_report_stylesheet_source(source: &str, is_sfc: bool) -> Option<std::borrow::Cow<'_, str>> {
-    if is_sfc {
-        return crate::extract::sfc_virtual_stylesheet(source).map(std::borrow::Cow::Owned);
+fn css_report_stylesheet_source(
+    source: &str,
+    kind: CssScanKind,
+) -> Option<std::borrow::Cow<'_, str>> {
+    match kind {
+        CssScanKind::Css => Some(std::borrow::Cow::Borrowed(source)),
+        CssScanKind::Sfc => {
+            crate::extract::sfc_virtual_stylesheet(source).map(std::borrow::Cow::Owned)
+        }
+        CssScanKind::CssInJs => {
+            crate::extract::css_in_js_virtual_stylesheet(source).map(std::borrow::Cow::Owned)
+        }
     }
-
-    Some(std::borrow::Cow::Borrowed(source))
 }
 
 fn record_css_analytics_summary(
@@ -2698,22 +2751,27 @@ fn walk_css_files(
     // rule, which are not listed individually), finalized after the walk.
     let mut tokens = CssTokenSets::default();
 
+    // Read the CSS-in-JS dep gate once; it admits the JS/TS arm of the walk.
+    let css_in_js = project_uses_css_in_js(&ctx.config.root);
+
     for file in files {
-        let Some((relative, is_sfc)) = css_report_scan_target(file, ctx) else {
+        let Some((relative, kind)) = css_report_scan_target(file, ctx, css_in_js) else {
             continue;
         };
         let Ok(source) = std::fs::read_to_string(&file.path) else {
             continue;
         };
 
-        if is_sfc {
+        if kind == CssScanKind::Sfc {
             record_scoped_unused_classes(&source, relative, &mut summary, &mut scoped_unused);
         }
 
-        // Vue/Svelte SFC `<style>` blocks are folded into a virtual stylesheet so
-        // their structural metrics (specificity, !important, design tokens) count
-        // the same as a standalone .css file; SFCs with only SCSS blocks yield None.
-        let Some(css_source) = css_report_stylesheet_source(&source, is_sfc) else {
+        // Vue/Svelte SFC `<style>` blocks and JS/TS CSS-in-JS tagged templates are
+        // folded into a virtual stylesheet so their structural metrics
+        // (specificity, !important, design tokens) count the same as a standalone
+        // .css file; an SFC with only SCSS blocks or a JS/TS file with no
+        // CSS-in-JS template yields None and is skipped.
+        let Some(css_source) = css_report_stylesheet_source(&source, kind) else {
             continue;
         };
         let Some(analytics) = crate::extract::compute_css_analytics(&css_source) else {
