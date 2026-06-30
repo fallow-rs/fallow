@@ -89,18 +89,22 @@ impl WalkthroughAccounting {
     }
 }
 
-/// The clean, surface-agnostic fact text for a coordination decision question.
+/// The clean, surface-agnostic fact text for a decision question, for the tour.
 ///
 /// The raw wire `question` leads with `` `<anchor_file>` `` (which every render
-/// surface ALREADY shows as the row's leading path) and inlines the full,
-/// unbounded contract-member list. This strips the redundant leading path and
-/// caps the member list to `max_members` names + "+N more", PRESERVING the
-/// trailing guidance sentence. The result is plain prose (no backticks), so a
-/// markdown surface needs no escaping and a human surface needs no truncation.
+/// surface ALREADY shows as the row's leading path), inlines the full, unbounded
+/// contract-member list, and ends with the decision's open question. For a guided
+/// tour this: strips the redundant leading path, caps the member list to
+/// `max_members` names + "+N more", and DROPS the trailing question (the section
+/// header frames the action once, and the question is still carried in the
+/// decisions brief and the JSON, where each decision stands alone). The result is
+/// plain prose (no backticks), so a markdown surface needs no escaping and a human
+/// surface needs no truncation.
 #[must_use]
 pub fn clean_decision_fact(question: &str, anchor_file: &str, max_members: usize) -> String {
     let stripped = strip_leading_path(question, anchor_file);
-    cap_member_list(&stripped, max_members)
+    let capped = cap_member_list(&stripped, max_members);
+    drop_trailing_question(&capped)
 }
 
 /// Drop a leading `` `<anchor_file>` `` token (with one trailing space) from the
@@ -137,6 +141,30 @@ fn cap_member_list(text: &str, max_members: usize) -> String {
         &text[..open],
         &text[close + 1..]
     )
+}
+
+/// Drop a trailing decision question (a sentence ending in `?`) so a guided tour
+/// shows the plain observation, not a per-file question. The decision's open
+/// question is still carried in the decisions brief and the JSON, where each
+/// decision stands alone; in the tour the section header frames the action once,
+/// so a question repeated on every row reads as a wall of the same sentence.
+fn drop_trailing_question(text: &str) -> String {
+    let parts: Vec<&str> = text.split(". ").collect();
+    let mut end = parts.len();
+    while end > 0 && parts[end - 1].trim_end().ends_with('?') {
+        end -= 1;
+    }
+    // Nothing trailing was a question (end unchanged), or the whole text is a
+    // question (end hit 0): leave it as-is rather than emit an empty fragment.
+    if end == parts.len() || end == 0 {
+        return text.to_string();
+    }
+    let kept = parts[..end].join(". ");
+    if kept.ends_with(['.', '!', '?']) {
+        kept
+    } else {
+        format!("{kept}.")
+    }
 }
 
 /// Cap an arbitrary list of names for inline display: first `max` names, then a
@@ -337,8 +365,8 @@ mod tests {
     }
 
     #[test]
-    fn strips_leading_path_and_caps_members() {
-        let q = "`src/db/schema.ts` changes a contract (a, b, c, d, e, f, g, h) consumed by 32 modules NOT in this diff. Coordinate the change, or is the contract stable?";
+    fn strips_leading_path_caps_members_and_drops_question() {
+        let q = "`src/db/schema.ts` changes exports (a, b, c, d, e, f, g, h) imported by 32 files outside this PR. Does this change break or alter what those callers expect?";
         let out = clean_decision_fact(q, "src/db/schema.ts", 3);
         // The leading path is gone (printed once by the row).
         assert!(
@@ -347,40 +375,45 @@ mod tests {
         );
         // The member list is capped with a "+N more".
         assert!(out.contains("(a, b, c, +5 more)"), "got: {out}");
-        // The trailing guidance survives in full.
+        // The trailing decision question is dropped in the tour (it lives in the brief).
         assert!(
-            out.ends_with("Coordinate the change, or is the contract stable?"),
-            "trailing question must survive: {out}"
+            !out.contains('?'),
+            "trailing question must be dropped: {out}"
+        );
+        assert!(
+            out.ends_with("outside this PR."),
+            "the observation survives, ending cleanly: {out}"
         );
         // No backticks remain to be escaped.
         assert!(!out.contains('`'), "no backticks remain: {out}");
     }
 
     #[test]
-    fn short_member_list_is_untouched() {
-        let q = "`src/lib/r2.ts` changes a contract (getR2, getR2Text) consumed by 6 modules NOT in this diff. Coordinate the change, or is the contract stable?";
+    fn short_member_list_is_kept_and_question_dropped() {
+        let q = "`src/lib/r2.ts` changes exports (getR2, getR2Text) imported by 6 files outside this PR. Does this change break or alter what those callers expect?";
         let out = clean_decision_fact(q, "src/lib/r2.ts", 6);
         assert_eq!(
             out,
-            "changes a contract (getR2, getR2Text) consumed by 6 modules NOT in this diff. Coordinate the change, or is the contract stable?"
+            "changes exports (getR2, getR2Text) imported by 6 files outside this PR."
         );
     }
 
     #[test]
-    fn single_member_prose_parenthetical_is_untouched() {
-        let q = "`src/lib/env.ts` changes a contract (env) consumed by 22 modules NOT in this diff. Coordinate the change, or is the contract stable?";
+    fn single_member_prose_parenthetical_is_kept_question_dropped() {
+        let q = "`src/lib/env.ts` changes exports (env) imported by 22 files outside this PR. Does this change break or alter what those callers expect?";
         let out = clean_decision_fact(q, "src/lib/env.ts", 6);
         assert!(out.contains("(env)"), "single member kept: {out}");
-        assert!(out.ends_with("stable?"), "trailing kept: {out}");
+        assert!(!out.contains('?'), "trailing question dropped: {out}");
+        assert!(out.ends_with("outside this PR."), "observation kept: {out}");
     }
 
     #[test]
-    fn non_anchor_question_keeps_its_own_path() {
-        // A boundary question names a DIFFERENT path than the anchor; it must not
-        // be stripped (the leading token is not the anchor file).
+    fn non_anchor_path_is_kept_but_question_dropped() {
+        // A boundary question names a DIFFERENT path than the anchor; its leading
+        // token is not stripped, but the tour still drops the trailing question.
         let q = "`ui` now imports `db` for the first time. Intended coupling, or should this edge not exist?";
         let out = clean_decision_fact(q, "src/ui/page.ts", 6);
-        assert_eq!(out, q, "non-matching leading token is preserved");
+        assert_eq!(out, "`ui` now imports `db` for the first time.");
     }
 
     #[test]

@@ -2502,11 +2502,11 @@ mod walkthrough_markdown_tests {
     }
 
     // F5/F7: a coordination question must NOT re-print the anchor path inside the
-    // fact text, must NOT emit a backslash-backtick sequence, and must cap the
-    // contract member list while keeping the trailing guidance question.
+    // fact text, must NOT emit a backslash-backtick sequence, must cap the
+    // contract member list, and drops the trailing question in the tour.
     #[test]
     fn fact_does_not_reprint_path_or_emit_escaped_backticks() {
-        let q = "`src/page.ts` changes a contract (a, b, c, d, e, f, g, h, i) consumed by 9 modules NOT in this diff. Coordinate the change, or is the contract stable?";
+        let q = "`src/page.ts` changes exports (a, b, c, d, e, f, g, h, i) imported by 9 files outside this PR. Does this change break or alter what those callers expect?";
         let guide = guide_with_question("src/page.ts", q);
         let md = build_walkthrough_markdown(&guide, Path::new("/project"), &[]);
         // No backslash-backtick anywhere (the F5 corruption).
@@ -2516,15 +2516,15 @@ mod walkthrough_markdown_tests {
         );
         // The path is printed once (the bullet lead), not a second time in the fact.
         assert!(
-            !md.contains("`src/page.ts` changes a contract"),
+            !md.contains("`src/page.ts` changes exports"),
             "fact must not re-print the path: {md}"
         );
         // The member list is capped with a "+N more".
         assert!(md.contains("+3 more"), "member list capped: {md}");
-        // The trailing actionable question survives in full.
+        // The trailing decision question is dropped in the tour (it lives in the brief).
         assert!(
-            md.contains("Coordinate the change, or is the contract stable?"),
-            "trailing guidance must survive: {md}"
+            !md.contains("break or alter"),
+            "the per-file question must be dropped in the tour: {md}"
         );
         // The raw "(score N)" is gone.
         assert!(!md.contains("(score "), "raw score removed: {md}");

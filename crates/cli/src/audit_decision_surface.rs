@@ -214,9 +214,9 @@ fn public_api_question(count: usize) -> String {
 /// Frame a coordination-gap (contract consumed outside the diff) decision.
 fn coordination_question(changed_file: &str, symbols: &[String], consumers: u64) -> String {
     format!(
-        "`{changed_file}` changes a contract ({}) consumed by {consumers} module{} NOT in this diff. Coordinate the change, or is the contract stable?",
+        "`{changed_file}` changes exports ({}) imported by {consumers} {} outside this PR. Does this change break or alter what those callers expect?",
         symbols.join(", "),
-        if consumers == 1 { "" } else { "s" }
+        if consumers == 1 { "file" } else { "files" }
     )
 }
 

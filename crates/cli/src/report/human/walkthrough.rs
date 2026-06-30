@@ -967,14 +967,14 @@ mod tests {
         assert!(status.contains("1 file across 1 stage"), "status: {status}");
     }
 
-    // F4/F5/F7: the contract member list is capped and the trailing guidance
-    // question survives (not truncated away); no raw score is shown.
+    // F4/F5/F7: the contract member list is capped and the trailing decision
+    // question is dropped in the tour (it lives in the brief); no raw score is shown.
     #[test]
-    fn contract_question_keeps_trailing_guidance_and_caps_members() {
+    fn contract_question_drops_in_tour_and_caps_members() {
         let members =
             "alertRules, apiKeys, auditLog, budgetAlerts, coverageAlerts, deployments, users, orgs";
         let question = format!(
-            "`src/db/schema.ts` changes a contract ({members}) consumed by 32 modules NOT in this diff. Coordinate the change, or is the contract stable?"
+            "`src/db/schema.ts` changes exports ({members}) imported by 32 files outside this PR. Does this change break or alter what those callers expect?"
         );
         let mut decision = coupling_decision("src/db/schema.ts");
         decision.question = question;
@@ -996,16 +996,20 @@ mod tests {
             viewed: &viewed,
             show_cleared: false,
         }));
-        // The trailing actionable question is NOT truncated away.
+        // The trailing decision question is dropped in the tour (it lives in the brief).
         assert!(
-            body.contains("Coordinate the change, or is the contract stable?"),
-            "trailing guidance must survive: {body}"
+            !body.contains("break or alter"),
+            "the per-file question must be dropped in the tour: {body}"
+        );
+        assert!(
+            body.contains("imported by 32 files outside this PR"),
+            "the observation survives: {body}"
         );
         // The member list is capped with a "+N more".
         assert!(body.contains("+2 more"), "member list capped: {body}");
         // The leading path is not re-printed inside the fact text.
         assert!(
-            !body.contains("`src/db/schema.ts` changes a contract"),
+            !body.contains("`src/db/schema.ts` changes exports"),
             "fact must not re-print the path: {body}"
         );
         // The contradictory raw "(score N)" is gone.
