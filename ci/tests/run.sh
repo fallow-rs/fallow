@@ -168,6 +168,7 @@ chmod +x "$SKIP_BIN/fallow"
 
 # FALLOW_INSTALL_DRY_RUN=true stays set so the assertion proves the skip path
 # short-circuits before the npm-install dry-run hook ever runs.
+rm -f /tmp/fallow-version-spec
 OUT=$(PATH="$SKIP_BIN:$PATH" FALLOW_ROOT="$INSTALL_TMP/empty" \
   FALLOW_SKIP_INSTALL=true FALLOW_INSTALL_DRY_RUN=true \
   /bin/sh -c "$GITLAB_INSTALL_SCRIPT" 2>&1)
@@ -179,6 +180,9 @@ else
 fi
 assert_contains "$OUT" "using pre-installed fallow 9.9.9" "install: FALLOW_SKIP_INSTALL reuses fallow on PATH"
 assert_not_contains "$OUT" "DRY RUN: npm install" "install: FALLOW_SKIP_INSTALL skips npm install"
+# The skip path must record the binary's semver to /tmp/fallow-version-spec so the
+# MR-integration script-prep block can pin remote scripts (parity with install path).
+assert_contains "$(cat /tmp/fallow-version-spec 2>/dev/null || true)" "9.9.9" "install: FALLOW_SKIP_INSTALL records binary semver for script-prep parity"
 
 # No fallow on PATH -> clear, early error (controlled PATH keeps this hermetic).
 OUT=$(PATH="/usr/bin:/bin" FALLOW_ROOT="$INSTALL_TMP/empty" \

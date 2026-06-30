@@ -716,7 +716,19 @@ GitLab setup gotchas:
 - The template sets `GIT_DEPTH: "0"` so `--changed-since` can diff against the MR base SHA without shallow-clone ambiguity.
 - For private GitLab npm registries, create `.npmrc` during the job with `${CI_PROJECT_ID}` and `${CI_JOB_TOKEN}` rather than committing tokens.
 - For pnpm projects with `minimumReleaseAge`, add `fallow` and `@fallow-cli/*` to `minimumReleaseAgeExclude` when you need to consume a just-published fallow release immediately.
-- To run the template against a fallow you install yourself (e.g. a pnpm-catalog pin), set `FALLOW_SKIP_INSTALL: "true"`, override `image:` to your base image, and make sure your install step leaves `fallow` resolvable on the job shell's `PATH`. A bare `pnpm install`/`npm install` only writes `node_modules/.bin/fallow`, which GitLab does **not** add to `PATH` automatically — prepend it in a `before_script` (e.g. `export PATH="$CI_PROJECT_DIR/node_modules/.bin:$PATH"`) or install fallow globally. The job then skips `npm install -g fallow` and runs your exact binary, so CI matches your local lint gate.
+- To run the template against a fallow you install yourself (e.g. a pnpm-catalog pin), set `FALLOW_SKIP_INSTALL: "true"`, override `image:` to your base image, and make sure your install step leaves `fallow` resolvable on the job shell's `PATH`. A bare `pnpm install`/`npm install` only writes `node_modules/.bin/fallow`, which GitLab does **not** add to `PATH` automatically, so prepend it yourself. A job that `extends: .fallow` and defines its own `before_script` **replaces** the template's `before_script` (GitLab does not merge them), so compose with `!reference` to keep the template's install + script-prep block:
+
+  ```yaml
+  fallow:
+    extends: .fallow
+    before_script:
+      - export PATH="$CI_PROJECT_DIR/node_modules/.bin:$PATH"
+      - !reference [.fallow, before_script]
+    variables:
+      FALLOW_SKIP_INSTALL: "true"
+  ```
+
+  The job then skips `npm install -g fallow` and runs your exact binary, so CI matches your local lint gate. If you also enable `FALLOW_COMMENT`/`FALLOW_REVIEW` and your binary is a dev build whose `--version` is not an exact release (e.g. `2.3.0-dev`), pin `FALLOW_SCRIPTS_REF` to a real tag or vendor `ci/scripts/` so the MR-integration scripts can still be fetched.
 
 ```yaml
 # .gitlab-ci.yml -- full example with rich MR comments
