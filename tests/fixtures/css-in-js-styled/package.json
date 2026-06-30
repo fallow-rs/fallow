@@ -1,0 +1,14 @@
+{
+  "name": "css-in-js-styled-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/main.tsx",
+  "dependencies": {
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "styled-components": "^6.1.0",
+    "@emotion/styled": "^11.11.0",
+    "@emotion/react": "^11.11.0",
+    "@vanilla-extract/css": "^1.14.0"
+  }
+}

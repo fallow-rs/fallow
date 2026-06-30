@@ -25,6 +25,8 @@ mod barrel_exports;
 mod basic_analysis;
 #[path = "integration_test/caching.rs"]
 mod caching;
+#[path = "integration_test/css_in_js_styled.rs"]
+mod css_in_js_styled;
 #[path = "integration_test/css_modules.rs"]
 mod css_modules;
 #[path = "integration_test/dependencies.rs"]
