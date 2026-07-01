@@ -105,11 +105,13 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
     // Styling is verdict-neutral but must still surface when it is the ONLY
     // signal (a project clean of dead-code/complexity/dupes but with styling
     // candidates), else the styling summary is invisible on the common case.
-    let has_styling = result
-        .health
-        .as_ref()
-        .and_then(|h| h.report.css_analytics.as_ref())
-        .is_some_and(|c| styling_candidate_count(&c.summary) > 0);
+    let has_styling = result.health.as_ref().is_some_and(|h| {
+        !h.report.styling_findings.is_empty()
+            || h.report
+                .css_analytics
+                .as_ref()
+                .is_some_and(|c| styling_candidate_count(&c.summary) > 0)
+    });
 
     if has_check_issues || has_health_findings || has_dupe_groups || has_styling {
         print_audit_findings(result, quiet, explain, show_headers);
@@ -212,33 +214,60 @@ fn styling_candidate_count(s: &fallow_output::CssAnalyticsSummary) -> u32 {
     .fold(0u32, u32::saturating_add)
 }
 
-/// One-line styling summary in the audit view: a candidate count with a pointer
-/// to `fallow health --css` for detail. Descriptive + verdict-neutral;
-/// deliberately NOT the A-F styling grade (that stays in `fallow health` for
-/// trending, per the styling-in-audit plan). Gated on the CSS pass having run.
+/// Styling section in the audit view: the graduated, agent-actionable styling
+/// FINDINGS (top-N per the noise budget), falling back to a candidate count for
+/// the not-yet-graduated descriptive candidates. Verdict-neutral; deliberately NOT
+/// the A-F styling grade (that stays in `fallow health` for trending, per plan).
 fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
+    /// Noise budget: findings shown per the audit view (the rest via `--css`).
+    const TOP_N: usize = 5;
     let Some(ref health) = result.health else {
         return;
     };
-    let Some(ref css) = health.report.css_analytics else {
-        return;
-    };
-    let candidates = styling_candidate_count(&css.summary);
-    if candidates == 0 {
+    let findings = &health.report.styling_findings;
+    let descriptive = health
+        .report
+        .css_analytics
+        .as_ref()
+        .map_or(0, |css| styling_candidate_count(&css.summary));
+    if findings.is_empty() && descriptive == 0 {
         return;
     }
     print_audit_section_header(
         show_headers,
         "── Styling ────────────────────────────────────────",
     );
-    let noun = if candidates == 1 {
-        "candidate"
-    } else {
-        "candidates"
-    };
+    if findings.is_empty() {
+        // Only not-yet-graduated descriptive candidates (dead surface, etc.).
+        let noun = if descriptive == 1 {
+            "candidate"
+        } else {
+            "candidates"
+        };
+        outln!(
+            "  {descriptive} styling {noun} {}",
+            "(run `fallow health --css` for detail)".dimmed()
+        );
+        return;
+    }
+    for finding in findings.iter().take(TOP_N) {
+        outln!(
+            "  {}  {}  {}",
+            finding.code,
+            finding.value,
+            format!("{}:{}", finding.path, finding.line).dimmed()
+        );
+    }
+    let hidden = findings.len().saturating_sub(TOP_N);
+    if hidden > 0 {
+        outln!(
+            "  {}",
+            format!("+ {hidden} more styling finding(s)").dimmed()
+        );
+    }
     outln!(
-        "  {candidates} styling {noun} {}",
-        "(run `fallow health --css` for detail)".dimmed()
+        "  {}",
+        "(run `fallow health --css` for full styling detail)".dimmed()
     );
 }
 
