@@ -7,7 +7,7 @@ use ls_types::{
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 
-use super::{FIRST_LINE_RANGE, doc_link};
+use super::{FIRST_LINE_RANGE, doc_link_for_code};
 
 /// Basename of `path`, falling back to the full display string.
 fn cycle_file_name(path: &std::path::Path) -> String {
@@ -88,7 +88,7 @@ fn push_legacy_circular_diagnostic(
         severity: Some(DiagnosticSeverity::WARNING),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String("circular-dependency".to_string())),
-        code_description: doc_link("circular-dependencies"),
+        code_description: doc_link_for_code("circular-dependency"),
         message,
         related_information: if related_info.is_empty() {
             None
@@ -172,7 +172,7 @@ fn push_circular_cycle_edge_diagnostics(
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("circular-dependency".to_string())),
-            code_description: doc_link("circular-dependencies"),
+            code_description: doc_link_for_code("circular-dependency"),
             message,
             related_information: if related_info.is_empty() {
                 None
@@ -297,7 +297,7 @@ fn push_re_export_member_diagnostic(
         severity: Some(DiagnosticSeverity::WARNING),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String("re-export-cycle".to_string())),
-        code_description: doc_link("re-export-cycles"),
+        code_description: doc_link_for_code("re-export-cycle"),
         message: message.to_string(),
         related_information: if related_info.is_empty() {
             None
@@ -361,7 +361,7 @@ fn push_boundary_import_violation_diagnostics(
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("boundary-violation".to_string())),
-            code_description: doc_link("boundary-violations"),
+            code_description: doc_link_for_code("boundary-violation"),
             message,
             related_information: related_info,
             ..Default::default()
@@ -393,7 +393,7 @@ fn push_boundary_coverage_violation_diagnostics(
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("boundary-violation".to_string())),
-            code_description: doc_link("boundary-violations"),
+            code_description: doc_link_for_code("boundary-violation"),
             message: "Boundary coverage: file does not match any configured zone".to_string(),
             related_information: None,
             ..Default::default()
@@ -425,7 +425,7 @@ fn push_boundary_call_violation_diagnostics(
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("boundary-violation".to_string())),
-            code_description: doc_link("boundary-violations"),
+            code_description: doc_link_for_code("boundary-violation"),
             message: format!(
                 "Boundary call: `{}` matches forbidden pattern `{}` in zone '{}'",
                 v.violation.callee, v.violation.pattern, v.violation.zone
@@ -480,7 +480,7 @@ pub fn push_policy_violation_diagnostics(
             severity: Some(severity),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("policy-violation".to_string())),
-            code_description: doc_link("policy-violations"),
+            code_description: doc_link_for_code("policy-violation"),
             message,
             related_information: None,
             ..Default::default()
@@ -519,7 +519,7 @@ pub fn push_invalid_client_export_diagnostics(
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("invalid-client-export".to_string())),
-            code_description: doc_link("invalid-client-exports"),
+            code_description: doc_link_for_code("invalid-client-export"),
             message,
             related_information: None,
             ..Default::default()
@@ -560,7 +560,7 @@ pub fn push_mixed_client_server_barrel_diagnostics(
             code: Some(NumberOrString::String(
                 "mixed-client-server-barrel".to_string(),
             )),
-            code_description: doc_link("mixed-client-server-barrels"),
+            code_description: doc_link_for_code("mixed-client-server-barrel"),
             message,
             related_information: None,
             ..Default::default()
@@ -599,7 +599,7 @@ pub fn push_misplaced_directive_diagnostics(
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("misplaced-directive".to_string())),
-            code_description: doc_link("misplaced-directives"),
+            code_description: doc_link_for_code("misplaced-directive"),
             message,
             related_information: None,
             ..Default::default()
@@ -638,7 +638,7 @@ pub fn push_unprovided_inject_diagnostics(
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("unprovided-inject".to_string())),
-            code_description: doc_link("unprovided-injects"),
+            code_description: doc_link_for_code("unprovided-inject"),
             message,
             related_information: None,
             ..Default::default()
@@ -677,7 +677,7 @@ pub fn push_route_collision_diagnostics(
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("route-collision".to_string())),
-            code_description: doc_link("route-collisions"),
+            code_description: doc_link_for_code("route-collision"),
             message,
             related_information: None,
             ..Default::default()
@@ -718,7 +718,7 @@ pub fn push_dynamic_segment_name_conflict_diagnostics(
             code: Some(NumberOrString::String(
                 "dynamic-segment-name-conflict".to_string(),
             )),
-            code_description: doc_link("dynamic-segment-name-conflicts"),
+            code_description: doc_link_for_code("dynamic-segment-name-conflict"),
             message,
             related_information: None,
             ..Default::default()

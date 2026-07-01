@@ -9,7 +9,7 @@ use fallow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
 
-use super::doc_link;
+use super::doc_link_for_code;
 
 #[expect(
     clippy::cast_possible_truncation,
@@ -62,7 +62,7 @@ pub fn push_duplicate_export_diagnostics(
                     severity: Some(DiagnosticSeverity::WARNING),
                     source: Some("fallow".to_string()),
                     code: Some(NumberOrString::String("duplicate-export".to_string())),
-                    code_description: doc_link("duplicate-exports"),
+                    code_description: doc_link_for_code("duplicate-export"),
                     message: format!("Duplicate export '{}'", dup.export_name),
                     related_information: if related_info.is_empty() {
                         None
@@ -204,7 +204,7 @@ pub fn push_stale_suppression_diagnostics(
             severity: Some(DiagnosticSeverity::HINT),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("stale-suppression".to_string())),
-            code_description: doc_link("stale-suppressions"),
+            code_description: doc_link_for_code("stale-suppression"),
             message,
             tags: Some(vec![DiagnosticTag::UNNECESSARY]),
             ..Default::default()

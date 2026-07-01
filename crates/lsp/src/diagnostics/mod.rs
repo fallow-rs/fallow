@@ -11,12 +11,14 @@ use ls_types::{CodeDescription, Diagnostic, Position, Range, Uri};
 use fallow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
+use fallow_types::issue_meta::issue_meta_by_code;
 
 /// Base URL for diagnostic documentation links.
 const DOCS_BASE: &str = "https://docs.fallow.tools/explanations/dead-code#";
 
-/// Build a `CodeDescription` with a documentation URL for the given anchor.
-fn doc_link(anchor: &str) -> Option<CodeDescription> {
+/// Build a `CodeDescription` with a documentation URL for the given issue code.
+fn doc_link_for_code(code: &str) -> Option<CodeDescription> {
+    let anchor = issue_meta_by_code(code)?.docs_anchor()?;
     let url = format!("{DOCS_BASE}{anchor}");
     url.parse::<Uri>().ok().map(|href| CodeDescription { href })
 }
@@ -273,13 +275,30 @@ mod tests {
 
     #[test]
     fn doc_link_produces_valid_url() {
-        let link = doc_link("unused-exports");
+        let link = doc_link_for_code("unused-export");
         assert!(link.is_some());
         let desc = link.unwrap();
         assert_eq!(
             desc.href.as_str(),
             "https://docs.fallow.tools/explanations/dead-code#unused-exports"
         );
+    }
+
+    #[test]
+    fn lsp_doc_links_follow_issue_metadata_anchors() {
+        for meta in fallow_types::issue_meta::diagnostic_issue_metas() {
+            let Some(anchor) = meta.docs_anchor() else {
+                continue;
+            };
+            let link = doc_link_for_code(meta.code)
+                .unwrap_or_else(|| panic!("missing LSP doc link for {}", meta.code));
+            assert_eq!(
+                link.href.as_str(),
+                format!("https://docs.fallow.tools/explanations/dead-code#{anchor}"),
+                "LSP doc link for {} must use IssueKindMeta docs anchor",
+                meta.code
+            );
+        }
     }
 
     #[test]

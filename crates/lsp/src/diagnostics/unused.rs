@@ -6,7 +6,7 @@ use ls_types::{
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 
-use super::{FIRST_LINE_RANGE, doc_link};
+use super::{FIRST_LINE_RANGE, doc_link_for_code};
 
 pub fn push_export_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
@@ -14,24 +14,22 @@ pub fn push_export_diagnostics(
 ) {
     let exports_iter = results.unused_exports.iter().map(|f| &f.export);
     let types_iter = results.unused_types.iter().map(|f| &f.export);
-    for (exports, code, anchor, msg_prefix) in [
+    for (exports, code, msg_prefix) in [
         (
             Box::new(exports_iter)
                 as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
             "unused-export",
-            "unused-exports",
             "Export" as &str,
         ),
         (
             Box::new(types_iter)
                 as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedExport>>,
             "unused-type",
-            "unused-types",
             "Type export",
         ),
     ] {
         for export in exports {
-            push_unused_export_diagnostic(map, export, code, anchor, msg_prefix);
+            push_unused_export_diagnostic(map, export, code, msg_prefix);
         }
     }
 
@@ -47,7 +45,6 @@ fn push_unused_export_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     export: &fallow_api::editor_results::UnusedExport,
     code: &str,
-    anchor: &str,
     msg_prefix: &str,
 ) {
     let Some(uri) = Uri::from_file_path(&export.path) else {
@@ -68,7 +65,7 @@ fn push_unused_export_diagnostic(
         severity: Some(DiagnosticSeverity::HINT),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String(code.to_string())),
-        code_description: doc_link(anchor),
+        code_description: doc_link_for_code(code),
         message: format!("{msg_prefix} '{}' is unused", export.export_name),
         tags: Some(vec![DiagnosticTag::UNNECESSARY]),
         ..Default::default()
@@ -101,7 +98,7 @@ fn push_private_type_leak_diagnostics(
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("private-type-leak".to_string())),
-                code_description: doc_link("private-type-leaks"),
+                code_description: doc_link_for_code("private-type-leak"),
                 message: format!(
                     "Export '{}' references private type '{}'",
                     leak.leak.export_name, leak.leak.type_name
@@ -120,7 +117,7 @@ pub fn push_file_diagnostics(map: &mut FxHashMap<Uri, Vec<Diagnostic>>, results:
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-file".to_string())),
-                code_description: doc_link("unused-files"),
+                code_description: doc_link_for_code("unused-file"),
                 message: "File is not reachable from any entry point".to_string(),
                 tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                 ..Default::default()
@@ -156,7 +153,7 @@ pub fn push_import_diagnostics(
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unresolved-import".to_string())),
-                code_description: doc_link("unresolved-imports"),
+                code_description: doc_link_for_code("unresolved-import"),
                 message: format!("Cannot find module '{}'", import.import.specifier),
                 ..Default::default()
             });
@@ -172,29 +169,26 @@ pub fn push_dep_diagnostics(
 ) {
     type DepIter<'a> =
         Box<dyn Iterator<Item = &'a fallow_api::editor_results::UnusedDependency> + 'a>;
-    let groups: [(DepIter<'_>, &str, &str, &str); 3] = [
+    let groups: [(DepIter<'_>, &str, &str); 3] = [
         (
             Box::new(results.unused_dependencies.iter().map(|f| &f.dep)),
             "unused-dependency",
-            "unused-dependencies",
             "Unused dependency",
         ),
         (
             Box::new(results.unused_dev_dependencies.iter().map(|f| &f.dep)),
             "unused-dev-dependency",
-            "unused-devdependencies",
             "Unused devDependency",
         ),
         (
             Box::new(results.unused_optional_dependencies.iter().map(|f| &f.dep)),
             "unused-optional-dependency",
-            "unused-optionaldependencies",
             "Unused optionalDependency",
         ),
     ];
-    for (deps, code, anchor, msg_prefix) in groups {
+    for (deps, code, msg_prefix) in groups {
         for dep in deps {
-            push_unused_dependency_diagnostic(map, dep, code, anchor, msg_prefix);
+            push_unused_dependency_diagnostic(map, dep, code, msg_prefix);
         }
     }
 
@@ -215,7 +209,6 @@ fn push_unused_dependency_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     dep: &fallow_api::editor_results::UnusedDependency,
     code: &str,
-    anchor: &str,
     msg_prefix: &str,
 ) {
     let Some(dep_uri) = Uri::from_file_path(&dep.path) else {
@@ -227,7 +220,7 @@ fn push_unused_dependency_diagnostic(
         severity: Some(DiagnosticSeverity::WARNING),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String(code.to_string())),
-        code_description: doc_link(anchor),
+        code_description: doc_link_for_code(code),
         message: format!("{msg_prefix}: {}", dep.package_name),
         ..Default::default()
     });
@@ -249,7 +242,7 @@ fn push_unlisted_dependency_diagnostics(
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("unlisted-dependency".to_string())),
-            code_description: doc_link("unlisted-dependencies"),
+            code_description: doc_link_for_code("unlisted-dependency"),
             message: format!(
                 "Unlisted dependency: {} (used but not in package.json)",
                 dep.dep.package_name
@@ -271,7 +264,7 @@ fn push_type_only_dependency_diagnostics(
                 severity: Some(DiagnosticSeverity::INFORMATION),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("type-only-dependency".to_string())),
-                code_description: doc_link("type-only-dependencies"),
+                code_description: doc_link_for_code("type-only-dependency"),
                 message: format!(
                     "Type-only dependency: {} (only used via type imports, could be a devDependency)",
                     dep.dep.package_name
@@ -294,7 +287,7 @@ fn push_test_only_dependency_diagnostics(
                 severity: Some(DiagnosticSeverity::INFORMATION),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("test-only-dependency".to_string())),
-                code_description: doc_link("test-only-dependencies"),
+                code_description: doc_link_for_code("test-only-dependency"),
                 message: format!(
                     "Production dependency '{}' is only imported by test files; consider moving to devDependencies",
                     dep.dep.package_name
@@ -319,7 +312,7 @@ fn push_unused_catalog_entry_diagnostics(
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-catalog-entry".to_string())),
-                code_description: doc_link("unused-catalog-entries"),
+                code_description: doc_link_for_code("unused-catalog-entry"),
                 message: unused_catalog_entry_message(entry),
                 ..Default::default()
             });
@@ -373,7 +366,7 @@ fn push_empty_catalog_group_diagnostics(
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("empty-catalog-group".to_string())),
-            code_description: doc_link("empty-catalog-groups"),
+            code_description: doc_link_for_code("empty-catalog-group"),
             message: format!(
                 "Empty catalog group: '{}' has no entries",
                 group.catalog_name
@@ -427,7 +420,7 @@ fn push_unresolved_catalog_reference_diagnostics(
             code: Some(NumberOrString::String(
                 "unresolved-catalog-reference".to_string(),
             )),
-            code_description: doc_link("unresolved-catalog-references"),
+            code_description: doc_link_for_code("unresolved-catalog-reference"),
             message,
             ..Default::default()
         });
@@ -474,7 +467,7 @@ fn push_unused_dependency_override_diagnostics(
             code: Some(NumberOrString::String(
                 "unused-dependency-override".to_string(),
             )),
-            code_description: doc_link("unused-dependency-overrides"),
+            code_description: doc_link_for_code("unused-dependency-override"),
             message,
             ..Default::default()
         });
@@ -505,7 +498,7 @@ fn push_misconfigured_dependency_override_diagnostics(
             code: Some(NumberOrString::String(
                 "misconfigured-dependency-override".to_string(),
             )),
-            code_description: doc_link("misconfigured-dependency-overrides"),
+            code_description: doc_link_for_code("misconfigured-dependency-override"),
             message,
             ..Default::default()
         });
@@ -519,31 +512,28 @@ pub fn push_member_diagnostics(
     let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
     let class_iter = results.unused_class_members.iter().map(|f| &f.member);
     let store_iter = results.unused_store_members.iter().map(|f| &f.member);
-    for (members, code, anchor, kind_label) in [
+    for (members, code, kind_label) in [
         (
             Box::new(enum_iter)
                 as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
             "unused-enum-member",
-            "unused-enum-members",
             "Enum member" as &str,
         ),
         (
             Box::new(class_iter)
                 as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
             "unused-class-member",
-            "unused-class-members",
             "Class member",
         ),
         (
             Box::new(store_iter)
                 as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
             "unused-store-member",
-            "unused-store-members",
             "Store member",
         ),
     ] {
         for member in members {
-            push_unused_member_diagnostic(map, member, code, anchor, kind_label);
+            push_unused_member_diagnostic(map, member, code, kind_label);
         }
     }
 
@@ -562,7 +552,6 @@ fn push_unused_member_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     member: &fallow_api::editor_results::UnusedMember,
     code: &str,
-    anchor: &str,
     kind_label: &str,
 ) {
     let Some(uri) = Uri::from_file_path(&member.path) else {
@@ -583,7 +572,7 @@ fn push_unused_member_diagnostic(
         severity: Some(DiagnosticSeverity::HINT),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String(code.to_string())),
-        code_description: doc_link(anchor),
+        code_description: doc_link_for_code(code),
         message: format!(
             "{kind_label} '{}.{}' is unused",
             member.parent_name, member.member_name
@@ -619,7 +608,7 @@ fn push_unrendered_component_diagnostics(
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unrendered-component".to_string())),
-                code_description: doc_link("unrendered-components"),
+                code_description: doc_link_for_code("unrendered-component"),
                 message: format!(
                     "Component '{}' is reachable but rendered nowhere in this project",
                     c.component_name
@@ -653,7 +642,7 @@ fn push_unused_component_prop_diagnostics(
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-component-prop".to_string())),
-                code_description: doc_link("unused-component-props"),
+                code_description: doc_link_for_code("unused-component-prop"),
                 message: format!(
                     "Prop '{}' is declared but referenced nowhere in this component",
                     p.prop_name
@@ -687,7 +676,7 @@ fn push_unused_component_emit_diagnostics(
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-component-emit".to_string())),
-                code_description: doc_link("unused-component-emits"),
+                code_description: doc_link_for_code("unused-component-emit"),
                 message: format!(
                     "Emit '{}' is declared but emitted nowhere in this component",
                     e.emit_name
@@ -721,7 +710,7 @@ fn push_unused_component_input_diagnostics(
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-component-input".to_string())),
-                code_description: doc_link("unused-component-inputs"),
+                code_description: doc_link_for_code("unused-component-input"),
                 message: format!(
                     "Input '{}' is declared but read nowhere in this component",
                     i.input_name
@@ -757,7 +746,7 @@ fn push_unused_component_output_diagnostics(
                 code: Some(NumberOrString::String(
                     "unused-component-output".to_string(),
                 )),
-                code_description: doc_link("unused-component-outputs"),
+                code_description: doc_link_for_code("unused-component-output"),
                 message: format!(
                     "Output '{}' is declared but emitted nowhere in this component",
                     o.output_name
@@ -791,7 +780,7 @@ fn push_unused_svelte_event_diagnostics(
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-svelte-event".to_string())),
-                code_description: doc_link("unused-svelte-events"),
+                code_description: doc_link_for_code("unused-svelte-event"),
                 message: format!(
                     "Event '{}' is dispatched but listened to nowhere in this project",
                     e.event_name
@@ -831,7 +820,7 @@ fn push_unused_load_data_key_diagnostics(
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-load-data-key".to_string())),
-                code_description: doc_link("unused-load-data-keys"),
+                code_description: doc_link_for_code("unused-load-data-key"),
                 message: format!(
                     "load() return key '{}' is read by no consumer (sibling +page.svelte data.<key> or project-wide page.data.<key>)",
                     k.key_name
@@ -871,7 +860,7 @@ fn push_unused_server_action_diagnostics(
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-server-action".to_string())),
-                code_description: doc_link("unused-server-actions"),
+                code_description: doc_link_for_code("unused-server-action"),
                 message: format!(
                     "Server action '{}' is exported from a \"use server\" file but no code in this project references it",
                     a.action_name
