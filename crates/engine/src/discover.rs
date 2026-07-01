@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use fallow_config::{PackageJson, ResolvedConfig, WorkspaceInfo};
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 
+use crate::core_backend;
+
 pub const SOURCE_EXTENSIONS: &[&str] = fallow_core::discover::SOURCE_EXTENSIONS;
 pub const PRODUCTION_EXCLUDE_PATTERNS: &[&str] = fallow_core::discover::PRODUCTION_EXCLUDE_PATTERNS;
 
@@ -173,7 +175,7 @@ pub fn discover_plugin_entry_points(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
 ) -> Vec<EntryPoint> {
-    fallow_core::discover::discover_plugin_entry_points(plugin_result.as_core(), config, files)
+    core_backend::discover_plugin_entry_points(plugin_result.as_backend(), config, files)
 }
 
 fn to_core_hidden_dir_scopes(

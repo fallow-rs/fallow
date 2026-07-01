@@ -4,17 +4,19 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{ExternalPluginDef, PackageJson};
 
+use crate::core_backend;
+
 pub mod registry {
+    use crate::core_backend;
+
     /// Invalid user-authored regex extracted from a plugin config file.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct PluginRegexValidationError {
-        pub(super) inner: fallow_core::plugins::registry::PluginRegexValidationError,
+        pub(super) inner: core_backend::BackendPluginRegexValidationError,
     }
 
-    impl From<fallow_core::plugins::registry::PluginRegexValidationError>
-        for PluginRegexValidationError
-    {
-        fn from(inner: fallow_core::plugins::registry::PluginRegexValidationError) -> Self {
+    impl From<core_backend::BackendPluginRegexValidationError> for PluginRegexValidationError {
+        fn from(inner: core_backend::BackendPluginRegexValidationError) -> Self {
             Self { inner }
         }
     }
@@ -22,56 +24,52 @@ pub mod registry {
     /// Names of every built-in framework plugin in registry order.
     #[must_use]
     pub fn builtin_plugin_names() -> Vec<&'static str> {
-        fallow_core::plugins::registry::builtin_plugin_names()
+        core_backend::builtin_plugin_names()
     }
 
     /// Format plugin regex validation errors for user-facing diagnostics.
     #[must_use]
     pub fn format_plugin_regex_errors(errors: &[PluginRegexValidationError]) -> String {
-        let core_errors = errors
+        let backend_errors = errors
             .iter()
             .map(|error| error.inner.clone())
             .collect::<Vec<_>>();
-        fallow_core::plugins::registry::format_plugin_regex_errors(&core_errors)
+        core_backend::format_plugin_regex_errors(&backend_errors)
     }
 }
 
 /// Aggregated results from all active plugins for a project.
 #[derive(Debug, Clone, Default)]
 pub struct AggregatedPluginResult {
-    inner: fallow_core::plugins::AggregatedPluginResult,
+    inner: core_backend::BackendAggregatedPluginResult,
 }
 
 impl AggregatedPluginResult {
-    pub(crate) const fn as_core(&self) -> &fallow_core::plugins::AggregatedPluginResult {
+    pub(crate) const fn as_backend(&self) -> &core_backend::BackendAggregatedPluginResult {
         &self.inner
     }
 
     /// Names of active plugins.
     #[must_use]
     pub fn active_plugins(&self) -> &[String] {
-        &self.inner.active_plugins
+        self.inner.active_plugins()
     }
 
     /// Merge active plugin names from another result, preserving insertion order.
     pub fn merge_active_plugins_from(&mut self, other: &Self) {
-        for plugin_name in &other.inner.active_plugins {
-            if !self.inner.active_plugins.contains(plugin_name) {
-                self.inner.active_plugins.push(plugin_name.clone());
-            }
-        }
+        self.inner.merge_active_plugins_from(&other.inner);
     }
 }
 
-impl From<fallow_core::plugins::AggregatedPluginResult> for AggregatedPluginResult {
-    fn from(inner: fallow_core::plugins::AggregatedPluginResult) -> Self {
+impl From<core_backend::BackendAggregatedPluginResult> for AggregatedPluginResult {
+    fn from(inner: core_backend::BackendAggregatedPluginResult) -> Self {
         Self { inner }
     }
 }
 
 /// Registry of all available plugins.
 pub struct PluginRegistry {
-    inner: fallow_core::plugins::PluginRegistry,
+    inner: core_backend::BackendPluginRegistry,
 }
 
 impl PluginRegistry {
@@ -79,7 +77,7 @@ impl PluginRegistry {
     #[must_use]
     pub fn new(external: Vec<ExternalPluginDef>) -> Self {
         Self {
-            inner: fallow_core::plugins::PluginRegistry::new(external),
+            inner: core_backend::BackendPluginRegistry::new(external),
         }
     }
 
@@ -132,10 +130,10 @@ mod tests {
     #[test]
     fn aggregated_plugin_result_merges_active_plugins() {
         let mut base = AggregatedPluginResult::default();
-        base.inner.active_plugins.push("nextjs".into());
+        base.inner.push_active_plugin_for_test("nextjs");
         let mut incoming = AggregatedPluginResult::default();
-        incoming.inner.active_plugins.push("nextjs".into());
-        incoming.inner.active_plugins.push("vitest".into());
+        incoming.inner.push_active_plugin_for_test("nextjs");
+        incoming.inner.push_active_plugin_for_test("vitest");
 
         base.merge_active_plugins_from(&incoming);
 

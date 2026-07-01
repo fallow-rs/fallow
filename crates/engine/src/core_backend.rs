@@ -5,6 +5,7 @@
 //! contained while the engine-owned contracts continue to stabilize.
 
 use fallow_config::ResolvedConfig;
+use fallow_config::{ExternalPluginDef, PackageJson};
 use fallow_graph::graph::ModuleGraph;
 use fallow_types::results::{SecurityFinding, SecuritySeverity};
 use rustc_hash::FxHashSet;
@@ -295,4 +296,95 @@ pub fn public_api_package_entry_points(
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> FxHashSet<fallow_types::discover::FileId> {
     fallow_core::analyze::public_api_package_entry_points(graph, config, root_pkg, workspaces)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendPluginRegexValidationError {
+    inner: fallow_core::plugins::registry::PluginRegexValidationError,
+}
+
+impl From<fallow_core::plugins::registry::PluginRegexValidationError>
+    for BackendPluginRegexValidationError
+{
+    fn from(inner: fallow_core::plugins::registry::PluginRegexValidationError) -> Self {
+        Self { inner }
+    }
+}
+
+pub fn builtin_plugin_names() -> Vec<&'static str> {
+    fallow_core::plugins::registry::builtin_plugin_names()
+}
+
+pub fn format_plugin_regex_errors(errors: &[BackendPluginRegexValidationError]) -> String {
+    let core_errors = errors
+        .iter()
+        .map(|error| error.inner.clone())
+        .collect::<Vec<_>>();
+    fallow_core::plugins::registry::format_plugin_regex_errors(&core_errors)
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BackendAggregatedPluginResult {
+    inner: fallow_core::plugins::AggregatedPluginResult,
+}
+
+impl BackendAggregatedPluginResult {
+    pub fn active_plugins(&self) -> &[String] {
+        &self.inner.active_plugins
+    }
+
+    pub fn merge_active_plugins_from(&mut self, other: &Self) {
+        for plugin_name in &other.inner.active_plugins {
+            if !self.inner.active_plugins.contains(plugin_name) {
+                self.inner.active_plugins.push(plugin_name.clone());
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn push_active_plugin_for_test(&mut self, plugin_name: impl Into<String>) {
+        self.inner.active_plugins.push(plugin_name.into());
+    }
+}
+
+impl From<fallow_core::plugins::AggregatedPluginResult> for BackendAggregatedPluginResult {
+    fn from(inner: fallow_core::plugins::AggregatedPluginResult) -> Self {
+        Self { inner }
+    }
+}
+
+pub struct BackendPluginRegistry {
+    inner: fallow_core::plugins::PluginRegistry,
+}
+
+impl BackendPluginRegistry {
+    pub fn new(external: Vec<ExternalPluginDef>) -> Self {
+        Self {
+            inner: fallow_core::plugins::PluginRegistry::new(external),
+        }
+    }
+
+    pub fn discovery_hidden_dirs(&self, pkg: &PackageJson, root: &Path) -> Vec<String> {
+        self.inner.discovery_hidden_dirs(pkg, root)
+    }
+
+    pub fn try_run(
+        &self,
+        pkg: &PackageJson,
+        root: &Path,
+        discovered_files: &[PathBuf],
+    ) -> Result<BackendAggregatedPluginResult, Vec<BackendPluginRegexValidationError>> {
+        self.inner
+            .try_run(pkg, root, discovered_files)
+            .map(Into::into)
+            .map_err(|errors| errors.into_iter().map(Into::into).collect())
+    }
+}
+
+pub fn discover_plugin_entry_points(
+    plugin_result: &BackendAggregatedPluginResult,
+    config: &ResolvedConfig,
+    files: &[fallow_types::discover::DiscoveredFile],
+) -> Vec<fallow_types::discover::EntryPoint> {
+    fallow_core::discover::discover_plugin_entry_points(&plugin_result.inner, config, files)
 }
