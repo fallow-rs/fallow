@@ -25,6 +25,16 @@ static SVELTE_EACH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     )
 });
 
+/// Matches a `{#each iterable as bindings}` block opener in raw markup, capturing
+/// the iterable and item bindings. Used only by the pre-scan that types each-block
+/// loop variables (issue #1707 follow-up); the streaming scan re-parses each block
+/// via `SVELTE_EACH_RE`.
+static SVELTE_EACH_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(
+        r"(?is)\{#each\s+(?P<iterable>[^}]+?)\s+as\s+(?P<bindings>[^}(]+?)\s*(?:\([^})]*\))?\s*\}",
+    )
+});
+
 static SVELTE_AWAIT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?is)^#await\s+(?P<expr>.+)$"));
 
@@ -65,26 +75,46 @@ pub(super) fn collect_template_usage(
     source: &str,
     imported_bindings: &FxHashSet<String>,
 ) -> TemplateUsage {
-    collect_template_usage_with_bound_targets(source, imported_bindings, &FxHashMap::default())
+    collect_template_usage_with_bound_targets(
+        source,
+        imported_bindings,
+        &FxHashMap::default(),
+        &FxHashMap::default(),
+    )
 }
 
 pub(super) fn collect_template_usage_with_bound_targets(
     source: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
 ) -> TemplateUsage {
     let markup = strip_non_template_content(source);
     if markup.is_empty() {
         return TemplateUsage::default();
     }
 
-    SvelteTemplateUsageScanner::new(&markup, imported_bindings, bound_targets).scan()
+    // Type each `{#each src as item}` loop item to its source iterable's element
+    // class up front (issue #1707 follow-up), so member accesses on the item
+    // (`{item.getter}`) remap onto the class via the effective bound targets. The
+    // pre-scan runs over `markup` (already `<script>`/`<style>`-stripped).
+    let augmented = augment_bound_targets_with_each(&markup, iterable_types, bound_targets);
+    let effective_bound_targets = augmented.as_ref().unwrap_or(bound_targets);
+
+    SvelteTemplateUsageScanner::new(
+        &markup,
+        imported_bindings,
+        effective_bound_targets,
+        iterable_types,
+    )
+    .scan()
 }
 
 struct SvelteTemplateUsageScanner<'a> {
     markup: &'a str,
     imported_bindings: &'a FxHashSet<String>,
     bound_targets: &'a FxHashMap<String, String>,
+    iterable_types: &'a FxHashMap<String, String>,
     usage: TemplateUsage,
     scopes: Vec<SvelteScopeFrame>,
 }
@@ -94,11 +124,13 @@ impl<'a> SvelteTemplateUsageScanner<'a> {
         markup: &'a str,
         imported_bindings: &'a FxHashSet<String>,
         bound_targets: &'a FxHashMap<String, String>,
+        iterable_types: &'a FxHashMap<String, String>,
     ) -> Self {
         Self {
             markup,
             imported_bindings,
             bound_targets,
+            iterable_types,
             usage: TemplateUsage::default(),
             scopes: vec![SvelteScopeFrame {
                 kind: SvelteBlockKind::Root,
@@ -133,6 +165,7 @@ impl<'a> SvelteTemplateUsageScanner<'a> {
             tag_end: next_index,
             imported_bindings: self.imported_bindings,
             bound_targets: self.bound_targets,
+            iterable_types: self.iterable_types,
             scopes: &mut self.scopes,
             usage: &mut self.usage,
         });
@@ -273,6 +306,7 @@ struct SvelteTagInput<'a> {
     tag_end: usize,
     imported_bindings: &'a FxHashSet<String>,
     bound_targets: &'a FxHashMap<String, String>,
+    iterable_types: &'a FxHashMap<String, String>,
     scopes: &'a mut Vec<SvelteScopeFrame>,
     usage: &'a mut TemplateUsage,
 }
@@ -286,6 +320,7 @@ fn apply_tag(input: &mut SvelteTagInput<'_>) {
         input.tag,
         input.imported_bindings,
         input.bound_targets,
+        input.iterable_types,
         input.scopes,
         input.usage,
     ) {
@@ -317,6 +352,7 @@ fn apply_svelte_block_tag(
     tag: &str,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
     scopes: &mut Vec<SvelteScopeFrame>,
     usage: &mut TemplateUsage,
 ) -> bool {
@@ -338,7 +374,14 @@ fn apply_svelte_block_tag(
     }
 
     if let Some(captures) = SVELTE_EACH_RE.captures(tag) {
-        apply_each_tag(&captures, imported_bindings, bound_targets, scopes, usage);
+        apply_each_tag(
+            &captures,
+            imported_bindings,
+            bound_targets,
+            iterable_types,
+            scopes,
+            usage,
+        );
         return true;
     }
 
@@ -488,12 +531,20 @@ fn apply_each_tag(
     captures: &regex::Captures<'_>,
     imported_bindings: &FxHashSet<String>,
     bound_targets: &FxHashMap<String, String>,
+    iterable_types: &FxHashMap<String, String>,
     scopes: &mut Vec<SvelteScopeFrame>,
     usage: &mut TemplateUsage,
 ) {
     let iterable = captures.name("iterable").map_or("", |m| m.as_str()).trim();
     let bindings = captures.name("bindings").map_or("", |m| m.as_str()).trim();
-    let each_locals = extract_pattern_binding_names(bindings);
+    let mut each_locals = extract_pattern_binding_names(bindings);
+    // When the item is typed to an element class (issue #1707 follow-up), drop it
+    // from the block locals so it stays an unresolved reference that remaps onto
+    // the class via the pre-augmented `bound_targets` (crediting `item.member`).
+    // The index alias and destructured items are unaffected.
+    if let Some((item, _)) = svelte_each_element_binding(iterable, bindings, iterable_types) {
+        each_locals.retain(|name| name != &item);
+    }
     let current = current_locals(scopes);
     merge_expression_usage_allow_dollar_refs_with_bound_targets(
         usage,
@@ -519,6 +570,65 @@ fn apply_each_tag(
         kind: SvelteBlockKind::Each,
         locals: each_locals,
     });
+}
+
+/// Pre-scan the markup for `{#each src as item}` blocks and, for each whose source
+/// iterable resolves to a known element class in `iterable_types`, bind the item
+/// to that class. Returns an augmented copy of `bound_targets` only when at least
+/// one typed item was found. First-write-wins on a repeated item name. The markup
+/// is already `<script>`/`<style>`-stripped, so this only sees template each-blocks.
+fn augment_bound_targets_with_each(
+    markup: &str,
+    iterable_types: &FxHashMap<String, String>,
+    bound_targets: &FxHashMap<String, String>,
+) -> Option<FxHashMap<String, String>> {
+    if iterable_types.is_empty() {
+        return None;
+    }
+    let mut augmented: Option<FxHashMap<String, String>> = None;
+    for caps in SVELTE_EACH_BLOCK_RE.captures_iter(markup) {
+        let iterable = caps.name("iterable").map_or("", |m| m.as_str());
+        let bindings = caps.name("bindings").map_or("", |m| m.as_str());
+        let Some((item, class)) = svelte_each_element_binding(iterable, bindings, iterable_types)
+        else {
+            continue;
+        };
+        augmented
+            .get_or_insert_with(|| bound_targets.clone())
+            .entry(item)
+            .or_insert(class);
+    }
+    augmented
+}
+
+/// Resolve a Svelte `{#each}` iterable + item bindings to `(item_name, class)`
+/// when the source iterable has a known element class and the item is a bare
+/// identifier. Destructured items (`{ id }`) and unknown sources yield `None`.
+fn svelte_each_element_binding(
+    iterable: &str,
+    bindings: &str,
+    iterable_types: &FxHashMap<String, String>,
+) -> Option<(String, String)> {
+    let class = iterable_types.get(iterable.trim())?;
+    let item = svelte_each_item_identifier(bindings)?;
+    Some((item, class.clone()))
+}
+
+/// Extract the loop ITEM identifier from a `{#each}` binding clause (`item`,
+/// `item, index`). A destructured or non-identifier item yields `None` (a naive
+/// first-element split leaves an invalid identifier that fails the check).
+fn svelte_each_item_identifier(bindings: &str) -> Option<String> {
+    let first = bindings.trim().split(',').next()?.trim();
+    is_each_identifier(first).then(|| first.to_string())
+}
+
+fn is_each_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    matches!(first, 'A'..='Z' | 'a'..='z' | '_' | '$')
+        && chars.all(|ch| matches!(ch, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '$'))
 }
 
 fn apply_await_tag(
@@ -1164,6 +1274,7 @@ mod tests {
             "<button onclick={() => counter.bump()}>{counter.value}</button>",
             &imported(&[]),
             &bound_targets(&[("counter", "Counter")]),
+            &FxHashMap::default(),
         );
 
         assert!(
@@ -1190,6 +1301,7 @@ mod tests {
             "{#each rows as counter}<button onclick={() => { other.go(); counter.bump(); }} />{/each}",
             &imported(&[]),
             &bound_targets(&[("counter", "Counter"), ("other", "Other")]),
+            &FxHashMap::default(),
         );
 
         assert!(
@@ -1206,6 +1318,95 @@ mod tests {
                 .iter()
                 .any(|access| access.object == "Counter" && access.member == "bump"),
             "shadowed counter.bump() must not map to Counter.bump, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    fn iterable_types(pairs: &[(&str, &str)]) -> FxHashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn each_item_typed_to_element_class_credits_member_access() {
+        // `{#each utils as util}` where `utils` is `Util[]`: member accesses on
+        // the item credit the `Util` class (issue #1707 follow-up).
+        let usage = collect_template_usage_with_bound_targets(
+            "{#each utils as util, i (i)}<p>{util.getter} {util.property} {util.hello()}</p>{/each}",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        for member in ["getter", "property", "hello"] {
+            assert!(
+                usage
+                    .member_accesses
+                    .iter()
+                    .any(|access| access.object == "Util" && access.member == member),
+                "util.{member} should map to Util.{member}, found: {:?}",
+                usage.member_accesses
+            );
+        }
+    }
+
+    #[test]
+    fn each_index_alias_is_not_typed_as_element_class() {
+        let usage = collect_template_usage_with_bound_targets(
+            "{#each utils as util, index}<p>{index.toFixed()}</p>{/each}",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "index member access must not map to the element class, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn each_destructured_item_is_not_typed() {
+        let usage = collect_template_usage_with_bound_targets(
+            "{#each utils as { id }}<p>{id}</p>{/each}",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "destructured item must not credit the element class, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn each_untyped_source_leaves_item_unmapped() {
+        // Neuter check: no known element type for the source, the item stays a
+        // local and its member accesses are not credited.
+        let usage = collect_template_usage_with_bound_targets(
+            "{#each utils as util}<p>{util.getter}</p>{/each}",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &FxHashMap::default(),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "untyped each item must not credit any class, found: {:?}",
             usage.member_accesses
         );
     }

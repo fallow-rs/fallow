@@ -197,6 +197,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Iterating a typed class array no longer reports the class members as
+  unused.** Extending the Vue `v-for` fix below to the general iteration case: an
+  iteration variable whose type is the element class of a typed array or reactive
+  array is now credited when you read members on it. This covers array-method
+  callbacks (`utils.map(u => u.getter)`, `.forEach`, `.filter`, `.find`,
+  `.flatMap`, and friends; `reduce` / `reduceRight` are excluded because their
+  first callback argument is the accumulator, not an element), `for (const u of
+  utils)` loops, React and Preact JSX `.map`, and Svelte `{#each utils as util}`
+  blocks. Previously all of these false-reported the class members as
+  `unused-class-member`. Explicitly annotated callback parameters
+  (`(u: Util) => ...`) already worked; this adds the implicitly-typed case. The
+  change only removes false positives; a genuinely unused member on the same
+  class still reports. Angular `@for` / `*ngFor`, Astro `.map`, and Vue `v-for`
+  over a member-expression source (`props.items`) are known remaining cases and
+  are queued as a follow-up. (Refs
+  [#1707](https://github.com/fallow-rs/fallow/issues/1707))
+
 - **Vue `v-for` loop variables iterating over a class array no longer report the
   class members as unused.** A Vue template that iterates a typed array or
   reactive array of a class and reads members on the loop item, for example

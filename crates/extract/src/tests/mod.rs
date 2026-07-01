@@ -567,3 +567,63 @@ fn glimmer_file_without_template_still_flags_unused_imports() {
     );
     assert_unused(&info, &["unused"]);
 }
+
+#[test]
+fn array_callback_param_typed_to_element_class_emits_member_access() {
+    // Issue #1707 follow-up: a `.map` / `.forEach` callback param over a typed
+    // array binding is typed to the element class, so member accesses on it are
+    // re-emitted against the class.
+    let info = parse_ts(
+        "import { Util } from './utils/Util'\n\
+         const utils: Util[] = [new Util()]\n\
+         utils.map((util) => util.getter)\n\
+         utils.forEach((util) => util.hello())\n",
+    );
+    for member in ["getter", "hello"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "Util" && access.member == member),
+            "util.{member} should map to Util.{member}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn for_of_loop_variable_typed_to_element_class_emits_member_access() {
+    let info = parse_ts(
+        "import { Util } from './utils/Util'\n\
+         const utils: Util[] = [new Util()]\n\
+         for (const util of utils) { util.property; util.hello() }\n",
+    );
+    for member in ["property", "hello"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "Util" && access.member == member),
+            "for-of util.{member} should map to Util.{member}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn reduce_accumulator_param_is_not_typed_to_element_class() {
+    // `reduce` is excluded from the iterable-callback allowlist: its first
+    // callback parameter is the accumulator, NOT an element, so a member access on
+    // it must not be credited to the array element class.
+    let info = parse_ts(
+        "import { Util } from './utils/Util'\n\
+         const utils: Util[] = [new Util()]\n\
+         utils.reduce((acc, u) => acc.merged(), new Util())\n",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Util" && access.member == "merged"),
+        "reduce accumulator `acc.merged()` must not map to Util.merged, found: {:?}",
+        info.member_accesses
+    );
+}

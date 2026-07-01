@@ -99,6 +99,7 @@ pub fn collect_template_usage_with_bound_targets(
             source,
             imported_bindings,
             bound_targets,
+            iterable_types,
         ),
     }
 }

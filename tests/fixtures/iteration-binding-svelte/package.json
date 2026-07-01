@@ -1,0 +1,6 @@
+{
+  "name": "iteration-binding-svelte",
+  "private": true,
+  "type": "module",
+  "dependencies": { "svelte": "^5.0.0" }
+}
