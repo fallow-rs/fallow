@@ -126,7 +126,7 @@ pub use results::{
     DeadCodeAnalysisWithHashes, DuplicationAnalysis, HealthAnalysisResult, ProjectAnalysisOutput,
 };
 pub use security::{derive_security_severity, security_catalogue_title};
-pub use session::{AnalysisSession, AnalysisSessionParts};
+pub use session::{AnalysisSession, AnalysisSessionArtifacts, AnalysisSessionParts};
 pub use source::inventory::{
     InventoryComplexity, InventoryEntry, walk_source, walk_source_with_complexity,
 };
@@ -396,6 +396,36 @@ mod tests {
         assert!(artifacts.graph.is_some());
         assert!(artifacts.modules.is_some_and(|modules| !modules.is_empty()));
         assert!(artifacts.files.is_some_and(|files| !files.is_empty()));
+    }
+
+    #[test]
+    fn analysis_session_returns_reuse_artifacts_with_fingerprints_and_scope() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        let source = src.join("index.ts");
+        std::fs::write(&source, "export const value = 1;\n").expect("source file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        let mut changed_files = rustc_hash::FxHashSet::default();
+        changed_files.insert(source.clone());
+        let artifacts = session
+            .analyze_dead_code_with_session_artifacts(false, true, Some(changed_files))
+            .expect("analysis succeeds");
+
+        assert!(artifacts.analysis.graph.is_some());
+        assert!(
+            artifacts
+                .changed_files
+                .as_ref()
+                .is_some_and(|changed| changed.contains(&source))
+        );
+        assert!(
+            artifacts
+                .source_fingerprints
+                .get(&source)
+                .is_some_and(|fingerprint| fingerprint.file_size > 0)
+        );
     }
 
     #[test]

@@ -1,5 +1,4 @@
 use fallow_engine::AnalysisSession;
-use fallow_types::output_format::OutputFormat;
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -172,41 +171,27 @@ fn validate_trace_clone_target(target: &TraceCloneTarget) -> ProgrammaticResult<
 fn load_trace_session(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let project_config = fallow_engine::config_for_project_analysis(
-        &resolved.root,
-        resolved.config_path.as_deref(),
-        fallow_engine::ProjectConfigOptions {
-            output: OutputFormat::Json,
-            no_cache: resolved.no_cache,
-            threads: resolved.threads,
-            production_override: resolved.production_override,
-            quiet: true,
-            analysis: fallow_config::ProductionAnalysis::DeadCode,
-        },
+    super::dead_code::load_dead_code_session(
+        &super::dead_code::default_dead_code_options_for_context(resolved),
+        resolved,
     )
-    .map_err(|err| {
-        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
-            .with_context("analysis.configPath")
-    })?;
-    Ok(AnalysisSession::from_config(project_config))
 }
 
 fn trace_artifacts(session: &AnalysisSession) -> ProgrammaticResult<TraceArtifacts> {
     let artifacts = session
-        .analyze_dead_code_with_artifacts(false, true)
+        .analyze_dead_code_with_session_artifacts(false, true, None)
         .map_err(|err| {
             ProgrammaticError::new(format!("trace analysis failed: {err}"), 2)
                 .with_code("FALLOW_TRACE_FAILED")
                 .with_context("trace")
         })?;
-    let graph = artifacts.graph.ok_or_else(|| {
+    let graph = artifacts.analysis.graph.ok_or_else(|| {
         ProgrammaticError::new("trace requires a retained module graph", 2)
             .with_code("FALLOW_TRACE_GRAPH_UNAVAILABLE")
             .with_context("trace.graph")
     })?;
     Ok(TraceArtifacts {
         graph,
-        script_used_packages: artifacts.script_used_packages,
+        script_used_packages: artifacts.analysis.script_used_packages,
     })
 }

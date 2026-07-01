@@ -6,8 +6,9 @@ use std::time::Instant;
 use fallow_config::{DuplicatesConfig, ResolvedConfig};
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::{ModuleInfo, ParseResult};
+use fallow_types::source_fingerprint::SourceFingerprint;
 use fallow_types::workspace::WorkspaceDiagnostic;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput, DuplicationAnalysis,
@@ -47,6 +48,14 @@ pub struct ParsedAnalysisSessionParts {
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub parse_ms: f64,
     pub parse_cpu_ms: f64,
+}
+
+/// Reusable artifacts produced by one session-owned dead-code run.
+#[derive(Debug)]
+pub struct AnalysisSessionArtifacts {
+    pub analysis: DeadCodeAnalysisArtifacts,
+    pub changed_files: Option<FxHashSet<PathBuf>>,
+    pub source_fingerprints: FxHashMap<PathBuf, SourceFingerprint>,
 }
 
 /// Borrowed session view for callers that expose `&ResolvedConfig`.
@@ -179,6 +188,35 @@ impl AnalysisSession {
         self.discovery.files()
     }
 
+    /// Source metadata fingerprints for every discovered source file.
+    #[must_use]
+    pub fn source_fingerprints(&self) -> FxHashMap<PathBuf, SourceFingerprint> {
+        self.discovery
+            .files()
+            .iter()
+            .map(|file| {
+                let fingerprint = std::fs::metadata(&file.path).map_or_else(
+                    |_| SourceFingerprint::new(0, file.size_bytes),
+                    |metadata| SourceFingerprint::from_metadata(&metadata),
+                );
+                (file.path.clone(), fingerprint)
+            })
+            .collect()
+    }
+
+    /// Resolve files changed since a git ref against this session root.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the ref is invalid, git is unavailable, or the
+    /// root is not part of a repository.
+    pub fn changed_files_since(
+        &self,
+        git_ref: &str,
+    ) -> Result<FxHashSet<PathBuf>, crate::ChangedFilesError> {
+        crate::changed_files(&self.config.root, git_ref)
+    }
+
     /// Workspace and source-discovery diagnostics captured for this session.
     #[must_use]
     pub fn workspace_diagnostics(&self) -> &[WorkspaceDiagnostic] {
@@ -254,6 +292,29 @@ impl AnalysisSession {
             need_complexity,
             retain_graph,
         )
+    }
+
+    /// Run dead-code analysis and return the session-scoped reuse artifacts.
+    ///
+    /// Callers pass a changed-file set they have already resolved for the
+    /// command. The returned value keeps that set beside parser, graph, and
+    /// source-fingerprint data so downstream runners do not have to rebuild or
+    /// rediscover the same inputs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parsing or analysis fails.
+    pub fn analyze_dead_code_with_session_artifacts(
+        &self,
+        need_complexity: bool,
+        retain_graph: bool,
+        changed_files: Option<FxHashSet<PathBuf>>,
+    ) -> EngineResult<AnalysisSessionArtifacts> {
+        Ok(AnalysisSessionArtifacts {
+            analysis: self.analyze_dead_code_with_artifacts(need_complexity, retain_graph)?,
+            changed_files,
+            source_fingerprints: self.source_fingerprints(),
+        })
     }
 
     /// Run duplication detection using the session's discovered files.

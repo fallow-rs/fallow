@@ -13,8 +13,8 @@ use fallow_types::results::{AnalysisResults, TraceHopRole};
 use rustc_hash::FxHashSet;
 
 use crate::{
-    BoundaryViolationsProgrammaticOutput, CircularDependenciesProgrammaticOutput, DeadCodeFilters,
-    DeadCodeOptions, DeadCodeProgrammaticOutput, ProgrammaticError,
+    AnalysisOptions, BoundaryViolationsProgrammaticOutput, CircularDependenciesProgrammaticOutput,
+    DeadCodeFilters, DeadCodeOptions, DeadCodeProgrammaticOutput, ProgrammaticError,
     analysis_context::{
         ProgrammaticAnalysisContext, changed_files_for_run, resolve_programmatic_analysis_context,
     },
@@ -132,7 +132,7 @@ fn keep_boundary_violations(results: &mut AnalysisResults) {
     results.boundary_call_violations = boundary_call_violations;
 }
 
-fn load_dead_code_session(
+pub(super) fn load_dead_code_session(
     options: &DeadCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
@@ -155,6 +155,28 @@ fn load_dead_code_session(
     })?;
     let project_config = configure_project_for_dead_code(project_config, options);
     Ok(AnalysisSession::from_config(project_config))
+}
+
+pub(super) fn default_dead_code_options_for_context(
+    resolved: &ProgrammaticAnalysisContext,
+) -> DeadCodeOptions {
+    DeadCodeOptions {
+        analysis: AnalysisOptions {
+            root: Some(resolved.root().to_path_buf()),
+            config_path: resolved.config_path().clone(),
+            no_cache: resolved.no_cache(),
+            threads: Some(resolved.threads()),
+            production_override: resolved.production_override(),
+            changed_since: resolved.changed_since().map(str::to_owned),
+            workspace: resolved.workspace().map(<[String]>::to_vec),
+            changed_workspaces: resolved.changed_workspaces().map(str::to_owned),
+            explain: resolved.explain_enabled(),
+            ..AnalysisOptions::default()
+        },
+        filters: DeadCodeFilters::default(),
+        files: Vec::new(),
+        include_entry_exports: false,
+    }
 }
 
 fn configure_project_for_dead_code(

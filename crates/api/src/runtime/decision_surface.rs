@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use fallow_config::ProductionAnalysis;
 use fallow_output::ReviewDeltas;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -81,32 +80,26 @@ fn run_decision_analysis(
     resolved: &ProgrammaticAnalysisContext,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<DecisionAnalysis> {
-    let project_config = fallow_engine::config_for_project_analysis(
-        &resolved.root,
-        resolved.config_path.as_deref(),
-        fallow_engine::ProjectConfigOptions {
-            output: fallow_types::output_format::OutputFormat::Json,
-            no_cache: resolved.no_cache,
-            threads: resolved.threads,
-            production_override: resolved.production_override,
-            quiet: true,
-            analysis: ProductionAnalysis::DeadCode,
-        },
-    )
-    .map_err(|err| {
-        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
-            .with_context("analysis.configPath")
-    })?;
-    let root = project_config.config.root.clone();
+    let session = super::dead_code::load_dead_code_session(
+        &super::dead_code::default_dead_code_options_for_context(resolved),
+        resolved,
+    )?;
+    let root = session.root().to_path_buf();
     let workspaces = fallow_config::discover_workspaces(&root);
     let root_pkg = fallow_config::PackageJson::load(&root.join("package.json")).ok();
-    let mut output = fallow_engine::analyze_retaining_modules(&project_config.config, false, true)
+    let artifacts = session
+        .analyze_dead_code_with_session_artifacts(false, true, changed_files.cloned())
         .map_err(|err| {
             ProgrammaticError::new(format!("decision-surface analysis failed: {err}"), 2)
                 .with_code("FALLOW_DECISION_SURFACE_FAILED")
                 .with_context("decision-surface")
         })?;
+    let fallow_engine::AnalysisSessionArtifacts {
+        analysis: mut output,
+        changed_files,
+        ..
+    } = artifacts;
+    let changed_files = changed_files.as_ref();
 
     if let Some(workspace_roots) = resolved.workspace_roots.as_ref() {
         fallow_engine::filter_to_workspaces(&mut output.results, workspace_roots);
@@ -121,7 +114,7 @@ fn run_decision_analysis(
         .map_or_else(FxHashSet::default, |graph| {
             crate::review_deltas::public_export_keys_for(
                 graph,
-                &project_config.config,
+                session.config(),
                 root_pkg.as_ref(),
                 &workspaces,
                 &root,
@@ -141,7 +134,7 @@ fn run_decision_analysis(
         })
     });
     let routing = changed_files.map_or_else(fallow_output::RoutingFacts::default, |files| {
-        crate::routing::compute_routing(&root, &project_config.config, files)
+        crate::routing::compute_routing(&root, session.config(), files)
     });
 
     Ok(DecisionAnalysis {
