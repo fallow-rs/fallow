@@ -197,6 +197,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Vue `v-for` loop variables iterating over a class array no longer report the
+  class members as unused.** A Vue template that iterates a typed array or
+  reactive array of a class and reads members on the loop item, for example
+  `v-for="(util, index) of utils"` with `{{ util.getter }}` / `{{ util.property }}`
+  / `{{ util.hello() }}` where `utils` is `Util[]` or
+  `computed(() => Util[])`, previously flagged `Util.getter` / `Util.property` /
+  `Util.hello` as `unused-class-member`. Previously fallow had no way to type a
+  `v-for` loop variable to its source iterable's element class, so member accesses
+  on the item were dropped. fallow now infers the element class of a Vue
+  `<script setup>` array or reactive-array binding (from the type annotation, a
+  `ref` / `computed` / `reactive` generic argument, a reactivity callback returning
+  a typed array, or a `new Class()` array literal) and credits member accesses on
+  the loop item. The change only removes false positives: a genuinely unused member
+  on the same class is still reported. Thanks [@Ericlm](https://github.com/Ericlm)
+  for the report and the minimal reproduction. (Closes
+  [#1707](https://github.com/fallow-rs/fallow/issues/1707))
+
 - **Telemetry: `fallow flags` and `fallow watch` now record `findings_present`,
   and a guard prevents the whole class of regression.** Both commands emit a
   `code_quality_review` telemetry event (the same workflow as combined `fallow`,
