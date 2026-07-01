@@ -467,10 +467,7 @@ fn engine_root_facade_does_not_reexport_private_adapter_helpers() {
 
 #[test]
 fn engine_core_references_stay_inside_adapter_modules() {
-    let allowed = [
-        "crates/engine/src/churn.rs",
-        "crates/engine/src/core_backend.rs",
-    ];
+    let allowed = ["crates/engine/src/core_backend.rs"];
     for source_path in rust_sources_under(["crates/engine/src"]) {
         let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
