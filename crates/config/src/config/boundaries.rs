@@ -375,7 +375,7 @@ pub struct BoundaryRule {
 }
 
 /// Resolved boundary config with pre-compiled glob matchers.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ResolvedBoundaryConfig {
     /// Compiled zones.
     pub zones: Vec<ResolvedZone>,
@@ -392,7 +392,7 @@ pub struct ResolvedBoundaryConfig {
 }
 
 /// Resolved boundary zone coverage policy.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ResolvedBoundaryCoverageConfig {
     /// Report source files that do not match any boundary zone.
     pub require_all_files: bool,
@@ -454,7 +454,7 @@ pub struct AuthoredRule {
 }
 
 /// A zone with pre-compiled glob matchers.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedZone {
     /// Zone name.
     pub name: String,
@@ -465,7 +465,7 @@ pub struct ResolvedZone {
 }
 
 /// A resolved boundary rule.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedBoundaryRule {
     /// Source zone.
     pub from_zone: String,

@@ -2,9 +2,11 @@
 
 use std::path::PathBuf;
 
+use fallow_engine::session::AnalysisSession;
 use fallow_output::{HealthGrouping, HealthReport, RootEnvelopeMode};
 use fallow_types::output_format::OutputFormat;
 use fallow_types::workspace::WorkspaceDiagnostic;
+use rustc_hash::FxHashSet;
 
 mod audit;
 mod dead_code;
@@ -134,6 +136,12 @@ fn run_programmatic_health_on_engine(
     )
     .map_err(|_| generic_health_error("health"))?;
 
+    Ok(programmatic_health_run_from_engine_result(result))
+}
+
+fn programmatic_health_run_from_engine_result<GroupResolver>(
+    result: fallow_engine::health::HealthAnalysisResult<GroupResolver>,
+) -> ProgrammaticHealthRun {
     let root = result.config.root.clone();
     let next_step_facts = ProgrammaticHealthNextStepFacts {
         suggestions_enabled: suggestions_enabled(),
@@ -141,12 +149,34 @@ fn run_programmatic_health_on_engine(
         impact_digest: None,
         audit_changed: fallow_engine::churn::is_git_repo(&root),
     };
-    Ok(ProgrammaticHealthRun {
+    ProgrammaticHealthRun {
         workspace_diagnostics: result.workspace_diagnostics.clone(),
         analysis: ProgrammaticHealthAnalysis::from_engine(result.without_group_resolver()),
         next_step_facts,
         telemetry_analysis_run_id: None,
-    })
+    }
+}
+
+pub(super) fn run_health_with_session(
+    options: &ComplexityOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    changed_files: Option<&FxHashSet<PathBuf>>,
+) -> ProgrammaticResult<HealthProgrammaticOutput> {
+    crate::validate_complexity_options(options)?;
+    let health_options = derive_programmatic_health_execution_options(resolved, options);
+    let result = fallow_engine::health::run_ungrouped_health_with_session(
+        &health_options,
+        resolved.workspace_roots.clone(),
+        session,
+        changed_files.map(|files| files.iter().cloned().collect()),
+    )
+    .map_err(|_| generic_health_error("health"))?;
+
+    Ok(assemble_health_programmatic_output(
+        options,
+        programmatic_health_run_from_engine_result(result),
+    ))
 }
 
 fn generic_health_error(command: &str) -> ProgrammaticError {
@@ -246,12 +276,22 @@ pub fn run_complexity_with_runner(
     runner: &impl ProgrammaticHealthRunner,
 ) -> ProgrammaticResult<HealthProgrammaticOutput> {
     crate::validate_complexity_options(options)?;
+    Ok(assemble_health_programmatic_output(
+        options,
+        runner.run_programmatic_health(options)?,
+    ))
+}
+
+fn assemble_health_programmatic_output(
+    options: &ComplexityOptions,
+    run: ProgrammaticHealthRun,
+) -> HealthProgrammaticOutput {
     let ProgrammaticHealthRun {
         analysis,
         workspace_diagnostics,
         next_step_facts,
         telemetry_analysis_run_id,
-    } = runner.run_programmatic_health(options)?;
+    } = run;
     let root = analysis.root.clone();
     let next_steps =
         fallow_output::build_health_next_steps(fallow_output::build_health_next_steps_input(
@@ -261,7 +301,7 @@ pub fn run_complexity_with_runner(
             next_step_facts.impact_digest,
             next_step_facts.audit_changed,
         ));
-    Ok(HealthProgrammaticOutput {
+    HealthProgrammaticOutput {
         report: analysis.report,
         grouping: analysis.grouping,
         root,
@@ -271,7 +311,7 @@ pub fn run_complexity_with_runner(
         next_steps,
         envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id,
-    })
+    }
 }
 
 /// Alias for [`run_complexity_with_runner`] with a product-oriented name.

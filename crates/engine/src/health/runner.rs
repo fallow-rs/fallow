@@ -6,10 +6,11 @@ use std::time::Instant;
 
 use fallow_config::ProductionAnalysis;
 use fallow_types::output_format::OutputFormat;
+use rustc_hash::FxHashSet;
 
 use crate::{
     project_config::{ProjectConfigOptions, config_for_project_analysis},
-    session::AnalysisSession,
+    session::{AnalysisSession, ParsedAnalysisSessionParts},
 };
 
 use super::{
@@ -55,6 +56,45 @@ pub fn run_ungrouped_health(
         .changed_since
         .and_then(|git_ref| session.changed_files_since(git_ref).ok());
     let parts = session.into_parsed_parts(true);
+
+    run_ungrouped_health_from_parts(options, ws_roots, parts, changed_files, config_ms, false)
+}
+
+/// Run health analysis from an existing analysis session.
+///
+/// This lets audit and other compound programmatic surfaces share config,
+/// discovery, and parser-cache state across analysis families.
+///
+/// # Errors
+///
+/// Returns the health command exit code for invalid inputs or analysis failures.
+pub fn run_ungrouped_health_with_session(
+    options: &HealthExecutionOptions<'_>,
+    ws_roots: Option<Vec<PathBuf>>,
+    session: &AnalysisSession,
+    changed_files: Option<Vec<PathBuf>>,
+) -> Result<HealthAnalysisResult<NoGroupResolver>, ExitCode> {
+    validate_health_churn_file(options).map_err(|_| ExitCode::from(2))?;
+
+    let changed_files = changed_files.map(FxHashSet::from_iter).or_else(|| {
+        options
+            .changed_since
+            .and_then(|git_ref| session.changed_files_since(git_ref).ok())
+    });
+    let parts = session.parsed_parts(true);
+    let shared_parse = parts.parse_ms == 0.0;
+
+    run_ungrouped_health_from_parts(options, ws_roots, parts, changed_files, 0.0, shared_parse)
+}
+
+fn run_ungrouped_health_from_parts(
+    options: &HealthExecutionOptions<'_>,
+    ws_roots: Option<Vec<PathBuf>>,
+    parts: ParsedAnalysisSessionParts,
+    changed_files: Option<FxHashSet<PathBuf>>,
+    config_ms: f64,
+    shared_parse: bool,
+) -> Result<HealthAnalysisResult<NoGroupResolver>, ExitCode> {
     let config = parts.config;
     let files = parts.files;
     let modules = parts.modules;
@@ -83,7 +123,7 @@ pub fn run_ungrouped_health(
             discover_ms: 0.0,
             parse_ms,
             parse_cpu_ms,
-            shared_parse: false,
+            shared_parse,
             pre_computed_analysis: None,
             workspace_diagnostics,
         },

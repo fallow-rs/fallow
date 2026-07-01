@@ -181,6 +181,55 @@ fn derives_programmatic_health_execution_options_from_api_contracts() {
 }
 
 #[test]
+fn run_health_with_session_reuses_existing_discovery() {
+    let project = tempfile::tempdir().expect("temp dir");
+    let src = project.path().join("src");
+    std::fs::create_dir(&src).expect("src dir");
+    std::fs::write(
+        src.join("index.ts"),
+        "export function existing(value: boolean) { if (value) { return 1; } return 0; }\n",
+    )
+    .expect("source file");
+
+    let options = ComplexityOptions {
+        analysis: analysis_at(project.path()),
+        max_cyclomatic: Some(1),
+        complexity: true,
+        ..ComplexityOptions::default()
+    };
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)
+        .expect("programmatic context resolves");
+    let session =
+        fallow_engine::session::AnalysisSession::load(project.path(), None).expect("session loads");
+
+    std::fs::write(
+        src.join("late.ts"),
+        "export function late(value: boolean) { if (value) { return 1; } return 0; }\n",
+    )
+    .expect("late source file");
+
+    let output = resolved
+        .install(|| run_health_with_session(&options, &resolved, &session, None))
+        .expect("health succeeds");
+
+    assert!(
+        output
+            .report
+            .findings
+            .iter()
+            .any(|finding| finding.path.ends_with("src/index.ts"))
+    );
+    assert!(
+        output
+            .report
+            .findings
+            .iter()
+            .all(|finding| !finding.path.ends_with("src/late.ts")),
+        "session-backed health must not rediscover files added after session load"
+    );
+}
+
+#[test]
 fn serialize_health_report_json_tags_meta_and_strips_paths() {
     let root = Path::new("/repo");
     let json = serialize_health_report_json(HealthJsonReportInput {

@@ -71,7 +71,7 @@ use file_scores::{
 };
 use finding_sort::sort_findings;
 pub use pipeline::{HealthPipelineInputs, HealthScopeInputs};
-pub use runner::run_ungrouped_health;
+pub use runner::{run_ungrouped_health, run_ungrouped_health_with_session};
 use vital_data::{HealthVitalData, HealthVitalDataInput, prepare_health_vital_data};
 use vital_signs_scope::{
     SubsetFilter, VitalSignsAndCountsInput, apply_duplication_metrics,

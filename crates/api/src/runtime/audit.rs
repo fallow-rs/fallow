@@ -15,7 +15,10 @@ use crate::{
     analysis_context::{changed_files_for_run, resolve_programmatic_analysis_context},
 };
 
-use super::{ProgrammaticResult, root_envelope_mode, run_dead_code, run_duplication, run_health};
+use super::{
+    ProgrammaticResult, root_envelope_mode, run_dead_code, run_duplication, run_health,
+    run_health_with_session,
+};
 
 /// Run changed-code audit through typed programmatic runners.
 ///
@@ -230,6 +233,35 @@ fn run_audit_subanalyses(
         coverage_root: options.coverage_root.clone(),
         ..ComplexityOptions::default()
     };
+
+    if options.production_dead_code == options.production_dupes
+        && options.production_dead_code == options.production_health
+    {
+        let resolved = resolve_programmatic_analysis_context(&dead_code_options.analysis)?;
+        return resolved.install(|| {
+            let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
+            let complexity =
+                run_health_with_session(&complexity_options, &resolved, &session, changed_files)?;
+            Ok(AuditSubanalyses {
+                dead_code: super::dead_code::run_dead_code_with_session(
+                    &dead_code_options,
+                    &resolved,
+                    &session,
+                    changed_files,
+                    |_| {},
+                    Instant::now(),
+                )?,
+                duplication: super::duplication::run_duplication_with_session(
+                    &duplication_options,
+                    &resolved,
+                    &session,
+                    changed_files,
+                    Instant::now(),
+                )?,
+                complexity,
+            })
+        });
+    }
 
     if options.production_dead_code == options.production_dupes {
         let resolved = resolve_programmatic_analysis_context(&dead_code_options.analysis)?;

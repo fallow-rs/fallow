@@ -287,6 +287,24 @@ impl AnalysisSession {
         }
     }
 
+    /// Parse discovered files without consuming the session.
+    #[must_use]
+    pub fn parsed_parts(&self, need_complexity: bool) -> ParsedAnalysisSessionParts {
+        let ParsedModules { modules, metrics } = self.parse_modules(need_complexity);
+        ParsedAnalysisSessionParts {
+            config: self.config.clone(),
+            config_path: self.config_path.clone(),
+            files: self.discovery.files().to_vec(),
+            modules,
+            workspace_diagnostics: self.workspace_diagnostics.clone(),
+            parse_ms: metrics.parse_ms,
+            cache_update_ms: metrics.cache_ms,
+            cache_hits: metrics.cache_hits,
+            cache_misses: metrics.cache_misses,
+            parse_cpu_ms: metrics.parse_cpu_ms,
+        }
+    }
+
     /// Run dead-code analysis for this session.
     ///
     /// # Errors
@@ -492,7 +510,8 @@ impl AnalysisSession {
             return None;
         };
         let cache = cache.as_ref()?;
-        if cache.need_complexity == need_complexity && cache.fingerprints == fingerprints {
+        let complexity_mode_satisfies_request = cache.need_complexity || !need_complexity;
+        if complexity_mode_satisfies_request && cache.fingerprints == fingerprints {
             return Some(cache.modules.clone());
         }
         None

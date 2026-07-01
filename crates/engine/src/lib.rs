@@ -285,6 +285,28 @@ mod tests {
     }
 
     #[test]
+    fn analysis_session_reuses_complexity_parse_for_plain_parse() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(
+            src.join("index.ts"),
+            "export function value() { return 1; }\n",
+        )
+        .expect("source file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        let first = session.parsed_parts(true);
+        assert!(!first.modules.is_empty());
+
+        let second = session.parsed_parts(false);
+
+        assert!(!second.modules.is_empty());
+        assert!(second.parse_ms.abs() < f64::EPSILON);
+        assert!(second.parse_cpu_ms.abs() < f64::EPSILON);
+    }
+
+    #[test]
     fn dead_code_reused_parse_path_uses_engine_pipeline() {
         let temp = tempfile::tempdir().expect("tempdir");
         let src = temp.path().join("src");

@@ -62,7 +62,7 @@ pub struct IgnoreExportRule {
 }
 
 /// `IgnoreExportRule` with the glob pre-compiled into a matcher.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompiledIgnoreExportRule {
     pub matcher: globset::GlobMatcher,
     pub exports: Vec<String>,
@@ -80,7 +80,7 @@ pub struct IgnoreCatalogReferenceRule {
 }
 
 /// `IgnoreCatalogReferenceRule` with the optional consumer glob pre-compiled.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompiledIgnoreCatalogReferenceRule {
     pub package: String,
     pub catalog: Option<String>,
@@ -118,7 +118,7 @@ pub struct IgnoreDependencyOverrideRule {
 }
 
 /// `IgnoreDependencyOverrideRule` ready for matching.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompiledIgnoreDependencyOverrideRule {
     pub package: String,
     pub source: Option<String>,
@@ -150,14 +150,14 @@ pub struct ConfigOverride {
 }
 
 /// Resolved override with pre-compiled glob matchers.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedOverride {
     pub matchers: Vec<globset::GlobMatcher>,
     pub rules: PartialRulesConfig,
 }
 
 /// Fully resolved configuration with all globs pre-compiled.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     pub root: PathBuf,
     pub entry_patterns: Vec<String>,
