@@ -4,9 +4,9 @@
 //! `fallow-core` directly. The goal is to keep core-backed orchestration
 //! contained while the engine-owned contracts continue to stabilize.
 
-use fallow_config::ResolvedConfig;
-use fallow_config::{ExternalPluginDef, PackageJson};
+use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceInfo};
 use fallow_graph::graph::ModuleGraph;
+use fallow_types::discover::{DiscoveredFile, EntryPoint};
 use fallow_types::results::{SecurityFinding, SecuritySeverity};
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
@@ -19,14 +19,35 @@ use crate::{
         CombinedFinding as EngineCombinedFinding,
         CrossReferenceResult as EngineCrossReferenceResult, DeadCodeKind as EngineDeadCodeKind,
     },
-    discover::AnalysisDiscovery,
+    discover::{AnalysisDiscovery, HiddenDirScope},
     duplicates::DuplicationReport,
     engine_error,
     module_graph::RetainedModuleGraph,
 };
 
+#[derive(Debug, Clone)]
+pub struct BackendAnalysisDiscovery {
+    inner: fallow_core::AnalysisDiscovery,
+}
+
+impl BackendAnalysisDiscovery {
+    fn as_core(&self) -> &fallow_core::AnalysisDiscovery {
+        &self.inner
+    }
+
+    pub fn files(&self) -> &[DiscoveredFile] {
+        self.inner.files()
+    }
+
+    pub fn into_files(self) -> Vec<DiscoveredFile> {
+        self.inner.into_files()
+    }
+}
+
 pub fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
-    AnalysisDiscovery::from_core(fallow_core::prepare_analysis_discovery(config))
+    AnalysisDiscovery::from_backend(BackendAnalysisDiscovery {
+        inner: fallow_core::prepare_analysis_discovery(config),
+    })
 }
 
 pub fn config_for_project(
@@ -44,7 +65,7 @@ pub fn analyze_with_usages_from_discovery(
     config: &ResolvedConfig,
     discovery: &AnalysisDiscovery,
 ) -> EngineResult<DeadCodeAnalysis> {
-    fallow_core::analyze_with_usages_from_discovery(config, discovery.as_core())
+    fallow_core::analyze_with_usages_from_discovery(config, discovery.as_backend().as_core())
         .map(|results| DeadCodeAnalysis { results })
         .map_err(engine_error)
 }
@@ -53,13 +74,16 @@ pub fn analyze_with_usages_and_complexity_from_discovery(
     config: &ResolvedConfig,
     discovery: &AnalysisDiscovery,
 ) -> EngineResult<DeadCodeAnalysisOutput> {
-    fallow_core::analyze_with_usages_and_complexity_from_discovery(config, discovery.as_core())
-        .map(|output| DeadCodeAnalysisOutput {
-            results: output.results,
-            modules: output.modules,
-            files: output.files,
-        })
-        .map_err(engine_error)
+    fallow_core::analyze_with_usages_and_complexity_from_discovery(
+        config,
+        discovery.as_backend().as_core(),
+    )
+    .map(|output| DeadCodeAnalysisOutput {
+        results: output.results,
+        modules: output.modules,
+        files: output.files,
+    })
+    .map_err(engine_error)
 }
 
 pub fn analyze_retaining_modules_from_discovery(
@@ -70,7 +94,7 @@ pub fn analyze_retaining_modules_from_discovery(
 ) -> EngineResult<DeadCodeAnalysisArtifacts> {
     fallow_core::analyze_retaining_modules_from_discovery(
         config,
-        discovery.as_core(),
+        discovery.as_backend().as_core(),
         need_complexity,
         retain_graph,
     )
@@ -296,6 +320,61 @@ pub fn public_api_package_entry_points(
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> FxHashSet<fallow_types::discover::FileId> {
     fallow_core::analyze::public_api_package_entry_points(graph, config, root_pkg, workspaces)
+}
+
+fn hidden_dir_scope(value: &fallow_core::discover::HiddenDirScope) -> HiddenDirScope {
+    HiddenDirScope::new(value.root().to_path_buf(), value.dirs().to_vec())
+}
+
+fn core_hidden_dir_scope(value: &HiddenDirScope) -> fallow_core::discover::HiddenDirScope {
+    fallow_core::discover::HiddenDirScope::new(value.root().to_path_buf(), value.dirs().to_vec())
+}
+
+fn core_hidden_dir_scopes(scopes: &[HiddenDirScope]) -> Vec<fallow_core::discover::HiddenDirScope> {
+    scopes.iter().map(core_hidden_dir_scope).collect()
+}
+
+pub fn is_allowed_hidden_dir(name: &std::ffi::OsStr) -> bool {
+    fallow_core::discover::is_allowed_hidden_dir(name)
+}
+
+pub fn collect_plugin_hidden_dir_scopes(
+    config: &ResolvedConfig,
+    root_pkg: Option<&PackageJson>,
+    workspaces: &[WorkspaceInfo],
+) -> Vec<HiddenDirScope> {
+    fallow_core::discover::collect_plugin_hidden_dir_scopes(config, root_pkg, workspaces)
+        .iter()
+        .map(hidden_dir_scope)
+        .collect()
+}
+
+pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
+    fallow_core::discover::discover_files(config)
+}
+
+pub fn discover_files_with_additional_hidden_dirs(
+    config: &ResolvedConfig,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> Vec<DiscoveredFile> {
+    let scopes = core_hidden_dir_scopes(additional_hidden_dir_scopes);
+    fallow_core::discover::discover_files_with_additional_hidden_dirs(config, &scopes)
+}
+
+pub fn discover_files_with_plugin_scopes(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
+    fallow_core::discover::discover_files_with_plugin_scopes(config)
+}
+
+pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
+    fallow_core::discover::discover_entry_points(config, files)
+}
+
+pub fn discover_workspace_entry_points(
+    ws_root: &Path,
+    config: &ResolvedConfig,
+    all_files: &[DiscoveredFile],
+) -> Vec<EntryPoint> {
+    fallow_core::discover::discover_workspace_entry_points(ws_root, config, all_files)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

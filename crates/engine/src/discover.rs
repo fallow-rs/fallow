@@ -8,8 +8,33 @@ pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, F
 
 use crate::core_backend;
 
-pub const SOURCE_EXTENSIONS: &[&str] = fallow_core::discover::SOURCE_EXTENSIONS;
-pub const PRODUCTION_EXCLUDE_PATTERNS: &[&str] = fallow_core::discover::PRODUCTION_EXCLUDE_PATTERNS;
+pub const SOURCE_EXTENSIONS: &[&str] = &[
+    "ts", "tsx", "mts", "cts", "gts", "js", "jsx", "mjs", "cjs", "gjs", "vue", "svelte", "astro",
+    "mdx", "css", "scss", "sass", "less", "html", "graphql", "gql",
+];
+
+/// Glob patterns for test/dev/story files excluded in production mode.
+pub const PRODUCTION_EXCLUDE_PATTERNS: &[&str] = &[
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/*.e2e.*",
+    "**/*.e2e-spec.*",
+    "**/*.bench.*",
+    "**/*.fixture.*",
+    "**/*.stories.*",
+    "**/*.story.*",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "**/__snapshots__/**",
+    "**/__fixtures__/**",
+    "**/test/**",
+    "**/tests/**",
+    "*.config.*",
+    "**/.*.js",
+    "**/.*.ts",
+    "**/.*.mjs",
+    "**/.*.cjs",
+];
 
 /// Entry points grouped by reachability role.
 #[derive(Debug, Clone, Default)]
@@ -26,16 +51,6 @@ impl CategorizedEntryPoints {
         dedup_entry_paths(&mut self.runtime);
         dedup_entry_paths(&mut self.test);
         self
-    }
-}
-
-impl From<fallow_core::discover::CategorizedEntryPoints> for CategorizedEntryPoints {
-    fn from(value: fallow_core::discover::CategorizedEntryPoints) -> Self {
-        Self {
-            all: value.all,
-            runtime: value.runtime,
-            test: value.test,
-        }
     }
 }
 
@@ -68,33 +83,18 @@ impl HiddenDirScope {
     }
 }
 
-impl From<fallow_core::discover::HiddenDirScope> for HiddenDirScope {
-    fn from(value: fallow_core::discover::HiddenDirScope) -> Self {
-        Self {
-            root: value.root().to_path_buf(),
-            dirs: value.dirs().to_vec(),
-        }
-    }
-}
-
-impl From<HiddenDirScope> for fallow_core::discover::HiddenDirScope {
-    fn from(value: HiddenDirScope) -> Self {
-        Self::new(value.root, value.dirs)
-    }
-}
-
 /// Reusable engine discovery prelude for one resolved project.
 #[derive(Debug, Clone)]
 pub struct AnalysisDiscovery {
-    inner: fallow_core::AnalysisDiscovery,
+    inner: core_backend::BackendAnalysisDiscovery,
 }
 
 impl AnalysisDiscovery {
-    pub(crate) const fn from_core(inner: fallow_core::AnalysisDiscovery) -> Self {
+    pub(crate) const fn from_backend(inner: core_backend::BackendAnalysisDiscovery) -> Self {
         Self { inner }
     }
 
-    pub(crate) const fn as_core(&self) -> &fallow_core::AnalysisDiscovery {
+    pub(crate) const fn as_backend(&self) -> &core_backend::BackendAnalysisDiscovery {
         &self.inner
     }
 
@@ -114,7 +114,7 @@ impl AnalysisDiscovery {
 /// Check if a hidden directory name is on the discovery allowlist.
 #[must_use]
 pub fn is_allowed_hidden_dir(name: &OsStr) -> bool {
-    fallow_core::discover::is_allowed_hidden_dir(name)
+    core_backend::is_allowed_hidden_dir(name)
 }
 
 /// Collect plugin-derived hidden directory scopes.
@@ -124,16 +124,13 @@ pub fn collect_plugin_hidden_dir_scopes(
     root_pkg: Option<&PackageJson>,
     workspaces: &[WorkspaceInfo],
 ) -> Vec<HiddenDirScope> {
-    fallow_core::discover::collect_plugin_hidden_dir_scopes(config, root_pkg, workspaces)
-        .into_iter()
-        .map(Into::into)
-        .collect()
+    core_backend::collect_plugin_hidden_dir_scopes(config, root_pkg, workspaces)
 }
 
 /// Discover source files for a resolved config.
 #[must_use]
 pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
-    fallow_core::discover::discover_files(config)
+    core_backend::discover_files(config)
 }
 
 /// Discover source files with additional package-scoped hidden directories.
@@ -142,20 +139,19 @@ pub fn discover_files_with_additional_hidden_dirs(
     config: &ResolvedConfig,
     additional_hidden_dir_scopes: &[HiddenDirScope],
 ) -> Vec<DiscoveredFile> {
-    let scopes = to_core_hidden_dir_scopes(additional_hidden_dir_scopes);
-    fallow_core::discover::discover_files_with_additional_hidden_dirs(config, &scopes)
+    core_backend::discover_files_with_additional_hidden_dirs(config, additional_hidden_dir_scopes)
 }
 
 /// Discover source files for a resolved config, including plugin scopes.
 #[must_use]
 pub fn discover_files_with_plugin_scopes(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
-    fallow_core::discover::discover_files_with_plugin_scopes(config)
+    core_backend::discover_files_with_plugin_scopes(config)
 }
 
 /// Discover configured and inferred entry points.
 #[must_use]
 pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
-    fallow_core::discover::discover_entry_points(config, files)
+    core_backend::discover_entry_points(config, files)
 }
 
 /// Discover entry points for a workspace package.
@@ -165,7 +161,7 @@ pub fn discover_workspace_entry_points(
     config: &ResolvedConfig,
     all_files: &[DiscoveredFile],
 ) -> Vec<EntryPoint> {
-    fallow_core::discover::discover_workspace_entry_points(ws_root, config, all_files)
+    core_backend::discover_workspace_entry_points(ws_root, config, all_files)
 }
 
 /// Discover entry points from plugin results.
@@ -178,12 +174,6 @@ pub fn discover_plugin_entry_points(
     core_backend::discover_plugin_entry_points(plugin_result.as_backend(), config, files)
 }
 
-fn to_core_hidden_dir_scopes(
-    scopes: &[HiddenDirScope],
-) -> Vec<fallow_core::discover::HiddenDirScope> {
-    scopes.iter().cloned().map(Into::into).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -191,27 +181,25 @@ mod tests {
     use super::{CategorizedEntryPoints, EntryPoint, EntryPointSource, HiddenDirScope};
 
     #[test]
-    fn hidden_dir_scope_round_trips_through_core() {
+    fn hidden_dir_scope_exposes_root_and_dirs() {
         let scope = HiddenDirScope::new(PathBuf::from("/repo/packages/app"), vec![".next".into()]);
 
-        let core: fallow_core::discover::HiddenDirScope = scope.clone().into();
-        let engine: HiddenDirScope = core.into();
-
-        assert_eq!(engine, scope);
-        assert_eq!(engine.root(), scope.root());
-        assert_eq!(engine.dirs(), scope.dirs());
+        assert_eq!(scope.root(), PathBuf::from("/repo/packages/app"));
+        assert_eq!(scope.dirs(), [".next"]);
     }
 
     #[test]
-    fn categorized_entry_points_converts_from_core() {
+    fn categorized_entry_points_dedups_each_bucket() {
         let entry = EntryPoint {
             path: PathBuf::from("/repo/src/index.ts"),
             source: EntryPointSource::DefaultIndex,
         };
-        let mut core = fallow_core::discover::CategorizedEntryPoints::default();
-        core.push_runtime(entry.clone());
-
-        let engine: CategorizedEntryPoints = core.into();
+        let engine = CategorizedEntryPoints {
+            all: vec![entry.clone(), entry.clone()],
+            runtime: vec![entry.clone(), entry.clone()],
+            test: Vec::new(),
+        }
+        .dedup();
 
         assert_eq!(engine.all.len(), 1);
         assert_eq!(engine.runtime.len(), 1);
