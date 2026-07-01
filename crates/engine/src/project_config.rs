@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use fallow_config::{FallowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic};
 use fallow_types::output_format::OutputFormat;
 
-use crate::{EngineError, EngineResult, engine_error};
+use crate::{EngineError, EngineResult, core_backend};
 
 /// Resolved project config plus the config file path when one was loaded.
 #[derive(Debug)]
@@ -33,19 +33,17 @@ pub struct ProjectConfigOptions {
 /// Returns an error when an explicit config cannot be loaded or automatic
 /// config discovery finds an invalid config.
 pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResult<ProjectConfig> {
-    fallow_core::config_for_project(root, config_path)
-        .map(|(config, path)| ProjectConfig {
-            workspace_diagnostics: collect_workspace_diagnostics(&config),
-            config,
-            path,
-        })
-        .map_err(engine_error)
+    core_backend::config_for_project(root, config_path).map(|(config, path)| ProjectConfig {
+        workspace_diagnostics: collect_workspace_diagnostics(&config),
+        config,
+        path,
+    })
 }
 
 /// Resolve the parse-cache size limit for a resolved config.
 #[must_use]
 pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
-    fallow_core::resolve_cache_max_size_bytes(config)
+    core_backend::resolve_cache_max_size_bytes(config)
 }
 
 pub fn default_project_config(root: &Path) -> ProjectConfig {

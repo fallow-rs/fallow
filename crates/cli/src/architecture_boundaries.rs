@@ -474,7 +474,6 @@ fn engine_core_references_stay_inside_adapter_modules() {
         "crates/engine/src/discover.rs",
         "crates/engine/src/duplicates.rs",
         "crates/engine/src/plugins.rs",
-        "crates/engine/src/project_config.rs",
     ];
     for source_path in rust_sources_under(["crates/engine/src"]) {
         let source = read_source_without_line_comments(&source_path)

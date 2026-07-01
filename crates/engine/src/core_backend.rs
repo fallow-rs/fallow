@@ -24,6 +24,17 @@ pub fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery 
     AnalysisDiscovery::from_core(fallow_core::prepare_analysis_discovery(config))
 }
 
+pub fn config_for_project(
+    root: &Path,
+    config_path: Option<&Path>,
+) -> EngineResult<(ResolvedConfig, Option<PathBuf>)> {
+    fallow_core::config_for_project(root, config_path).map_err(engine_error)
+}
+
+pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
+    fallow_core::resolve_cache_max_size_bytes(config)
+}
+
 pub fn analyze_with_usages_from_discovery(
     config: &ResolvedConfig,
     discovery: &AnalysisDiscovery,
