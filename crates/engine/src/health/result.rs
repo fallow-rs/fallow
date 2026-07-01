@@ -122,7 +122,72 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
             )
         });
         input.report.css_analytics = computation.map(|computation| computation.report);
+        // Graduation (chunk 2): map the descriptive css candidates into first-class
+        // styling findings, honoring inline suppression at production time. Styling
+        // stays in its own domain (HealthReport), not the dead-code AnalysisResults.
+        input.report.styling_findings = build_styling_findings(
+            input.report.css_analytics.as_ref(),
+            input.modules,
+            input.files,
+            input.config,
+        );
     }
+}
+
+/// Graduate the descriptive css candidates into first-class [`StylingFinding`]s.
+/// Honors inline suppression (`// fallow-ignore-next-line css-token-drift` /
+/// `-file`) at production time, matched by the candidate's relative path against
+/// the module's parsed suppressions. First family: `css-token-drift` (Tailwind
+/// arbitrary values = hardcoded-instead-of-token). Default severity `warn` is
+/// applied downstream; the finding is verdict-neutral by default.
+fn build_styling_findings(
+    css: Option<&fallow_output::CssAnalyticsReport>,
+    modules: &[fallow_types::extract::ModuleInfo],
+    files: &[DiscoveredFile],
+    config: &ResolvedConfig,
+) -> Vec<fallow_output::StylingFinding> {
+    use fallow_types::suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
+
+    let Some(css) = css else {
+        return Vec::new();
+    };
+    if css.tailwind_arbitrary_values.is_empty() {
+        return Vec::new();
+    }
+
+    let path_by_id: rustc_hash::FxHashMap<_, _> =
+        files.iter().map(|f| (f.id, f.path.as_path())).collect();
+    let mut supp_by_rel: rustc_hash::FxHashMap<String, &[Suppression]> =
+        rustc_hash::FxHashMap::default();
+    for module in modules {
+        if module.suppressions.is_empty() {
+            continue;
+        }
+        if let Some(abs) = path_by_id.get(&module.file_id)
+            && let Some(rel) = super::runtime_filter::relative_to_root(abs, &config.root)
+        {
+            supp_by_rel.insert(rel, module.suppressions.as_slice());
+        }
+    }
+
+    let mut findings = Vec::new();
+    for candidate in &css.tailwind_arbitrary_values {
+        if let Some(supps) = supp_by_rel.get(candidate.path.as_str())
+            && (is_file_suppressed(supps, IssueKind::CssTokenDrift)
+                || is_suppressed(supps, candidate.line, IssueKind::CssTokenDrift))
+        {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-token-drift".to_string(),
+            sub_kind: "tailwind-arbitrary-value".to_string(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            value: candidate.value.clone(),
+            actions: candidate.actions.clone(),
+        });
+    }
+    findings
 }
 
 fn build_health_result<R>(input: HealthResultInput<R>) -> HealthAnalysisResult<R> {
