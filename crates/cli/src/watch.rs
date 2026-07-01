@@ -294,7 +294,7 @@ fn print_waiting(opts: &WatchOptions<'_>) {
 
 fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOptions<'_>) -> ExitCode {
     let start = Instant::now();
-    let results = match fallow_engine::analyze(config) {
+    let results = match fallow_engine::dead_code::analyze(config) {
         Ok(analysis) => analysis.results,
         Err(e) => {
             eprintln!("Analysis error: {e}");

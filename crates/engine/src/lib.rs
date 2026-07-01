@@ -31,7 +31,7 @@ pub mod codeowners;
 mod core_backend;
 mod cross_reference;
 mod css;
-mod dead_code;
+pub mod dead_code;
 mod discover;
 mod duplicates;
 mod error;
@@ -65,11 +65,6 @@ pub use churn_impl::{
     analyze_churn_cached, is_git_repo, parse_since, set_spawn_hook as set_churn_spawn_hook,
 };
 pub use cross_reference::{CombinedFinding, CrossReferenceResult, DeadCodeKind, cross_reference};
-pub use dead_code::{
-    analyze, analyze_retaining_modules, analyze_with_file_hashes, analyze_with_parse_result,
-    analyze_with_trace, analyze_with_usages, analyze_with_usages_and_complexity,
-    filter_by_changed_files, filter_to_workspaces,
-};
 pub use discover::{
     AnalysisDiscovery, CategorizedEntryPoints, DiscoveredFile, EntryPoint, EntryPointSource,
     FileId, HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS, SOURCE_EXTENSIONS,

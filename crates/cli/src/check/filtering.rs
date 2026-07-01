@@ -18,7 +18,7 @@ pub fn filter_to_workspaces(
     results: &mut fallow_types::results::AnalysisResults,
     ws_roots: &[PathBuf],
 ) {
-    fallow_engine::filter_to_workspaces(results, ws_roots);
+    fallow_engine::dead_code::filter_to_workspaces(results, ws_roots);
 }
 
 /// Resolve `--workspace <patterns...>` to a set of workspace roots, or exit with

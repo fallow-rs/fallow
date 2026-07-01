@@ -375,7 +375,7 @@ fn run_check_analysis(
     config: &ResolvedConfig,
 ) -> Result<CheckAnalysisData, ExitCode> {
     if opts.retain_modules_for_health {
-        return fallow_engine::analyze_retaining_modules(config, true, true)
+        return fallow_engine::dead_code::analyze_retaining_modules(config, true, true)
             .map(|output| CheckAnalysisData {
                 results: output.results,
                 trace_graph: output.graph,
@@ -388,7 +388,7 @@ fn run_check_analysis(
     }
 
     if opts.trace_opts.any_active() {
-        return fallow_engine::analyze_with_trace(config)
+        return fallow_engine::dead_code::analyze_with_trace(config)
             .map(|output| CheckAnalysisData {
                 results: output.results,
                 trace_graph: output.graph,
@@ -400,7 +400,7 @@ fn run_check_analysis(
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
-    fallow_engine::analyze(config)
+    fallow_engine::dead_code::analyze(config)
         .map(|analysis| CheckAnalysisData {
             results: analysis.results,
             trace_graph: None,

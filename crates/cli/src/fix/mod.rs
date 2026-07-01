@@ -22,7 +22,7 @@ fn run_analyze(
     config: &fallow_config::ResolvedConfig,
     output: OutputFormat,
 ) -> Result<(fallow_types::results::AnalysisResults, CapturedHashes), ExitCode> {
-    let output_struct = fallow_engine::analyze_with_file_hashes(config)
+    let output_struct = fallow_engine::dead_code::analyze_with_file_hashes(config)
         .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
     Ok((output_struct.results, output_struct.file_hashes))
 }

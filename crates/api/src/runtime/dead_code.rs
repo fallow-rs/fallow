@@ -218,7 +218,7 @@ fn apply_dead_code_scope(
     results: &mut AnalysisResults,
 ) -> ProgrammaticResult<()> {
     if let Some(workspace_roots) = resolved.workspace_roots.as_ref() {
-        fallow_engine::filter_to_workspaces(results, workspace_roots);
+        fallow_engine::dead_code::filter_to_workspaces(results, workspace_roots);
     }
     let resolved_changed_files = if changed_files.is_some() {
         None
@@ -226,7 +226,7 @@ fn apply_dead_code_scope(
         changed_files_for_run(resolved)?
     };
     if let Some(changed_files) = changed_files.or(resolved_changed_files.as_ref()) {
-        fallow_engine::filter_by_changed_files(results, changed_files);
+        fallow_engine::dead_code::filter_by_changed_files(results, changed_files);
     }
     if let Some(diff) = resolved.diff.as_ref() {
         filter_dead_code_by_diff(results, diff, session.root());
@@ -413,7 +413,7 @@ fn apply_dead_code_file_filter(
             }
         })
         .collect::<FxHashSet<_>>();
-    fallow_engine::filter_by_changed_files(results, &file_set);
+    fallow_engine::dead_code::filter_by_changed_files(results, &file_set);
     clear_dead_code_dependency_findings(results);
 }
 

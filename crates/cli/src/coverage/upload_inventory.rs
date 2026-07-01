@@ -694,7 +694,7 @@ fn collect_caller_edges(
     config: &ResolvedConfig,
     functions: &[InventoryFunction],
 ) -> BTreeMap<String, Vec<CallerSitePayload>> {
-    let artifacts = match fallow_engine::analyze_retaining_modules(config, false, true) {
+    let artifacts = match fallow_engine::dead_code::analyze_retaining_modules(config, false, true) {
         Ok(artifacts) => artifacts,
         Err(err) => {
             eprintln!(

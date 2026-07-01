@@ -1071,7 +1071,7 @@ fn analyze_security_candidates(
     config: &fallow_config::ResolvedConfig,
 ) -> Result<SecurityAnalysisState, ExitCode> {
     if opts.runtime_coverage.is_none() {
-        return fallow_engine::analyze(config)
+        return fallow_engine::dead_code::analyze(config)
             .map(|analysis| SecurityAnalysisState {
                 results: analysis.results,
                 modules: None,
@@ -1081,7 +1081,7 @@ fn analyze_security_candidates(
             .map_err(|err| emit_error(&format!("Analysis error: {err}"), 2, opts.output));
     }
 
-    fallow_engine::analyze_retaining_modules(config, true, true)
+    fallow_engine::dead_code::analyze_retaining_modules(config, true, true)
         .map(|mut output| {
             let modules = output.modules.take();
             let files = output.files.take();
@@ -4125,7 +4125,7 @@ mod tests {
         .expect("fixture config loads");
         config.rules.security_sink = Severity::Warn;
 
-        let analysis = fallow_engine::analyze(&config).expect("fixture analyzes");
+        let analysis = fallow_engine::dead_code::analyze(&config).expect("fixture analyzes");
         let finding = analysis
             .results
             .security_findings

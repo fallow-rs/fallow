@@ -102,10 +102,10 @@ fn run_decision_analysis(
     let changed_files = changed_files.as_ref();
 
     if let Some(workspace_roots) = resolved.workspace_roots.as_ref() {
-        fallow_engine::filter_to_workspaces(&mut output.results, workspace_roots);
+        fallow_engine::dead_code::filter_to_workspaces(&mut output.results, workspace_roots);
     }
     if let Some(changed_files) = changed_files {
-        fallow_engine::filter_by_changed_files(&mut output.results, changed_files);
+        fallow_engine::dead_code::filter_by_changed_files(&mut output.results, changed_files);
     }
 
     let public_api = output

@@ -3304,8 +3304,9 @@ mod tests {
         let files = parsed.files;
         let modules = parsed.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
-        let analysis_output = fallow_engine::analyze_with_parse_result(&config, &modules)
-            .unwrap_or_else(|err| panic!("failed to analyze temp project: {err}"));
+        let analysis_output =
+            fallow_engine::dead_code::analyze_with_parse_result(&config, &modules)
+                .unwrap_or_else(|err| panic!("failed to analyze temp project: {err}"));
         let static_signals = build_static_signal_index(&modules, &analysis_output, &file_paths)
             .unwrap_or_else(|err| panic!("failed to build static signal index: {err}"));
         let app_path = src_dir.join("app.ts");
