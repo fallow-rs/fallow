@@ -875,6 +875,7 @@ mod tests {
         let current = manifest(&workspace_scoped, mode(), &map);
 
         assert!(!cached.matches_inputs(&current));
+        assert!(!cached.matches_resolution_inputs(&current));
     }
 
     #[test]

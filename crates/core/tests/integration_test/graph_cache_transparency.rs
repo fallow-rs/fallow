@@ -363,6 +363,50 @@ fn ignore_pattern_change_misses_cache_and_reflects_file_set() {
     );
 }
 
+/// Resolve conditions are graph-affecting resolver options, so they must
+/// invalidate through `GraphCacheMode` even when the discovered file set is
+/// unchanged.
+#[test]
+#[expect(
+    deprecated,
+    reason = "trace timings are still the internal contract for this cache invalidation gate"
+)]
+fn resolve_condition_change_misses_cache_and_matches_cold_output() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_tree(&fixture_path("barrel-exports"), &root);
+    let cache_dir = temp.path().join("cache");
+
+    let base = create_config_with_cache(root.clone(), cache_dir.clone());
+    fallow_core::analyze(&base).expect("cold base analysis");
+
+    let mut changed = create_config_with_cache(root.clone(), cache_dir);
+    changed.resolve.conditions.push("react-server".to_string());
+
+    let after = fallow_core::analyze_with_trace(&changed).expect("changed condition analysis");
+    let timings = after.timings.expect("trace timings retained");
+    assert!(
+        timings.resolve_imports_ms > f64::EPSILON,
+        "resolve condition changes must miss the graph cache, got {}ms",
+        timings.resolve_imports_ms
+    );
+
+    let mut cold_changed = create_config_with_cache(root, temp.path().join("cold-cache"));
+    cold_changed
+        .resolve
+        .conditions
+        .push("react-server".to_string());
+    cold_changed.no_cache = true;
+    let cold = fallow_core::analyze(&cold_changed).expect("cold changed condition analysis");
+    let cold_json = serde_json::to_value(&cold).expect("serialize cold changed results");
+    let after_json =
+        serde_json::to_value(&after.results).expect("serialize cache-miss changed results");
+    assert_eq!(
+        cold_json, after_json,
+        "a resolve-condition cache miss must match a cold analysis with the same config"
+    );
+}
+
 #[test]
 #[expect(
     deprecated,
