@@ -102,8 +102,16 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
     let has_check_issues = result.summary.dead_code_issues > 0;
     let has_health_findings = result.summary.complexity_findings > 0;
     let has_dupe_groups = result.summary.duplication_clone_groups > 0;
+    // Styling is verdict-neutral but must still surface when it is the ONLY
+    // signal (a project clean of dead-code/complexity/dupes but with styling
+    // candidates), else the styling summary is invisible on the common case.
+    let has_styling = result
+        .health
+        .as_ref()
+        .and_then(|h| h.report.css_analytics.as_ref())
+        .is_some_and(|c| styling_candidate_count(&c.summary) > 0);
 
-    if has_check_issues || has_health_findings || has_dupe_groups {
+    if has_check_issues || has_health_findings || has_dupe_groups || has_styling {
         print_audit_findings(result, quiet, explain, show_headers);
     }
 
@@ -183,8 +191,29 @@ pub fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, sh
     print_audit_styling_summary(result, show_headers);
 }
 
-/// One-line styling summary in the audit view: a cleanup-candidate count with a
-/// pointer to `fallow health --css` for detail. Descriptive + verdict-neutral;
+/// Count the styling candidates in a CSS analytics summary (dead surface + token
+/// drift + broken references). Saturating, matching the CSS-analytics
+/// accumulation convention (`css_analytics.rs` uses `saturating_add` throughout).
+fn styling_candidate_count(s: &fallow_output::CssAnalyticsSummary) -> u32 {
+    [
+        s.tailwind_arbitrary_values,
+        s.duplicate_declaration_blocks,
+        s.unreferenced_css_classes,
+        s.unused_theme_tokens,
+        s.unused_font_faces,
+        s.unused_property_registrations,
+        s.unused_layers,
+        s.scoped_unused_classes,
+        s.keyframes_unreferenced,
+        s.keyframes_undefined,
+        s.unresolved_class_references,
+    ]
+    .into_iter()
+    .fold(0u32, u32::saturating_add)
+}
+
+/// One-line styling summary in the audit view: a candidate count with a pointer
+/// to `fallow health --css` for detail. Descriptive + verdict-neutral;
 /// deliberately NOT the A-F styling grade (that stays in `fallow health` for
 /// trending, per the styling-in-audit plan). Gated on the CSS pass having run.
 fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
@@ -194,18 +223,7 @@ fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
     let Some(ref css) = health.report.css_analytics else {
         return;
     };
-    let s = &css.summary;
-    let candidates = s.tailwind_arbitrary_values
-        + s.duplicate_declaration_blocks
-        + s.unreferenced_css_classes
-        + s.unused_theme_tokens
-        + s.unused_font_faces
-        + s.unused_property_registrations
-        + s.unused_layers
-        + s.scoped_unused_classes
-        + s.keyframes_unreferenced
-        + s.keyframes_undefined
-        + s.unresolved_class_references;
+    let candidates = styling_candidate_count(&css.summary);
     if candidates == 0 {
         return;
     }
@@ -218,7 +236,10 @@ fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
     } else {
         "candidates"
     };
-    eprintln!("  {candidates} styling cleanup {noun} (run `fallow health --css` for detail)");
+    outln!(
+        "  {candidates} styling {noun} {}",
+        "(run `fallow health --css` for detail)".dimmed()
+    );
 }
 
 /// Print the TTY-only explain tip above the findings sections.
