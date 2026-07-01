@@ -6,7 +6,7 @@
 //! that consumers read via member access (`import { vars } from './tokens';
 //! vars.color.primary`). This module is the DEFINITION half of the token
 //! blast-radius: it parses JS/TS with oxc, gates recognition on import-binding
-//! provenance (reusing `css_in_js_object::module_library`), and for each
+//! provenance (reusing the sibling `object::module_library`), and for each
 //! recognized token-definition call emits the access BINDING plus the flattened
 //! dotted LEAF token paths (with each leaf's source line). The CONSUMER half (who
 //! reads `vars.color.primary` across modules) is resolved in the analyze layer
@@ -55,7 +55,7 @@ use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::css_in_js_object::{Lib, module_library};
+use super::object::{Lib, module_library};
 
 /// A single defined design token: its dotted LEAF path relative to the access
 /// binding (`color.primary`, or flat `primaryColor` for StyleX), and the 1-based

@@ -1,8 +1,8 @@
 //! CSS and stylesheet extraction helpers owned by the engine boundary.
 
+use fallow_extract::CssInJsObjectSheets;
 use fallow_extract::css::ThemeScan;
 use fallow_extract::css_classes::MarkupClassScan;
-use fallow_extract::css_in_js_object::CssInJsObjectSheets;
 use fallow_extract::sfc::SfcStyle;
 use fallow_extract::tailwind::TailwindArbitraryUse;
 use fallow_types::extract::{CssAnalytics, ExportInfo};

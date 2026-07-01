@@ -84,9 +84,7 @@ use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
 use rustc_hash::FxHashMap;
 
-/// The synthetic selector each lifted style bucket is wrapped in, shared with the
-/// 3b template lifter so both forms produce the same rule shape.
-const WRAPPER: &str = ".fallow-css-in-js";
+use super::shared::{WRAPPER, count_newlines};
 
 /// CSS property names (camelCase) whose numeric values are UNITLESS: a bare
 /// number is the value, not a `px` length. Mirrors React's well-known unitless
@@ -144,7 +142,7 @@ const UNITLESS_PROPERTIES: &[&str] = &[
 /// whether a library's synthetic rules count toward the styling-health structural
 /// grade and duplicate-block fingerprints.
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Lib {
+pub enum Lib {
     /// vanilla-extract (`@vanilla-extract/css` / `/recipes`): real selectors via
     /// `globalStyle` / `selectors`, structure is meaningful.
     VanillaExtract,
@@ -504,7 +502,7 @@ enum CallKind {
 /// than a package name, so any specifier whose path contains a `styled-system`
 /// segment is treated as Panda (still behind the engine's `@pandacss/dev` dep
 /// gate, which decides whether the file is scanned at all).
-pub(crate) fn module_library(specifier: &str) -> Option<Lib> {
+pub fn module_library(specifier: &str) -> Option<Lib> {
     match specifier {
         "@vanilla-extract/css" | "@vanilla-extract/recipes" => Some(Lib::VanillaExtract),
         "@emotion/react" | "@emotion/css" => Some(Lib::Emotion),
@@ -746,10 +744,6 @@ fn sanitize_selector(selector: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
-}
-
-fn count_newlines(s: &str) -> usize {
-    s.bytes().filter(|&b| b == b'\n').count()
 }
 
 #[cfg(all(test, not(miri)))]

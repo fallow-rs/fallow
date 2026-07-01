@@ -22,8 +22,6 @@ pub(crate) mod complexity;
 pub mod css;
 pub mod css_classes;
 pub mod css_in_js;
-pub mod css_in_js_object;
-pub mod css_in_js_tokens;
 pub mod css_metrics;
 pub mod flags;
 pub mod glimmer;
@@ -75,11 +73,9 @@ pub use css::{
 pub use css_classes::{
     MarkupClassScan, MarkupClassToken, is_edit_distance_one, is_typo_edit, scan_markup_class_tokens,
 };
-pub use css_in_js::css_in_js_virtual_stylesheet;
-pub use css_in_js_object::{CssInJsObjectSheets, css_in_js_object_sheets};
-pub use css_in_js_tokens::{
-    CssInJsToken, CssInJsTokenDef, TokenConsumerHit, css_in_js_token_consumers,
-    css_in_js_token_defs,
+pub use css_in_js::{
+    CssInJsObjectSheets, CssInJsToken, CssInJsTokenDef, TokenConsumerHit, css_in_js_object_sheets,
+    css_in_js_token_consumers, css_in_js_token_defs, css_in_js_virtual_stylesheet,
 };
 pub use css_metrics::compute_css_analytics;
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};

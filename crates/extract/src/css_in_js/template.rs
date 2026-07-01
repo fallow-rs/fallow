@@ -26,6 +26,8 @@
 
 use std::sync::LazyLock;
 
+use super::shared::{WRAPPER, count_newlines};
+
 /// A CSS-valid identifier placeholder substituted for every `${...}`
 /// interpolation. Chosen so that a value-position interpolation
 /// (`color: ${x}` -> `color: fallowinterp`) parses as an identifier rather than a
@@ -88,7 +90,8 @@ pub fn css_in_js_virtual_stylesheet(source: &str) -> Option<String> {
         // while a body that already contains full rules (`& { ... }`, `&:hover`)
         // still parses under nesting. The wrapper selector occupies the body's
         // start line; the body keeps its own lines.
-        out.push_str(".fallow-css-in-js{");
+        out.push_str(WRAPPER);
+        out.push('{');
         out.push_str(&body);
         out.push('}');
         current_line += count_newlines(&body);
@@ -202,10 +205,6 @@ fn skip_string(bytes: &[u8], open: usize) -> Option<usize> {
         }
     }
     None
-}
-
-fn count_newlines(s: &str) -> usize {
-    s.bytes().filter(|&b| b == b'\n').count()
 }
 
 #[cfg(all(test, not(miri)))]
