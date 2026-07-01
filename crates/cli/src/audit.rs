@@ -109,6 +109,10 @@ pub struct AuditOptions<'a> {
     pub gate: AuditGate,
     /// Report unused exports in entry files (forwarded to the dead-code sub-pass).
     pub include_entry_exports: bool,
+    /// Run styling analytics (CSS + CSS-in-JS) in the health sub-pass so styling
+    /// signals surface in the audit output. Default on; `--no-css` disables.
+    /// Descriptive + verdict-neutral (never affects the audit verdict / exit code).
+    pub css: bool,
     /// Paid runtime-coverage sidecar input (V8 directory, V8 JSON, or
     /// Istanbul coverage map). Forwarded into the embedded health pass so
     /// audit surfaces the `hot-path-touched` verdict alongside dead-code
@@ -566,6 +570,9 @@ fn build_base_audit_options<'a>(
         coverage_root: opts.coverage_root,
         gate: AuditGate::All,
         include_entry_exports: opts.include_entry_exports,
+        // Base pass does not consume styling in Slice 1 (verdict-neutral, no
+        // introduced-styling delta yet); skip the base CSS re-parse for perf.
+        css: false,
         runtime_coverage: None,
         min_invocations_hot: opts.min_invocations_hot,
         brief: false,
@@ -2024,7 +2031,11 @@ fn build_audit_health_options<'a>(
         ownership: false,
         ownership_emails: None,
         targets: false,
-        css: false,
+        // Styling analytics surface in `fallow audit` so a coding agent gets
+        // styling feedback in the same stream it already reads for dead-code +
+        // complexity. Changed-file-scoped (cheap) + dep-gated; descriptive only
+        // (verdict-neutral). See .plans/styling-findings-in-audit.md (Slice 1).
+        css: opts.css,
         force_full: false,
         score_only_output: false,
         enforce_coverage_gap_gate: false,

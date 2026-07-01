@@ -4214,6 +4214,9 @@ fn run_resolved_audit(
             coverage_root: args.coverage_root.as_deref(),
             gate: args.gate.map_or(inputs.audit_cfg.gate, Into::into),
             include_entry_exports: cli.include_entry_exports,
+            // Styling analytics on by default in `fallow audit` (Slice 1);
+            // descriptive + verdict-neutral. Opt-out flag is a follow-up.
+            css: true,
             runtime_coverage: args.runtime_coverage.as_deref(),
             min_invocations_hot: args.min_invocations_hot,
             brief: args.brief,
@@ -4290,6 +4293,8 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
         coverage_root: None,
         gate: inputs.audit_cfg.gate,
         include_entry_exports: cli.include_entry_exports,
+        // Decision-surface (brief apex) does not render styling; keep it lean.
+        css: false,
         runtime_coverage: None,
         min_invocations_hot: 0,
         brief: true,
