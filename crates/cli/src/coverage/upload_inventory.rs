@@ -22,10 +22,10 @@ use std::process::ExitCode;
 
 use fallow_config::ResolvedConfig;
 use fallow_cov_protocol::{FunctionIdentity, IdentityResolution, function_identity_id};
+use fallow_engine::churn::{ChurnResult, ChurnTrend, FileChurn, analyze_churn_cached, parse_since};
 use fallow_engine::discover::discover_files_with_plugin_scopes;
-use fallow_engine::{
-    ChurnResult, ChurnTrend, FileChurn, analyze_churn_cached, parse_since,
-    source::inventory::{InventoryComplexity, InventoryEntry, walk_source_with_complexity},
+use fallow_engine::source::inventory::{
+    InventoryComplexity, InventoryEntry, walk_source_with_complexity,
 };
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};

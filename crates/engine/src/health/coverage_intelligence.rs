@@ -1033,7 +1033,7 @@ mod tests {
                 lines_deleted: 20,
                 complexity_density: 0.5,
                 fan_in: 3,
-                trend: crate::ChurnTrend::Stable,
+                trend: crate::churn::ChurnTrend::Stable,
                 ownership: Some(OwnershipMetrics {
                     bus_factor: 1,
                     contributor_count: 1,

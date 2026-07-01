@@ -139,7 +139,7 @@ fn run_programmatic_health_on_engine(
         suggestions_enabled: suggestions_enabled(),
         offer_setup: setup_pointer_applicable(&root),
         impact_digest: None,
-        audit_changed: fallow_engine::is_git_repo(&root),
+        audit_changed: fallow_engine::churn::is_git_repo(&root),
     };
     Ok(ProgrammaticHealthRun {
         workspace_diagnostics: result.workspace_diagnostics.clone(),

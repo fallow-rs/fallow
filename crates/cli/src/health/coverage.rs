@@ -956,7 +956,7 @@ fn build_static_signal_index(
         .iter()
         .map(|module| (module.file_id, module))
         .collect();
-    for export in fallow_engine::module_value_exports(graph) {
+    for export in fallow_engine::module_graph::module_value_exports(graph) {
         let Some(&path) = file_paths.get(&export.file_id) else {
             continue;
         };
@@ -996,7 +996,7 @@ fn index_dead_code_signals(
 /// Index one graph value export, including test-referenced state.
 fn index_graph_value_export(
     index: &mut StaticSignalIndex,
-    export: &fallow_engine::ModuleValueExport,
+    export: &fallow_engine::module_graph::ModuleValueExport,
     module: Option<&fallow_types::extract::ModuleInfo>,
     path: &Path,
 ) {

@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::time::Duration;
 
 use fallow_config::OutputFormat;
-use fallow_engine::RetainedModuleGraph;
+use fallow_engine::module_graph::RetainedModuleGraph;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

@@ -11,7 +11,7 @@ use crate::{
 use super::{ProgrammaticResult, duplication, resolve_programmatic_analysis_context};
 
 struct TraceArtifacts {
-    graph: fallow_engine::RetainedModuleGraph,
+    graph: fallow_engine::module_graph::RetainedModuleGraph,
     script_used_packages: FxHashSet<String>,
 }
 
@@ -30,7 +30,7 @@ pub fn run_trace_export(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
-        let output = fallow_engine::trace_export(
+        let output = fallow_engine::trace::trace_export(
             &artifacts.graph,
             session.root(),
             &options.file,
@@ -65,15 +65,16 @@ pub fn run_trace_file(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
-        let output = fallow_engine::trace_file(&artifacts.graph, session.root(), &options.file)
-            .ok_or_else(|| {
-                ProgrammaticError::new(
-                    format!("file '{}' not found in module graph", options.file),
-                    2,
-                )
-                .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
-                .with_context("trace_file")
-            })?;
+        let output =
+            fallow_engine::trace::trace_file(&artifacts.graph, session.root(), &options.file)
+                .ok_or_else(|| {
+                    ProgrammaticError::new(
+                        format!("file '{}' not found in module graph", options.file),
+                        2,
+                    )
+                    .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
+                    .with_context("trace_file")
+                })?;
         Ok(TraceFileProgrammaticOutput { output })
     })
 }
@@ -92,7 +93,7 @@ pub fn run_trace_dependency(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
-        let output = fallow_engine::trace_dependency(
+        let output = fallow_engine::trace::trace_dependency(
             &artifacts.graph,
             session.root(),
             &options.package_name,
@@ -123,11 +124,15 @@ pub fn run_trace_clone(
             .report;
         let (trace, not_found) = match &options.target {
             TraceCloneTarget::Location { file, line } => (
-                fallow_engine::trace_clone(&report, session.root(), file, *line),
+                fallow_engine::trace::trace_clone(&report, session.root(), file, *line),
                 format!("no clone found at {file}:{line}"),
             ),
             TraceCloneTarget::Fingerprint(fingerprint) => (
-                fallow_engine::trace_clone_by_fingerprint(&report, session.root(), fingerprint),
+                fallow_engine::trace::trace_clone_by_fingerprint(
+                    &report,
+                    session.root(),
+                    fingerprint,
+                ),
                 format!("no clone group with fingerprint {fingerprint}"),
             ),
         };

@@ -104,7 +104,7 @@ fn default_workspace_ref_for_next_step(root: &Path) -> Option<String> {
 /// `audit-changed`: gate only the files the current branch changed. `fallow
 /// audit` auto-detects its base, so no ref needs embedding.
 pub fn audit_changed_applicable(root: &Path) -> bool {
-    fallow_engine::is_git_repo(root)
+    fallow_engine::churn::is_git_repo(root)
 }
 
 // ---------------------------------------------------------------------------

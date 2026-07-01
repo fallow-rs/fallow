@@ -36,7 +36,7 @@
 //! can reach the `Skip` arm, and the output is byte-identical to the no-runtime baseline. The free
 //! tier ranks but never skips; safe-skip is runtime-backed only.
 
-use fallow_engine::FocusFileFactsPaths;
+use fallow_engine::module_graph::FocusFileFactsPaths;
 pub use fallow_output::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
 
 /// A unit's score at or above this threshold is labeled [`FocusLabel::ReviewHere`];

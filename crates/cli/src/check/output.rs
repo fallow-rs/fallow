@@ -2,7 +2,7 @@ use std::io::{BufWriter, Write};
 use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_engine::RetainedModuleGraph;
+use fallow_engine::module_graph::RetainedModuleGraph;
 use rustc_hash::FxHashSet;
 
 use super::TraceOptions;
@@ -24,7 +24,7 @@ pub(super) fn handle_trace_output(
                 output,
             ));
         };
-        match fallow_engine::trace_export(graph, root, file_path, export_name) {
+        match fallow_engine::trace::trace_export(graph, root, file_path, export_name) {
             Some(trace) => {
                 report::print_export_trace(&trace, output);
                 return Some(ExitCode::SUCCESS);
@@ -40,7 +40,7 @@ pub(super) fn handle_trace_output(
     }
 
     if let Some(ref file_path) = trace_opts.trace_file {
-        match fallow_engine::trace_file(graph, root, file_path) {
+        match fallow_engine::trace::trace_file(graph, root, file_path) {
             Some(trace) => {
                 report::print_file_trace(&trace, output);
                 return Some(ExitCode::SUCCESS);
@@ -56,13 +56,14 @@ pub(super) fn handle_trace_output(
     }
 
     if let Some(ref pkg_name) = trace_opts.trace_dependency {
-        let trace = fallow_engine::trace_dependency(graph, root, pkg_name, script_used_packages);
+        let trace =
+            fallow_engine::trace::trace_dependency(graph, root, pkg_name, script_used_packages);
         report::print_dependency_trace(&trace, output);
         return Some(ExitCode::SUCCESS);
     }
 
     if let Some(ref file_path) = trace_opts.impact_closure {
-        match fallow_engine::trace_impact_closure(graph, root, file_path) {
+        match fallow_engine::trace::trace_impact_closure(graph, root, file_path) {
             Some(trace) => {
                 report::print_impact_closure_trace(&trace, output);
                 return Some(ExitCode::SUCCESS);
@@ -129,7 +130,8 @@ pub fn run_cross_reference(
     let files = fallow_engine::discover::discover_files_with_plugin_scopes(config);
     let dupe_report =
         fallow_engine::duplicates::find_duplicates(&config.root, &files, &config.duplicates);
-    let cross_ref = fallow_engine::cross_reference(&dupe_report, unfiltered_results);
+    let cross_ref =
+        fallow_engine::cross_reference::cross_reference(&dupe_report, unfiltered_results);
 
     if cross_ref.has_findings() {
         report::print_cross_reference_findings(&cross_ref, &config.root, quiet, config.output);

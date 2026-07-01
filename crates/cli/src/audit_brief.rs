@@ -118,7 +118,7 @@ pub fn build_triage(result: &AuditResult) -> DiffTriage {
 #[must_use]
 pub fn derive_graph_facts(
     results: &AnalysisResults,
-    closure: Option<&fallow_engine::ImpactClosurePaths>,
+    closure: Option<&fallow_engine::module_graph::ImpactClosurePaths>,
 ) -> GraphFacts {
     let mut zones: FxHashSet<String> = FxHashSet::default();
     for finding in &results.boundary_violations {
@@ -1144,7 +1144,7 @@ mod tests {
 
     #[test]
     fn derive_graph_facts_populates_reachable_from_from_closure() {
-        use fallow_engine::{CoordinationGapPaths, ImpactClosurePaths};
+        use fallow_engine::module_graph::{CoordinationGapPaths, ImpactClosurePaths};
         let results = AnalysisResults::default();
         let closure = ImpactClosurePaths {
             in_diff: vec!["src/core.ts".to_string()],

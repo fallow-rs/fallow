@@ -2212,7 +2212,7 @@ fn signal_test_helper() -> ExitCode {
 }
 
 fn install_spawn_hooks() {
-    fallow_engine::set_churn_spawn_hook(signal::scoped_child::output);
+    fallow_engine::churn::set_spawn_hook(signal::scoped_child::output);
     fallow_engine::changed_files::set_spawn_hook(signal::scoped_child::output);
 }
 

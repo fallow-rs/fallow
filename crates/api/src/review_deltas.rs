@@ -79,7 +79,7 @@ pub fn cycle_keys(findings: &[CircularDependencyFinding], root: &Path) -> FxHash
 /// entry set) into the retained graph's public export key query.
 #[must_use]
 pub fn public_export_keys_for(
-    graph: &fallow_engine::RetainedModuleGraph,
+    graph: &fallow_engine::module_graph::RetainedModuleGraph,
     config: &fallow_config::ResolvedConfig,
     root_pkg: Option<&fallow_config::PackageJson>,
     workspaces: &[fallow_config::WorkspaceInfo],

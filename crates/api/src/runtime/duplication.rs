@@ -93,7 +93,7 @@ pub(super) fn run_duplication_with_session(
         clone_fingerprints: &clone_fingerprints,
         offer_setup: setup_pointer_applicable(root),
         impact_digest: None,
-        audit_changed: fallow_engine::is_git_repo(root),
+        audit_changed: fallow_engine::churn::is_git_repo(root),
     });
     let output: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {

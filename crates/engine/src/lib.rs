@@ -22,13 +22,14 @@ use std::path::Path;
 
 use rustc_hash::FxHashMap;
 
+use crate::module_graph::RetainedModuleGraph;
+
 pub mod baseline;
 pub mod changed_files;
-#[path = "churn.rs"]
-mod churn_impl;
+pub mod churn;
 pub mod codeowners;
 mod core_backend;
-mod cross_reference;
+pub mod cross_reference;
 mod css;
 pub mod dead_code;
 pub mod discover;
@@ -39,7 +40,7 @@ mod flags;
 #[path = "git_env.rs"]
 mod git_env_impl;
 pub mod health;
-mod module_graph;
+pub mod module_graph;
 pub mod plugins;
 pub mod project_config;
 mod public_api;
@@ -48,16 +49,11 @@ mod security;
 pub mod session;
 pub mod source;
 mod suppress;
-mod trace;
-mod trace_chain;
+pub mod trace;
+pub mod trace_chain;
 pub mod validate;
 pub mod vital_signs;
 
-pub use churn_impl::{
-    AuthorContribution, ChurnResult, ChurnTrend, FileChurn, SinceDuration, analyze_churn,
-    analyze_churn_cached, is_git_repo, parse_since, set_spawn_hook as set_churn_spawn_hook,
-};
-pub use cross_reference::{CombinedFinding, CrossReferenceResult, DeadCodeKind, cross_reference};
 pub use error::emit_error;
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
@@ -66,13 +62,6 @@ pub use flags::{
     FeatureFlagsAnalysis, analyze_feature_flags, builtin_env_prefixes, builtin_sdk_providers,
 };
 pub use git_env_impl::{AMBIENT_GIT_ENV_VARS, clear_ambient_git_env};
-pub use module_graph::{
-    CoordinationGapPaths, DirectImporterSummary, FocusFileFactsPaths, ImpactClosurePaths,
-    ImportedSymbolSummary, ModuleValueExport, PartitionOrderPaths, RetainedModuleGraph,
-    ReviewUnitPaths, export_lines_for_changed_paths, focus_facts_for_changed_paths,
-    impact_closure_for_changed_paths, internal_consumers_for_changed_paths, module_value_exports,
-    partition_order_for_changed_paths,
-};
 pub use public_api::public_api_package_entry_points;
 pub use results::{
     DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
@@ -80,13 +69,6 @@ pub use results::{
 };
 pub use security::{derive_security_severity, security_catalogue_title};
 pub use suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
-pub use trace::{
-    CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ImpactClosureGap,
-    ImpactClosureTrace, PipelineTimings, ReExportChain, TracedCloneGroup, TracedExport,
-    TracedReExport, trace_clone, trace_clone_by_fingerprint, trace_dependency, trace_export,
-    trace_file, trace_impact_closure,
-};
-pub use trace_chain::trace_symbol_chain;
 
 /// Result alias for typed engine operations.
 pub type EngineResult<T> = Result<T, EngineError>;
@@ -434,7 +416,7 @@ mod tests {
             },
         )
         .expect("project config loads");
-        let trace = crate::trace_symbol_chain(
+        let trace = crate::trace_chain::trace_symbol_chain(
             &project_config.config,
             fallow_types::trace_chain::SymbolChainQuery {
                 file: "src/util.ts",

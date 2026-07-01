@@ -326,7 +326,7 @@ pub struct CheckResult {
     /// audit brief path from the retained graph against the changed-file set;
     /// `None` outside the brief path. Holds root-relative paths so it survives
     /// the graph drop and serializes directly.
-    pub impact_closure: Option<fallow_engine::ImpactClosurePaths>,
+    pub impact_closure: Option<fallow_engine::module_graph::ImpactClosurePaths>,
     /// Exports-aware public-export key set for the review brief: the
     /// `<rel_path>::<name>` keys reachable through `package.json` `exports` +
     /// re-export reachability. Computed from the retained graph on the brief
@@ -340,14 +340,14 @@ pub struct CheckResult {
     /// changed-file set, before the graph is dropped; `None` outside the brief
     /// path. Holds root-relative paths so it survives the graph drop and
     /// serializes directly.
-    pub partition_order: Option<fallow_engine::PartitionOrderPaths>,
+    pub partition_order: Option<fallow_engine::module_graph::PartitionOrderPaths>,
     /// Per-changed-file graph facts for the review brief's stage 4 weighted
     /// focus map: fan-in/out (blast radius) plus the dynamic-dispatch and
     /// re-export-indirection confidence-flag signals. Computed from the retained
     /// graph on the brief path against the changed-file set, before the graph is
     /// dropped; `None` outside the brief path. Holds root-relative paths so it
     /// survives the graph drop.
-    pub focus_facts: Option<Vec<fallow_engine::FocusFileFactsPaths>>,
+    pub focus_facts: Option<Vec<fallow_engine::module_graph::FocusFileFactsPaths>>,
     /// Per-changed-file `rel_path -> [(exported-symbol, 1-based declaration line)]`
     /// map for the decision surface, so a coordination / public-API decision can
     /// anchor an inline comment to the exact export line. Computed from the
@@ -363,7 +363,7 @@ pub struct CheckResult {
 
 struct CheckAnalysisData {
     results: AnalysisResults,
-    trace_graph: Option<fallow_engine::RetainedModuleGraph>,
+    trace_graph: Option<fallow_engine::module_graph::RetainedModuleGraph>,
     trace_timings: Option<fallow_types::trace::PipelineTimings>,
     retained_modules: Option<Vec<ModuleInfo>>,
     retained_files: Option<Vec<DiscoveredFile>>,
@@ -437,7 +437,7 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
 fn handle_trace_side_effects(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
-    trace_graph: Option<&fallow_engine::RetainedModuleGraph>,
+    trace_graph: Option<&fallow_engine::module_graph::RetainedModuleGraph>,
     trace_timings: Option<&fallow_types::trace::PipelineTimings>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
 ) -> Result<(), ExitCode> {
@@ -582,7 +582,7 @@ fn regression_config_path(opts: &CheckOptions<'_>) -> std::path::PathBuf {
 
 fn build_shared_parse_data(
     results: &AnalysisResults,
-    trace_graph: Option<fallow_engine::RetainedModuleGraph>,
+    trace_graph: Option<fallow_engine::module_graph::RetainedModuleGraph>,
     retained_modules: Option<Vec<ModuleInfo>>,
     retained_files: Option<Vec<DiscoveredFile>>,
     script_used_packages: &rustc_hash::FxHashSet<String>,

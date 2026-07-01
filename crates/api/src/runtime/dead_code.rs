@@ -103,7 +103,7 @@ pub(super) fn run_dead_code_with_session(
         offer_setup: setup_pointer_applicable(root),
         impact_digest: None,
         workspace_ref: default_workspace_ref(root).as_deref(),
-        audit_changed: fallow_engine::is_git_repo(root),
+        audit_changed: fallow_engine::churn::is_git_repo(root),
     });
     let output = build_check_output(CheckOutputInput {
         schema_version: CHECK_SCHEMA_VERSION,

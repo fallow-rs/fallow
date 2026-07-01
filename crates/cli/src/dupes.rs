@@ -107,22 +107,23 @@ fn run_clone_trace(
     trace_spec: &str,
     output: OutputFormat,
 ) -> ExitCode {
-    let (trace_result, not_found) =
-        if let Some(fp) = trace_spec.strip_prefix(fallow_engine::duplicates::FINGERPRINT_PREFIX) {
-            let fingerprint = format!("{}{fp}", fallow_engine::duplicates::FINGERPRINT_PREFIX);
-            let result = fallow_engine::trace_clone_by_fingerprint(report, root, &fingerprint);
-            (
-                result,
-                format!("no clone group with fingerprint {fingerprint}"),
-            )
-        } else {
-            let (file_path, line) = match parse_trace_spec(trace_spec) {
-                Ok(parsed) => parsed,
-                Err(msg) => return emit_error(msg, 2, output),
-            };
-            let result = fallow_engine::trace_clone(report, root, file_path, line);
-            (result, format!("no clone found at {file_path}:{line}"))
+    let (trace_result, not_found) = if let Some(fp) =
+        trace_spec.strip_prefix(fallow_engine::duplicates::FINGERPRINT_PREFIX)
+    {
+        let fingerprint = format!("{}{fp}", fallow_engine::duplicates::FINGERPRINT_PREFIX);
+        let result = fallow_engine::trace::trace_clone_by_fingerprint(report, root, &fingerprint);
+        (
+            result,
+            format!("no clone group with fingerprint {fingerprint}"),
+        )
+    } else {
+        let (file_path, line) = match parse_trace_spec(trace_spec) {
+            Ok(parsed) => parsed,
+            Err(msg) => return emit_error(msg, 2, output),
         };
+        let result = fallow_engine::trace::trace_clone(report, root, file_path, line);
+        (result, format!("no clone found at {file_path}:{line}"))
+    };
     if trace_result.matched_instance.is_none() {
         return emit_error(&not_found, 2, output);
     }

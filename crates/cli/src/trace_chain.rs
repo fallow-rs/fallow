@@ -76,7 +76,7 @@ pub fn run_trace(opts: &TraceChainOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let trace = match fallow_engine::trace_symbol_chain(
+    let trace = match fallow_engine::trace_chain::trace_symbol_chain(
         &config,
         SymbolChainQuery {
             file: &file,

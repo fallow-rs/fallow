@@ -1005,14 +1005,14 @@ fn compute_brief_impact_closure(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
-) -> Option<fallow_engine::ImpactClosurePaths> {
+) -> Option<fallow_engine::module_graph::ImpactClosurePaths> {
     let graph = check
         .shared_parse
         .as_ref()
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::impact_closure_for_changed_paths(graph, root, changed_files)
+    fallow_engine::module_graph::impact_closure_for_changed_paths(graph, root, changed_files)
 }
 
 /// Compute the partition + order for the review brief's stage 2 from the
@@ -1026,14 +1026,14 @@ fn compute_brief_partition_order(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
-) -> Option<fallow_engine::PartitionOrderPaths> {
+) -> Option<fallow_engine::module_graph::PartitionOrderPaths> {
     let graph = check
         .shared_parse
         .as_ref()
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::partition_order_for_changed_paths(graph, root, changed_files)
+    fallow_engine::module_graph::partition_order_for_changed_paths(graph, root, changed_files)
 }
 
 /// Precompute the per-changed-file `rel_path -> [(export-name, 1-based line)]` map
@@ -1051,7 +1051,7 @@ fn compute_brief_export_lines(
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::export_lines_for_changed_paths(graph, root, changed_files)
+    fallow_engine::module_graph::export_lines_for_changed_paths(graph, root, changed_files)
 }
 
 /// Precompute the per-anchor honest consumer count for the decision surface:
@@ -1073,7 +1073,7 @@ fn compute_brief_internal_consumers(
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::internal_consumers_for_changed_paths(graph, root, changed_files)
+    fallow_engine::module_graph::internal_consumers_for_changed_paths(graph, root, changed_files)
 }
 
 /// Compute the per-file focus graph facts (fan-in/out + the dynamic-dispatch /
@@ -1089,14 +1089,14 @@ fn compute_brief_focus_facts(
     root: &std::path::Path,
     check: &CheckResult,
     changed_files: &FxHashSet<PathBuf>,
-) -> Option<Vec<fallow_engine::FocusFileFactsPaths>> {
+) -> Option<Vec<fallow_engine::module_graph::FocusFileFactsPaths>> {
     let graph = check
         .shared_parse
         .as_ref()
         .and_then(|sp| sp.analysis_output.as_ref())
         .and_then(|out| out.graph.as_ref())?;
 
-    fallow_engine::focus_facts_for_changed_paths(graph, root, changed_files)
+    fallow_engine::module_graph::focus_facts_for_changed_paths(graph, root, changed_files)
 }
 
 /// Run the audit pipeline: resolve base ref, run analyses, compute verdict.
@@ -1497,7 +1497,7 @@ fn compute_decision_surface(
 /// the blast and the union of consumed symbols as the contract. Sorted by changed
 /// file for deterministic output.
 fn aggregate_coordination_gaps(
-    gaps: &[fallow_engine::CoordinationGapPaths],
+    gaps: &[fallow_engine::module_graph::CoordinationGapPaths],
 ) -> Vec<crate::audit_decision_surface::CoordinationAnchor> {
     use crate::audit_decision_surface::CoordinationAnchor;
     let mut by_file: FxHashMap<String, (u64, FxHashSet<String>)> = FxHashMap::default();
