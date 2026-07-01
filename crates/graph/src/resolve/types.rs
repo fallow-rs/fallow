@@ -10,7 +10,7 @@ use serde_json::Value;
 use fallow_types::discover::FileId;
 
 /// Result of resolving an import specifier.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ResolveResult {
     /// Resolved to a file within the project.
     InternalModule(FileId),

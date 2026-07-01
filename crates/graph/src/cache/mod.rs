@@ -8,7 +8,11 @@
 use std::path::Path;
 
 use fallow_types::discover::{DiscoveredFile, StableFileKey};
+use fallow_types::extract::{ImportInfo, ReExportInfo};
 use fallow_types::source_fingerprint::SourceFingerprint;
+use oxc_span::Span;
+
+use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 
 mod store;
 
@@ -20,7 +24,281 @@ pub use store::GraphCacheStore;
 /// graph types that derive serde for the cache, the manifest types, or the
 /// store envelope) changes, so a stale `graph-cache.bin` written by an older
 /// binary is rejected rather than deserialized into the wrong shape.
-pub const GRAPH_CACHE_VERSION: u32 = 1;
+pub const GRAPH_CACHE_VERSION: u32 = 2;
+
+/// Cached import edge that can be restored without re-running resolution.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CachedResolvedImport {
+    /// Import metadata mirrored from extraction or resolver synthesis.
+    pub info: CachedImportInfo,
+    /// Resolved target for this import edge.
+    pub target: ResolveResult,
+}
+
+impl From<&ResolvedImport> for CachedResolvedImport {
+    fn from(import: &ResolvedImport) -> Self {
+        Self {
+            info: CachedImportInfo::from(&import.info),
+            target: import.target.clone(),
+        }
+    }
+}
+
+impl From<CachedResolvedImport> for ResolvedImport {
+    fn from(import: CachedResolvedImport) -> Self {
+        Self {
+            info: import.info.into(),
+            target: import.target,
+        }
+    }
+}
+
+/// Cached re-export edge that can be restored without re-running resolution.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CachedResolvedReExport {
+    /// Re-export metadata mirrored from extraction.
+    pub info: CachedReExportInfo,
+    /// Resolved target for this re-export source.
+    pub target: ResolveResult,
+}
+
+impl From<&ResolvedReExport> for CachedResolvedReExport {
+    fn from(re_export: &ResolvedReExport) -> Self {
+        Self {
+            info: CachedReExportInfo::from(&re_export.info),
+            target: re_export.target.clone(),
+        }
+    }
+}
+
+impl From<CachedResolvedReExport> for ResolvedReExport {
+    fn from(re_export: CachedResolvedReExport) -> Self {
+        Self {
+            info: re_export.info.into(),
+            target: re_export.target,
+        }
+    }
+}
+
+/// Cache-friendly mirror of [`ImportInfo`].
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CachedImportInfo {
+    /// Import source specifier.
+    pub source: String,
+    /// Imported binding shape.
+    pub imported_name: fallow_types::extract::ImportedName,
+    /// Local binding name.
+    pub local_name: String,
+    /// Whether this import is type-only.
+    pub is_type_only: bool,
+    /// Whether this import originated from a style context.
+    pub from_style: bool,
+    /// Span of the full import declaration.
+    pub span: [u32; 2],
+    /// Span of the import source literal.
+    pub source_span: [u32; 2],
+}
+
+impl From<&ImportInfo> for CachedImportInfo {
+    fn from(info: &ImportInfo) -> Self {
+        Self {
+            source: info.source.clone(),
+            imported_name: info.imported_name.clone(),
+            local_name: info.local_name.clone(),
+            is_type_only: info.is_type_only,
+            from_style: info.from_style,
+            span: span_to_pair(info.span),
+            source_span: span_to_pair(info.source_span),
+        }
+    }
+}
+
+impl From<CachedImportInfo> for ImportInfo {
+    fn from(info: CachedImportInfo) -> Self {
+        Self {
+            source: info.source,
+            imported_name: info.imported_name,
+            local_name: info.local_name,
+            is_type_only: info.is_type_only,
+            from_style: info.from_style,
+            span: pair_to_span(info.span),
+            source_span: pair_to_span(info.source_span),
+        }
+    }
+}
+
+/// Cache-friendly mirror of [`ReExportInfo`].
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CachedReExportInfo {
+    /// Re-export source specifier.
+    pub source: String,
+    /// Imported name from the source module.
+    pub imported_name: String,
+    /// Exported name from this module.
+    pub exported_name: String,
+    /// Whether this re-export is type-only.
+    pub is_type_only: bool,
+    /// Span of the re-export declaration.
+    pub span: [u32; 2],
+}
+
+impl From<&ReExportInfo> for CachedReExportInfo {
+    fn from(info: &ReExportInfo) -> Self {
+        Self {
+            source: info.source.clone(),
+            imported_name: info.imported_name.clone(),
+            exported_name: info.exported_name.clone(),
+            is_type_only: info.is_type_only,
+            span: span_to_pair(info.span),
+        }
+    }
+}
+
+impl From<CachedReExportInfo> for ReExportInfo {
+    fn from(info: CachedReExportInfo) -> Self {
+        Self {
+            source: info.source,
+            imported_name: info.imported_name,
+            exported_name: info.exported_name,
+            is_type_only: info.is_type_only,
+            span: pair_to_span(info.span),
+        }
+    }
+}
+
+/// Cached resolver output for one module.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CachedResolvedModule {
+    /// File identifier of the source module.
+    pub file_id: fallow_types::discover::FileId,
+    /// Static import and require edges after resolution.
+    pub resolved_imports: Vec<CachedResolvedImport>,
+    /// Literal dynamic import edges after resolution.
+    pub resolved_dynamic_imports: Vec<CachedResolvedImport>,
+    /// Re-export source edges after resolution.
+    pub re_exports: Vec<CachedResolvedReExport>,
+    /// Dynamic import pattern targets, aligned with current extracted patterns.
+    pub resolved_dynamic_pattern_targets: Vec<Vec<fallow_types::discover::FileId>>,
+}
+
+impl From<&ResolvedModule> for CachedResolvedModule {
+    fn from(module: &ResolvedModule) -> Self {
+        Self {
+            file_id: module.file_id,
+            resolved_imports: module
+                .resolved_imports
+                .iter()
+                .map(CachedResolvedImport::from)
+                .collect(),
+            resolved_dynamic_imports: module
+                .resolved_dynamic_imports
+                .iter()
+                .map(CachedResolvedImport::from)
+                .collect(),
+            re_exports: module
+                .re_exports
+                .iter()
+                .map(CachedResolvedReExport::from)
+                .collect(),
+            resolved_dynamic_pattern_targets: module
+                .resolved_dynamic_patterns
+                .iter()
+                .map(|(_, targets)| targets.clone())
+                .collect(),
+        }
+    }
+}
+
+/// Convert resolved modules into the compact graph-cache resolver payload.
+#[must_use]
+pub fn cache_resolved_modules(resolved: &[ResolvedModule]) -> Vec<CachedResolvedModule> {
+    resolved.iter().map(CachedResolvedModule::from).collect()
+}
+
+/// Restore resolved modules from cached resolver payloads and current parsed modules.
+///
+/// Returns `None` if the payload no longer aligns with the current parse result.
+/// A normal graph-cache manifest hit should keep these aligned; this extra check
+/// keeps corrupt or hand-edited cache files on the safe miss path.
+#[must_use]
+pub fn restore_resolved_modules(
+    modules: &[fallow_types::extract::ModuleInfo],
+    files: &[DiscoveredFile],
+    cached: &[CachedResolvedModule],
+) -> Option<Vec<ResolvedModule>> {
+    if modules.len() != cached.len() {
+        return None;
+    }
+
+    let mut by_file_id: rustc_hash::FxHashMap<_, _> = modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
+    let path_by_file_id: rustc_hash::FxHashMap<_, _> = files
+        .iter()
+        .map(|file| (file.id, file.path.clone()))
+        .collect();
+
+    cached
+        .iter()
+        .map(|entry| {
+            let module = by_file_id.remove(&entry.file_id)?;
+            let path = path_by_file_id.get(&entry.file_id)?.clone();
+            if entry.resolved_dynamic_pattern_targets.len() != module.dynamic_import_patterns.len()
+            {
+                return None;
+            }
+
+            Some(ResolvedModule {
+                file_id: module.file_id,
+                path,
+                exports: module.exports.clone(),
+                re_exports: entry
+                    .re_exports
+                    .iter()
+                    .cloned()
+                    .map(ResolvedReExport::from)
+                    .collect(),
+                resolved_imports: entry
+                    .resolved_imports
+                    .iter()
+                    .cloned()
+                    .map(ResolvedImport::from)
+                    .collect(),
+                resolved_dynamic_imports: entry
+                    .resolved_dynamic_imports
+                    .iter()
+                    .cloned()
+                    .map(ResolvedImport::from)
+                    .collect(),
+                resolved_dynamic_patterns: module
+                    .dynamic_import_patterns
+                    .iter()
+                    .cloned()
+                    .zip(entry.resolved_dynamic_pattern_targets.iter().cloned())
+                    .collect(),
+                member_accesses: module.member_accesses.clone(),
+                semantic_facts: module.semantic_facts.clone(),
+                whole_object_uses: module.whole_object_uses.clone(),
+                has_cjs_exports: module.has_cjs_exports,
+                has_angular_component_template_url: module.has_angular_component_template_url,
+                unused_import_bindings: module.unused_import_bindings.iter().cloned().collect(),
+                type_referenced_import_bindings: module.type_referenced_import_bindings.clone(),
+                value_referenced_import_bindings: module.value_referenced_import_bindings.clone(),
+                namespace_object_aliases: module.namespace_object_aliases.clone(),
+                exported_factory_returns: module.exported_factory_returns.clone(),
+            })
+        })
+        .collect()
+}
+
+fn span_to_pair(span: Span) -> [u32; 2] {
+    [span.start, span.end]
+}
+
+fn pair_to_span(pair: [u32; 2]) -> Span {
+    Span::new(pair[0], pair[1])
+}
 
 /// Serialize an [`oxc_span::Span`] as a `[start, end]` `u32` pair.
 ///

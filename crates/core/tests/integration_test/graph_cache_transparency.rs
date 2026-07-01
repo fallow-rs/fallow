@@ -268,6 +268,37 @@ fn file_rename_misses_cache_and_reflects_new_path() {
     );
 }
 
+#[test]
+#[expect(
+    deprecated,
+    reason = "trace timings are still the internal contract for this cache performance gate"
+)]
+fn warm_graph_cache_hit_skips_import_resolution() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_tree(&fixture_path("barrel-exports"), &root);
+    let cache_dir = temp.path().join("cache");
+
+    let config = create_config_with_cache(root, cache_dir);
+
+    let cold = fallow_core::analyze_with_trace(&config).expect("cold analysis");
+    let warm = fallow_core::analyze_with_trace(&config).expect("warm analysis");
+
+    let cold_json = serde_json::to_value(&cold.results).expect("serialize cold results");
+    let warm_json = serde_json::to_value(&warm.results).expect("serialize warm results");
+    assert_eq!(
+        cold_json, warm_json,
+        "warm graph-cache hit must preserve analysis output"
+    );
+
+    let warm_timings = warm.timings.expect("trace timings retained");
+    assert!(
+        warm_timings.resolve_imports_ms.abs() <= f64::EPSILON,
+        "warm graph-cache hit must skip import resolution, got {}ms",
+        warm_timings.resolve_imports_ms
+    );
+}
+
 /// Resolve a real-world benchmark fixture path. These are gitignored symlinks
 /// that may be absent on a fresh checkout, so callers skip when missing.
 fn benchmark_fixture_path(name: &str) -> std::path::PathBuf {

@@ -681,9 +681,25 @@ impl<'a> AnalysisSession<'a> {
         };
 
         let entry_points = discover_analysis_entry_points(&shared);
-        let resolved = resolve_analysis_imports_timed(&shared, &modules);
-        let graph =
-            build_analysis_graph_timed(&shared, &resolved.resolved, &entry_points, &modules);
+        let (resolved, graph) = if let Some(hit) =
+            try_load_analysis_graph_cache(&shared, &entry_points, &modules)
+        {
+            (
+                TimedResolvedModules {
+                    resolved: hit.resolved,
+                    elapsed_ms: 0.0,
+                },
+                TimedGraph {
+                    graph: hit.graph,
+                    elapsed_ms: hit.elapsed_ms,
+                },
+            )
+        } else {
+            let resolved = resolve_analysis_imports_timed(&shared, &modules);
+            let graph =
+                build_analysis_graph_timed(&shared, &resolved.resolved, &entry_points, &modules);
+            (resolved, graph)
+        };
         release_resolution_payloads(&mut modules);
         let analysis = analyze_dead_code_timed(
             &shared,
@@ -1083,6 +1099,12 @@ struct TimedGraph {
     elapsed_ms: f64,
 }
 
+struct GraphCacheHit {
+    graph: graph::ModuleGraph,
+    resolved: Vec<resolve::ResolvedModule>,
+    elapsed_ms: f64,
+}
+
 struct TimedAnalysis {
     result: AnalysisResults,
     elapsed_ms: f64,
@@ -1112,8 +1134,24 @@ fn run_reused_analysis_core(input: &ReusedAnalysisCoreInput<'_>) -> ReusedAnalys
     };
 
     let entry_points = discover_analysis_entry_points(&shared);
-    let resolved = resolve_analysis_imports_timed(&shared, modules);
-    let graph = build_analysis_graph_timed(&shared, &resolved.resolved, &entry_points, modules);
+    let (resolved, graph) = if let Some(hit) =
+        try_load_analysis_graph_cache(&shared, &entry_points, modules)
+    {
+        (
+            TimedResolvedModules {
+                resolved: hit.resolved,
+                elapsed_ms: 0.0,
+            },
+            TimedGraph {
+                graph: hit.graph,
+                elapsed_ms: hit.elapsed_ms,
+            },
+        )
+    } else {
+        let resolved = resolve_analysis_imports_timed(&shared, modules);
+        let graph = build_analysis_graph_timed(&shared, &resolved.resolved, &entry_points, modules);
+        (resolved, graph)
+    };
 
     let mut analysis_modules = modules.to_vec();
     release_resolution_payloads(&mut analysis_modules);
@@ -1157,6 +1195,38 @@ fn discover_analysis_entry_points(input: &AnalysisCoreSharedInput<'_>) -> TimedE
         count,
         elapsed_ms,
     }
+}
+
+fn try_load_analysis_graph_cache(
+    input: &AnalysisCoreSharedInput<'_>,
+    entry_points: &TimedEntryPoints,
+    modules: &[extract::ModuleInfo],
+) -> Option<GraphCacheHit> {
+    if input.config.no_cache {
+        return None;
+    }
+
+    let t = Instant::now();
+    input.progress.set_stage("loading module graph cache...");
+    let current = build_graph_cache_manifest(
+        input.config,
+        input.plugin_result,
+        &entry_points.entry_points,
+        input.files,
+    );
+    let store = graph_cache::GraphCacheStore::load(&input.config.cache_dir)?;
+    if !store.manifest.matches_inputs(&current) {
+        return None;
+    }
+    let resolved =
+        graph_cache::restore_resolved_modules(modules, input.files, &store.resolved_modules)?;
+    tracing::debug!("Graph cache hit: skipping import resolution and graph build");
+
+    Some(GraphCacheHit {
+        graph: store.graph,
+        resolved,
+        elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
+    })
 }
 
 fn resolve_analysis_imports_timed(
@@ -1557,32 +1627,23 @@ struct BuildAnalysisGraphInput<'a> {
     workspaces: &'a [fallow_config::WorkspaceInfo],
 }
 
-/// Build the analysis graph, transparently backed by a persisted graph cache.
+/// Build the analysis graph and persist it for the next identical run.
 ///
-/// On a re-run whose file set + fingerprints + graph-affecting options are
-/// byte-identical to the previous run, the previously-built `ModuleGraph` is
-/// loaded from `.fallow/graph-cache.bin` and the (potentially large) build is
-/// skipped. The persisted graph already includes the `credit_*` post-build
-/// steps, so the cache hit returns it directly; a miss builds fresh, runs both
-/// credit steps, and persists for next time. The cache is gated on
-/// `config.no_cache` (same flag as the extraction cache) and is a strict
-/// performance optimization: a cache hit produces an identical `ModuleGraph`,
-/// so analysis results are unchanged (the mandatory correctness gate).
+/// The warm hit path happens before import resolution in
+/// `try_load_analysis_graph_cache`. This miss path always builds fresh, runs
+/// both credit steps, and persists the graph plus resolver outputs for next
+/// time. The cache is gated on `config.no_cache` and is a strict performance
+/// optimization: a cache hit produces identical analysis results.
 fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGraph {
     let caching_enabled = !input.config.no_cache;
-
-    let current_manifest = caching_enabled.then(|| build_graph_cache_manifest(input));
-
-    if let Some(current) = current_manifest.as_ref()
-        && let Some(store) = graph_cache::GraphCacheStore::load(&input.config.cache_dir)
-        && store.manifest.matches_inputs(current)
-    {
-        // Cache hit: the persisted graph already includes the post-build credit
-        // steps and a reconstructed `namespace_imported` bitset (rebuilt inside
-        // `GraphCacheStore::load`), so it is returned verbatim.
-        tracing::debug!("Graph cache hit: skipping graph build");
-        return store.graph;
-    }
+    let current_manifest = caching_enabled.then(|| {
+        build_graph_cache_manifest(
+            input.config,
+            input.plugin_result,
+            input.entry_points,
+            input.files,
+        )
+    });
 
     let mut graph = graph::ModuleGraph::build_with_reachability_roots(
         input.resolved,
@@ -1599,6 +1660,7 @@ fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGra
             version: graph_cache::GRAPH_CACHE_VERSION,
             manifest,
             graph,
+            resolved_modules: graph_cache::cache_resolved_modules(input.resolved),
         };
         store.save(&input.config.cache_dir);
         // `save` borrows the store, so the freshly built graph is moved back out
@@ -1614,26 +1676,24 @@ fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGra
 /// Build the current `GraphCacheManifest` from the run's discovered files and
 /// graph-affecting option hashes.
 fn build_graph_cache_manifest(
-    input: &BuildAnalysisGraphInput<'_>,
+    config: &ResolvedConfig,
+    plugin_result: &plugins::AggregatedPluginResult,
+    entry_points: &discover::CategorizedEntryPoints,
+    files: &[discover::DiscoveredFile],
 ) -> graph_cache::GraphCacheManifest {
     let mode = graph_cache::GraphCacheMode::new(
-        resolver_options_hash(input.config),
-        entry_points_hash(input.entry_points),
-        plugin_config_hash(input.plugin_result),
+        resolver_options_hash(config),
+        entry_points_hash(entry_points),
+        plugin_config_hash(plugin_result),
     );
-    graph_cache::GraphCacheManifest::from_discovered_files(
-        &input.config.root,
-        input.files,
-        mode,
-        |path| {
-            std::fs::metadata(path).map_or(
-                fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
-                |metadata| {
-                    fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata)
-                },
-            )
-        },
-    )
+    graph_cache::GraphCacheManifest::from_discovered_files(&config.root, files, mode, |path| {
+        std::fs::metadata(path).map_or(
+            fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
+            |metadata| {
+                fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata)
+            },
+        )
+    })
 }
 
 /// Hash the resolver-affecting options: the project root, extraction config
