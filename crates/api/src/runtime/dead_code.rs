@@ -70,6 +70,17 @@ fn run_dead_code_inner(
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let start = Instant::now();
     let session = load_dead_code_session(options, resolved)?;
+    run_dead_code_with_session(options, resolved, &session, None, post_filter, start)
+}
+
+pub(super) fn run_dead_code_with_session(
+    options: &DeadCodeOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    changed_files: Option<&FxHashSet<std::path::PathBuf>>,
+    post_filter: impl FnOnce(&mut AnalysisResults),
+    start: Instant,
+) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let analysis = session.analyze_dead_code().map_err(|err| {
         ProgrammaticError::new(format!("dead-code analysis failed: {err}"), 2)
             .with_code("FALLOW_DEAD_CODE_FAILED")
@@ -77,7 +88,7 @@ fn run_dead_code_inner(
     })?;
     let mut results = analysis.results;
 
-    apply_dead_code_scope(options, resolved, &session, &mut results)?;
+    apply_dead_code_scope(options, resolved, session, changed_files, &mut results)?;
     apply_dead_code_filters(&options.filters, &mut results);
     post_filter(&mut results);
 
@@ -203,13 +214,19 @@ fn apply_dead_code_scope(
     options: &DeadCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
+    changed_files: Option<&FxHashSet<std::path::PathBuf>>,
     results: &mut AnalysisResults,
 ) -> ProgrammaticResult<()> {
     if let Some(workspace_roots) = resolved.workspace_roots.as_ref() {
         fallow_engine::filter_to_workspaces(results, workspace_roots);
     }
-    if let Some(changed_files) = changed_files_for_run(resolved)? {
-        fallow_engine::filter_by_changed_files(results, &changed_files);
+    let resolved_changed_files = if changed_files.is_some() {
+        None
+    } else {
+        changed_files_for_run(resolved)?
+    };
+    if let Some(changed_files) = changed_files.or(resolved_changed_files.as_ref()) {
+        fallow_engine::filter_by_changed_files(results, changed_files);
     }
     if let Some(diff) = resolved.diff.as_ref() {
         filter_dead_code_by_diff(results, diff, session.root());

@@ -7,6 +7,7 @@ use fallow_output::{
     dupes_meta,
 };
 use fallow_types::output_format::OutputFormat;
+use rustc_hash::FxHashSet;
 
 use crate::{
     DupesReportPayload, DuplicationGroup, DuplicationMode, DuplicationOptions,
@@ -41,10 +42,25 @@ fn run_duplication_inner(
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let start = Instant::now();
     let session = load_duplication_session(options, resolved)?;
+    run_duplication_with_session(options, resolved, &session, None, start)
+}
+
+pub(super) fn run_duplication_with_session(
+    options: &DuplicationOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    changed_files: Option<&FxHashSet<std::path::PathBuf>>,
+    start: Instant,
+) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let dupes_config = build_dupes_config(options, &session.config().duplicates);
-    let changed_files = changed_files_for_run(resolved)?;
+    let resolved_changed_files = if changed_files.is_some() {
+        None
+    } else {
+        changed_files_for_run(resolved)?
+    };
     let cache_dir = (!resolved.no_cache).then_some(session.config().cache_dir.as_path());
-    let mut report = if let Some(changed_files) = changed_files.as_ref() {
+    let mut report = if let Some(changed_files) = changed_files.or(resolved_changed_files.as_ref())
+    {
         let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
         session
             .find_duplicates_touching_files_with_defaults(&dupes_config, &changed_files, cache_dir)

@@ -7,12 +7,13 @@
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_api::{
-    AnalysisOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode, DuplicationOptions,
-    EngineHealthRunner, run_circular_dependencies, run_dead_code, run_duplication,
-    run_health_with_runner,
+    AnalysisOptions, AuditOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode,
+    DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, run_audit,
+    run_circular_dependencies, run_dead_code, run_duplication, run_health_with_runner,
 };
 use fallow_core::{
     cache::{CacheStore, module_to_cached},
@@ -34,10 +35,24 @@ struct ExtractCacheInput {
     cache: CacheStore,
 }
 
+struct EditorSessionInput {
+    _temp_dir: TempDir,
+    session: EditorAnalysisSession,
+}
+
 fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
     let path = root.join(path);
     std::fs::create_dir_all(path.parent().expect("fixture file has parent")).unwrap();
     std::fs::write(path, source.as_ref()).unwrap();
+}
+
+fn run_git(root: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .status()
+        .expect("git command starts");
+    assert!(status.success(), "git {args:?} succeeds");
 }
 
 fn dependency_block(dependencies: &[(&str, &str)]) -> String {
@@ -783,6 +798,86 @@ fn create_warm_complexity_health_project() -> CommandInput {
     input
 }
 
+fn create_audit_project(changed: bool) -> CommandInput {
+    let input = create_workspace_project();
+    run_git(&input.root, &["init", "-q"]);
+    run_git(&input.root, &["add", "."]);
+    run_git(
+        &input.root,
+        &[
+            "-c",
+            "user.name=Fallow Bench",
+            "-c",
+            "user.email=bench@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+    );
+    if changed {
+        write_file(
+            &input.root,
+            "packages/shared/src/extra.ts",
+            r#"
+export const introducedUnusedHelper = (): string => "unused";
+"#,
+        );
+        let index = input.root.join("packages/shared/src/index.ts");
+        let mut source = fs::read_to_string(&index).expect("shared index is readable");
+        source.push_str("\nexport { introducedUnusedHelper } from \"./extra\";\n");
+        fs::write(index, source).expect("shared index is writable");
+    }
+    input
+}
+
+fn audit_options(root: &Path) -> AuditOptions {
+    AuditOptions {
+        analysis: analysis_options(root, true),
+        base: Some("HEAD".to_string()),
+        ..AuditOptions::default()
+    }
+}
+
+fn run_programmatic_combined(input: &CommandInput) {
+    let dead_code = DeadCodeOptions {
+        analysis: analysis_options(&input.root, true),
+        ..DeadCodeOptions::default()
+    };
+    let duplication = DuplicationOptions {
+        analysis: analysis_options(&input.root, true),
+        mode: Some(DuplicationMode::Mild),
+        min_tokens: Some(35),
+        min_lines: Some(5),
+        min_occurrences: Some(2),
+        ..DuplicationOptions::default()
+    };
+    let health = ComplexityOptions {
+        analysis: analysis_options(&input.root, true),
+        complexity: true,
+        file_scores: true,
+        score: true,
+        ..ComplexityOptions::default()
+    };
+
+    let _ = run_dead_code(&dead_code).expect("combined dead-code succeeds");
+    let _ = run_duplication(&duplication).expect("combined duplication succeeds");
+    let _ = run_health_with_runner(&health, &EngineHealthRunner).expect("combined health succeeds");
+}
+
+fn create_editor_session_workspace_project() -> EditorSessionInput {
+    let CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    } = create_workspace_project();
+    let session = EditorAnalysisSession::load(&root, None).expect("editor session loads");
+    EditorSessionInput {
+        _temp_dir: temp_dir,
+        session,
+    }
+}
+
 fn dead_code_package_library_exports(c: &mut Criterion) {
     c.bench_function("dead_code_package_library_exports", |bencher| {
         bencher.iter_batched_ref(
@@ -859,6 +954,50 @@ fn extract_workspace_monorepo_warm_hash_hit(c: &mut Criterion) {
                 assert_eq!(result.cache_hits, input.files.len());
                 assert_eq!(result.cache_misses, 0);
                 result
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn audit_clean_workspace_no_changes(c: &mut Criterion) {
+    c.bench_function("audit_clean_workspace_no_changes", |bencher| {
+        bencher.iter_batched_ref(
+            || create_audit_project(false),
+            |input| run_audit(&audit_options(&input.root)),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn audit_changed_workspace_new_export(c: &mut Criterion) {
+    c.bench_function("audit_changed_workspace_new_export", |bencher| {
+        bencher.iter_batched_ref(
+            || create_audit_project(true),
+            |input| run_audit(&audit_options(&input.root)),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn combined_workspace_programmatic_all_sections(c: &mut Criterion) {
+    c.bench_function("combined_workspace_programmatic_all_sections", |bencher| {
+        bencher.iter_batched_ref(
+            create_workspace_project,
+            |input| run_programmatic_combined(input),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn editor_workspace_repeated_session_analysis(c: &mut Criterion) {
+    c.bench_function("editor_workspace_repeated_session_analysis", |bencher| {
+        bencher.iter_batched_ref(
+            create_editor_session_workspace_project,
+            |input| {
+                input
+                    .session
+                    .analyze_project_with(&input.session.config().duplicates, true)
             },
             BatchSize::LargeInput,
         );
@@ -969,6 +1108,10 @@ criterion_group!(
     dead_code_workspace_monorepo_cross_package,
     dead_code_workspace_monorepo_cross_package_warm_metadata_hit,
     extract_workspace_monorepo_warm_hash_hit,
+    audit_clean_workspace_no_changes,
+    audit_changed_workspace_new_export,
+    combined_workspace_programmatic_all_sections,
+    editor_workspace_repeated_session_analysis,
     duplication_next_route_callbacks_repeated_auth,
     circular_dependencies_domain_graph_cycles,
     health_complex_service_scoring,

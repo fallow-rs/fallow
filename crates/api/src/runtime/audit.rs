@@ -6,6 +6,7 @@ use fallow_config::AuditGate;
 use fallow_engine::clear_ambient_git_env;
 use fallow_output::build_audit_next_steps;
 use fallow_types::output::NextStep;
+use rustc_hash::FxHashSet;
 
 use crate::{
     AnalysisOptions, AuditAttribution, AuditOptions, AuditProgrammaticKeySnapshot,
@@ -40,7 +41,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         ));
     }
 
-    let head = run_audit_subanalyses(options, &analysis)?;
+    let head = run_audit_subanalyses(options, &analysis, Some(&changed_files))?;
     let current_snapshot = snapshot_from_analyses(&head);
     let base_snapshot = if matches!(options.gate, AuditGate::NewOnly) {
         Some(compute_base_snapshot(options, &resolved_base.git_ref)?)
@@ -207,6 +208,7 @@ struct AuditSubanalyses {
 fn run_audit_subanalyses(
     options: &AuditOptions,
     analysis: &AnalysisOptions,
+    changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
     let dead_code_options = DeadCodeOptions {
         analysis: analysis_with_production(analysis, options.production_dead_code),
@@ -226,6 +228,31 @@ fn run_audit_subanalyses(
         coverage_root: options.coverage_root.clone(),
         ..ComplexityOptions::default()
     };
+
+    if options.production_dead_code == options.production_dupes {
+        let resolved = resolve_programmatic_analysis_context(&dead_code_options.analysis)?;
+        return resolved.install(|| {
+            let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
+            Ok(AuditSubanalyses {
+                dead_code: super::dead_code::run_dead_code_with_session(
+                    &dead_code_options,
+                    &resolved,
+                    &session,
+                    changed_files,
+                    |_| {},
+                    Instant::now(),
+                )?,
+                duplication: super::duplication::run_duplication_with_session(
+                    &duplication_options,
+                    &resolved,
+                    &session,
+                    changed_files,
+                    Instant::now(),
+                )?,
+                complexity: run_health(&complexity_options)?,
+            })
+        });
+    }
 
     Ok(AuditSubanalyses {
         dead_code: run_dead_code(&dead_code_options)?,
@@ -377,7 +404,7 @@ fn compute_base_snapshot(
         explain: false,
         ..options.analysis.clone()
     };
-    let base = run_audit_subanalyses(options, &base_analysis)?;
+    let base = run_audit_subanalyses(options, &base_analysis, None)?;
     Ok(snapshot_from_analyses(&base))
 }
 
