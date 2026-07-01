@@ -6,9 +6,9 @@ use fallow_config::DuplicatesConfig;
 use fallow_types::discover::DiscoveredFile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::DuplicationAnalysis;
+use crate::{DuplicationAnalysis, core_backend};
 
-pub const FINGERPRINT_PREFIX: &str = fallow_core::duplicates::FINGERPRINT_PREFIX;
+pub const FINGERPRINT_PREFIX: &str = "dup:";
 
 pub type CloneGroup = fallow_types::duplicates::CloneGroup;
 pub type CloneInstance = fallow_types::duplicates::CloneInstance;
@@ -19,7 +19,7 @@ pub type DuplicationStats = fallow_types::duplicates::DuplicationStats;
 /// Report-scoped clone fingerprint assignment exposed through the engine boundary.
 #[derive(Debug, Clone)]
 pub struct CloneFingerprintSet {
-    inner: fallow_core::duplicates::CloneFingerprintSet,
+    inner: core_backend::BackendCloneFingerprintSet,
 }
 
 impl CloneFingerprintSet {
@@ -27,7 +27,7 @@ impl CloneFingerprintSet {
     #[must_use]
     pub fn from_groups(groups: &[CloneGroup]) -> Self {
         Self {
-            inner: fallow_core::duplicates::CloneFingerprintSet::from_groups(groups),
+            inner: core_backend::BackendCloneFingerprintSet::from_groups(groups),
         }
     }
 
@@ -63,29 +63,24 @@ impl CloneFingerprintSet {
 /// Compute the stable fingerprint for a clone group.
 #[must_use]
 pub fn clone_fingerprint(instances: &[CloneInstance]) -> String {
-    fallow_core::duplicates::clone_fingerprint(instances)
+    core_backend::clone_fingerprint(instances)
 }
 
 /// Compute a clone fingerprint directly from a representative source fragment.
 #[must_use]
 pub fn fingerprint_for_fragment(fragment: &str) -> String {
-    fallow_core::duplicates::fingerprint_for_fragment(fragment)
+    core_backend::fingerprint_for_fragment(fragment)
 }
 
 /// Return the best-effort dominant identifier for a clone group.
 #[must_use]
 pub fn dominant_identifier(group: &CloneGroup) -> Option<String> {
-    fallow_core::duplicates::dominant_identifier(group)
+    core_backend::dominant_identifier(group)
 }
 
 /// Refresh clone-family and mirrored-directory fields after clone groups change.
 pub fn refresh_clone_families(report: &mut DuplicationReport, root: &Path) {
-    report.clone_families =
-        fallow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = fallow_core::duplicates::families::detect_mirrored_directories(
-        &report.clone_families,
-        root,
-    );
+    core_backend::refresh_clone_families(report, root);
 }
 
 /// Recompute duplication statistics after clone groups have been filtered.
@@ -142,14 +137,7 @@ pub fn source_token_kinds_equivalent(
     base: &str,
     cross_language: bool,
 ) -> bool {
-    let current_tokens =
-        fallow_core::duplicates::tokenize::tokenize_file(path, current, cross_language);
-    let base_tokens = fallow_core::duplicates::tokenize::tokenize_file(path, base, cross_language);
-    current_tokens
-        .tokens
-        .iter()
-        .map(|token| &token.kind)
-        .eq(base_tokens.tokens.iter().map(|token| &token.kind))
+    core_backend::source_token_kinds_equivalent(path, current, base, cross_language)
 }
 
 /// Run duplication detection on a discovered file set.
@@ -159,7 +147,7 @@ pub fn find_duplicates(
     files: &[DiscoveredFile],
     config: &DuplicatesConfig,
 ) -> DuplicationReport {
-    fallow_core::duplicates::find_duplicates(root, files, config)
+    core_backend::find_duplicates(root, files, config)
 }
 
 /// Run cached duplication detection inside the engine boundary.
@@ -170,7 +158,7 @@ pub fn find_duplicates_cached(
     config: &DuplicatesConfig,
     cache_dir: &Path,
 ) -> DuplicationReport {
-    fallow_core::duplicates::find_duplicates_cached(root, files, config, cache_dir)
+    core_backend::find_duplicates_cached(root, files, config, cache_dir)
 }
 
 /// Run duplication detection and include metadata about built-in ignored files.
@@ -181,17 +169,7 @@ pub fn find_duplicates_with_defaults(
     config: &DuplicatesConfig,
     cache_dir: Option<&Path>,
 ) -> DuplicationAnalysis {
-    let (report, default_ignore_skips) = if let Some(cache_dir) = cache_dir {
-        fallow_core::duplicates::find_duplicates_cached_with_default_ignore_skips(
-            root, files, config, cache_dir,
-        )
-    } else {
-        fallow_core::duplicates::find_duplicates_with_default_ignore_skips(root, files, config)
-    };
-    DuplicationAnalysis {
-        report,
-        default_ignore_skips,
-    }
+    core_backend::find_duplicates_with_defaults(root, files, config, cache_dir)
 }
 
 /// Run focused duplication detection and include metadata about built-in ignored files.
@@ -203,27 +181,13 @@ pub fn find_duplicates_touching_files_with_defaults(
     changed_files: &[PathBuf],
     cache_dir: Option<&Path>,
 ) -> DuplicationAnalysis {
-    let changed_files = changed_files.iter().cloned().collect::<FxHashSet<_>>();
-    let (report, default_ignore_skips) = if let Some(cache_dir) = cache_dir {
-        fallow_core::duplicates::find_duplicates_touching_files_cached_with_default_ignore_skips(
-            root,
-            files,
-            config,
-            &changed_files,
-            cache_dir,
-        )
-    } else {
-        fallow_core::duplicates::find_duplicates_touching_files_with_default_ignore_skips(
-            root,
-            files,
-            config,
-            &changed_files,
-        )
-    };
-    DuplicationAnalysis {
-        report,
-        default_ignore_skips,
-    }
+    core_backend::find_duplicates_touching_files_with_defaults(
+        root,
+        files,
+        config,
+        changed_files,
+        cache_dir,
+    )
 }
 
 #[cfg(test)]
