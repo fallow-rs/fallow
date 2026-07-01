@@ -174,7 +174,9 @@ fn run_combined_check_and_dupes(
     check_result: &mut Option<CheckResult>,
     dupes_result: &mut Option<DupesResult>,
 ) -> Result<(), ExitCode> {
-    if let (Some(check_opts), true) = (check_opts, opts.run_dupes) {
+    if let (Some(check_opts), true) = (check_opts, opts.run_dupes)
+        && !can_share_dupes_files_with_check(opts)
+    {
         let (check_res, dupes_res) = rayon::join(
             || crate::check::execute_check(check_opts),
             || run_combined_dupes(opts, None),
@@ -356,17 +358,18 @@ fn shared_dupes_files(
     opts: &CombinedOptions<'_>,
     check_result: Option<&CheckResult>,
 ) -> Option<Vec<fallow_engine::discover::DiscoveredFile>> {
+    if !can_share_dupes_files_with_check(opts) {
+        return None;
+    }
+
+    check_result.and_then(|r| r.shared_parse.as_ref().map(|sp| sp.files.clone()))
+}
+
+fn can_share_dupes_files_with_check(opts: &CombinedOptions<'_>) -> bool {
     let check_production = opts.production_dead_code.unwrap_or(opts.production);
     let health_production = opts.production_health.unwrap_or(opts.production);
     let dupes_production = opts.production_dupes.unwrap_or(opts.production);
-    let share_files_with_dupes = opts.run_health
-        && check_production == health_production
-        && check_production == dupes_production;
-    if share_files_with_dupes {
-        check_result.and_then(|r| r.shared_parse.as_ref().map(|sp| sp.files.clone()))
-    } else {
-        None
-    }
+    opts.run_health && check_production == health_production && check_production == dupes_production
 }
 
 fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
@@ -426,14 +429,21 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::process::ExitCode;
 
-    use crate::AnalysisKind;
+    use fallow_config::OutputFormat;
 
+    use crate::AnalysisKind;
+    use crate::combined::CombinedOptions;
+    use crate::regression::{RegressionOpts, SaveRegressionTarget, Tolerance};
+
+    use super::can_share_dupes_files_with_check;
     use super::orientation::is_test_path;
     use super::output::exit_code_to_u8;
     use super::resolve_analyses;
+
+    static TEST_CONFIG_PATH: Option<PathBuf> = None;
 
     #[test]
     fn resolve_analyses_defaults_to_all_and_honors_only() {
@@ -491,5 +501,79 @@ mod tests {
         assert_eq!(exit_code_to_u8(ExitCode::SUCCESS), 0);
         assert_eq!(exit_code_to_u8(ExitCode::from(1)), 1);
         assert_eq!(exit_code_to_u8(ExitCode::from(2)), 1);
+    }
+
+    fn test_combined_options() -> CombinedOptions<'static> {
+        CombinedOptions {
+            root: Path::new("."),
+            config_path: &TEST_CONFIG_PATH,
+            output: OutputFormat::Json,
+            no_cache: false,
+            threads: 1,
+            quiet: true,
+            fail_on_issues: false,
+            sarif_file: None,
+            changed_since: None,
+            churn_file: None,
+            baseline: None,
+            save_baseline: None,
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            group_by: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            summary: false,
+            run_check: true,
+            run_dupes: true,
+            run_health: true,
+            dupes_mode: None,
+            dupes_threshold: None,
+            dupes_min_tokens: None,
+            dupes_min_lines: None,
+            dupes_min_occurrences: None,
+            dupes_skip_local: false,
+            dupes_cross_language: false,
+            dupes_ignore_imports: None,
+            score: false,
+            trend: false,
+            save_snapshot: None,
+            coverage: None,
+            coverage_root: None,
+            include_entry_exports: false,
+            regression_opts: RegressionOpts {
+                fail_on_regression: false,
+                tolerance: Tolerance::Absolute(0),
+                regression_baseline_file: None,
+                save_target: SaveRegressionTarget::None,
+                scoped: false,
+                quiet: true,
+                output: OutputFormat::Json,
+            },
+        }
+    }
+
+    #[test]
+    fn dupes_files_share_only_when_health_scope_matches() {
+        let mut opts = test_combined_options();
+
+        assert!(can_share_dupes_files_with_check(&opts));
+
+        opts.run_health = false;
+        assert!(!can_share_dupes_files_with_check(&opts));
+
+        opts.run_health = true;
+        opts.production_dupes = Some(true);
+        assert!(!can_share_dupes_files_with_check(&opts));
+
+        opts.production = true;
+        opts.production_dead_code = Some(false);
+        opts.production_health = Some(false);
+        opts.production_dupes = Some(false);
+        assert!(can_share_dupes_files_with_check(&opts));
     }
 }
