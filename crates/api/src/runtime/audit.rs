@@ -36,6 +36,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         return Ok(empty_audit_output(
             options,
             resolved_base,
+            resolved.root(),
             changed_files_count,
             start.elapsed(),
         ));
@@ -167,6 +168,7 @@ fn analysis_with_production(
 fn empty_audit_output(
     options: &AuditOptions,
     base: ResolvedAuditBase,
+    root: &Path,
     changed_files_count: usize,
     elapsed: std::time::Duration,
 ) -> AuditProgrammaticOutput {
@@ -186,7 +188,7 @@ fn empty_audit_output(
         changed_files_count,
         base_ref: base.git_ref,
         base_description: base.description,
-        head_sha: options.analysis.root.as_deref().and_then(get_head_sha),
+        head_sha: get_head_sha(root),
         elapsed,
         base_snapshot_skipped: None,
         base_snapshot: None,
@@ -671,6 +673,31 @@ mod tests {
             "src/feature.ts"
         );
         assert_eq!(json["dead_code"]["unused_files"][0]["introduced"], true);
+    }
+
+    #[test]
+    fn empty_audit_output_uses_resolved_root_for_head_sha() {
+        let project = audit_fixture();
+        let output = empty_audit_output(
+            &AuditOptions {
+                analysis: AnalysisOptions {
+                    root: None,
+                    ..AnalysisOptions::default()
+                },
+                base: Some("HEAD".to_string()),
+                gate: AuditGate::NewOnly,
+                ..AuditOptions::default()
+            },
+            ResolvedAuditBase {
+                git_ref: "HEAD".to_string(),
+                description: None,
+            },
+            project.path(),
+            0,
+            std::time::Duration::ZERO,
+        );
+
+        assert!(output.head_sha.is_some());
     }
 
     fn audit_fixture() -> tempfile::TempDir {
