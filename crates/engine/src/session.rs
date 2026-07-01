@@ -109,17 +109,15 @@ impl<'a> AnalysisSessionView<'a> {
             parse_result,
             metrics,
         } = parse_files_with_config(self.config, self.discovery.files(), need_complexity);
-        core_backend::analyze_with_owned_parse_result_from_discovery(
-            core_backend::ParsedAnalysisInput {
-                config: self.config,
-                discovery: &self.discovery,
-                modules: parse_result.modules,
-                metrics,
-                collect_usages: true,
-                retain_graph,
-                retain_modules: need_complexity,
-            },
-        )
+        run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
+            config: self.config,
+            discovery: &self.discovery,
+            modules: parse_result.modules,
+            metrics,
+            collect_usages: true,
+            retain_graph,
+            retain_modules: need_complexity,
+        })
     }
 }
 
@@ -323,17 +321,15 @@ impl AnalysisSession {
             parse_result,
             metrics,
         } = parse_files_with_config(&self.config, self.files(), need_complexity);
-        core_backend::analyze_with_owned_parse_result_from_discovery(
-            core_backend::ParsedAnalysisInput {
-                config: &self.config,
-                discovery: &self.discovery,
-                modules: parse_result.modules,
-                metrics,
-                collect_usages: true,
-                retain_graph,
-                retain_modules: need_complexity,
-            },
-        )
+        run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
+            config: &self.config,
+            discovery: &self.discovery,
+            modules: parse_result.modules,
+            metrics,
+            collect_usages: true,
+            retain_graph,
+            retain_modules: need_complexity,
+        })
     }
 
     /// Run dead-code analysis and return the session-scoped reuse artifacts.
@@ -577,6 +573,86 @@ fn source_fingerprint(path: &Path) -> SourceFingerprint {
         |_| SourceFingerprint::new(0, 0),
         |metadata| SourceFingerprint::from_metadata(&metadata),
     )
+}
+
+struct EngineDeadCodePipelineInput<'a> {
+    config: &'a ResolvedConfig,
+    discovery: &'a crate::discover::AnalysisDiscovery,
+    modules: Vec<ModuleInfo>,
+    metrics: core_backend::ParseMetrics,
+    collect_usages: bool,
+    retain_graph: bool,
+    retain_modules: bool,
+}
+
+fn run_engine_owned_dead_code_pipeline(
+    input: EngineDeadCodePipelineInput<'_>,
+) -> EngineResult<DeadCodeAnalysisArtifacts> {
+    let EngineDeadCodePipelineInput {
+        config,
+        discovery,
+        mut modules,
+        metrics,
+        collect_usages,
+        retain_graph,
+        retain_modules,
+    } = input;
+    let prelude = core_backend::prepare_dead_code_backend_prelude(config, discovery)?;
+    let prelude_timings = prelude.timings();
+    let entry_points = core_backend::discover_dead_code_entry_points(&prelude);
+    let (resolved, graph) = if let Some((resolved, graph)) =
+        core_backend::try_load_dead_code_graph_cache(&prelude, &entry_points, &modules)
+    {
+        (resolved, graph)
+    } else {
+        let resolved = core_backend::resolve_dead_code_imports(&prelude, &modules);
+        let graph = core_backend::build_dead_code_graph(
+            &prelude,
+            &resolved.resolved,
+            &entry_points,
+            &modules,
+        );
+        (resolved, graph)
+    };
+
+    for module in &mut modules {
+        module.release_resolution_payload();
+    }
+
+    let detector = core_backend::run_dead_code_detectors(
+        &prelude,
+        &graph.graph,
+        &resolved.resolved,
+        &modules,
+        collect_usages,
+        &entry_points,
+    );
+    let profile = core_backend::dead_code_pipeline_profile(
+        retain_graph,
+        &prelude,
+        prelude_timings,
+        metrics,
+        modules.len(),
+        &entry_points,
+        &resolved,
+        &graph,
+        &detector,
+        discovery.files().len(),
+        discovery.workspaces().len(),
+    );
+    let script_used_packages = prelude.script_used_packages();
+    prelude.finish();
+    let file_hashes = core_backend::collect_file_hashes(&modules, discovery.files());
+
+    Ok(DeadCodeAnalysisArtifacts {
+        results: detector.results,
+        timings: profile.timings,
+        graph: retain_graph.then_some(graph.graph),
+        modules: retain_modules.then_some(modules),
+        files: retain_modules.then(|| discovery.files().to_vec()),
+        script_used_packages,
+        file_hashes,
+    })
 }
 
 pub fn analyze_dead_code_from_config(config: &ResolvedConfig) -> EngineResult<DeadCodeAnalysis> {

@@ -179,18 +179,6 @@ pub struct AnalysisParseMetrics {
     pub parse_cpu_ms: f64,
 }
 
-/// Inputs for running the detector backend from caller-owned discovery and
-/// parsed modules.
-pub struct ParsedAnalysisInput<'a> {
-    pub config: &'a ResolvedConfig,
-    pub discovery: &'a AnalysisDiscovery,
-    pub modules: Vec<extract::ModuleInfo>,
-    pub parse_metrics: AnalysisParseMetrics,
-    pub retain: bool,
-    pub collect_usages: bool,
-    pub retain_modules: bool,
-}
-
 /// Update cache: write freshly parsed modules and refresh stale mtime/size entries.
 fn update_cache(
     store: &mut cache::CacheStore,
@@ -560,6 +548,12 @@ impl AnalysisDiscovery {
         &self.files
     }
 
+    /// Discovered workspace packages for this session.
+    #[must_use]
+    pub fn workspaces(&self) -> &[fallow_config::WorkspaceInfo] {
+        &self.workspaces
+    }
+
     /// Consume this discovery prelude and return its source file registry.
     #[must_use]
     pub fn into_files(self) -> Vec<discover::DiscoveredFile> {
@@ -798,41 +792,6 @@ impl<'a> AnalysisSession<'a> {
             file_hashes: collect_file_hashes(modules, self.files()),
         })
     }
-
-    fn run_with_owned_parse_result(
-        self,
-        modules: Vec<extract::ModuleInfo>,
-        parse_metrics: AnalysisParseMetrics,
-        retain: bool,
-        collect_usages: bool,
-        retain_modules: bool,
-    ) -> Result<AnalysisOutput, FallowError> {
-        let workspace_pkgs = self.load_workspace_packages();
-        let (plugin_result, plugins_ms, scripts_ms) =
-            self.run_plugins_and_scripts(&workspace_pkgs)?;
-
-        let core = self.run_owned_core(&workspace_pkgs, &plugin_result, modules, collect_usages);
-        self.progress.finish();
-
-        let profile = full_analysis_pipeline_profile(
-            &self.prelude_timings(plugins_ms, scripts_ms),
-            self.pipeline_start,
-            self.files(),
-            self.workspaces(),
-            &core,
-            &ParseMetrics::from(parse_metrics),
-        );
-        trace_pipeline_profile(&profile);
-
-        Ok(assemble_full_output(
-            core,
-            plugin_result,
-            &profile,
-            self.files(),
-            retain,
-            retain_modules,
-        ))
-    }
 }
 
 /// Run the shared prelude: progress setup, node_modules check, workspace and
@@ -934,6 +893,227 @@ fn run_plugins_and_scripts(
     Ok((plugin_result, plugins_ms, scripts_ms))
 }
 
+/// Timings captured by the dead-code backend prelude.
+#[derive(Debug, Clone, Copy)]
+pub struct DeadCodePreludeTimings {
+    pub discover_ms: f64,
+    pub workspaces_ms: f64,
+    pub plugins_ms: f64,
+    pub scripts_ms: f64,
+}
+
+/// Opaque backend prelude for engine-owned dead-code orchestration.
+///
+/// The engine owns the phase ordering. Core keeps the detector/backend state
+/// needed by those phases private.
+pub struct DeadCodeBackendPrelude<'a> {
+    config: &'a ResolvedConfig,
+    pipeline_start: Instant,
+    progress: progress::AnalysisProgress,
+    discovery: &'a AnalysisDiscovery,
+    workspace_pkgs: Vec<LoadedWorkspacePackage<'a>>,
+    plugin_result: plugins::AggregatedPluginResult,
+    plugins_ms: f64,
+    scripts_ms: f64,
+}
+
+impl DeadCodeBackendPrelude<'_> {
+    #[must_use]
+    pub fn timings(&self) -> DeadCodePreludeTimings {
+        DeadCodePreludeTimings {
+            discover_ms: self.discovery.discover_ms,
+            workspaces_ms: self.discovery.workspaces_ms,
+            plugins_ms: self.plugins_ms,
+            scripts_ms: self.scripts_ms,
+        }
+    }
+
+    #[must_use]
+    pub fn elapsed_ms(&self) -> f64 {
+        self.pipeline_start.elapsed().as_secs_f64() * 1000.0
+    }
+
+    #[must_use]
+    pub fn script_used_packages(&self) -> FxHashSet<String> {
+        self.plugin_result.script_used_packages.clone()
+    }
+
+    pub fn finish(&self) {
+        self.progress.finish();
+    }
+}
+
+/// Entry-point discovery result for an engine-owned dead-code pipeline.
+pub struct DeadCodeEntryPoints {
+    inner: TimedEntryPoints,
+}
+
+impl DeadCodeEntryPoints {
+    #[must_use]
+    pub fn count(&self) -> usize {
+        self.inner.count
+    }
+
+    #[must_use]
+    pub fn elapsed_ms(&self) -> f64 {
+        self.inner.elapsed_ms
+    }
+}
+
+/// Import-resolution result for an engine-owned dead-code pipeline.
+pub struct DeadCodeResolvedModules {
+    pub resolved: Vec<resolve::ResolvedModule>,
+    pub elapsed_ms: f64,
+}
+
+/// Graph build or graph-cache result for an engine-owned dead-code pipeline.
+pub struct DeadCodeGraphRun {
+    pub graph: graph::ModuleGraph,
+    pub elapsed_ms: f64,
+}
+
+/// Detector result for an engine-owned dead-code pipeline.
+pub struct DeadCodeDetectorRun {
+    pub results: AnalysisResults,
+    pub elapsed_ms: f64,
+}
+
+/// Prepare plugin and script context for engine-owned dead-code orchestration.
+///
+/// # Errors
+///
+/// Returns an error if plugin detection fails.
+pub fn prepare_dead_code_backend_prelude<'a>(
+    config: &'a ResolvedConfig,
+    discovery: &'a AnalysisDiscovery,
+) -> Result<DeadCodeBackendPrelude<'a>, FallowError> {
+    let progress = new_analysis_progress(config);
+    let pipeline_start = Instant::now();
+    let workspace_pkgs = load_workspace_packages(&discovery.workspaces);
+    let (plugin_result, plugins_ms, scripts_ms) = run_plugins_and_scripts(&PluginScriptInput {
+        config,
+        progress: &progress,
+        files: discovery.files(),
+        workspaces: &discovery.workspaces,
+        root_pkg: discovery.root_pkg.as_ref(),
+        workspace_pkgs: &workspace_pkgs,
+        config_candidates: &discovery.config_candidates,
+    })?;
+
+    Ok(DeadCodeBackendPrelude {
+        config,
+        pipeline_start,
+        progress,
+        discovery,
+        workspace_pkgs,
+        plugin_result,
+        plugins_ms,
+        scripts_ms,
+    })
+}
+
+/// Discover entry points for an engine-owned dead-code pipeline.
+#[must_use]
+pub fn discover_dead_code_entry_points(
+    prelude: &DeadCodeBackendPrelude<'_>,
+) -> DeadCodeEntryPoints {
+    let shared = prelude.shared_input();
+    DeadCodeEntryPoints {
+        inner: discover_analysis_entry_points(&shared),
+    }
+}
+
+/// Try loading the graph cache for an engine-owned dead-code pipeline.
+#[must_use]
+pub fn try_load_dead_code_graph_cache(
+    prelude: &DeadCodeBackendPrelude<'_>,
+    entry_points: &DeadCodeEntryPoints,
+    modules: &[extract::ModuleInfo],
+) -> Option<(DeadCodeResolvedModules, DeadCodeGraphRun)> {
+    let shared = prelude.shared_input();
+    try_load_analysis_graph_cache(&shared, &entry_points.inner, modules).map(|hit| {
+        (
+            DeadCodeResolvedModules {
+                resolved: hit.resolved,
+                elapsed_ms: 0.0,
+            },
+            DeadCodeGraphRun {
+                graph: hit.graph,
+                elapsed_ms: hit.elapsed_ms,
+            },
+        )
+    })
+}
+
+/// Resolve imports for an engine-owned dead-code pipeline.
+#[must_use]
+pub fn resolve_dead_code_imports(
+    prelude: &DeadCodeBackendPrelude<'_>,
+    modules: &[extract::ModuleInfo],
+) -> DeadCodeResolvedModules {
+    let shared = prelude.shared_input();
+    let resolved = resolve_analysis_imports_timed(&shared, modules);
+    DeadCodeResolvedModules {
+        resolved: resolved.resolved,
+        elapsed_ms: resolved.elapsed_ms,
+    }
+}
+
+/// Build the module graph for an engine-owned dead-code pipeline.
+#[must_use]
+pub fn build_dead_code_graph(
+    prelude: &DeadCodeBackendPrelude<'_>,
+    resolved: &[resolve::ResolvedModule],
+    entry_points: &DeadCodeEntryPoints,
+    modules: &[extract::ModuleInfo],
+) -> DeadCodeGraphRun {
+    let shared = prelude.shared_input();
+    let graph = build_analysis_graph_timed(&shared, resolved, &entry_points.inner, modules);
+    DeadCodeGraphRun {
+        graph: graph.graph,
+        elapsed_ms: graph.elapsed_ms,
+    }
+}
+
+/// Run the dead-code detectors for an engine-owned pipeline.
+#[must_use]
+pub fn run_dead_code_detectors(
+    prelude: &DeadCodeBackendPrelude<'_>,
+    graph: &graph::ModuleGraph,
+    resolved: &[resolve::ResolvedModule],
+    modules: &[extract::ModuleInfo],
+    collect_usages: bool,
+    entry_points: &DeadCodeEntryPoints,
+) -> DeadCodeDetectorRun {
+    let shared = prelude.shared_input();
+    let analysis = analyze_dead_code_timed(
+        &shared,
+        graph,
+        resolved,
+        modules,
+        collect_usages,
+        entry_points.inner.summary.clone(),
+    );
+    DeadCodeDetectorRun {
+        results: analysis.result,
+        elapsed_ms: analysis.elapsed_ms,
+    }
+}
+
+impl<'a> DeadCodeBackendPrelude<'a> {
+    fn shared_input(&'a self) -> AnalysisCoreSharedInput<'a> {
+        AnalysisCoreSharedInput {
+            config: self.config,
+            progress: &self.progress,
+            files: self.discovery.files(),
+            workspaces: &self.discovery.workspaces,
+            root_pkg: self.discovery.root_pkg.as_ref(),
+            workspace_pkgs: &self.workspace_pkgs,
+            plugin_result: &self.plugin_result,
+        }
+    }
+}
+
 /// Run the analysis pipeline using pre-parsed modules, skipping the parsing stage.
 ///
 /// This avoids re-parsing files when the caller already has a `ParseResult` (e.g., from
@@ -955,26 +1135,6 @@ pub fn analyze_with_parse_result(
 ) -> Result<AnalysisOutput, FallowError> {
     let _span = tracing::info_span!("fallow_analyze_with_parse_result").entered();
     AnalysisSession::new(config).run_with_parse_result(modules)
-}
-
-/// Run the core graph/detector backend from engine-owned discovery and parsed
-/// modules.
-///
-/// # Errors
-///
-/// Returns an error if plugin detection, graph construction, or analysis fails.
-pub fn analyze_with_owned_parse_result_from_discovery(
-    input: ParsedAnalysisInput<'_>,
-) -> Result<AnalysisOutput, FallowError> {
-    let _span = tracing::info_span!("fallow_analyze").entered();
-    AnalysisSession::from_discovery(input.config, input.discovery.clone())
-        .run_with_owned_parse_result(
-            input.modules,
-            input.parse_metrics,
-            input.retain,
-            input.collect_usages,
-            input.retain_modules,
-        )
 }
 
 /// Prelude/aggregate metrics shared between the parse and reuse pipeline paths

@@ -104,6 +104,12 @@ impl AnalysisDiscovery {
         self.inner.files()
     }
 
+    /// Discovered workspace packages for this session.
+    #[must_use]
+    pub fn workspaces(&self) -> &[WorkspaceInfo] {
+        self.inner.workspaces()
+    }
+
     /// Consume this discovery prelude and return its source file registry.
     #[must_use]
     pub fn into_files(self) -> Vec<DiscoveredFile> {

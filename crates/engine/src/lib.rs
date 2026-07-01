@@ -172,6 +172,30 @@ mod tests {
     }
 
     #[test]
+    fn engine_session_owns_dead_code_pipeline_sequence() {
+        let session_source =
+            fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/session.rs"))
+                .expect("read engine session");
+        assert!(
+            !session_source.contains("analyze_with_owned_parse_result_from_discovery"),
+            "engine session must not delegate dead-code orchestration to the old core monolith"
+        );
+        for required_phase in [
+            "prepare_dead_code_backend_prelude",
+            "discover_dead_code_entry_points",
+            "try_load_dead_code_graph_cache",
+            "resolve_dead_code_imports",
+            "build_dead_code_graph",
+            "run_dead_code_detectors",
+        ] {
+            assert!(
+                session_source.contains(required_phase),
+                "engine session must explicitly sequence `{required_phase}`"
+            );
+        }
+    }
+
+    #[test]
     fn analysis_session_loads_config_and_discovered_files() {
         let temp = tempfile::tempdir().expect("tempdir");
         let src = temp.path().join("src");
