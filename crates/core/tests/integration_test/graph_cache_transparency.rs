@@ -11,6 +11,7 @@
 
 use std::path::Path;
 
+use fallow_config::{FallowConfig, OutputFormat};
 use fallow_core::graph_cache::{GraphCacheManifest, GraphCacheMode};
 use fallow_types::source_fingerprint::SourceFingerprint;
 
@@ -71,6 +72,30 @@ fn assert_cold_warm_identical(fixture: &str) {
     );
 }
 
+fn create_custom_config_with_cache(
+    root: std::path::PathBuf,
+    cache_dir: std::path::PathBuf,
+    customize: impl FnOnce(&mut FallowConfig),
+) -> fallow_config::ResolvedConfig {
+    let mut raw = FallowConfig::default();
+    customize(&mut raw);
+    let mut config = raw.resolve(root, OutputFormat::Human, 4, false, true, None);
+    config.cache_dir = cache_dir;
+    config
+}
+
+fn current_manifest_with_cached_mode(
+    config: &fallow_config::ResolvedConfig,
+    store: &fallow_core::graph_cache::GraphCacheStore,
+) -> GraphCacheManifest {
+    let files = fallow_core::discover::discover_files(config);
+    GraphCacheManifest::from_discovered_files(&config.root, &files, store.manifest.mode, |path| {
+        std::fs::metadata(path).map_or(SourceFingerprint::new(0, 0), |m| {
+            SourceFingerprint::from_metadata(&m)
+        })
+    })
+}
+
 #[test]
 fn namespace_imports_cold_vs_warm_identical() {
     // Exercises `import * as ns` so the `namespace_imported` reconstruction on
@@ -128,19 +153,9 @@ fn source_change_misses_cache_and_reflects_change() {
 
     // Re-discover the now-mutated file set and confirm the persisted manifest
     // no longer matches the current inputs (the cache will MISS, not stale-serve).
-    let files = fallow_core::discover::discover_files(&config);
-    let current = GraphCacheManifest::from_discovered_files(
-        &config.root,
-        &files,
-        GraphCacheMode::new(0, 0, 0),
-        |path| {
-            std::fs::metadata(path).map_or(SourceFingerprint::new(0, 0), |m| {
-                SourceFingerprint::from_metadata(&m)
-            })
-        },
-    );
     let store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
         .expect("persisted graph cache exists after cold run");
+    let current = current_manifest_with_cached_mode(&config, &store);
     assert!(
         !store.manifest.matches_inputs(&current),
         "a mutated source file must invalidate the persisted graph-cache manifest"
@@ -179,19 +194,9 @@ fn file_deletion_misses_cache_and_reflects_change() {
     let target = root.join("src/orphan.ts");
     std::fs::remove_file(&target).expect("delete unused fixture file");
 
-    let files = fallow_core::discover::discover_files(&config);
-    let current = GraphCacheManifest::from_discovered_files(
-        &config.root,
-        &files,
-        GraphCacheMode::new(0, 0, 0),
-        |path| {
-            std::fs::metadata(path).map_or(SourceFingerprint::new(0, 0), |m| {
-                SourceFingerprint::from_metadata(&m)
-            })
-        },
-    );
     let store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
         .expect("persisted graph cache exists after cold run");
+    let current = current_manifest_with_cached_mode(&config, &store);
     assert!(
         !store.manifest.matches_inputs(&current),
         "a deleted source file must invalidate the persisted graph-cache manifest"
@@ -233,19 +238,9 @@ fn file_rename_misses_cache_and_reflects_new_path() {
     )
     .expect("rename unused fixture file");
 
-    let files = fallow_core::discover::discover_files(&config);
-    let current = GraphCacheManifest::from_discovered_files(
-        &config.root,
-        &files,
-        GraphCacheMode::new(0, 0, 0),
-        |path| {
-            std::fs::metadata(path).map_or(SourceFingerprint::new(0, 0), |m| {
-                SourceFingerprint::from_metadata(&m)
-            })
-        },
-    );
     let store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
         .expect("persisted graph cache exists after cold run");
+    let current = current_manifest_with_cached_mode(&config, &store);
     assert!(
         !store.manifest.matches_inputs(&current),
         "a renamed source file must invalidate the persisted graph-cache manifest"
@@ -265,6 +260,105 @@ fn file_rename_misses_cache_and_reflects_new_path() {
             .iter()
             .any(|issue| issue.file.path.ends_with("src/renamed-orphan.ts")),
         "renamed source path must be analyzed after cache invalidation"
+    );
+}
+
+/// Production mode intentionally stays out of `resolver_options_hash`; it must
+/// invalidate through the discovered file set. A stale non-production graph
+/// would keep test-only imports alive and hide `testHelper`.
+#[test]
+#[expect(
+    deprecated,
+    reason = "trace timings are still the internal contract for this cache invalidation gate"
+)]
+fn production_mode_change_misses_cache_and_reflects_file_set() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_tree(&fixture_path("production-mode"), &root);
+    let cache_dir = temp.path().join("cache");
+
+    let non_production = create_config_with_cache(root.clone(), cache_dir.clone());
+    fallow_core::analyze(&non_production).expect("cold non-production analysis");
+
+    let production = create_custom_config_with_cache(root, cache_dir.clone(), |config| {
+        config.production = true.into();
+    });
+    let store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
+        .expect("persisted graph cache exists after cold run");
+    let current = current_manifest_with_cached_mode(&production, &store);
+    assert!(
+        !store.manifest.matches_inputs(&current),
+        "production mode must invalidate via the discovered file set"
+    );
+
+    let after = fallow_core::analyze_with_trace(&production).expect("production analysis");
+    let timings = after.timings.expect("trace timings retained");
+    assert!(
+        timings.resolve_imports_ms > f64::EPSILON,
+        "production mode change must miss the graph cache, got {}ms",
+        timings.resolve_imports_ms
+    );
+    let unused_export_names: Vec<&str> = after
+        .results
+        .unused_exports
+        .iter()
+        .map(|finding| finding.export.export_name.as_str())
+        .collect();
+    assert!(
+        unused_export_names.contains(&"testHelper"),
+        "production analysis must reflect excluded test files, got {unused_export_names:?}"
+    );
+}
+
+/// Ignore patterns intentionally stay out of `resolver_options_hash`; they must
+/// invalidate through the discovered file set. A stale graph would keep the
+/// ignored orphan file in the result.
+#[test]
+#[expect(
+    deprecated,
+    reason = "trace timings are still the internal contract for this cache invalidation gate"
+)]
+fn ignore_pattern_change_misses_cache_and_reflects_file_set() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_tree(&fixture_path("basic-project"), &root);
+    let cache_dir = temp.path().join("cache");
+
+    let without_ignore = create_config_with_cache(root.clone(), cache_dir.clone());
+    let before = fallow_core::analyze(&without_ignore).expect("cold analysis");
+    assert!(
+        before
+            .unused_files
+            .iter()
+            .any(|issue| issue.file.path.ends_with("src/orphan.ts")),
+        "fixture should expose the ignored file before ignorePatterns change"
+    );
+
+    let with_ignore = create_custom_config_with_cache(root, cache_dir.clone(), |config| {
+        config.ignore_patterns = vec!["src/orphan.ts".to_string()];
+    });
+    let store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
+        .expect("persisted graph cache exists after cold run");
+    let current = current_manifest_with_cached_mode(&with_ignore, &store);
+    assert!(
+        !store.manifest.matches_inputs(&current),
+        "ignorePatterns change must invalidate via the discovered file set"
+    );
+
+    let after = fallow_core::analyze_with_trace(&with_ignore).expect("ignored analysis");
+    let timings = after.timings.expect("trace timings retained");
+    assert!(
+        timings.resolve_imports_ms > f64::EPSILON,
+        "ignorePatterns change must miss the graph cache, got {}ms",
+        timings.resolve_imports_ms
+    );
+    assert!(
+        after
+            .results
+            .unused_files
+            .iter()
+            .all(|issue| !issue.file.path.ends_with("src/orphan.ts")),
+        "ignored source file must not survive through a graph-cache hit"
     );
 }
 
