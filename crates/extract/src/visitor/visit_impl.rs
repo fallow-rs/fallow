@@ -93,6 +93,24 @@ use visit_security_classifiers::*;
 pub(super) use visit_security_routes::function_body_has_use_server;
 use visit_security_routes::*;
 
+/// Array iteration methods whose callback's FIRST parameter is an element of the
+/// receiver array (so it can be typed to the receiver's element class). `reduce`
+/// and `reduceRight` are intentionally excluded: their first callback parameter
+/// is the accumulator, not an element. `sort` is excluded to keep the set to
+/// single-element-per-call iterators. See issue #1707 follow-up.
+const ITERABLE_ELEMENT_CALLBACK_METHODS: &[&str] = &[
+    "map",
+    "forEach",
+    "filter",
+    "find",
+    "findLast",
+    "findIndex",
+    "findLastIndex",
+    "flatMap",
+    "some",
+    "every",
+];
+
 impl ModuleInfoExtractor {
     /// Record a same-file function whose body returns `new Class()` so a later
     /// `const x = <name>()` binding can resolve to that class. Module scope only;
@@ -351,13 +369,16 @@ impl ModuleInfoExtractor {
             },
             _ => return,
         };
-        if method_name.as_str() != "forEach" {
+        // Array iteration methods whose callback's FIRST parameter is an element.
+        // `reduce` / `reduceRight` are excluded because their first callback
+        // parameter is the accumulator, not an element. See issue #1707 follow-up.
+        if !ITERABLE_ELEMENT_CALLBACK_METHODS.contains(&method_name.as_str()) {
             return;
         }
         let Some(receiver_name) = static_member_object_name(receiver_expr) else {
             return;
         };
-        let Some(element_type) = self.iterable_element_types.get(&receiver_name).cloned() else {
+        let Some(element_type) = self.iterable_element_type_for(&receiver_name) else {
             return;
         };
         let Some(first_arg) = expr.arguments.first() else {
@@ -380,6 +401,38 @@ impl ModuleInfoExtractor {
         };
         if let Some(name) = param_name {
             self.insert_class_binding_target(name, element_type);
+        }
+    }
+
+    /// The element class of an iterable receiver, consulting the Angular
+    /// query-list map first (`this.items()`) then the general array / reactive
+    /// array binding map (`const utils: Util[]`). Reused by the `for...of` and
+    /// array-callback iteration-binding paths (issue #1707 follow-up).
+    fn iterable_element_type_for(&self, receiver_name: &str) -> Option<String> {
+        self.iterable_element_types
+            .get(receiver_name)
+            .or_else(|| self.array_binding_element_types.get(receiver_name))
+            .cloned()
+    }
+
+    /// Bind a `for (const util of utils)` loop variable to the element class of
+    /// `utils` so member accesses on the loop variable (`util.getter`) credit the
+    /// class. Bare-identifier loop bindings over an identifier receiver only;
+    /// destructured bindings and non-identifier receivers are out of scope.
+    fn bind_for_of_element(&mut self, stmt: &ForOfStatement<'_>) {
+        let Some(receiver_name) = static_member_object_name(&stmt.right) else {
+            return;
+        };
+        let Some(element_type) = self.iterable_element_type_for(&receiver_name) else {
+            return;
+        };
+        let ForStatementLeft::VariableDeclaration(decl) = &stmt.left else {
+            return;
+        };
+        if let Some(declarator) = decl.declarations.first()
+            && let BindingPattern::BindingIdentifier(id) = &declarator.id
+        {
+            self.insert_class_binding_target(id.name.to_string(), element_type);
         }
     }
 
@@ -1974,6 +2027,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_for_of_statement(&mut self, stmt: &ForOfStatement<'a>) {
+        self.bind_for_of_element(stmt);
+
         if let Some((strings, objects)) = self.static_package_loop_bindings(stmt) {
             self.loop_string_bindings.push(strings);
             self.loop_object_property_values.push(objects);

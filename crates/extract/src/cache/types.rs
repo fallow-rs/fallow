@@ -693,7 +693,14 @@ use crate::MemberKind;
 /// element class, so template member accesses on the item (`{{ util.getter }}`)
 /// credit the class. A warm cache from 215 carries the stale `.vue`
 /// `member_accesses` that lack the credited item-member accesses.
-pub(super) const CACHE_VERSION: u32 = 216;
+///
+/// Bumped to 217 (issue #1707 follow-up): the same element-class inference now
+/// also types JS iteration bindings, `utils.map(u => u.getter)` / `.forEach` /
+/// `.filter` / etc. callback params and `for (const u of utils)` loop variables
+/// over a typed array / reactive array, so member accesses on the iteration
+/// variable credit the element class. A warm cache from 216 lacks the credited
+/// iteration-variable member accesses.
+pub(super) const CACHE_VERSION: u32 = 217;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
