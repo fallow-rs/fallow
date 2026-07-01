@@ -46,6 +46,9 @@ pub fn run_ungrouped_health(
     let config_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     let session = crate::AnalysisSession::from_config(project_config);
+    let changed_files = options
+        .changed_since
+        .and_then(|git_ref| session.changed_files_since(git_ref).ok());
     let parts = session.into_parsed_parts(true);
     let config = parts.config;
     let files = parts.files;
@@ -55,9 +58,7 @@ pub fn run_ungrouped_health(
     let parse_cpu_ms = parts.parse_cpu_ms;
 
     let scope_inputs = HealthScopeInputs::<NoGroupResolver> {
-        changed_files: options
-            .changed_since
-            .and_then(|git_ref| crate::changed_files(&config.root, git_ref).ok()),
+        changed_files,
         diff_index: options.diff_index,
         ws_roots,
         group_resolver: None,
