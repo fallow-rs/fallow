@@ -186,7 +186,6 @@ pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "workspace",
     "changed-workspaces",
     "explain",
-    "legacy-envelope",
 ];
 
 /// Structured error surface for the programmatic API.
@@ -256,11 +255,6 @@ pub struct AnalysisOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: bool,
-    /// Return the legacy root envelope without top-level `kind`.
-    ///
-    /// This is a migration-only compatibility flag. New consumers should branch
-    /// on `kind`; see `fallow_output::LEGACY_ENVELOPE_REMOVAL_TARGET`.
-    pub legacy_envelope: bool,
 }
 
 /// Issue-type filters for the dead-code analysis.

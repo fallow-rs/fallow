@@ -27,29 +27,25 @@ fn cli_core_dependency_stays_dev_only() {
 }
 
 #[test]
-fn compatibility_debt_surfaces_have_removal_policy() {
+fn root_envelope_compatibility_debt_stays_removed() {
     let root_envelopes =
         std::fs::read_to_string(workspace_root().join("crates/output/src/root_envelopes.rs"))
             .expect("read root envelopes");
     assert!(
-        root_envelopes.contains("LEGACY_ENVELOPE_REMOVAL_TARGET"),
-        "legacy envelope compatibility must keep an explicit removal target"
+        !root_envelopes.contains("RootEnvelopeMode::Legacy"),
+        "legacy root envelope mode must not be reintroduced"
     );
     assert!(
-        root_envelopes.contains("LEGACY_ENVELOPE_DEPRECATION_REQUIREMENT"),
-        "legacy envelope compatibility must keep an explicit deprecation requirement"
+        !root_envelopes.contains("remove_root_kind"),
+        "root kind stripping must not be reintroduced"
     );
     let compat_docs =
         std::fs::read_to_string(workspace_root().join("docs/backwards-compatibility.md"))
             .expect("read compatibility docs");
-    for required in [
-        "--legacy-envelope",
-        "AnalysisOptions::legacy_envelope",
-        "one minor release",
-    ] {
+    for required in ["top-level `kind` discriminator", "Tagged root envelopes"] {
         assert!(
             compat_docs.contains(required),
-            "compatibility docs must mention {required}"
+            "compatibility docs must keep tagged-envelope guidance: {required}"
         );
     }
 }
@@ -347,12 +343,11 @@ fn cli_json_root_outputs_use_runtime_envelope_mode() {
         }
         let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
-        for forbidden in ["RootEnvelopeMode::Tagged", "RootEnvelopeMode::Legacy"] {
-            assert!(
-                !source.contains(forbidden),
-                "{source_path} must use output_runtime::current_root_envelope_mode() for root JSON output"
-            );
-        }
+        let forbidden = "RootEnvelopeMode::Tagged";
+        assert!(
+            !source.contains(forbidden),
+            "{source_path} must use output_runtime::current_root_envelope_mode() for root JSON output"
+        );
     }
 }
 

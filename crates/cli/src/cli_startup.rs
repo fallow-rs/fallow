@@ -8,8 +8,8 @@ use fallow_engine::validate;
 use crate::cli_format::{Format, FormatConfig, format_from_env, parse_format_arg, resolve_format};
 use crate::cli_telemetry::{TelemetryRun, record_run_epilogue};
 use crate::{
-    Cli, Command, emit_known_failure, output_runtime, rayon_pool, regression, report,
-    runtime_support, security_help_target, telemetry,
+    Cli, Command, emit_known_failure, rayon_pool, regression, report, runtime_support,
+    security_help_target, telemetry,
 };
 
 /// Build the tracing filter for the CLI.
@@ -255,8 +255,8 @@ fn warn_legacy_check_alias_if_needed(used_legacy_check_alias: bool, quiet: bool)
 }
 
 /// Parse argv into a `Cli`, apply the legacy-alias warning and process-wide
-/// overrides (legacy envelope, max-file-size, workspace PR marker), and resolve
-/// the output format. Returns the parse error's exit code on failure.
+/// overrides (max-file-size, workspace PR marker), and resolve the output
+/// format. Returns the parse error's exit code on failure.
 pub fn parse_cli_args() -> Result<(Cli, FormatConfig), ExitCode> {
     let used_legacy_check_alias = raw_args_use_legacy_check_alias();
     let mut cli = Cli::try_parse().map_err(|err| handle_cli_parse_error(&err))?;
@@ -266,7 +266,6 @@ pub fn parse_cli_args() -> Result<(Cli, FormatConfig), ExitCode> {
     {
         *brief = true;
     }
-    output_runtime::set_legacy_envelope(cli.legacy_envelope);
     runtime_support::set_max_file_size_override(cli.max_file_size);
 
     if let Some(workspaces) = cli.workspace.as_ref()

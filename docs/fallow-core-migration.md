@@ -63,12 +63,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The JSON contract is documented in `docs/output-schema.json`. Consumers that
 want CLI parity can call the matching `serialize_*_programmatic_json` function
-on a typed programmatic output at their protocol boundary. Set
-`AnalysisOptions::legacy_envelope` only while migrating consumers that still
-expect the previous root shape without `kind`; new integrations should not set
-it, and existing consumers should treat it as scheduled compatibility debt.
-It is scheduled for removal at the next breaking-compatible cleanup release,
-after one minor release with a deprecation notice.
+on a typed programmatic output at their protocol boundary. Object-shaped JSON
+roots always carry the top-level `kind` discriminator; consumers should branch
+on `kind` rather than probing for unique field presence.
 
 ## Semantic differences vs. the typed Rust API
 
@@ -99,8 +96,7 @@ fallow check --format json --root path/to/project | jq '.unused_exports[0]'
 (`exit_code: 0` ok, `2` generic, `7` network, etc.) so CI integrations that
 branch on exit codes work identically through the programmatic surface.
 
-## Scheduled compatibility removals
+## Removed compatibility debt
 
-- `AnalysisOptions::legacy_envelope` remains scheduled compatibility debt. Its
-  removal requires one minor release with a deprecation notice, plus a changelog
-  entry naming the replacement protocol behavior.
+- The previous root-envelope compatibility options have been removed. Tagged
+  root envelopes are the only supported object-shaped JSON protocol.

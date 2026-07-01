@@ -1069,8 +1069,7 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
              `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, \
              `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, \
              `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of \
-             probing for unique field presence. `--legacy-envelope` removes \
-             only the document-root `kind` for one compatibility cycle. \
+             probing for unique field presence. \
              `CodeClimateOutput` is a bare JSON array (per the Code Climate / \
              GitLab Code Quality spec) and stays a sibling root branch \
              discriminated by checking whether the document root is an array."

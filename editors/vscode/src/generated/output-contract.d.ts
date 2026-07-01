@@ -25,7 +25,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `--legacy-envelope` removes only the document-root `kind` for one compatibility cycle. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
 /**
@@ -34,11 +34,9 @@ export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
  * schema derived from this enum drives the document-root `oneOf` in
  * `docs/output-schema.json`.
  *
- * The default wire shape now carries a top-level `kind` discriminator so
- * agents and schema-validating clients can select the variant in O(1) instead
- * of probing for unique field presence. `--legacy-envelope` is a one-cycle
- * compatibility flag that removes only this document-root `kind` field from
- * CLI JSON output; nested report objects are not rewritten.
+ * The wire shape carries a top-level `kind` discriminator so agents and
+ * schema-validating clients can select the variant in O(1) instead of probing
+ * for unique field presence.
  *
  * One envelope is intentionally NOT in this enum:
  * - `CodeClimateOutput` serializes as a bare JSON array

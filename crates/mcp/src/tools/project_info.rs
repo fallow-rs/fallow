@@ -87,7 +87,6 @@ fn project_info_options_from_params(params: &ProjectInfoParams) -> ProjectInfoOp
             workspace: None,
             changed_workspaces: None,
             explain: false,
-            legacy_envelope: false,
         },
         entry_points: params.entry_points == Some(true),
         files: params.files == Some(true),

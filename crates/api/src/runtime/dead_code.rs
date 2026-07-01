@@ -107,7 +107,7 @@ fn run_dead_code_inner(
     Ok(DeadCodeProgrammaticOutput {
         output,
         root: session.root().to_path_buf(),
-        envelope_mode: root_envelope_mode(resolved.legacy_envelope),
+        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     })
 }

@@ -89,7 +89,6 @@ fn feature_flags_options_from_params(params: &FeatureFlagsParams) -> FeatureFlag
                 .map(|workspace| vec![workspace]),
             changed_workspaces: None,
             explain: true,
-            legacy_envelope: false,
         },
         top: params.top,
     }

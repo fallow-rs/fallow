@@ -25,7 +25,6 @@ pub struct DeadCodeOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
-    pub legacy_envelope: Option<bool>,
     pub unused_files: Option<bool>,
     pub unused_exports: Option<bool>,
     pub unused_deps: Option<bool>,
@@ -73,7 +72,6 @@ pub struct DuplicationOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
-    pub legacy_envelope: Option<bool>,
     pub mode: Option<String>,
     pub min_tokens: Option<u32>,
     pub min_lines: Option<u32>,
@@ -100,7 +98,6 @@ pub struct FeatureFlagsOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
-    pub legacy_envelope: Option<bool>,
     pub top: Option<u32>,
 }
 
@@ -117,7 +114,6 @@ pub struct ComplexityOptions {
     pub workspace: Option<Vec<String>>,
     pub changed_workspaces: Option<String>,
     pub explain: Option<bool>,
-    pub legacy_envelope: Option<bool>,
     pub max_cyclomatic: Option<u32>,
     pub max_cognitive: Option<u32>,
     pub max_crap: Option<f64>,
@@ -151,7 +147,6 @@ struct CommonOptionsInput {
     workspace: Option<Vec<String>>,
     changed_workspaces: Option<String>,
     explain: Option<bool>,
-    legacy_envelope: Option<bool>,
 }
 
 fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOptions> {
@@ -178,7 +173,6 @@ fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOp
         workspace: input.workspace,
         changed_workspaces: input.changed_workspaces,
         explain: input.explain.unwrap_or(false),
-        legacy_envelope: input.legacy_envelope.unwrap_or(false),
     })
 }
 
@@ -290,7 +284,6 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
-                legacy_envelope: value.legacy_envelope,
             })?,
             filters: api::DeadCodeFilters {
                 unused_files: value.unused_files.unwrap_or(false),
@@ -353,7 +346,6 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
-                legacy_envelope: value.legacy_envelope,
             })?,
             mode: parse_duplication_mode(value.mode)?,
             min_tokens: value.min_tokens.map(|n| n as usize),
@@ -395,7 +387,6 @@ impl TryFrom<FeatureFlagsOptions> for api::FeatureFlagsOptions {
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
-                legacy_envelope: value.legacy_envelope,
             })?,
             top: value.top.map(|n| n as usize),
         })
@@ -418,7 +409,6 @@ impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
                 workspace: value.workspace,
                 changed_workspaces: value.changed_workspaces,
                 explain: value.explain,
-                legacy_envelope: value.legacy_envelope,
             })?,
             max_cyclomatic: value
                 .max_cyclomatic
@@ -678,7 +668,6 @@ mod tests {
             workspace: Some(vec!["apps/web".to_string()]),
             changed_workspaces: None,
             explain: Some(true),
-            legacy_envelope: Some(true),
             unused_files: Some(true),
             unused_exports: Some(true),
             unused_deps: Some(true),
@@ -736,7 +725,6 @@ mod tests {
             Some(vec!["apps/web".to_string()])
         );
         assert!(options.analysis.explain);
-        assert!(options.analysis.legacy_envelope);
         assert!(options.filters.unused_files);
         assert!(options.filters.unused_exports);
         assert!(options.filters.unused_deps);
@@ -1005,7 +993,6 @@ mod tests {
             workspace: Some(vec!["apps/web".to_string()]),
             changed_workspaces: Some("origin/main".to_string()),
             explain: Some(true),
-            legacy_envelope: Some(true),
             top: Some(3),
         })
         .expect("feature flag options should map");
@@ -1033,7 +1020,6 @@ mod tests {
             Some("origin/main")
         );
         assert!(options.analysis.explain);
-        assert!(options.analysis.legacy_envelope);
         assert_eq!(options.top, Some(3));
     }
 

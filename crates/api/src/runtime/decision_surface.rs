@@ -40,7 +40,7 @@ pub fn run_decision_surface(
         return Ok(DecisionSurfaceProgrammaticOutput {
             surface: fallow_output::DecisionSurface::default(),
             elapsed: start.elapsed(),
-            envelope_mode: root_envelope_mode(options.analysis.legacy_envelope),
+            envelope_mode: root_envelope_mode(),
             telemetry_analysis_run_id: None,
         });
     }
@@ -53,7 +53,7 @@ pub fn run_decision_surface(
     Ok(DecisionSurfaceProgrammaticOutput {
         surface,
         elapsed: start.elapsed(),
-        envelope_mode: root_envelope_mode(options.analysis.legacy_envelope),
+        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     })
 }

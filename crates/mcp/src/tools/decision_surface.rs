@@ -39,7 +39,6 @@ fn decision_surface_options_from_params(params: &DecisionSurfaceParams) -> Decis
             diff_file: env_diff_file(),
             workspace: non_empty_string(params.workspace.as_deref()).map(|value| vec![value]),
             explain: false,
-            legacy_envelope: false,
             ..AnalysisOptions::default()
         },
         base: non_empty_string(params.base.as_deref()),

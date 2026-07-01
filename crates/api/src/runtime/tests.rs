@@ -217,25 +217,6 @@ fn serialize_health_report_json_tags_meta_and_strips_paths() {
 }
 
 #[test]
-fn serialize_health_report_json_respects_legacy_envelope() {
-    let json = serialize_health_report_json(HealthJsonReportInput {
-        report: HealthReport::default(),
-        root: Path::new("/repo"),
-        elapsed: std::time::Duration::ZERO,
-        explain: false,
-        grouped_by: None,
-        groups: None,
-        workspace_diagnostics: Vec::new(),
-        next_steps: Vec::new(),
-        envelope_mode: RootEnvelopeMode::Legacy,
-        telemetry_analysis_run_id: None,
-    })
-    .expect("health JSON serializes");
-
-    assert!(json.get("kind").is_none());
-}
-
-#[test]
 fn programmatic_health_runner_serializes_api_owned_output() {
     let project = tempfile::tempdir().expect("temp dir");
     let root = project.path().to_path_buf();
@@ -496,25 +477,6 @@ fn serialized_feature_flags_returns_json_adapter_output() {
 }
 
 #[test]
-fn serialized_duplication_legacy_envelope_removes_root_kind() {
-    let project = tempfile::tempdir().expect("temp dir");
-    let root = project.path();
-    std::fs::create_dir(root.join("src")).expect("src dir");
-    std::fs::write(root.join("src/a.ts"), "export const a = 1;\n").expect("file");
-
-    let json = duplication_json(&DuplicationOptions {
-        analysis: AnalysisOptions {
-            legacy_envelope: true,
-            ..analysis_at(root)
-        },
-        ..DuplicationOptions::default()
-    })
-    .expect("duplication succeeds");
-
-    assert!(json.get("kind").is_none());
-}
-
-#[test]
 fn serialized_dead_code_returns_dead_code_envelope() {
     let project = dead_code_project();
     let root = project.path();
@@ -582,27 +544,6 @@ fn run_dead_code_family_helpers_return_typed_filtered_output() {
     assert!(boundary.boundary_call_violations().is_empty());
     assert_eq!(circular.output.total_issues, 0);
     assert_eq!(boundary.output.total_issues, 0);
-}
-
-#[test]
-fn serialized_dead_code_legacy_envelope_removes_root_kind() {
-    let project = dead_code_project();
-    let root = project.path();
-
-    let json = dead_code_json(&DeadCodeOptions {
-        analysis: AnalysisOptions {
-            legacy_envelope: true,
-            ..analysis_at(root)
-        },
-        filters: DeadCodeFilters {
-            unused_exports: true,
-            ..DeadCodeFilters::default()
-        },
-        ..DeadCodeOptions::default()
-    })
-    .expect("dead-code succeeds");
-
-    assert!(json.get("kind").is_none());
 }
 
 #[test]

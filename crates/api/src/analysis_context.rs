@@ -29,7 +29,6 @@ pub struct ProgrammaticAnalysisContext {
     pub(crate) workspace: Option<Vec<String>>,
     pub(crate) changed_workspaces: Option<String>,
     pub(crate) workspace_roots: Option<Vec<PathBuf>>,
-    pub(crate) legacy_envelope: bool,
     pub(crate) explain: bool,
 }
 
@@ -78,7 +77,6 @@ pub fn resolve_programmatic_analysis_context(
         workspace: options.workspace.clone(),
         changed_workspaces: options.changed_workspaces.clone(),
         workspace_roots,
-        legacy_envelope: options.legacy_envelope,
         explain: options.explain,
     })
 }

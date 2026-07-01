@@ -172,7 +172,6 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
             workspace: non_empty_string(params.workspace.as_deref()).map(|value| vec![value]),
             changed_workspaces: None,
             explain: true,
-            legacy_envelope: false,
         },
         base: non_empty_string(params.base.as_deref()),
         production: params.production.unwrap_or(false),

@@ -59,7 +59,7 @@ fn run_feature_flags_inner(
 
     Ok(FeatureFlagsProgrammaticOutput {
         output,
-        envelope_mode: root_envelope_mode(resolved.legacy_envelope),
+        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     })
 }

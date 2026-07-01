@@ -163,7 +163,7 @@ pub fn run_list_boundaries(
 
         Ok(ListBoundariesProgrammaticOutput {
             boundaries: boundary_data_to_output(&data),
-            envelope_mode: RootEnvelopeMode::from_legacy(options.analysis.legacy_envelope),
+            envelope_mode: RootEnvelopeMode::Tagged,
         })
     })
 }
@@ -227,7 +227,7 @@ pub fn run_project_info(
             boundaries,
             workspaces,
             envelope,
-            envelope_mode: RootEnvelopeMode::from_legacy(options.analysis.legacy_envelope),
+            envelope_mode: RootEnvelopeMode::Tagged,
         })
     })
 }

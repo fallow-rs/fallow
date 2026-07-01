@@ -72,28 +72,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_mode_removes_only_root_kind() {
-        let _guard = TelemetryRunIdGuard::set(None);
-        let value = serialize_root_output_with_mode(
-            FallowOutput::Combined(combined_output()),
-            RootEnvelopeMode::Legacy,
-        )
-        .expect("combined root should serialize");
-
-        assert!(value.get("kind").is_none());
-
-        let mut nested = serde_json::json!({
-            "kind": "root",
-            "action": {
-                "kind": "suppress"
-            }
-        });
-        fallow_output::remove_root_kind(&mut nested);
-        assert!(nested.get("kind").is_none());
-        assert_eq!(nested["action"]["kind"], "suppress");
-    }
-
-    #[test]
     fn root_output_attaches_telemetry_meta() {
         let _guard = TelemetryRunIdGuard::set(Some("run_test123"));
         let value = serialize_root_output_with_mode(

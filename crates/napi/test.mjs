@@ -196,13 +196,6 @@ writeFileSync(
 }
 
 {
-  const report = await detectDeadCode({ root, legacyEnvelope: true });
-  assert.equal(report.kind, undefined);
-  assert.equal(report.schema_version, 7);
-  console.log("  [PASS] detectDeadCode legacyEnvelope");
-}
-
-{
   const report = await detectDeadCode({
     root,
     diffFile: serviceDiff,

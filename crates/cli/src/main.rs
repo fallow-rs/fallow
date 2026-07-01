@@ -321,10 +321,6 @@ struct Cli {
     #[arg(long, global = true)]
     explain: bool,
 
-    /// Emit migration-only JSON root envelopes without the top-level `kind`.
-    #[arg(long, global = true)]
-    legacy_envelope: bool,
-
     /// Show a per-pattern breakdown for default duplicate ignores.
     #[arg(long, global = true)]
     explain_skipped: bool,
@@ -4486,7 +4482,6 @@ mod tests {
             "sarif-file",
             "summary",
             "output-file",
-            "legacy-envelope",
             "max-file-size",
             "explain",
             "surface",
@@ -4583,7 +4578,6 @@ mod tests {
                         | "workspace"
                         | "changed-workspaces"
                         | "explain"
-                        | "legacy-envelope"
                 )
             })
             .collect();

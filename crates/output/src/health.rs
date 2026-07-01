@@ -144,28 +144,4 @@ mod tests {
             "run-health"
         );
     }
-
-    #[test]
-    fn serialize_health_json_output_can_keep_legacy_root_shape() {
-        let output = serialize_health_json_output(HealthJsonOutputInput {
-            output: HealthOutputInput {
-                schema_version: 7,
-                version: "test".to_string(),
-                elapsed: Duration::ZERO,
-                report: serde_json::json!({ "summary": {} }),
-                grouped_by: None,
-                groups: None::<Vec<serde_json::Value>>,
-                meta: None,
-                workspace_diagnostics: Vec::new(),
-                next_steps: Vec::new(),
-            },
-            root_prefix: None,
-            envelope_mode: RootEnvelopeMode::Legacy,
-            analysis_run_id: None,
-        })
-        .expect("health output should serialize");
-
-        assert!(output.get("kind").is_none());
-        assert_eq!(output["schema_version"], 7);
-    }
 }

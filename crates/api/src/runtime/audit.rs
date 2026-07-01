@@ -77,7 +77,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
         duplication: Some(head.duplication),
         complexity: Some(head.complexity),
         next_steps,
-        envelope_mode: root_envelope_mode(options.analysis.legacy_envelope),
+        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     })
 }
@@ -193,7 +193,7 @@ fn empty_audit_output(
         duplication: None,
         complexity: None,
         next_steps: Vec::new(),
-        envelope_mode: root_envelope_mode(options.analysis.legacy_envelope),
+        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
     }
 }

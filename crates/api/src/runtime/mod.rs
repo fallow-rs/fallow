@@ -267,7 +267,7 @@ pub fn run_complexity_with_runner(
         explain: options.analysis.explain,
         workspace_diagnostics,
         next_steps,
-        envelope_mode: root_envelope_mode(options.analysis.legacy_envelope),
+        envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id,
     })
 }
@@ -284,8 +284,8 @@ pub fn run_health_with_runner(
     run_complexity_with_runner(options, runner)
 }
 
-const fn root_envelope_mode(legacy_envelope: bool) -> RootEnvelopeMode {
-    RootEnvelopeMode::from_legacy(legacy_envelope)
+const fn root_envelope_mode() -> RootEnvelopeMode {
+    RootEnvelopeMode::Tagged
 }
 
 #[cfg(test)]

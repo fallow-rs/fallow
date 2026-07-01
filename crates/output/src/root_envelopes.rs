@@ -4,40 +4,10 @@ use fallow_types::envelope::{ElapsedMs, Meta, SchemaVersion, TelemetryMeta, Tool
 use fallow_types::output::NextStep;
 use serde::Serialize;
 
-/// Compatibility window label for `--legacy-envelope`.
-///
-/// The flag exists only to let consumers migrate from root-shape probing to the
-/// top-level `kind` discriminator. New integrations must use the tagged shape.
-pub const LEGACY_ENVELOPE_COMPATIBILITY_WINDOW: &str = "one-cycle";
-
-/// Planned removal target for `--legacy-envelope`.
-///
-/// This stays a string instead of a semver parser input so docs, CLI help, and
-/// generated schemas can quote the same policy without pulling version logic
-/// into the output-contract crate.
-pub const LEGACY_ENVELOPE_REMOVAL_TARGET: &str = "next breaking-compatible cleanup release";
-
-/// Release-process requirement before `--legacy-envelope` is removed.
-pub const LEGACY_ENVELOPE_DEPRECATION_REQUIREMENT: &str =
-    "one minor release with a deprecation notice before removal";
-
-/// Whether a JSON root envelope keeps the top-level `kind` discriminator.
+/// JSON root envelope discriminator policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootEnvelopeMode {
     Tagged,
-    Legacy,
-}
-
-impl RootEnvelopeMode {
-    /// Convert a legacy-envelope flag into the root envelope mode.
-    #[must_use]
-    pub const fn from_legacy(legacy_envelope: bool) -> Self {
-        if legacy_envelope {
-            Self::Legacy
-        } else {
-            Self::Tagged
-        }
-    }
 }
 
 /// Serialize a typed fallow root envelope with the requested discriminator
@@ -51,11 +21,8 @@ pub fn serialize_json_root_output<T: Serialize>(
     output: T,
     mode: RootEnvelopeMode,
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let mut value = serde_json::to_value(output)?;
-    if mode == RootEnvelopeMode::Legacy {
-        remove_root_kind(&mut value);
-    }
-    Ok(value)
+    let _ = mode;
+    serde_json::to_value(output)
 }
 
 /// Serialize an output envelope and apply an explicit root discriminator.
@@ -134,20 +101,10 @@ where
     Ok(value)
 }
 
-/// Remove only the document-root discriminator. Nested objects may carry their
-/// own meaningful `kind` fields, so this intentionally does not recurse.
-pub fn remove_root_kind(value: &mut serde_json::Value) {
-    if let serde_json::Value::Object(map) = value {
-        map.remove("kind");
-    }
-}
-
-/// Apply a document-root discriminator unless the caller requested the legacy
-/// envelope shape.
+/// Apply a document-root discriminator.
 pub fn apply_root_kind(value: &mut serde_json::Value, kind: &'static str, mode: RootEnvelopeMode) {
-    if mode == RootEnvelopeMode::Tagged
-        && let serde_json::Value::Object(map) = value
-    {
+    let _ = mode;
+    if let serde_json::Value::Object(map) = value {
         let existing = std::mem::take(map);
         map.insert(
             "kind".to_string(),
@@ -270,11 +227,9 @@ pub struct CombinedMeta {
 /// schema derived from this enum drives the document-root `oneOf` in
 /// `docs/output-schema.json`.
 ///
-/// The default wire shape now carries a top-level `kind` discriminator so
-/// agents and schema-validating clients can select the variant in O(1) instead
-/// of probing for unique field presence. `--legacy-envelope` is a one-cycle
-/// compatibility flag that removes only this document-root `kind` field from
-/// CLI JSON output; nested report objects are not rewritten.
+/// The wire shape carries a top-level `kind` discriminator so agents and
+/// schema-validating clients can select the variant in O(1) instead of probing
+/// for unique field presence.
 ///
 /// One envelope is intentionally NOT in this enum:
 /// - `CodeClimateOutput` serializes as a bare JSON array
@@ -409,42 +364,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn root_envelope_mode_maps_legacy_flag() {
-        assert_eq!(
-            RootEnvelopeMode::from_legacy(false),
-            RootEnvelopeMode::Tagged
-        );
-        assert_eq!(
-            RootEnvelopeMode::from_legacy(true),
-            RootEnvelopeMode::Legacy
-        );
-    }
-
-    #[test]
-    fn legacy_mode_removes_only_root_kind() {
-        let mut value = json!({
-            "kind": "root",
-            "action": {
-                "kind": "suppress"
-            }
-        });
-
-        remove_root_kind(&mut value);
-
-        assert!(value.get("kind").is_none());
-        assert_eq!(value["action"]["kind"], "suppress");
-    }
-
-    #[test]
-    fn apply_root_kind_respects_legacy_mode() {
-        let mut value = json!({});
-
-        apply_root_kind(&mut value, "dead_code", RootEnvelopeMode::Legacy);
-
-        assert!(value.get("kind").is_none());
-    }
-
-    #[test]
     fn apply_root_kind_sets_tagged_mode() {
         let mut value = json!({});
 
@@ -472,21 +391,6 @@ mod tests {
         attach_telemetry_meta(&mut value, Some("run-123"));
 
         assert_eq!(value, json!(["not", "an", "object"]));
-    }
-
-    #[test]
-    fn serialize_json_root_output_removes_root_kind_in_legacy_mode() {
-        let value = serialize_json_root_output(
-            json!({
-                "kind": "combined",
-                "schema_version": 1
-            }),
-            RootEnvelopeMode::Legacy,
-        )
-        .expect("root should serialize");
-
-        assert!(value.get("kind").is_none());
-        assert_eq!(value["schema_version"], 1);
     }
 
     #[test]
@@ -561,19 +465,6 @@ mod tests {
         assert_eq!(
             value["_meta"]["telemetry"]["analysis_run_id"],
             "run-combined"
-        );
-    }
-
-    #[test]
-    fn legacy_envelope_policy_is_explicit() {
-        assert_eq!(LEGACY_ENVELOPE_COMPATIBILITY_WINDOW, "one-cycle");
-        assert_eq!(
-            LEGACY_ENVELOPE_REMOVAL_TARGET,
-            "next breaking-compatible cleanup release"
-        );
-        assert_eq!(
-            LEGACY_ENVELOPE_DEPRECATION_REQUIREMENT,
-            "one minor release with a deprecation notice before removal"
         );
     }
 }
