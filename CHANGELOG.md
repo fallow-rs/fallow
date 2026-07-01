@@ -209,9 +209,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unused-class-member`. Explicitly annotated callback parameters
   (`(u: Util) => ...`) already worked; this adds the implicitly-typed case. The
   change only removes false positives; a genuinely unused member on the same
-  class still reports. Angular `@for` / `*ngFor`, Astro `.map`, and Vue `v-for`
-  over a member-expression source (`props.items`) are known remaining cases and
-  are queued as a follow-up. (Refs
+  class still reports. Angular `@for` / `*ngFor`
+  ([#1712](https://github.com/fallow-rs/fallow/issues/1712)), Astro `.map`
+  ([#1713](https://github.com/fallow-rs/fallow/issues/1713)), and Vue `v-for`
+  over a member-expression source such as `props.items`
+  ([#1711](https://github.com/fallow-rs/fallow/issues/1711)) are tracked as
+  follow-ups. (Refs
   [#1707](https://github.com/fallow-rs/fallow/issues/1707))
 
 - **Vue `v-for` loop variables iterating over a class array no longer report the
