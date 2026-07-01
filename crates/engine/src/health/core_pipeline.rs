@@ -4,6 +4,8 @@ use std::process::ExitCode;
 
 use fallow_config::ResolvedConfig;
 
+use crate::results::DeadCodeAnalysisArtifacts;
+
 use super::analysis_data::{
     HealthAnalysisData, HealthAnalysisDataInput, prepare_health_analysis_data,
 };
@@ -21,7 +23,7 @@ pub(super) struct HealthCoreSectionsInput<'a, R> {
     pub(super) files: &'a [fallow_types::discover::DiscoveredFile],
     pub(super) modules: &'a [crate::source::ModuleInfo],
     pub(super) scope: &'a HealthScope<'a, R>,
-    pub(super) pre_computed_analysis: Option<crate::DeadCodeAnalysisArtifacts>,
+    pub(super) pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     pub(super) seams: &'a HealthSeams<'a>,
 }
 
@@ -30,7 +32,7 @@ struct HealthAnalysisPreludeInput<'a, R> {
     config: &'a ResolvedConfig,
     modules: &'a [crate::source::ModuleInfo],
     scope: &'a HealthScope<'a, R>,
-    pre_computed_analysis: Option<crate::DeadCodeAnalysisArtifacts>,
+    pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     seams: &'a HealthSeams<'a>,
 }
 

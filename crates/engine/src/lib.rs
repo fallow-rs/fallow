@@ -20,10 +20,6 @@ use std::fmt;
 #[cfg(test)]
 use std::path::Path;
 
-use rustc_hash::FxHashMap;
-
-use crate::module_graph::RetainedModuleGraph;
-
 pub mod baseline;
 pub mod changed_files;
 pub mod churn;
@@ -54,11 +50,6 @@ pub mod trace;
 pub mod trace_chain;
 pub mod validate;
 pub mod vital_signs;
-
-use fallow_types::discover::DiscoveredFile;
-use fallow_types::extract::ModuleInfo;
-use fallow_types::results::AnalysisResults;
-use results::DeadCodeAnalysisArtifacts;
 
 /// Result alias for typed engine operations.
 pub type EngineResult<T> = Result<T, EngineError>;
@@ -97,34 +88,6 @@ pub(crate) fn engine_error(err: impl fmt::Display) -> EngineError {
     EngineError::new(err.to_string())
 }
 
-/// Build health shared parse data from retained dead-code artifacts.
-#[must_use]
-pub fn health_shared_parse_data_from_artifacts(
-    results: &AnalysisResults,
-    graph: Option<RetainedModuleGraph>,
-    modules: Option<Vec<ModuleInfo>>,
-    files: Option<Vec<DiscoveredFile>>,
-    script_used_packages: impl IntoIterator<Item = String>,
-) -> Option<health::HealthSharedParseData> {
-    let (Some(modules), Some(files)) = (modules, files) else {
-        return None;
-    };
-    let analysis_output = graph.map(|graph| DeadCodeAnalysisArtifacts {
-        results: results.clone(),
-        timings: None,
-        graph: Some(graph),
-        modules: None,
-        files: None,
-        script_used_packages: script_used_packages.into_iter().collect(),
-        file_hashes: FxHashMap::default(),
-    });
-    Some(health::HealthSharedParseData {
-        files,
-        modules,
-        analysis_output,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,6 +124,7 @@ mod tests {
             "pub use results::",
             "pub use security::",
             "pub use suppress::",
+            "health_shared_parse_data_from_artifacts",
         ];
 
         for forbidden in forbidden_exports {

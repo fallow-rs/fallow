@@ -7,7 +7,7 @@ use rustc_hash::FxHashSet;
 use fallow_config::ResolvedConfig;
 
 use crate::{
-    EngineResult, ModuleInfo, core_backend,
+    EngineResult, core_backend,
     results::{
         AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
         DeadCodeAnalysisWithHashes,
@@ -16,6 +16,7 @@ use crate::{
         analyze_dead_code_from_config, analyze_dead_code_with_artifacts_from_config,
         analyze_dead_code_with_complexity_from_config,
     },
+    source::ModuleInfo,
 };
 
 /// Run dead-code analysis for a resolved config.

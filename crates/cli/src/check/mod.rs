@@ -587,7 +587,7 @@ fn build_shared_parse_data(
     retained_files: Option<Vec<DiscoveredFile>>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
 ) -> Option<fallow_engine::health::HealthSharedParseData> {
-    fallow_engine::health_shared_parse_data_from_artifacts(
+    fallow_engine::health::shared_parse_data_from_artifacts(
         results,
         trace_graph,
         retained_modules,

@@ -10,6 +10,11 @@ use fallow_output::{
 };
 use fallow_types::output_format::OutputFormat;
 use fallow_types::path_util::is_absolute_path_any_platform;
+use fallow_types::results::AnalysisResults;
+use rustc_hash::FxHashMap;
+
+use crate::module_graph::RetainedModuleGraph;
+use crate::results::DeadCodeAnalysisArtifacts;
 
 mod actions;
 mod analysis_data;
@@ -73,6 +78,34 @@ use vital_signs_scope::{
     compute_vital_signs_and_counts,
 };
 
+/// Build health shared parse data from retained dead-code artifacts.
+#[must_use]
+pub fn shared_parse_data_from_artifacts(
+    results: &AnalysisResults,
+    graph: Option<RetainedModuleGraph>,
+    modules: Option<Vec<crate::source::ModuleInfo>>,
+    files: Option<Vec<crate::discover::DiscoveredFile>>,
+    script_used_packages: impl IntoIterator<Item = String>,
+) -> Option<HealthSharedParseData> {
+    let (Some(modules), Some(files)) = (modules, files) else {
+        return None;
+    };
+    let analysis_output = graph.map(|graph| DeadCodeAnalysisArtifacts {
+        results: results.clone(),
+        timings: None,
+        graph: Some(graph),
+        modules: None,
+        files: None,
+        script_used_packages: script_used_packages.into_iter().collect(),
+        file_hashes: FxHashMap::default(),
+    });
+    Some(HealthSharedParseData {
+        files,
+        modules,
+        analysis_output,
+    })
+}
+
 /// Command-neutral grouping resolver contract for `--group-by` health output.
 ///
 /// The CLI owns the concrete resolver (CODEOWNERS parsing, package discovery);
@@ -124,7 +157,7 @@ pub type RuntimeCoverageAnalyzer<'a> = dyn Fn(
 pub struct RuntimeCoverageSeamInput<'a> {
     pub root: &'a Path,
     pub modules: &'a [fallow_types::extract::ModuleInfo],
-    pub analysis_output: &'a crate::DeadCodeAnalysisArtifacts,
+    pub analysis_output: &'a DeadCodeAnalysisArtifacts,
     pub istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     pub file_paths: &'a rustc_hash::FxHashMap<fallow_types::discover::FileId, &'a PathBuf>,
     pub ignore_set: &'a globset::GlobSet,
@@ -523,7 +556,7 @@ pub struct HealthSharedParseData {
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
     pub modules: Vec<fallow_types::extract::ModuleInfo>,
     /// Full analysis output (graph + results) for file scoring.
-    pub analysis_output: Option<crate::DeadCodeAnalysisArtifacts>,
+    pub analysis_output: Option<DeadCodeAnalysisArtifacts>,
 }
 
 #[cfg(test)]

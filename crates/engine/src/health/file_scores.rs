@@ -12,6 +12,7 @@ use fallow_output::FileHealthScore;
 use fallow_types::output_format::OutputFormat;
 
 use crate::error::emit_error;
+use crate::results::DeadCodeAnalysisArtifacts;
 
 use super::HealthExecutionOptions;
 use super::filters::filter_coverage_gaps;
@@ -37,7 +38,7 @@ pub struct FileScoresAndChurnInput<'a> {
 
 pub fn compute_file_scores_and_churn(
     input: FileScoresAndChurnInput<'_>,
-    precomputed_for_scores: Option<crate::DeadCodeAnalysisArtifacts>,
+    precomputed_for_scores: Option<DeadCodeAnalysisArtifacts>,
 ) -> Result<FileScoresAndChurn, ExitCode> {
     let needs_churn = input.opts.hotspots || input.opts.targets;
     if input.needs_file_scores && needs_churn {
@@ -126,7 +127,7 @@ struct FileScoreInput<'a> {
     ignore_set: &'a globset::GlobSet,
     output: OutputFormat,
     istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
-    pre_computed: Option<crate::DeadCodeAnalysisArtifacts>,
+    pre_computed: Option<DeadCodeAnalysisArtifacts>,
 }
 
 fn compute_filtered_file_scores(input: FileScoreInput<'_>) -> Result<FileScoreResult, ExitCode> {

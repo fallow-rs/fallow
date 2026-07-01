@@ -1152,7 +1152,7 @@ pub(super) fn compute_file_scores(
     modules: &[crate::source::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
-    analysis_output: crate::DeadCodeAnalysisArtifacts,
+    analysis_output: crate::results::DeadCodeAnalysisArtifacts,
     istanbul_coverage: Option<&IstanbulCoverage>,
     root: &std::path::Path,
 ) -> Result<FileScoreOutput, String> {
@@ -2694,7 +2694,7 @@ mod tests {
         let modules: Vec<crate::source::ModuleInfo> = vec![];
         let file_paths = rustc_hash::FxHashMap::default();
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -2726,7 +2726,7 @@ mod tests {
         let modules: Vec<crate::source::ModuleInfo> = vec![];
         let file_paths = rustc_hash::FxHashMap::default();
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: None,
@@ -2802,7 +2802,7 @@ mod tests {
             rustc_hash::FxHashMap::default();
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -2857,7 +2857,7 @@ mod tests {
             rustc_hash::FxHashMap::default();
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -2959,7 +2959,7 @@ mod tests {
         let mut changed = rustc_hash::FxHashSet::default();
         changed.insert(path_b);
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -3058,7 +3058,7 @@ mod tests {
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
         file_paths.insert(crate::discover::FileId(1), &files[1].path);
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -3142,7 +3142,7 @@ mod tests {
             ),
         );
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -3257,7 +3257,7 @@ mod tests {
             rustc_hash::FxHashMap::default();
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -3381,7 +3381,7 @@ mod tests {
             ),
         );
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -3541,7 +3541,7 @@ mod tests {
             ),
         );
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -3687,7 +3687,7 @@ mod tests {
             );
         }
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results,
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -3749,7 +3749,7 @@ mod tests {
         let file_paths: rustc_hash::FxHashMap<crate::discover::FileId, &std::path::PathBuf> =
             rustc_hash::FxHashMap::default();
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -3811,7 +3811,7 @@ mod tests {
             rustc_hash::FxHashMap::default();
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -3910,7 +3910,7 @@ mod tests {
             rustc_hash::FxHashMap::default();
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),
@@ -3972,7 +3972,7 @@ mod tests {
             rustc_hash::FxHashMap::default();
         file_paths.insert(crate::discover::FileId(0), &files[0].path);
 
-        let output = crate::DeadCodeAnalysisArtifacts {
+        let output = crate::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: Some(crate::module_graph::RetainedModuleGraph::from(graph)),

@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use fallow_config::ResolvedConfig;
 
 use crate::error::emit_error;
+use crate::results::DeadCodeAnalysisArtifacts;
 
 use super::framework_health::FrameworkHealthFacts;
 use super::{FileScoresAndChurnInput, HealthOptions, HealthSeams, RuntimeCoverageSeamInput};
@@ -32,7 +33,7 @@ pub(super) struct HealthAnalysisDataInput<'a> {
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
     pub(super) istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
-    pub(super) pre_computed_analysis: Option<crate::DeadCodeAnalysisArtifacts>,
+    pub(super) pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     pub(super) needs_file_scores: bool,
     pub(super) seams: &'a HealthSeams<'a>,
 }
@@ -101,9 +102,9 @@ fn prepare_shared_analysis_output(
     opts: &HealthOptions<'_>,
     config: &ResolvedConfig,
     modules: &[crate::source::ModuleInfo],
-    pre_computed: Option<crate::DeadCodeAnalysisArtifacts>,
+    pre_computed: Option<DeadCodeAnalysisArtifacts>,
     needed: bool,
-) -> Result<Option<crate::DeadCodeAnalysisArtifacts>, ExitCode> {
+) -> Result<Option<DeadCodeAnalysisArtifacts>, ExitCode> {
     if !needed {
         return Ok(None);
     }
@@ -120,7 +121,7 @@ struct RuntimeCoverageAnalysisScope<'a> {
     opts: &'a HealthOptions<'a>,
     config: &'a ResolvedConfig,
     modules: &'a [crate::source::ModuleInfo],
-    shared_analysis_output: Option<&'a crate::DeadCodeAnalysisArtifacts>,
+    shared_analysis_output: Option<&'a DeadCodeAnalysisArtifacts>,
     istanbul_coverage: Option<&'a scoring::IstanbulCoverage>,
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     ignore_set: &'a globset::GlobSet,
@@ -163,7 +164,7 @@ fn analyze_runtime_coverage(
 }
 
 struct PreparedSharedHealthAnalysis {
-    output: Option<crate::DeadCodeAnalysisArtifacts>,
+    output: Option<DeadCodeAnalysisArtifacts>,
     framework_health_facts: Option<FrameworkHealthFacts>,
 }
 
@@ -171,7 +172,7 @@ impl PreparedSharedHealthAnalysis {
     fn take_for_file_scores(
         &mut self,
         needs_file_scores: bool,
-    ) -> Option<crate::DeadCodeAnalysisArtifacts> {
+    ) -> Option<DeadCodeAnalysisArtifacts> {
         if needs_file_scores {
             self.output.take()
         } else {

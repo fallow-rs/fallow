@@ -7,6 +7,8 @@ use fallow_output::DiffIndex;
 use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::results::DeadCodeAnalysisArtifacts;
+
 /// Discovery / parse inputs the CLI resolves before calling the engine.
 pub struct HealthPipelineInputs {
     pub config: ResolvedConfig,
@@ -19,7 +21,7 @@ pub struct HealthPipelineInputs {
     pub parse_cpu_ms: f64,
     /// True when discover + parse were reused from the upstream check pass.
     pub shared_parse: bool,
-    pub pre_computed_analysis: Option<crate::DeadCodeAnalysisArtifacts>,
+    pub pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
 }
 

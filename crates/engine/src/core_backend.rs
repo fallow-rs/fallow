@@ -16,7 +16,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use crate::{
-    EngineResult, ModuleInfo,
+    EngineResult,
     changed_files::{ChangedFilesError, ChangedFilesSpawnHook},
     churn::{AuthorContribution, ChurnResult, ChurnSpawnHook, FileChurn, SinceDuration},
     cross_reference::{
@@ -27,6 +27,7 @@ use crate::{
     engine_error,
     module_graph::RetainedModuleGraph,
     results::{AnalysisResults, DeadCodeAnalysisArtifacts, DuplicationAnalysis},
+    source::ModuleInfo,
 };
 
 #[derive(Debug, Clone)]
