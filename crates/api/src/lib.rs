@@ -106,6 +106,7 @@ pub use explain::{
     rule_docs_url, rule_guide, security_meta, serialize_explain_programmatic_json,
     unknown_explain_error,
 };
+pub use fallow_config::AuditGate;
 pub use fallow_output::RootEnvelopeMode;
 pub use fallow_types::trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
@@ -142,20 +143,21 @@ pub use output_contracts::{
     SecuritySummaryOutput, WorkspacesOutput,
 };
 pub use runtime::{
-    BoundaryViolationsOutput, BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
-    CircularDependenciesProgrammaticOutput, DeadCodeOutput, DeadCodeProgrammaticOutput,
-    DuplicationOutput, DuplicationProgrammaticOutput, EngineHealthRunner, FeatureFlagsOutput,
-    FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
-    ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun,
-    ProgrammaticHealthRunner, TraceCloneOutput, TraceCloneProgrammaticOutput,
-    TraceDependencyOutput, TraceDependencyProgrammaticOutput, TraceExportOutput,
-    TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
-    run_boundary_violations, run_circular_dependencies, run_complexity_with_runner, run_dead_code,
-    run_duplication, run_feature_flags, run_health, run_health_with_runner, run_trace_clone,
-    run_trace_dependency, run_trace_export, run_trace_file, serialize_health_report_json,
+    AuditProgrammaticOutput, BoundaryViolationsOutput, BoundaryViolationsProgrammaticOutput,
+    CircularDependenciesOutput, CircularDependenciesProgrammaticOutput, DeadCodeOutput,
+    DeadCodeProgrammaticOutput, DuplicationOutput, DuplicationProgrammaticOutput,
+    EngineHealthRunner, FeatureFlagsOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
+    HealthProgrammaticOutput, ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts,
+    ProgrammaticHealthRun, ProgrammaticHealthRunner, TraceCloneOutput,
+    TraceCloneProgrammaticOutput, TraceDependencyOutput, TraceDependencyProgrammaticOutput,
+    TraceExportOutput, TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
+    run_audit, run_boundary_violations, run_circular_dependencies, run_complexity_with_runner,
+    run_dead_code, run_duplication, run_feature_flags, run_health, run_health_with_runner,
+    run_trace_clone, run_trace_dependency, run_trace_export, run_trace_file,
+    serialize_health_report_json,
 };
 pub use runtime_json::{
-    serialize_boundary_violations_programmatic_json,
+    serialize_audit_programmatic_json, serialize_boundary_violations_programmatic_json,
     serialize_circular_dependencies_programmatic_json, serialize_dead_code_programmatic_json,
     serialize_duplication_programmatic_json, serialize_feature_flags_programmatic_json,
     serialize_health_programmatic_json, serialize_trace_clone_programmatic_json,
@@ -298,6 +300,24 @@ pub struct DeadCodeOptions {
     pub filters: DeadCodeFilters,
     pub files: Vec<PathBuf>,
     pub include_entry_exports: bool,
+}
+
+/// Options for changed-code audit analysis.
+#[derive(Debug, Clone, Default)]
+pub struct AuditOptions {
+    pub analysis: AnalysisOptions,
+    pub base: Option<String>,
+    pub production: bool,
+    pub production_dead_code: Option<bool>,
+    pub production_health: Option<bool>,
+    pub production_dupes: Option<bool>,
+    pub gate: fallow_config::AuditGate,
+    pub max_crap: Option<f64>,
+    pub coverage: Option<PathBuf>,
+    pub coverage_root: Option<PathBuf>,
+    pub include_entry_exports: bool,
+    pub runtime_coverage: Option<PathBuf>,
+    pub min_invocations_hot: u64,
 }
 
 /// Options for feature-flag analysis.

@@ -9,6 +9,7 @@ use fallow_api::{RootEnvelopeMode, serialize_explain_programmatic_json};
 
 use super::super::{
     analyze::run_analyze_api_value,
+    audit::run_audit_api_value,
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
     build_find_dupes_args, build_get_blast_radius_args, build_get_cleanup_candidates_args,
@@ -146,6 +147,7 @@ pub(super) const API_BACKED_CODE_MODE_TOOLS: &[CodeModeTool] = &[
     CodeModeTool::TraceDependency,
     CodeModeTool::TraceClone,
     CodeModeTool::CheckHealth,
+    CodeModeTool::Audit,
     CodeModeTool::FallowExplain,
     CodeModeTool::ListBoundaries,
     CodeModeTool::FeatureFlags,
@@ -217,6 +219,10 @@ pub(super) fn run_api_tool(
             let params: HealthParams = parse_params(params)?;
             run_health_api_value(&params)
         }
+        CodeModeTool::Audit => {
+            let params: AuditParams = parse_params(params)?;
+            run_audit_api_value(&params)
+        }
         CodeModeTool::FallowExplain => {
             let params: ExplainParams = parse_params(params)?;
             serialize_explain_programmatic_json(&params.issue_type, RootEnvelopeMode::Tagged, None)
@@ -232,7 +238,6 @@ pub(super) fn run_api_tool(
             run_list_boundaries_api_value(&params)
         }
         CodeModeTool::SecurityCandidates
-        | CodeModeTool::Audit
         | CodeModeTool::Impact
         | CodeModeTool::CheckRuntimeCoverage
         | CodeModeTool::GetHotPaths
@@ -419,6 +424,7 @@ mod tests {
                 "trace_dependency",
                 "trace_clone",
                 "check_health",
+                "audit",
                 "fallow_explain",
                 "list_boundaries",
                 "feature_flags",
@@ -438,7 +444,6 @@ mod tests {
     fn cli_only_code_mode_tools_are_not_api_backed() {
         for tool in [
             CodeModeTool::SecurityCandidates,
-            CodeModeTool::Audit,
             CodeModeTool::Impact,
             CodeModeTool::CheckRuntimeCoverage,
             CodeModeTool::GetHotPaths,

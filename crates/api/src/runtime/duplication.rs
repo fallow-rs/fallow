@@ -95,6 +95,7 @@ fn run_duplication_inner(
     Ok(DuplicationProgrammaticOutput {
         output,
         root: session.root().to_path_buf(),
+        threshold: dupes_config.threshold,
         envelope_mode: root_envelope_mode(resolved.legacy_envelope),
         telemetry_analysis_run_id: None,
     })

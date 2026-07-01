@@ -6,20 +6,23 @@ use fallow_output::{HealthGrouping, HealthReport, RootEnvelopeMode};
 use fallow_types::output_format::OutputFormat;
 use fallow_types::workspace::WorkspaceDiagnostic;
 
+mod audit;
 mod dead_code;
 mod duplication;
 mod feature_flags;
 mod trace;
 
 pub use crate::runtime_output::{
-    BoundaryViolationsOutput, BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
-    CircularDependenciesProgrammaticOutput, DeadCodeOutput, DeadCodeProgrammaticOutput,
-    DuplicationOutput, DuplicationProgrammaticOutput, FeatureFlagsOutput,
-    FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
-    TraceCloneOutput, TraceCloneProgrammaticOutput, TraceDependencyOutput,
-    TraceDependencyProgrammaticOutput, TraceExportOutput, TraceExportProgrammaticOutput,
-    TraceFileOutput, TraceFileProgrammaticOutput, serialize_health_report_json,
+    AuditProgrammaticOutput, BoundaryViolationsOutput, BoundaryViolationsProgrammaticOutput,
+    CircularDependenciesOutput, CircularDependenciesProgrammaticOutput, DeadCodeOutput,
+    DeadCodeProgrammaticOutput, DuplicationOutput, DuplicationProgrammaticOutput,
+    FeatureFlagsOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
+    HealthProgrammaticOutput, TraceCloneOutput, TraceCloneProgrammaticOutput,
+    TraceDependencyOutput, TraceDependencyProgrammaticOutput, TraceExportOutput,
+    TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
+    serialize_health_report_json,
 };
+pub use audit::run_audit;
 pub use dead_code::{run_boundary_violations, run_circular_dependencies, run_dead_code};
 pub use duplication::run_duplication;
 pub use feature_flags::run_feature_flags;

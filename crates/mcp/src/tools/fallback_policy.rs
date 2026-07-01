@@ -95,7 +95,13 @@ mod tests {
             "mod.rs",
             "security.rs",
         ];
-        let conditional_cli_backed = ["analyze.rs", "check_changed.rs", "dupes.rs", "health.rs"];
+        let conditional_cli_backed = [
+            "analyze.rs",
+            "audit.rs",
+            "check_changed.rs",
+            "dupes.rs",
+            "health.rs",
+        ];
 
         for entry in std::fs::read_dir(&tools_dir).expect("read tools dir") {
             let entry = entry.expect("read tools entry");
