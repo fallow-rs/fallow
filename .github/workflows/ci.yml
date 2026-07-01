@@ -76,6 +76,7 @@ jobs:
               - 'rule-pack-schema.json'
               - 'npm/fallow/schema.json'
               - 'npm/fallow/capabilities.json'
+              - 'npm/fallow/issue-registry.json'
               - 'npm/fallow/types/output-contract.d.ts'
               - 'npm/fallow/skills/fallow/**'
               - 'editors/vscode/src/generated/output-contract.d.ts'

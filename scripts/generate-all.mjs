@@ -24,6 +24,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CHECK = process.argv.includes("--check");
 const HELP = process.argv.includes("--help") || process.argv.includes("-h");
 const CAPABILITY_SCHEMA_PATH = "npm/fallow/capabilities.json";
+const ISSUE_REGISTRY_PATH = "npm/fallow/issue-registry.json";
 
 const run = (cmd, args, options = {}) =>
   execFileSync(cmd, args, {
@@ -60,11 +61,36 @@ const assertSame = (path, actual) => {
 
 const ensureTrailingNewline = (text) => (text.endsWith("\n") ? text : `${text}\n`);
 
+const issueRegistry = (capabilitySchema) => {
+  const parsed = JSON.parse(capabilitySchema);
+  const issueTypes = (parsed.issue_types ?? []).toSorted((a, b) => {
+    const leftIndex = Number.isInteger(a.registry_index)
+      ? a.registry_index
+      : Number.MAX_SAFE_INTEGER;
+    const rightIndex = Number.isInteger(b.registry_index)
+      ? b.registry_index
+      : Number.MAX_SAFE_INTEGER;
+    return leftIndex - rightIndex || String(a.id).localeCompare(String(b.id));
+  });
+  return ensureTrailingNewline(
+    `${JSON.stringify(
+      {
+        schema_version: 1,
+        source: "fallow schema issue_types",
+        issue_types: issueTypes,
+      },
+      null,
+      2,
+    )}`,
+  );
+};
+
 const generateSchemaFiles = () => {
   const configSchema = ensureTrailingNewline(cargoFallow("config-schema"));
   const pluginSchema = ensureTrailingNewline(cargoFallow("plugin-schema"));
   const rulePackSchema = ensureTrailingNewline(cargoFallow("rule-pack-schema"));
   const capabilitySchema = ensureTrailingNewline(cargoFallow("schema"));
+  const registry = issueRegistry(capabilitySchema);
   const output = ensureTrailingNewline(outputSchema());
 
   if (CHECK) {
@@ -75,6 +101,7 @@ const generateSchemaFiles = () => {
     assertSame("plugin-schema.json", pluginSchema);
     assertSame("rule-pack-schema.json", rulePackSchema);
     assertSame(CAPABILITY_SCHEMA_PATH, capabilitySchema);
+    assertSame(ISSUE_REGISTRY_PATH, registry);
     assertSame("docs/output-schema.json", output);
     return capabilitySchema;
   }
@@ -83,6 +110,7 @@ const generateSchemaFiles = () => {
   write("plugin-schema.json", pluginSchema);
   write("rule-pack-schema.json", rulePackSchema);
   write(CAPABILITY_SCHEMA_PATH, capabilitySchema);
+  write(ISSUE_REGISTRY_PATH, registry);
   write("docs/output-schema.json", output);
   if (existsSync(join(REPO_ROOT, "npm/fallow/schema.json"))) {
     copyFileSync(join(REPO_ROOT, "schema.json"), join(REPO_ROOT, "npm/fallow/schema.json"));

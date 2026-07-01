@@ -437,7 +437,8 @@ jobs:
   # a committed generated surface disagrees with what regen would produce
   # (force-push to main, history rewrite, tag pointed at an old SHA). The root
   # bundle validates config/plugin/rule-pack schemas, output schema, npm
-  # capability metadata, TS output contracts, NAPI types, and agent docs.
+  # capability metadata, issue registry export, TS output contracts, NAPI types,
+  # and agent docs.
   # Failure here blocks `npm-publish` AND `vscode-publish`. Refs #416.
   #
   # Prep-tier job: `contents: read` only, no publish tokens, so running

@@ -52,7 +52,8 @@
     "./scripts/*": "./scripts/*",
     "./skills/*": "./skills/*",
     "./schema.json": "./schema.json",
-    "./capabilities.json": "./capabilities.json"
+    "./capabilities.json": "./capabilities.json",
+    "./issue-registry.json": "./issue-registry.json"
   },
   "typesVersions": {
     "*": {
@@ -69,7 +70,8 @@
     "types",
     "README.md",
     "schema.json",
-    "capabilities.json"
+    "capabilities.json",
+    "issue-registry.json"
   ],
   "scripts": {
     "test:platform": "node --test scripts/platform-package.test.js",
