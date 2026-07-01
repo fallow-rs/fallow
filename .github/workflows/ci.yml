@@ -355,6 +355,8 @@ jobs:
             'skills/fallow/references/gotchas.md',
             'skills/fallow/references/patterns.md',
             'schema.json',
+            'capabilities.json',
+            'issue-registry.json',
           ];
           const missing = required.filter((file) => !files.has(file));
           if (missing.length > 0) {

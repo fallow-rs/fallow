@@ -169,10 +169,10 @@ If `docs/output-schema.json` changed, regenerate the VS Code extension's TypeScr
 
 ```bash
 cd editors/vscode
-pnpm run codegen:types   # writes editors/vscode/src/generated/output-contract.d.ts
+pnpm run codegen:contracts   # writes VS Code and npm generated contracts
 ```
 
-CI runs `pnpm run check:codegen` to confirm the committed generated file matches a fresh regeneration.
+CI runs `pnpm run check:contracts` to confirm the committed generated files match a fresh regeneration.
 
 ## Git conventions
 
