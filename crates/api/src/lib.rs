@@ -27,6 +27,7 @@ pub mod combined_output;
 pub mod compact_output;
 pub mod dead_code_codeclimate;
 pub mod dead_code_sarif;
+pub mod decision_surface;
 pub mod dupes_output;
 mod duplication_filters;
 pub mod editor;
@@ -39,6 +40,8 @@ mod list_runtime;
 pub mod markdown_output;
 mod next_steps;
 pub mod output_contracts;
+pub mod review_deltas;
+pub mod routing;
 pub mod runtime;
 mod runtime_json;
 mod runtime_output;
@@ -147,23 +150,24 @@ pub use runtime::{
     AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
     BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
     CircularDependenciesProgrammaticOutput, DeadCodeOutput, DeadCodeProgrammaticOutput,
-    DuplicationOutput, DuplicationProgrammaticOutput, EngineHealthRunner, FeatureFlagsOutput,
-    FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
-    ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun,
-    ProgrammaticHealthRunner, TraceCloneOutput, TraceCloneProgrammaticOutput,
-    TraceDependencyOutput, TraceDependencyProgrammaticOutput, TraceExportOutput,
-    TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput, run_audit,
-    run_boundary_violations, run_circular_dependencies, run_complexity_with_runner, run_dead_code,
-    run_duplication, run_feature_flags, run_health, run_health_with_runner, run_trace_clone,
-    run_trace_dependency, run_trace_export, run_trace_file, serialize_health_report_json,
+    DecisionSurfaceProgrammaticOutput, DuplicationOutput, DuplicationProgrammaticOutput,
+    EngineHealthRunner, FeatureFlagsOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
+    HealthProgrammaticOutput, ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts,
+    ProgrammaticHealthRun, ProgrammaticHealthRunner, TraceCloneOutput,
+    TraceCloneProgrammaticOutput, TraceDependencyOutput, TraceDependencyProgrammaticOutput,
+    TraceExportOutput, TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
+    run_audit, run_boundary_violations, run_circular_dependencies, run_complexity_with_runner,
+    run_dead_code, run_decision_surface, run_duplication, run_feature_flags, run_health,
+    run_health_with_runner, run_trace_clone, run_trace_dependency, run_trace_export,
+    run_trace_file, serialize_health_report_json,
 };
 pub use runtime_json::{
     serialize_audit_programmatic_json, serialize_boundary_violations_programmatic_json,
     serialize_circular_dependencies_programmatic_json, serialize_dead_code_programmatic_json,
-    serialize_duplication_programmatic_json, serialize_feature_flags_programmatic_json,
-    serialize_health_programmatic_json, serialize_trace_clone_programmatic_json,
-    serialize_trace_dependency_programmatic_json, serialize_trace_export_programmatic_json,
-    serialize_trace_file_programmatic_json,
+    serialize_decision_surface_programmatic_json, serialize_duplication_programmatic_json,
+    serialize_feature_flags_programmatic_json, serialize_health_programmatic_json,
+    serialize_trace_clone_programmatic_json, serialize_trace_dependency_programmatic_json,
+    serialize_trace_export_programmatic_json, serialize_trace_file_programmatic_json,
 };
 pub use sarif_output::{
     annotate_sarif_results, build_duplication_sarif, build_grouped_duplication_sarif,
@@ -319,6 +323,14 @@ pub struct AuditOptions {
     pub include_entry_exports: bool,
     pub runtime_coverage: Option<PathBuf>,
     pub min_invocations_hot: u64,
+}
+
+/// Options for changed-code decision-surface analysis.
+#[derive(Debug, Clone, Default)]
+pub struct DecisionSurfaceOptions {
+    pub analysis: AnalysisOptions,
+    pub base: Option<String>,
+    pub max_decisions: Option<usize>,
 }
 
 /// Options for feature-flag analysis.

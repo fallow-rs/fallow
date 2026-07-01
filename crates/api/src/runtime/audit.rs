@@ -102,12 +102,14 @@ fn validate_audit_api_options(options: &AuditOptions) -> ProgrammaticResult<()> 
 }
 
 #[derive(Debug, Clone)]
-struct ResolvedAuditBase {
-    git_ref: String,
-    description: Option<String>,
+pub(super) struct ResolvedAuditBase {
+    pub(super) git_ref: String,
+    pub(super) description: Option<String>,
 }
 
-fn resolve_audit_base_ref(options: &AuditOptions) -> ProgrammaticResult<ResolvedAuditBase> {
+pub(super) fn resolve_audit_base_ref(
+    options: &AuditOptions,
+) -> ProgrammaticResult<ResolvedAuditBase> {
     if let Some(ref_str) = options
         .base
         .as_deref()
@@ -393,13 +395,13 @@ fn analysis_root_from_options(options: &AuditOptions) -> ProgrammaticResult<Path
     }
 }
 
-struct BaseWorktree {
+pub(super) struct BaseWorktree {
     repo_root: PathBuf,
     path: PathBuf,
 }
 
 impl BaseWorktree {
-    fn create(repo_root: &Path, base_ref: &str) -> ProgrammaticResult<Self> {
+    pub(super) fn create(repo_root: &Path, base_ref: &str) -> ProgrammaticResult<Self> {
         let path = base_worktree_path()?;
         let mut command = Command::new("git");
         command
@@ -438,7 +440,7 @@ impl BaseWorktree {
         })
     }
 
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.path
     }
 }
@@ -475,7 +477,7 @@ fn base_worktree_path() -> ProgrammaticResult<PathBuf> {
     )))
 }
 
-fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf {
+pub(super) fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf {
     let Some(git_root) = git_toplevel(current_root) else {
         return base_worktree_root.to_path_buf();
     };

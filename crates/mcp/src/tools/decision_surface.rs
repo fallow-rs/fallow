@@ -1,60 +1,62 @@
 use crate::params::DecisionSurfaceParams;
 
+use fallow_api::{
+    AnalysisOptions, DecisionSurfaceOptions, run_decision_surface as run_decision_surface_api,
+    serialize_decision_surface_programmatic_json,
+};
 use rmcp::ErrorData as McpError;
-use rmcp::model::CallToolResult;
+use rmcp::model::{CallToolResult, Content};
 
-use super::{push_global, push_scope, push_str_flag, run_tool};
+use super::api_runtime::{
+    env_diff_file, json_success, non_empty_path, non_empty_string, programmatic_error_body,
+    run_api_blocking,
+};
 
-/// Run the `decision_surface` tool. It is intentionally CLI-backed until the
-/// audit brief/decision-surface runner is exposed from `fallow-api`.
+/// Run the `decision_surface` tool through the typed programmatic API.
 pub async fn run_decision_surface(
-    binary: &str,
+    _binary: &str,
     params: DecisionSurfaceParams,
 ) -> Result<CallToolResult, McpError> {
-    let args = build_decision_surface_args(&params);
-    run_tool(binary, "decision_surface", &args).await
+    let options = decision_surface_options_from_params(&params);
+    let result = run_api_blocking("decision_surface", move || {
+        run_decision_surface_api(&options).and_then(serialize_decision_surface_programmatic_json)
+    })
+    .await?
+    .map_or_else(
+        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |value| json_success(&value),
+    );
+    Ok(result)
 }
 
-/// Build CLI arguments for the `decision_surface` tool: `fallow decision-surface
-/// --format json --quiet`. The separable, cheap apex; reuses the changed-code
-/// (brief) analysis, NOT the full pipeline.
-pub fn build_decision_surface_args(params: &DecisionSurfaceParams) -> Vec<String> {
-    let mut args = vec![
-        "decision-surface".to_string(),
-        "--format".to_string(),
-        "json".to_string(),
-        "--quiet".to_string(),
-    ];
-
-    push_global(
-        &mut args,
-        params.root.as_deref(),
-        params.config.as_deref(),
-        params.no_cache,
-        params.threads,
-    );
-    push_str_flag(&mut args, "--base", params.base.as_deref());
-    // The decision surface is a read-only orientation; it has no production knob,
-    // so only the workspace scope flows through.
-    push_scope(&mut args, None, params.workspace.as_deref());
-    if let Some(max_decisions) = params.max_decisions {
-        args.extend(["--max-decisions".to_string(), max_decisions.to_string()]);
+fn decision_surface_options_from_params(params: &DecisionSurfaceParams) -> DecisionSurfaceOptions {
+    DecisionSurfaceOptions {
+        analysis: AnalysisOptions {
+            root: non_empty_path(params.root.as_deref()),
+            config_path: non_empty_path(params.config.as_deref()),
+            no_cache: params.no_cache.unwrap_or(false),
+            threads: params.threads,
+            diff_file: env_diff_file(),
+            workspace: non_empty_string(params.workspace.as_deref()).map(|value| vec![value]),
+            explain: false,
+            legacy_envelope: false,
+            ..AnalysisOptions::default()
+        },
+        base: non_empty_string(params.base.as_deref()),
+        max_decisions: params.max_decisions,
     }
-
-    args
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rmcp::model::RawContent;
 
     #[test]
-    fn builds_decision_surface_command_with_json_quiet() {
+    fn default_decision_surface_maps_to_programmatic_api_options() {
         let params = DecisionSurfaceParams::default();
-        let args = build_decision_surface_args(&params);
-        assert_eq!(args[0], "decision-surface");
-        assert!(args.windows(2).any(|p| p == ["--format", "json"]));
-        assert!(args.contains(&"--quiet".to_string()));
+        let options = decision_surface_options_from_params(&params);
+        assert_eq!(options.max_decisions, None);
     }
 
     #[test]
@@ -64,9 +66,9 @@ mod tests {
             max_decisions: Some(5),
             ..DecisionSurfaceParams::default()
         };
-        let args = build_decision_surface_args(&params);
-        assert!(args.windows(2).any(|p| p == ["--base", "origin/main"]));
-        assert!(args.windows(2).any(|p| p == ["--max-decisions", "5"]));
+        let options = decision_surface_options_from_params(&params);
+        assert_eq!(options.base.as_deref(), Some("origin/main"));
+        assert_eq!(options.max_decisions, Some(5));
     }
 
     #[test]
@@ -75,7 +77,83 @@ mod tests {
             workspace: Some("apps/web".to_string()),
             ..DecisionSurfaceParams::default()
         };
-        let args = build_decision_surface_args(&params);
-        assert!(args.windows(2).any(|p| p == ["--workspace", "apps/web"]));
+        let options = decision_surface_options_from_params(&params);
+        assert_eq!(
+            options.analysis.workspace,
+            Some(vec!["apps/web".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn run_decision_surface_api_path_returns_json_without_cli_binary() {
+        let project = audit_fixture();
+
+        let result = run_decision_surface(
+            "unused-binary-on-api-path",
+            DecisionSurfaceParams {
+                root: Some(project.path().display().to_string()),
+                base: Some("HEAD".to_string()),
+                no_cache: Some(true),
+                ..DecisionSurfaceParams::default()
+            },
+        )
+        .await
+        .expect("api result");
+
+        assert_eq!(result.is_error, Some(false));
+        let text = match &result.content[0].raw {
+            RawContent::Text(text) => &text.text,
+            _ => panic!("expected text content"),
+        };
+        let json: serde_json::Value = serde_json::from_str(text).expect("json");
+        assert_eq!(json["kind"], "decision-surface");
+        assert_eq!(json["command"], "decision-surface");
+        assert!(json["decisions"].is_array());
+    }
+
+    fn audit_fixture() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::create_dir_all(project.path().join("src")).expect("create src");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"decision-api","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            project.path().join("src/index.ts"),
+            "console.log('entry');\n",
+        )
+        .expect("write entry");
+        git(project.path(), &["init"]);
+        git(project.path(), &["add", "."]);
+        git(
+            project.path(),
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+        std::fs::write(
+            project.path().join("src/feature.ts"),
+            "export const unused = 1;\n",
+        )
+        .expect("write changed source");
+        project
+    }
+
+    fn git(root: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .status()
+            .expect("git command");
+        assert!(status.success(), "git {args:?} failed");
     }
 }

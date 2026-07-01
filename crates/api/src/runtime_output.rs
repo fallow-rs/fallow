@@ -333,6 +333,15 @@ pub struct AuditProgrammaticKeySnapshot {
     pub dupes: FxHashSet<String>,
 }
 
+/// Typed programmatic decision-surface output before JSON serialization.
+#[derive(Debug, Clone)]
+pub struct DecisionSurfaceProgrammaticOutput {
+    pub surface: fallow_output::DecisionSurface,
+    pub elapsed: std::time::Duration,
+    pub envelope_mode: RootEnvelopeMode,
+    pub telemetry_analysis_run_id: Option<String>,
+}
+
 /// Serialize a health / complexity report into the stable JSON output contract.
 ///
 /// # Errors

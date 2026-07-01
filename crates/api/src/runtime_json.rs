@@ -9,14 +9,17 @@ use crate::{
     runtime::{
         AuditProgrammaticOutput, BoundaryViolationsProgrammaticOutput,
         CircularDependenciesProgrammaticOutput, DeadCodeProgrammaticOutput,
-        DuplicationProgrammaticOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
-        HealthProgrammaticOutput, TraceCloneProgrammaticOutput, TraceDependencyProgrammaticOutput,
+        DecisionSurfaceProgrammaticOutput, DuplicationProgrammaticOutput,
+        FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
+        TraceCloneProgrammaticOutput, TraceDependencyProgrammaticOutput,
         TraceExportProgrammaticOutput, TraceFileProgrammaticOutput, serialize_health_report_json,
     },
 };
 use fallow_output::{
-    CHECK_SCHEMA_VERSION, CheckOutput, GroupByMode, RootEnvelopeMode, serialize_check_json_output,
-    serialize_dupes_json_output, serialize_feature_flags_json_output, strip_root_prefix,
+    CHECK_SCHEMA_VERSION, CheckOutput, GroupByMode, RootEnvelopeMode,
+    build_decision_surface_output, serialize_check_json_output,
+    serialize_decision_surface_json_output, serialize_dupes_json_output,
+    serialize_feature_flags_json_output, strip_root_prefix,
 };
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use serde::Serialize;
@@ -24,6 +27,33 @@ use std::path::Path;
 use std::time::Duration;
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
+
+/// Serialize typed decision-surface output into the stable JSON contract.
+///
+/// # Errors
+///
+/// Returns a structured error if the decision-surface payload cannot serialize.
+pub fn serialize_decision_surface_programmatic_json(
+    output: DecisionSurfaceProgrammaticOutput,
+) -> ProgrammaticResult<serde_json::Value> {
+    let DecisionSurfaceProgrammaticOutput {
+        surface,
+        elapsed: _,
+        envelope_mode,
+        telemetry_analysis_run_id,
+    } = output;
+    let payload = build_decision_surface_output(&surface);
+    serialize_decision_surface_json_output(
+        payload,
+        envelope_mode,
+        telemetry_analysis_run_id.as_deref(),
+    )
+    .map_err(|err| {
+        ProgrammaticError::new(format!("failed to serialize decision surface: {err}"), 2)
+            .with_code("FALLOW_SERIALIZE_DECISION_SURFACE")
+            .with_context("decision-surface")
+    })
+}
 
 /// Serialize typed audit output into the stable JSON compatibility contract.
 ///

@@ -10,8 +10,6 @@
 
 pub mod coverage;
 
-/// Ownership analysis helpers, re-exported from the engine.
-pub use fallow_engine::health_ownership as ownership;
 /// Health scoring helpers, re-exported from the engine for CLI consumers that
 /// still address them through `crate::health::scoring`.
 pub use fallow_engine::health_scoring as scoring;

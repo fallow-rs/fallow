@@ -839,18 +839,17 @@ pub struct DecisionSurfaceParams {
     /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
     /// base is the git merge-base against the branch's upstream or the remote
     /// default (`origin/main`); set `FALLOW_AUDIT_BASE` in the server env to pin
-    /// it. Passed through to the CLI's `--base` flag.
+    /// it.
     pub base: Option<String>,
 
     /// Cap on the number of consequential structural decisions surfaced (the
     /// working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus
-    /// 1). Passed through to the CLI's `--max-decisions` flag.
+    /// 1).
     pub max_decisions: Option<usize>,
 
     /// Scope analysis to one or more workspaces. Accepts a single package name
     /// for the common case, or a comma-separated list with globs and `!` negation
-    /// (e.g. `"web,admin"`, `"apps/*"`). Passed through to the CLI's `--workspace`
-    /// flag.
+    /// (e.g. `"web,admin"`, `"apps/*"`).
     pub workspace: Option<String>,
 
     /// Disable the incremental parse cache. Forces a full re-parse of all files.
