@@ -325,6 +325,7 @@ fn api_and_cli_do_not_use_removed_engine_root_adapter_exports() {
             "fallow_engine::ProjectAnalysisArtifacts",
             "fallow_engine::ProjectConfig",
             "fallow_engine::ProjectConfigOptions",
+            "fallow_engine::results::",
             "fallow_engine::ChangedFilesError",
             "fallow_engine::changed_files(",
             "fallow_engine::config_for_project(",

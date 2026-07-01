@@ -414,7 +414,7 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
 fn build_index_from_analysis(
     root: &Path,
     modules: &[fallow_types::extract::ModuleInfo],
-    analysis_output: &fallow_engine::results::DeadCodeAnalysisArtifacts,
+    analysis_output: &fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
     codeowners: Option<&crate::codeowners::CodeOwners>,
 ) -> StaticIndex {
@@ -453,7 +453,9 @@ struct UnusedStaticSets {
 }
 
 impl UnusedStaticSets {
-    fn from_analysis(analysis_output: &fallow_engine::results::DeadCodeAnalysisArtifacts) -> Self {
+    fn from_analysis(
+        analysis_output: &fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
+    ) -> Self {
         let files: FxHashSet<PathBuf> = analysis_output
             .results
             .unused_files

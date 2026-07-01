@@ -221,7 +221,7 @@ pub mod editor_security {
     /// Return the human-readable security catalogue title for a finding kind.
     #[must_use]
     pub fn security_catalogue_title(kind: &str) -> Option<&'static str> {
-        fallow_engine::results::security_catalogue_title(kind)
+        fallow_engine::dead_code::security_catalogue_title(kind)
     }
 }
 
@@ -243,7 +243,7 @@ pub struct EditorDeadCodeAnalysisOutput {
 }
 
 impl EditorDeadCodeAnalysisOutput {
-    fn from_engine(output: fallow_engine::results::DeadCodeAnalysisOutput) -> Self {
+    fn from_engine(output: fallow_engine::dead_code::DeadCodeAnalysisOutput) -> Self {
         Self {
             results: output.results,
             modules: output.modules,

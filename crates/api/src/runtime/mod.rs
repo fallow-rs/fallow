@@ -63,7 +63,7 @@ pub struct ProgrammaticHealthAnalysis {
 
 impl ProgrammaticHealthAnalysis {
     fn from_engine<GroupResolver>(
-        analysis: fallow_engine::results::HealthAnalysisResult<GroupResolver>,
+        analysis: fallow_engine::health::HealthAnalysisResult<GroupResolver>,
     ) -> Self {
         Self {
             root: analysis.config.root,

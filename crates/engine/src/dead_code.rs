@@ -6,12 +6,13 @@ use rustc_hash::FxHashSet;
 
 use fallow_config::ResolvedConfig;
 
+pub use crate::results::{
+    AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
+    DeadCodeAnalysisWithHashes, derive_security_severity, security_catalogue_title,
+};
+
 use crate::{
     EngineResult, core_backend,
-    results::{
-        AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
-        DeadCodeAnalysisWithHashes,
-    },
     session::{
         analyze_dead_code_from_config, analyze_dead_code_with_artifacts_from_config,
         analyze_dead_code_with_complexity_from_config,
