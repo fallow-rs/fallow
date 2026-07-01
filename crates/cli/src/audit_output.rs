@@ -159,7 +159,7 @@ pub fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, sh
             crate::health::HealthPrintOptions {
                 quiet,
                 explain,
-                gates: fallow_engine::HealthGateOptions::default(),
+                gates: fallow_engine::health::HealthGateOptions::default(),
                 summary: false,
                 summary_heading: true,
                 show_explain_tip: false,

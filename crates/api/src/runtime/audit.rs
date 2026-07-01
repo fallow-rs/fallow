@@ -86,7 +86,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
 
 fn validate_audit_api_options(options: &AuditOptions) -> ProgrammaticResult<()> {
     if let Err(err) =
-        fallow_engine::validate_coverage_root_absolute(options.coverage_root.as_deref())
+        fallow_engine::health::validate_coverage_root_absolute(options.coverage_root.as_deref())
     {
         return Err(ProgrammaticError::new(err, 2)
             .with_code("FALLOW_INVALID_COVERAGE_ROOT")

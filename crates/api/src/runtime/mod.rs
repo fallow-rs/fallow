@@ -128,9 +128,11 @@ fn run_programmatic_health_on_engine(
     options: &ComplexityOptions,
 ) -> ProgrammaticResult<ProgrammaticHealthRun> {
     let health_options = derive_programmatic_health_execution_options(resolved, options);
-    let result =
-        fallow_engine::run_ungrouped_health(&health_options, resolved.workspace_roots.clone())
-            .map_err(|_| generic_health_error("health"))?;
+    let result = fallow_engine::health::run_ungrouped_health(
+        &health_options,
+        resolved.workspace_roots.clone(),
+    )
+    .map_err(|_| generic_health_error("health"))?;
 
     let root = result.config.root.clone();
     let next_step_facts = ProgrammaticHealthNextStepFacts {
@@ -174,10 +176,10 @@ pub fn run_health(options: &ComplexityOptions) -> ProgrammaticResult<HealthProgr
 fn derive_programmatic_health_execution_options<'a>(
     resolved: &'a ProgrammaticAnalysisContext,
     options: &'a ComplexityOptions,
-) -> fallow_engine::HealthExecutionOptions<'a> {
+) -> fallow_engine::health::HealthExecutionOptions<'a> {
     let run = crate::derive_complexity_run_options(options);
 
-    fallow_engine::HealthExecutionOptions {
+    fallow_engine::health::HealthExecutionOptions {
         root: resolved.root(),
         config_path: resolved.config_path(),
         output: OutputFormat::Human,
@@ -210,7 +212,7 @@ fn derive_programmatic_health_execution_options<'a>(
         enforce_coverage_gap_gate: true,
         effort: run.effort.map(crate::target_effort_to_output),
         score: run.sections.score,
-        gates: fallow_engine::HealthGateOptions::default(),
+        gates: fallow_engine::health::HealthGateOptions::default(),
         since: run.since,
         min_commits: run.min_commits,
         explain: resolved.explain_enabled(),

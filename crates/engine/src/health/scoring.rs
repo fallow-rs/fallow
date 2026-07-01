@@ -898,7 +898,7 @@ pub(super) fn load_istanbul_coverage(
     coverage_root: Option<&std::path::Path>,
     project_root: Option<&std::path::Path>,
 ) -> Result<IstanbulCoverage, String> {
-    crate::validate_coverage_root_absolute(coverage_root)?;
+    super::validate_coverage_root_absolute(coverage_root)?;
     let resolved = resolve_relative_to_root(path, project_root);
     let file_path = if resolved.is_dir() {
         let candidate = resolved.join("coverage-final.json");

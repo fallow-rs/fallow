@@ -2,7 +2,7 @@
 //!
 //! The command-neutral analysis pipeline (scoring, hotspots, targets, grouping,
 //! coverage gaps, vital signs, report assembly) lives in
-//! `fallow_engine` health root API. This module owns the CLI orchestration that the
+//! `fallow_engine::health` API. This module owns the CLI orchestration that the
 //! engine intentionally does not: command option validation, workspace /
 //! changed-file / shared-diff scope resolution, CODEOWNERS-backed
 //! grouping-resolver construction, the runtime coverage sidecar seam,
@@ -12,14 +12,14 @@ pub mod coverage;
 
 /// Health scoring helpers, re-exported from the engine for CLI consumers that
 /// still address them through `crate::health::scoring`.
-pub use fallow_engine::health_scoring as scoring;
+pub use fallow_engine::health::scoring;
 
 use std::process::ExitCode;
 use std::time::Instant;
 
 use colored::Colorize;
 use fallow_config::OutputFormat;
-use fallow_engine::{
+use fallow_engine::health::{
     HealthExecutionOptions, HealthGateOptions, HealthGroupResolver, HealthPipelineInputs,
     HealthScopeInputs, HealthSeams, HealthSharedParseData, HealthSort, RuntimeCoverageSeamInput,
     execute_health_inner, validate_health_churn_file,
@@ -123,7 +123,7 @@ fn health_seams<'a>() -> HealthSeams<'a> {
     reason = "by-value input matches the engine RuntimeCoverageAnalyzer seam signature"
 )]
 fn runtime_coverage_seam(
-    options: &fallow_engine::RuntimeCoverageOptions,
+    options: &fallow_engine::health::RuntimeCoverageOptions,
     input: RuntimeCoverageSeamInput<'_>,
 ) -> Result<fallow_output::RuntimeCoverageReport, ExitCode> {
     coverage::analyze(
@@ -175,7 +175,7 @@ fn build_health_scope_inputs<'a>(
 fn load_health_config(
     opts: &HealthOptions<'_>,
 ) -> Result<(fallow_config::ResolvedConfig, f64), ExitCode> {
-    fallow_engine::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
+    fallow_engine::health::validate_coverage_root_absolute(opts.coverage_inputs.coverage_root)
         .map_err(|e| emit_error(&e, 2, opts.output))?;
     validate_health_churn_file(opts)?;
     let t = Instant::now();

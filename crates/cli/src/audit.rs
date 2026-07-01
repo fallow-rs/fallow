@@ -1959,7 +1959,7 @@ fn build_audit_dupes_options<'a>(
 fn run_audit_health<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
-    shared_parse: Option<fallow_engine::HealthSharedParseData>,
+    shared_parse: Option<fallow_engine::health::HealthSharedParseData>,
 ) -> Result<Option<HealthResult>, ExitCode> {
     let runtime_coverage = match opts.runtime_coverage {
         Some(path) => match crate::health::coverage::prepare_options(
@@ -1992,7 +1992,7 @@ fn run_audit_health<'a>(
 fn build_audit_health_options<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
-    runtime_coverage: Option<fallow_engine::RuntimeCoverageOptions>,
+    runtime_coverage: Option<fallow_engine::health::RuntimeCoverageOptions>,
 ) -> HealthOptions<'a> {
     HealthOptions {
         root: opts.root,
@@ -2001,13 +2001,13 @@ fn build_audit_health_options<'a>(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
-        thresholds: fallow_engine::HealthThresholdOverrides {
+        thresholds: fallow_engine::health::HealthThresholdOverrides {
             max_cyclomatic: None,
             max_cognitive: None,
             max_crap: opts.max_crap,
         },
         top: None,
-        sort: fallow_engine::HealthSort::Cyclomatic,
+        sort: fallow_engine::health::HealthSort::Cyclomatic,
         production: opts.production_health.unwrap_or(opts.production),
         production_override: opts.production_health,
         changed_since,
@@ -2031,14 +2031,14 @@ fn build_audit_health_options<'a>(
         enforce_coverage_gap_gate: false,
         effort: None,
         score: false,
-        gates: fallow_engine::HealthGateOptions::default(),
+        gates: fallow_engine::health::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: opts.explain,
         summary: false,
         save_snapshot: None,
         trend: false,
-        coverage_inputs: fallow_engine::HealthCoverageInputs {
+        coverage_inputs: fallow_engine::health::HealthCoverageInputs {
             coverage: opts.coverage,
             coverage_root: opts.coverage_root,
         },
@@ -2065,7 +2065,7 @@ pub use output::{
 /// clears. The marker only affects the local Impact store; it never changes
 /// the verdict, exit code, or output.
 pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode {
-    if let Err(e) = fallow_engine::validate_coverage_root_absolute(opts.coverage_root) {
+    if let Err(e) = fallow_engine::health::validate_coverage_root_absolute(opts.coverage_root) {
         return emit_error(&e, 2, opts.output);
     }
     let coverage_resolved = opts

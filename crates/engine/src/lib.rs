@@ -39,7 +39,7 @@ mod feature_flags;
 mod flags;
 #[path = "git_env.rs"]
 mod git_env_impl;
-mod health;
+pub mod health;
 mod module_graph;
 mod plugins;
 mod project_config;
@@ -47,7 +47,7 @@ mod public_api;
 pub mod results;
 mod security;
 mod session;
-mod source;
+pub mod source;
 mod suppress;
 mod trace;
 mod trace_chain;
@@ -90,17 +90,6 @@ pub use flags::{
     FeatureFlagsAnalysis, analyze_feature_flags, builtin_env_prefixes, builtin_sdk_providers,
 };
 pub use git_env_impl::{AMBIENT_GIT_ENV_VARS, clear_ambient_git_env};
-pub use health::{
-    ComplexityRunOptions, ComplexitySectionOptions, DerivedComplexityOptions,
-    DerivedHealthSections, HealthCoverageInputs, HealthExecutionOptions, HealthGateOptions,
-    HealthGroupResolver, HealthPipelineInputs, HealthRunOptions, HealthRunOptionsInput,
-    HealthScopeInputs, HealthSeams, HealthSectionOptions, HealthSharedParseData, HealthSort,
-    HealthThresholdOverrides, RuntimeCoverageOptions, RuntimeCoverageSeamInput,
-    derive_complexity_sections, derive_health_run_options, derive_health_sections,
-    execute_health_inner, run_ungrouped_health, validate_coverage_root_absolute,
-    validate_health_churn_file,
-};
-pub use health::{ownership as health_ownership, scoring as health_scoring};
 pub use module_graph::{
     CoordinationGapPaths, DirectImporterSummary, FocusFileFactsPaths, ImpactClosurePaths,
     ImportedSymbolSummary, ModuleValueExport, PartitionOrderPaths, RetainedModuleGraph,
@@ -123,9 +112,6 @@ pub use results::{
 };
 pub use security::{derive_security_severity, security_catalogue_title};
 pub use session::{AnalysisSession, AnalysisSessionArtifacts};
-pub use source::inventory::{
-    InventoryComplexity, InventoryEntry, walk_source, walk_source_with_complexity,
-};
 pub use suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
 pub use trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ImpactClosureGap,
@@ -180,7 +166,7 @@ pub fn health_shared_parse_data_from_artifacts(
     modules: Option<Vec<ModuleInfo>>,
     files: Option<Vec<DiscoveredFile>>,
     script_used_packages: impl IntoIterator<Item = String>,
-) -> Option<HealthSharedParseData> {
+) -> Option<health::HealthSharedParseData> {
     let (Some(modules), Some(files)) = (modules, files) else {
         return None;
     };
@@ -193,7 +179,7 @@ pub fn health_shared_parse_data_from_artifacts(
         script_used_packages: script_used_packages.into_iter().collect(),
         file_hashes: FxHashMap::default(),
     });
-    Some(HealthSharedParseData {
+    Some(health::HealthSharedParseData {
         files,
         modules,
         analysis_output,

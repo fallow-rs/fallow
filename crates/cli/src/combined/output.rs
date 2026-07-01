@@ -297,7 +297,7 @@ fn print_health_section(
         crate::health::HealthPrintOptions {
             quiet: opts.quiet,
             explain: opts.explain,
-            gates: fallow_engine::HealthGateOptions::default(),
+            gates: fallow_engine::health::HealthGateOptions::default(),
             summary: opts.summary,
             summary_heading: !show_headers,
             show_explain_tip: false,

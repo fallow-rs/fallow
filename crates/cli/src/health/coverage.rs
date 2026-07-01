@@ -29,7 +29,7 @@ use url::Url;
 use crate::error::emit_error;
 use crate::health::scoring::IstanbulCoverage;
 use crate::license::verifying_key;
-use fallow_engine::RuntimeCoverageOptions;
+use fallow_engine::health::RuntimeCoverageOptions;
 use fallow_output::{
     RUNTIME_STALE_AFTER_DAYS, RuntimeCoverageAction, RuntimeCoverageConfidence,
     RuntimeCoverageDataSource, RuntimeCoverageDiscriminators, RuntimeCoverageEvidence,
@@ -2230,7 +2230,7 @@ mod tests {
         HotPath, IdentityResolution, PROTOCOL_VERSION, ReportVerdict, Response, Summary, Verdict,
         function_identity_id,
     };
-    use fallow_engine::RuntimeCoverageOptions;
+    use fallow_engine::health::RuntimeCoverageOptions;
     use globset::{Glob, GlobSetBuilder};
     use oxc_coverage_instrument::{Location, Position};
     use rustc_hash::{FxHashMap, FxHashSet};

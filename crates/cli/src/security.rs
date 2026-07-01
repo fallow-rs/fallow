@@ -1129,7 +1129,7 @@ fn analyze_security_runtime(
     )?;
     let result = crate::health::execute_health_with_shared_parse(
         &security_runtime_health_options(opts, runtime_coverage),
-        fallow_engine::HealthSharedParseData {
+        fallow_engine::health::HealthSharedParseData {
             files,
             modules,
             analysis_output: Some(analysis_output),
@@ -1142,7 +1142,7 @@ fn analyze_security_runtime(
 /// context for security findings (complexity/hotspot/ownership all disabled).
 fn security_runtime_health_options<'a>(
     opts: &SecurityOptions<'a>,
-    runtime_coverage: fallow_engine::RuntimeCoverageOptions,
+    runtime_coverage: fallow_engine::health::RuntimeCoverageOptions,
 ) -> HealthOptions<'a> {
     HealthOptions {
         root: opts.root,
@@ -1151,9 +1151,9 @@ fn security_runtime_health_options<'a>(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
-        thresholds: fallow_engine::HealthThresholdOverrides::default(),
+        thresholds: fallow_engine::health::HealthThresholdOverrides::default(),
         top: None,
-        sort: fallow_engine::HealthSort::Cyclomatic,
+        sort: fallow_engine::health::HealthSort::Cyclomatic,
         production: true,
         production_override: Some(true),
         changed_since: opts.changed_since,
@@ -1177,14 +1177,14 @@ fn security_runtime_health_options<'a>(
         enforce_coverage_gap_gate: false,
         effort: None,
         score: false,
-        gates: fallow_engine::HealthGateOptions::default(),
+        gates: fallow_engine::health::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: false,
         summary: false,
         save_snapshot: None,
         trend: false,
-        coverage_inputs: fallow_engine::HealthCoverageInputs::default(),
+        coverage_inputs: fallow_engine::health::HealthCoverageInputs::default(),
         performance: false,
         runtime_coverage: Some(runtime_coverage),
         churn_file: None,

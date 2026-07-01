@@ -377,9 +377,9 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
-        thresholds: fallow_engine::HealthThresholdOverrides::default(),
+        thresholds: fallow_engine::health::HealthThresholdOverrides::default(),
         top: None,
-        sort: fallow_engine::HealthSort::Cyclomatic,
+        sort: fallow_engine::health::HealthSort::Cyclomatic,
         production: opts.production_health.unwrap_or(opts.production),
         production_override: opts.production_health,
         changed_since: opts.changed_since,
@@ -403,7 +403,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         enforce_coverage_gap_gate: false,
         effort: None,
         score: opts.score || opts.trend,
-        gates: fallow_engine::HealthGateOptions::default(),
+        gates: fallow_engine::health::HealthGateOptions::default(),
         since: None,
         min_commits: None,
         explain: opts.explain,
@@ -412,7 +412,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
             .save_snapshot
             .map(|opt| std::path::PathBuf::from(opt.as_deref().unwrap_or_default())),
         trend: opts.trend,
-        coverage_inputs: fallow_engine::HealthCoverageInputs {
+        coverage_inputs: fallow_engine::health::HealthCoverageInputs {
             coverage: opts.coverage,
             coverage_root: opts.coverage_root,
         },

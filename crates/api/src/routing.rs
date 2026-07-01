@@ -16,7 +16,7 @@ use rustc_hash::FxHashSet;
 
 use fallow_config::ResolvedConfig;
 use fallow_engine::codeowners::CodeOwners;
-use fallow_engine::health_ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
+use fallow_engine::health::ownership::{OwnershipContext, compile_bot_globs, compute_ownership};
 use fallow_engine::{ChurnResult, SinceDuration, analyze_churn};
 
 /// Default churn window for routing: one year of history is enough to identify

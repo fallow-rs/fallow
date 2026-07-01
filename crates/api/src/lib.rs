@@ -676,7 +676,7 @@ pub fn validate_complexity_options(options: &ComplexityOptions) -> Result<(), Pr
         .with_context("health.coverage"));
     }
     if let Err(message) =
-        fallow_engine::validate_coverage_root_absolute(options.coverage_root.as_deref())
+        fallow_engine::health::validate_coverage_root_absolute(options.coverage_root.as_deref())
     {
         return Err(ProgrammaticError::new(message, 2)
             .with_code("FALLOW_INVALID_COVERAGE_ROOT")
@@ -713,27 +713,27 @@ fn is_health_score_only_output(options: &HealthSectionOptions, score: bool) -> b
 
 const fn thresholds_to_engine(
     thresholds: ComplexityThresholdOverrides,
-) -> fallow_engine::HealthThresholdOverrides {
-    fallow_engine::HealthThresholdOverrides {
+) -> fallow_engine::health::HealthThresholdOverrides {
+    fallow_engine::health::HealthThresholdOverrides {
         max_cyclomatic: thresholds.max_cyclomatic,
         max_cognitive: thresholds.max_cognitive,
         max_crap: thresholds.max_crap,
     }
 }
 
-const fn complexity_sort_to_engine(sort: ComplexitySort) -> fallow_engine::HealthSort {
+const fn complexity_sort_to_engine(sort: ComplexitySort) -> fallow_engine::health::HealthSort {
     match sort {
-        ComplexitySort::Severity => fallow_engine::HealthSort::Severity,
-        ComplexitySort::Cyclomatic => fallow_engine::HealthSort::Cyclomatic,
-        ComplexitySort::Cognitive => fallow_engine::HealthSort::Cognitive,
-        ComplexitySort::Lines => fallow_engine::HealthSort::Lines,
+        ComplexitySort::Severity => fallow_engine::health::HealthSort::Severity,
+        ComplexitySort::Cyclomatic => fallow_engine::health::HealthSort::Cyclomatic,
+        ComplexitySort::Cognitive => fallow_engine::health::HealthSort::Cognitive,
+        ComplexitySort::Lines => fallow_engine::health::HealthSort::Lines,
     }
 }
 
 const fn coverage_inputs_to_engine(
     coverage_inputs: ComplexityCoverageInputs<'_>,
-) -> fallow_engine::HealthCoverageInputs<'_> {
-    fallow_engine::HealthCoverageInputs {
+) -> fallow_engine::health::HealthCoverageInputs<'_> {
+    fallow_engine::health::HealthCoverageInputs {
         coverage: coverage_inputs.coverage,
         coverage_root: coverage_inputs.coverage_root,
     }

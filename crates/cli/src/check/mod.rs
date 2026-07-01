@@ -320,7 +320,7 @@ pub struct CheckResult {
     pub baseline_matched: Option<(usize, usize)>,
     pub timings: Option<fallow_types::trace::PipelineTimings>,
     /// Retained parse data for sharing with health (only populated when retain_modules_for_health=true).
-    pub shared_parse: Option<fallow_engine::HealthSharedParseData>,
+    pub shared_parse: Option<fallow_engine::health::HealthSharedParseData>,
     /// Impact closure for the review brief: the transitive
     /// affected-but-not-in-diff set plus coordination gaps. Populated by the
     /// audit brief path from the retained graph against the changed-file set;
@@ -586,7 +586,7 @@ fn build_shared_parse_data(
     retained_modules: Option<Vec<ModuleInfo>>,
     retained_files: Option<Vec<DiscoveredFile>>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
-) -> Option<fallow_engine::HealthSharedParseData> {
+) -> Option<fallow_engine::health::HealthSharedParseData> {
     fallow_engine::health_shared_parse_data_from_artifacts(
         results,
         trace_graph,

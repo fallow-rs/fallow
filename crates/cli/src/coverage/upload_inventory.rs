@@ -8,7 +8,7 @@
 //! The cloud join key is `(filePath, functionName, lineNumber)` since the
 //! line-aware function-identity migration (`0010`), so distinct same-named
 //! functions at different lines in the same file are preserved and merged
-//! into their own rows. The walker behind `fallow_engine::walk_source_with_complexity`
+//! into their own rows. The walker behind `fallow_engine::source::inventory`
 //! emits Istanbul / `oxc-coverage-instrument`-compatible names and unique
 //! 1-based line numbers per function declaration.
 //!
@@ -23,8 +23,9 @@ use std::process::ExitCode;
 use fallow_config::ResolvedConfig;
 use fallow_cov_protocol::{FunctionIdentity, IdentityResolution, function_identity_id};
 use fallow_engine::{
-    ChurnResult, ChurnTrend, FileChurn, InventoryComplexity, InventoryEntry, analyze_churn_cached,
-    discover_files_with_plugin_scopes, parse_since, walk_source_with_complexity,
+    ChurnResult, ChurnTrend, FileChurn, analyze_churn_cached, discover_files_with_plugin_scopes,
+    parse_since,
+    source::inventory::{InventoryComplexity, InventoryEntry, walk_source_with_complexity},
 };
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
