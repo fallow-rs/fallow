@@ -58,22 +58,57 @@ pub(super) fn collect_template_usage_with_bound_targets(
     bound_targets: &FxHashMap<String, String>,
     iterable_types: &FxHashMap<String, String>,
 ) -> TemplateUsage {
-    // Type each `v-for` loop item to its source iterable's element class up front
-    // (issue #1707), so a member access on the item (`{{ util.getter }}`) anywhere
-    // in the streamed scan remaps onto the class via the effective bound targets.
-    // Only clone when there is something to add.
-    let augmented = augment_bound_targets_with_v_for_types(source, iterable_types, bound_targets);
-    let effective_bound_targets = augmented.as_ref().unwrap_or(bound_targets);
-
     let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
         .find_iter(source)
         .map(|m| (m.start(), m.end()))
         .collect();
+    let body_ranges = template_body_ranges(source, &comment_ranges);
+
+    // Type each `v-for` loop item to its source iterable's element class up front
+    // (issue #1707), so a member access on the item (`{{ util.getter }}`) anywhere
+    // in the streamed scan remaps onto the class via the effective bound targets.
+    // Only clone when there is something to add. Scoped to the same template body
+    // regions (comments excluded) the streaming scan covers, so a `v-for="..."`
+    // string inside `<script>` or an HTML comment is never picked up.
+    let augmented = augment_bound_targets_with_v_for_types(
+        source,
+        &body_ranges,
+        &comment_ranges,
+        iterable_types,
+        bound_targets,
+    );
+    let effective_bound_targets = augmented.as_ref().unwrap_or(bound_targets);
 
     let mut usage = TemplateUsage::default();
+    for &(body_start, body_end) in &body_ranges {
+        usage.merge(scan_template_body(
+            &source[body_start..body_end],
+            body_start,
+            imported_bindings,
+            effective_bound_targets,
+            iterable_types,
+        ));
+    }
+
+    scan_style_vbind_usage(
+        source,
+        imported_bindings,
+        effective_bound_targets,
+        &mut usage,
+    );
+
+    usage
+}
+
+/// Compute the `(start, end)` byte ranges of each root `<template>` body, mirroring
+/// the streaming scan's skip logic: nested `<template>` opens are subsumed by the
+/// enclosing root body, comment-embedded opens and self-closing `<template/>` are
+/// skipped.
+fn template_body_ranges(source: &str, comment_ranges: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
     // Cursor past the last fully-consumed root template body, so nested
-    // `<template>` opens (which `TEMPLATE_OPEN_RE` also matches) are skipped
-    // rather than rescanned as separate roots.
+    // `<template>` opens (which `TEMPLATE_OPEN_RE` also matches) are skipped rather
+    // than rescanned as separate roots.
     let mut scan_from = 0usize;
     for open in TEMPLATE_OPEN_RE.find_iter(source) {
         if open.start() < scan_from {
@@ -93,34 +128,24 @@ pub(super) fn collect_template_usage_with_bound_targets(
         let Some(body_end) = find_template_body_end(source, body_start) else {
             continue;
         };
-        usage.merge(scan_template_body(
-            &source[body_start..body_end],
-            body_start,
-            imported_bindings,
-            effective_bound_targets,
-            iterable_types,
-        ));
+        ranges.push((body_start, body_end));
         scan_from = body_end;
     }
-
-    scan_style_vbind_usage(
-        source,
-        imported_bindings,
-        effective_bound_targets,
-        &mut usage,
-    );
-
-    usage
+    ranges
 }
 
-/// Pre-scan the template for `v-for` directives and, for each whose source
-/// iterable resolves to a known element class in `iterable_types`, bind the loop
-/// item variable to that class. Returns an augmented copy of `bound_targets` only
-/// when at least one typed loop variable was found (so the common no-array case
-/// pays no clone). First-write-wins on a repeated item name across v-fors: the
-/// over-credit direction is preferred (never introduces a false positive).
+/// Pre-scan the template body regions for `v-for` directives and, for each whose
+/// source iterable resolves to a known element class in `iterable_types`, bind the
+/// loop item variable to that class. Returns an augmented copy of `bound_targets`
+/// only when at least one typed loop variable was found (so the common no-array
+/// case pays no clone). First-write-wins on a repeated item name across v-fors:
+/// the over-credit direction is preferred (never introduces a false positive).
+/// Matches are constrained to `body_ranges` and excluded from `comment_ranges`, so
+/// a `v-for="..."` occurring in `<script>` or inside an HTML comment is ignored.
 fn augment_bound_targets_with_v_for_types(
     source: &str,
+    body_ranges: &[(usize, usize)],
+    comment_ranges: &[(usize, usize)],
     iterable_types: &FxHashMap<String, String>,
     bound_targets: &FxHashMap<String, String>,
 ) -> Option<FxHashMap<String, String>> {
@@ -132,6 +157,19 @@ fn augment_bound_targets_with_v_for_types(
         let Some(value) = caps.get(1).or_else(|| caps.get(2)) else {
             continue;
         };
+        let pos = value.start();
+        let in_template = body_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end);
+        if !in_template {
+            continue;
+        }
+        let in_comment = comment_ranges
+            .iter()
+            .any(|&(start, end)| pos >= start && pos < end);
+        if in_comment {
+            continue;
+        }
         let Some((item, class)) = v_for_element_binding(value.as_str(), iterable_types) else {
             continue;
         };
@@ -1265,6 +1303,30 @@ mod tests {
                 .iter()
                 .any(|access| access.object == "Util"),
             "destructured item must not credit the element class, found: {:?}",
+            usage.member_accesses
+        );
+    }
+
+    #[test]
+    fn v_for_inside_comment_does_not_type_template_reference() {
+        // The pre-scan is scoped to template bodies with comments excluded (same
+        // as the streaming scan), so a `v-for=` inside an HTML comment must not
+        // type a later bare `util.x` reference elsewhere in the template. Here the
+        // `<span>{{ util.getter }}` is outside any real v-for, so `util` is unbound
+        // and must credit nothing (issue #1707 hardening).
+        let usage = collect_template_usage_with_bound_targets(
+            "<template><!-- <li v-for=\"util of utils\">{{ util.getter }}</li> --><span>{{ util.getter }}</span></template>",
+            &imported(&[]),
+            &FxHashMap::default(),
+            &iterable_types(&[("utils", "Util")]),
+        );
+
+        assert!(
+            !usage
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "a v-for in a comment must not type a template reference, found: {:?}",
             usage.member_accesses
         );
     }
