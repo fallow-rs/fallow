@@ -470,7 +470,6 @@ fn engine_core_references_stay_inside_adapter_modules() {
     let allowed = [
         "crates/engine/src/churn.rs",
         "crates/engine/src/core_backend.rs",
-        "crates/engine/src/cross_reference.rs",
         "crates/engine/src/discover.rs",
         "crates/engine/src/duplicates.rs",
         "crates/engine/src/plugins.rs",

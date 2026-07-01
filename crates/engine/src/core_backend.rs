@@ -14,6 +14,10 @@ use crate::{
     AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
     EngineResult, ModuleInfo,
     changed_files::{ChangedFilesError, ChangedFilesSpawnHook},
+    cross_reference::{
+        CombinedFinding as EngineCombinedFinding,
+        CrossReferenceResult as EngineCrossReferenceResult, DeadCodeKind as EngineDeadCodeKind,
+    },
     discover::AnalysisDiscovery,
     duplicates::DuplicationReport,
     engine_error,
@@ -103,6 +107,52 @@ pub fn filter_results_by_changed_files(
     changed_files: &FxHashSet<PathBuf>,
 ) {
     fallow_core::changed_files::filter_results_by_changed_files(results, changed_files);
+}
+
+fn dead_code_kind(kind: fallow_core::cross_reference::DeadCodeKind) -> EngineDeadCodeKind {
+    match kind {
+        fallow_core::cross_reference::DeadCodeKind::UnusedFile => EngineDeadCodeKind::UnusedFile,
+        fallow_core::cross_reference::DeadCodeKind::UnusedExport { export_name } => {
+            EngineDeadCodeKind::UnusedExport { export_name }
+        }
+        fallow_core::cross_reference::DeadCodeKind::UnusedType { type_name } => {
+            EngineDeadCodeKind::UnusedType { type_name }
+        }
+    }
+}
+
+fn combined_finding(
+    finding: fallow_core::cross_reference::CombinedFinding,
+) -> EngineCombinedFinding {
+    EngineCombinedFinding {
+        clone_instance: finding.clone_instance,
+        dead_code_kind: dead_code_kind(finding.dead_code_kind),
+        group_index: finding.group_index,
+    }
+}
+
+fn cross_reference_result(
+    result: fallow_core::cross_reference::CrossReferenceResult,
+) -> EngineCrossReferenceResult {
+    EngineCrossReferenceResult {
+        combined_findings: result
+            .combined_findings
+            .into_iter()
+            .map(combined_finding)
+            .collect(),
+        clones_in_unused_files: result.clones_in_unused_files,
+        clones_with_unused_exports: result.clones_with_unused_exports,
+    }
+}
+
+pub fn cross_reference(
+    duplication: &DuplicationReport,
+    dead_code: &AnalysisResults,
+) -> EngineCrossReferenceResult {
+    cross_reference_result(fallow_core::cross_reference::cross_reference(
+        duplication,
+        dead_code,
+    ))
 }
 
 pub fn trace_export(

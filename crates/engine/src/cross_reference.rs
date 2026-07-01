@@ -3,6 +3,7 @@
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
+use crate::core_backend;
 use crate::duplicates::{CloneInstance, DuplicationReport};
 use crate::results::AnalysisResults;
 
@@ -17,16 +18,6 @@ pub struct CombinedFinding {
     pub group_index: usize,
 }
 
-impl From<fallow_core::cross_reference::CombinedFinding> for CombinedFinding {
-    fn from(finding: fallow_core::cross_reference::CombinedFinding) -> Self {
-        Self {
-            clone_instance: finding.clone_instance,
-            dead_code_kind: finding.dead_code_kind.into(),
-            group_index: finding.group_index,
-        }
-    }
-}
-
 /// The type of dead code that overlaps with a clone instance.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum DeadCodeKind {
@@ -36,20 +27,6 @@ pub enum DeadCodeKind {
     UnusedExport { export_name: String },
     /// A specific unused type overlaps with the clone's line range.
     UnusedType { type_name: String },
-}
-
-impl From<fallow_core::cross_reference::DeadCodeKind> for DeadCodeKind {
-    fn from(kind: fallow_core::cross_reference::DeadCodeKind) -> Self {
-        match kind {
-            fallow_core::cross_reference::DeadCodeKind::UnusedFile => Self::UnusedFile,
-            fallow_core::cross_reference::DeadCodeKind::UnusedExport { export_name } => {
-                Self::UnusedExport { export_name }
-            }
-            fallow_core::cross_reference::DeadCodeKind::UnusedType { type_name } => {
-                Self::UnusedType { type_name }
-            }
-        }
-    }
 }
 
 /// Result of cross-referencing duplication with dead-code analysis.
@@ -86,27 +63,13 @@ impl CrossReferenceResult {
     }
 }
 
-impl From<fallow_core::cross_reference::CrossReferenceResult> for CrossReferenceResult {
-    fn from(result: fallow_core::cross_reference::CrossReferenceResult) -> Self {
-        Self {
-            combined_findings: result
-                .combined_findings
-                .into_iter()
-                .map(CombinedFinding::from)
-                .collect(),
-            clones_in_unused_files: result.clones_in_unused_files,
-            clones_with_unused_exports: result.clones_with_unused_exports,
-        }
-    }
-}
-
 /// Cross-reference duplication findings with dead-code analysis results.
 #[must_use]
 pub fn cross_reference(
     duplication: &DuplicationReport,
     dead_code: &AnalysisResults,
 ) -> CrossReferenceResult {
-    fallow_core::cross_reference::cross_reference(duplication, dead_code).into()
+    core_backend::cross_reference(duplication, dead_code)
 }
 
 #[cfg(test)]
@@ -151,28 +114,5 @@ mod tests {
         assert!(result.has_findings());
         assert!(result.affected_group_indices().contains(&2));
         assert!(result.affected_group_indices().contains(&4));
-    }
-
-    #[test]
-    fn cross_reference_result_converts_from_core_without_leaking_type() {
-        let result =
-            CrossReferenceResult::from(fallow_core::cross_reference::CrossReferenceResult {
-                combined_findings: vec![fallow_core::cross_reference::CombinedFinding {
-                    clone_instance: clone_instance("src/a.ts", 1, 3),
-                    dead_code_kind: fallow_core::cross_reference::DeadCodeKind::UnusedType {
-                        type_name: "UnusedType".to_string(),
-                    },
-                    group_index: 7,
-                }],
-                clones_in_unused_files: 0,
-                clones_with_unused_exports: 1,
-            });
-
-        assert_eq!(result.total(), 1);
-        assert_eq!(result.clones_with_unused_exports, 1);
-        assert!(matches!(
-            result.combined_findings[0].dead_code_kind,
-            DeadCodeKind::UnusedType { ref type_name } if type_name == "UnusedType"
-        ));
     }
 }
