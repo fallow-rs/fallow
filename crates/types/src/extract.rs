@@ -1531,23 +1531,11 @@ impl<'a> SemanticFactView<'a> {
             .collect()
     }
 
-    /// Alias for [`Self::instance_export_bindings`].
-    #[deprecated(since = "2.103.0", note = "use instance_export_bindings")]
-    pub fn typed_instance_export_bindings(self) -> Vec<InstanceExportBindingFact> {
-        self.instance_export_bindings()
-    }
-
     /// Collect static factory call member facts.
     pub fn factory_call_member_accesses(self) -> Vec<FactoryCallMemberAccessFact> {
         factory_call_member_access_facts(self.semantic_facts)
             .cloned()
             .collect()
-    }
-
-    /// Alias for [`Self::factory_call_member_accesses`].
-    #[deprecated(since = "2.103.0", note = "use factory_call_member_accesses")]
-    pub fn typed_factory_call_member_accesses(self) -> Vec<FactoryCallMemberAccessFact> {
-        self.factory_call_member_accesses()
     }
 
     /// Collect free-function factory-return member facts.
@@ -1557,23 +1545,11 @@ impl<'a> SemanticFactView<'a> {
             .collect()
     }
 
-    /// Alias for [`Self::factory_fn_member_accesses`].
-    #[deprecated(since = "2.103.0", note = "use factory_fn_member_accesses")]
-    pub fn typed_factory_fn_member_accesses(self) -> Vec<FactoryFnMemberAccessFact> {
-        self.factory_fn_member_accesses()
-    }
-
     /// Collect static factory fluent-chain member facts.
     pub fn fluent_chain_member_accesses(self) -> Vec<FluentChainMemberAccessFact> {
         fluent_chain_member_access_facts(self.semantic_facts)
             .cloned()
             .collect()
-    }
-
-    /// Alias for [`Self::fluent_chain_member_accesses`].
-    #[deprecated(since = "2.103.0", note = "use fluent_chain_member_accesses")]
-    pub fn typed_fluent_chain_member_accesses(self) -> Vec<FluentChainMemberAccessFact> {
-        self.fluent_chain_member_accesses()
     }
 
     /// Collect constructor-rooted fluent-chain member facts.
@@ -1583,23 +1559,11 @@ impl<'a> SemanticFactView<'a> {
             .collect()
     }
 
-    /// Alias for [`Self::fluent_chain_new_member_accesses`].
-    #[deprecated(since = "2.103.0", note = "use fluent_chain_new_member_accesses")]
-    pub fn typed_fluent_chain_new_member_accesses(self) -> Vec<FluentChainNewMemberAccessFact> {
-        self.fluent_chain_new_member_accesses()
-    }
-
     /// Collect Playwright fixture-use facts.
     pub fn playwright_fixture_uses(self) -> Vec<PlaywrightFixtureUseFact> {
         playwright_fixture_use_facts(self.semantic_facts)
             .cloned()
             .collect()
-    }
-
-    /// Alias for [`Self::playwright_fixture_uses`].
-    #[deprecated(since = "2.103.0", note = "use playwright_fixture_uses")]
-    pub fn typed_playwright_fixture_uses(self) -> Vec<PlaywrightFixtureUseFact> {
-        self.playwright_fixture_uses()
     }
 
     /// Collect Playwright fixture-definition facts.
@@ -1609,12 +1573,6 @@ impl<'a> SemanticFactView<'a> {
             .collect()
     }
 
-    /// Alias for [`Self::playwright_fixture_definitions`].
-    #[deprecated(since = "2.103.0", note = "use playwright_fixture_definitions")]
-    pub fn typed_playwright_fixture_definitions(self) -> Vec<PlaywrightFixtureDefinitionFact> {
-        self.playwright_fixture_definitions()
-    }
-
     /// Collect Playwright fixture-alias facts.
     pub fn playwright_fixture_aliases(self) -> Vec<PlaywrightFixtureAliasFact> {
         playwright_fixture_alias_facts(self.semantic_facts)
@@ -1622,23 +1580,11 @@ impl<'a> SemanticFactView<'a> {
             .collect()
     }
 
-    /// Alias for [`Self::playwright_fixture_aliases`].
-    #[deprecated(since = "2.103.0", note = "use playwright_fixture_aliases")]
-    pub fn typed_playwright_fixture_aliases(self) -> Vec<PlaywrightFixtureAliasFact> {
-        self.playwright_fixture_aliases()
-    }
-
     /// Collect Playwright fixture-type facts.
     pub fn playwright_fixture_types(self) -> Vec<PlaywrightFixtureTypeFact> {
         playwright_fixture_type_facts(self.semantic_facts)
             .cloned()
             .collect()
-    }
-
-    /// Alias for [`Self::playwright_fixture_types`].
-    #[deprecated(since = "2.103.0", note = "use playwright_fixture_types")]
-    pub fn typed_playwright_fixture_types(self) -> Vec<PlaywrightFixtureTypeFact> {
-        self.playwright_fixture_types()
     }
 }
 

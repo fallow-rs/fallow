@@ -2027,38 +2027,6 @@ fn propagate_member_accesses_through_inheritance(
     }
 }
 
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
-)]
-#[allow(dead_code, reason = "kept for the deprecated fallow_core helper API")]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "frozen deprecated public API (ADR-008); signature must not change"
-)]
-pub fn find_unused_members(
-    graph: &ModuleGraph,
-    resolved_modules: &[ResolvedModule],
-    modules: &[ModuleInfo],
-    suppressions: &SuppressionContext<'_>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
-    user_class_member_allowlist: &[UsedClassMemberRule],
-    ignore_decorators: &[String],
-) -> (Vec<UnusedMember>, Vec<UnusedMember>) {
-    let results = find_unused_members_with_public_api_entry_points(UnusedMemberScanInput {
-        graph,
-        resolved_modules,
-        modules,
-        suppressions,
-        line_offsets_by_file,
-        user_class_member_allowlist,
-        ignore_decorators,
-        public_api_entry_points: &FxHashSet::default(),
-        lit_active: false,
-    });
-    (results.enum_members, results.class_members)
-}
-
 /// Cross-file member-usage detection results, split by member kind. Store
 /// members (Pinia `state` / `getters` / `actions` key, or a setup-store
 /// returned key) are reported separately from enum and class members because
@@ -2708,10 +2676,6 @@ fn collect_direct_member_accesses(resolved_modules: &[ResolvedModule]) -> Member
 }
 
 #[cfg(test)]
-#[expect(
-    deprecated,
-    reason = "ADR-008 keeps direct detector unit tests while the public warning targets external callers"
-)]
 mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
@@ -2730,6 +2694,33 @@ mod tests {
     };
     use oxc_span::Span;
     use std::path::PathBuf;
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "test harness mirrors scanner inputs"
+    )]
+    fn find_unused_members(
+        graph: &ModuleGraph,
+        resolved_modules: &[ResolvedModule],
+        modules: &[ModuleInfo],
+        suppressions: &SuppressionContext<'_>,
+        line_offsets_by_file: &LineOffsetsMap<'_>,
+        user_class_member_allowlist: &[UsedClassMemberRule],
+        ignore_decorators: &[String],
+    ) -> (Vec<UnusedMember>, Vec<UnusedMember>) {
+        let results = find_unused_members_with_public_api_entry_points(UnusedMemberScanInput {
+            graph,
+            resolved_modules,
+            modules,
+            suppressions,
+            line_offsets_by_file,
+            user_class_member_allowlist,
+            ignore_decorators,
+            public_api_entry_points: &FxHashSet::default(),
+            lit_active: false,
+        });
+        (results.enum_members, results.class_members)
+    }
 
     #[expect(
         clippy::cast_possible_truncation,
