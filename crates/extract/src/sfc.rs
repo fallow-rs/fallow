@@ -609,7 +609,7 @@ fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     // `unused-component-prop` / `unused-component-emit` detectors. Extracted to a
     // helper to keep this function under the unit-size lint.
     if input.kind == SfcKind::Vue {
-        merge_vue_props_emits_into(input, &parser_return.program);
+        merge_vue_props_emits_into(input, &parser_return.program, &mut extractor);
     }
 
     // Svelte 5 `$props()` rune harvesting for `unused-component-prop`. `$props`
@@ -752,6 +752,7 @@ fn merge_svelte_props_into(
 fn merge_vue_props_emits_into(
     input: &mut SfcScriptMergeInput<'_>,
     program: &oxc_ast::ast::Program<'_>,
+    extractor: &mut ModuleInfoExtractor,
 ) {
     let byte_offset = input.script.byte_offset as u32;
     if input.script.is_setup {
@@ -759,6 +760,7 @@ fn merge_vue_props_emits_into(
             input,
             crate::sfc_props::harvest_define_props(program),
             byte_offset,
+            extractor,
         );
         apply_emits_harvest(
             input,
@@ -770,6 +772,7 @@ fn merge_vue_props_emits_into(
             input,
             crate::sfc_props::harvest_options_api_props(program),
             byte_offset,
+            extractor,
         );
         apply_emits_harvest(
             input,
@@ -788,6 +791,7 @@ fn apply_props_harvest(
     input: &mut SfcScriptMergeInput<'_>,
     harvest: crate::sfc_props::DefinePropsHarvest,
     byte_offset: u32,
+    extractor: &mut ModuleInfoExtractor,
 ) {
     if harvest.has_unharvestable_props {
         input.combined.has_unharvestable_props = true;
@@ -803,6 +807,18 @@ fn apply_props_harvest(
     }
     if let Some(binding) = harvest.props_return_binding {
         *input.props_return_binding = Some(binding);
+    }
+    // Record each props array field's element class keyed `props.<field>` into the
+    // visitor's array-binding element-types map (issue #1711). This runs before
+    // `harvest_template_visible_bindings` reads that map into
+    // `template_visible_iterable_types`, so a `v-for="(util) of props.items"`
+    // matches the `"props.items"` key and types `util` to the element class.
+    // Over-credit only: the harvest records a field only when its type resolved
+    // to a non-builtin array element class, so this can never add a finding.
+    for (field_name, element_type) in harvest.props_array_element_types {
+        extractor
+            .array_binding_element_types_mut()
+            .insert(format!("props.{field_name}"), element_type);
     }
     for mut prop in harvest.props {
         prop.span_start += byte_offset;

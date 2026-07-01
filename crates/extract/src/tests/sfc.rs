@@ -2133,3 +2133,59 @@ fn route_component_template_member_access_is_not_whole_use() {
         "data.title member access must not set the whole-data-use flag"
     );
 }
+
+#[test]
+fn vue_v_for_over_props_items_credits_element_class_members() {
+    // Issue #1711: `v-for="(util, i) of props.items"` where the prop `items` is
+    // typed `Util[]` via `defineProps<{ items: Util[] }>()`. The loop item must
+    // be typed to the element class `Util`, so `util.id` / `util.getValue()`
+    // credit `Util.id` / `Util.getValue` instead of reporting unused-class-member.
+    let source = r#"
+<script setup lang="ts">
+import type { Util } from './utils/Util'
+const props = defineProps<{ items: Util[] }>()
+</script>
+<template>
+  <div v-for="(util, i) of props.items" :key="i">
+    <span>{{ util.id }}</span>
+    <span>{{ util.getValue() }}</span>
+  </div>
+</template>
+"#;
+    let info = parse_sfc(source, "App.vue");
+
+    for member in ["id", "getValue"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "Util" && access.member == member),
+            "props.items v-for item `util.{member}` should map to Util.{member}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn vue_v_for_over_props_items_untyped_field_leaves_item_unmapped() {
+    // Neuter check: a prop field typed as a non-class array (`number[]`) yields
+    // no element class, so the loop item stays unmapped and its member accesses
+    // credit no user class (over-credit only, never a false positive).
+    let source = r#"
+<script setup lang="ts">
+const props = defineProps<{ items: number[] }>()
+</script>
+<template>
+  <div v-for="(util, i) of props.items" :key="i">{{ util.toFixed() }}</div>
+</template>
+"#;
+    let info = parse_sfc(source, "App.vue");
+
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Util"),
+        "a non-class array prop field must not type the loop item, found: {:?}",
+        info.member_accesses
+    );
+}

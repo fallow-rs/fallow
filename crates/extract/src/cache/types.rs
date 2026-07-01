@@ -700,7 +700,13 @@ use crate::MemberKind;
 /// over a typed array / reactive array, so member accesses on the iteration
 /// variable credit the element class. A warm cache from 216 lacks the credited
 /// iteration-variable member accesses.
-pub(super) const CACHE_VERSION: u32 = 217;
+///
+/// Bumped to 218 for issue #1711: a Vue `v-for` over a `props.<field>`
+/// member-expression source (where the prop is typed as an array of a class via
+/// `defineProps<{ items: Util[] }>()`) now types the loop item to the element
+/// class, so `.vue` `member_accesses` gain the credited item-member accesses a
+/// warm 217 cache lacks.
+pub(super) const CACHE_VERSION: u32 = 218;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

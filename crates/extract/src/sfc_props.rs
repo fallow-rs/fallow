@@ -40,6 +40,15 @@ pub struct DefinePropsHarvest {
     /// used by the template scanner to credit `props.<name>` member accesses in
     /// the template. `None` for the destructure form.
     pub props_return_binding: Option<String>,
+    /// Prop fields whose declared type is an array of a non-builtin class,
+    /// keyed by prop field name -> element class name (`items` -> `Util` for
+    /// `defineProps<{ items: Util[] }>()`). Consumed in `sfc.rs` to record
+    /// `props.<field>` -> element class into the visitor's
+    /// `array_binding_element_types` map so a Vue `v-for="(util) of props.items"`
+    /// types the loop item to the element class (issue #1711). Only the inline
+    /// TS literal form is harvested; only non-builtin array element types are
+    /// recorded (over-credit only, never a false positive).
+    pub props_array_element_types: FxHashMap<String, String>,
 }
 
 /// Harvest `defineProps` declared props and abstain flags from a `<script setup>`
@@ -54,6 +63,10 @@ struct DefinePropsScan {
     /// prop name -> local binding name (for `const { name: alias } = defineProps()`).
     prop_aliases: FxHashMap<String, String>,
     prop_names: Vec<(String, u32)>,
+    /// prop field name -> array element class name, for inline TS literal fields
+    /// whose type is an array of a non-builtin class (`items: Util[]`). Feeds
+    /// `DefinePropsHarvest.props_array_element_types` (issue #1711).
+    prop_array_element_types: FxHashMap<String, String>,
 }
 
 pub fn harvest_define_props(program: &Program<'_>) -> DefinePropsHarvest {
@@ -97,7 +110,12 @@ fn scan_define_props_statement(
                     continue;
                 };
                 if scan.prop_names.is_empty() && !harvest.has_unharvestable_props {
-                    collect_define_props_names(call, &mut scan.prop_names, harvest);
+                    collect_define_props_names(
+                        call,
+                        &mut scan.prop_names,
+                        &mut scan.prop_array_element_types,
+                        harvest,
+                    );
                 }
                 bind_define_props_target(
                     &declarator.id,
@@ -116,7 +134,12 @@ fn scan_define_props_statement(
                     && !harvest.has_unharvestable_props
                     && let Some(inner) = unwrap_define_props_call(&expr_stmt.expression)
                 {
-                    collect_define_props_names(inner, &mut scan.prop_names, harvest);
+                    collect_define_props_names(
+                        inner,
+                        &mut scan.prop_names,
+                        &mut scan.prop_array_element_types,
+                        harvest,
+                    );
                 }
             }
         }
@@ -170,6 +193,10 @@ fn finalize_define_props(
     }
 
     harvest.props_return_binding = scan.props_return_binding;
+    // Record array-element types for props fields typed as `Util[]` so the SFC
+    // merge can key `props.<field>` -> element class for the Vue v-for fix
+    // (issue #1711). Only harvestable inline-TS-literal array fields are present.
+    harvest.props_array_element_types = scan.prop_array_element_types;
 }
 
 /// Harvest Svelte 5 `$props()` declared props and abstain flags from a parsed
@@ -350,6 +377,7 @@ fn inspect_macro_call(call: &CallExpression<'_>, harvest: &mut DefinePropsHarves
 fn collect_define_props_names(
     call: &CallExpression<'_>,
     prop_names: &mut Vec<(String, u32)>,
+    prop_array_element_types: &mut FxHashMap<String, String>,
     harvest: &mut DefinePropsHarvest,
 ) {
     // Inline TS form: `defineProps<{ foo: T }>()`.
@@ -361,6 +389,20 @@ fn collect_define_props_names(
                         if let TSSignature::TSPropertySignature(sig) = member
                             && let Some(name) = property_key_name(&sig.key)
                         {
+                            // A field typed as an array of a non-builtin class
+                            // (`items: Util[]`) records its element class so a
+                            // `v-for="(util) of props.items"` can type the loop
+                            // item (issue #1711); a builtin / non-array type
+                            // yields None and simply records nothing.
+                            if let Some(element_type) =
+                                sig.type_annotation.as_deref().and_then(|annotation| {
+                                    crate::visitor::infer_props_field_array_element_type(
+                                        &annotation.type_annotation,
+                                    )
+                                })
+                            {
+                                prop_array_element_types.insert(name.clone(), element_type);
+                            }
                             prop_names.push((name, sig.span.start));
                         }
                     }

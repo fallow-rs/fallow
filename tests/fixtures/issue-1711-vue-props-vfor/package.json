@@ -1,0 +1,8 @@
+{
+  "name": "issue-1711-vue-props-vfor",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "vue": "^3.5.0"
+  }
+}

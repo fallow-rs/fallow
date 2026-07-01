@@ -28,6 +28,20 @@ use fallow_types::extract::{
     SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
+use helpers::array_element_type_from_type;
+
+/// Infer the element class of a Vue `defineProps` field whose declared type is an
+/// array (or nullable array) of a non-builtin class (`items: Util[]` /
+/// `Array<Util>` / `readonly Util[]` / `Util[] | null`). Thin crate-visible
+/// wrapper over the visitor helper so the SFC props harvest reuses the same
+/// inference the `v-for` binding fix uses, keyed by the prop field's `TSType`.
+/// Returns a non-builtin class name only; `number[]` / `Map[]` / non-array field
+/// types yield `None` (over-credit only, issue #1711).
+pub(crate) fn infer_props_field_array_element_type(
+    field_type: &oxc_ast::ast::TSType<'_>,
+) -> Option<String> {
+    array_element_type_from_type(field_type)
+}
 
 #[derive(Debug, Clone)]
 struct LocalClassExportInfo {
@@ -616,6 +630,14 @@ impl ModuleInfoExtractor {
 
     pub(crate) fn array_binding_element_types(&self) -> &FxHashMap<String, String> {
         &self.array_binding_element_types
+    }
+
+    /// Mutable accessor so the SFC props harvest can record `props.<field>` ->
+    /// element-class entries after the visit but before the template-visible
+    /// iterable-types read, typing a Vue `v-for="(util) of props.items"` loop
+    /// item to the prop field's array element class (issue #1711).
+    pub(crate) fn array_binding_element_types_mut(&mut self) -> &mut FxHashMap<String, String> {
+        &mut self.array_binding_element_types
     }
 
     fn insert_class_binding_target(&mut self, binding: String, target: String) {

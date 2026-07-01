@@ -197,6 +197,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Vue `v-for` over a `props.<field>` array no longer reports the element
+  class members as unused.** A Vue `<script setup>` component that iterates a
+  prop typed as an array of a class and reads members on the loop item, for
+  example `v-for="(util, i) of props.items"` with `{{ util.getter }}` /
+  `{{ util.hello() }}` where `props` comes from
+  `defineProps<{ items: Util[] }>()`, previously flagged `Util.getter` /
+  `Util.hello` as `unused-class-member`. The element-type crediting only matched
+  a bare module-scope iterable, not a `props.<field>` member-expression source.
+  The `defineProps` inline-type harvest now records each array-typed prop field's
+  element class as `props.<field>`, which the existing `v-for` scanner matches, so
+  member accesses on the loop item credit the class. Over-credit only: a
+  genuinely unused member on the same class still reports, and a non-class array
+  prop (`number[]`) types nothing. (Closes
+  [#1711](https://github.com/fallow-rs/fallow/issues/1711))
+
 - **Iterating a typed class array no longer reports the class members as
   unused.** Extending the Vue `v-for` fix below to the general iteration case: an
   iteration variable whose type is the element class of a typed array or reactive
@@ -210,11 +225,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`(u: Util) => ...`) already worked; this adds the implicitly-typed case. The
   change only removes false positives; a genuinely unused member on the same
   class still reports. Angular `@for` / `*ngFor`
-  ([#1712](https://github.com/fallow-rs/fallow/issues/1712)), Astro `.map`
-  ([#1713](https://github.com/fallow-rs/fallow/issues/1713)), and Vue `v-for`
-  over a member-expression source such as `props.items`
-  ([#1711](https://github.com/fallow-rs/fallow/issues/1711)) are tracked as
-  follow-ups. (Refs
+  ([#1712](https://github.com/fallow-rs/fallow/issues/1712)) and Astro `.map`
+  ([#1713](https://github.com/fallow-rs/fallow/issues/1713)) are tracked as
+  follow-ups; Vue `v-for` over a member-expression `props.<field>` source is
+  fixed above ([#1711](https://github.com/fallow-rs/fallow/issues/1711)). (Refs
   [#1707](https://github.com/fallow-rs/fallow/issues/1707))
 
 - **Vue `v-for` loop variables iterating over a class array no longer report the
