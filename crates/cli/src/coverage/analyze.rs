@@ -380,7 +380,7 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
         },
         fallow_config::ProductionAnalysis::Health,
     )?;
-    let session = fallow_engine::AnalysisSession::from_resolved_config(config);
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config);
     let analysis_output = session
         .analyze_dead_code_with_artifacts(true, true)
         .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;

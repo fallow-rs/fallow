@@ -145,6 +145,7 @@ impl<GroupResolver> HealthAnalysisResult<GroupResolver> {
 
 #[cfg(test)]
 mod tests {
+    use crate::project_config::{ProjectConfigOptions, config_for_project_analysis};
     use fallow_config::ProductionAnalysis;
     use fallow_types::output_format::OutputFormat;
 
@@ -153,10 +154,10 @@ mod tests {
     #[test]
     fn health_analysis_result_drops_presentation_resolver() {
         let project = tempfile::tempdir().expect("temp dir");
-        let project_config = crate::config_for_project_analysis(
+        let project_config = config_for_project_analysis(
             project.path(),
             None,
-            crate::ProjectConfigOptions {
+            ProjectConfigOptions {
                 output: OutputFormat::Json,
                 no_cache: true,
                 threads: 1,

@@ -42,7 +42,7 @@ type LoadConfigFn = fn(
 fn is_relevant_source(path: &Path) -> bool {
     path.extension()
         .and_then(|s| s.to_str())
-        .is_some_and(|ext| fallow_engine::SOURCE_EXTENSIONS.contains(&ext))
+        .is_some_and(|ext| fallow_engine::discover::SOURCE_EXTENSIONS.contains(&ext))
 }
 
 fn is_relevant_config(path: &Path) -> bool {
@@ -65,14 +65,15 @@ fn has_disallowed_hidden_dir(relative: &Path) -> bool {
     relative.parent().is_some_and(|parent| {
         parent.components().any(|component| {
             let name = component.as_os_str();
-            name.to_string_lossy().starts_with('.') && !fallow_engine::is_allowed_hidden_dir(name)
+            name.to_string_lossy().starts_with('.')
+                && !fallow_engine::discover::is_allowed_hidden_dir(name)
         })
     })
 }
 
 fn build_production_glob_set() -> Option<globset::GlobSet> {
     let mut builder = globset::GlobSetBuilder::new();
-    for pattern in fallow_engine::PRODUCTION_EXCLUDE_PATTERNS {
+    for pattern in fallow_engine::discover::PRODUCTION_EXCLUDE_PATTERNS {
         if let Ok(glob) = globset::GlobBuilder::new(pattern)
             .literal_separator(true)
             .build()

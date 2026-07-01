@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Instant;
 
-use fallow_engine::{AnalysisSession, ProjectConfig};
+use fallow_engine::{project_config::ProjectConfig, session::AnalysisSession};
 use fallow_output::{
     CHECK_SCHEMA_VERSION, FeatureFlagsOutputInput, build_feature_flags_output, feature_flags_meta,
     relative_to_diff_path,
@@ -67,13 +67,15 @@ fn run_feature_flags_inner(
 fn load_feature_flags_session(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let project_config =
-        fallow_engine::config_for_project(&resolved.root, resolved.config_path.as_deref())
-            .map_err(|err| {
-                ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-                    .with_code("FALLOW_CONFIG_LOAD_FAILED")
-                    .with_context("analysis.configPath")
-            })?;
+    let project_config = fallow_engine::project_config::config_for_project(
+        &resolved.root,
+        resolved.config_path.as_deref(),
+    )
+    .map_err(|err| {
+        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
+            .with_code("FALLOW_CONFIG_LOAD_FAILED")
+            .with_context("analysis.configPath")
+    })?;
     Ok(AnalysisSession::from_config(
         configure_project_for_feature_flags(project_config, resolved),
     ))

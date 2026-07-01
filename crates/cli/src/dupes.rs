@@ -175,7 +175,7 @@ fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
     threshold > 0.0 && duplication_percentage > threshold
 }
 
-use fallow_engine::filter_duplication_by_changed_files as filter_by_changed_files;
+use fallow_engine::changed_files::filter_duplication_by_changed_files as filter_by_changed_files;
 
 /// Filter a duplication report to only retain clone groups where at least one
 /// instance belongs to a file under one of the given workspace roots. Mirrors
@@ -331,8 +331,8 @@ fn execute_dupes_inner(
     let config = load_dupes_config_for_analysis(opts)?;
 
     let dupes_config = build_dupes_config(opts, &config.duplicates);
-    let files =
-        pre_discovered.unwrap_or_else(|| fallow_engine::discover_files_with_plugin_scopes(&config));
+    let files = pre_discovered
+        .unwrap_or_else(|| fallow_engine::discover::discover_files_with_plugin_scopes(&config));
 
     let changed_files_from_since = resolve_changed_since(opts);
     let effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>> =

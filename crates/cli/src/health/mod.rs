@@ -233,7 +233,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     let (config, config_ms) = load_health_config(opts)?;
 
     let t = Instant::now();
-    let session = fallow_engine::AnalysisSession::from_resolved_config(config);
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
     let session = session.into_parsed_parts(true);
     let config = session.config;

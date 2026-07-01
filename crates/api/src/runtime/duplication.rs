@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use fallow_config::{DetectionMode, DuplicatesConfig};
-use fallow_engine::{AnalysisSession, ProjectConfig};
+use fallow_engine::{project_config::ProjectConfig, session::AnalysisSession};
 use fallow_output::{
     DupesNextStepsInput, DupesOutput, DupesOutputInput, build_dupes_next_steps, build_dupes_output,
     dupes_meta,
@@ -121,13 +121,15 @@ pub(super) fn load_duplication_session(
     options: &DuplicationOptions,
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let project_config =
-        fallow_engine::config_for_project(&resolved.root, resolved.config_path.as_deref())
-            .map_err(|err| {
-                ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-                    .with_code("FALLOW_CONFIG_LOAD_FAILED")
-                    .with_context("analysis.configPath")
-            })?;
+    let project_config = fallow_engine::project_config::config_for_project(
+        &resolved.root,
+        resolved.config_path.as_deref(),
+    )
+    .map_err(|err| {
+        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
+            .with_code("FALLOW_CONFIG_LOAD_FAILED")
+            .with_context("analysis.configPath")
+    })?;
     let project_config = configure_project_for_duplication(project_config, options, resolved);
     Ok(AnalysisSession::from_config(project_config))
 }

@@ -1,4 +1,4 @@
-use fallow_engine::AnalysisSession;
+use fallow_engine::session::AnalysisSession;
 use rustc_hash::FxHashSet;
 
 use crate::{

@@ -12,8 +12,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput, DuplicationAnalysis,
-    EngineResult, ProjectAnalysisOutput, ProjectConfig, config_for_project, core_backend,
-    duplicates, project_config::default_project_config,
+    EngineResult, ProjectAnalysisOutput, core_backend, duplicates,
+    project_config::{ProjectConfig, config_for_project, default_project_config},
 };
 
 /// Reusable engine session for one resolved project.
@@ -213,8 +213,8 @@ impl AnalysisSession {
     pub fn changed_files_since(
         &self,
         git_ref: &str,
-    ) -> Result<FxHashSet<PathBuf>, crate::ChangedFilesError> {
-        crate::changed_files(&self.config.root, git_ref)
+    ) -> Result<FxHashSet<PathBuf>, crate::changed_files::ChangedFilesError> {
+        crate::changed_files::changed_files(&self.config.root, git_ref)
     }
 
     /// Workspace and source-discovery diagnostics captured for this session.
@@ -427,7 +427,7 @@ fn parse_files_with_config(
         fallow_extract::cache::CacheStore::load(
             &config.cache_dir,
             config.cache_config_hash,
-            crate::resolve_cache_max_size_bytes(config),
+            crate::project_config::resolve_cache_max_size_bytes(config),
         )
     };
     let parse_result = crate::source::parse_all_files(files, cache.as_ref(), need_complexity);

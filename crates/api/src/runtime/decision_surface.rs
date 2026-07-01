@@ -94,7 +94,7 @@ fn run_decision_analysis(
                 .with_code("FALLOW_DECISION_SURFACE_FAILED")
                 .with_context("decision-surface")
         })?;
-    let fallow_engine::AnalysisSessionArtifacts {
+    let fallow_engine::session::AnalysisSessionArtifacts {
         analysis: mut output,
         changed_files,
         ..

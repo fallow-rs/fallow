@@ -2,7 +2,10 @@ use std::path::Path;
 use std::time::Instant;
 
 use fallow_config::ProductionAnalysis;
-use fallow_engine::{AnalysisSession, ProjectConfig, ProjectConfigOptions};
+use fallow_engine::{
+    project_config::{ProjectConfig, ProjectConfigOptions},
+    session::AnalysisSession,
+};
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckOutputInput, DeadCodeNextStepsInput, DiffIndex, build_check_output,
     build_dead_code_next_steps, check_meta, relative_to_diff_path,
@@ -147,7 +150,7 @@ pub(super) fn load_dead_code_session(
     options: &DeadCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let project_config = fallow_engine::config_for_project_analysis(
+    let project_config = fallow_engine::project_config::config_for_project_analysis(
         &resolved.root,
         resolved.config_path.as_deref(),
         ProjectConfigOptions {

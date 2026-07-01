@@ -3296,7 +3296,7 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("failed to write app.test.ts: {err}"));
 
-        let parsed = fallow_engine::AnalysisSession::from_resolved_config(
+        let parsed = fallow_engine::session::AnalysisSession::from_resolved_config(
             FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
         )
         .into_parsed_parts(true);
@@ -3430,7 +3430,7 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("failed to write other.ts: {err}"));
 
-        let parsed = fallow_engine::AnalysisSession::from_resolved_config(
+        let parsed = fallow_engine::session::AnalysisSession::from_resolved_config(
             FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
         )
         .into_parsed_parts(true);

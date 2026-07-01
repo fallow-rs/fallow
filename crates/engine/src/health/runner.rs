@@ -7,6 +7,11 @@ use std::time::Instant;
 use fallow_config::ProductionAnalysis;
 use fallow_types::output_format::OutputFormat;
 
+use crate::{
+    project_config::{ProjectConfigOptions, config_for_project_analysis},
+    session::AnalysisSession,
+};
+
 use super::{
     HealthAnalysisResult, HealthExecutionOptions, HealthPipelineInputs, HealthScopeInputs,
     HealthSeams, NoGroupResolver, RuntimeCoverageOptions, RuntimeCoverageSeamInput,
@@ -30,10 +35,10 @@ pub fn run_ungrouped_health(
     validate_health_churn_file(options).map_err(|_| ExitCode::from(2))?;
 
     let start = Instant::now();
-    let project_config = crate::config_for_project_analysis(
+    let project_config = config_for_project_analysis(
         options.root,
         options.config_path.as_deref(),
-        crate::ProjectConfigOptions {
+        ProjectConfigOptions {
             output: OutputFormat::Human,
             no_cache: options.no_cache,
             threads: options.threads,
@@ -45,7 +50,7 @@ pub fn run_ungrouped_health(
     .map_err(|_| ExitCode::from(2))?;
     let config_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-    let session = crate::AnalysisSession::from_config(project_config);
+    let session = AnalysisSession::from_config(project_config);
     let changed_files = options
         .changed_since
         .and_then(|git_ref| session.changed_files_since(git_ref).ok());

@@ -235,7 +235,7 @@ fn find_matches(
     Ok(hits)
 }
 
-pub use fallow_engine::{
+pub use fallow_engine::changed_files::{
     filter_results_by_changed_files as filter_changed_files, get_changed_files,
     try_get_changed_files,
 };

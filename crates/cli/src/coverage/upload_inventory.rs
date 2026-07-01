@@ -22,9 +22,9 @@ use std::process::ExitCode;
 
 use fallow_config::ResolvedConfig;
 use fallow_cov_protocol::{FunctionIdentity, IdentityResolution, function_identity_id};
+use fallow_engine::discover::discover_files_with_plugin_scopes;
 use fallow_engine::{
-    ChurnResult, ChurnTrend, FileChurn, analyze_churn_cached, discover_files_with_plugin_scopes,
-    parse_since,
+    ChurnResult, ChurnTrend, FileChurn, analyze_churn_cached, parse_since,
     source::inventory::{InventoryComplexity, InventoryEntry, walk_source_with_complexity},
 };
 use globset::{Glob, GlobSet, GlobSetBuilder};

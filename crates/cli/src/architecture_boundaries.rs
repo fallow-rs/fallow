@@ -269,31 +269,46 @@ fn api_and_cli_use_trace_output_contracts_from_types() {
 }
 
 #[test]
-fn engine_git_helpers_are_private_root_api() {
+fn engine_adapter_modules_are_explicit_public_boundaries() {
     let engine_lib = std::fs::read_to_string(workspace_root().join("crates/engine/src/lib.rs"))
         .expect("read engine lib");
-    for forbidden in [
+    for required in [
         "pub mod changed_files;",
-        "pub mod churn;",
-        "pub mod cross_reference;",
+        "pub mod dead_code;",
         "pub mod discover;",
+        "pub mod duplicates;",
+        "pub mod health;",
+        "pub mod plugins;",
+        "pub mod project_config;",
+        "pub mod session;",
+        "pub mod source;",
+    ] {
+        assert!(
+            engine_lib.contains(required),
+            "engine module boundary must stay explicit: {required}"
+        );
+    }
+
+    for private in [
+        "pub mod core_backend;",
+        "pub mod cross_reference;",
         "pub mod error;",
-        "pub mod extract;",
-        "pub mod flags;",
         "pub mod git_env;",
         "pub mod module_graph;",
-        "pub mod plugins;",
         "pub mod public_api;",
         "pub mod security;",
         "pub mod trace;",
         "pub mod trace_chain;",
     ] {
         assert!(
-            !engine_lib.contains(forbidden),
-            "engine git helpers must stay private adapters with explicit root reexports"
+            !engine_lib.contains(private),
+            "engine private adapter module must not become a public catch-all boundary: {private}"
         );
     }
+}
 
+#[test]
+fn api_and_cli_do_not_use_removed_engine_root_adapter_exports() {
     for source_path in rust_sources_under(["crates/api/src", "crates/cli/src"]) {
         if source_path == "crates/cli/src/architecture_boundaries.rs" {
             continue;
@@ -301,38 +316,24 @@ fn engine_git_helpers_are_private_root_api() {
         let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
         for forbidden in [
-            "fallow_engine::changed_files::",
-            "use fallow_engine::changed_files::",
-            "fallow_engine::churn::",
-            "use fallow_engine::churn::",
-            "fallow_engine::cross_reference::",
-            "use fallow_engine::cross_reference::",
-            "fallow_engine::discover::",
-            "use fallow_engine::discover::",
-            "fallow_engine::error::",
-            "use fallow_engine::error::",
-            "fallow_engine::extract::",
-            "use fallow_engine::extract::",
-            "fallow_engine::flags::",
-            "use fallow_engine::flags::",
-            "fallow_engine::git_env::",
-            "use fallow_engine::git_env::",
-            "fallow_engine::module_graph::",
-            "use fallow_engine::module_graph::",
-            "fallow_engine::plugins::",
-            "use fallow_engine::plugins::",
-            "fallow_engine::public_api::",
-            "use fallow_engine::public_api::",
-            "fallow_engine::security::",
-            "use fallow_engine::security::",
-            "fallow_engine::trace::",
-            "use fallow_engine::trace::",
-            "fallow_engine::trace_chain::",
-            "use fallow_engine::trace_chain::",
+            "fallow_engine::AnalysisSession",
+            "fallow_engine::AnalysisSessionArtifacts",
+            "fallow_engine::ProjectConfig",
+            "fallow_engine::ProjectConfigOptions",
+            "fallow_engine::ChangedFilesError",
+            "fallow_engine::changed_files(",
+            "fallow_engine::config_for_project(",
+            "fallow_engine::config_for_project_analysis(",
+            "fallow_engine::discover_entry_points(",
+            "fallow_engine::discover_files",
+            "fallow_engine::filter_results_by_changed_files",
+            "fallow_engine::get_changed_files(",
+            "fallow_engine::resolve_cache_max_size_bytes(",
+            "fallow_engine::try_get_changed_files",
         ] {
             assert!(
                 !source.contains(forbidden),
-                "{source_path} must use explicit fallow-engine root git helper APIs"
+                "{source_path} must use the typed fallow-engine module path instead of removed root export {forbidden}"
             );
         }
     }
@@ -421,6 +422,11 @@ fn engine_root_facade_does_not_reexport_private_adapter_helpers() {
         "analyze_with_file_hashes",
         "filter_to_workspaces",
         "pub use duplicates::",
+        "pub use changed_files::",
+        "pub use discover::",
+        "pub use plugins::",
+        "pub use project_config::",
+        "pub use session::",
         "pub use source::inventory",
         "InventoryComplexity",
         "InventoryEntry",

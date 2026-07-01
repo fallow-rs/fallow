@@ -158,7 +158,8 @@ pub fn run_list_boundaries(
     resolved.install(|| {
         let project_config = load_list_project_config(&resolved)?;
 
-        let files = fallow_engine::discover_files_with_plugin_scopes(&project_config.config);
+        let files =
+            fallow_engine::discover::discover_files_with_plugin_scopes(&project_config.config);
         let data = compute_boundary_data(&project_config.config, Some(&files));
 
         Ok(ListBoundariesProgrammaticOutput {
@@ -185,7 +186,9 @@ pub fn run_project_info(
         let need_plugin_result = options.plugins || options.entry_points || show_all;
         let need_files = options.files || options.entry_points || options.boundaries || show_all;
         let discovered = if need_files || need_plugin_result {
-            Some(fallow_engine::discover_files_with_plugin_scopes(config))
+            Some(fallow_engine::discover::discover_files_with_plugin_scopes(
+                config,
+            ))
         } else {
             None
         };
@@ -234,11 +237,11 @@ pub fn run_project_info(
 
 fn load_list_project_config(
     resolved: &crate::ProgrammaticAnalysisContext,
-) -> ProgrammaticResult<fallow_engine::ProjectConfig> {
-    fallow_engine::config_for_project_analysis(
+) -> ProgrammaticResult<fallow_engine::project_config::ProjectConfig> {
+    fallow_engine::project_config::config_for_project_analysis(
         resolved.root(),
         resolved.config_path().as_deref(),
-        fallow_engine::ProjectConfigOptions {
+        fallow_engine::project_config::ProjectConfigOptions {
             output: fallow_types::output_format::OutputFormat::Json,
             no_cache: resolved.no_cache(),
             threads: resolved.threads(),
@@ -261,7 +264,7 @@ const fn project_info_should_show_all(options: &ProjectInfoOptions) -> bool {
 fn collect_plugins(
     options: &ProjectInfoOptions,
     show_all: bool,
-    plugin_result: Option<&fallow_engine::AggregatedPluginResult>,
+    plugin_result: Option<&fallow_engine::plugins::AggregatedPluginResult>,
 ) -> Option<Vec<String>> {
     if options.plugins || show_all {
         plugin_result.map(|plugin_result| plugin_result.active_plugins().to_vec())
@@ -294,7 +297,7 @@ fn collect_plugin_result(
     options: &ProjectInfoOptions,
     show_all: bool,
     discovered: Option<&[DiscoveredFile]>,
-) -> ProgrammaticResult<Option<fallow_engine::AggregatedPluginResult>> {
+) -> ProgrammaticResult<Option<fallow_engine::plugins::AggregatedPluginResult>> {
     if !(options.plugins || options.entry_points || show_all) {
         return Ok(None);
     }
@@ -302,12 +305,13 @@ fn collect_plugin_result(
     let files = match discovered {
         Some(discovered) => discovered,
         None => {
-            fallback_discovered = fallow_engine::discover_files_with_plugin_scopes(config);
+            fallback_discovered =
+                fallow_engine::discover::discover_files_with_plugin_scopes(config);
             &fallback_discovered
         }
     };
     let file_paths: Vec<std::path::PathBuf> = files.iter().map(|file| file.path.clone()).collect();
-    let registry = fallow_engine::PluginRegistry::new(config.external_plugins.clone());
+    let registry = fallow_engine::plugins::PluginRegistry::new(config.external_plugins.clone());
     let mut result = run_package_plugins(&registry, &root.join("package.json"), root, &file_paths)?
         .unwrap_or_default();
     merge_workspace_plugins(root, &registry, &file_paths, &mut result)?;
@@ -315,11 +319,11 @@ fn collect_plugin_result(
 }
 
 fn run_package_plugins(
-    registry: &fallow_engine::PluginRegistry,
+    registry: &fallow_engine::plugins::PluginRegistry,
     package_path: &Path,
     root: &Path,
     file_paths: &[std::path::PathBuf],
-) -> ProgrammaticResult<Option<fallow_engine::AggregatedPluginResult>> {
+) -> ProgrammaticResult<Option<fallow_engine::plugins::AggregatedPluginResult>> {
     let Ok(package) = fallow_config::PackageJson::load(package_path) else {
         return Ok(None);
     };
@@ -327,17 +331,20 @@ fn run_package_plugins(
         .try_run(&package, root, file_paths)
         .map(Some)
         .map_err(|errors| {
-            ProgrammaticError::new(fallow_engine::format_plugin_regex_errors(&errors), 2)
-                .with_code("FALLOW_PLUGIN_REGEX_FAILED")
-                .with_context("project_info.plugins")
+            ProgrammaticError::new(
+                fallow_engine::plugins::registry::format_plugin_regex_errors(&errors),
+                2,
+            )
+            .with_code("FALLOW_PLUGIN_REGEX_FAILED")
+            .with_context("project_info.plugins")
         })
 }
 
 fn merge_workspace_plugins(
     root: &Path,
-    registry: &fallow_engine::PluginRegistry,
+    registry: &fallow_engine::plugins::PluginRegistry,
     file_paths: &[std::path::PathBuf],
-    result: &mut fallow_engine::AggregatedPluginResult,
+    result: &mut fallow_engine::plugins::AggregatedPluginResult,
 ) -> ProgrammaticResult<()> {
     for workspace in &fallow_config::discover_workspaces(root) {
         let Some(workspace_result) = run_package_plugins(
@@ -360,22 +367,22 @@ fn collect_entry_points(
     options: &ProjectInfoOptions,
     show_all: bool,
     discovered: Option<&[DiscoveredFile]>,
-    plugin_result: Option<&fallow_engine::AggregatedPluginResult>,
+    plugin_result: Option<&fallow_engine::plugins::AggregatedPluginResult>,
 ) -> Option<Vec<EntryPoint>> {
     if !(options.entry_points || show_all) {
         return None;
     }
     let discovered = discovered?;
-    let mut entries = fallow_engine::discover_entry_points(config, discovered);
+    let mut entries = fallow_engine::discover::discover_entry_points(config, discovered);
     for workspace in &fallow_config::discover_workspaces(root) {
-        entries.extend(fallow_engine::discover_workspace_entry_points(
+        entries.extend(fallow_engine::discover::discover_workspace_entry_points(
             &workspace.root,
             config,
             discovered,
         ));
     }
     if let Some(plugin_result) = plugin_result {
-        entries.extend(fallow_engine::discover_plugin_entry_points(
+        entries.extend(fallow_engine::discover::discover_plugin_entry_points(
             plugin_result,
             config,
             discovered,

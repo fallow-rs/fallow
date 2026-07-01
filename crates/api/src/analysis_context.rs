@@ -266,7 +266,7 @@ pub fn changed_files_for_run(
     let Some(git_ref) = resolved.changed_since.as_deref() else {
         return Ok(None);
     };
-    fallow_engine::changed_files(&resolved.root, git_ref)
+    fallow_engine::changed_files::changed_files(&resolved.root, git_ref)
         .map(Some)
         .map_err(|err| {
             ProgrammaticError::new(
@@ -361,17 +361,18 @@ fn resolve_changed_workspaces(root: &Path, git_ref: &str) -> ProgrammaticResult<
         .with_code("FALLOW_WORKSPACES_NOT_FOUND")
         .with_context("analysis.changedWorkspaces"));
     }
-    let changed_files = fallow_engine::changed_files(root, git_ref).map_err(|err| {
-        ProgrammaticError::new(
-            format!(
-                "failed to resolve changed workspaces for ref `{git_ref}`: {}",
-                err.describe()
-            ),
-            2,
-        )
-        .with_code("FALLOW_CHANGED_WORKSPACES_FAILED")
-        .with_context("analysis.changedWorkspaces")
-    })?;
+    let changed_files =
+        fallow_engine::changed_files::changed_files(root, git_ref).map_err(|err| {
+            ProgrammaticError::new(
+                format!(
+                    "failed to resolve changed workspaces for ref `{git_ref}`: {}",
+                    err.describe()
+                ),
+                2,
+            )
+            .with_code("FALLOW_CHANGED_WORKSPACES_FAILED")
+            .with_context("analysis.changedWorkspaces")
+        })?;
     let mut roots = workspaces
         .into_iter()
         .filter(|workspace| {

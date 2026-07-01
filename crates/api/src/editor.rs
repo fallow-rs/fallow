@@ -107,13 +107,19 @@ impl ChangedFilesError {
     }
 }
 
-impl From<fallow_engine::ChangedFilesError> for ChangedFilesError {
-    fn from(error: fallow_engine::ChangedFilesError) -> Self {
+impl From<fallow_engine::changed_files::ChangedFilesError> for ChangedFilesError {
+    fn from(error: fallow_engine::changed_files::ChangedFilesError) -> Self {
         match error {
-            fallow_engine::ChangedFilesError::InvalidRef(err) => Self::InvalidRef(err),
-            fallow_engine::ChangedFilesError::GitMissing(err) => Self::GitMissing(err),
-            fallow_engine::ChangedFilesError::NotARepository => Self::NotARepository,
-            fallow_engine::ChangedFilesError::GitFailed(stderr) => Self::GitFailed(stderr),
+            fallow_engine::changed_files::ChangedFilesError::InvalidRef(err) => {
+                Self::InvalidRef(err)
+            }
+            fallow_engine::changed_files::ChangedFilesError::GitMissing(err) => {
+                Self::GitMissing(err)
+            }
+            fallow_engine::changed_files::ChangedFilesError::NotARepository => Self::NotARepository,
+            fallow_engine::changed_files::ChangedFilesError::GitFailed(stderr) => {
+                Self::GitFailed(stderr)
+            }
         }
     }
 }
@@ -125,7 +131,7 @@ impl From<fallow_engine::ChangedFilesError> for ChangedFilesError {
 /// Returns an API-owned changed-file error when git cannot inspect the
 /// repository.
 pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
-    fallow_engine::resolve_git_toplevel(cwd).map_err(ChangedFilesError::from)
+    fallow_engine::changed_files::resolve_git_toplevel(cwd).map_err(ChangedFilesError::from)
 }
 
 /// Get changed files and the git toplevel used to resolve them.
@@ -139,7 +145,7 @@ pub fn try_get_changed_files_with_toplevel(
     toplevel: &Path,
     git_ref: &str,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
-    fallow_engine::try_get_changed_files_with_toplevel(cwd, toplevel, git_ref)
+    fallow_engine::changed_files::try_get_changed_files_with_toplevel(cwd, toplevel, git_ref)
         .map_err(ChangedFilesError::from)
 }
 
@@ -363,7 +369,7 @@ fn build_health_ignore_set(patterns: &[String]) -> Option<globset::GlobSet> {
 /// Reusable editor analysis session owned by the API boundary.
 #[derive(Debug)]
 pub struct EditorAnalysisSession {
-    inner: fallow_engine::AnalysisSession,
+    inner: fallow_engine::session::AnalysisSession,
 }
 
 impl EditorAnalysisSession {
@@ -373,7 +379,7 @@ impl EditorAnalysisSession {
     ///
     /// Returns an engine error when project config loading fails.
     pub fn load(root: &Path, config_path: Option<&Path>) -> fallow_engine::EngineResult<Self> {
-        fallow_engine::AnalysisSession::load(root, config_path).map(Self::from_engine)
+        fallow_engine::session::AnalysisSession::load(root, config_path).map(Self::from_engine)
     }
 
     /// Load config, apply one editor-specific adjustment, then discover files.
@@ -386,14 +392,14 @@ impl EditorAnalysisSession {
         config_path: Option<&Path>,
         configure: impl FnOnce(&mut fallow_config::ResolvedConfig),
     ) -> fallow_engine::EngineResult<Self> {
-        fallow_engine::AnalysisSession::load_with_config(root, config_path, configure)
+        fallow_engine::session::AnalysisSession::load_with_config(root, config_path, configure)
             .map(Self::from_engine)
     }
 
     /// Build a session from built-in defaults, ignoring project config files.
     #[must_use]
     pub fn load_default(root: &Path) -> Self {
-        Self::from_engine(fallow_engine::AnalysisSession::load_default(root))
+        Self::from_engine(fallow_engine::session::AnalysisSession::load_default(root))
     }
 
     /// Resolved project config.
@@ -423,7 +429,7 @@ impl EditorAnalysisSession {
             .map(EditorProjectAnalysisOutput::from_engine)
     }
 
-    const fn from_engine(inner: fallow_engine::AnalysisSession) -> Self {
+    const fn from_engine(inner: fallow_engine::session::AnalysisSession) -> Self {
         Self { inner }
     }
 }
@@ -502,8 +508,11 @@ impl EditorAnalysisOutput {
     }
 
     pub fn filter_by_changed_files(&mut self, changed_files: &FxHashSet<PathBuf>, root: &Path) {
-        fallow_engine::filter_results_by_changed_files(&mut self.results, changed_files);
-        fallow_engine::filter_duplication_by_changed_files(
+        fallow_engine::changed_files::filter_results_by_changed_files(
+            &mut self.results,
+            changed_files,
+        );
+        fallow_engine::changed_files::filter_duplication_by_changed_files(
             &mut self.duplication,
             changed_files,
             root,

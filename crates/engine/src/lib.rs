@@ -23,8 +23,7 @@ use std::path::Path;
 use rustc_hash::FxHashMap;
 
 pub mod baseline;
-#[path = "changed_files.rs"]
-mod changed_files_impl;
+pub mod changed_files;
 #[path = "churn.rs"]
 mod churn_impl;
 pub mod codeowners;
@@ -32,7 +31,7 @@ mod core_backend;
 mod cross_reference;
 mod css;
 pub mod dead_code;
-mod discover;
+pub mod discover;
 pub mod duplicates;
 mod error;
 mod feature_flags;
@@ -41,12 +40,12 @@ mod flags;
 mod git_env_impl;
 pub mod health;
 mod module_graph;
-mod plugins;
-mod project_config;
+pub mod plugins;
+pub mod project_config;
 mod public_api;
 pub mod results;
 mod security;
-mod session;
+pub mod session;
 pub mod source;
 mod suppress;
 mod trace;
@@ -54,25 +53,13 @@ mod trace_chain;
 pub mod validate;
 pub mod vital_signs;
 
-pub use changed_files_impl::{
-    ChangedFilesError, changed_files, filter_duplication_by_changed_files,
-    filter_results_by_changed_files, get_changed_files, resolve_git_common_dir,
-    resolve_git_toplevel, set_spawn_hook, try_get_changed_diff, try_get_changed_files,
-    try_get_changed_files_with_toplevel, validate_git_ref,
-};
 pub use churn_impl::{
     AuthorContribution, ChurnResult, ChurnTrend, FileChurn, SinceDuration, analyze_churn,
     analyze_churn_cached, is_git_repo, parse_since, set_spawn_hook as set_churn_spawn_hook,
 };
 pub use cross_reference::{CombinedFinding, CrossReferenceResult, DeadCodeKind, cross_reference};
-pub use discover::{
-    AnalysisDiscovery, CategorizedEntryPoints, DiscoveredFile, EntryPoint, EntryPointSource,
-    FileId, HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS, SOURCE_EXTENSIONS,
-    collect_plugin_hidden_dir_scopes, discover_entry_points, discover_files,
-    discover_files_with_additional_hidden_dirs, discover_files_with_plugin_scopes,
-    discover_plugin_entry_points, discover_workspace_entry_points, is_allowed_hidden_dir,
-};
 pub use error::emit_error;
+use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::AnalysisResults;
 pub use flags::{
@@ -86,21 +73,12 @@ pub use module_graph::{
     impact_closure_for_changed_paths, internal_consumers_for_changed_paths, module_value_exports,
     partition_order_for_changed_paths,
 };
-pub use plugins::registry::{
-    PluginRegexValidationError, builtin_plugin_names, format_plugin_regex_errors,
-};
-pub use plugins::{AggregatedPluginResult, PluginRegistry};
-pub use project_config::{
-    ProjectConfig, ProjectConfigOptions, config_for_project, config_for_project_analysis,
-    resolve_cache_max_size_bytes,
-};
 pub use public_api::public_api_package_entry_points;
 pub use results::{
     DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
     DeadCodeAnalysisWithHashes, DuplicationAnalysis, HealthAnalysisResult, ProjectAnalysisOutput,
 };
 pub use security::{derive_security_severity, security_catalogue_title};
-pub use session::{AnalysisSession, AnalysisSessionArtifacts};
 pub use suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
 pub use trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ImpactClosureGap,
@@ -178,6 +156,10 @@ pub fn health_shared_parse_data_from_artifacts(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        project_config::{ProjectConfigOptions, config_for_project, config_for_project_analysis},
+        session::AnalysisSession,
+    };
     use fallow_config::ProductionAnalysis;
     use fallow_types::output_format::OutputFormat;
 
