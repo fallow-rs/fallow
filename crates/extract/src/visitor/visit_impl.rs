@@ -1499,7 +1499,11 @@ impl<'a> ModuleInfoExtractor {
     /// Scan an Angular inline `template:` string: record used selectors, the
     /// dynamic-render abstain, template member-access refs, offset-remapped
     /// security sinks, and the inline-template complexity finding.
-    fn record_angular_inline_template(&mut self, meta: &super::helpers::AngularComponentMetadata) {
+    fn record_angular_inline_template(
+        &mut self,
+        class: &Class<'_>,
+        meta: &super::helpers::AngularComponentMetadata,
+    ) {
         let Some(ref template) = meta.inline_template else {
             return;
         };
@@ -1511,7 +1515,15 @@ impl<'a> ModuleInfoExtractor {
             self.has_dynamic_component_render = true;
         }
 
-        let refs = crate::sfc_template::angular::collect_angular_template_refs(template);
+        // Type `@for` / `*ngFor` loop variables over a component field typed as an
+        // array of a class (`utils: Util[]`) to the element class, so template
+        // member accesses on the loop item (`{{ util.getName() }}`) remap onto the
+        // class instead of being dropped (issue #1712).
+        let field_types = super::helpers::collect_component_field_array_types(class);
+        let refs = crate::sfc_template::angular::collect_angular_template_refs_with_field_types(
+            template,
+            &field_types,
+        );
         for name in refs.identifiers {
             self.record_angular_template_member_fact(name.clone());
         }
@@ -2309,7 +2321,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let Some(meta) = extract_angular_component_metadata(class) {
             self.record_angular_selector(class, &meta);
             self.record_angular_template_assets(&meta);
-            self.record_angular_inline_template(&meta);
+            self.record_angular_inline_template(class, &meta);
             self.record_angular_template_members(&meta);
         }
         self.class_super_stack

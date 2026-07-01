@@ -627,3 +627,53 @@ fn reduce_accumulator_param_is_not_typed_to_element_class() {
         info.member_accesses
     );
 }
+
+#[test]
+fn angular_component_field_for_loop_item_emits_member_access() {
+    // Issue #1712: an Angular component field typed `utils: Util[]` iterated by a
+    // `@for` / `*ngFor` inline template credits member accesses on the loop item.
+    let info = parse_ts(
+        "import { Component } from '@angular/core'\n\
+         import { Util } from './utils/Util'\n\
+         @Component({\n\
+           selector: 'app-root',\n\
+           template: `@for (util of utils; track util) { {{ util.getName() }} } <li *ngFor=\"let u of utils\">{{ u.getter }}</li>`,\n\
+         })\n\
+         export class AppComponent {\n\
+           utils: Util[] = [new Util()]\n\
+         }\n",
+    );
+    for member in ["getName", "getter"] {
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "Util" && access.member == member),
+            "@for/*ngFor util.{member} should map to Util.{member}, found: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+#[test]
+fn angular_component_field_builtin_array_is_not_typed() {
+    // A `number[]` field element is a builtin: the loop item must NOT credit any
+    // class member (over-credit only, no false positives).
+    let info = parse_ts(
+        "import { Component } from '@angular/core'\n\
+         @Component({\n\
+           selector: 'app-root',\n\
+           template: `@for (n of nums; track n) { {{ n.toFixed() }} }`,\n\
+         })\n\
+         export class AppComponent {\n\
+           nums: number[] = [1]\n\
+         }\n",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.member == "toFixed" && access.object != "n"),
+        "a builtin `number[]` loop item must not credit a class member, found: {:?}",
+        info.member_accesses
+    );
+}

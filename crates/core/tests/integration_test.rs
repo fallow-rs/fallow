@@ -355,6 +355,9 @@ mod issue_1711_vue_props_vfor;
 #[path = "integration_test/iteration_binding_element_types.rs"]
 mod iteration_binding_element_types;
 
+#[path = "integration_test/issue_1712_angular_for_class_member.rs"]
+mod issue_1712_angular_for_class_member;
+
 #[path = "integration_test/issue_843_nestjs_lifecycle.rs"]
 mod issue_843_nestjs_lifecycle;
 

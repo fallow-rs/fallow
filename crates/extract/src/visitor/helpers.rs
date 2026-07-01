@@ -778,6 +778,37 @@ fn local_typed_array_element(statements: &[Statement<'_>], name: &str) -> Option
     None
 }
 
+/// Collect the element class of each non-private component FIELD whose type is
+/// an array (or reactive array) of a non-builtin class, keyed by field name.
+///
+/// Reuses `infer_array_binding_element_type` (the Vue v-for / iteration-binding
+/// element-type inference) against each `PropertyDefinition`'s annotation and
+/// initializer, so a component field `utils: Util[]` yields `("utils", "Util")`.
+/// The Angular template scanner types a `@for` / `*ngFor` loop variable over
+/// such a field to its element class. Private fields are skipped because a
+/// template cannot iterate them. Over-credit only: a field whose element type
+/// cannot be resolved is left out (status quo). See issue #1712.
+pub(super) fn collect_component_field_array_types(class: &Class<'_>) -> FxHashMap<String, String> {
+    let mut field_types: FxHashMap<String, String> = FxHashMap::default();
+    for element in &class.body.body {
+        let ClassElement::PropertyDefinition(prop) = element else {
+            continue;
+        };
+        if matches!(prop.accessibility, Some(TSAccessibility::Private)) {
+            continue;
+        }
+        let Some(name) = prop.key.static_name() else {
+            continue;
+        };
+        if let Some(element_type) =
+            infer_array_binding_element_type(prop.type_annotation.as_deref(), prop.value.as_ref())
+        {
+            field_types.insert(name.to_string(), element_type);
+        }
+    }
+    field_types
+}
+
 pub(super) fn has_angular_plural_query_decorator(
     decorators: &[oxc_ast::ast::Decorator<'_>],
 ) -> bool {

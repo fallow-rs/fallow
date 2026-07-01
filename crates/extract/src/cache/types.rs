@@ -706,7 +706,13 @@ use crate::MemberKind;
 /// `defineProps<{ items: Util[] }>()`) now types the loop item to the element
 /// class, so `.vue` `member_accesses` gain the credited item-member accesses a
 /// warm 217 cache lacks.
-pub(super) const CACHE_VERSION: u32 = 218;
+///
+/// Bumped to 219 for issue #1712: an Angular `@for` / `*ngFor` loop variable
+/// over a component field typed as an array of a class (`utils: Util[]`) in an
+/// inline `template:` is typed to the element class, so inline-Angular-component
+/// `member_accesses` gain the remapped item-member accesses a warm 218 cache
+/// lacks.
+pub(super) const CACHE_VERSION: u32 = 219;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
