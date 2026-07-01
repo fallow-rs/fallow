@@ -11,6 +11,11 @@ import type {
   TraceLevel,
 } from "./types.js";
 import { getDiagnosticCategories } from "./diagnosticFilter.js";
+import {
+  ISSUE_TYPE_ALIASES,
+  ISSUE_TYPE_DEFAULTS,
+  type IssueTypeKey,
+} from "./generated/issue-types.js";
 
 const SECTION = "fallow";
 
@@ -47,47 +52,20 @@ export const getResolvedConfigPath = (workspaceRootOverride?: string): string =>
 
 export const getAutoDownload = (): boolean => getConfig().get<boolean>("autoDownload", true);
 
-export const getIssueTypes = (): IssueTypeConfig =>
-  getConfig().get<IssueTypeConfig>("issueTypes", {
-    "unused-files": true,
-    "unused-exports": true,
-    "unused-types": true,
-    "private-type-leaks": true,
-    "unused-dependencies": true,
-    "unused-dev-dependencies": true,
-    "unused-optional-dependencies": true,
-    "unused-enum-members": true,
-    "unused-class-members": true,
-    "unused-store-member": true,
-    "unused-server-action": true,
-    "unused-load-data-key": true,
-    "unused-component-prop": true,
-    "unused-component-emit": true,
-    "unused-component-input": true,
-    "unused-component-output": true,
-    "unused-svelte-event": true,
-    "unrendered-component": true,
-    "unprovided-inject": true,
-    "invalid-client-export": true,
-    "mixed-client-server-barrel": true,
-    "misplaced-directive": true,
-    "route-collision": true,
-    "dynamic-segment-name-conflict": true,
-    "unresolved-imports": true,
-    "unlisted-dependencies": true,
-    "duplicate-exports": true,
-    "type-only-dependencies": true,
-    "test-only-dependencies": true,
-    "circular-dependencies": true,
-    "re-export-cycles": true,
-    "boundary-violation": true,
-    "policy-violation": true,
-    "stale-suppressions": true,
-    "unused-catalog-entries": true,
-    "unresolved-catalog-references": true,
-    "unused-dependency-overrides": true,
-    "misconfigured-dependency-overrides": true,
-  });
+const isIssueTypeKey = (value: string): value is IssueTypeKey =>
+  Object.hasOwn(ISSUE_TYPE_DEFAULTS, value);
+
+export const getIssueTypes = (): IssueTypeConfig => {
+  const configured = getConfig().get<Record<string, boolean>>("issueTypes", {});
+  const normalized: Record<IssueTypeKey, boolean> = { ...ISSUE_TYPE_DEFAULTS };
+  for (const [key, enabled] of Object.entries(configured)) {
+    const canonical = isIssueTypeKey(key) ? key : ISSUE_TYPE_ALIASES[key];
+    if (canonical !== undefined) {
+      normalized[canonical] = enabled;
+    }
+  }
+  return normalized;
+};
 
 export const getDuplicationThresholdOverride = (): number | undefined =>
   getConfiguredValue<number>("duplication.threshold");

@@ -4,7 +4,7 @@ use clap::CommandFactory;
 #[cfg(test)]
 use fallow_output::issue_output_contracts;
 use fallow_output::{TsAliasMeta, issue_output_contract_by_code};
-use fallow_types::issue_meta::issue_meta_by_code;
+use fallow_types::issue_meta::{ISSUE_KIND_META, issue_meta_by_code};
 use fallow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
 
 use crate::Cli;
@@ -112,6 +112,11 @@ fn task_matrix_schema() -> serde_json::Value {
 /// add an arm when a new rule has any of those capabilities.
 #[derive(Default)]
 struct IssueTypeMeta {
+    label: Option<&'static str>,
+    config_key: Option<&'static str>,
+    registry_index: Option<usize>,
+    aliases: &'static [&'static str],
+    lsp: bool,
     filter_flag: Option<&'static str>,
     result_key: Option<&'static str>,
     summary_label: Option<&'static str>,
@@ -133,6 +138,13 @@ impl IssueTypeMeta {
     fn from_shared(bare_id: &str) -> Self {
         let mut meta = Self::default();
         if let Some(shared) = issue_meta_by_code(bare_id) {
+            meta.label = Some(shared.label);
+            meta.config_key = shared.config_key;
+            meta.registry_index = ISSUE_KIND_META
+                .iter()
+                .position(|candidate| candidate.code == shared.code);
+            meta.aliases = shared.aliases;
+            meta.lsp = shared.lsp;
             meta.filter_flag = shared.filter_flag;
             if let Some(token) = shared.suppress_token {
                 meta.suppress = Some((token, shared.suppress_file_level));
@@ -189,6 +201,11 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
         "command": command,
         "category": rule.category,
         "description": rule.short,
+        "label": meta.label,
+        "config_key": meta.config_key,
+        "registry_index": meta.registry_index,
+        "aliases": meta.aliases,
+        "lsp": meta.lsp,
         "filter_flag": meta.filter_flag,
         "result_key": meta.result_key,
         "summary_label": meta.summary_label,
@@ -957,6 +974,69 @@ mod tests {
         }
     }
 
+    #[test]
+    fn issue_type_registry_fields_follow_issue_kind_meta() {
+        let schema = schema();
+        for row in schema["issue_types"].as_array().unwrap() {
+            let id = row["id"].as_str().unwrap();
+            let Some(shared) = issue_meta_by_code(id) else {
+                assert!(
+                    row["label"].is_null(),
+                    "unregistered row {id} must not invent a label"
+                );
+                assert!(
+                    row["config_key"].is_null(),
+                    "unregistered row {id} must not invent a config key"
+                );
+                assert!(
+                    row["registry_index"].is_null(),
+                    "unregistered row {id} must not invent a registry index"
+                );
+                assert_eq!(
+                    row["aliases"].as_array().map(Vec::len),
+                    Some(0),
+                    "unregistered row {id} must not invent aliases"
+                );
+                assert_eq!(
+                    row["lsp"].as_bool(),
+                    Some(false),
+                    "unregistered row {id} must not be exposed as an LSP issue type"
+                );
+                continue;
+            };
+
+            assert_eq!(
+                row["label"].as_str(),
+                Some(shared.label),
+                "row {id} must derive label from IssueKindMeta"
+            );
+            assert_eq!(
+                row["config_key"].as_str(),
+                shared.config_key,
+                "row {id} must derive config_key from IssueKindMeta"
+            );
+            assert!(
+                row["registry_index"].as_u64().is_some(),
+                "row {id} must derive registry_index from IssueKindMeta"
+            );
+            let aliases: Vec<&str> = row["aliases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|alias| alias.as_str().unwrap())
+                .collect();
+            assert_eq!(
+                aliases, shared.aliases,
+                "row {id} must derive aliases from IssueKindMeta"
+            );
+            assert_eq!(
+                row["lsp"].as_bool(),
+                Some(shared.lsp),
+                "row {id} must derive lsp from IssueKindMeta"
+            );
+        }
+    }
+
     /// Nullable fields are ALWAYS present (null when not applicable), so
     /// consumers never face absent-vs-null ambiguity.
     #[test]
@@ -978,6 +1058,11 @@ mod tests {
                 "rule_id",
                 "command",
                 "category",
+                "label",
+                "config_key",
+                "registry_index",
+                "aliases",
+                "lsp",
                 "counts_in_total",
                 "fixable",
                 "suppressible",

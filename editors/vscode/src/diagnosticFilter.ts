@@ -7,6 +7,8 @@ import type {
   vsdiag,
 } from "vscode-languageclient/node";
 import type { DiagnosticSeveritySetting } from "./types.js";
+import { DIAGNOSTIC_CATEGORIES, type DiagnosticCategory } from "./generated/issue-types.js";
+export { DIAGNOSTIC_CATEGORIES, type DiagnosticCategory };
 
 const STATE_KEY = "fallow.diagnosticFilter.v1";
 const FALLOW_SOURCE = "fallow";
@@ -21,77 +23,6 @@ const FALLOW_SOURCE = "fallow";
  * (insertion order, the first key in the Map).
  */
 const MAX_CACHE_ENTRIES = 5000;
-
-export interface DiagnosticCategory {
-  readonly code: string;
-  readonly label: string;
-}
-
-/**
- * Fallback diagnostic categories for older fallow-lsp binaries that do not
- * support `fallow/issueTypes`. Current servers provide the canonical list.
- */
-export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
-  { code: "code-duplication", label: "Code Duplication" },
-  { code: "unused-file", label: "Unused Files" },
-  { code: "unused-export", label: "Unused Exports" },
-  { code: "unused-type", label: "Unused Types" },
-  { code: "private-type-leak", label: "Private Type Leaks" },
-  { code: "unused-dependency", label: "Unused Dependencies" },
-  { code: "unused-dev-dependency", label: "Unused Dev Dependencies" },
-  {
-    code: "unused-optional-dependency",
-    label: "Unused Optional Dependencies",
-  },
-  { code: "unused-enum-member", label: "Unused Enum Members" },
-  { code: "unused-class-member", label: "Unused Class Members" },
-  { code: "unused-store-member", label: "Unused Store Members" },
-  { code: "unused-server-action", label: "Unused Server Actions" },
-  { code: "unused-load-data-key", label: "Unused Load Data Keys" },
-  { code: "unused-component-prop", label: "Unused Component Props" },
-  { code: "unused-component-emit", label: "Unused Component Emits" },
-  { code: "unused-component-input", label: "Unused Component Inputs" },
-  { code: "unused-component-output", label: "Unused Component Outputs" },
-  { code: "unused-svelte-event", label: "Unused Svelte Events" },
-  { code: "unrendered-component", label: "Unrendered Components" },
-  { code: "unprovided-inject", label: "Unprovided Injects" },
-  { code: "invalid-client-export", label: "Invalid Client Exports" },
-  {
-    code: "mixed-client-server-barrel",
-    label: "Mixed Client/Server Barrels",
-  },
-  { code: "misplaced-directive", label: "Misplaced Directives" },
-  { code: "route-collision", label: "Route Collisions" },
-  {
-    code: "dynamic-segment-name-conflict",
-    label: "Dynamic Segment Name Conflicts",
-  },
-  { code: "unresolved-import", label: "Unresolved Imports" },
-  { code: "unlisted-dependency", label: "Unlisted Dependencies" },
-  { code: "duplicate-export", label: "Duplicate Exports" },
-  { code: "type-only-dependency", label: "Type-Only Dependencies" },
-  { code: "test-only-dependency", label: "Test-Only Dependencies" },
-  { code: "circular-dependency", label: "Circular Dependencies" },
-  { code: "re-export-cycle", label: "Re-Export Cycles" },
-  { code: "boundary-violation", label: "Boundary Violations" },
-  { code: "policy-violation", label: "Policy Violations" },
-  { code: "stale-suppression", label: "Stale Suppressions" },
-  { code: "missing-suppression-reason", label: "Missing Suppression Reasons" },
-  { code: "unused-catalog-entry", label: "Unused Catalog Entries" },
-  { code: "empty-catalog-group", label: "Empty Catalog Groups" },
-  {
-    code: "unresolved-catalog-reference",
-    label: "Unresolved Catalog References",
-  },
-  {
-    code: "unused-dependency-override",
-    label: "Unused Dependency Overrides",
-  },
-  {
-    code: "misconfigured-dependency-override",
-    label: "Misconfigured Dependency Overrides",
-  },
-];
 
 let activeDiagnosticCategories: ReadonlyArray<DiagnosticCategory> = DIAGNOSTIC_CATEGORIES;
 

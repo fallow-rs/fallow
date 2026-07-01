@@ -41,6 +41,7 @@ import {
   getDuplicationSkipLocalOverride,
   getDuplicationThresholdOverride,
   getDiagnosticSeverity,
+  getIssueTypes,
   getMutedDiagnosticCategories,
   getResolvedConfigPath,
   getHealthInlineComplexity,
@@ -112,6 +113,44 @@ describe("duplication setting overrides", () => {
 describe("health inline complexity setting", () => {
   it("defaults on (the extension renders the complexity lens)", () => {
     expect(getHealthInlineComplexity()).toBe(true);
+  });
+});
+
+describe("issue type settings", () => {
+  beforeEach(() => {
+    inspected = {};
+    configured = {};
+    scopedConfigured = {};
+  });
+
+  it("normalizes legacy issue type aliases to registry config keys", () => {
+    configured = {
+      issueTypes: {
+        "re-export-cycles": false,
+        "unused-load-data-key": false,
+        "unused-store-member": false,
+      },
+    };
+
+    const issueTypes = getIssueTypes();
+
+    expect(issueTypes["re-export-cycle"]).toBe(false);
+    expect(issueTypes["unused-load-data-keys"]).toBe(false);
+    expect(issueTypes["unused-store-members"]).toBe(false);
+  });
+
+  it("keeps registry defaults for unconfigured issue types", () => {
+    configured = {
+      issueTypes: {
+        "unused-exports": false,
+      },
+    };
+
+    const issueTypes = getIssueTypes();
+
+    expect(issueTypes["unused-exports"]).toBe(false);
+    expect(issueTypes["unused-files"]).toBe(true);
+    expect(issueTypes["empty-catalog-groups"]).toBe(true);
   });
 });
 

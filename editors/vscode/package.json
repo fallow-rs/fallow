@@ -230,32 +230,33 @@
             "unused-optional-dependencies": true,
             "unused-enum-members": true,
             "unused-class-members": true,
-            "unused-store-member": true,
-            "unused-server-action": true,
-            "unused-load-data-key": true,
-            "unused-component-prop": true,
-            "unused-component-emit": true,
-            "unused-component-input": true,
-            "unused-component-output": true,
-            "unused-svelte-event": true,
-            "unrendered-component": true,
-            "unprovided-inject": true,
-            "invalid-client-export": true,
-            "mixed-client-server-barrel": true,
-            "misplaced-directive": true,
-            "route-collision": true,
-            "dynamic-segment-name-conflict": true,
+            "unused-store-members": true,
             "unresolved-imports": true,
             "unlisted-dependencies": true,
             "duplicate-exports": true,
             "type-only-dependencies": true,
             "test-only-dependencies": true,
             "circular-dependencies": true,
-            "re-export-cycles": true,
+            "re-export-cycle": true,
             "boundary-violation": true,
             "policy-violation": true,
+            "invalid-client-export": true,
+            "mixed-client-server-barrel": true,
+            "misplaced-directive": true,
+            "unprovided-injects": true,
+            "unrendered-components": true,
+            "unused-component-props": true,
+            "unused-component-emits": true,
+            "unused-component-inputs": true,
+            "unused-component-outputs": true,
+            "unused-svelte-events": true,
+            "unused-server-actions": true,
+            "unused-load-data-keys": true,
+            "route-collision": true,
+            "dynamic-segment-name-conflict": true,
             "stale-suppressions": true,
             "unused-catalog-entries": true,
+            "empty-catalog-groups": true,
             "unresolved-catalog-references": true,
             "unused-dependency-overrides": true,
             "misconfigured-dependency-overrides": true
@@ -289,49 +290,7 @@
             "unused-class-members": {
               "type": "boolean"
             },
-            "unused-store-member": {
-              "type": "boolean"
-            },
-            "unused-server-action": {
-              "type": "boolean"
-            },
-            "unused-load-data-key": {
-              "type": "boolean"
-            },
-            "unused-component-prop": {
-              "type": "boolean"
-            },
-            "unused-component-emit": {
-              "type": "boolean"
-            },
-            "unused-component-input": {
-              "type": "boolean"
-            },
-            "unused-component-output": {
-              "type": "boolean"
-            },
-            "unused-svelte-event": {
-              "type": "boolean"
-            },
-            "unrendered-component": {
-              "type": "boolean"
-            },
-            "unprovided-inject": {
-              "type": "boolean"
-            },
-            "invalid-client-export": {
-              "type": "boolean"
-            },
-            "mixed-client-server-barrel": {
-              "type": "boolean"
-            },
-            "misplaced-directive": {
-              "type": "boolean"
-            },
-            "route-collision": {
-              "type": "boolean"
-            },
-            "dynamic-segment-name-conflict": {
+            "unused-store-members": {
               "type": "boolean"
             },
             "unresolved-imports": {
@@ -352,7 +311,7 @@
             "circular-dependencies": {
               "type": "boolean"
             },
-            "re-export-cycles": {
+            "re-export-cycle": {
               "type": "boolean"
             },
             "boundary-violation": {
@@ -361,10 +320,55 @@
             "policy-violation": {
               "type": "boolean"
             },
+            "invalid-client-export": {
+              "type": "boolean"
+            },
+            "mixed-client-server-barrel": {
+              "type": "boolean"
+            },
+            "misplaced-directive": {
+              "type": "boolean"
+            },
+            "unprovided-injects": {
+              "type": "boolean"
+            },
+            "unrendered-components": {
+              "type": "boolean"
+            },
+            "unused-component-props": {
+              "type": "boolean"
+            },
+            "unused-component-emits": {
+              "type": "boolean"
+            },
+            "unused-component-inputs": {
+              "type": "boolean"
+            },
+            "unused-component-outputs": {
+              "type": "boolean"
+            },
+            "unused-svelte-events": {
+              "type": "boolean"
+            },
+            "unused-server-actions": {
+              "type": "boolean"
+            },
+            "unused-load-data-keys": {
+              "type": "boolean"
+            },
+            "route-collision": {
+              "type": "boolean"
+            },
+            "dynamic-segment-name-conflict": {
+              "type": "boolean"
+            },
             "stale-suppressions": {
               "type": "boolean"
             },
             "unused-catalog-entries": {
+              "type": "boolean"
+            },
+            "empty-catalog-groups": {
               "type": "boolean"
             },
             "unresolved-catalog-references": {

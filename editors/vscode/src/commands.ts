@@ -470,13 +470,34 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
       : [],
     unused_enum_members: types["unused-enum-members"] ? result.unused_enum_members : [],
     unused_class_members: types["unused-class-members"] ? result.unused_class_members : [],
+    unused_store_members: types["unused-store-members"] ? result.unused_store_members : [],
+    unused_server_actions: types["unused-server-actions"] ? result.unused_server_actions : [],
+    unused_load_data_keys: types["unused-load-data-keys"] ? result.unused_load_data_keys : [],
+    unused_component_props: types["unused-component-props"] ? result.unused_component_props : [],
+    unused_component_emits: types["unused-component-emits"] ? result.unused_component_emits : [],
+    unused_component_inputs: types["unused-component-inputs"] ? result.unused_component_inputs : [],
+    unused_component_outputs: types["unused-component-outputs"]
+      ? result.unused_component_outputs
+      : [],
+    unused_svelte_events: types["unused-svelte-events"] ? result.unused_svelte_events : [],
+    unrendered_components: types["unrendered-components"] ? result.unrendered_components : [],
+    unprovided_injects: types["unprovided-injects"] ? result.unprovided_injects : [],
+    invalid_client_exports: types["invalid-client-export"] ? result.invalid_client_exports : [],
+    mixed_client_server_barrels: types["mixed-client-server-barrel"]
+      ? result.mixed_client_server_barrels
+      : [],
+    misplaced_directives: types["misplaced-directive"] ? result.misplaced_directives : [],
+    route_collisions: types["route-collision"] ? result.route_collisions : [],
+    dynamic_segment_name_conflicts: types["dynamic-segment-name-conflict"]
+      ? result.dynamic_segment_name_conflicts
+      : [],
     unresolved_imports: types["unresolved-imports"] ? result.unresolved_imports : [],
     unlisted_dependencies: types["unlisted-dependencies"] ? result.unlisted_dependencies : [],
     duplicate_exports: types["duplicate-exports"] ? result.duplicate_exports : [],
     type_only_dependencies: types["type-only-dependencies"] ? result.type_only_dependencies : [],
     test_only_dependencies: types["test-only-dependencies"] ? result.test_only_dependencies : [],
     circular_dependencies: types["circular-dependencies"] ? result.circular_dependencies : [],
-    re_export_cycles: types["re-export-cycles"] ? result.re_export_cycles : [],
+    re_export_cycles: types["re-export-cycle"] ? result.re_export_cycles : [],
     boundary_violations: types["boundary-violation"] ? result.boundary_violations : [],
     boundary_coverage_violations: types["boundary-violation"]
       ? result.boundary_coverage_violations
@@ -485,11 +506,7 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     policy_violations: types["policy-violation"] ? result.policy_violations : [],
     stale_suppressions: types["stale-suppressions"] ? result.stale_suppressions : [],
     unused_catalog_entries: types["unused-catalog-entries"] ? result.unused_catalog_entries : [],
-    // Intentionally ungateable: there is no `empty-catalog-groups` key in
-    // IssueTypeConfig, so it is always passed through. Made explicit (rather than
-    // relying on the `...result` spread) so a future spread removal does not
-    // silently drop the field, and so the count/filter handling stays in step.
-    empty_catalog_groups: result.empty_catalog_groups,
+    empty_catalog_groups: types["empty-catalog-groups"] ? result.empty_catalog_groups : [],
     unresolved_catalog_references: types["unresolved-catalog-references"]
       ? result.unresolved_catalog_references
       : [],

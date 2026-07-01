@@ -69,7 +69,7 @@ export const ISSUE_CATEGORY_LABELS: Record<IssueCategory, string> = {
   "mixed-client-server-barrel": "Mixed Client/Server Barrels",
   "misplaced-directive": "Misplaced Directives",
   "route-collision": "Route Collisions",
-  "dynamic-segment-name-conflict": "Dynamic Segment Name Conflicts",
+  "dynamic-segment-name-conflict": "Dynamic Segment Conflicts",
   "unresolved-imports": "Unresolved Imports",
   "unlisted-dependencies": "Unlisted Dependencies",
   "duplicate-exports": "Duplicate Exports",
