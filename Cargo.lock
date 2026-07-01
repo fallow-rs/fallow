@@ -973,6 +973,7 @@ dependencies = [
 name = "fallow-api"
 version = "2.103.0"
 dependencies = [
+ "dunce",
  "fallow-config",
  "fallow-engine",
  "fallow-output",

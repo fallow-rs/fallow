@@ -13,14 +13,14 @@ mod feature_flags;
 mod trace;
 
 pub use crate::runtime_output::{
-    AuditProgrammaticOutput, BoundaryViolationsOutput, BoundaryViolationsProgrammaticOutput,
-    CircularDependenciesOutput, CircularDependenciesProgrammaticOutput, DeadCodeOutput,
-    DeadCodeProgrammaticOutput, DuplicationOutput, DuplicationProgrammaticOutput,
-    FeatureFlagsOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
-    HealthProgrammaticOutput, TraceCloneOutput, TraceCloneProgrammaticOutput,
-    TraceDependencyOutput, TraceDependencyProgrammaticOutput, TraceExportOutput,
-    TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
-    serialize_health_report_json,
+    AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
+    BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
+    CircularDependenciesProgrammaticOutput, DeadCodeOutput, DeadCodeProgrammaticOutput,
+    DuplicationOutput, DuplicationProgrammaticOutput, FeatureFlagsOutput,
+    FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
+    TraceCloneOutput, TraceCloneProgrammaticOutput, TraceDependencyOutput,
+    TraceDependencyProgrammaticOutput, TraceExportOutput, TraceExportProgrammaticOutput,
+    TraceFileOutput, TraceFileProgrammaticOutput, serialize_health_report_json,
 };
 pub use audit::run_audit;
 pub use dead_code::{run_boundary_violations, run_circular_dependencies, run_dead_code};

@@ -19,6 +19,7 @@ fallow-config = { workspace = true }
 fallow-engine = { workspace = true }
 fallow-output = { workspace = true }
 fallow-types = { workspace = true }
+dunce = { workspace = true }
 globset = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }

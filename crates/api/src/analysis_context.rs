@@ -114,23 +114,11 @@ fn resolve_analysis_root(root: Option<&Path>) -> ProgrammaticResult<PathBuf> {
             .with_context("analysis.root")
         })?,
     };
-    if !root.exists() {
-        return Err(ProgrammaticError::new(
-            format!("analysis root does not exist: {}", root.display()),
-            2,
-        )
-        .with_code("FALLOW_INVALID_ROOT")
-        .with_context("analysis.root"));
-    }
-    if !root.is_dir() {
-        return Err(ProgrammaticError::new(
-            format!("analysis root is not a directory: {}", root.display()),
-            2,
-        )
-        .with_code("FALLOW_INVALID_ROOT")
-        .with_context("analysis.root"));
-    }
-    Ok(root)
+    fallow_engine::validate::validate_root(&root).map_err(|err| {
+        ProgrammaticError::new(err, 2)
+            .with_code("FALLOW_INVALID_ROOT")
+            .with_context("analysis.root")
+    })
 }
 
 fn validate_analysis_config_path(config_path: Option<&Path>) -> ProgrammaticResult<()> {

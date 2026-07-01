@@ -21,6 +21,7 @@ use fallow_output::EffortEstimate;
 use serde::Serialize;
 
 mod analysis_context;
+pub mod audit_keys;
 pub mod audit_output;
 pub mod combined_output;
 pub mod compact_output;
@@ -143,18 +144,18 @@ pub use output_contracts::{
     SecuritySummaryOutput, WorkspacesOutput,
 };
 pub use runtime::{
-    AuditProgrammaticOutput, BoundaryViolationsOutput, BoundaryViolationsProgrammaticOutput,
-    CircularDependenciesOutput, CircularDependenciesProgrammaticOutput, DeadCodeOutput,
-    DeadCodeProgrammaticOutput, DuplicationOutput, DuplicationProgrammaticOutput,
-    EngineHealthRunner, FeatureFlagsOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
-    HealthProgrammaticOutput, ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts,
-    ProgrammaticHealthRun, ProgrammaticHealthRunner, TraceCloneOutput,
-    TraceCloneProgrammaticOutput, TraceDependencyOutput, TraceDependencyProgrammaticOutput,
-    TraceExportOutput, TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
-    run_audit, run_boundary_violations, run_circular_dependencies, run_complexity_with_runner,
-    run_dead_code, run_duplication, run_feature_flags, run_health, run_health_with_runner,
-    run_trace_clone, run_trace_dependency, run_trace_export, run_trace_file,
-    serialize_health_report_json,
+    AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
+    BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
+    CircularDependenciesProgrammaticOutput, DeadCodeOutput, DeadCodeProgrammaticOutput,
+    DuplicationOutput, DuplicationProgrammaticOutput, EngineHealthRunner, FeatureFlagsOutput,
+    FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
+    ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun,
+    ProgrammaticHealthRunner, TraceCloneOutput, TraceCloneProgrammaticOutput,
+    TraceDependencyOutput, TraceDependencyProgrammaticOutput, TraceExportOutput,
+    TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput, run_audit,
+    run_boundary_violations, run_circular_dependencies, run_complexity_with_runner, run_dead_code,
+    run_duplication, run_feature_flags, run_health, run_health_with_runner, run_trace_clone,
+    run_trace_dependency, run_trace_export, run_trace_file, serialize_health_report_json,
 };
 pub use runtime_json::{
     serialize_audit_programmatic_json, serialize_boundary_violations_programmatic_json,

@@ -33,18 +33,21 @@ type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 pub fn serialize_audit_programmatic_json(
     output: AuditProgrammaticOutput,
 ) -> ProgrammaticResult<serde_json::Value> {
+    let base_snapshot = output.base_snapshot.as_ref();
     let dead_code = output
         .dead_code
         .as_ref()
-        .map(serialize_audit_dead_code)
+        .map(|dead_code| serialize_audit_dead_code(dead_code, base_snapshot))
         .transpose()?;
     let duplication = output
         .duplication
-        .map(serialize_audit_duplication)
+        .as_ref()
+        .map(|duplication| serialize_audit_duplication(duplication, base_snapshot))
         .transpose()?;
     let complexity = output
         .complexity
-        .map(serialize_audit_complexity)
+        .as_ref()
+        .map(|complexity| serialize_audit_complexity(complexity, base_snapshot))
         .transpose()?;
 
     crate::serialize_audit_json(
@@ -81,8 +84,9 @@ pub fn serialize_audit_programmatic_json(
 
 fn serialize_audit_dead_code(
     output: &DeadCodeProgrammaticOutput,
+    base_snapshot: Option<&crate::AuditProgrammaticKeySnapshot>,
 ) -> ProgrammaticResult<serde_json::Value> {
-    crate::serialize_check_json_payload(crate::CheckJsonPayloadInput {
+    let mut json = crate::serialize_check_json_payload(crate::CheckJsonPayloadInput {
         results: &output.output.results,
         root: &output.root,
         elapsed: Duration::from_millis(output.output.elapsed_ms.0),
@@ -94,35 +98,77 @@ fn serialize_audit_dead_code(
         ProgrammaticError::new(format!("failed to serialize audit dead-code: {err}"), 2)
             .with_code("FALLOW_SERIALIZE_AUDIT_DEAD_CODE")
             .with_context("audit.deadCode")
-    })
+    })?;
+    if let Some(base) = base_snapshot {
+        crate::audit_keys::annotate_dead_code_json(
+            &mut json,
+            &output.output.results,
+            &output.root,
+            &base.dead_code,
+        );
+    }
+    Ok(json)
 }
 
 fn serialize_audit_duplication(
-    output: DuplicationProgrammaticOutput,
+    output: &DuplicationProgrammaticOutput,
+    base_snapshot: Option<&crate::AuditProgrammaticKeySnapshot>,
 ) -> ProgrammaticResult<serde_json::Value> {
-    let root = output.root;
-    let mut json = serde_json::to_value(output.output.report).map_err(|err| {
+    let mut json = serde_json::to_value(&output.output.report).map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize audit duplication: {err}"), 2)
             .with_code("FALLOW_SERIALIZE_AUDIT_DUPLICATION")
             .with_context("audit.duplication")
     })?;
-    let root_prefix = format!("{}/", root.display());
+    let root_prefix = format!("{}/", output.root.display());
     strip_root_prefix(&mut json, &root_prefix);
+    if let Some(base) = base_snapshot {
+        annotate_audit_duplication_json(&mut json, output, &base.dupes);
+    }
     Ok(json)
 }
 
 fn serialize_audit_complexity(
-    output: HealthProgrammaticOutput,
+    output: &HealthProgrammaticOutput,
+    base_snapshot: Option<&crate::AuditProgrammaticKeySnapshot>,
 ) -> ProgrammaticResult<serde_json::Value> {
-    let root = output.root;
-    let mut json = serde_json::to_value(output.report).map_err(|err| {
+    let mut json = serde_json::to_value(&output.report).map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize audit complexity: {err}"), 2)
             .with_code("FALLOW_SERIALIZE_AUDIT_COMPLEXITY")
             .with_context("audit.complexity")
     })?;
-    let root_prefix = format!("{}/", root.display());
+    let root_prefix = format!("{}/", output.root.display());
     strip_root_prefix(&mut json, &root_prefix);
+    if let Some(base) = base_snapshot {
+        crate::audit_keys::annotate_health_json(
+            &mut json,
+            &output.report,
+            &output.root,
+            &base.health,
+        );
+    }
     Ok(json)
+}
+
+fn annotate_audit_duplication_json(
+    json: &mut serde_json::Value,
+    output: &DuplicationProgrammaticOutput,
+    base: &rustc_hash::FxHashSet<String>,
+) {
+    let Some(items) = json
+        .get_mut("clone_groups")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for (item, group) in items.iter_mut().zip(&output.output.report.clone_groups) {
+        if let serde_json::Value::Object(map) = item {
+            let key = crate::audit_keys::dupe_group_key(&group.group, &output.root);
+            map.insert(
+                "introduced".to_string(),
+                serde_json::json!(!base.contains(&key)),
+            );
+        }
+    }
 }
 
 /// Serialize typed dead-code output into the stable JSON compatibility contract.

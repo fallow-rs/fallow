@@ -441,7 +441,7 @@ struct FrameworkFindingSlices<'a> {
 /// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
 /// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` derives
 /// backwards-compatible aliases from `fallow schema` `ts_alias` rows.
-pub(super) fn dead_code_keys(
+pub fn dead_code_keys(
     results: &fallow_types::results::AnalysisResults,
     root: &Path,
 ) -> FxHashSet<String> {
@@ -1169,7 +1169,11 @@ impl<'a> DeadCodeKeyCollector<'a> {
 /// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
 /// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` derives
 /// backwards-compatible aliases from `fallow schema` `ts_alias` rows.
-pub(super) fn retain_introduced_dead_code(
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across audit attribution keys"
+)]
+pub fn retain_introduced_dead_code(
     results: &mut fallow_types::results::AnalysisResults,
     root: &Path,
     base: Option<&FxHashSet<String>>,
@@ -1538,7 +1542,11 @@ where
     }
 }
 
-pub(super) fn annotate_dead_code_json(
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across audit attribution keys"
+)]
+pub fn annotate_dead_code_json(
     json: &mut serde_json::Value,
     results: &fallow_types::results::AnalysisResults,
     root: &Path,
@@ -2156,7 +2164,11 @@ fn annotate_dependency_override_json(
     );
 }
 
-pub(super) fn annotate_health_json(
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across audit attribution keys"
+)]
+pub fn annotate_health_json(
     json: &mut serde_json::Value,
     report: &fallow_output::HealthReport,
     root: &Path,
@@ -2181,7 +2193,11 @@ pub(super) fn annotate_health_json(
     }
 }
 
-pub(super) fn annotate_dupes_json(
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across audit attribution keys"
+)]
+pub fn annotate_dupes_json(
     json: &mut serde_json::Value,
     report: &fallow_types::duplicates::DuplicationReport,
     root: &Path,
@@ -2203,7 +2219,7 @@ pub(super) fn annotate_dupes_json(
     }
 }
 
-pub(super) fn health_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashSet<String> {
+pub fn health_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashSet<String> {
     report
         .findings
         .iter()
@@ -2211,10 +2227,7 @@ pub(super) fn health_keys(report: &fallow_output::HealthReport, root: &Path) -> 
         .collect()
 }
 
-pub(super) fn health_finding_key(
-    finding: &fallow_output::ComplexityViolation,
-    root: &Path,
-) -> String {
+pub fn health_finding_key(finding: &fallow_output::ComplexityViolation, root: &Path) -> String {
     format!(
         "complexity:{}:{}:{:?}",
         relative_key_path(&finding.path, root),
@@ -2223,7 +2236,7 @@ pub(super) fn health_finding_key(
     )
 }
 
-pub(super) fn dupes_keys(
+pub fn dupes_keys(
     report: &fallow_types::duplicates::DuplicationReport,
     root: &Path,
 ) -> FxHashSet<String> {
@@ -2234,7 +2247,7 @@ pub(super) fn dupes_keys(
         .collect()
 }
 
-pub(super) fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path) -> String {
+pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path) -> String {
     let mut files: Vec<String> = group
         .instances
         .iter()

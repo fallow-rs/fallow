@@ -860,8 +860,7 @@ use crate::base_worktree::{
     sweep_orphan_audit_worktrees, touch_last_used,
 };
 
-#[path = "audit_keys.rs"]
-pub mod keys;
+pub use fallow_api::audit_keys as keys;
 
 #[path = "audit_review_deltas.rs"]
 pub mod review_deltas;

@@ -61,6 +61,10 @@ fn analysis_at(root: &Path) -> AnalysisOptions {
     }
 }
 
+fn canonical_root(root: &Path) -> PathBuf {
+    dunce::canonicalize(root).expect("canonical root")
+}
+
 fn health_json_with_runner(
     options: &ComplexityOptions,
     runner: &impl ProgrammaticHealthRunner,
@@ -154,7 +158,7 @@ fn derives_programmatic_health_execution_options_from_api_contracts() {
 
     let execution = derive_programmatic_health_execution_options(&resolved, &options);
 
-    assert_eq!(execution.root, root);
+    assert_eq!(execution.root, canonical_root(root));
     assert!(matches!(execution.output, OutputFormat::Human));
     assert!(execution.no_cache);
     assert_eq!(execution.threads, 2);
@@ -423,7 +427,7 @@ fn run_duplication_returns_typed_output_before_json() {
     assert!(run.clone_families().is_empty());
     assert!(run.groups().is_none());
     assert_eq!(run.report().stats.clone_groups, 0);
-    assert_eq!(run.root, root);
+    assert_eq!(run.root, canonical_root(root));
     assert_eq!(run.envelope_mode, RootEnvelopeMode::Tagged);
 
     let json =
@@ -548,7 +552,7 @@ fn run_dead_code_returns_typed_output_before_json() {
     let _: &crate::DeadCodeOutput = &run.output;
     assert_eq!(run.output.schema_version.0, CHECK_SCHEMA_VERSION);
     assert_eq!(run.results().unused_exports.len(), 2);
-    assert_eq!(run.root(), root);
+    assert_eq!(run.root(), canonical_root(root));
     assert_eq!(run.envelope_mode, RootEnvelopeMode::Tagged);
 
     let json =

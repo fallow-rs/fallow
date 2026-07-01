@@ -145,8 +145,8 @@ fn requires_cli_fallback(params: &AuditParams) -> bool {
 
 fn cli_fallback_reason(params: &AuditParams) -> Option<&'static str> {
     let gate = params.gate.as_deref().unwrap_or("new-only");
-    if gate != "all" {
-        return Some("new-only audit attribution");
+    if !VALID_AUDIT_GATES.contains(&gate) {
+        return Some("invalid gate");
     }
     baseline_fallback_reason(params.dead_code_baseline.as_deref(), None)
         .or_else(|| baseline_fallback_reason(params.health_baseline.as_deref(), None))
@@ -208,10 +208,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_new_only_audit_stays_on_cli_until_attribution_moves() {
+    fn default_new_only_audit_uses_programmatic_api_route() {
         let params = AuditParams::default();
-        assert!(requires_cli_fallback(&params));
-        assert_eq!(run_audit_api_value(&params).expect("fallback check"), None);
+        assert!(!requires_cli_fallback(&params));
+        let options = audit_options_from_params(&params).expect("audit options");
+        assert_eq!(options.gate, AuditGate::NewOnly);
     }
 
     #[test]
@@ -251,6 +252,61 @@ mod tests {
 
     #[tokio::test]
     async fn run_audit_gate_all_api_path_returns_json_without_cli_binary() {
+        let project = audit_fixture();
+
+        let result = run_audit(
+            "unused-binary-on-api-path",
+            AuditParams {
+                root: Some(project.path().display().to_string()),
+                base: Some("HEAD".to_string()),
+                gate: Some("all".to_string()),
+                no_cache: Some(true),
+                ..AuditParams::default()
+            },
+        )
+        .await
+        .expect("api result");
+
+        assert_eq!(result.is_error, Some(false));
+        let text = match &result.content[0].raw {
+            RawContent::Text(text) => &text.text,
+            _ => panic!("expected text content"),
+        };
+        let json: serde_json::Value = serde_json::from_str(text).expect("json");
+        assert_eq!(json["kind"], "audit");
+        assert_eq!(json["command"], "audit");
+        assert!(json["dead_code"].is_object());
+    }
+
+    #[tokio::test]
+    async fn run_audit_default_new_only_api_path_marks_introduced_without_cli_binary() {
+        let project = audit_fixture();
+
+        let result = run_audit(
+            "unused-binary-on-api-path",
+            AuditParams {
+                root: Some(project.path().display().to_string()),
+                base: Some("HEAD".to_string()),
+                no_cache: Some(true),
+                ..AuditParams::default()
+            },
+        )
+        .await
+        .expect("api result");
+
+        assert_eq!(result.is_error, Some(false));
+        let text = match &result.content[0].raw {
+            RawContent::Text(text) => &text.text,
+            _ => panic!("expected text content"),
+        };
+        let json: serde_json::Value = serde_json::from_str(text).expect("json");
+        assert_eq!(json["kind"], "audit");
+        assert_eq!(json["attribution"]["gate"], "new-only");
+        assert_eq!(json["attribution"]["dead_code_introduced"], 1);
+        assert_eq!(json["dead_code"]["unused_files"][0]["introduced"], true);
+    }
+
+    fn audit_fixture() -> tempfile::TempDir {
         let project = tempfile::tempdir().expect("project");
         std::fs::create_dir_all(project.path().join("src")).expect("create src");
         std::fs::write(
@@ -284,29 +340,7 @@ mod tests {
             "export const unused = 1;\n",
         )
         .expect("write changed source");
-
-        let result = run_audit(
-            "unused-binary-on-api-path",
-            AuditParams {
-                root: Some(project.path().display().to_string()),
-                base: Some("HEAD".to_string()),
-                gate: Some("all".to_string()),
-                no_cache: Some(true),
-                ..AuditParams::default()
-            },
-        )
-        .await
-        .expect("api result");
-
-        assert_eq!(result.is_error, Some(false));
-        let text = match &result.content[0].raw {
-            RawContent::Text(text) => &text.text,
-            _ => panic!("expected text content"),
-        };
-        let json: serde_json::Value = serde_json::from_str(text).expect("json");
-        assert_eq!(json["kind"], "audit");
-        assert_eq!(json["command"], "audit");
-        assert!(json["dead_code"].is_object());
+        project
     }
 
     fn git(root: &std::path::Path, args: &[&str]) {

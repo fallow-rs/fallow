@@ -14,6 +14,7 @@ use fallow_types::output_dead_code::{
 };
 use fallow_types::results::AnalysisResults;
 use fallow_types::workspace::WorkspaceDiagnostic;
+use rustc_hash::FxHashSet;
 
 use crate::{AuditAttribution, AuditSummary, AuditVerdict};
 use crate::{CloneFamilyFinding, CloneGroupFinding, DupesReportPayload, DuplicationGroup};
@@ -315,12 +316,21 @@ pub struct AuditProgrammaticOutput {
     pub head_sha: Option<String>,
     pub elapsed: std::time::Duration,
     pub base_snapshot_skipped: Option<bool>,
+    pub base_snapshot: Option<AuditProgrammaticKeySnapshot>,
     pub dead_code: Option<DeadCodeProgrammaticOutput>,
     pub duplication: Option<DuplicationProgrammaticOutput>,
     pub complexity: Option<HealthProgrammaticOutput>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<String>,
+}
+
+/// Stable audit key snapshot used to classify introduced vs inherited findings.
+#[derive(Debug, Clone, Default)]
+pub struct AuditProgrammaticKeySnapshot {
+    pub dead_code: FxHashSet<String>,
+    pub health: FxHashSet<String>,
+    pub dupes: FxHashSet<String>,
 }
 
 /// Serialize a health / complexity report into the stable JSON output contract.
