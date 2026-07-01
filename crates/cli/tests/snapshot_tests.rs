@@ -19,11 +19,12 @@ use fallow_cli::report::{
     },
 };
 use fallow_config::RulesConfig;
-use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
-use fallow_core::extract::MemberKind;
-use fallow_core::results::*;
 use fallow_output::codeclimate_issues_to_value;
 use fallow_output::*;
+use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
+use fallow_types::extract::MemberKind;
+use fallow_types::output_dead_code::*;
+use fallow_types::results::*;
 
 fn sarif_rule(id: &str, fallback_short: &str, level: &str) -> serde_json::Value {
     let def = fallow_cli::explain::rule_by_id(id);
@@ -283,57 +284,51 @@ fn sample_results(root: &Path) -> AnalysisResults {
             ],
             kind: ReExportCycleKind::MultiNode,
         }));
-    r.unused_catalog_entries.push(
-        fallow_core::results::UnusedCatalogEntryFinding::with_actions(
-            fallow_core::results::UnusedCatalogEntry {
+    r.unused_catalog_entries
+        .push(UnusedCatalogEntryFinding::with_actions(
+            UnusedCatalogEntry {
                 entry_name: "is-even".to_string(),
                 catalog_name: "default".to_string(),
                 path: PathBuf::from("pnpm-workspace.yaml"),
                 line: 6,
                 hardcoded_consumers: vec![],
             },
-        ),
-    );
-    r.unused_catalog_entries.push(
-        fallow_core::results::UnusedCatalogEntryFinding::with_actions(
-            fallow_core::results::UnusedCatalogEntry {
+        ));
+    r.unused_catalog_entries
+        .push(UnusedCatalogEntryFinding::with_actions(
+            UnusedCatalogEntry {
                 entry_name: "old-thing".to_string(),
                 catalog_name: "legacy".to_string(),
                 path: PathBuf::from("pnpm-workspace.yaml"),
                 line: 12,
                 hardcoded_consumers: vec![PathBuf::from("apps/web/package.json")],
             },
-        ),
-    );
-    r.empty_catalog_groups.push(
-        fallow_core::results::EmptyCatalogGroupFinding::with_actions(
-            fallow_core::results::EmptyCatalogGroup {
-                catalog_name: "react17".to_string(),
-                path: PathBuf::from("pnpm-workspace.yaml"),
-                line: 10,
-            },
-        ),
-    );
-    r.unresolved_catalog_references.push(
-        fallow_core::results::UnresolvedCatalogReferenceFinding::with_actions(
-            fallow_core::results::UnresolvedCatalogReference {
+        ));
+    r.empty_catalog_groups
+        .push(EmptyCatalogGroupFinding::with_actions(EmptyCatalogGroup {
+            catalog_name: "react17".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 10,
+        }));
+    r.unresolved_catalog_references
+        .push(UnresolvedCatalogReferenceFinding::with_actions(
+            UnresolvedCatalogReference {
                 entry_name: "old-react".to_string(),
                 catalog_name: "react17".to_string(),
                 path: root.join("packages/app/package.json"),
                 line: 14,
                 available_in_catalogs: vec!["react18".to_string()],
             },
-        ),
-    );
+        ));
     r.unused_dependency_overrides.push(
-        fallow_core::results::UnusedDependencyOverrideFinding::with_actions(
-            fallow_core::results::UnusedDependencyOverride {
+        UnusedDependencyOverrideFinding::with_actions(
+            UnusedDependencyOverride {
                 raw_key: "axios".to_string(),
                 target_package: "axios".to_string(),
                 parent_package: None,
                 version_constraint: None,
                 version_range: "^1.6.0".to_string(),
-                source: fallow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
+                source: DependencyOverrideSource::PnpmWorkspaceYaml,
                 path: root.join("pnpm-workspace.yaml"),
                 line: 9,
                 hint: Some(
@@ -344,83 +339,72 @@ fn sample_results(root: &Path) -> AnalysisResults {
         ),
     );
     r.misconfigured_dependency_overrides.push(
-        fallow_core::results::MisconfiguredDependencyOverrideFinding::with_actions(
-            fallow_core::results::MisconfiguredDependencyOverride {
-                raw_key: "@types/react@<<18".to_string(),
-                target_package: None,
-                raw_value: "18.0.0".to_string(),
-                reason: fallow_core::results::DependencyOverrideMisconfigReason::UnparsableKey,
-                source: fallow_core::results::DependencyOverrideSource::PnpmPackageJson,
-                path: root.join("package.json"),
-                line: 3,
-            },
-        ),
+        MisconfiguredDependencyOverrideFinding::with_actions(MisconfiguredDependencyOverride {
+            raw_key: "@types/react@<<18".to_string(),
+            target_package: None,
+            raw_value: "18.0.0".to_string(),
+            reason: DependencyOverrideMisconfigReason::UnparsableKey,
+            source: DependencyOverrideSource::PnpmPackageJson,
+            path: root.join("package.json"),
+            line: 3,
+        }),
     );
-    r.invalid_client_exports.push(
-        fallow_core::results::InvalidClientExportFinding::with_actions(
-            fallow_core::results::InvalidClientExport {
+    r.invalid_client_exports
+        .push(InvalidClientExportFinding::with_actions(
+            InvalidClientExport {
                 path: root.join("app/page.tsx"),
                 export_name: "metadata".to_string(),
                 directive: "use client".to_string(),
                 line: 3,
                 col: 0,
             },
-        ),
-    );
-    r.mixed_client_server_barrels.push(
-        fallow_core::results::MixedClientServerBarrelFinding::with_actions(
-            fallow_core::results::MixedClientServerBarrel {
+        ));
+    r.mixed_client_server_barrels
+        .push(MixedClientServerBarrelFinding::with_actions(
+            MixedClientServerBarrel {
                 path: root.join("app/components/index.ts"),
                 client_origin: "./Button".to_string(),
                 server_origin: "./fetchUser".to_string(),
                 line: 2,
                 col: 0,
             },
-        ),
-    );
-    r.unprovided_injects
-        .push(fallow_core::results::UnprovidedInjectFinding::with_actions(
-            fallow_core::results::UnprovidedInject {
-                path: root.join("src/useTheme.ts"),
-                key_name: "THEME_KEY".to_string(),
-                framework: "vue".to_string(),
-                line: 5,
-                col: 2,
-            },
         ));
-    r.unused_component_inputs.push(
-        fallow_core::results::UnusedComponentInputFinding::with_actions(
-            fallow_core::results::UnusedComponentInput {
+    r.unprovided_injects
+        .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
+            path: root.join("src/useTheme.ts"),
+            key_name: "THEME_KEY".to_string(),
+            framework: "vue".to_string(),
+            line: 5,
+            col: 2,
+        }));
+    r.unused_component_inputs
+        .push(UnusedComponentInputFinding::with_actions(
+            UnusedComponentInput {
                 path: root.join("src/user-card.component.ts"),
                 component_name: "UserCardComponent".to_string(),
                 input_name: "variant".to_string(),
                 line: 12,
                 col: 2,
             },
-        ),
-    );
-    r.unused_component_outputs.push(
-        fallow_core::results::UnusedComponentOutputFinding::with_actions(
-            fallow_core::results::UnusedComponentOutput {
+        ));
+    r.unused_component_outputs
+        .push(UnusedComponentOutputFinding::with_actions(
+            UnusedComponentOutput {
                 path: root.join("src/user-card.component.ts"),
                 component_name: "UserCardComponent".to_string(),
                 output_name: "selected".to_string(),
                 line: 15,
                 col: 2,
             },
-        ),
-    );
-    r.unused_svelte_events.push(
-        fallow_core::results::UnusedSvelteEventFinding::with_actions(
-            fallow_core::results::UnusedSvelteEvent {
-                path: root.join("src/Child.svelte"),
-                component_name: "Child".to_string(),
-                event_name: "dead".to_string(),
-                line: 6,
-                col: 2,
-            },
-        ),
-    );
+        ));
+    r.unused_svelte_events
+        .push(UnusedSvelteEventFinding::with_actions(UnusedSvelteEvent {
+            path: root.join("src/Child.svelte"),
+            component_name: "Child".to_string(),
+            event_name: "dead".to_string(),
+            line: 6,
+            col: 2,
+        }));
 
     r
 }

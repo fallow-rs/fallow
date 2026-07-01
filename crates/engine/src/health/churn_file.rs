@@ -20,7 +20,7 @@ pub fn validate_health_churn_file(opts: &HealthExecutionOptions<'_>) -> Result<(
         && (opts.hotspots || opts.targets)
     {
         let resolved = super::scoring::resolve_relative_to_root(churn_file, Some(opts.root));
-        crate::analyze_churn_from_file(&resolved, opts.root)
+        crate::churn_impl::analyze_churn_from_file(&resolved, opts.root)
             .map_err(|e| emit_error(&e, 2, opts.output))?;
     }
     Ok(())

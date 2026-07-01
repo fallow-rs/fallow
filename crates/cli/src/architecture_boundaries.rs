@@ -14,15 +14,15 @@ fn api_consumers_depend_on_api_not_engine_cli_or_core() {
 }
 
 #[test]
-fn cli_core_dependency_stays_dev_only() {
+fn cli_does_not_depend_on_core() {
     let manifest = read_manifest("crates/cli/Cargo.toml");
     assert!(
         !section_has_dep(&manifest, "dependencies", "fallow-core"),
         "fallow-cli must not depend on fallow-core in production dependencies"
     );
     assert!(
-        section_has_dep(&manifest, "dev-dependencies", "fallow-core"),
-        "fallow-cli keeps fallow-core only for test compatibility"
+        !section_has_dep(&manifest, "dev-dependencies", "fallow-core"),
+        "fallow-cli tests must use public contract crates instead of fallow-core"
     );
 }
 
@@ -83,6 +83,26 @@ fn lower_contract_crates_do_not_depend_upward() {
 fn api_and_engine_do_not_depend_on_cli() {
     assert_no_deps("crates/api/Cargo.toml", &["fallow-cli"]);
     assert_no_deps("crates/engine/Cargo.toml", &["fallow-api", "fallow-cli"]);
+}
+
+#[test]
+fn api_does_not_depend_on_core_or_cli() {
+    assert_no_deps("crates/api/Cargo.toml", &["fallow-core", "fallow-cli"]);
+    for source_path in rust_sources_under(["crates/api/src"]) {
+        let source = read_source_without_line_comments(&source_path)
+            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+        for forbidden in [
+            "fallow_core::",
+            "use fallow_core",
+            "fallow_cli::",
+            "use fallow_cli",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{source_path} must consume fallow-engine or API-owned helpers instead of {forbidden}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -383,9 +403,33 @@ fn api_consumers_do_not_reference_engine_core_or_cli_sources() {
         ] {
             assert!(
                 !source.contains(forbidden),
-                "{source_path} must consume fallow-api or fallow-engine instead of {forbidden}"
+                "{source_path} must consume fallow-api instead of {forbidden}"
             );
         }
+    }
+}
+
+#[test]
+fn engine_root_facade_does_not_reexport_private_adapter_helpers() {
+    let source_path = "crates/engine/src/lib.rs";
+    let source = read_source_without_line_comments(source_path)
+        .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+    for forbidden in [
+        "ChangedFilesSpawnHook",
+        "ChurnSpawnHook",
+        "analyze_churn_from_file",
+        "collect_hidden_dir_scopes",
+        "compile_glob_set",
+        "discover_dynamically_loaded_entry_points",
+        "discover_files_and_config_candidates",
+        "discover_infrastructure_entry_points",
+        "discover_plugin_entry_point_sets",
+        "AnalysisSessionParts",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "fallow-engine root facade must not re-export private adapter helper {forbidden}"
+        );
     }
 }
 

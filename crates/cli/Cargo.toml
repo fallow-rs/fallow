@@ -107,7 +107,6 @@ doctest = false
 
 [dev-dependencies]
 insta = { workspace = true }
-fallow-core = { workspace = true }
 fallow-types = { workspace = true }
 proptest = { workspace = true }
 proc-macro2 = { version = "1", features = ["span-locations"] }

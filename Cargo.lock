@@ -1011,7 +1011,6 @@ dependencies = [
  "ed25519-dalek",
  "fallow-api",
  "fallow-config",
- "fallow-core",
  "fallow-cov-protocol",
  "fallow-engine",
  "fallow-license",

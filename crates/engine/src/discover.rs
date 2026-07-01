@@ -128,33 +128,10 @@ pub fn collect_plugin_hidden_dir_scopes(
         .collect()
 }
 
-/// Collect plugin-derived and script-derived hidden directory scopes.
-#[must_use]
-pub fn collect_hidden_dir_scopes(
-    config: &ResolvedConfig,
-    root_pkg: Option<&PackageJson>,
-    workspaces: &[WorkspaceInfo],
-) -> Vec<HiddenDirScope> {
-    fallow_core::discover::collect_hidden_dir_scopes(config, root_pkg, workspaces)
-        .into_iter()
-        .map(Into::into)
-        .collect()
-}
-
 /// Discover source files for a resolved config.
 #[must_use]
 pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     fallow_core::discover::discover_files(config)
-}
-
-/// Discover source files and config candidates in one traversal.
-#[must_use]
-pub fn discover_files_and_config_candidates(
-    config: &ResolvedConfig,
-    additional_hidden_dir_scopes: &[HiddenDirScope],
-) -> (Vec<DiscoveredFile>, Vec<std::path::PathBuf>) {
-    let scopes = to_core_hidden_dir_scopes(additional_hidden_dir_scopes);
-    fallow_core::discover::discover_files_and_config_candidates(config, &scopes)
 }
 
 /// Discover source files with additional package-scoped hidden directories.
@@ -197,38 +174,6 @@ pub fn discover_plugin_entry_points(
     files: &[DiscoveredFile],
 ) -> Vec<EntryPoint> {
     fallow_core::discover::discover_plugin_entry_points(plugin_result.as_core(), config, files)
-}
-
-/// Discover plugin-derived entry points with roles preserved.
-#[must_use]
-pub fn discover_plugin_entry_point_sets(
-    plugin_result: &crate::plugins::AggregatedPluginResult,
-    config: &ResolvedConfig,
-    files: &[DiscoveredFile],
-) -> CategorizedEntryPoints {
-    fallow_core::discover::discover_plugin_entry_point_sets(plugin_result.as_core(), config, files)
-        .into()
-}
-
-/// Discover entry points from `dynamicallyLoaded` config patterns.
-#[must_use]
-pub fn discover_dynamically_loaded_entry_points(
-    config: &ResolvedConfig,
-    files: &[DiscoveredFile],
-) -> Vec<EntryPoint> {
-    fallow_core::discover::discover_dynamically_loaded_entry_points(config, files)
-}
-
-/// Pre-compile glob patterns for efficient path matching.
-#[must_use]
-pub fn compile_glob_set(patterns: &[String]) -> Option<globset::GlobSet> {
-    fallow_core::discover::compile_glob_set(patterns)
-}
-
-/// Discover entry points from infrastructure config files.
-#[must_use]
-pub fn discover_infrastructure_entry_points(root: &Path) -> Vec<EntryPoint> {
-    fallow_core::discover::discover_infrastructure_entry_points(root)
 }
 
 fn to_core_hidden_dir_scopes(

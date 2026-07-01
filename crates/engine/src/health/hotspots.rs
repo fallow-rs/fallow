@@ -50,7 +50,7 @@ pub(super) fn fetch_churn_data(
         let resolved =
             crate::health::scoring::resolve_relative_to_root(churn_file, Some(opts.root));
         let t = std::time::Instant::now();
-        let result = match crate::analyze_churn_from_file(&resolved, opts.root) {
+        let result = match crate::churn_impl::analyze_churn_from_file(&resolved, opts.root) {
             Ok(r) => r,
             Err(e) => {
                 // The up-front `health::validate_churn_file` gate already
