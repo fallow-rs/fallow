@@ -468,17 +468,13 @@ fn engine_root_facade_does_not_reexport_private_adapter_helpers() {
 #[test]
 fn engine_core_references_stay_inside_adapter_modules() {
     let allowed = [
-        "crates/engine/src/changed_files.rs",
         "crates/engine/src/churn.rs",
         "crates/engine/src/core_backend.rs",
         "crates/engine/src/cross_reference.rs",
         "crates/engine/src/discover.rs",
         "crates/engine/src/duplicates.rs",
-        "crates/engine/src/git_env.rs",
         "crates/engine/src/plugins.rs",
         "crates/engine/src/project_config.rs",
-        "crates/engine/src/public_api.rs",
-        "crates/engine/src/security.rs",
     ];
     for source_path in rust_sources_under(["crates/engine/src"]) {
         let source = read_source_without_line_comments(&source_path)
@@ -486,7 +482,7 @@ fn engine_core_references_stay_inside_adapter_modules() {
         if source.contains("fallow_core::") || source.contains("use fallow_core") {
             assert!(
                 allowed.contains(&source_path.as_str()),
-                "{source_path} must route fallow_core access through an explicit engine adapter"
+                "{source_path} must route fallow_core access through core_backend or an approved typed adapter still awaiting containment"
             );
         }
     }

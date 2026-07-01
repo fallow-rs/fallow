@@ -6,13 +6,18 @@
 
 use fallow_config::ResolvedConfig;
 use fallow_graph::graph::ModuleGraph;
+use fallow_types::results::{SecurityFinding, SecuritySeverity};
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
     AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
-    EngineResult, ModuleInfo, discover::AnalysisDiscovery, duplicates::DuplicationReport,
-    engine_error, module_graph::RetainedModuleGraph,
+    EngineResult, ModuleInfo,
+    changed_files::{ChangedFilesError, ChangedFilesSpawnHook},
+    discover::AnalysisDiscovery,
+    duplicates::DuplicationReport,
+    engine_error,
+    module_graph::RetainedModuleGraph,
 };
 
 pub fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
@@ -147,4 +152,86 @@ pub fn trace_symbol_chain(
     query: fallow_types::trace_chain::SymbolChainQuery<'_>,
 ) -> Option<fallow_types::trace_chain::SymbolChainTrace> {
     fallow_core::trace_chain::trace_symbol_chain(graph, modules, root, query)
+}
+
+fn changed_files_error(error: fallow_core::changed_files::ChangedFilesError) -> ChangedFilesError {
+    match error {
+        fallow_core::changed_files::ChangedFilesError::InvalidRef(err) => {
+            ChangedFilesError::InvalidRef(err)
+        }
+        fallow_core::changed_files::ChangedFilesError::GitMissing(err) => {
+            ChangedFilesError::GitMissing(err)
+        }
+        fallow_core::changed_files::ChangedFilesError::NotARepository => {
+            ChangedFilesError::NotARepository
+        }
+        fallow_core::changed_files::ChangedFilesError::GitFailed(stderr) => {
+            ChangedFilesError::GitFailed(stderr)
+        }
+    }
+}
+
+pub fn set_changed_files_spawn_hook(hook: ChangedFilesSpawnHook) {
+    fallow_core::changed_files::set_spawn_hook(hook);
+}
+
+pub fn validate_git_ref(s: &str) -> Result<&str, String> {
+    fallow_core::changed_files::validate_git_ref(s)
+}
+
+pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
+    fallow_core::changed_files::resolve_git_toplevel(cwd).map_err(changed_files_error)
+}
+
+pub fn resolve_git_common_dir(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
+    fallow_core::changed_files::resolve_git_common_dir(cwd).map_err(changed_files_error)
+}
+
+pub fn try_get_changed_files(
+    root: &Path,
+    git_ref: &str,
+) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+    fallow_core::changed_files::try_get_changed_files(root, git_ref).map_err(changed_files_error)
+}
+
+pub fn try_get_changed_files_with_toplevel(
+    cwd: &Path,
+    toplevel: &Path,
+    git_ref: &str,
+) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+    fallow_core::changed_files::try_get_changed_files_with_toplevel(cwd, toplevel, git_ref)
+        .map_err(changed_files_error)
+}
+
+pub fn try_get_changed_diff(root: &Path, git_ref: &str) -> Result<String, ChangedFilesError> {
+    fallow_core::changed_files::try_get_changed_diff(root, git_ref).map_err(changed_files_error)
+}
+
+pub fn get_changed_files(root: &Path, git_ref: &str) -> Option<FxHashSet<PathBuf>> {
+    fallow_core::changed_files::get_changed_files(root, git_ref)
+}
+
+pub fn filter_duplication_by_changed_files(
+    report: &mut DuplicationReport,
+    changed_files: &FxHashSet<PathBuf>,
+    root: &Path,
+) {
+    fallow_core::changed_files::filter_duplication_by_changed_files(report, changed_files, root);
+}
+
+pub fn derive_security_severity(finding: &SecurityFinding) -> SecuritySeverity {
+    fallow_core::analyze::derive_security_severity(finding)
+}
+
+pub fn security_catalogue_title(kind: &str) -> Option<&'static str> {
+    fallow_core::analyze::security_catalogue_title(kind)
+}
+
+pub fn public_api_package_entry_points(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    root_pkg: Option<&fallow_config::PackageJson>,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> FxHashSet<fallow_types::discover::FileId> {
+    fallow_core::analyze::public_api_package_entry_points(graph, config, root_pkg, workspaces)
 }
