@@ -168,6 +168,29 @@ pub struct AnalysisOutput {
     pub file_hashes: rustc_hash::FxHashMap<std::path::PathBuf, u64>,
 }
 
+/// Parse/cache phase metrics supplied by callers that own parsing before
+/// handing modules back to the core detector backend.
+#[derive(Debug, Clone, Copy)]
+pub struct AnalysisParseMetrics {
+    pub parse_ms: f64,
+    pub cache_ms: f64,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub parse_cpu_ms: f64,
+}
+
+/// Inputs for running the detector backend from caller-owned discovery and
+/// parsed modules.
+pub struct ParsedAnalysisInput<'a> {
+    pub config: &'a ResolvedConfig,
+    pub discovery: &'a AnalysisDiscovery,
+    pub modules: Vec<extract::ModuleInfo>,
+    pub parse_metrics: AnalysisParseMetrics,
+    pub retain: bool,
+    pub collect_usages: bool,
+    pub retain_modules: bool,
+}
+
 /// Update cache: write freshly parsed modules and refresh stale mtime/size entries.
 fn update_cache(
     store: &mut cache::CacheStore,
@@ -759,6 +782,41 @@ impl<'a> AnalysisSession<'a> {
             file_hashes: collect_file_hashes(modules, self.files()),
         })
     }
+
+    fn run_with_owned_parse_result(
+        self,
+        modules: Vec<extract::ModuleInfo>,
+        parse_metrics: AnalysisParseMetrics,
+        retain: bool,
+        collect_usages: bool,
+        retain_modules: bool,
+    ) -> Result<AnalysisOutput, FallowError> {
+        let workspace_pkgs = self.load_workspace_packages();
+        let (plugin_result, plugins_ms, scripts_ms) =
+            self.run_plugins_and_scripts(&workspace_pkgs)?;
+
+        let core = self.run_owned_core(&workspace_pkgs, &plugin_result, modules, collect_usages);
+        self.progress.finish();
+
+        let profile = full_analysis_pipeline_profile(
+            &self.prelude_timings(plugins_ms, scripts_ms),
+            self.pipeline_start,
+            self.files(),
+            self.workspaces(),
+            &core,
+            &ParseMetrics::from(parse_metrics),
+        );
+        trace_pipeline_profile(&profile);
+
+        Ok(assemble_full_output(
+            core,
+            plugin_result,
+            &profile,
+            self.files(),
+            retain,
+            retain_modules,
+        ))
+    }
 }
 
 /// Run the shared prelude: progress setup, node_modules check, workspace and
@@ -881,6 +939,26 @@ pub fn analyze_with_parse_result(
 ) -> Result<AnalysisOutput, FallowError> {
     let _span = tracing::info_span!("fallow_analyze_with_parse_result").entered();
     AnalysisSession::new(config).run_with_parse_result(modules)
+}
+
+/// Run the core graph/detector backend from engine-owned discovery and parsed
+/// modules.
+///
+/// # Errors
+///
+/// Returns an error if plugin detection, graph construction, or analysis fails.
+pub fn analyze_with_owned_parse_result_from_discovery(
+    input: ParsedAnalysisInput<'_>,
+) -> Result<AnalysisOutput, FallowError> {
+    let _span = tracing::info_span!("fallow_analyze").entered();
+    AnalysisSession::from_discovery(input.config, input.discovery.clone())
+        .run_with_owned_parse_result(
+            input.modules,
+            input.parse_metrics,
+            input.retain,
+            input.collect_usages,
+            input.retain_modules,
+        )
 }
 
 /// Prelude/aggregate metrics shared between the parse and reuse pipeline paths
@@ -1310,6 +1388,18 @@ struct ParseMetrics {
     cache_hits: usize,
     cache_misses: usize,
     parse_cpu_ms: f64,
+}
+
+impl From<AnalysisParseMetrics> for ParseMetrics {
+    fn from(metrics: AnalysisParseMetrics) -> Self {
+        Self {
+            parse_ms: metrics.parse_ms,
+            cache_ms: metrics.cache_ms,
+            cache_hits: metrics.cache_hits,
+            cache_misses: metrics.cache_misses,
+            parse_cpu_ms: metrics.parse_cpu_ms,
+        }
+    }
 }
 
 fn parse_analysis_modules(

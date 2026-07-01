@@ -47,6 +47,9 @@ pub struct ParsedAnalysisSessionParts {
     pub modules: Vec<ModuleInfo>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub parse_ms: f64,
+    pub cache_update_ms: f64,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
     pub parse_cpu_ms: f64,
 }
 
@@ -77,14 +80,19 @@ impl<'a> AnalysisSessionView<'a> {
     }
 
     fn analyze_dead_code(&self) -> EngineResult<DeadCodeAnalysis> {
-        core_backend::analyze_with_usages_from_discovery(self.config, &self.discovery)
+        self.analyze_dead_code_with_artifacts(false, false)
+            .map(|output| DeadCodeAnalysis {
+                results: output.results,
+            })
     }
 
     fn analyze_dead_code_with_complexity(&self) -> EngineResult<DeadCodeAnalysisOutput> {
-        core_backend::analyze_with_usages_and_complexity_from_discovery(
-            self.config,
-            &self.discovery,
-        )
+        self.analyze_dead_code_with_artifacts(true, false)
+            .map(|output| DeadCodeAnalysisOutput {
+                results: output.results,
+                modules: output.modules,
+                files: output.files,
+            })
     }
 
     fn analyze_dead_code_with_artifacts(
@@ -92,11 +100,20 @@ impl<'a> AnalysisSessionView<'a> {
         need_complexity: bool,
         retain_graph: bool,
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {
-        core_backend::analyze_retaining_modules_from_discovery(
-            self.config,
-            &self.discovery,
-            need_complexity,
-            retain_graph,
+        let ParsedModules {
+            parse_result,
+            metrics,
+        } = parse_files_with_config(self.config, self.discovery.files(), need_complexity);
+        core_backend::analyze_with_owned_parse_result_from_discovery(
+            core_backend::ParsedAnalysisInput {
+                config: self.config,
+                discovery: &self.discovery,
+                modules: parse_result.modules,
+                metrics,
+                collect_usages: true,
+                retain_graph,
+                retain_modules: need_complexity,
+            },
         )
     }
 }
@@ -243,14 +260,20 @@ impl AnalysisSession {
             files,
             workspace_diagnostics,
         } = self.into_parts();
-        let (parse_result, parse_ms) = parse_files_with_config(&config, &files, need_complexity);
+        let ParsedModules {
+            parse_result,
+            metrics,
+        } = parse_files_with_config(&config, &files, need_complexity);
         ParsedAnalysisSessionParts {
             config,
             config_path,
             files,
             modules: parse_result.modules,
             workspace_diagnostics,
-            parse_ms,
+            parse_ms: metrics.parse_ms,
+            cache_update_ms: metrics.cache_ms,
+            cache_hits: metrics.cache_hits,
+            cache_misses: metrics.cache_misses,
             parse_cpu_ms: parse_result.parse_cpu_ms,
         }
     }
@@ -261,7 +284,10 @@ impl AnalysisSession {
     ///
     /// Returns an error if parsing or analysis fails.
     pub fn analyze_dead_code(&self) -> EngineResult<DeadCodeAnalysis> {
-        core_backend::analyze_with_usages_from_discovery(&self.config, &self.discovery)
+        self.analyze_dead_code_with_artifacts(false, false)
+            .map(|output| DeadCodeAnalysis {
+                results: output.results,
+            })
     }
 
     /// Run dead-code analysis with retained complexity artifacts.
@@ -270,10 +296,12 @@ impl AnalysisSession {
     ///
     /// Returns an error if parsing or analysis fails.
     pub fn analyze_dead_code_with_complexity(&self) -> EngineResult<DeadCodeAnalysisOutput> {
-        core_backend::analyze_with_usages_and_complexity_from_discovery(
-            &self.config,
-            &self.discovery,
-        )
+        self.analyze_dead_code_with_artifacts(true, false)
+            .map(|output| DeadCodeAnalysisOutput {
+                results: output.results,
+                modules: output.modules,
+                files: output.files,
+            })
     }
 
     /// Run dead-code analysis with retained modules, discovered files and graph.
@@ -286,11 +314,20 @@ impl AnalysisSession {
         need_complexity: bool,
         retain_graph: bool,
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {
-        core_backend::analyze_retaining_modules_from_discovery(
-            &self.config,
-            &self.discovery,
-            need_complexity,
-            retain_graph,
+        let ParsedModules {
+            parse_result,
+            metrics,
+        } = parse_files_with_config(&self.config, self.files(), need_complexity);
+        core_backend::analyze_with_owned_parse_result_from_discovery(
+            core_backend::ParsedAnalysisInput {
+                config: &self.config,
+                discovery: &self.discovery,
+                modules: parse_result.modules,
+                metrics,
+                collect_usages: true,
+                retain_graph,
+                retain_modules: need_complexity,
+            },
         )
     }
 
@@ -397,7 +434,7 @@ pub fn parse_files_for_config(
     files: &[DiscoveredFile],
     need_complexity: bool,
 ) -> ParseResult {
-    parse_files_with_config(config, files, need_complexity).0
+    parse_files_with_config(config, files, need_complexity).parse_result
 }
 
 fn merge_workspace_diagnostics(
@@ -415,23 +452,105 @@ fn merge_workspace_diagnostics(
     merged
 }
 
+struct ParsedModules {
+    parse_result: ParseResult,
+    metrics: core_backend::ParseMetrics,
+}
+
 fn parse_files_with_config(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
     need_complexity: bool,
-) -> (ParseResult, f64) {
+) -> ParsedModules {
     let parse_start = Instant::now();
-    let cache = if config.no_cache {
+    let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
+    let mut cache = if config.no_cache {
         None
     } else {
         fallow_extract::cache::CacheStore::load(
             &config.cache_dir,
             config.cache_config_hash,
-            crate::project_config::resolve_cache_max_size_bytes(config),
+            cache_max_size_bytes,
         )
     };
     let parse_result = crate::source::parse_all_files(files, cache.as_ref(), need_complexity);
-    (parse_result, parse_start.elapsed().as_secs_f64() * 1000.0)
+    let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
+    let cache_ms = update_parse_cache_if_enabled(config, &mut cache, &parse_result.modules, files);
+    let metrics = core_backend::ParseMetrics {
+        parse_ms,
+        cache_ms,
+        cache_hits: parse_result.cache_hits,
+        cache_misses: parse_result.cache_misses,
+        parse_cpu_ms: parse_result.parse_cpu_ms,
+    };
+    ParsedModules {
+        parse_result,
+        metrics,
+    }
+}
+
+fn update_parse_cache_if_enabled(
+    config: &ResolvedConfig,
+    cache: &mut Option<fallow_extract::cache::CacheStore>,
+    modules: &[ModuleInfo],
+    files: &[DiscoveredFile],
+) -> f64 {
+    let start = Instant::now();
+    if config.no_cache {
+        return start.elapsed().as_secs_f64() * 1000.0;
+    }
+
+    let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
+    let store = cache.get_or_insert_with(fallow_extract::cache::CacheStore::new);
+    if update_parse_cache(store, modules, files)
+        && let Err(error) = store.save(
+            &config.cache_dir,
+            config.cache_config_hash,
+            cache_max_size_bytes,
+        )
+    {
+        tracing::warn!("Failed to save cache: {error}");
+    }
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
+fn update_parse_cache(
+    store: &mut fallow_extract::cache::CacheStore,
+    modules: &[ModuleInfo],
+    files: &[DiscoveredFile],
+) -> bool {
+    let mut dirty = false;
+    for module in modules {
+        if let Some(file) = files.get(module.file_id.0 as usize) {
+            let fingerprint = source_fingerprint(&file.path);
+            if let Some(cached) = store.get_by_path_only(&file.path)
+                && cached.content_hash == module.content_hash
+            {
+                if cached.source_fingerprint() != fingerprint {
+                    let preserved_last_access = cached.last_access_secs;
+                    let mut refreshed =
+                        fallow_extract::cache::module_to_cached(module, fingerprint);
+                    refreshed.last_access_secs = preserved_last_access;
+                    store.insert(&file.path, refreshed);
+                    dirty = true;
+                }
+                continue;
+            }
+            store.insert(
+                &file.path,
+                fallow_extract::cache::module_to_cached(module, fingerprint),
+            );
+            dirty = true;
+        }
+    }
+    store.retain_paths(files) || dirty
+}
+
+fn source_fingerprint(path: &Path) -> SourceFingerprint {
+    std::fs::metadata(path).map_or_else(
+        |_| SourceFingerprint::new(0, 0),
+        |metadata| SourceFingerprint::from_metadata(&metadata),
+    )
 }
 
 pub fn analyze_dead_code_from_config(config: &ResolvedConfig) -> EngineResult<DeadCodeAnalysis> {

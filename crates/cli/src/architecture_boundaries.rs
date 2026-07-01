@@ -396,6 +396,19 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
             "{source_path} must use engine::core_backend instead of direct fallow_core calls"
         );
     }
+
+    let session = read_source_without_line_comments("crates/engine/src/session.rs")
+        .expect("read engine session source");
+    for forbidden in [
+        "analyze_with_usages_from_discovery",
+        "analyze_with_usages_and_complexity_from_discovery",
+        "analyze_retaining_modules_from_discovery",
+    ] {
+        assert!(
+            !session.contains(forbidden),
+            "engine session must own dead-code parse orchestration instead of calling {forbidden}"
+        );
+    }
 }
 
 #[test]

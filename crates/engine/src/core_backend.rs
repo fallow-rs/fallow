@@ -15,8 +15,7 @@ use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    AnalysisResults, DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
-    DuplicationAnalysis, EngineResult, ModuleInfo,
+    AnalysisResults, DeadCodeAnalysisArtifacts, DuplicationAnalysis, EngineResult, ModuleInfo,
     changed_files::{ChangedFilesError, ChangedFilesSpawnHook},
     churn::{AuthorContribution, ChurnResult, ChurnSpawnHook, FileChurn, SinceDuration},
     cross_reference::{
@@ -64,47 +63,6 @@ pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
     fallow_core::resolve_cache_max_size_bytes(config)
 }
 
-pub fn analyze_with_usages_from_discovery(
-    config: &ResolvedConfig,
-    discovery: &AnalysisDiscovery,
-) -> EngineResult<DeadCodeAnalysis> {
-    fallow_core::analyze_with_usages_from_discovery(config, discovery.as_backend().as_core())
-        .map(|results| DeadCodeAnalysis { results })
-        .map_err(engine_error)
-}
-
-pub fn analyze_with_usages_and_complexity_from_discovery(
-    config: &ResolvedConfig,
-    discovery: &AnalysisDiscovery,
-) -> EngineResult<DeadCodeAnalysisOutput> {
-    fallow_core::analyze_with_usages_and_complexity_from_discovery(
-        config,
-        discovery.as_backend().as_core(),
-    )
-    .map(|output| DeadCodeAnalysisOutput {
-        results: output.results,
-        modules: output.modules,
-        files: output.files,
-    })
-    .map_err(engine_error)
-}
-
-pub fn analyze_retaining_modules_from_discovery(
-    config: &ResolvedConfig,
-    discovery: &AnalysisDiscovery,
-    need_complexity: bool,
-    retain_graph: bool,
-) -> EngineResult<DeadCodeAnalysisArtifacts> {
-    fallow_core::analyze_retaining_modules_from_discovery(
-        config,
-        discovery.as_backend().as_core(),
-        need_complexity,
-        retain_graph,
-    )
-    .map(dead_code_artifacts)
-    .map_err(engine_error)
-}
-
 pub fn analyze_with_parse_result(
     config: &ResolvedConfig,
     modules: &[ModuleInfo],
@@ -116,6 +74,53 @@ pub fn analyze_with_parse_result(
     fallow_core::analyze_with_parse_result(config, modules)
         .map(dead_code_artifacts)
         .map_err(engine_error)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ParseMetrics {
+    pub parse_ms: f64,
+    pub cache_ms: f64,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub parse_cpu_ms: f64,
+}
+
+pub struct ParsedAnalysisInput<'a> {
+    pub config: &'a ResolvedConfig,
+    pub discovery: &'a AnalysisDiscovery,
+    pub modules: Vec<ModuleInfo>,
+    pub metrics: ParseMetrics,
+    pub collect_usages: bool,
+    pub retain_graph: bool,
+    pub retain_modules: bool,
+}
+
+impl From<ParseMetrics> for fallow_core::AnalysisParseMetrics {
+    fn from(metrics: ParseMetrics) -> Self {
+        Self {
+            parse_ms: metrics.parse_ms,
+            cache_ms: metrics.cache_ms,
+            cache_hits: metrics.cache_hits,
+            cache_misses: metrics.cache_misses,
+            parse_cpu_ms: metrics.parse_cpu_ms,
+        }
+    }
+}
+
+pub fn analyze_with_owned_parse_result_from_discovery(
+    input: ParsedAnalysisInput<'_>,
+) -> EngineResult<DeadCodeAnalysisArtifacts> {
+    fallow_core::analyze_with_owned_parse_result_from_discovery(fallow_core::ParsedAnalysisInput {
+        config: input.config,
+        discovery: input.discovery.as_backend().as_core(),
+        modules: input.modules,
+        parse_metrics: input.metrics.into(),
+        retain: input.retain_graph,
+        collect_usages: input.collect_usages,
+        retain_modules: input.retain_modules,
+    })
+    .map(dead_code_artifacts)
+    .map_err(engine_error)
 }
 
 fn dead_code_artifacts(output: fallow_core::AnalysisOutput) -> DeadCodeAnalysisArtifacts {
