@@ -450,6 +450,31 @@ pub struct ScopedUnusedClasses {
     pub actions: Vec<CssCandidateAction>,
 }
 
+/// One advisory STYLING FINDING: the graduation of a descriptive css candidate
+/// into a first-class, severity-aware, suppressible finding surfaced in
+/// `fallow audit`. The styling domain's OWN finding type (not borrowed into the
+/// dead-code `AnalysisResults`, and not glued in the CLI). `code` is the kebab
+/// IssueKind code (e.g. `css-token-drift`), so severity / inline suppression /
+/// SARIF / MCP all resolve via the shared `issue_meta` contract through
+/// `IssueKind::parse(code)`. One `Vec<StylingFinding>` carries every styling
+/// family; the `code` discriminates.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct StylingFinding {
+    /// The kebab IssueKind code, e.g. `css-token-drift`.
+    pub code: String,
+    /// The specific sub-kind within the family, e.g. `tailwind-arbitrary-value`.
+    pub sub_kind: String,
+    /// Workspace-relative path of the finding.
+    pub path: String,
+    /// 1-based line of the finding.
+    pub line: u32,
+    /// The offending literal value, e.g. `w-[13px]`.
+    pub value: String,
+    /// Suggested next steps (verify / suppress; never an auto-fix).
+    pub actions: Vec<CssCandidateAction>,
+}
+
 /// A read-only verification step attached to a CSS cleanup candidate.
 ///
 /// CSS candidates (unreferenced `@keyframes`, unused scoped classes) are never

@@ -4,7 +4,8 @@ use crate::{
     CoverageGaps, CoverageIntelligenceReport, CssAnalyticsReport, FileHealthScore,
     FrameworkHealthDiagnostics, HealthActionsMeta, HealthFinding, HealthScore, HealthSummary,
     HealthTrend, HotspotFinding, HotspotSummary, LargeFunctionEntry, RefactoringTargetFinding,
-    RuntimeCoverageReport, StylingHealth, TargetThresholds, ThresholdOverrideState, VitalSigns,
+    RuntimeCoverageReport, StylingFinding, StylingHealth, TargetThresholds, ThresholdOverrideState,
+    VitalSigns,
 };
 use fallow_types::output_dead_code::PropDrillingChainFinding;
 
@@ -105,6 +106,14 @@ pub struct HealthReport {
     /// code score is never affected by this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub styling_health: Option<StylingHealth>,
+    /// Advisory STYLING FINDINGS: the graduation of the descriptive css
+    /// candidates into first-class, severity-aware, suppressible findings
+    /// surfaced in `fallow audit`. Verdict-neutral by default (the rule defaults
+    /// to `warn`); the styling domain's OWN findings collection, not the dead-code
+    /// `AnalysisResults`. Present only with `--css`; empty is skipped so a plain
+    /// run is byte-unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub styling_findings: Vec<StylingFinding>,
     /// Per-file top render fan-in for the descriptive human drill-down only.
     #[serde(skip)]
     pub render_fan_in_top: rustc_hash::FxHashMap<std::path::PathBuf, (String, u32)>,
@@ -131,6 +140,7 @@ mod tests {
         assert!(!json.contains("framework_health"));
         assert!(!json.contains("css_analytics"));
         assert!(!json.contains("styling_health"));
+        assert!(!json.contains("styling_findings"));
     }
 
     #[test]

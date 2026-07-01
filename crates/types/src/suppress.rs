@@ -169,6 +169,12 @@ pub enum IssueKind {
     /// analyzed project. Cross-file dead-output direction: the component fires an
     /// event nothing handles.
     UnusedSvelteEvent,
+    /// A CSS / CSS-in-JS design-token DRIFT candidate surfaced in `fallow audit`
+    /// as an advisory styling finding: a hardcoded value where a design token
+    /// exists (a Tailwind arbitrary value like `w-[13px]`, or a near-duplicate
+    /// token). Styling-domain finding produced by the health-time css pass (not
+    /// dead-code); the rule defaults to `warn` and is verdict-neutral.
+    CssTokenDrift,
 }
 
 impl IssueKind {
@@ -221,6 +227,7 @@ impl IssueKind {
         Self::ThinWrapper,
         Self::DuplicatePropShape,
         Self::UnusedSvelteEvent,
+        Self::CssTokenDrift,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -280,6 +287,7 @@ impl IssueKind {
             Self::UnusedComponentInput => 45,
             Self::UnusedComponentOutput => 46,
             Self::UnusedSvelteEvent => 47,
+            Self::CssTokenDrift => 48,
         }
     }
 
@@ -334,6 +342,7 @@ impl IssueKind {
             45 => Some(Self::UnusedComponentInput),
             46 => Some(Self::UnusedComponentOutput),
             47 => Some(Self::UnusedSvelteEvent),
+            48 => Some(Self::CssTokenDrift),
             _ => None,
         }
     }

@@ -279,6 +279,9 @@ fn build_health_report_struct(
         framework_health: parts.framework_health,
         css_analytics: None,
         styling_health: None,
+        // Populated by the css pass in finalize_health_report_side_effects, like
+        // css_analytics / styling_health above.
+        styling_findings: Vec::new(),
         render_fan_in_top: parts.render_fan_in_top,
     };
     fill_coverage_intelligence(&mut report, opts);

@@ -762,6 +762,21 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         lsp: false,
         docs_category: "source",
     },
+    IssueKindMeta {
+        kind: Some(IssueKind::CssTokenDrift),
+        code: "css-token-drift",
+        aliases: &[],
+        label: "CSS Token Drift",
+        // config_key wired in the config chunk (RulesConfig rule for error/off
+        // escalation); the finding is inline-suppressible via the suppress token.
+        config_key: None,
+        filter_flag: None,
+        mcp_issue_type: None,
+        suppress_token: Some("css-token-drift"),
+        suppress_file_level: false,
+        lsp: false,
+        docs_category: "health",
+    },
 ];
 
 /// Shared contract facts for serialized `AnalysisResults` arrays.
