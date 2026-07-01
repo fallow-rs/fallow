@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use fallow_config::OutputFormat;
 use fallow_cov_protocol::function_identity_id;
-use fallow_engine::clear_ambient_git_env;
+use fallow_engine::changed_files::clear_ambient_git_env;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
@@ -414,7 +414,7 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
 fn build_index_from_analysis(
     root: &Path,
     modules: &[fallow_types::extract::ModuleInfo],
-    analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts,
+    analysis_output: &fallow_engine::results::DeadCodeAnalysisArtifacts,
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
     codeowners: Option<&crate::codeowners::CodeOwners>,
 ) -> StaticIndex {
@@ -453,7 +453,7 @@ struct UnusedStaticSets {
 }
 
 impl UnusedStaticSets {
-    fn from_analysis(analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts) -> Self {
+    fn from_analysis(analysis_output: &fallow_engine::results::DeadCodeAnalysisArtifacts) -> Self {
         let files: FxHashSet<PathBuf> = analysis_output
             .results
             .unused_files

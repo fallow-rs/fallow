@@ -245,7 +245,7 @@ pub fn prepare_options(
 pub(super) struct RuntimeCoverageAnalysisInput<'a> {
     pub root: &'a Path,
     pub modules: &'a [fallow_types::extract::ModuleInfo],
-    pub analysis_output: &'a fallow_engine::DeadCodeAnalysisArtifacts,
+    pub analysis_output: &'a fallow_engine::results::DeadCodeAnalysisArtifacts,
     pub istanbul_coverage: Option<&'a IstanbulCoverage>,
     pub file_paths: &'a FxHashMap<fallow_types::discover::FileId, &'a PathBuf>,
     pub ignore_set: &'a GlobSet,
@@ -942,7 +942,7 @@ fn assemble_request(
 
 fn build_static_signal_index(
     modules: &[fallow_types::extract::ModuleInfo],
-    analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts,
+    analysis_output: &fallow_engine::results::DeadCodeAnalysisArtifacts,
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
 ) -> Result<StaticSignalIndex, String> {
     let graph = analysis_output
@@ -974,7 +974,7 @@ fn build_static_signal_index(
 /// Seed the signal index with unused-file and unused-export dead-code signals.
 fn index_dead_code_signals(
     index: &mut StaticSignalIndex,
-    analysis_output: &fallow_engine::DeadCodeAnalysisArtifacts,
+    analysis_output: &fallow_engine::results::DeadCodeAnalysisArtifacts,
 ) {
     for file in &analysis_output.results.unused_files {
         index.unused_files.insert(file.file.path.clone());
@@ -2240,8 +2240,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use url::Url;
 
-    fn empty_analysis_output() -> fallow_engine::DeadCodeAnalysisArtifacts {
-        fallow_engine::DeadCodeAnalysisArtifacts {
+    fn empty_analysis_output() -> fallow_engine::results::DeadCodeAnalysisArtifacts {
+        fallow_engine::results::DeadCodeAnalysisArtifacts {
             results: fallow_types::results::AnalysisResults::default(),
             timings: None,
             graph: None,

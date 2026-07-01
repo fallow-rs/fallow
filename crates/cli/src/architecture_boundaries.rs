@@ -158,7 +158,7 @@ fn api_programmatic_health_runner_does_not_expose_engine_results() {
     let source_path = "crates/api/src/runtime/mod.rs";
     let source = std::fs::read_to_string(workspace_root().join(source_path)).expect("read source");
     for forbidden in [
-        "pub analysis: fallow_engine::HealthAnalysisResult",
+        "pub analysis: fallow_engine::results::HealthAnalysisResult",
         "pub type ProgrammaticHealthAnalysis = fallow_engine::",
         "pub type ProgrammaticHealthRun = fallow_engine::",
         "pub fn derive_programmatic_health_execution_options",

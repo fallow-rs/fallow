@@ -37,7 +37,7 @@ fn run_feature_flags_inner(
 ) -> ProgrammaticResult<FeatureFlagsProgrammaticOutput> {
     let start = Instant::now();
     let session = load_feature_flags_session(resolved)?;
-    let analysis = fallow_engine::analyze_feature_flags(session.config());
+    let analysis = fallow_engine::flags::analyze_feature_flags(session.config());
     if analysis.files_scanned == 0 {
         return Err(ProgrammaticError::new("no files discovered", 2)
             .with_code("FALLOW_NO_FILES_DISCOVERED")

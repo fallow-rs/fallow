@@ -290,7 +290,8 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
 }
 
 /// Result of executing health analysis without printing.
-pub type HealthResult = fallow_engine::HealthAnalysisResult<crate::report::OwnershipResolver>;
+pub type HealthResult =
+    fallow_engine::results::HealthAnalysisResult<crate::report::OwnershipResolver>;
 
 /// Print health results and return appropriate exit code.
 ///

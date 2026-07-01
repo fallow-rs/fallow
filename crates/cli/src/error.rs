@@ -1,13 +1,13 @@
 use std::process::ExitCode;
 
-use fallow_types::output_format::OutputFormat;
+use fallow_config::OutputFormat;
 
 /// Emit an error as structured JSON on stdout when `--format json` is active,
 /// then return the given exit code. For non-JSON formats, emit to stderr as usual.
 #[expect(
     clippy::print_stdout,
     clippy::print_stderr,
-    reason = "legacy health helpers still emit CLI-shaped errors internally"
+    reason = "structured error emission for CLI surfaces"
 )]
 pub fn emit_error(message: &str, exit_code: u8, output: OutputFormat) -> ExitCode {
     if matches!(output, OutputFormat::Json) {

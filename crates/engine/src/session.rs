@@ -11,12 +11,14 @@ use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
-    DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput, DuplicationAnalysis,
     EngineResult, core_backend, duplicates,
     project_analysis::{
         ProjectAnalysisArtifactOptions, ProjectAnalysisArtifacts, ProjectAnalysisOutput,
     },
     project_config::{ProjectConfig, config_for_project, default_project_config},
+    results::{
+        DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput, DuplicationAnalysis,
+    },
 };
 
 /// Reusable engine session for one resolved project.

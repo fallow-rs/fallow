@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::clear_ambient_git_env;
+use crate::git_env::clear_ambient_git_env;
 
 /// Number of seconds in one day.
 const SECS_PER_DAY: u64 = 86_400;

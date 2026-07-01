@@ -9,6 +9,8 @@ use rustc_hash::FxHashSet;
 use crate::core_backend;
 use crate::duplicates::DuplicationReport;
 
+pub use crate::git_env::{AMBIENT_GIT_ENV_VARS, clear_ambient_git_env};
+
 /// Function pointer signature used to intercept short-running git
 /// subprocesses spawned by changed-file helpers.
 pub type ChangedFilesSpawnHook = fn(&mut std::process::Command) -> std::io::Result<Output>;

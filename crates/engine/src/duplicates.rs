@@ -6,7 +6,7 @@ use fallow_config::DuplicatesConfig;
 use fallow_types::discover::DiscoveredFile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{DuplicationAnalysis, core_backend};
+use crate::{core_backend, results::DuplicationAnalysis};
 
 pub const FINGERPRINT_PREFIX: &str = "dup:";
 

@@ -19,7 +19,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
-use fallow_engine::{derive_security_severity, security_catalogue_title};
+use fallow_engine::results::{derive_security_severity, security_catalogue_title};
 pub use fallow_output::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,
     SecurityBlindSpotsSchemaVersion, SecurityBlindSpotsSummary, SecurityGateVerdict,
@@ -1063,7 +1063,7 @@ struct SecurityAnalysisState {
     results: AnalysisResults,
     modules: Option<Vec<ModuleInfo>>,
     files: Option<Vec<DiscoveredFile>>,
-    analysis_output: Option<fallow_engine::DeadCodeAnalysisArtifacts>,
+    analysis_output: Option<fallow_engine::results::DeadCodeAnalysisArtifacts>,
 }
 
 fn analyze_security_candidates(
@@ -1118,7 +1118,7 @@ fn analyze_security_runtime(
     path: &Path,
     modules: Vec<ModuleInfo>,
     files: Vec<DiscoveredFile>,
-    analysis_output: fallow_engine::DeadCodeAnalysisArtifacts,
+    analysis_output: fallow_engine::results::DeadCodeAnalysisArtifacts,
 ) -> Result<Option<RuntimeCoverageReport>, ExitCode> {
     let runtime_coverage = crate::health::coverage::prepare_options(
         path,

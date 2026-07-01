@@ -36,9 +36,9 @@ pub mod discover;
 pub mod duplicates;
 mod error;
 mod feature_flags;
-mod flags;
+pub mod flags;
 #[path = "git_env.rs"]
-mod git_env_impl;
+mod git_env;
 pub mod health;
 pub mod module_graph;
 pub mod plugins;
@@ -55,21 +55,10 @@ pub mod trace_chain;
 pub mod validate;
 pub mod vital_signs;
 
-pub use error::emit_error;
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::AnalysisResults;
-pub use flags::{
-    FeatureFlagsAnalysis, analyze_feature_flags, builtin_env_prefixes, builtin_sdk_providers,
-};
-pub use git_env_impl::{AMBIENT_GIT_ENV_VARS, clear_ambient_git_env};
-pub use public_api::public_api_package_entry_points;
-pub use results::{
-    DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
-    DeadCodeAnalysisWithHashes, DuplicationAnalysis, HealthAnalysisResult,
-};
-pub use security::{derive_security_severity, security_catalogue_title};
-pub use suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
+use results::DeadCodeAnalysisArtifacts;
 
 /// Result alias for typed engine operations.
 pub type EngineResult<T> = Result<T, EngineError>;
@@ -146,6 +135,7 @@ mod tests {
     };
     use fallow_config::ProductionAnalysis;
     use fallow_types::output_format::OutputFormat;
+    use std::fs;
 
     #[test]
     fn engine_error_displays_message() {
@@ -153,6 +143,32 @@ mod tests {
 
         assert_eq!(err.message(), "config failed");
         assert_eq!(err.to_string(), "config failed");
+    }
+
+    #[test]
+    fn engine_root_does_not_reexport_broad_surface_modules() {
+        let source = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
+            .expect("read engine lib");
+        let public_surface = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("engine lib has public surface before tests");
+        let forbidden_exports = [
+            "pub use error::",
+            "pub use flags::",
+            "pub use git_env::",
+            "pub use public_api::",
+            "pub use results::",
+            "pub use security::",
+            "pub use suppress::",
+        ];
+
+        for forbidden in forbidden_exports {
+            assert!(
+                !public_surface.contains(forbidden),
+                "engine root must expose typed modules, not `{forbidden}`"
+            );
+        }
     }
 
     #[test]

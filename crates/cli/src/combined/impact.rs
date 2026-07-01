@@ -2,7 +2,7 @@ use crate::check::CheckResult;
 use crate::dupes::DupesResult;
 use crate::health::HealthResult;
 
-use fallow_engine::clear_ambient_git_env;
+use fallow_engine::changed_files::clear_ambient_git_env;
 
 use super::CombinedOptions;
 

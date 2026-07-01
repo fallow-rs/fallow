@@ -16,7 +16,7 @@
 //!    public-API delta; one reachable through an `exports` path yields exactly
 //!    one (the Aisha repro). R4 (attribute to the exports-mapped copy only) is
 //!    encoded by which modules land in the public-API entry-point set
-//!    (`fallow_engine::public_api_package_entry_points`).
+//!    (`fallow_engine::project_analysis::public_api_package_entry_points`).
 //!
 //! Relocation-awareness (R3) falls out of the set-difference: a moved file that
 //! preserves its zone pair / public-export key / cycle membership produces no
@@ -75,7 +75,7 @@ pub fn cycle_keys(findings: &[CircularDependencyFinding], root: &Path) -> FxHash
 
 /// Compute the exports-aware public-export key set from a retained graph + the
 /// project config and package metadata. Wires
-/// `fallow_engine::public_api_package_entry_points` (the R4 exports-aware
+/// `fallow_engine::project_analysis::public_api_package_entry_points` (the R4 exports-aware
 /// entry set) into the retained graph's public export key query.
 #[must_use]
 pub fn public_export_keys_for(
@@ -85,8 +85,9 @@ pub fn public_export_keys_for(
     workspaces: &[fallow_config::WorkspaceInfo],
     root: &Path,
 ) -> FxHashSet<String> {
-    let public_entries =
-        fallow_engine::public_api_package_entry_points(graph, config, root_pkg, workspaces);
+    let public_entries = fallow_engine::project_analysis::public_api_package_entry_points(
+        graph, config, root_pkg, workspaces,
+    );
     graph.public_export_keys(&public_entries, root)
 }
 

@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
-use fallow_engine::clear_ambient_git_env;
+use fallow_engine::changed_files::clear_ambient_git_env;
 use fallow_types::results::AnalysisResults;
 
 use super::counts::{CheckCounts, DupesCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline};

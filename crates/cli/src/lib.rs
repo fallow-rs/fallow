@@ -106,9 +106,7 @@ mod combined;
 mod dupes;
 
 /// Structured error output for CLI and JSON formats.
-pub mod error {
-    pub use fallow_engine::emit_error;
-}
+pub mod error;
 
 #[allow(
     dead_code,

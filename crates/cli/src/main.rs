@@ -73,9 +73,7 @@ mod cli_telemetry;
 mod watch;
 
 use check::{CheckOptions, IssueFilters, TraceOptions};
-mod error {
-    pub use fallow_engine::emit_error;
-}
+mod error;
 #[cfg(test)]
 use cli_format::parse_format_arg;
 use cli_format::{Format, FormatConfig, apply_ci_defaults};

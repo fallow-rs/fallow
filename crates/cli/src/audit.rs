@@ -4,7 +4,7 @@ use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
 use fallow_config::{AuditGate, OutputFormat};
-use fallow_engine::clear_ambient_git_env;
+use fallow_engine::changed_files::clear_ambient_git_env;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -390,7 +390,7 @@ fn count_introduced(keys: &FxHashSet<String>, base: Option<&FxHashSet<String>>) 
 /// surface the most likely culprit so a user hitting an unexpected worktree
 /// failure can short-circuit the diagnosis. Returns `None` otherwise.
 fn ambient_git_env_hint() -> Option<String> {
-    use fallow_engine::AMBIENT_GIT_ENV_VARS;
+    use fallow_engine::changed_files::AMBIENT_GIT_ENV_VARS;
     for var in AMBIENT_GIT_ENV_VARS {
         if let Ok(value) = std::env::var(var)
             && !value.is_empty()

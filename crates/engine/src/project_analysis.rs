@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use rustc_hash::FxHashSet;
 
+pub use crate::public_api::public_api_package_entry_points;
 pub use crate::results::{ProjectAnalysisArtifacts, ProjectAnalysisOutput};
 
 /// Artifact retention options for one project-level analysis run.
