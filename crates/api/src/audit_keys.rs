@@ -439,7 +439,7 @@ struct FrameworkFindingSlices<'a> {
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
 /// file) and the per-collection severity branches in
 /// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
-/// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` derives
+/// TypeScript mirror: `editors/vscode/scripts/codegen-contracts.mjs` derives
 /// backwards-compatible aliases from `fallow schema` `ts_alias` rows.
 pub fn dead_code_keys(
     results: &fallow_types::results::AnalysisResults,
@@ -1167,7 +1167,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
 /// finding type is added): `annotate_dead_code_json` (same key formats, this
 /// file) and the per-collection severity branches in
 /// `crates/cli/src/check/rules.rs` (`apply_rules`, `has_error_severity_issues`).
-/// TypeScript mirror: `editors/vscode/scripts/codegen-types.mjs` derives
+/// TypeScript mirror: `editors/vscode/scripts/codegen-contracts.mjs` derives
 /// backwards-compatible aliases from `fallow schema` `ts_alias` rows.
 #[expect(
     clippy::implicit_hasher,

@@ -64,7 +64,7 @@ jobs:
             # Rust change) still trigger the drift gate on the PR rather than
             # slipping through to a push-time failure on main. Refs #416, #440.
             # Generated npm and editor contract files are included for the same
-            # reason: the Ubuntu check job runs the full `generate:all:check`
+            # reason: the Ubuntu check job runs the full `generate:contracts:check`
             # bundle now, covering output schema, capability metadata, TS
             # contracts, NAPI types, and agent docs in one place.
             rust:
@@ -241,7 +241,7 @@ jobs:
 
       - name: Run contract bundle drift gate
         if: matrix.os == 'ubuntu-latest'
-        run: CI=true npm run generate:all:check
+        run: CI=true npm run generate:contracts:check
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
@@ -475,8 +475,8 @@ jobs:
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
       - run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
       - run: cd editors/vscode && pnpm audit --prod
-      - name: Verify generated TypeScript matches docs/output-schema.json
-        run: cd editors/vscode && pnpm run check:codegen
+      - name: Verify generated extension contracts
+        run: cd editors/vscode && pnpm run check:contracts
       - run: cd editors/vscode && pnpm lint
       - run: cd editors/vscode && pnpm build
       - run: cd editors/vscode && pnpm test:unit

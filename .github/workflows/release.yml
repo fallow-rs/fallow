@@ -432,7 +432,7 @@ jobs:
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" refs/tags/v1 --force
 
   # Belt-and-suspenders generated contract drift check before either privileged
-  # publish job runs. PR CI runs `npm run generate:all:check` on every relevant
+  # publish job runs. PR CI runs `npm run generate:contracts:check` on every relevant
   # contract change, but a release tag could in theory be cut on a commit where
   # a committed generated surface disagrees with what regen would produce
   # (force-push to main, history rewrite, tag pointed at an old SHA). The root
@@ -472,7 +472,7 @@ jobs:
         run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Verify generated contract bundle
-        run: CI=true npm run generate:all:check
+        run: CI=true npm run generate:contracts:check
 
   # Build the npm publish tree (versioned package.json files, binaries, NAPI
   # addons, schema) into immutable tarballs. This job runs no publish

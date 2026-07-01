@@ -848,16 +848,16 @@
     ]
   },
   "scripts": {
-    "codegen:types": "node ./scripts/codegen-types.mjs",
-    "check:codegen": "node ./scripts/codegen-types.mjs --check",
-    "prebuild": "pnpm run codegen:types",
+    "codegen:contracts": "node ./scripts/codegen-contracts.mjs",
+    "check:contracts": "node ./scripts/codegen-contracts.mjs --check",
+    "prebuild": "pnpm run codegen:contracts",
     "build": "rolldown -c",
     "watch": "rolldown -c --watch",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "pnpm run test:unit && pnpm run test:integration",
     "test:unit": "vitest run",
     "test:integration": "pnpm run build && tsc -p tsconfig.test.json && node ./.test-dist/test/integration/runTest.js",
-    "prepackage": "pnpm run codegen:types && cp ../../LICENSE ./LICENSE",
+    "prepackage": "pnpm run codegen:contracts && cp ../../LICENSE ./LICENSE",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies",
     "publish:ovsx": "ovsx publish --no-dependencies"

@@ -22,6 +22,6 @@ Use this file when editing `editors/vscode/**`.
 ## Validation
 
 - Source edit: run `pnpm --dir editors/vscode run lint` and the focused tests.
-- Generated type edit: run `pnpm --dir editors/vscode run check:codegen`.
+- Generated contract edit: run `pnpm --dir editors/vscode run check:contracts`.
 - Bundle-affecting edit: run `pnpm --dir editors/vscode run build` as a compile check. `dist/` is gitignored and rebuilt by CI/release, so there is nothing to commit.
 - Packaging or manifest edit: run the manifest or packaging tests that cover the touched surface.

@@ -8,7 +8,7 @@
  * before they get committed.
  *
  * Drift between Rust and the schema is enforced by the schema-driven test
- * in `crates/cli/src/report/json.rs` and by `pnpm run check:codegen`.
+ * in `crates/cli/src/report/json.rs` and by `pnpm run check:contracts`.
  */
 import { describe, expect, it } from "vitest";
 import type {

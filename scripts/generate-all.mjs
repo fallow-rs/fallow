@@ -90,8 +90,8 @@ const generateSchemaFiles = () => {
   return capabilitySchema;
 };
 
-const generateOutputTypes = (capabilityPath) => {
-  run("pnpm", ["--dir", "editors/vscode", "run", CHECK ? "check:codegen" : "codegen:types"], {
+const generateExtensionContracts = (capabilityPath) => {
+  run("pnpm", ["--dir", "editors/vscode", "run", CHECK ? "check:contracts" : "codegen:contracts"], {
     env: { FALLOW_CODEGEN_CAPABILITY_SCHEMA: capabilityPath },
     stdio: "inherit",
   });
@@ -137,7 +137,7 @@ const main = () => {
   }
   const capabilitySchema = generateSchemaFiles();
   withCapabilitySchemaFile(capabilitySchema, (capabilityPath) => {
-    generateOutputTypes(capabilityPath);
+    generateExtensionContracts(capabilityPath);
     generateAgentDocs(capabilityPath);
   });
   generateNapiTypes();

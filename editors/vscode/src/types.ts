@@ -4,7 +4,7 @@
  * `./labels`, and `./fix-types`.
  *
  * Schema-derived contract types are generated from `docs/output-schema.json`
- * by `scripts/codegen-types.mjs`. Edit the schema (and the upstream Rust
+ * by `scripts/codegen-contracts.mjs`. Edit the schema (and the upstream Rust
  * struct), regenerate, commit. See the banner of
  * `src/generated/output-contract.d.ts` for the full recipe.
  *
