@@ -431,14 +431,13 @@ jobs:
           git tag -f v1 "${GITHUB_SHA}"
           git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" refs/tags/v1 --force
 
-  # Belt-and-suspenders codegen drift check before either privileged publish
-  # job runs. PR CI runs `pnpm run check:codegen` on every relevant change,
-  # but a release tag could in theory be cut on a commit where the committed
-  # `editors/vscode/src/generated/output-contract.d.ts` /
-  # `npm/fallow/types/output-contract.d.ts` disagree with what regen would
-  # produce from `docs/output-schema.json` (force-push to main, history rewrite,
-  # tag pointed at an old SHA). One `check:codegen` run validates BOTH outputs
-  # because `editors/vscode/scripts/codegen-types.mjs` writes them in lock-step.
+  # Belt-and-suspenders generated contract drift check before either privileged
+  # publish job runs. PR CI runs `npm run generate:all:check` on every relevant
+  # contract change, but a release tag could in theory be cut on a commit where
+  # a committed generated surface disagrees with what regen would produce
+  # (force-push to main, history rewrite, tag pointed at an old SHA). The root
+  # bundle validates config/plugin/rule-pack schemas, output schema, npm
+  # capability metadata, TS output contracts, NAPI types, and agent docs.
   # Failure here blocks `npm-publish` AND `vscode-publish`. Refs #416.
   #
   # Prep-tier job: `contents: read` only, no publish tokens, so running
@@ -455,6 +454,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy, rustfmt
+
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.33.0
@@ -468,8 +471,8 @@ jobs:
       - name: Install dependencies
         run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Verify generated TypeScript matches docs/output-schema.json
-        run: cd editors/vscode && pnpm run check:codegen
+      - name: Verify generated contract bundle
+        run: CI=true npm run generate:all:check
 
   # Build the npm publish tree (versioned package.json files, binaries, NAPI
   # addons, schema) into immutable tarballs. This job runs no publish

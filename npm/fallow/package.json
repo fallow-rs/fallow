@@ -51,7 +51,8 @@
     "./bin/*": "./bin/*",
     "./scripts/*": "./scripts/*",
     "./skills/*": "./skills/*",
-    "./schema.json": "./schema.json"
+    "./schema.json": "./schema.json",
+    "./capabilities.json": "./capabilities.json"
   },
   "typesVersions": {
     "*": {
@@ -67,7 +68,8 @@
     "!skills/_artifacts",
     "types",
     "README.md",
-    "schema.json"
+    "schema.json",
+    "capabilities.json"
   ],
   "scripts": {
     "test:platform": "node --test scripts/platform-package.test.js",

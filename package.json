@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "commitlint": "commitlint",
+    "generate:contracts": "node scripts/generate-all.mjs",
+    "generate:contracts:check": "node scripts/generate-all.mjs --check",
     "generate:all": "node scripts/generate-all.mjs",
     "generate:all:check": "node scripts/generate-all.mjs --check",
     "scaffold:analyzer": "node scripts/scaffold-analyzer-plan.mjs",

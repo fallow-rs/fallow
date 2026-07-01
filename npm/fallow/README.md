@@ -23,6 +23,8 @@ npm install --save-dev fallow   # or: pnpm add -D fallow / yarn add -D fallow / 
 Installs the `fallow` CLI plus the companion `fallow-lsp` and `fallow-mcp` binaries in your project.
 
 The package also ships a version-matched Agent Skill under `skills/fallow`.
+For tools that need CLI and issue-surface metadata without spawning the binary,
+`fallow/capabilities.json` mirrors `fallow schema` for the installed version.
 TanStack Intent discovers it from `node_modules` automatically:
 
 ```bash

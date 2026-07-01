@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Regenerate every committed generated surface from the Rust and manifest
- * sources of truth.
+ * Regenerate every committed generated contract surface from the Rust and
+ * manifest sources of truth.
  *
  * Default mode writes files. `--check` renders into a temp dir where possible
  * and exits non-zero on drift without touching committed files.
@@ -23,11 +23,13 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CHECK = process.argv.includes("--check");
 const HELP = process.argv.includes("--help") || process.argv.includes("-h");
+const CAPABILITY_SCHEMA_PATH = "npm/fallow/capabilities.json";
 
 const run = (cmd, args, options = {}) =>
   execFileSync(cmd, args, {
     cwd: REPO_ROOT,
     encoding: options.encoding ?? "utf8",
+    env: options.env ? { ...process.env, ...options.env } : process.env,
     stdio: options.stdio ?? ["ignore", "pipe", "inherit"],
   });
 
@@ -62,6 +64,7 @@ const generateSchemaFiles = () => {
   const configSchema = ensureTrailingNewline(cargoFallow("config-schema"));
   const pluginSchema = ensureTrailingNewline(cargoFallow("plugin-schema"));
   const rulePackSchema = ensureTrailingNewline(cargoFallow("rule-pack-schema"));
+  const capabilitySchema = ensureTrailingNewline(cargoFallow("schema"));
   const output = ensureTrailingNewline(outputSchema());
 
   if (CHECK) {
@@ -71,41 +74,57 @@ const generateSchemaFiles = () => {
     }
     assertSame("plugin-schema.json", pluginSchema);
     assertSame("rule-pack-schema.json", rulePackSchema);
+    assertSame(CAPABILITY_SCHEMA_PATH, capabilitySchema);
     assertSame("docs/output-schema.json", output);
-    return;
+    return capabilitySchema;
   }
 
   write("schema.json", configSchema);
   write("plugin-schema.json", pluginSchema);
   write("rule-pack-schema.json", rulePackSchema);
+  write(CAPABILITY_SCHEMA_PATH, capabilitySchema);
   write("docs/output-schema.json", output);
   if (existsSync(join(REPO_ROOT, "npm/fallow/schema.json"))) {
     copyFileSync(join(REPO_ROOT, "schema.json"), join(REPO_ROOT, "npm/fallow/schema.json"));
   }
+  return capabilitySchema;
 };
 
-const generateOutputTypes = () => {
+const generateOutputTypes = (capabilityPath) => {
   run("pnpm", ["--dir", "editors/vscode", "run", CHECK ? "check:codegen" : "codegen:types"], {
+    env: { FALLOW_CODEGEN_CAPABILITY_SCHEMA: capabilityPath },
     stdio: "inherit",
   });
 };
 
-const generateAgentDocs = () => {
+const generateAgentDocs = (capabilityPath) => {
+  const args = [
+    "scripts/generate-agent-docs.mjs",
+    "--schema",
+    capabilityPath,
+    "--target",
+    "npm/fallow/skills/fallow",
+  ];
+  if (CHECK) {
+    args.push("--check");
+  }
+  run("node", args, { stdio: "inherit" });
+};
+
+const generateNapiTypes = () => {
+  const args = ["crates/napi/scripts/write-dts.mjs"];
+  if (CHECK) {
+    args.push("--check");
+  }
+  run("node", args, { stdio: "inherit" });
+};
+
+const withCapabilitySchemaFile = (capabilitySchema, callback) => {
   const dir = mkdtempSync(join(tmpdir(), "fallow-generate-all-"));
   const capabilityPath = join(dir, "schema.json");
   try {
-    writeFileSync(capabilityPath, ensureTrailingNewline(cargoFallow("schema")));
-    const args = [
-      "scripts/generate-agent-docs.mjs",
-      "--schema",
-      capabilityPath,
-      "--target",
-      "npm/fallow/skills/fallow",
-    ];
-    if (CHECK) {
-      args.push("--check");
-    }
-    run("node", args, { stdio: "inherit" });
+    writeFileSync(capabilityPath, capabilitySchema);
+    callback(capabilityPath);
   } finally {
     rmSync(dir, { force: true, recursive: true });
   }
@@ -116,9 +135,12 @@ const main = () => {
     console.log("Usage: node scripts/generate-all.mjs [--check]");
     return;
   }
-  generateSchemaFiles();
-  generateOutputTypes();
-  generateAgentDocs();
+  const capabilitySchema = generateSchemaFiles();
+  withCapabilitySchemaFile(capabilitySchema, (capabilityPath) => {
+    generateOutputTypes(capabilityPath);
+    generateAgentDocs(capabilityPath);
+  });
+  generateNapiTypes();
 };
 
 try {

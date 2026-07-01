@@ -50,7 +50,7 @@ if (!validate(fallowOutput)) {
 }
 ```
 
-For TypeScript types generated from the schema, see `npm/fallow/types/output-contract.d.ts` (mirrored to `editors/vscode/src/generated/output-contract.d.ts`). Both are regenerated from `docs/output-schema.json` via `cd editors/vscode && pnpm run codegen:types`.
+For TypeScript types generated from the schema, see `npm/fallow/types/output-contract.d.ts` (mirrored to `editors/vscode/src/generated/output-contract.d.ts`). The npm package also exposes `fallow/capabilities.json`, a version-matched copy of `fallow schema` with CLI capability and issue registry metadata. Regenerate the full bundle with `npm run generate:all`.
 
 #### TypeScript bare-name backwards-compat aliases
 

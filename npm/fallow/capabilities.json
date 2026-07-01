@@ -1,0 +1,5124 @@
+{
+  "name": "fallow",
+  "version": "2.103.0",
+  "manifest_version": "1",
+  "description": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
+  "global_flags": [
+    {
+      "name": "--root",
+      "type": "string",
+      "required": false,
+      "description": "Project root directory",
+      "short": "-r"
+    },
+    {
+      "name": "--config",
+      "type": "string",
+      "required": false,
+      "description": "Path to config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml)",
+      "short": "-c"
+    },
+    {
+      "name": "--format",
+      "type": "string",
+      "required": false,
+      "description": "Output format (alias: --output)",
+      "short": "-f",
+      "default": "human",
+      "possible_values": [
+        "human",
+        "json",
+        "sarif",
+        "compact",
+        "markdown",
+        "codeclimate",
+        "pr-comment-github",
+        "pr-comment-gitlab",
+        "review-github",
+        "review-gitlab",
+        "badge"
+      ]
+    },
+    {
+      "name": "--quiet",
+      "type": "bool",
+      "required": false,
+      "description": "Suppress progress output",
+      "short": "-q",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--no-cache",
+      "type": "bool",
+      "required": false,
+      "description": "Disable incremental caching",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--threads",
+      "type": "string",
+      "required": false,
+      "description": "Number of parser threads"
+    },
+    {
+      "name": "--changed-since",
+      "type": "string",
+      "required": false,
+      "description": "Only report issues in files changed since this git ref (e.g., main, HEAD~5)"
+    },
+    {
+      "name": "--diff-file",
+      "type": "string",
+      "required": false,
+      "description": "Unified diff for line-level scoping. Use `-` to read from stdin. Project-level findings still bypass this filter. When both this and `--changed-since` are set, the diff filter wins for finding scope while `--changed-since` still drives file discovery"
+    },
+    {
+      "name": "--diff-stdin",
+      "type": "bool",
+      "required": false,
+      "description": "Read the unified diff from stdin. Equivalent to `--diff-file -`",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--churn-file",
+      "type": "string",
+      "required": false,
+      "description": "Import change history from a `fallow-churn/v1` JSON file instead of `git log`, powering hotspots, ownership, and bus-factor on projects with no git repository (Yandex Arc, Mercurial, Perforce). A small wrapper translates your VCS log into the contract. Resolved relative to `--root`. Affects `health --hotspots` / `--ownership` / `--targets` only; `audit`, `impact`, and `--changed-since` still require git"
+    },
+    {
+      "name": "--max-file-size",
+      "type": "string",
+      "required": false,
+      "description": "Skip source files larger than this many megabytes (default 5) instead of parsing them, guarding against the out-of-memory blowup a single multi-MB generated/vendored/bundled file causes on large repos. Use `0` for no limit. Declaration files (`.d.ts`) are always analyzed. Skipped files are reported and excluded from every analysis. Also settable via `FALLOW_MAX_FILE_SIZE`"
+    },
+    {
+      "name": "--baseline",
+      "type": "string",
+      "required": false,
+      "description": "Compare against a previously saved baseline file"
+    },
+    {
+      "name": "--parent-run",
+      "type": "string",
+      "required": false,
+      "description": "Correlate this run with a previous telemetry analysis run"
+    },
+    {
+      "name": "--save-baseline",
+      "type": "string",
+      "required": false,
+      "description": "Save the current results as a baseline file"
+    },
+    {
+      "name": "--production",
+      "type": "bool",
+      "required": false,
+      "description": "Production mode: exclude test/story/dev files, only start/build scripts, report type-only dependencies",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--no-production",
+      "type": "bool",
+      "required": false,
+      "description": "Force production mode OFF for every analysis, overriding a project config's `production: true` (and `FALLOW_PRODUCTION`). Conflicts with `--production`",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--production-dead-code",
+      "type": "bool",
+      "required": false,
+      "description": "Run dead-code analysis in production mode when using bare combined mode",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--production-health",
+      "type": "bool",
+      "required": false,
+      "description": "Run health analysis in production mode when using bare combined mode",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--production-dupes",
+      "type": "bool",
+      "required": false,
+      "description": "Run duplication analysis in production mode when using bare combined mode",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--workspace",
+      "type": "string",
+      "required": false,
+      "description": "Scope output to selected workspaces. Accepts exact names, glob patterns, and `!`-prefixed negations. Values can be comma-separated or repeated",
+      "short": "-w"
+    },
+    {
+      "name": "--changed-workspaces",
+      "type": "string",
+      "required": false,
+      "description": "Scope output to workspaces touched since the given git ref. Git is required. Mutually exclusive with `--workspace`"
+    },
+    {
+      "name": "--group-by",
+      "type": "string",
+      "required": false,
+      "description": "Group output by owner or by directory",
+      "possible_values": [
+        "owner",
+        "directory",
+        "package",
+        "section"
+      ]
+    },
+    {
+      "name": "--performance",
+      "type": "bool",
+      "required": false,
+      "description": "Show pipeline performance timing breakdown",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--explain",
+      "type": "bool",
+      "required": false,
+      "description": "Include metric definitions and rule descriptions in output",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--explain-skipped",
+      "type": "bool",
+      "required": false,
+      "description": "Show a per-pattern breakdown for default duplicate ignores",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--summary",
+      "type": "bool",
+      "required": false,
+      "description": "Show only category counts without individual items",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--ci",
+      "type": "bool",
+      "required": false,
+      "description": "CI mode: equivalent to --format sarif --fail-on-issues --quiet",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--fail-on-issues",
+      "type": "bool",
+      "required": false,
+      "description": "Exit with code 1 if issues are found",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--sarif-file",
+      "type": "string",
+      "required": false,
+      "description": "Write SARIF output to a file (in addition to the primary --format output)"
+    },
+    {
+      "name": "--output-file",
+      "type": "string",
+      "required": false,
+      "description": "Write the report to a file instead of stdout, for any --format (no ANSI codes). Useful on large projects where the terminal scrollback truncates the top. Progress and the confirmation stay on stderr",
+      "short": "-o"
+    },
+    {
+      "name": "--fail-on-regression",
+      "type": "bool",
+      "required": false,
+      "description": "Fail if issue count increased beyond tolerance compared to a regression baseline",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--tolerance",
+      "type": "string",
+      "required": false,
+      "description": "Allowed issue count increase before a regression is flagged",
+      "default": "0"
+    },
+    {
+      "name": "--regression-baseline",
+      "type": "string",
+      "required": false,
+      "description": "Path to the regression baseline file"
+    },
+    {
+      "name": "--save-regression-baseline",
+      "type": "string",
+      "required": false,
+      "description": "Save the current issue counts as a regression baseline"
+    },
+    {
+      "name": "--only",
+      "type": "string",
+      "required": false,
+      "description": "Run only specific analyses when no subcommand is given",
+      "possible_values": [
+        "dead-code",
+        "dupes",
+        "health"
+      ]
+    },
+    {
+      "name": "--skip",
+      "type": "string",
+      "required": false,
+      "description": "Skip specific analyses when no subcommand is given",
+      "possible_values": [
+        "dead-code",
+        "dupes",
+        "health"
+      ]
+    },
+    {
+      "name": "--dupes-mode",
+      "type": "string",
+      "required": false,
+      "description": "Override duplication detection mode in combined mode",
+      "possible_values": [
+        "strict",
+        "mild",
+        "weak",
+        "semantic"
+      ]
+    },
+    {
+      "name": "--dupes-threshold",
+      "type": "string",
+      "required": false,
+      "description": "Override duplication threshold in combined mode"
+    },
+    {
+      "name": "--dupes-min-tokens",
+      "type": "string",
+      "required": false,
+      "description": "Override the minimum token count for clones in combined mode"
+    },
+    {
+      "name": "--dupes-min-lines",
+      "type": "string",
+      "required": false,
+      "description": "Override the minimum line count for clones in combined mode"
+    },
+    {
+      "name": "--dupes-min-occurrences",
+      "type": "string",
+      "required": false,
+      "description": "Override the minimum clone occurrences in combined mode (must be >= 2)"
+    },
+    {
+      "name": "--dupes-skip-local",
+      "type": "bool",
+      "required": false,
+      "description": "Only report cross-directory duplicates in combined mode",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--dupes-cross-language",
+      "type": "bool",
+      "required": false,
+      "description": "Enable cross-language duplicate detection in combined mode",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--dupes-ignore-imports",
+      "type": "bool",
+      "required": false,
+      "description": "Exclude module wiring from duplicate detection in combined mode (default). Pass `--dupes-no-ignore-imports` to count it again",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--dupes-no-ignore-imports",
+      "type": "bool",
+      "required": false,
+      "description": "Count module wiring as clone candidates in combined mode (opt out of the default exclusion)",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--score",
+      "type": "bool",
+      "required": false,
+      "description": "Compute health score in combined mode",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--trend",
+      "type": "bool",
+      "required": false,
+      "description": "Compare current health metrics against the most recent saved snapshot",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
+      "name": "--save-snapshot",
+      "type": "string",
+      "required": false,
+      "description": "Save a vital signs snapshot for trend tracking in combined mode. Provide a path or omit for the default `.fallow/snapshots/` location"
+    },
+    {
+      "name": "--coverage",
+      "type": "string",
+      "required": false,
+      "description": "Path to Istanbul coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
+    },
+    {
+      "name": "--coverage-root",
+      "type": "string",
+      "required": false,
+      "description": "Absolute prefix to strip from Istanbul file paths in combined mode. Also settable via `FALLOW_COVERAGE_ROOT` or `health.coverageRoot`"
+    },
+    {
+      "name": "--include-entry-exports",
+      "type": "bool",
+      "required": false,
+      "description": "Report unused exports in entry files instead of auto-marking them as used",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    }
+  ],
+  "commands": [
+    {
+      "name": "dead-code",
+      "description": "Analyze project for unused code and circular dependencies",
+      "flags": [
+        {
+          "name": "--unused-files",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused files",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-exports",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused exports",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-deps",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused dependencies",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-types",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused type exports",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--private-type-leaks",
+          "type": "bool",
+          "required": false,
+          "description": "Opt in to private type leak API hygiene findings and only report that issue type",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-enum-members",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused enum members",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-class-members",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused class members",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-store-members",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused store members",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unprovided-injects",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unprovided injects",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unrendered-components",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unrendered components",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-component-props",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused component props",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-component-emits",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused component emits",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-component-inputs",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused component inputs",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-component-outputs",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused component outputs",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-svelte-events",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused Svelte dispatched events",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-server-actions",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused server actions",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-load-data-keys",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused SvelteKit load() data keys",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unresolved-imports",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unresolved imports",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unlisted-deps",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unlisted dependencies",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--duplicate-exports",
+          "type": "bool",
+          "required": false,
+          "description": "Only report duplicate exports",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--circular-deps",
+          "type": "bool",
+          "required": false,
+          "description": "Only report circular dependencies",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--re-export-cycles",
+          "type": "bool",
+          "required": false,
+          "description": "Only report re-export cycles",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--boundary-violations",
+          "type": "bool",
+          "required": false,
+          "description": "Only report boundary violations",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--policy-violations",
+          "type": "bool",
+          "required": false,
+          "description": "Only report rule-pack policy violations",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--stale-suppressions",
+          "type": "bool",
+          "required": false,
+          "description": "Only report stale suppressions",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-catalog-entries",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused pnpm catalog entries",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--empty-catalog-groups",
+          "type": "bool",
+          "required": false,
+          "description": "Only report empty pnpm catalog groups",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unresolved-catalog-references",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unresolved pnpm catalog references",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--unused-dependency-overrides",
+          "type": "bool",
+          "required": false,
+          "description": "Only report unused pnpm dependency overrides",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--misconfigured-dependency-overrides",
+          "type": "bool",
+          "required": false,
+          "description": "Only report misconfigured pnpm dependency overrides",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--include-dupes",
+          "type": "bool",
+          "required": false,
+          "description": "Also run duplication analysis and cross-reference with dead code",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--trace",
+          "type": "string",
+          "required": false,
+          "description": "Trace why an export is used/unused (format: `FILE:EXPORT_NAME`)"
+        },
+        {
+          "name": "--trace-file",
+          "type": "string",
+          "required": false,
+          "description": "Trace all edges for a file (imports, exports, importers)"
+        },
+        {
+          "name": "--trace-dependency",
+          "type": "string",
+          "required": false,
+          "description": "Trace where a dependency is used"
+        },
+        {
+          "name": "--impact-closure",
+          "type": "string",
+          "required": false,
+          "description": "Compute the impact closure for a file (the transitive affected-but-not-in-diff set + coordination gap). Walks reverse-deps and re-export chains; powers the `inspect_target` MCP tool"
+        },
+        {
+          "name": "--top",
+          "type": "string",
+          "required": false,
+          "description": "Show only the top N items per category"
+        },
+        {
+          "name": "--file",
+          "type": "string",
+          "required": false,
+          "description": "Only report issues in the specified file(s). Accepts multiple values. The full project graph is still built, but only issues in matching files are reported. Useful for lint-staged pre-commit hooks"
+        }
+      ]
+    },
+    {
+      "name": "watch",
+      "description": "Watch for changes and re-run analysis",
+      "flags": [
+        {
+          "name": "--no-clear",
+          "type": "bool",
+          "required": false,
+          "description": "Don't clear the screen between re-analyses",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "inspect",
+      "description": "Inspect one file or exported symbol as a bundled evidence query",
+      "flags": [
+        {
+          "name": "--file",
+          "type": "string",
+          "required": false,
+          "description": "File to inspect"
+        },
+        {
+          "name": "--symbol",
+          "type": "string",
+          "required": false,
+          "description": "Exported symbol to inspect, formatted as FILE:EXPORT"
+        },
+        {
+          "name": "--symbol-chain",
+          "type": "bool",
+          "required": false,
+          "description": "OPT-IN: also attach the best-effort symbol-level call chain (`fallow trace`) as the `symbol_chain` evidence section. Only meaningful for a `--symbol` target. Default off (best-effort, syntactic, OFF the ranked path)",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "trace",
+      "description": "Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path)",
+      "flags": [
+        {
+          "name": "symbol",
+          "type": "string",
+          "required": true,
+          "description": "Target symbol, formatted as FILE:SYMBOL (e.g. src/utils.ts:formatDate)"
+        },
+        {
+          "name": "--callers",
+          "type": "bool",
+          "required": false,
+          "description": "Walk UP to callers (modules that import the symbol). When neither `--callers` nor `--callees` is set, both directions are walked",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--callees",
+          "type": "bool",
+          "required": false,
+          "description": "Walk DOWN to callees (the symbol's module's import-symbol edges plus unresolved call sites). When neither flag is set, both are walked",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--depth",
+          "type": "string",
+          "required": false,
+          "description": "Chain depth bound for both directions (default 2). Symbol-level is best-effort, so a shallow bound keeps the trace legible"
+        }
+      ]
+    },
+    {
+      "name": "fix",
+      "description": "Auto-fix issues: remove unused exports, dependencies, and enum members; add duplicate-export rules to a fallow config file",
+      "flags": [
+        {
+          "name": "--dry-run",
+          "type": "bool",
+          "required": false,
+          "description": "Dry run, show what would be changed without modifying files",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--yes",
+          "type": "bool",
+          "required": false,
+          "description": "Skip confirmation prompt (required in non-TTY environments like CI or AI agents)",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--no-create-config",
+          "type": "bool",
+          "required": false,
+          "description": "Refuse to create a new fallow config file when none exists. Use this from pre-commit hooks, CI bots, and `fallow watch` where silently materialising a new top-level config file would surprise the user. The duplicate-export config-add path is skipped with an explanatory message; source-file edits proceed normally",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "init",
+      "description": "Initialize a .fallowrc.json configuration file, AGENTS.md guide, or git pre-commit hook. Use `.fallowrc.jsonc` for editor-native JSON-with-comments support; both extensions are auto-discovered",
+      "flags": [
+        {
+          "name": "--toml",
+          "type": "bool",
+          "required": false,
+          "description": "Generate TOML instead of JSONC",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--agents",
+          "type": "bool",
+          "required": false,
+          "description": "Scaffold a starter AGENTS.md guidance file for coding agents",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--hooks",
+          "type": "bool",
+          "required": false,
+          "description": "Scaffold a shell-level pre-commit git hook in `.git/hooks/` that runs fallow on changed files. Alias for `fallow hooks install --target git`",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--branch",
+          "type": "string",
+          "required": false,
+          "description": "Fallback base branch/ref for the pre-commit hook when no upstream is set"
+        },
+        {
+          "name": "--decline",
+          "type": "bool",
+          "required": false,
+          "description": "Record that this project deliberately stays unconfigured: persists a decline so the first-contact setup hint and the `setup` next-step stop appearing here. Writes no config file; idempotent",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "hooks",
+      "description": "Install or remove fallow-managed Git and agent hooks",
+      "flags": []
+    },
+    {
+      "name": "ci",
+      "description": "CI helpers for PR/MR feedback envelopes",
+      "flags": []
+    },
+    {
+      "name": "config-schema",
+      "description": "Print the JSON Schema for fallow configuration files",
+      "flags": []
+    },
+    {
+      "name": "plugin-schema",
+      "description": "Print the JSON Schema for external plugin files",
+      "flags": []
+    },
+    {
+      "name": "rule-pack-schema",
+      "description": "Print the JSON Schema for rule pack files",
+      "flags": []
+    },
+    {
+      "name": "config",
+      "description": "Show the resolved config and which config file was loaded",
+      "flags": [
+        {
+          "name": "--path",
+          "type": "bool",
+          "required": false,
+          "description": "Print only the config file path (one line, no JSON)",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "list",
+      "description": "List discovered entry points, files, plugins, boundaries, and workspaces",
+      "flags": [
+        {
+          "name": "--entry-points",
+          "type": "bool",
+          "required": false,
+          "description": "Show entry points",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--files",
+          "type": "bool",
+          "required": false,
+          "description": "Show all discovered files",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--plugins",
+          "type": "bool",
+          "required": false,
+          "description": "Show active plugins",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--boundaries",
+          "type": "bool",
+          "required": false,
+          "description": "Show architecture boundary zones, rules, and per-zone file counts",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--workspaces",
+          "type": "bool",
+          "required": false,
+          "description": "Show monorepo workspaces and any workspace-discovery diagnostics (malformed package.json, unreachable glob matches, missing tsconfig references)",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "workspaces",
+      "description": "Show monorepo workspaces and any workspace-discovery diagnostics",
+      "flags": []
+    },
+    {
+      "name": "dupes",
+      "description": "Find code duplication / clones across the project",
+      "flags": [
+        {
+          "name": "--mode",
+          "type": "string",
+          "required": false,
+          "description": "Detection mode: strict, mild, weak, or semantic (defaults to the value in `.fallowrc.jsonc`, or `mild` if unset)",
+          "possible_values": [
+            "strict",
+            "mild",
+            "weak",
+            "semantic"
+          ]
+        },
+        {
+          "name": "--min-tokens",
+          "type": "string",
+          "required": false,
+          "description": "Minimum token count for a clone (defaults to the value in `.fallowrc.jsonc`, or `50` if unset)"
+        },
+        {
+          "name": "--min-lines",
+          "type": "string",
+          "required": false,
+          "description": "Minimum line count for a clone (defaults to the value in `.fallowrc.jsonc`, or `5` if unset)"
+        },
+        {
+          "name": "--min-occurrences",
+          "type": "string",
+          "required": false,
+          "description": "Minimum number of occurrences before a clone group is reported. Raise to focus on widespread copy-paste worth refactoring and skip pair-only clones. (defaults to the value in `.fallowrc.jsonc`, or `2` if unset)"
+        },
+        {
+          "name": "--threshold",
+          "type": "string",
+          "required": false,
+          "description": "Fail if duplication exceeds this percentage (0 = no limit) (defaults to the value in `.fallowrc.jsonc`, or `0` if unset)"
+        },
+        {
+          "name": "--skip-local",
+          "type": "bool",
+          "required": false,
+          "description": "Only report cross-directory duplicates",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--cross-language",
+          "type": "bool",
+          "required": false,
+          "description": "Enable cross-language detection (strip TS type annotations for TS↔JS matching)",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--ignore-imports",
+          "type": "bool",
+          "required": false,
+          "description": "Exclude module wiring from clone detection (default; covers imports, re-exports, and top-level static require bindings). Pass `--no-ignore-imports` to count it again",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--no-ignore-imports",
+          "type": "bool",
+          "required": false,
+          "description": "Count module wiring as clone candidates (opt out of the default exclusion)",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--top",
+          "type": "string",
+          "required": false,
+          "description": "Show only the N most-duplicated clone groups (sorted by instance count descending, then line count descending)"
+        },
+        {
+          "name": "--trace",
+          "type": "string",
+          "required": false,
+          "description": "Trace all clones at a specific location (format: `FILE:LINE`)"
+        }
+      ]
+    },
+    {
+      "name": "health",
+      "description": "Analyze function complexity (cyclomatic + cognitive)",
+      "flags": [
+        {
+          "name": "--max-cyclomatic",
+          "type": "string",
+          "required": false,
+          "description": "Maximum cyclomatic complexity threshold (overrides config)"
+        },
+        {
+          "name": "--max-cognitive",
+          "type": "string",
+          "required": false,
+          "description": "Maximum cognitive complexity threshold (overrides config)"
+        },
+        {
+          "name": "--max-crap",
+          "type": "string",
+          "required": false,
+          "description": "Maximum CRAP score threshold (overrides config, default 30.0). Functions meeting or exceeding this score are reported alongside complexity findings. Pair with `--coverage` for accurate scoring"
+        },
+        {
+          "name": "--top",
+          "type": "string",
+          "required": false,
+          "description": "Show only the N most complex functions"
+        },
+        {
+          "name": "--sort",
+          "type": "string",
+          "required": false,
+          "description": "Sort by: cyclomatic (default), cognitive, lines, or severity",
+          "default": "cyclomatic",
+          "possible_values": [
+            "severity",
+            "cyclomatic",
+            "cognitive",
+            "lines"
+          ]
+        },
+        {
+          "name": "--complexity",
+          "type": "bool",
+          "required": false,
+          "description": "Show only complexity findings (functions exceeding thresholds). By default all sections are shown; use this to select only complexity",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--complexity-breakdown",
+          "type": "bool",
+          "required": false,
+          "description": "Include the per-decision-point complexity breakdown (`contributions[]`) on each complexity finding in `--format json` output. Each entry names the construct (if, else-if, loop, boolean operator, ...) and its cyclomatic/cognitive weight, so a consumer can explain WHY a function scored high. Used by the VS Code inline editor breakdown. Off by default to keep CI/default output lean",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--file-scores",
+          "type": "bool",
+          "required": false,
+          "description": "Show only per-file health scores (fan-in, fan-out, dead code ratio, maintainability index). Requires full analysis pipeline (graph + dead code detection). Sorted by risk-aware triage concern: lower MI and higher CRAP risk first. --sort and --baseline apply to complexity findings only, not file scores",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--coverage-gaps",
+          "type": "bool",
+          "required": false,
+          "description": "Show only static test coverage gaps: runtime files and exports with no dependency path from any discovered test root. Requires full analysis pipeline",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--hotspots",
+          "type": "bool",
+          "required": false,
+          "description": "Show only hotspots: files that are both complex and frequently changing. Combines git churn history with complexity data. Requires a git repository",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--ownership",
+          "type": "bool",
+          "required": false,
+          "description": "Attach ownership signals to hotspot entries: bus factor, contributor count, declared CODEOWNERS owner, and ownership drift. Implies `--hotspots`. Requires a git repository",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--ownership-emails",
+          "type": "string",
+          "required": false,
+          "description": "Privacy mode for author emails emitted with `--ownership`. Defaults to `handle` (local-part only). Use `raw` for OSS repos where authors are public, or `anonymized` to emit non-reversible pseudonyms in regulated environments. Implies `--ownership`",
+          "possible_values": [
+            "raw",
+            "handle",
+            "anonymized",
+            "hash"
+          ]
+        },
+        {
+          "name": "--targets",
+          "type": "bool",
+          "required": false,
+          "description": "Show only refactoring targets: ranked recommendations based on complexity, coupling, churn, and dead code signals. Requires full analysis pipeline",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--css",
+          "type": "bool",
+          "required": false,
+          "description": "Add structural CSS analytics: specificity hotspots, !important density, over-complex selectors, deep nesting, and conservative cleanup candidates. Standard CSS is parsed structurally; preprocessor sources are scanned only where fallow can avoid expanding Sass/Less semantics",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--effort",
+          "type": "string",
+          "required": false,
+          "description": "Filter refactoring targets by effort level (low, medium, high). Implies --targets",
+          "possible_values": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        {
+          "name": "--score",
+          "type": "bool",
+          "required": false,
+          "description": "Show only the project health score (0–100) with letter grade (A/B/C/D/F). The score is included by default when no section flags are set",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--min-score",
+          "type": "string",
+          "required": false,
+          "description": "Fail if the health score is below this threshold (0-100). Implies --score. The authoritative CI quality gate: when set, complexity findings become informational and the exit code is driven solely by the score (so --min-score 0 always exits 0). Composes with --min-severity (fails if either gate trips). Plain `fallow health` (no gate flag) stays advisory and exits 1 on any finding; for a gate on newly-introduced complexity use `fallow audit --gate new-only`"
+        },
+        {
+          "name": "--min-severity",
+          "type": "string",
+          "required": false,
+          "description": "Only exit with error for findings at or above this severity. Use --min-severity critical to ignore moderate/high findings in CI. Composes with --min-score (the run fails if either gate trips)",
+          "possible_values": [
+            "moderate",
+            "high",
+            "critical"
+          ]
+        },
+        {
+          "name": "--report-only",
+          "type": "bool",
+          "required": false,
+          "description": "Print the score and findings but never fail CI (always exit 0). Advisory mode for surfacing health in logs without blocking. Mutually exclusive with --min-score and --min-severity",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--since",
+          "type": "string",
+          "required": false,
+          "description": "Git history window for hotspot analysis (default: 6m). Accepts durations (6m, 90d, 1y, 2w) or ISO dates (2025-06-01)"
+        },
+        {
+          "name": "--min-commits",
+          "type": "string",
+          "required": false,
+          "description": "Minimum number of commits for a file to be included in hotspot ranking (default: 3)"
+        },
+        {
+          "name": "--save-snapshot",
+          "type": "string",
+          "required": false,
+          "description": "Save a vital signs snapshot for trend tracking. Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given. Forces file-scores, hotspot, and score computation for complete metrics"
+        },
+        {
+          "name": "--trend",
+          "type": "bool",
+          "required": false,
+          "description": "Compare current metrics against the most recent saved snapshot. Reads from `.fallow/snapshots/` and shows per-metric deltas with directional indicators. Implies --score",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--coverage",
+          "type": "string",
+          "required": false,
+          "description": "Path to coverage data (coverage-final.json) for exact per-function CRAP scores. Generate with `jest --coverage`, `vitest run --coverage --provider istanbul`, or any Istanbul-compatible tool. Requires Istanbul format (not v8/c8 native format). Accepts a single Istanbul coverage map JSON file or a directory containing coverage-final.json. Use --coverage-root when the file was generated in a different environment (CI runner, Docker). Affects CRAP scores only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var"
+        },
+        {
+          "name": "--coverage-root",
+          "type": "string",
+          "required": false,
+          "description": "Absolute prefix to strip from file paths in coverage data before prepending the project root. Use when coverage was generated in a different environment (CI runner, Docker). Example: if coverage paths start with /home/runner/work/myapp and the project root is ./, pass --coverage-root /home/runner/work/myapp"
+        },
+        {
+          "name": "--runtime-coverage",
+          "type": "string",
+          "required": false,
+          "description": "File or directory containing runtime coverage input. Accepts a V8 coverage directory, a single V8 JSON file, or a single Istanbul coverage map JSON file (commonly coverage-final.json)"
+        },
+        {
+          "name": "--min-invocations-hot",
+          "type": "string",
+          "required": false,
+          "description": "Threshold for hot-path classification",
+          "default": "100"
+        },
+        {
+          "name": "--min-observation-volume",
+          "type": "string",
+          "required": false,
+          "description": "Minimum total trace volume before the sidecar allows high-confidence `safe_to_delete` / `review_required` verdicts. Below this the sidecar caps confidence at `medium` to protect against overconfident verdicts on new or low-traffic services. Omit to use the sidecar's spec default (5000)"
+        },
+        {
+          "name": "--low-traffic-threshold",
+          "type": "string",
+          "required": false,
+          "description": "Fraction of total trace count below which an invoked function is classified as `low_traffic` rather than `active`. Expressed as a decimal (e.g. `0.001` for 0.1%). Omit to use the sidecar's spec default (0.001)"
+        }
+      ]
+    },
+    {
+      "name": "flags",
+      "description": "Detect feature flag patterns in the codebase",
+      "flags": [
+        {
+          "name": "--top",
+          "type": "string",
+          "required": false,
+          "description": "Show only the top N flags"
+        }
+      ]
+    },
+    {
+      "name": "explain",
+      "description": "Explain one fallow issue type without running an analysis",
+      "flags": [
+        {
+          "name": "issue_type",
+          "type": "string",
+          "required": true,
+          "description": "Issue type, issue label, or rule id to explain"
+        }
+      ]
+    },
+    {
+      "name": "audit",
+      "description": "Audit changed files for dead code, complexity, and duplication",
+      "flags": [
+        {
+          "name": "--production-dead-code",
+          "type": "bool",
+          "required": false,
+          "description": "Run dead-code analysis in production mode for this audit",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--production-health",
+          "type": "bool",
+          "required": false,
+          "description": "Run health analysis in production mode for this audit",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--production-dupes",
+          "type": "bool",
+          "required": false,
+          "description": "Run duplication analysis in production mode for this audit",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--dead-code-baseline",
+          "type": "string",
+          "required": false,
+          "description": "Compare dead-code issues against a saved baseline (produced by `fallow dead-code --save-baseline`)"
+        },
+        {
+          "name": "--health-baseline",
+          "type": "string",
+          "required": false,
+          "description": "Compare health findings against a saved baseline (produced by `fallow health --save-baseline`)"
+        },
+        {
+          "name": "--dupes-baseline",
+          "type": "string",
+          "required": false,
+          "description": "Compare duplication clone groups against a saved baseline (produced by `fallow dupes --save-baseline`)"
+        },
+        {
+          "name": "--max-crap",
+          "type": "string",
+          "required": false,
+          "description": "Maximum CRAP score threshold (overrides config, default 30.0). Functions meeting or exceeding this score cause audit to fail. Pair with `--coverage` for accurate scoring"
+        },
+        {
+          "name": "--coverage",
+          "type": "string",
+          "required": false,
+          "description": "Path to Istanbul-format coverage data (coverage-final.json) for accurate per-function CRAP scores in the health sub-analysis. Also configurable via FALLOW_COVERAGE"
+        },
+        {
+          "name": "--coverage-root",
+          "type": "string",
+          "required": false,
+          "description": "Absolute prefix to strip from coverage data paths before CRAP matching. Use when coverage was generated under a different checkout root in CI or Docker"
+        },
+        {
+          "name": "--gate",
+          "type": "string",
+          "required": false,
+          "description": "Which findings affect the audit verdict",
+          "possible_values": [
+            "new-only",
+            "all"
+          ]
+        },
+        {
+          "name": "--runtime-coverage",
+          "type": "string",
+          "required": false,
+          "description": "Paid runtime-coverage sidecar input. Accepts a V8 directory, a single V8 JSON file, or an Istanbul coverage map JSON. Spawns the `fallow-cov` sidecar as part of the audit pipeline so the `hot-path-touched` verdict surfaces alongside dead-code and complexity findings without requiring a second `fallow health` invocation in CI. License-gated; the verdict is informational (no exit code change) until a future `--gate hot-path-touched` knob lands"
+        },
+        {
+          "name": "--min-invocations-hot",
+          "type": "string",
+          "required": false,
+          "description": "Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set",
+          "default": "100"
+        },
+        {
+          "name": "--gate-marker",
+          "type": "string",
+          "required": false,
+          "description": "Internal marker identifying a gate run (e.g. `pre-commit`), set by the generated git hook so Fallow Impact can record a containment event when the gate blocks then clears. Hidden; never changes the verdict, exit code, or output"
+        },
+        {
+          "name": "--brief",
+          "type": "bool",
+          "required": false,
+          "description": "Render the deterministic review brief instead of the gating audit report. The brief answers \"where do I look?\" rather than \"will CI block this?\", runs the same analysis, and ALWAYS exits 0 (the verdict is carried informationally). Implied by `fallow review`. Orthogonal to `--format`",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--max-decisions",
+          "type": "string",
+          "required": false,
+          "description": "Cap on the number of consequential structural decisions surfaced in the review brief's decision surface (the working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus 1). Only consulted on the brief path",
+          "default": "4"
+        },
+        {
+          "name": "--walkthrough-guide",
+          "type": "bool",
+          "required": false,
+          "description": "Emit the agent-contract WALKTHROUGH GUIDE: the current digest (brief + decision surface), the review direction, the JSON schema the agent must return, and a deterministic graph-snapshot hash pinned into the digest. The digest is built from the graph only (PR prose is never folded in, so it is injection-resistant). Implies the brief; always exits 0. A thin agent skill calls this to fetch the current guide, produces judgment JSON, then reopens with `--walkthrough-file`",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--walkthrough-file",
+          "type": "string",
+          "required": false,
+          "description": "Ingest an agent's judgment JSON and POST-VALIDATE it against the LIVE graph. Rejects any judgment whose `signal_id` fallow did not emit (anti-hallucination); refuses the whole payload as stale when the echoed graph-snapshot hash no longer matches (the tree moved). The verifier is the graph, not a second model. Implies the brief; always exits 0. The agent's free-text framing is fenced as non-deterministic and never gates or auto-posts"
+        },
+        {
+          "name": "--walkthrough",
+          "type": "bool",
+          "required": false,
+          "description": "Render the existing walkthrough guide as a staged HUMAN terminal tour (Stage 1 load-bearing / Stage 2 mechanical), or markdown with `--format markdown`. Implies the brief; always exits 0. `--format json --walkthrough` emits the same agent-contract JSON as `--walkthrough-guide`",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--mark-viewed",
+          "type": "string",
+          "required": false,
+          "description": "Record one or more changed files as VIEWED in the local walkthrough viewed-state ledger (`.fallow/walkthrough-state.json`), then render the tour. Files already viewed (and still current) collapse into the Cleared panel. Repeatable. Stale marks (the tree moved) are ignored on render but never deleted. Only consulted on the `--walkthrough` path"
+        },
+        {
+          "name": "--show-cleared",
+          "type": "bool",
+          "required": false,
+          "description": "Expand the Cleared panel in the human/markdown walkthrough tour: list each de-prioritized and already-viewed file instead of the collapsed one-line summary. Only consulted on the `--walkthrough` path",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--show-deprioritized",
+          "type": "bool",
+          "required": false,
+          "description": "Expand the de-prioritized units in the review brief's weighted focus map (\"show me what you de-prioritized\"). The `deprioritized` escape-hatch list is ALWAYS present in `--format json` regardless; this flag only re-expands the collapse-by-default human focus render. Only consulted on the brief path",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "decision-surface",
+      "description": "Surface the consequential structural DECISIONS a change embeds (the apex of the review brief), each framed as a judgment question with the routed expert to ask",
+      "flags": [
+        {
+          "name": "--max-decisions",
+          "type": "string",
+          "required": false,
+          "description": "Cap on the number of surfaced decisions (the working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus 1)",
+          "default": "4"
+        }
+      ]
+    },
+    {
+      "name": "impact",
+      "description": "Show what fallow has done for you: how many issues it is surfacing, the trend since the last recorded run, and how many commits it contained at the pre-commit gate",
+      "flags": [
+        {
+          "name": "--all",
+          "type": "bool",
+          "required": false,
+          "description": "Aggregate every tracked project into one cross-repo roll-up (\"what has fallow done for me across all my repos\"). Reads the user config dir; ignores `--root`. Cannot combine with a subcommand",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--sort",
+          "type": "string",
+          "required": false,
+          "description": "Row ordering for `--all` (default: most recently recorded first)",
+          "default": "recent",
+          "possible_values": [
+            "recent",
+            "resolved",
+            "contained",
+            "name"
+          ]
+        },
+        {
+          "name": "--limit",
+          "type": "string",
+          "required": false,
+          "description": "Cap the number of `--all` rows printed (grand totals still reflect every tracked project)"
+        }
+      ]
+    },
+    {
+      "name": "security",
+      "description": "Surface local security candidates for downstream agent verification (opt-in)",
+      "flags": [
+        {
+          "name": "--runtime-coverage",
+          "type": "string",
+          "required": false,
+          "description": "Paid runtime-coverage sidecar input. Accepts a V8 directory, a single V8 JSON file, or an Istanbul coverage map JSON. When set, `fallow security` annotates tainted-sink candidates with production runtime state and uses that state as an additive ranking signal"
+        },
+        {
+          "name": "--min-invocations-hot",
+          "type": "string",
+          "required": false,
+          "description": "Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set",
+          "default": "100"
+        },
+        {
+          "name": "--file",
+          "type": "string",
+          "required": false,
+          "description": "Only report security candidates in or reachable from the specified files. The full project graph is still built, but output is scoped to matching finding anchors or trace hops. Accepts multiple values"
+        },
+        {
+          "name": "--gate",
+          "type": "string",
+          "required": false,
+          "description": "Opt-in regression gate: fail (exit 8) only when the change introduces a NEW security-sink candidate in the changed lines, not on the whole candidate backlog. Requires a diff source: `--changed-since <ref>`, `--diff-file <path>`, or `--diff-stdin`. There is deliberately no `all` mode (gating on the full backlog is the anti-feature this gate avoids)",
+          "possible_values": [
+            "new",
+            "newly-reachable"
+          ]
+        },
+        {
+          "name": "--surface",
+          "type": "bool",
+          "required": false,
+          "description": "Include the agent-facing attack-surface inventory in JSON output",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "schema",
+      "description": "Dump fallow's capability manifest (CLI commands and flags, issue types, MCP tools, framework plugins, env vars) as machine-readable JSON for agent introspection. Always JSON, regardless of --format",
+      "flags": []
+    },
+    {
+      "name": "ci-template",
+      "description": "Print or vendor CI integration templates",
+      "flags": []
+    },
+    {
+      "name": "migrate",
+      "description": "Migrate configuration from knip or jscpd to fallow",
+      "flags": [
+        {
+          "name": "--toml",
+          "type": "bool",
+          "required": false,
+          "description": "Generate `fallow.toml` instead of JSONC",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--jsonc",
+          "type": "bool",
+          "required": false,
+          "description": "Write JSONC content to `.fallowrc.jsonc` instead of `.fallowrc.json`. The generated content is the same JSONC (with `//` comments) either way; the `.jsonc` extension lets editors auto-detect JSON-with-comments syntax highlighting and silences linters that flag comments in `.json`. Without `--jsonc` or `--toml`, fallow auto-mirrors the source extension: a `knip.jsonc` migration writes `.fallowrc.jsonc`, a `knip.json` migration writes `.fallowrc.json`",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--dry-run",
+          "type": "bool",
+          "required": false,
+          "description": "Only preview the generated config without writing",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--from",
+          "type": "string",
+          "required": false,
+          "description": "Path to source config file (auto-detect if not specified)"
+        }
+      ]
+    },
+    {
+      "name": "license",
+      "description": "Manage the license for continuous/cloud runtime monitoring",
+      "flags": []
+    },
+    {
+      "name": "telemetry",
+      "description": "Manage opt-in product telemetry",
+      "flags": []
+    },
+    {
+      "name": "coverage",
+      "description": "Runtime coverage workflow",
+      "flags": []
+    },
+    {
+      "name": "setup-hooks",
+      "description": "Install or remove a Claude Code PreToolUse hook that gates `git commit` / `git push` on `fallow audit`, so the agent cleans findings before the command runs",
+      "flags": [
+        {
+          "name": "--agent",
+          "type": "string",
+          "required": false,
+          "description": "Target a specific agent surface (default: auto-detect)",
+          "possible_values": [
+            "claude",
+            "codex"
+          ]
+        },
+        {
+          "name": "--dry-run",
+          "type": "bool",
+          "required": false,
+          "description": "Print what would be written or removed without touching the filesystem",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--force",
+          "type": "bool",
+          "required": false,
+          "description": "Overwrite a user-edited hook script, invalid settings.json, or remove a user-edited script during uninstall",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--user",
+          "type": "bool",
+          "required": false,
+          "description": "Write to the user's home directory instead of the project root",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--gitignore-claude",
+          "type": "bool",
+          "required": false,
+          "description": "Append `.claude/` to the project's `.gitignore`",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--uninstall",
+          "type": "bool",
+          "required": false,
+          "description": "Remove the fallow-gate handler, hook script, and AGENTS.md managed block instead of installing them. Idempotent: reports \"unchanged\" when nothing to remove",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    }
+  ],
+  "default_command": null,
+  "default_behavior": "Runs all analyses (check + dupes + health). Use --only/--skip to select.",
+  "issue_types": [
+    {
+      "id": "unused-file",
+      "rule_id": "fallow/unused-file",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "File is not reachable from any entry point",
+      "filter_flag": "--unused-files",
+      "result_key": "unused_files",
+      "summary_label": "Unused files",
+      "summary_docs_anchor": "unused-files",
+      "sarif_rule_ids": [
+        "fallow/unused-file"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-file"
+      ],
+      "ts_alias": {
+        "name": "UnusedFile",
+        "parent": "UnusedFileFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-file unused-file",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-files"
+    },
+    {
+      "id": "unused-export",
+      "rule_id": "fallow/unused-export",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Export is never imported",
+      "filter_flag": "--unused-exports",
+      "result_key": "unused_exports",
+      "summary_label": "Unused exports",
+      "summary_docs_anchor": "unused-exports",
+      "sarif_rule_ids": [
+        "fallow/unused-export"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-export"
+      ],
+      "ts_alias": {
+        "name": "UnusedExport",
+        "parent": "UnusedExportFinding"
+      },
+      "counts_in_total": true,
+      "fixable": true,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-export",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-exports"
+    },
+    {
+      "id": "unused-type",
+      "rule_id": "fallow/unused-type",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Type export is never imported",
+      "filter_flag": "--unused-types",
+      "result_key": "unused_types",
+      "summary_label": "Unused types",
+      "summary_docs_anchor": "unused-types",
+      "sarif_rule_ids": [
+        "fallow/unused-type"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-type"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-type",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-types"
+    },
+    {
+      "id": "private-type-leak",
+      "rule_id": "fallow/private-type-leak",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Exported signature references a private type",
+      "filter_flag": "--private-type-leaks",
+      "result_key": "private_type_leaks",
+      "summary_label": "Private type leaks",
+      "summary_docs_anchor": "private-type-leaks",
+      "sarif_rule_ids": [
+        "fallow/private-type-leak"
+      ],
+      "codeclimate_check_names": [
+        "fallow/private-type-leak"
+      ],
+      "ts_alias": {
+        "name": "PrivateTypeLeak",
+        "parent": "PrivateTypeLeakFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line private-type-leak",
+      "note": "Opt-in API hygiene check; the rule defaults to off",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#private-type-leaks"
+    },
+    {
+      "id": "unused-dependency",
+      "rule_id": "fallow/unused-dependency",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "Dependency listed but never imported",
+      "filter_flag": "--unused-deps",
+      "result_key": "unused_dependencies",
+      "summary_label": "Unused dependencies",
+      "summary_docs_anchor": "unused-dependencies",
+      "sarif_rule_ids": [
+        "fallow/unused-dependency"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-dependency"
+      ],
+      "ts_alias": {
+        "name": "UnusedDependency",
+        "parent": "UnusedDependencyFinding"
+      },
+      "counts_in_total": true,
+      "fixable": true,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-dependencies"
+    },
+    {
+      "id": "unused-dev-dependency",
+      "rule_id": "fallow/unused-dev-dependency",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "Dev dependency listed but never imported",
+      "filter_flag": "--unused-deps",
+      "result_key": "unused_dev_dependencies",
+      "summary_label": "Unused devDependencies",
+      "summary_docs_anchor": "unused-dependencies",
+      "sarif_rule_ids": [
+        "fallow/unused-dev-dependency"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-dev-dependency"
+      ],
+      "ts_alias": {
+        "name": "UnusedDependency",
+        "parent": "UnusedDevDependencyFinding"
+      },
+      "counts_in_total": true,
+      "fixable": true,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-devdependencies"
+    },
+    {
+      "id": "unused-optional-dependency",
+      "rule_id": "fallow/unused-optional-dependency",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "Optional dependency listed but never imported",
+      "filter_flag": "--unused-deps",
+      "result_key": "unused_optional_dependencies",
+      "summary_label": "Unused optionalDependencies",
+      "summary_docs_anchor": "unused-dependencies",
+      "sarif_rule_ids": [
+        "fallow/unused-optional-dependency"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-optional-dependency"
+      ],
+      "ts_alias": {
+        "name": "UnusedDependency",
+        "parent": "UnusedOptionalDependencyFinding"
+      },
+      "counts_in_total": true,
+      "fixable": true,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-optionaldependencies"
+    },
+    {
+      "id": "type-only-dependency",
+      "rule_id": "fallow/type-only-dependency",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "Production dependency only used via type-only imports",
+      "filter_flag": "--unused-deps",
+      "result_key": "type_only_dependencies",
+      "summary_label": "Type-only dependencies",
+      "summary_docs_anchor": "type-only-dependencies",
+      "sarif_rule_ids": [
+        "fallow/type-only-dependency"
+      ],
+      "codeclimate_check_names": [
+        "fallow/type-only-dependency"
+      ],
+      "ts_alias": {
+        "name": "TypeOnlyDependency",
+        "parent": "TypeOnlyDependencyFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies"
+    },
+    {
+      "id": "test-only-dependency",
+      "rule_id": "fallow/test-only-dependency",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "Production dependency only imported by test files",
+      "filter_flag": "--unused-deps",
+      "result_key": "test_only_dependencies",
+      "summary_label": "Test-only dependencies",
+      "summary_docs_anchor": "test-only-dependencies",
+      "sarif_rule_ids": [
+        "fallow/test-only-dependency"
+      ],
+      "codeclimate_check_names": [
+        "fallow/test-only-dependency"
+      ],
+      "ts_alias": {
+        "name": "TestOnlyDependency",
+        "parent": "TestOnlyDependencyFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#test-only-dependencies"
+    },
+    {
+      "id": "unused-enum-member",
+      "rule_id": "fallow/unused-enum-member",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Enum member is never referenced",
+      "filter_flag": "--unused-enum-members",
+      "result_key": "unused_enum_members",
+      "summary_label": "Unused enum members",
+      "summary_docs_anchor": "unused-enum-members",
+      "sarif_rule_ids": [
+        "fallow/unused-enum-member"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-enum-member"
+      ],
+      "ts_alias": {
+        "name": "UnusedMember",
+        "parent": "UnusedEnumMemberFinding"
+      },
+      "counts_in_total": true,
+      "fixable": true,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-enum-member",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-enum-members"
+    },
+    {
+      "id": "unused-class-member",
+      "rule_id": "fallow/unused-class-member",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Class member is never referenced",
+      "filter_flag": "--unused-class-members",
+      "result_key": "unused_class_members",
+      "summary_label": "Unused class members",
+      "summary_docs_anchor": "unused-class-members",
+      "sarif_rule_ids": [
+        "fallow/unused-class-member"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-class-member"
+      ],
+      "ts_alias": {
+        "name": "UnusedMember",
+        "parent": "UnusedClassMemberFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-class-member",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-class-members"
+    },
+    {
+      "id": "unused-store-member",
+      "rule_id": "fallow/unused-store-member",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Store member is never accessed by any consumer",
+      "filter_flag": "--unused-store-members",
+      "result_key": "unused_store_members",
+      "summary_label": "Unused store members",
+      "summary_docs_anchor": "unused-store-members",
+      "sarif_rule_ids": [
+        "fallow/unused-store-member"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-store-member"
+      ],
+      "ts_alias": {
+        "name": "UnusedMember",
+        "parent": "UnusedStoreMemberFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-store-member",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-store-members"
+    },
+    {
+      "id": "unresolved-import",
+      "rule_id": "fallow/unresolved-import",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Import could not be resolved",
+      "filter_flag": "--unresolved-imports",
+      "result_key": "unresolved_imports",
+      "summary_label": "Unresolved imports",
+      "summary_docs_anchor": "unresolved-imports",
+      "sarif_rule_ids": [
+        "fallow/unresolved-import"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unresolved-import"
+      ],
+      "ts_alias": {
+        "name": "UnresolvedImport",
+        "parent": "UnresolvedImportFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unresolved-import",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unresolved-imports"
+    },
+    {
+      "id": "unlisted-dependency",
+      "rule_id": "fallow/unlisted-dependency",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "Dependency used but not in package.json",
+      "filter_flag": "--unlisted-deps",
+      "result_key": "unlisted_dependencies",
+      "summary_label": "Unlisted dependencies",
+      "summary_docs_anchor": "unlisted-dependencies",
+      "sarif_rule_ids": [
+        "fallow/unlisted-dependency"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unlisted-dependency"
+      ],
+      "ts_alias": {
+        "name": "UnlistedDependency",
+        "parent": "UnlistedDependencyFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies"
+    },
+    {
+      "id": "duplicate-export",
+      "rule_id": "fallow/duplicate-export",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Export name appears in multiple modules",
+      "filter_flag": "--duplicate-exports",
+      "result_key": "duplicate_exports",
+      "summary_label": "Duplicate exports",
+      "summary_docs_anchor": "duplicate-exports",
+      "sarif_rule_ids": [
+        "fallow/duplicate-export"
+      ],
+      "codeclimate_check_names": [
+        "fallow/duplicate-export"
+      ],
+      "ts_alias": {
+        "name": "DuplicateExport",
+        "parent": "DuplicateExportFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-file duplicate-export",
+      "note": "fallow fix can add an ignoreExports rule to the fallow config instead of editing source",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#duplicate-exports"
+    },
+    {
+      "id": "circular-dependency",
+      "rule_id": "fallow/circular-dependency",
+      "command": "dead-code",
+      "category": "Architecture",
+      "description": "Circular dependency chain detected",
+      "filter_flag": "--circular-deps",
+      "result_key": "circular_dependencies",
+      "summary_label": "Circular dependencies",
+      "summary_docs_anchor": "circular-dependencies",
+      "sarif_rule_ids": [
+        "fallow/circular-dependency"
+      ],
+      "codeclimate_check_names": [
+        "fallow/circular-dependency"
+      ],
+      "ts_alias": {
+        "name": "CircularDependency",
+        "parent": "CircularDependencyFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line circular-dependency",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#circular-dependencies"
+    },
+    {
+      "id": "re-export-cycle",
+      "rule_id": "fallow/re-export-cycle",
+      "command": "dead-code",
+      "category": "Architecture",
+      "description": "Two or more barrel files re-export from each other in a loop",
+      "filter_flag": "--re-export-cycles",
+      "result_key": "re_export_cycles",
+      "summary_label": "Re-export cycles",
+      "summary_docs_anchor": "re-export-cycles",
+      "sarif_rule_ids": [
+        "fallow/re-export-cycle"
+      ],
+      "codeclimate_check_names": [
+        "fallow/re-export-cycle"
+      ],
+      "ts_alias": {
+        "name": "ReExportCycle",
+        "parent": "ReExportCycleFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-file re-export-cycle",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#re-export-cycles"
+    },
+    {
+      "id": "boundary-violation",
+      "rule_id": "fallow/boundary-violation",
+      "command": "dead-code",
+      "category": "Architecture",
+      "description": "Import crosses a configured architecture boundary",
+      "filter_flag": "--boundary-violations",
+      "result_key": "boundary_violations",
+      "summary_label": "Boundary violations",
+      "summary_docs_anchor": "boundary-violations",
+      "sarif_rule_ids": [
+        "fallow/boundary-violation"
+      ],
+      "codeclimate_check_names": [
+        "fallow/boundary-violation"
+      ],
+      "ts_alias": {
+        "name": "BoundaryViolation",
+        "parent": "BoundaryViolationFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line boundary-violation",
+      "note": "Requires configured boundary zones (boundaries config)",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#boundary-violations"
+    },
+    {
+      "id": "boundary-coverage",
+      "rule_id": "fallow/boundary-coverage",
+      "command": "dead-code",
+      "category": "Architecture",
+      "description": "Source file matches no configured architecture boundary zone",
+      "filter_flag": "--boundary-violations",
+      "result_key": "boundary_coverage_violations",
+      "summary_label": "Boundary coverage",
+      "summary_docs_anchor": "boundary-violations",
+      "sarif_rule_ids": [
+        "fallow/boundary-coverage"
+      ],
+      "codeclimate_check_names": [
+        "fallow/boundary-coverage"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-file boundary-violation",
+      "note": "Requires boundaries.coverage.requireAllFiles",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#boundary-violations"
+    },
+    {
+      "id": "boundary-call-violation",
+      "rule_id": "fallow/boundary-call-violation",
+      "command": "dead-code",
+      "category": "Architecture",
+      "description": "Zoned file calls a callee its zone forbids",
+      "filter_flag": "--boundary-violations",
+      "result_key": "boundary_call_violations",
+      "summary_label": "Boundary calls",
+      "summary_docs_anchor": "boundary-violations",
+      "sarif_rule_ids": [
+        "fallow/boundary-call-violation"
+      ],
+      "codeclimate_check_names": [
+        "fallow/boundary-call-violation"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line boundary-call-violation",
+      "note": "Requires boundaries.calls.forbidden patterns",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#boundary-violations"
+    },
+    {
+      "id": "policy-violation",
+      "rule_id": "fallow/policy-violation",
+      "command": "dead-code",
+      "category": "Policy",
+      "description": "Banned usage matched a rule-pack rule",
+      "filter_flag": "--policy-violations",
+      "result_key": "policy_violations",
+      "summary_label": "Policy violations",
+      "summary_docs_anchor": "policy-violations",
+      "sarif_rule_ids": [
+        "fallow/policy-violation"
+      ],
+      "codeclimate_check_names": [
+        "fallow/policy-violation"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line policy-violation",
+      "note": "Requires a configured rule pack (rulePacks config)",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#policy-violations"
+    },
+    {
+      "id": "stale-suppression",
+      "rule_id": "fallow/stale-suppression",
+      "command": "dead-code",
+      "category": "Suppressions",
+      "description": "Suppression comment or tag no longer matches any issue",
+      "filter_flag": "--stale-suppressions",
+      "result_key": "stale_suppressions",
+      "summary_label": "Stale suppressions",
+      "summary_docs_anchor": "stale-suppressions",
+      "sarif_rule_ids": [
+        "fallow/stale-suppression",
+        "fallow/missing-suppression-reason"
+      ],
+      "codeclimate_check_names": [
+        "fallow/stale-suppression",
+        "fallow/missing-suppression-reason"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Fix by removing the stale suppression marker itself",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#stale-suppressions"
+    },
+    {
+      "id": "missing-suppression-reason",
+      "rule_id": "fallow/missing-suppression-reason",
+      "command": "dead-code",
+      "category": "Suppressions",
+      "description": "Suppression comment omits a required reason",
+      "filter_flag": "--stale-suppressions",
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#stale-suppressions"
+    },
+    {
+      "id": "unused-catalog-entry",
+      "rule_id": "fallow/unused-catalog-entry",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "Catalog entry not referenced by any workspace package",
+      "filter_flag": "--unused-catalog-entries",
+      "result_key": "unused_catalog_entries",
+      "summary_label": "Unused catalog entries",
+      "summary_docs_anchor": "unused-catalog-entries",
+      "sarif_rule_ids": [
+        "fallow/unused-catalog-entry"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-catalog-entry"
+      ],
+      "ts_alias": {
+        "name": "UnusedCatalogEntry",
+        "parent": "UnusedCatalogEntryFinding"
+      },
+      "counts_in_total": true,
+      "fixable": true,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-catalog-entries"
+    },
+    {
+      "id": "empty-catalog-group",
+      "rule_id": "fallow/empty-catalog-group",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "Named catalog group has no entries",
+      "filter_flag": "--empty-catalog-groups",
+      "result_key": "empty_catalog_groups",
+      "summary_label": "Empty catalog groups",
+      "summary_docs_anchor": "empty-catalog-groups",
+      "sarif_rule_ids": [
+        "fallow/empty-catalog-group"
+      ],
+      "codeclimate_check_names": [
+        "fallow/empty-catalog-group"
+      ],
+      "ts_alias": {
+        "name": "EmptyCatalogGroup",
+        "parent": "EmptyCatalogGroupFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#empty-catalog-groups"
+    },
+    {
+      "id": "unresolved-catalog-reference",
+      "rule_id": "fallow/unresolved-catalog-reference",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "package.json references a catalog that does not declare the package",
+      "filter_flag": "--unresolved-catalog-references",
+      "result_key": "unresolved_catalog_references",
+      "summary_label": "Unresolved catalog references",
+      "summary_docs_anchor": "unresolved-catalog-references",
+      "sarif_rule_ids": [
+        "fallow/unresolved-catalog-reference"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unresolved-catalog-reference"
+      ],
+      "ts_alias": {
+        "name": "UnresolvedCatalogReference",
+        "parent": "UnresolvedCatalogReferenceFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references"
+    },
+    {
+      "id": "unused-dependency-override",
+      "rule_id": "fallow/unused-dependency-override",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "pnpm.overrides entry targets a package not declared or resolved",
+      "filter_flag": "--unused-dependency-overrides",
+      "result_key": "unused_dependency_overrides",
+      "summary_label": "Unused dependency overrides",
+      "summary_docs_anchor": "unused-dependency-overrides",
+      "sarif_rule_ids": [
+        "fallow/unused-dependency-override"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-dependency-override"
+      ],
+      "ts_alias": {
+        "name": "UnusedDependencyOverride",
+        "parent": "UnusedDependencyOverrideFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides"
+    },
+    {
+      "id": "misconfigured-dependency-override",
+      "rule_id": "fallow/misconfigured-dependency-override",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "pnpm.overrides entry has an unparsable key or value",
+      "filter_flag": "--misconfigured-dependency-overrides",
+      "result_key": "misconfigured_dependency_overrides",
+      "summary_label": "Misconfigured dependency overrides",
+      "summary_docs_anchor": "misconfigured-dependency-overrides",
+      "sarif_rule_ids": [
+        "fallow/misconfigured-dependency-override"
+      ],
+      "codeclimate_check_names": [
+        "fallow/misconfigured-dependency-override"
+      ],
+      "ts_alias": {
+        "name": "MisconfiguredDependencyOverride",
+        "parent": "MisconfiguredDependencyOverrideFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#misconfigured-dependency-overrides"
+    },
+    {
+      "id": "invalid-client-export",
+      "rule_id": "fallow/invalid-client-export",
+      "command": "dead-code",
+      "category": "Policy",
+      "description": "\"use client\" file exports a server-only / route-config name",
+      "filter_flag": null,
+      "result_key": "invalid_client_exports",
+      "summary_label": "Invalid client exports",
+      "summary_docs_anchor": "invalid-client-exports",
+      "sarif_rule_ids": [
+        "fallow/invalid-client-export"
+      ],
+      "codeclimate_check_names": [
+        "fallow/invalid-client-export"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line invalid-client-export",
+      "note": "Requires the project to declare next",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#invalid-client-exports"
+    },
+    {
+      "id": "mixed-client-server-barrel",
+      "rule_id": "fallow/mixed-client-server-barrel",
+      "command": "dead-code",
+      "category": "Policy",
+      "description": "Barrel re-exports both a \"use client\" module and a server-only module",
+      "filter_flag": null,
+      "result_key": "mixed_client_server_barrels",
+      "summary_label": "Mixed client/server barrels",
+      "summary_docs_anchor": "mixed-client-server-barrels",
+      "sarif_rule_ids": [
+        "fallow/mixed-client-server-barrel"
+      ],
+      "codeclimate_check_names": [
+        "fallow/mixed-client-server-barrel"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line mixed-client-server-barrel",
+      "note": "Requires the project to declare next",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#mixed-client-server-barrels"
+    },
+    {
+      "id": "misplaced-directive",
+      "rule_id": "fallow/misplaced-directive",
+      "command": "dead-code",
+      "category": "Policy",
+      "description": "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
+      "filter_flag": null,
+      "result_key": "misplaced_directives",
+      "summary_label": "Misplaced directives",
+      "summary_docs_anchor": "misplaced-directives",
+      "sarif_rule_ids": [
+        "fallow/misplaced-directive"
+      ],
+      "codeclimate_check_names": [
+        "fallow/misplaced-directive"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line misplaced-directive",
+      "note": "Requires the project to declare next",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#misplaced-directives"
+    },
+    {
+      "id": "unprovided-inject",
+      "rule_id": "fallow/unprovided-inject",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "inject() / getContext() reads a key that no provide() / setContext() supplies",
+      "filter_flag": "--unprovided-injects",
+      "result_key": "unprovided_injects",
+      "summary_label": "Unprovided injects",
+      "summary_docs_anchor": "unprovided-inject",
+      "sarif_rule_ids": [
+        "fallow/unprovided-inject"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unprovided-inject"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unprovided-inject",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unprovided-injects"
+    },
+    {
+      "id": "unrendered-component",
+      "rule_id": "fallow/unrendered-component",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "A Vue / Svelte component is reachable through a barrel but rendered nowhere",
+      "filter_flag": "--unrendered-components",
+      "result_key": "unrendered_components",
+      "summary_label": "Unrendered components",
+      "summary_docs_anchor": "unrendered-component",
+      "sarif_rule_ids": [
+        "fallow/unrendered-component"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unrendered-component"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unrendered-component",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unrendered-components"
+    },
+    {
+      "id": "unused-component-prop",
+      "rule_id": "fallow/unused-component-prop",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "A Vue, Svelte, or React component prop is referenced nowhere in its own component",
+      "filter_flag": "--unused-component-props",
+      "result_key": "unused_component_props",
+      "summary_label": "Unused component props",
+      "summary_docs_anchor": "unused-component-prop",
+      "sarif_rule_ids": [
+        "fallow/unused-component-prop"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-component-prop"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-component-prop",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-component-props"
+    },
+    {
+      "id": "unused-component-emit",
+      "rule_id": "fallow/unused-component-emit",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
+      "filter_flag": "--unused-component-emits",
+      "result_key": "unused_component_emits",
+      "summary_label": "Unused component emits",
+      "summary_docs_anchor": "unused-component-emit",
+      "sarif_rule_ids": [
+        "fallow/unused-component-emit"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-component-emit"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-component-emit",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-component-emits"
+    },
+    {
+      "id": "unused-component-input",
+      "rule_id": "fallow/unused-component-input",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "An Angular @Input() / signal input() / model() input is read nowhere in its own component",
+      "filter_flag": "--unused-component-inputs",
+      "result_key": "unused_component_inputs",
+      "summary_label": "Unused component inputs",
+      "summary_docs_anchor": "unused-component-input",
+      "sarif_rule_ids": [
+        "fallow/unused-component-input"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-component-input"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-component-input",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-component-inputs"
+    },
+    {
+      "id": "unused-component-output",
+      "rule_id": "fallow/unused-component-output",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "An Angular @Output() / signal output() output is emitted nowhere in its own component",
+      "filter_flag": "--unused-component-outputs",
+      "result_key": "unused_component_outputs",
+      "summary_label": "Unused component outputs",
+      "summary_docs_anchor": "unused-component-output",
+      "sarif_rule_ids": [
+        "fallow/unused-component-output"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-component-output"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-component-output",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-component-outputs"
+    },
+    {
+      "id": "unused-svelte-event",
+      "rule_id": "fallow/unused-svelte-event",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project",
+      "filter_flag": "--unused-svelte-events",
+      "result_key": "unused_svelte_events",
+      "summary_label": "Unused Svelte events",
+      "summary_docs_anchor": "unused-svelte-event",
+      "sarif_rule_ids": [
+        "fallow/unused-svelte-event"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-svelte-event"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-svelte-event",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-svelte-events"
+    },
+    {
+      "id": "unused-server-action",
+      "rule_id": "fallow/unused-server-action",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
+      "filter_flag": "--unused-server-actions",
+      "result_key": "unused_server_actions",
+      "summary_label": "Unused server actions",
+      "summary_docs_anchor": "unused-server-action",
+      "sarif_rule_ids": [
+        "fallow/unused-server-action"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-server-action"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-server-action",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-server-actions"
+    },
+    {
+      "id": "unused-load-data-key",
+      "rule_id": "fallow/unused-load-data-key",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "A SvelteKit load() return-object key is read by no consumer",
+      "filter_flag": "--unused-load-data-keys",
+      "result_key": "unused_load_data_keys",
+      "summary_label": "Unused load data keys",
+      "summary_docs_anchor": "unused-load-data-key",
+      "sarif_rule_ids": [
+        "fallow/unused-load-data-key"
+      ],
+      "codeclimate_check_names": [
+        "fallow/unused-load-data-key"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line unused-load-data-key",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#unused-load-data-keys"
+    },
+    {
+      "id": "prop-drilling",
+      "rule_id": "fallow/prop-drilling",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer",
+      "filter_flag": null,
+      "result_key": "prop_drilling_chains",
+      "summary_label": "Prop drilling",
+      "summary_docs_anchor": "prop-drilling",
+      "sarif_rule_ids": [
+        "fallow/prop-drilling"
+      ],
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line prop-drilling",
+      "note": "Opt-in: set rules.prop-drilling to warn or error to enable. Defaults to off.",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#prop-drilling"
+    },
+    {
+      "id": "thin-wrapper",
+      "rule_id": "fallow/thin-wrapper",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
+      "filter_flag": null,
+      "result_key": "thin_wrappers",
+      "summary_label": "Thin wrappers",
+      "summary_docs_anchor": "thin-wrapper",
+      "sarif_rule_ids": [
+        "fallow/thin-wrapper"
+      ],
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line thin-wrapper",
+      "note": "Opt-in: set rules.thin-wrapper to warn or error to enable. Defaults to off.",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#thin-wrapper"
+    },
+    {
+      "id": "duplicate-prop-shape",
+      "rule_id": "fallow/duplicate-prop-shape",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
+      "filter_flag": null,
+      "result_key": "duplicate_prop_shapes",
+      "summary_label": "Duplicate prop shapes",
+      "summary_docs_anchor": "duplicate-prop-shape",
+      "sarif_rule_ids": [
+        "fallow/duplicate-prop-shape"
+      ],
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line duplicate-prop-shape",
+      "note": "Opt-in: set rules.duplicate-prop-shape to warn or error to enable. Defaults to off.",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#duplicate-prop-shape"
+    },
+    {
+      "id": "route-collision",
+      "rule_id": "fallow/route-collision",
+      "command": "dead-code",
+      "category": "Policy",
+      "description": "Two or more Next.js App Router route files resolve to the same URL",
+      "filter_flag": null,
+      "result_key": "route_collisions",
+      "summary_label": "Route collisions",
+      "summary_docs_anchor": "route-collisions",
+      "sarif_rule_ids": [
+        "fallow/route-collision"
+      ],
+      "codeclimate_check_names": [
+        "fallow/route-collision"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-file route-collision",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#route-collisions"
+    },
+    {
+      "id": "dynamic-segment-name-conflict",
+      "rule_id": "fallow/dynamic-segment-name-conflict",
+      "command": "dead-code",
+      "category": "Policy",
+      "description": "Sibling Next.js dynamic route segments use different slug names at the same position",
+      "filter_flag": null,
+      "result_key": "dynamic_segment_name_conflicts",
+      "summary_label": "Dynamic segment conflicts",
+      "summary_docs_anchor": "dynamic-segment-name-conflicts",
+      "sarif_rule_ids": [
+        "fallow/dynamic-segment-name-conflict"
+      ],
+      "codeclimate_check_names": [
+        "fallow/dynamic-segment-name-conflict"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-file dynamic-segment-name-conflict",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#dynamic-segment-name-conflicts"
+    },
+    {
+      "id": "high-cyclomatic-complexity",
+      "rule_id": "fallow/high-cyclomatic-complexity",
+      "command": "health",
+      "category": "Health",
+      "description": "Function has high cyclomatic complexity",
+      "filter_flag": "--complexity",
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line complexity",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/health#cyclomatic-complexity"
+    },
+    {
+      "id": "high-cognitive-complexity",
+      "rule_id": "fallow/high-cognitive-complexity",
+      "command": "health",
+      "category": "Health",
+      "description": "Function has high cognitive complexity",
+      "filter_flag": "--complexity",
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line complexity",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/health#cognitive-complexity"
+    },
+    {
+      "id": "high-complexity",
+      "rule_id": "fallow/high-complexity",
+      "command": "health",
+      "category": "Health",
+      "description": "Function exceeds both complexity thresholds",
+      "filter_flag": "--complexity",
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line complexity",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/health#complexity-metrics"
+    },
+    {
+      "id": "high-crap-score",
+      "rule_id": "fallow/high-crap-score",
+      "command": "health",
+      "category": "Health",
+      "description": "Function has a high CRAP score (complexity combined with low coverage)",
+      "filter_flag": "--complexity",
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line complexity",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/health#crap-score"
+    },
+    {
+      "id": "refactoring-target",
+      "rule_id": "fallow/refactoring-target",
+      "command": "health",
+      "category": "Health",
+      "description": "File identified as a high-priority refactoring candidate",
+      "filter_flag": "--targets",
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/health#refactoring-targets"
+    },
+    {
+      "id": "untested-file",
+      "rule_id": "fallow/untested-file",
+      "command": "health",
+      "category": "Health",
+      "description": "Runtime-reachable file has no test dependency path",
+      "filter_flag": "--coverage-gaps",
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-file coverage-gaps",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-gaps"
+    },
+    {
+      "id": "untested-export",
+      "rule_id": "fallow/untested-export",
+      "command": "health",
+      "category": "Health",
+      "description": "Runtime-reachable export has no test dependency path",
+      "filter_flag": "--coverage-gaps",
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-file coverage-gaps",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-gaps"
+    },
+    {
+      "id": "runtime-safe-to-delete",
+      "rule_id": "fallow/runtime-safe-to-delete",
+      "command": "health",
+      "category": "Health",
+      "description": "Statically unused AND never invoked in production with V8 tracking",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
+      "license": "freemium",
+      "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+      "docs_url": "https://docs.fallow.tools/explanations/health#runtime-coverage"
+    },
+    {
+      "id": "runtime-review-required",
+      "rule_id": "fallow/runtime-review-required",
+      "command": "health",
+      "category": "Health",
+      "description": "Statically used but never invoked in production",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
+      "license": "freemium",
+      "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+      "docs_url": "https://docs.fallow.tools/explanations/health#runtime-coverage"
+    },
+    {
+      "id": "runtime-low-traffic",
+      "rule_id": "fallow/runtime-low-traffic",
+      "command": "health",
+      "category": "Health",
+      "description": "Function was invoked below the low-traffic threshold",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
+      "license": "freemium",
+      "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+      "docs_url": "https://docs.fallow.tools/explanations/health#runtime-coverage"
+    },
+    {
+      "id": "runtime-coverage-unavailable",
+      "rule_id": "fallow/runtime-coverage-unavailable",
+      "command": "health",
+      "category": "Health",
+      "description": "Runtime coverage could not be resolved for this function",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
+      "license": "freemium",
+      "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+      "docs_url": "https://docs.fallow.tools/explanations/health#runtime-coverage"
+    },
+    {
+      "id": "runtime-coverage",
+      "rule_id": "fallow/runtime-coverage",
+      "command": "health",
+      "category": "Health",
+      "description": "Runtime coverage finding",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Requires --runtime-coverage input (V8 directory, V8 JSON, or Istanbul map)",
+      "license": "freemium",
+      "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+      "docs_url": "https://docs.fallow.tools/explanations/health#runtime-coverage"
+    },
+    {
+      "id": "coverage-intelligence-risky-change",
+      "rule_id": "fallow/coverage-intelligence-risky-change",
+      "command": "health",
+      "category": "Health",
+      "description": "Changed hot path combines high CRAP and low test coverage",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Produced by fallow coverage analyze",
+      "license": "freemium",
+      "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-intelligence"
+    },
+    {
+      "id": "coverage-intelligence-delete",
+      "rule_id": "fallow/coverage-intelligence-delete",
+      "command": "health",
+      "category": "Health",
+      "description": "Static and runtime evidence indicate code can be deleted",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Produced by fallow coverage analyze",
+      "license": "freemium",
+      "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-intelligence"
+    },
+    {
+      "id": "coverage-intelligence-review",
+      "rule_id": "fallow/coverage-intelligence-review",
+      "command": "health",
+      "category": "Health",
+      "description": "Cold reachable uncovered code needs owner review",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Produced by fallow coverage analyze",
+      "license": "freemium",
+      "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-intelligence"
+    },
+    {
+      "id": "coverage-intelligence-refactor",
+      "rule_id": "fallow/coverage-intelligence-refactor",
+      "command": "health",
+      "category": "Health",
+      "description": "Hot covered code has high CRAP and should be refactored carefully",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": "Produced by fallow coverage analyze",
+      "license": "freemium",
+      "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+      "docs_url": "https://docs.fallow.tools/explanations/health#coverage-intelligence"
+    },
+    {
+      "id": "code-duplication",
+      "rule_id": "fallow/code-duplication",
+      "command": "dupes",
+      "category": "Duplication",
+      "description": "Duplicated code block",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line code-duplication",
+      "note": "Reported by fallow dupes (and bare fallow / fallow audit)",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/duplication#clone-groups"
+    },
+    {
+      "id": "feature-flag",
+      "rule_id": "fallow/feature-flag",
+      "command": "flags",
+      "category": "Flags",
+      "description": "Detected feature flag pattern",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line feature-flag",
+      "note": "Reported by fallow flags",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/flags"
+    },
+    {
+      "id": "tainted-sink",
+      "rule_id": "security/tainted-sink",
+      "command": "security",
+      "category": "Security",
+      "description": "Syntactic security sink candidates require verification",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "client-server-leak",
+      "rule_id": "security/client-server-leak",
+      "command": "security",
+      "category": "Security",
+      "description": "Client-bound code reaches a non-public env read",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-file security-client-server-leak",
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "hardcoded-secret",
+      "rule_id": "security/hardcoded-secret",
+      "command": "security",
+      "category": "Security",
+      "description": "Provider-prefixed or contextual secret literals require verification",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Include-required category: enable via security.categories.include",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "dangerous-html",
+      "rule_id": "security/dangerous-html",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-79",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "template-escape-bypass",
+      "rule_id": "security/template-escape-bypass",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-79",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "command-injection",
+      "rule_id": "security/command-injection",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-78",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "code-injection",
+      "rule_id": "security/code-injection",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-94",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "dynamic-regex",
+      "rule_id": "security/dynamic-regex",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-1333",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "redos-regex",
+      "rule_id": "security/redos-regex",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-1333",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "resource-amplification",
+      "rule_id": "security/resource-amplification",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-400",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "dynamic-module-load",
+      "rule_id": "security/dynamic-module-load",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-95",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "sql-injection",
+      "rule_id": "security/sql-injection",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-89",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "ssrf",
+      "rule_id": "security/ssrf",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-918",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "secret-to-network",
+      "rule_id": "security/secret-to-network",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-201",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "path-traversal",
+      "rule_id": "security/path-traversal",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-22",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "header-injection",
+      "rule_id": "security/header-injection",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-113",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "open-redirect",
+      "rule_id": "security/open-redirect",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-601",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "postmessage-wildcard-origin",
+      "rule_id": "security/postmessage-wildcard-origin",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-346",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "tls-validation-disabled",
+      "rule_id": "security/tls-validation-disabled",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-295",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "cleartext-transport",
+      "rule_id": "security/cleartext-transport",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-319",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "electron-unsafe-webpreferences",
+      "rule_id": "security/electron-unsafe-webpreferences",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-1188",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "world-writable-permission",
+      "rule_id": "security/world-writable-permission",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-732",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "insecure-temp-file",
+      "rule_id": "security/insecure-temp-file",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-377",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "mysql-multiple-statements",
+      "rule_id": "security/mysql-multiple-statements",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-89",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "permissive-cors",
+      "rule_id": "security/permissive-cors",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-942",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "insecure-cookie",
+      "rule_id": "security/insecure-cookie",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-614",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "mass-assignment",
+      "rule_id": "security/mass-assignment",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-915",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "weak-crypto",
+      "rule_id": "security/weak-crypto",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-327",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "insecure-randomness",
+      "rule_id": "security/insecure-randomness",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-338",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "jwt-alg-none",
+      "rule_id": "security/jwt-alg-none",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-347",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "jwt-verify-missing-algorithms",
+      "rule_id": "security/jwt-verify-missing-algorithms",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-347",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "deprecated-cipher",
+      "rule_id": "security/deprecated-cipher",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-327",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "unsafe-buffer-alloc",
+      "rule_id": "security/unsafe-buffer-alloc",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-1188",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "unsafe-deserialization",
+      "rule_id": "security/unsafe-deserialization",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-502",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "angular-trusted-html",
+      "rule_id": "security/angular-trusted-html",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-79",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "nextjs-open-redirect",
+      "rule_id": "security/nextjs-open-redirect",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-601",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "dom-document-write",
+      "rule_id": "security/dom-document-write",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-79",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "jquery-html",
+      "rule_id": "security/jquery-html",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-79",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "route-send-file",
+      "rule_id": "security/route-send-file",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-22",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "webview-injection",
+      "rule_id": "security/webview-injection",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-94",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "prototype-pollution",
+      "rule_id": "security/prototype-pollution",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-1321",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "zip-slip",
+      "rule_id": "security/zip-slip",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-22",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "nosql-injection",
+      "rule_id": "security/nosql-injection",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-943",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "ssti",
+      "rule_id": "security/ssti",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-1336",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "xxe",
+      "rule_id": "security/xxe",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-611",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "secret-pii-log",
+      "rule_id": "security/secret-pii-log",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-532",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "xpath-injection",
+      "rule_id": "security/xpath-injection",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-643",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    },
+    {
+      "id": "llm-call-injection",
+      "rule_id": "security/llm-call-injection",
+      "command": "security",
+      "category": "Security",
+      "description": "Catalogue security candidate for CWE-1427",
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line security-sink",
+      "note": "Tainted-sink catalogue category; the security-sink suppression token covers every category",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/cli/security"
+    }
+  ],
+  "suppression_comments": {
+    "next_line": "// fallow-ignore-next-line [issue-type]",
+    "file": "// fallow-ignore-file [issue-type]",
+    "note": "Omit [issue-type] to suppress all issue types. Unknown tokens are silently ignored."
+  },
+  "output_formats": [
+    "human",
+    "json",
+    "sarif",
+    "compact",
+    "markdown",
+    "codeclimate",
+    "gitlab-codequality",
+    "pr-comment-github",
+    "pr-comment-gitlab",
+    "review-github",
+    "review-gitlab",
+    "badge"
+  ],
+  "exit_codes": {
+    "0": "Success (no error-severity issues found)",
+    "1": "Error-severity issues found (per rules config, or --fail-on-issues promotes warn→error)",
+    "2": "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}"
+  },
+  "environment_variables": {
+    "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown/codeclimate/gitlab-codequality/pr-comment-github/pr-comment-gitlab/review-github/review-gitlab/badge). CLI --format flag overrides this.",
+    "FALLOW_QUIET": "Set to \"1\" or \"true\" to suppress progress output. CLI --quiet flag overrides this.",
+    "FALLOW_PRODUCTION": "Set to true/false to override production mode for all analyses.",
+    "FALLOW_PRODUCTION_DEAD_CODE": "Set to true/false to override production mode for dead-code analysis.",
+    "FALLOW_PRODUCTION_HEALTH": "Set to true/false to override production mode for health analysis.",
+    "FALLOW_PRODUCTION_DUPES": "Set to true/false to override production mode for duplication analysis.",
+    "FALLOW_REVIEW_GUIDANCE": "Set to true to append collapsed guidance blocks to review-github/review-gitlab inline comment bodies.",
+    "FALLOW_SUMMARY_SCOPE": "Summary scope for pr-comment-github/pr-comment-gitlab: all (default) keeps project-level dependency/catalog/override findings outside the diff filter; diff applies the diff filter to them too. Inline review comments are unaffected.",
+    "FALLOW_DIFF_CONTEXT": "Line radius around changed diff lines when scoping findings to a diff in the review/PR-comment formats (default 3).",
+    "FALLOW_BOT_LOGIN": "Bot or token username treated as fallow's own when reconciling existing PR/MR comments in review-github/review-gitlab. Required when posting with a personal access token (the author then carries a human identity).",
+    "FALLOW_API_RETRIES": "Maximum HTTP attempts for review-comment reconciliation API calls (default 3).",
+    "FALLOW_API_RETRY_DELAY": "Floor delay in seconds between HTTP retry attempts (default 2); a server-supplied Retry-After overrides it on 429 responses.",
+    "FALLOW_CACHE_DIR": "Directory for fallow's persistent analysis cache. Relative paths resolve from the project root and override cache.dir.",
+    "FALLOW_CACHE_MAX_SIZE": "Extraction cache size cap in megabytes (default 256). Wins over the cache.maxSizeMb config field.",
+    "FALLOW_EXTENDS_TIMEOUT_SECS": "Timeout in seconds for fetching https:// configs referenced via the extends field (default 5).",
+    "FALLOW_COVERAGE": "Path to Istanbul coverage data (coverage-final.json) for accurate per-function CRAP scores. CLI --coverage flag overrides this.",
+    "FALLOW_MAX_FILE_SIZE": "Per-file size ceiling in megabytes for source discovery (default 5; 0 = no limit). CLI --max-file-size flag overrides this.",
+    "FALLOW_AUDIT_BASE": "Pins the fallow audit comparison base ref when no --base/--changed-since is passed (e.g. upstream/main).",
+    "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS": "GC threshold in days for reusable audit base-snapshot caches (default 30; 0 disables the sweep).",
+    "FALLOW_IMPACT_STORE_MAX_AGE_DAYS": "GC threshold in days for per-project fallow impact stores; a recorded run reclaims stores older than this (unset/0 keeps every store forever).",
+    "FALLOW_ROOT": "Project root used by the review-github/review-gitlab renderers to read source for suggestion blocks. Set it alongside --root when rendering review formats outside the bundled CI integrations.",
+    "FALLOW_LICENSE": "License JWT (full string) for the paid runtime intelligence layer; intended for shared CI runners.",
+    "FALLOW_LICENSE_PATH": "File path containing the license JWT.",
+    "FALLOW_LICENSE_SKEW_TOLERANCE_SECONDS": "Clock-skew tolerance applied to the license JWT's iat claim (default 86400).",
+    "FALLOW_COV_BIN": "Explicit path override for the fallow-cov runtime-coverage sidecar binary.",
+    "FALLOW_COV_BINARY_PATH": "Secondary explicit path override for the fallow-cov sidecar, checked after FALLOW_COV_BIN (air-gapped installs, distro-packaged sidecars, shared Docker images).",
+    "FALLOW_RUNTIME_COVERAGE_SOURCE": "Set to cloud to select cloud runtime coverage in fallow coverage analyze without passing --cloud.",
+    "FALLOW_REPO": "owner/repo fallback for fallow coverage analyze --cloud when --repo is not passed (otherwise parsed from the git origin remote).",
+    "FALLOW_API_URL": "Base URL override for fallow cloud API calls (license refresh, trial, coverage uploads).",
+    "FALLOW_API_KEY": "fallow cloud bearer token for coverage upload commands.",
+    "FALLOW_CA_BUNDLE": "Path to a PEM certificate bundle for fallow cloud and provider HTTP calls (replaces the default WebPKI roots).",
+    "FALLOW_UPDATE_CHECK": "Set to off/0/false to disable the human-TTY upgrade nudge and its background version check.",
+    "FALLOW_SUGGESTIONS": "Set to off/0/false/no/disabled to suppress the next_steps[] array of read-only follow-up commands in JSON output (and the human Next: line). Useful for CI consumers that snapshot-diff raw --format json output. Default on.",
+    "FALLOW_TELEMETRY": "Opt-in telemetry mode: off, on, or inspect (print the payload to stderr without sending). Telemetry is off by default.",
+    "FALLOW_TELEMETRY_DISABLED": "Admin/fleet kill switch: truthy values hard-disable telemetry and refuse fallow telemetry enable.",
+    "FALLOW_TELEMETRY_DEBUG": "Truthy values alias FALLOW_TELEMETRY=inspect.",
+    "FALLOW_AGENT_SOURCE": "Normalized agent vendor for telemetry classification (e.g. claude_code, codex, cursor). Only read when telemetry is on.",
+    "DO_NOT_TRACK": "Honored as a top-precedence telemetry kill switch (consoledonottrack.com convention).",
+    "FALLOW_BIN": "Path to the fallow binary (used by the fallow-mcp server to spawn the CLI).",
+    "FALLOW_TIMEOUT_SECS": "MCP server: per-tool-call CLI subprocess timeout in seconds (default 120). Raise for long runs like production coverage on large dumps.",
+    "FALLOW_DIFF_FILE": "MCP server: path to a unified diff that scopes all findings by changed line.",
+    "FALLOW_CHANGED_SINCE": "MCP server: git ref that scopes file discovery for analysis tools.",
+    "FALLOW_INTEGRATION_SURFACE": "Telemetry integration_surface override for non-CLI surfaces (mcp/lsp/vscode/napi/programmatic). Set by the MCP server on the CLI it spawns.",
+    "FALLOW_MCP_TOOL": "Telemetry mcp_tool dimension, validated against the MCP tool-name allowlist. Set by the MCP server alongside FALLOW_INTEGRATION_SURFACE=mcp."
+  },
+  "severity_levels": [
+    "error",
+    "warn",
+    "off"
+  ],
+  "mcp_tools": {
+    "server": "fallow-mcp",
+    "note": "key_params is a curated subset; the live MCP input schemas (list_tools) are authoritative for the full parameter list",
+    "tools": [
+      {
+        "name": "code_execute",
+        "kind": "composition",
+        "description": "Run a bounded read-only JavaScript snippet that composes fallow's analysis tools inside a sandbox (Code Mode meta-tool, not a plain analysis call)",
+        "key_params": [
+          "code",
+          "timeout_ms",
+          "max_output_bytes"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "analyze",
+        "kind": "analysis",
+        "description": "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations",
+        "key_params": [
+          "issue_types",
+          "production",
+          "workspace",
+          "baseline",
+          "group_by",
+          "file"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "check_changed",
+        "kind": "analysis",
+        "description": "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review)",
+        "key_params": [
+          "since",
+          "baseline",
+          "fail_on_regression"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "security_candidates",
+        "kind": "analysis",
+        "description": "Unverified local security candidates (tainted sinks) for downstream agent verification",
+        "key_params": [
+          "gate",
+          "surface",
+          "changed_since",
+          "paths"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "inspect_target",
+        "kind": "analysis",
+        "description": "One evidence bundle for a file or exported symbol: trace, dead-code actions, duplication, complexity, and security candidates",
+        "key_params": [
+          "target",
+          "production"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "find_dupes",
+        "kind": "analysis",
+        "description": "Code duplication detection with clone groups and refactoring suggestions",
+        "key_params": [
+          "mode",
+          "min_tokens",
+          "min_occurrences",
+          "top",
+          "threshold"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "check_health",
+        "kind": "analysis",
+        "description": "Complexity metrics, health score, hotspots, ownership, refactoring targets, and coverage gaps",
+        "key_params": [
+          "score",
+          "file_scores",
+          "hotspots",
+          "targets",
+          "coverage",
+          "runtime_coverage",
+          "max_crap",
+          "group_by"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "check_runtime_coverage",
+        "kind": "runtime-coverage",
+        "description": "Merge V8 or Istanbul runtime coverage into the health report (hot paths, cold paths, verdicts)",
+        "key_params": [
+          "coverage",
+          "min_invocations_hot",
+          "min_observation_volume",
+          "low_traffic_threshold",
+          "group_by"
+        ],
+        "license": "freemium",
+        "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+        "read_only": true
+      },
+      {
+        "name": "get_hot_paths",
+        "kind": "runtime-coverage",
+        "description": "Production hot paths from runtime coverage, sorted by invocation volume",
+        "key_params": [
+          "coverage",
+          "top",
+          "min_invocations_hot"
+        ],
+        "license": "freemium",
+        "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+        "read_only": true
+      },
+      {
+        "name": "get_blast_radius",
+        "kind": "runtime-coverage",
+        "description": "Blast-radius context (caller counts, risk bands) from runtime coverage; augments review only, never gates safe_to_delete (three-state tracking issues that verdict)",
+        "key_params": [
+          "coverage",
+          "group_by"
+        ],
+        "license": "freemium",
+        "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+        "read_only": true
+      },
+      {
+        "name": "get_importance",
+        "kind": "runtime-coverage",
+        "description": "Production-importance scores (0-100) combining invocations, complexity, and ownership; augments review only, never gates safe_to_delete (three-state tracking issues that verdict)",
+        "key_params": [
+          "coverage",
+          "group_by"
+        ],
+        "license": "freemium",
+        "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+        "read_only": true
+      },
+      {
+        "name": "get_cleanup_candidates",
+        "kind": "runtime-coverage",
+        "description": "Cleanup candidates with safe_to_delete, review_required, and low_traffic verdicts from runtime coverage",
+        "key_params": [
+          "coverage",
+          "group_by"
+        ],
+        "license": "freemium",
+        "license_note": "A single local runtime-coverage capture is free; continuous or multi-capture runtime monitoring requires an active license (fallow license activate).",
+        "read_only": true
+      },
+      {
+        "name": "get_token_blast_radius",
+        "kind": "analysis",
+        "description": "Design-token blast radius for Tailwind v4 @theme tokens AND CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind) or js-member (CSS-in-JS cross-module member access); descriptive context for sizing a token change, never a deletion gate",
+        "key_params": [],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "audit",
+        "kind": "analysis",
+        "description": "Combined dead-code, complexity, and duplication audit for changed files with a pass/warn/fail verdict",
+        "key_params": [
+          "gate",
+          "base",
+          "max_crap",
+          "coverage",
+          "runtime_coverage"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "decision_surface",
+        "kind": "analysis",
+        "description": "Surface the few consequential structural decisions a change embeds (coupling, public API, dependency), each as a judgment question with the routed expert; ranked, capped, and signal_id-anchored",
+        "key_params": [
+          "base",
+          "max_decisions",
+          "workspace"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "fallow_explain",
+        "kind": "introspection",
+        "description": "Explain one issue type (rationale, examples, fix guidance) without running an analysis",
+        "key_params": [
+          "issue_type"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "fix_preview",
+        "kind": "fix",
+        "description": "Dry-run auto-fix preview; shows what would change without modifying files",
+        "key_params": [
+          "no_create_config"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "fix_apply",
+        "kind": "fix",
+        "description": "Apply auto-fixes: removes unused exports, dependencies, and enum members (mutates files)",
+        "key_params": [
+          "no_create_config"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": false
+      },
+      {
+        "name": "project_info",
+        "kind": "introspection",
+        "description": "Project metadata: active framework plugins, discovered files, entry points, and boundary zones",
+        "key_params": [
+          "entry_points",
+          "files",
+          "plugins",
+          "boundaries"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "list_boundaries",
+        "kind": "introspection",
+        "description": "List architecture boundary zones and access rules",
+        "key_params": [],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "feature_flags",
+        "kind": "analysis",
+        "description": "Detect feature flag patterns (environment variables, SDK calls, config objects)",
+        "key_params": [
+          "workspace",
+          "production"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "impact",
+        "kind": "introspection",
+        "description": "Read the local Fallow Impact value-tracking report (per-project history in the user config dir, never in the repo; local-dev only)",
+        "key_params": [
+          "root"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "impact_all",
+        "kind": "introspection",
+        "description": "Roll every tracked fallow project on this machine into one cross-repo value report (hashed keys plus basename labels, never paths; local-dev only)",
+        "key_params": [
+          "sort",
+          "limit"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "trace_export",
+        "kind": "trace",
+        "description": "Trace why an export is used or unused, including re-export chains and entry-point status",
+        "key_params": [
+          "file",
+          "export_name"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "trace_file",
+        "kind": "trace",
+        "description": "Trace all module-graph edges for a file (imports, exports, importers, re-exports)",
+        "key_params": [
+          "file"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "trace_dependency",
+        "kind": "trace",
+        "description": "Trace where a dependency is imported and whether scripts or CI use it",
+        "key_params": [
+          "package_name"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
+        "name": "trace_clone",
+        "kind": "trace",
+        "description": "Deep-dive a duplicate-code clone group by location or fingerprint",
+        "key_params": [
+          "file",
+          "line",
+          "fingerprint"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      }
+    ]
+  },
+  "plugins": {
+    "count": 123,
+    "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
+    "names": [
+      "nextjs",
+      "nuxt",
+      "pinia",
+      "remix",
+      "astro",
+      "browser-extension",
+      "wxt",
+      "angular",
+      "react-router",
+      "redwoodsdk",
+      "tanstack-router",
+      "react-native",
+      "expo",
+      "expo-router",
+      "firebase",
+      "nestjs",
+      "adonis",
+      "docusaurus",
+      "gatsby",
+      "sveltekit",
+      "nitro",
+      "capacitor",
+      "ionic",
+      "sanity",
+      "supabase",
+      "vitepress",
+      "rspress",
+      "next-intl",
+      "relay",
+      "electron",
+      "i18next",
+      "qwik",
+      "convex",
+      "lit",
+      "lexical",
+      "obsidian",
+      "content-collections",
+      "contentlayer",
+      "fumadocs",
+      "mintlify",
+      "velite",
+      "ember",
+      "vite",
+      "vscode",
+      "webpack",
+      "rollup",
+      "rolldown",
+      "rspack",
+      "rsbuild",
+      "tsup",
+      "tsdown",
+      "pkg-utils",
+      "parcel",
+      "vitest",
+      "jest",
+      "playwright",
+      "cypress",
+      "mocha",
+      "ava",
+      "tap",
+      "tsd",
+      "k6",
+      "storybook",
+      "stryker",
+      "karma",
+      "cucumber",
+      "webdriverio",
+      "eslint",
+      "biome",
+      "stylelint",
+      "prettier",
+      "oxlint",
+      "markdownlint",
+      "cspell",
+      "remark",
+      "typescript",
+      "babel",
+      "swc",
+      "tailwind",
+      "postcss",
+      "unocss",
+      "pandacss",
+      "prisma",
+      "drizzle",
+      "knex",
+      "typeorm",
+      "kysely",
+      "turborepo",
+      "nx",
+      "changesets",
+      "syncpack",
+      "commitlint",
+      "commitizen",
+      "commit-and-tag-version",
+      "semantic-release",
+      "danger",
+      "hardhat",
+      "vercel",
+      "wrangler",
+      "opennext-cloudflare",
+      "sentry",
+      "husky",
+      "lint-staged",
+      "lefthook",
+      "simple-git-hooks",
+      "svgo",
+      "svgr",
+      "graphql-codegen",
+      "typedoc",
+      "openapi-ts",
+      "plop",
+      "c8",
+      "nyc",
+      "msw",
+      "napi-rs",
+      "opencode",
+      "nodemon",
+      "pm2",
+      "dependency-cruiser",
+      "wuchale",
+      "varlock",
+      "pnpm",
+      "bun"
+    ]
+  },
+  "task_matrix": [
+    {
+      "task": "delete an \"unused\" export or file",
+      "command": "fallow dead-code --trace <file>:<export>",
+      "note": null
+    },
+    {
+      "task": "delete an \"unused\" dependency",
+      "command": "fallow dead-code --trace-dependency <name>",
+      "note": null
+    },
+    {
+      "task": "commit or open a PR",
+      "command": "fallow audit --base <ref>",
+      "note": null
+    },
+    {
+      "task": "prioritize refactoring",
+      "command": "fallow health --hotspots --targets",
+      "note": null
+    },
+    {
+      "task": "ask who owns code",
+      "command": "fallow health --ownership",
+      "note": null
+    },
+    {
+      "task": "check untested-but-reachable code",
+      "command": "fallow health --coverage-gaps",
+      "note": null
+    },
+    {
+      "task": "consolidate duplication",
+      "command": "fallow dupes --trace dup:<fingerprint>",
+      "note": null
+    },
+    {
+      "task": "find feature flags",
+      "command": "fallow flags",
+      "note": null
+    },
+    {
+      "task": "surface security candidates",
+      "command": "fallow security",
+      "note": null
+    },
+    {
+      "task": "understand a finding",
+      "command": "fallow explain <issue-type>",
+      "note": null
+    },
+    {
+      "task": "scope a monorepo",
+      "command": "--workspace <glob> / --changed-workspaces <ref>",
+      "note": "global flags, prefix any command"
+    }
+  ]
+}

@@ -45,7 +45,7 @@ Use this as the default map for a new finding:
 - Total counts: if a new serialized `AnalysisResults` array contributes to `total_issues()`, add it to `TOTAL_ISSUE_RESULT_KEYS` and set the metadata row's `counts_in_total`. If the array is advisory, keep `counts_in_total` false so schema consumers know not to gate PR summary surfaces on it.
 - Actions: add suppress, fix, trace, or config actions when agents can act on the finding safely.
 - LSP and MCP: prefer the shared metadata row for contract facts. Keep editor and agent guidance hand-written where nuance matters.
-- Schemas and generated types: run `npm run generate:all` after changing generated contract surfaces.
+- Contract bundle: run `npm run generate:all` after changing schema, output, issue registry, CLI capability, TS type, NAPI type, or agent-doc surfaces.
 - Docs: update this guide or `docs/plugin-authoring.md` when the workflow changes.
 
 ## Detection Shape
@@ -93,7 +93,8 @@ regression when the rule depends on framework conventions.
 ## Regeneration
 
 After touching schema, generated types, config schemas, plugin schemas, rule-pack
-schemas, or agent-facing docs, run:
+schemas, issue registry metadata, CLI capability metadata, NAPI types, or
+agent-facing docs, run:
 
 ```bash
 npm run generate:all
@@ -105,4 +106,7 @@ Before opening a PR, run:
 npm run generate:all:check
 ```
 
-The check command fails on drift without rewriting committed files.
+The check command fails on drift without rewriting committed files. It verifies
+the full generated contract bundle: config/plugin/rule-pack schemas, output
+schema, npm `schema.json`, npm `capabilities.json`, TS output contracts, NAPI
+types, and agent-facing docs.
