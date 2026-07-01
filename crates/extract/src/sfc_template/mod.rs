@@ -87,8 +87,10 @@ pub fn collect_template_usage_with_bound_targets(
     iterable_types: &FxHashMap<String, String>,
 ) -> TemplateUsage {
     match kind {
-        // `iterable_types` (v-for loop-variable element classes) is a Vue-only
-        // concept; Svelte `{#each}` is out of scope for issue #1707.
+        // `iterable_types` maps a template-visible binding to its array element
+        // class; both scanners consume it to type an iteration variable (Vue
+        // `v-for`, Svelte `{#each}`) so member accesses on the item credit the
+        // element class. See issue #1707 and its follow-up.
         SfcKind::Vue => vue::collect_template_usage_with_bound_targets(
             source,
             imported_bindings,
