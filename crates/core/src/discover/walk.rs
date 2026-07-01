@@ -769,6 +769,45 @@ mod tests {
     }
 
     #[test]
+    fn file_id_assignment_recomputes_after_rename_or_delete() {
+        let before = assign_file_ids(vec![
+            (std::path::PathBuf::from("/project/src/a.ts"), 10),
+            (std::path::PathBuf::from("/project/src/b.ts"), 10),
+            (std::path::PathBuf::from("/project/src/c.ts"), 10),
+        ]);
+        let after_delete = assign_file_ids(vec![
+            (std::path::PathBuf::from("/project/src/a.ts"), 10),
+            (std::path::PathBuf::from("/project/src/c.ts"), 10),
+        ]);
+        let after_rename = assign_file_ids(vec![
+            (std::path::PathBuf::from("/project/src/a.ts"), 10),
+            (std::path::PathBuf::from("/project/src/c.ts"), 10),
+            (std::path::PathBuf::from("/project/src/d.ts"), 10),
+        ]);
+
+        assert_eq!(before[0].id, FileId(0));
+        assert_eq!(before[1].id, FileId(1));
+        assert_eq!(before[2].id, FileId(2));
+        assert_eq!(after_delete[0].id, FileId(0));
+        assert_eq!(after_delete[1].id, FileId(1));
+        assert_eq!(
+            after_delete[1].path,
+            std::path::PathBuf::from("/project/src/c.ts")
+        );
+        assert_eq!(after_rename[0].id, FileId(0));
+        assert_eq!(after_rename[1].id, FileId(1));
+        assert_eq!(
+            after_rename[1].path,
+            std::path::PathBuf::from("/project/src/c.ts")
+        );
+        assert_eq!(after_rename[2].id, FileId(2));
+        assert_eq!(
+            after_rename[2].path,
+            std::path::PathBuf::from("/project/src/d.ts")
+        );
+    }
+
+    #[test]
     fn allowed_hidden_dirs() {
         assert!(is_allowed_hidden_dir(OsStr::new(".storybook")));
         assert!(is_allowed_hidden_dir(OsStr::new(".vitepress")));

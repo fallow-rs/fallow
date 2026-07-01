@@ -325,6 +325,45 @@ mod tests {
     }
 
     #[test]
+    fn manifest_misses_on_file_rename_with_same_fingerprint() {
+        let before = vec![file(0, "/project/src/old.ts")];
+        let after = vec![file(0, "/project/src/new.ts")];
+        let map = fingerprints(&[
+            ("/project/src/old.ts", SourceFingerprint::new(10, 1)),
+            ("/project/src/new.ts", SourceFingerprint::new(10, 1)),
+        ]);
+
+        let cached = manifest(&before, mode(), &map);
+        let current = manifest(&after, mode(), &map);
+
+        assert!(!cached.matches_inputs(&current));
+    }
+
+    #[test]
+    fn manifest_misses_on_workspace_scoped_file_set() {
+        let full_project = vec![
+            file(0, "/project/packages/app/src/index.ts"),
+            file(1, "/project/packages/shared/src/index.ts"),
+        ];
+        let workspace_scoped = vec![file(0, "/project/packages/app/src/index.ts")];
+        let map = fingerprints(&[
+            (
+                "/project/packages/app/src/index.ts",
+                SourceFingerprint::new(10, 1),
+            ),
+            (
+                "/project/packages/shared/src/index.ts",
+                SourceFingerprint::new(20, 1),
+            ),
+        ]);
+
+        let cached = manifest(&full_project, mode(), &map);
+        let current = manifest(&workspace_scoped, mode(), &map);
+
+        assert!(!cached.matches_inputs(&current));
+    }
+
+    #[test]
     fn manifest_misses_on_mode_change() {
         let files = vec![file(0, "/project/src/a.ts")];
         let map = fingerprints(&[("/project/src/a.ts", SourceFingerprint::new(10, 1))]);

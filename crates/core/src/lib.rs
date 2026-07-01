@@ -2629,6 +2629,20 @@ mod tests {
     }
 
     #[test]
+    fn graph_cache_resolver_hash_includes_resolve_conditions() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let config_a = session_config(dir.path());
+        let mut config_b = session_config(dir.path());
+        config_b.resolve.conditions.push("react-server".to_string());
+
+        assert_ne!(
+            resolver_options_hash(&config_a),
+            resolver_options_hash(&config_b),
+            "resolve condition changes must invalidate the graph cache"
+        );
+    }
+
+    #[test]
     fn graph_cache_plugin_hash_includes_auto_imports() {
         let mut without_auto_import = plugin_result();
         let mut with_auto_import = plugin_result();

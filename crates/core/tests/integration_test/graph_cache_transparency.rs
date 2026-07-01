@@ -207,6 +207,67 @@ fn file_deletion_misses_cache_and_reflects_change() {
     );
 }
 
+/// A rename must MISS the cache and the next result must use the new path,
+/// even when the file contents are byte-identical.
+#[test]
+fn file_rename_misses_cache_and_reflects_new_path() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_tree(&fixture_path("basic-project"), &root);
+    let cache_dir = temp.path().join("cache");
+
+    let config = create_config_with_cache(root.clone(), cache_dir.clone());
+
+    let before = fallow_core::analyze(&config).expect("cold analysis");
+    assert!(
+        before
+            .unused_files
+            .iter()
+            .any(|issue| issue.file.path.ends_with("src/orphan.ts")),
+        "fixture should expose the file that will be renamed"
+    );
+
+    std::fs::rename(
+        root.join("src/orphan.ts"),
+        root.join("src/renamed-orphan.ts"),
+    )
+    .expect("rename unused fixture file");
+
+    let files = fallow_core::discover::discover_files(&config);
+    let current = GraphCacheManifest::from_discovered_files(
+        &config.root,
+        &files,
+        GraphCacheMode::new(0, 0, 0),
+        |path| {
+            std::fs::metadata(path).map_or(SourceFingerprint::new(0, 0), |m| {
+                SourceFingerprint::from_metadata(&m)
+            })
+        },
+    );
+    let store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
+        .expect("persisted graph cache exists after cold run");
+    assert!(
+        !store.manifest.matches_inputs(&current),
+        "a renamed source file must invalidate the persisted graph-cache manifest"
+    );
+
+    let after = fallow_core::analyze(&config).expect("analysis after rename");
+    assert!(
+        after
+            .unused_files
+            .iter()
+            .all(|issue| !issue.file.path.ends_with("src/orphan.ts")),
+        "old source path must not survive through a graph-cache hit"
+    );
+    assert!(
+        after
+            .unused_files
+            .iter()
+            .any(|issue| issue.file.path.ends_with("src/renamed-orphan.ts")),
+        "renamed source path must be analyzed after cache invalidation"
+    );
+}
+
 /// Resolve a real-world benchmark fixture path. These are gitignored symlinks
 /// that may be absent on a fresh checkout, so callers skip when missing.
 fn benchmark_fixture_path(name: &str) -> std::path::PathBuf {
