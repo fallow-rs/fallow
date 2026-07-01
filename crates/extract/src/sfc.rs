@@ -403,6 +403,7 @@ pub(crate) fn parse_sfc_to_module(
     let mut combined = empty_sfc_module(file_id, source, content_hash);
     let mut template_visible_imports: FxHashSet<String> = FxHashSet::default();
     let mut template_visible_bound_targets: FxHashMap<String, String> = FxHashMap::default();
+    let mut template_visible_iterable_types: FxHashMap<String, String> = FxHashMap::default();
     let mut props_return_binding: Option<String> = None;
     let mut emit_return_binding: Option<String> = None;
 
@@ -413,6 +414,7 @@ pub(crate) fn parse_sfc_to_module(
             combined: &mut combined,
             template_visible_imports: &mut template_visible_imports,
             template_visible_bound_targets: &mut template_visible_bound_targets,
+            template_visible_iterable_types: &mut template_visible_iterable_types,
             props_return_binding: &mut props_return_binding,
             emit_return_binding: &mut emit_return_binding,
             need_complexity,
@@ -438,6 +440,7 @@ pub(crate) fn parse_sfc_to_module(
         source,
         template_visible_imports: &template_visible_imports,
         template_visible_bound_targets: &template_visible_bound_targets,
+        template_visible_iterable_types: &template_visible_iterable_types,
         props_return_binding: props_return_binding.as_deref(),
         credit_load_data: kind == SfcKind::Svelte && is_sveltekit_route_data_component(path),
         combined: &mut combined,
@@ -564,6 +567,7 @@ struct SfcScriptMergeInput<'a> {
     combined: &'a mut ModuleInfo,
     template_visible_imports: &'a mut FxHashSet<String>,
     template_visible_bound_targets: &'a mut FxHashMap<String, String>,
+    template_visible_iterable_types: &'a mut FxHashMap<String, String>,
     props_return_binding: &'a mut Option<String>,
     emit_return_binding: &'a mut Option<String>,
     need_complexity: bool,
@@ -705,6 +709,16 @@ fn harvest_template_visible_bindings(
                     .class_name()
                     .map(|class_name| (local.clone(), class_name.to_string()))
             }),
+    );
+    // Array / reactive-array binding element classes, so the Vue template
+    // scanner can type a `v-for` loop variable to its source's element class
+    // (issue #1707). `this.`-filtered for parity with bound targets.
+    input.template_visible_iterable_types.extend(
+        extractor
+            .array_binding_element_types()
+            .iter()
+            .filter(|(local, _)| !local.starts_with("this."))
+            .map(|(local, element)| (local.clone(), element.clone())),
     );
 }
 
@@ -943,6 +957,7 @@ struct TemplateUsageInput<'a> {
     source: &'a str,
     template_visible_imports: &'a FxHashSet<String>,
     template_visible_bound_targets: &'a FxHashMap<String, String>,
+    template_visible_iterable_types: &'a FxHashMap<String, String>,
     props_return_binding: Option<&'a str>,
     credit_load_data: bool,
     combined: &'a mut ModuleInfo,
@@ -954,6 +969,7 @@ fn apply_template_usage(input: TemplateUsageInput<'_>) {
         source,
         template_visible_imports,
         template_visible_bound_targets,
+        template_visible_iterable_types,
         props_return_binding,
         credit_load_data,
         combined,
@@ -970,6 +986,7 @@ fn apply_template_usage(input: TemplateUsageInput<'_>) {
         source,
         &credited,
         template_visible_bound_targets,
+        template_visible_iterable_types,
         credit_load_data,
     );
     apply_prop_template_credit(&template_usage, props_return_binding, combined);
@@ -1027,18 +1044,26 @@ fn compute_template_usage(
     source: &str,
     credited: &FxHashSet<String>,
     template_visible_bound_targets: &FxHashMap<String, String>,
+    template_visible_iterable_types: &FxHashMap<String, String>,
     credit_load_data: bool,
 ) -> crate::template_usage::TemplateUsage {
     if credit_load_data && template_visible_bound_targets.contains_key("data") {
         let mut filtered = template_visible_bound_targets.clone();
         filtered.remove("data");
-        collect_template_usage_with_bound_targets(kind, source, credited, &filtered)
+        collect_template_usage_with_bound_targets(
+            kind,
+            source,
+            credited,
+            &filtered,
+            template_visible_iterable_types,
+        )
     } else {
         collect_template_usage_with_bound_targets(
             kind,
             source,
             credited,
             template_visible_bound_targets,
+            template_visible_iterable_types,
         )
     }
 }

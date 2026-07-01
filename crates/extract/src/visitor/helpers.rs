@@ -579,6 +579,205 @@ fn extract_query_list_from_type(ty: &TSType<'_>) -> Option<String> {
     }
 }
 
+/// Vue reactivity wrappers whose value (auto-unwrapped in a template) is an
+/// array of the wrapped element type. A `v-for` iterates the unwrapped value, so
+/// the loop item's class is the array element type of the wrapper's payload.
+const VUE_REACTIVITY_WRAPPERS: &[&str] = &[
+    "ref",
+    "computed",
+    "shallowRef",
+    "reactive",
+    "shallowReactive",
+    "readonly",
+    "toRef",
+    "customRef",
+];
+
+/// Extract the element type name of an array-shaped TS type: `T[]`,
+/// `readonly T[]`, `Array<T>`, `ReadonlyArray<T>`, a parenthesized form, and a
+/// nullable union of any of those. Returns the element name only when it is a
+/// non-builtin identifier type reference (a class / interface whose members the
+/// analyze layer can credit); `number[]`, `string[]`, `Map[]`, etc. yield `None`.
+pub(super) fn array_element_type_from_type(ty: &TSType<'_>) -> Option<String> {
+    match ty {
+        TSType::TSArrayType(arr) => {
+            let name = extract_type_reference_name(&arr.element_type)?;
+            (!is_builtin_constructor(&name)).then_some(name)
+        }
+        TSType::TSTypeReference(type_ref) => {
+            let name = extract_type_name(&type_ref.type_name)?;
+            if name != "Array" && name != "ReadonlyArray" {
+                return None;
+            }
+            let first = type_ref.type_arguments.as_deref()?.params.first()?;
+            let element = extract_type_reference_name(first)?;
+            (!is_builtin_constructor(&element)).then_some(element)
+        }
+        TSType::TSTypeOperatorType(op)
+            if op.operator == oxc_ast::ast::TSTypeOperatorOperator::Readonly =>
+        {
+            array_element_type_from_type(&op.type_annotation)
+        }
+        TSType::TSParenthesizedType(paren) => array_element_type_from_type(&paren.type_annotation),
+        TSType::TSUnionType(union) => {
+            let mut found: Option<String> = None;
+            for branch in &union.types {
+                match branch {
+                    TSType::TSNullKeyword(_) | TSType::TSUndefinedKeyword(_) => {}
+                    other => {
+                        if found.is_some() {
+                            return None;
+                        }
+                        found = array_element_type_from_type(other);
+                        found.as_ref()?;
+                    }
+                }
+            }
+            found
+        }
+        _ => None,
+    }
+}
+
+/// Infer the element class of an array-shaped binding from its optional type
+/// annotation and optional initializer. The annotation is authoritative when
+/// present; otherwise the initializer is inspected for a Vue reactivity wrapper
+/// (`computed<Util[]>(...)` generic arg, or a callback returning a typed array),
+/// or a direct array literal of `new Util()` elements. Returns a non-builtin
+/// class name only; the analyze layer resolves it to the defining export.
+pub(super) fn infer_array_binding_element_type(
+    type_annotation: Option<&TSTypeAnnotation<'_>>,
+    init: Option<&Expression<'_>>,
+) -> Option<String> {
+    if let Some(annotation) = type_annotation {
+        return array_element_type_from_type(&annotation.type_annotation);
+    }
+    infer_array_element_from_init(init?)
+}
+
+fn infer_array_element_from_init(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => {
+            infer_array_element_from_init(&paren.expression)
+        }
+        Expression::ArrayExpression(arr) => array_literal_element_type(arr),
+        Expression::CallExpression(call) => reactivity_wrapper_element_type(call),
+        _ => None,
+    }
+}
+
+fn reactivity_wrapper_element_type(call: &CallExpression<'_>) -> Option<String> {
+    let Expression::Identifier(callee) = &call.callee else {
+        return None;
+    };
+    if !VUE_REACTIVITY_WRAPPERS.contains(&callee.name.as_str()) {
+        return None;
+    }
+    if let Some(type_args) = call.type_arguments.as_deref()
+        && let Some(first) = type_args.params.first()
+        && let Some(element) = array_element_type_from_type(first)
+    {
+        return Some(element);
+    }
+    callback_returned_array_element(call.arguments.first()?)
+}
+
+fn callback_returned_array_element(arg: &Argument<'_>) -> Option<String> {
+    match arg {
+        Argument::ArrowFunctionExpression(arrow) => {
+            if arrow.expression {
+                let Statement::ExpressionStatement(stmt) = arrow.body.statements.first()? else {
+                    return None;
+                };
+                return array_literal_element_type_of_expr(&stmt.expression);
+            }
+            function_body_returned_array_element(&arrow.body)
+        }
+        Argument::FunctionExpression(func) => {
+            function_body_returned_array_element(func.body.as_deref()?)
+        }
+        _ => None,
+    }
+}
+
+fn function_body_returned_array_element(body: &oxc_ast::ast::FunctionBody<'_>) -> Option<String> {
+    let Statement::ReturnStatement(ret) = body.statements.last()? else {
+        return None;
+    };
+    match unwrap_returned_expr(ret.argument.as_ref()?) {
+        Expression::ArrayExpression(arr) => array_literal_element_type(arr),
+        // `const utls: Util[] = []; ...; return utls` (the issue #1707 repro):
+        // resolve the returned local's declared array element type.
+        Expression::Identifier(id) => local_typed_array_element(&body.statements, &id.name),
+        _ => None,
+    }
+}
+
+fn unwrap_returned_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => unwrap_returned_expr(&paren.expression),
+        other => other,
+    }
+}
+
+fn array_literal_element_type_of_expr(expr: &Expression<'_>) -> Option<String> {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => {
+            array_literal_element_type_of_expr(&paren.expression)
+        }
+        Expression::ArrayExpression(arr) => array_literal_element_type(arr),
+        _ => None,
+    }
+}
+
+/// The element class of an array literal whose elements are ALL `new Class()`
+/// with the same non-builtin `Class`. Empty arrays, mixed classes, and any
+/// non-`new` element yield `None` (no confident single element type).
+fn array_literal_element_type(arr: &oxc_ast::ast::ArrayExpression<'_>) -> Option<String> {
+    let mut element: Option<String> = None;
+    for item in &arr.elements {
+        let ArrayExpressionElement::NewExpression(new_expr) = item else {
+            return None;
+        };
+        let Expression::Identifier(callee) = &new_expr.callee else {
+            return None;
+        };
+        let name = callee.name.as_str();
+        if is_builtin_constructor(name) {
+            return None;
+        }
+        match &element {
+            Some(existing) if existing != name => return None,
+            Some(_) => {}
+            None => element = Some(name.to_string()),
+        }
+    }
+    element
+}
+
+/// Scan a function body's top-level statements for `const/let <name>: T[]` and
+/// return the array element class of its annotation. Used when a reactivity
+/// callback returns a locally-declared, array-annotated binding.
+fn local_typed_array_element(statements: &[Statement<'_>], name: &str) -> Option<String> {
+    for stmt in statements {
+        let Statement::VariableDeclaration(decl) = stmt else {
+            continue;
+        };
+        for declarator in &decl.declarations {
+            let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+                continue;
+            };
+            if id.name != name {
+                continue;
+            }
+            if let Some(annotation) = declarator.type_annotation.as_deref() {
+                return array_element_type_from_type(&annotation.type_annotation);
+            }
+        }
+    }
+    None
+}
+
 pub(super) fn has_angular_plural_query_decorator(
     decorators: &[oxc_ast::ast::Decorator<'_>],
 ) -> bool {
@@ -2797,6 +2996,146 @@ export class AppComponent {}
         assert!(
             info.imports.iter().all(|i| !i.source.is_empty()),
             "no unexpected empty-source imports"
+        );
+    }
+
+    // --- infer_array_binding_element_type (issue #1707) ---
+
+    fn element_type_of_first_declarator(source: &str) -> Option<String> {
+        use oxc_allocator::Allocator;
+        use oxc_parser::Parser;
+        use oxc_span::SourceType;
+
+        let allocator = Allocator::default();
+        let ret = Parser::new(&allocator, source, SourceType::ts()).parse();
+        for stmt in &ret.program.body {
+            if let Statement::VariableDeclaration(decl) = stmt
+                && let Some(declarator) = decl.declarations.first()
+            {
+                return infer_array_binding_element_type(
+                    declarator.type_annotation.as_deref(),
+                    declarator.init.as_ref(),
+                );
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn element_type_from_plain_array_annotation() {
+        assert_eq!(
+            element_type_of_first_declarator("const utils: Util[] = []"),
+            Some("Util".to_string())
+        );
+    }
+
+    #[test]
+    fn element_type_from_generic_array_annotations() {
+        assert_eq!(
+            element_type_of_first_declarator("const utils: Array<Util> = []"),
+            Some("Util".to_string())
+        );
+        assert_eq!(
+            element_type_of_first_declarator("const utils: ReadonlyArray<Util> = []"),
+            Some("Util".to_string())
+        );
+    }
+
+    #[test]
+    fn element_type_from_readonly_and_nullable_array_annotations() {
+        assert_eq!(
+            element_type_of_first_declarator("const utils: readonly Util[] = []"),
+            Some("Util".to_string())
+        );
+        assert_eq!(
+            element_type_of_first_declarator("const utils: Util[] | null = null"),
+            Some("Util".to_string())
+        );
+    }
+
+    #[test]
+    fn element_type_from_reactivity_wrapper_generic() {
+        assert_eq!(
+            element_type_of_first_declarator("const utils = ref<Util[]>([])"),
+            Some("Util".to_string())
+        );
+        assert_eq!(
+            element_type_of_first_declarator("const utils = computed<Util[]>(() => [])"),
+            Some("Util".to_string())
+        );
+        assert_eq!(
+            element_type_of_first_declarator("const utils = shallowRef<readonly Util[]>([])"),
+            Some("Util".to_string())
+        );
+    }
+
+    #[test]
+    fn element_type_from_computed_returning_local_typed_array() {
+        // The issue #1707 repro shape: no explicit generic, the callback returns a
+        // locally-declared, array-annotated binding.
+        assert_eq!(
+            element_type_of_first_declarator(
+                "const utils = computed(() => { const utls: Util[] = []; for (let i = 0; i < 10; i++) { utls.push(new Util()) } return utls })"
+            ),
+            Some("Util".to_string())
+        );
+    }
+
+    #[test]
+    fn element_type_from_computed_returning_new_array_literal() {
+        assert_eq!(
+            element_type_of_first_declarator("const utils = computed(() => [new Util(), new Util()])"),
+            Some("Util".to_string())
+        );
+    }
+
+    #[test]
+    fn element_type_from_direct_new_array_literal() {
+        assert_eq!(
+            element_type_of_first_declarator("const utils = [new Util(), new Util()]"),
+            Some("Util".to_string())
+        );
+    }
+
+    #[test]
+    fn element_type_none_for_builtin_element() {
+        assert_eq!(
+            element_type_of_first_declarator("const nums: number[] = []"),
+            None
+        );
+        assert_eq!(
+            element_type_of_first_declarator("const dates = [new Date(), new Date()]"),
+            None
+        );
+    }
+
+    #[test]
+    fn element_type_none_for_mixed_or_non_new_array_literal() {
+        assert_eq!(
+            element_type_of_first_declarator("const utils = [new Util(), new Other()]"),
+            None
+        );
+        assert_eq!(
+            element_type_of_first_declarator("const utils = [makeUtil(), makeUtil()]"),
+            None
+        );
+    }
+
+    #[test]
+    fn element_type_none_for_non_array_and_non_wrapper() {
+        assert_eq!(
+            element_type_of_first_declarator("const util = new Util()"),
+            None
+        );
+        assert_eq!(
+            element_type_of_first_declarator("const utils = makeThings()"),
+            None
+        );
+        assert_eq!(
+            element_type_of_first_declarator(
+                "const utils = computed(() => { return someUntyped })"
+            ),
+            None
         );
     }
 }

@@ -197,6 +197,13 @@ pub(crate) struct ModuleInfoExtractor {
     interface_property_types: FxHashMap<String, FxHashMap<String, String>>,
     pending_typed_destructures: Vec<(String, String, String)>,
     iterable_element_types: FxHashMap<String, String>,
+    /// Module-scope value bindings whose type is an array (or Vue reactive array)
+    /// of a non-builtin class, keyed by binding name -> element class name. Read
+    /// by the Vue SFC template scanner to type a `v-for` loop variable to its
+    /// source iterable's element class so template member accesses on the item
+    /// (`{{ util.getter }}`) credit the class. Transient extractor state, not a
+    /// cached `ModuleInfo` field (mirrors `binding_target_names`).
+    array_binding_element_types: FxHashMap<String, String>,
     object_binding_candidates: Vec<ObjectBindingCandidate>,
     local_declaration_names: FxHashSet<String>,
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
@@ -605,6 +612,10 @@ impl ModuleInfoExtractor {
 
     pub(crate) fn binding_target_names(&self) -> &FxHashMap<String, BindingTarget> {
         &self.binding_target_names
+    }
+
+    pub(crate) fn array_binding_element_types(&self) -> &FxHashMap<String, String> {
+        &self.array_binding_element_types
     }
 
     fn insert_class_binding_target(&mut self, binding: String, target: String) {

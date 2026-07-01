@@ -686,7 +686,14 @@ use crate::MemberKind;
 /// member access, so an implicitly-coerced `toString` is credited instead of
 /// reported as an unused class member. A warm cache from 214 lacks the
 /// synthesized `toString` accesses.
-pub(super) const CACHE_VERSION: u32 = 215;
+///
+/// Bumped to 216 (issue #1707): a Vue `v-for` loop variable iterating over a
+/// typed array / reactive array of a class (`v-for="(util) of utils"` where
+/// `utils` is `Util[]` / `computed(() => Util[])`) now types the item to its
+/// element class, so template member accesses on the item (`{{ util.getter }}`)
+/// credit the class. A warm cache from 215 carries the stale `.vue`
+/// `member_accesses` that lack the credited item-member accesses.
+pub(super) const CACHE_VERSION: u32 = 216;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

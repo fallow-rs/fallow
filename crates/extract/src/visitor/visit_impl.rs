@@ -27,9 +27,9 @@ use super::helpers::{
     extract_custom_element_tag_reference, extract_custom_elements_define,
     extract_implemented_interface_names, extract_nested_type_bindings,
     extract_query_list_element_type, extract_super_class_name, extract_type_annotation_name,
-    has_angular_class_decorator, has_angular_plural_query_decorator, is_meta_url_arg,
-    lit_custom_element_decorator, lit_custom_element_tag, regex_pattern_to_suffix,
-    ts_import_type_qualifier_root,
+    has_angular_class_decorator, has_angular_plural_query_decorator,
+    infer_array_binding_element_type, is_meta_url_arg, lit_custom_element_decorator,
+    lit_custom_element_tag, regex_pattern_to_suffix, ts_import_type_qualifier_root,
 };
 use super::{
     BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, SideEffectRegistrationTarget,
@@ -1187,6 +1187,18 @@ impl<'a> ModuleInfoExtractor {
                 .entry(id.name.to_string())
                 .or_default()
                 .push(classify_factory_assigned_value(init));
+
+            // Type a module-scope array / reactive-array binding to its element
+            // class so the Vue SFC template scanner can credit `v-for`
+            // loop-variable member accesses (`{{ util.getter }}`). Over-credit
+            // only (never adds a finding); consumed solely by the Vue template
+            // scan. See issue #1707.
+            if let Some(element) =
+                infer_array_binding_element_type(declarator.type_annotation.as_deref(), Some(init))
+            {
+                self.array_binding_element_types
+                    .insert(id.name.to_string(), element);
+            }
         }
 
         // FP-1 (unused-load-data-key): `const X = data` passes the whole
