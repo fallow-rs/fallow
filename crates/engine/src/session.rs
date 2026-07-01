@@ -13,7 +13,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::{
     DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput, DuplicationAnalysis,
     EngineResult, core_backend, duplicates,
-    project_analysis::{ProjectAnalysisArtifacts, ProjectAnalysisOutput},
+    project_analysis::{
+        ProjectAnalysisArtifactOptions, ProjectAnalysisArtifacts, ProjectAnalysisOutput,
+    },
     project_config::{ProjectConfig, config_for_project, default_project_config},
 };
 
@@ -380,21 +382,14 @@ impl AnalysisSession {
         duplicates_config: &DuplicatesConfig,
         retain_complexity_artifacts: bool,
     ) -> EngineResult<ProjectAnalysisOutput> {
-        let dead_code = if retain_complexity_artifacts {
-            self.analyze_dead_code_with_complexity()?
-        } else {
-            let analysis = self.analyze_dead_code()?;
-            DeadCodeAnalysisOutput {
-                results: analysis.results,
-                modules: None,
-                files: None,
-            }
-        };
-        let duplication = self.find_duplicates_with(duplicates_config);
-        Ok(ProjectAnalysisOutput {
-            dead_code,
-            duplication,
-        })
+        self.analyze_project_with_artifacts(
+            duplicates_config,
+            ProjectAnalysisArtifactOptions {
+                retain_complexity_artifacts,
+                ..ProjectAnalysisArtifactOptions::default()
+            },
+        )
+        .map(ProjectAnalysisArtifacts::into_output)
     }
 
     /// Run dead-code and duplication analysis with retained session reuse data.
@@ -409,16 +404,19 @@ impl AnalysisSession {
     pub fn analyze_project_with_artifacts(
         &self,
         duplicates_config: &DuplicatesConfig,
-        retain_complexity_artifacts: bool,
-        retain_graph: bool,
-        changed_files: Option<FxHashSet<PathBuf>>,
+        options: ProjectAnalysisArtifactOptions,
     ) -> EngineResult<ProjectAnalysisArtifacts> {
+        let source_fingerprints = options
+            .collect_source_fingerprints
+            .then(|| self.source_fingerprints());
         Ok(ProjectAnalysisArtifacts {
-            dead_code: self
-                .analyze_dead_code_with_artifacts(retain_complexity_artifacts, retain_graph)?,
+            dead_code: self.analyze_dead_code_with_artifacts(
+                options.retain_complexity_artifacts,
+                options.retain_graph,
+            )?,
             duplication: self.find_duplicates_with(duplicates_config),
-            changed_files,
-            source_fingerprints: self.source_fingerprints(),
+            changed_files: options.changed_files,
+            source_fingerprints,
         })
     }
 

@@ -320,6 +320,7 @@ fn api_and_cli_do_not_use_removed_engine_root_adapter_exports() {
         for forbidden in [
             "fallow_engine::AnalysisSession",
             "fallow_engine::AnalysisSessionArtifacts",
+            "fallow_engine::ProjectAnalysisArtifactOptions",
             "fallow_engine::ProjectAnalysisOutput",
             "fallow_engine::ProjectAnalysisArtifacts",
             "fallow_engine::ProjectConfig",

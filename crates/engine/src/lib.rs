@@ -140,6 +140,7 @@ pub fn health_shared_parse_data_from_artifacts(
 mod tests {
     use super::*;
     use crate::{
+        project_analysis::ProjectAnalysisArtifactOptions,
         project_config::{ProjectConfigOptions, config_for_project, config_for_project_analysis},
         session::AnalysisSession,
     };
@@ -378,9 +379,12 @@ mod tests {
         let artifacts = session
             .analyze_project_with_artifacts(
                 &session.config().duplicates,
-                true,
-                true,
-                Some(changed_files),
+                ProjectAnalysisArtifactOptions {
+                    retain_complexity_artifacts: true,
+                    retain_graph: true,
+                    changed_files: Some(changed_files),
+                    collect_source_fingerprints: true,
+                },
             )
             .expect("project analysis succeeds");
 
@@ -394,11 +398,23 @@ mod tests {
         assert!(
             artifacts
                 .source_fingerprints
-                .get(&source)
+                .as_ref()
+                .and_then(|fingerprints| fingerprints.get(&source))
                 .is_some_and(|fingerprint| fingerprint.file_size > 0)
         );
 
-        let output = artifacts.into_output(true);
+        let lightweight = session
+            .analyze_project_with_artifacts(
+                &session.config().duplicates,
+                ProjectAnalysisArtifactOptions::default(),
+            )
+            .expect("project analysis succeeds");
+        assert!(
+            lightweight.source_fingerprints.is_none(),
+            "source fingerprints should be opt-in for lightweight editor analysis"
+        );
+
+        let output = artifacts.into_output();
         assert!(output.dead_code.modules.is_some());
         assert!(output.dead_code.files.is_some());
     }

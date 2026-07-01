@@ -100,22 +100,18 @@ pub struct ProjectAnalysisArtifacts {
     pub dead_code: DeadCodeAnalysisArtifacts,
     pub duplication: duplicates::DuplicationReport,
     pub changed_files: Option<FxHashSet<PathBuf>>,
-    pub source_fingerprints: FxHashMap<PathBuf, SourceFingerprint>,
+    pub source_fingerprints: Option<FxHashMap<PathBuf, SourceFingerprint>>,
 }
 
 impl ProjectAnalysisArtifacts {
     /// Drop retained reuse-only artifacts and return the stable project output.
     #[must_use]
-    pub fn into_output(self, retain_complexity_artifacts: bool) -> ProjectAnalysisOutput {
+    pub fn into_output(self) -> ProjectAnalysisOutput {
         ProjectAnalysisOutput {
             dead_code: DeadCodeAnalysisOutput {
                 results: self.dead_code.results,
-                modules: retain_complexity_artifacts
-                    .then_some(self.dead_code.modules)
-                    .flatten(),
-                files: retain_complexity_artifacts
-                    .then_some(self.dead_code.files)
-                    .flatten(),
+                modules: self.dead_code.modules,
+                files: self.dead_code.files,
             },
             duplication: self.duplication,
         }
