@@ -13,6 +13,7 @@ use std::path::Path;
 
 use fallow_config::{FallowConfig, OutputFormat};
 use fallow_core::graph_cache::{GraphCacheManifest, GraphCacheMode};
+use fallow_types::discover::FileId;
 use fallow_types::source_fingerprint::SourceFingerprint;
 
 use super::common::{create_config_with_cache, fixture_path};
@@ -390,6 +391,66 @@ fn warm_graph_cache_hit_skips_import_resolution() {
         warm_timings.resolve_imports_ms.abs() <= f64::EPSILON,
         "warm graph-cache hit must skip import resolution, got {}ms",
         warm_timings.resolve_imports_ms
+    );
+}
+
+#[test]
+#[expect(
+    deprecated,
+    reason = "trace timings are still the internal contract for this cache performance gate"
+)]
+fn resolver_cache_hit_rebuilds_graph_when_file_ids_shift() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    copy_tree(&fixture_path("barrel-exports"), &root);
+    let cache_dir = temp.path().join("cache");
+
+    let config = create_config_with_cache(root, cache_dir.clone());
+
+    let cold = fallow_core::analyze_with_trace(&config).expect("cold analysis");
+    let mut store = fallow_core::graph_cache::GraphCacheStore::load(&cache_dir)
+        .expect("persisted graph cache exists after cold run");
+    let current = current_manifest_with_cached_mode(&config, &store);
+
+    for file in &mut store.manifest.files {
+        file.file_id = FileId(file.file_id.0 + 10_000);
+    }
+    store.graph.modules.clear();
+    store.graph.package_usage.clear();
+    store.graph.type_only_package_usage.clear();
+    store.graph.entry_points.clear();
+    store.graph.runtime_entry_points.clear();
+    store.graph.test_entry_points.clear();
+    store.graph.reverse_deps.clear();
+
+    assert!(
+        !store.manifest.matches_inputs(&current),
+        "shifted FileIds must not trust the persisted graph"
+    );
+    assert!(
+        store.manifest.matches_resolution_inputs(&current),
+        "stable file keys and fingerprints should still allow resolver reuse"
+    );
+    store.save(&cache_dir);
+
+    let warm = fallow_core::analyze_with_trace(&config).expect("resolver-cache analysis");
+    let cold_json = serde_json::to_value(&cold.results).expect("serialize cold results");
+    let warm_json = serde_json::to_value(&warm.results).expect("serialize warm results");
+    assert_eq!(
+        cold_json, warm_json,
+        "resolver-cache hit must rebuild the graph and preserve analysis output"
+    );
+
+    let warm_timings = warm.timings.expect("trace timings retained");
+    assert!(
+        warm_timings.resolve_imports_ms.abs() <= f64::EPSILON,
+        "resolver-cache hit must skip import resolution, got {}ms",
+        warm_timings.resolve_imports_ms
+    );
+    assert!(
+        warm_timings.build_graph_ms > f64::EPSILON,
+        "resolver-cache hit must rebuild the graph, got {}ms",
+        warm_timings.build_graph_ms
     );
 }
 
