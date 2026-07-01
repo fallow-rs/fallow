@@ -1,0 +1,8 @@
+{
+  "name": "issue-1707-vue-vfor-class-member",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "vue": "^3.5.0"
+  }
+}

@@ -346,6 +346,9 @@ mod issue_1638_openlayers_dispatch;
 #[path = "integration_test/issue_1638_tostring_coercion.rs"]
 mod issue_1638_tostring_coercion;
 
+#[path = "integration_test/issue_1707_vue_vfor_class_member.rs"]
+mod issue_1707_vue_vfor_class_member;
+
 #[path = "integration_test/issue_843_nestjs_lifecycle.rs"]
 mod issue_843_nestjs_lifecycle;
 
