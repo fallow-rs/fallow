@@ -309,6 +309,44 @@ mod tests {
     }
 
     #[test]
+    fn analysis_session_reparses_when_cached_source_changes() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(
+            src.join("index.ts"),
+            "import { value } from './util';\nconsole.log(value);\n",
+        )
+        .expect("entry file");
+        let util_path = src.join("util.ts");
+        std::fs::write(&util_path, "export const value = 1;\n").expect("source file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        let first = session
+            .analyze_project_with(&fallow_config::DuplicatesConfig::default(), true)
+            .expect("first analysis succeeds");
+        assert!(first.dead_code.results.unused_exports.is_empty());
+
+        std::fs::write(
+            &util_path,
+            "export const value = 1;\nexport const addedUnused = 2;\n",
+        )
+        .expect("updated source file");
+
+        let second = session
+            .analyze_project_with(&fallow_config::DuplicatesConfig::default(), true)
+            .expect("second analysis succeeds");
+        assert!(
+            second
+                .dead_code
+                .results
+                .unused_exports
+                .iter()
+                .any(|finding| finding.export.export_name == "addedUnused")
+        );
+    }
+
+    #[test]
     fn analysis_session_returns_combined_project_analysis() {
         let temp = tempfile::tempdir().expect("tempdir");
         let src = temp.path().join("src");

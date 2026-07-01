@@ -1,6 +1,7 @@
 //! Engine-owned analysis session orchestration.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use fallow_config::{DuplicatesConfig, ResolvedConfig};
@@ -32,6 +33,14 @@ pub struct AnalysisSession {
     config_path: Option<PathBuf>,
     discovery: crate::discover::AnalysisDiscovery,
     workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    parsed_cache: Mutex<Option<ParsedModuleCache>>,
+}
+
+#[derive(Debug)]
+struct ParsedModuleCache {
+    need_complexity: bool,
+    fingerprints: Vec<SourceFingerprint>,
+    modules: Vec<ModuleInfo>,
 }
 
 /// Owned session parts for runners that need to continue an existing pipeline.
@@ -105,14 +114,12 @@ impl<'a> AnalysisSessionView<'a> {
         need_complexity: bool,
         retain_graph: bool,
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {
-        let ParsedModules {
-            parse_result,
-            metrics,
-        } = parse_files_with_config(self.config, self.discovery.files(), need_complexity);
+        let ParsedModules { modules, metrics } =
+            parse_files_with_config(self.config, self.discovery.files(), need_complexity);
         run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
             config: self.config,
             discovery: &self.discovery,
-            modules: parse_result.modules,
+            modules,
             metrics,
             collect_usages: true,
             retain_graph,
@@ -170,6 +177,7 @@ impl AnalysisSession {
             config_path: project_config.path,
             discovery,
             workspace_diagnostics,
+            parsed_cache: Mutex::new(None),
         }
     }
 
@@ -263,21 +271,19 @@ impl AnalysisSession {
             files,
             workspace_diagnostics,
         } = self.into_parts();
-        let ParsedModules {
-            parse_result,
-            metrics,
-        } = parse_files_with_config(&config, &files, need_complexity);
+        let ParsedModules { modules, metrics } =
+            parse_files_with_config(&config, &files, need_complexity);
         ParsedAnalysisSessionParts {
             config,
             config_path,
             files,
-            modules: parse_result.modules,
+            modules,
             workspace_diagnostics,
             parse_ms: metrics.parse_ms,
             cache_update_ms: metrics.cache_ms,
             cache_hits: metrics.cache_hits,
             cache_misses: metrics.cache_misses,
-            parse_cpu_ms: parse_result.parse_cpu_ms,
+            parse_cpu_ms: metrics.parse_cpu_ms,
         }
     }
 
@@ -317,14 +323,11 @@ impl AnalysisSession {
         need_complexity: bool,
         retain_graph: bool,
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {
-        let ParsedModules {
-            parse_result,
-            metrics,
-        } = parse_files_with_config(&self.config, self.files(), need_complexity);
+        let ParsedModules { modules, metrics } = self.parse_modules(need_complexity);
         run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
             config: &self.config,
             discovery: &self.discovery,
-            modules: parse_result.modules,
+            modules,
             metrics,
             collect_usages: true,
             retain_graph,
@@ -449,6 +452,51 @@ impl AnalysisSession {
             cache_dir,
         )
     }
+
+    fn parse_modules(&self, need_complexity: bool) -> ParsedModules {
+        let fingerprints = source_fingerprints_for_files(self.files());
+        if let Some(fingerprints) = fingerprints.as_ref()
+            && let Some(modules) = self.cached_modules(need_complexity, fingerprints)
+        {
+            return ParsedModules {
+                modules,
+                metrics: core_backend::ParseMetrics {
+                    parse_ms: 0.0,
+                    cache_ms: 0.0,
+                    cache_hits: 0,
+                    cache_misses: 0,
+                    parse_cpu_ms: 0.0,
+                },
+            };
+        }
+
+        let parsed = parse_files_with_config(&self.config, self.files(), need_complexity);
+        if let Some(fingerprints) = fingerprints
+            && let Ok(mut cache) = self.parsed_cache.lock()
+        {
+            *cache = Some(ParsedModuleCache {
+                need_complexity,
+                fingerprints,
+                modules: parsed.modules.clone(),
+            });
+        }
+        parsed
+    }
+
+    fn cached_modules(
+        &self,
+        need_complexity: bool,
+        fingerprints: &[SourceFingerprint],
+    ) -> Option<Vec<ModuleInfo>> {
+        let Ok(cache) = self.parsed_cache.lock() else {
+            return None;
+        };
+        let cache = cache.as_ref()?;
+        if cache.need_complexity == need_complexity && cache.fingerprints == fingerprints {
+            return Some(cache.modules.clone());
+        }
+        None
+    }
 }
 
 pub fn parse_files_for_config(
@@ -456,7 +504,14 @@ pub fn parse_files_for_config(
     files: &[DiscoveredFile],
     need_complexity: bool,
 ) -> ParseResult {
-    parse_files_with_config(config, files, need_complexity).parse_result
+    let ParsedModules { modules, metrics } =
+        parse_files_with_config(config, files, need_complexity);
+    ParseResult {
+        modules,
+        cache_hits: metrics.cache_hits,
+        cache_misses: metrics.cache_misses,
+        parse_cpu_ms: metrics.parse_cpu_ms,
+    }
 }
 
 fn merge_workspace_diagnostics(
@@ -475,7 +530,7 @@ fn merge_workspace_diagnostics(
 }
 
 struct ParsedModules {
-    parse_result: ParseResult,
+    modules: Vec<ModuleInfo>,
     metrics: core_backend::ParseMetrics,
 }
 
@@ -506,9 +561,21 @@ fn parse_files_with_config(
         parse_cpu_ms: parse_result.parse_cpu_ms,
     };
     ParsedModules {
-        parse_result,
+        modules: parse_result.modules,
         metrics,
     }
+}
+
+fn source_fingerprints_for_files(files: &[DiscoveredFile]) -> Option<Vec<SourceFingerprint>> {
+    files
+        .iter()
+        .map(|file| {
+            std::fs::metadata(&file.path)
+                .ok()
+                .map(|metadata| SourceFingerprint::from_metadata(&metadata))
+                .filter(|fingerprint| fingerprint.has_known_mtime())
+        })
+        .collect()
 }
 
 fn update_parse_cache_if_enabled(
