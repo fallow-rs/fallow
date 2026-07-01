@@ -1,4 +1,9 @@
-//! Analysis result types exposed through the engine boundary.
+//! Internal analysis result contracts re-exported through typed engine modules.
+
+#![allow(
+    unused_imports,
+    reason = "private result contract aggregation re-exports types consumed through typed engine modules"
+)]
 
 use std::path::PathBuf;
 use std::time::Duration;

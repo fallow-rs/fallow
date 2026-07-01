@@ -300,6 +300,7 @@ fn engine_adapter_modules_are_explicit_public_boundaries() {
         "pub mod error;",
         "pub mod git_env;",
         "pub mod public_api;",
+        "pub mod results;",
         "pub mod security;",
     ] {
         assert!(

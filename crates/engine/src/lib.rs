@@ -41,7 +41,7 @@ pub mod plugins;
 pub mod project_analysis;
 pub mod project_config;
 mod public_api;
-pub mod results;
+mod results;
 mod security;
 pub mod session;
 pub mod source;
