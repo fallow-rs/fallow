@@ -179,12 +179,46 @@ fn append_health_sarif_results(
 
     append_refactoring_target_sarif_results(sarif_results, report, root);
     append_coverage_gap_sarif_results(sarif_results, report, root, snippets);
+    append_styling_sarif_results(sarif_results, report, root);
+}
+
+/// SARIF results for the styling-domain findings (css-token-drift, ...). Uses the
+/// finding's kebab `code` as the SARIF rule id via the shared issue_meta contract,
+/// so every styling family surfaces uniformly. Advisory (`warning` level).
+fn append_styling_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    report: &HealthReport,
+    root: &Path,
+) {
+    for finding in &report.styling_findings {
+        let uri = relative_uri(std::path::Path::new(&finding.path), root);
+        let message = format!(
+            "[{}] {}: `{}`",
+            finding.code, finding.sub_kind, finding.value
+        );
+        sarif_results.push(sarif_result(
+            &format!("fallow/{}", finding.code),
+            "warning",
+            &message,
+            &uri,
+            Some((finding.line, 1)),
+        ));
+    }
+}
+
+fn health_styling_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<serde_json::Value> {
+    vec![rule_builder(
+        "fallow/css-token-drift",
+        "CSS / CSS-in-JS design-token drift (a hardcoded value where a token exists)",
+        "warning",
+    )]
 }
 
 fn health_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<serde_json::Value> {
     let mut rules = health_complexity_sarif_rules(rule_builder);
     rules.extend(health_runtime_sarif_rules(rule_builder));
     rules.extend(health_coverage_intelligence_sarif_rules(rule_builder));
+    rules.extend(health_styling_sarif_rules(rule_builder));
     rules
 }
 
