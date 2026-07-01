@@ -3,8 +3,9 @@
 //! This crate owns stable report DTOs that are not tied to CLI rendering.
 //! Higher-level output assemblers live above this crate in `fallow-api` or the
 //! CLI, while this crate remains the shared typed boundary those builders and
-//! non-CLI consumers can use. Shared selectors such as `OutputFormat` live in
-//! `fallow-types` and are re-exported here for compatibility.
+//! non-CLI consumers can use. Shared selectors such as `OutputFormat` stay in
+//! `fallow-types`; this crate re-exports only the selectors needed to keep
+//! output builders on one contract surface.
 #![cfg_attr(
     test,
     allow(

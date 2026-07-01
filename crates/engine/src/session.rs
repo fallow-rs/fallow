@@ -49,9 +49,9 @@ pub struct ParsedAnalysisSessionParts {
     pub parse_cpu_ms: f64,
 }
 
-/// Borrowed session view for callers that still expose `&ResolvedConfig`.
+/// Borrowed session view for callers that expose `&ResolvedConfig`.
 ///
-/// This keeps legacy helper signatures intact while routing discovery and
+/// This keeps existing helper signatures intact while routing discovery and
 /// analysis through the same session-owned orchestration shape as
 /// [`AnalysisSession`].
 struct AnalysisSessionView<'a> {

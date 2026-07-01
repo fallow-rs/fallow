@@ -1106,15 +1106,6 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
 
     let (base_ref, base_description) = resolve_base_ref(opts)?;
 
-    // Always sweep: prunable orphans (cache dir externally reaped, git admin
-    // entry left behind) are reclaimed regardless of the age threshold, so the
-    // sweep runs even when age-based GC is disabled (`max_age` is `None`).
-    sweep_old_reusable_caches(
-        opts.root,
-        resolve_cache_max_age(opts.root, opts.config_path.as_ref()),
-        opts.quiet,
-    );
-
     let Some(changed_files) = crate::check::get_changed_files(opts.root, &base_ref) else {
         return Err(emit_error(
             &format!(
@@ -1134,6 +1125,15 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
             start.elapsed(),
         ));
     }
+
+    // Sweep only once audit will do real changed-code work. A clean tree never
+    // creates or reuses a base worktree, so keeping the no-change fast path
+    // free of worktree-listing IO is both safe and visibly cheaper.
+    sweep_old_reusable_caches(
+        opts.root,
+        resolve_cache_max_age(opts.root, opts.config_path.as_ref()),
+        opts.quiet,
+    );
 
     let changed_since = Some(base_ref.as_str());
 

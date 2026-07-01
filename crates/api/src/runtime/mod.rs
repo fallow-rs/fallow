@@ -68,7 +68,7 @@ impl ProgrammaticHealthAnalysis {
     }
 }
 
-/// Health runner output shared by API, NAPI, and compatibility adapters.
+/// Health runner output shared by API, NAPI, and alternate runners.
 ///
 /// Runtime-only presentation probes stay explicit so the API boundary, not the
 /// concrete runner, owns the final programmatic report assembly.
@@ -82,7 +82,7 @@ pub struct ProgrammaticHealthRun {
 /// Runner boundary for programmatic health.
 ///
 /// This keeps embedders on the typed API contract while still allowing tests
-/// and compatibility adapters to provide a custom health runner.
+/// and host integrations to provide a custom health runner.
 pub trait ProgrammaticHealthRunner {
     /// Run health analysis for public programmatic options.
     ///
@@ -101,7 +101,7 @@ pub trait ProgrammaticHealthRunner {
 /// This runs the command-neutral health pipeline through the engine health
 /// runner without touching the CLI crate: the programmatic
 /// path never groups (`--group-by`), never drives the runtime coverage sidecar,
-/// and never records CLI telemetry, so the seams are inert no-ops. NAPI and
+/// and never records CLI telemetry, so the runner hooks are inert. NAPI and
 /// future Rust embedders use this runner; the CLI keeps its own runner for the
 /// `fallow health` command path.
 #[derive(Debug, Clone, Copy, Default)]
