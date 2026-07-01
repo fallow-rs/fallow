@@ -42,6 +42,7 @@ mod git_env_impl;
 pub mod health;
 pub mod module_graph;
 pub mod plugins;
+pub mod project_analysis;
 pub mod project_config;
 mod public_api;
 pub mod results;
@@ -65,7 +66,7 @@ pub use git_env_impl::{AMBIENT_GIT_ENV_VARS, clear_ambient_git_env};
 pub use public_api::public_api_package_entry_points;
 pub use results::{
     DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
-    DeadCodeAnalysisWithHashes, DuplicationAnalysis, HealthAnalysisResult, ProjectAnalysisOutput,
+    DeadCodeAnalysisWithHashes, DuplicationAnalysis, HealthAnalysisResult,
 };
 pub use security::{derive_security_severity, security_catalogue_title};
 pub use suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
@@ -361,6 +362,45 @@ mod tests {
                 .get(&source)
                 .is_some_and(|fingerprint| fingerprint.file_size > 0)
         );
+    }
+
+    #[test]
+    fn analysis_session_returns_project_artifacts_with_reuse_metadata() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        let source = src.join("index.ts");
+        std::fs::write(&source, "export const value = 1;\n").expect("source file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        let mut changed_files = rustc_hash::FxHashSet::default();
+        changed_files.insert(source.clone());
+        let artifacts = session
+            .analyze_project_with_artifacts(
+                &session.config().duplicates,
+                true,
+                true,
+                Some(changed_files),
+            )
+            .expect("project analysis succeeds");
+
+        assert!(artifacts.dead_code.graph.is_some());
+        assert!(
+            artifacts
+                .changed_files
+                .as_ref()
+                .is_some_and(|changed| changed.contains(&source))
+        );
+        assert!(
+            artifacts
+                .source_fingerprints
+                .get(&source)
+                .is_some_and(|fingerprint| fingerprint.file_size > 0)
+        );
+
+        let output = artifacts.into_output(true);
+        assert!(output.dead_code.modules.is_some());
+        assert!(output.dead_code.files.is_some());
     }
 
     #[test]

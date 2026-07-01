@@ -282,6 +282,7 @@ fn engine_adapter_modules_are_explicit_public_boundaries() {
         "pub mod health;",
         "pub mod module_graph;",
         "pub mod plugins;",
+        "pub mod project_analysis;",
         "pub mod project_config;",
         "pub mod session;",
         "pub mod source;",
@@ -319,6 +320,8 @@ fn api_and_cli_do_not_use_removed_engine_root_adapter_exports() {
         for forbidden in [
             "fallow_engine::AnalysisSession",
             "fallow_engine::AnalysisSessionArtifacts",
+            "fallow_engine::ProjectAnalysisOutput",
+            "fallow_engine::ProjectAnalysisArtifacts",
             "fallow_engine::ProjectConfig",
             "fallow_engine::ProjectConfigOptions",
             "fallow_engine::ChangedFilesError",

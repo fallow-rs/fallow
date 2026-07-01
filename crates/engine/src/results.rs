@@ -7,6 +7,7 @@ use fallow_config::ResolvedConfig;
 use fallow_output::{HealthGrouping, HealthReport, HealthTimings};
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
+use fallow_types::source_fingerprint::SourceFingerprint;
 use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -91,6 +92,34 @@ pub struct DeadCodeAnalysisArtifacts {
 pub struct ProjectAnalysisOutput {
     pub dead_code: DeadCodeAnalysisOutput,
     pub duplication: duplicates::DuplicationReport,
+}
+
+/// Typed project analysis result with reusable session artifacts.
+#[derive(Debug)]
+pub struct ProjectAnalysisArtifacts {
+    pub dead_code: DeadCodeAnalysisArtifacts,
+    pub duplication: duplicates::DuplicationReport,
+    pub changed_files: Option<FxHashSet<PathBuf>>,
+    pub source_fingerprints: FxHashMap<PathBuf, SourceFingerprint>,
+}
+
+impl ProjectAnalysisArtifacts {
+    /// Drop retained reuse-only artifacts and return the stable project output.
+    #[must_use]
+    pub fn into_output(self, retain_complexity_artifacts: bool) -> ProjectAnalysisOutput {
+        ProjectAnalysisOutput {
+            dead_code: DeadCodeAnalysisOutput {
+                results: self.dead_code.results,
+                modules: retain_complexity_artifacts
+                    .then_some(self.dead_code.modules)
+                    .flatten(),
+                files: retain_complexity_artifacts
+                    .then_some(self.dead_code.files)
+                    .flatten(),
+            },
+            duplication: self.duplication,
+        }
+    }
 }
 
 /// Typed duplication analysis result.

@@ -442,7 +442,7 @@ pub struct EditorProjectAnalysisOutput {
 }
 
 impl EditorProjectAnalysisOutput {
-    fn from_engine(output: fallow_engine::ProjectAnalysisOutput) -> Self {
+    fn from_engine(output: fallow_engine::project_analysis::ProjectAnalysisOutput) -> Self {
         Self {
             dead_code: EditorDeadCodeAnalysisOutput::from_engine(output.dead_code),
             duplication: output.duplication,

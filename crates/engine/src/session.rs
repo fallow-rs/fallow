@@ -12,7 +12,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput, DuplicationAnalysis,
-    EngineResult, ProjectAnalysisOutput, core_backend, duplicates,
+    EngineResult, core_backend, duplicates,
+    project_analysis::{ProjectAnalysisArtifacts, ProjectAnalysisOutput},
     project_config::{ProjectConfig, config_for_project, default_project_config},
 };
 
@@ -393,6 +394,31 @@ impl AnalysisSession {
         Ok(ProjectAnalysisOutput {
             dead_code,
             duplication,
+        })
+    }
+
+    /// Run dead-code and duplication analysis with retained session reuse data.
+    ///
+    /// This is the engine-owned project artifact boundary for callers that need
+    /// to hand one analysis result across audit, decision, editor, or follow-up
+    /// analysis surfaces without rediscovering session metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if dead-code parsing or analysis fails.
+    pub fn analyze_project_with_artifacts(
+        &self,
+        duplicates_config: &DuplicatesConfig,
+        retain_complexity_artifacts: bool,
+        retain_graph: bool,
+        changed_files: Option<FxHashSet<PathBuf>>,
+    ) -> EngineResult<ProjectAnalysisArtifacts> {
+        Ok(ProjectAnalysisArtifacts {
+            dead_code: self
+                .analyze_dead_code_with_artifacts(retain_complexity_artifacts, retain_graph)?,
+            duplication: self.find_duplicates_with(duplicates_config),
+            changed_files,
+            source_fingerprints: self.source_fingerprints(),
         })
     }
 
