@@ -672,3 +672,25 @@ pub fn analyze_dead_code_with_artifacts_from_config(
 ) -> EngineResult<DeadCodeAnalysisArtifacts> {
     AnalysisSessionView::new(config).analyze_dead_code_with_artifacts(need_complexity, retain_graph)
 }
+
+pub(crate) fn analyze_dead_code_with_parse_result_from_config(
+    config: &ResolvedConfig,
+    modules: &[ModuleInfo],
+) -> EngineResult<DeadCodeAnalysisArtifacts> {
+    let discovery = crate::discover::prepare_analysis_discovery(config);
+    run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
+        config,
+        discovery: &discovery,
+        modules: modules.to_vec(),
+        metrics: core_backend::ParseMetrics {
+            parse_ms: 0.0,
+            cache_ms: 0.0,
+            cache_hits: 0,
+            cache_misses: 0,
+            parse_cpu_ms: 0.0,
+        },
+        collect_usages: true,
+        retain_graph: true,
+        retain_modules: false,
+    })
+}

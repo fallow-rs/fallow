@@ -16,6 +16,7 @@ use crate::{
     session::{
         analyze_dead_code_from_config, analyze_dead_code_with_artifacts_from_config,
         analyze_dead_code_with_complexity_from_config,
+        analyze_dead_code_with_parse_result_from_config,
     },
     source::ModuleInfo,
 };
@@ -89,7 +90,7 @@ pub fn analyze_with_parse_result(
     config: &ResolvedConfig,
     modules: &[ModuleInfo],
 ) -> EngineResult<DeadCodeAnalysisArtifacts> {
-    core_backend::analyze_with_parse_result(config, modules)
+    analyze_dead_code_with_parse_result_from_config(config, modules)
 }
 
 /// Run dead-code analysis with export usage and retained complexity artifacts.

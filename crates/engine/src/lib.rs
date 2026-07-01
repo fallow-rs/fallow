@@ -285,6 +285,30 @@ mod tests {
     }
 
     #[test]
+    fn dead_code_reused_parse_path_uses_engine_pipeline() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(src.join("index.ts"), "import './util';\n").expect("entry file");
+        std::fs::write(src.join("util.ts"), "export const value = 1;\n").expect("source file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        let parts = session.into_parsed_parts(false);
+        let analysis = crate::dead_code::analyze_with_parse_result(&parts.config, &parts.modules)
+            .expect("reused parse analysis succeeds");
+
+        assert!(analysis.graph.is_some());
+        assert!(analysis.modules.is_none());
+        assert!(analysis.files.is_none());
+        assert!(
+            analysis
+                .file_hashes
+                .keys()
+                .any(|path| path.ends_with("util.ts"))
+        );
+    }
+
+    #[test]
     fn analysis_session_returns_combined_project_analysis() {
         let temp = tempfile::tempdir().expect("tempdir");
         let src = temp.path().join("src");

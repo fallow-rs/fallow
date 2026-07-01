@@ -415,6 +415,20 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
             "engine session must own dead-code parse orchestration instead of calling {forbidden}"
         );
     }
+
+    let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
+        .expect("read engine core backend source");
+    assert!(
+        !core_backend.contains("fallow_core::analyze_with_parse_result"),
+        "engine reused-parse analysis must use the engine-owned dead-code phase pipeline"
+    );
+
+    let dead_code =
+        read_source_without_line_comments("crates/engine/src/dead_code.rs").expect("read source");
+    assert!(
+        !dead_code.contains("core_backend::analyze_with_parse_result"),
+        "engine dead-code facade must not delegate reused-parse analysis to the old core monolith"
+    );
 }
 
 #[test]

@@ -26,7 +26,7 @@ use crate::{
     discover::{AnalysisDiscovery, HiddenDirScope},
     engine_error,
     module_graph::RetainedModuleGraph,
-    results::{AnalysisResults, DeadCodeAnalysisArtifacts, DuplicationAnalysis},
+    results::{AnalysisResults, DuplicationAnalysis},
     source::ModuleInfo,
 };
 
@@ -82,19 +82,6 @@ pub fn config_for_project(
 
 pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
     fallow_core::resolve_cache_max_size_bytes(config)
-}
-
-pub fn analyze_with_parse_result(
-    config: &ResolvedConfig,
-    modules: &[ModuleInfo],
-) -> EngineResult<DeadCodeAnalysisArtifacts> {
-    #[expect(
-        deprecated,
-        reason = "fallow-engine is the typed migration boundary over the internal core backend"
-    )]
-    fallow_core::analyze_with_parse_result(config, modules)
-        .map(dead_code_artifacts)
-        .map_err(engine_error)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -329,18 +316,6 @@ impl From<ParseMetrics> for fallow_core::AnalysisParseMetrics {
             cache_misses: metrics.cache_misses,
             parse_cpu_ms: metrics.parse_cpu_ms,
         }
-    }
-}
-
-fn dead_code_artifacts(output: fallow_core::AnalysisOutput) -> DeadCodeAnalysisArtifacts {
-    DeadCodeAnalysisArtifacts {
-        results: output.results,
-        timings: output.timings,
-        graph: output.graph.map(RetainedModuleGraph::from),
-        modules: output.modules,
-        files: output.files,
-        script_used_packages: output.script_used_packages,
-        file_hashes: output.file_hashes,
     }
 }
 
