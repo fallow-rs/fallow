@@ -3084,7 +3084,9 @@ export class AppComponent {}
     #[test]
     fn element_type_from_computed_returning_new_array_literal() {
         assert_eq!(
-            element_type_of_first_declarator("const utils = computed(() => [new Util(), new Util()])"),
+            element_type_of_first_declarator(
+                "const utils = computed(() => [new Util(), new Util()])"
+            ),
             Some("Util".to_string())
         );
     }
