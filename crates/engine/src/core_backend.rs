@@ -35,6 +35,26 @@ pub struct BackendAnalysisDiscovery {
 }
 
 impl BackendAnalysisDiscovery {
+    pub fn from_parts(
+        files: Vec<DiscoveredFile>,
+        workspaces: Vec<WorkspaceInfo>,
+        root_pkg: Option<PackageJson>,
+        config_candidates: Vec<PathBuf>,
+        discover_ms: f64,
+        workspaces_ms: f64,
+    ) -> Self {
+        Self {
+            inner: fallow_core::AnalysisDiscovery::from_parts(
+                files,
+                workspaces,
+                root_pkg,
+                config_candidates,
+                discover_ms,
+                workspaces_ms,
+            ),
+        }
+    }
+
     fn as_core(&self) -> &fallow_core::AnalysisDiscovery {
         &self.inner
     }
@@ -50,12 +70,6 @@ impl BackendAnalysisDiscovery {
     pub fn into_files(self) -> Vec<DiscoveredFile> {
         self.inner.into_files()
     }
-}
-
-pub fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
-    AnalysisDiscovery::from_backend(BackendAnalysisDiscovery {
-        inner: fallow_core::prepare_analysis_discovery(config),
-    })
 }
 
 pub fn config_for_project(
@@ -768,8 +782,27 @@ pub fn collect_plugin_hidden_dir_scopes(
         .collect()
 }
 
+pub fn collect_hidden_dir_scopes(
+    config: &ResolvedConfig,
+    root_pkg: Option<&PackageJson>,
+    workspaces: &[WorkspaceInfo],
+) -> Vec<HiddenDirScope> {
+    fallow_core::discover::collect_hidden_dir_scopes(config, root_pkg, workspaces)
+        .iter()
+        .map(hidden_dir_scope)
+        .collect()
+}
+
 pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     fallow_core::discover::discover_files(config)
+}
+
+pub fn discover_files_and_config_candidates(
+    config: &ResolvedConfig,
+    additional_hidden_dir_scopes: &[HiddenDirScope],
+) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
+    let scopes = core_hidden_dir_scopes(additional_hidden_dir_scopes);
+    fallow_core::discover::discover_files_and_config_candidates(config, &scopes)
 }
 
 pub fn discover_files_with_additional_hidden_dirs(

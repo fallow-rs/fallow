@@ -349,20 +349,6 @@ pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, F
     Ok(output.results)
 }
 
-/// Run the full analysis pipeline with export usage collection from a reusable
-/// discovery prelude.
-///
-/// # Errors
-///
-/// Returns an error if parsing or analysis fails.
-pub fn analyze_with_usages_from_discovery(
-    config: &ResolvedConfig,
-    discovery: &AnalysisDiscovery,
-) -> Result<AnalysisResults, FallowError> {
-    let output = analyze_full_from_discovery(config, discovery, false, true, false, false)?;
-    Ok(output.results)
-}
-
 /// Run the full analysis pipeline with export usage collection and retained
 /// per-function complexity modules.
 ///
@@ -381,19 +367,6 @@ pub fn analyze_with_usages_and_complexity(
     config: &ResolvedConfig,
 ) -> Result<AnalysisOutput, FallowError> {
     analyze_full(config, false, true, true, true)
-}
-
-/// Run the full analysis pipeline with export usage collection and retained
-/// complexity artifacts from a reusable discovery prelude.
-///
-/// # Errors
-///
-/// Returns an error if parsing or analysis fails.
-pub fn analyze_with_usages_and_complexity_from_discovery(
-    config: &ResolvedConfig,
-    discovery: &AnalysisDiscovery,
-) -> Result<AnalysisOutput, FallowError> {
-    analyze_full_from_discovery(config, discovery, false, true, true, true)
 }
 
 /// Run the full analysis pipeline with optional performance timings and graph retention.
@@ -444,28 +417,6 @@ pub fn analyze_retaining_modules(
     retain_graph: bool,
 ) -> Result<AnalysisOutput, FallowError> {
     analyze_full(config, retain_graph, false, need_complexity, true)
-}
-
-/// Run the full analysis pipeline with retained modules/files from a reusable
-/// discovery prelude.
-///
-/// # Errors
-///
-/// Returns an error if parsing or analysis fails.
-pub fn analyze_retaining_modules_from_discovery(
-    config: &ResolvedConfig,
-    discovery: &AnalysisDiscovery,
-    need_complexity: bool,
-    retain_graph: bool,
-) -> Result<AnalysisOutput, FallowError> {
-    analyze_full_from_discovery(
-        config,
-        discovery,
-        retain_graph,
-        false,
-        need_complexity,
-        true,
-    )
 }
 
 fn new_analysis_progress(config: &ResolvedConfig) -> progress::AnalysisProgress {
@@ -542,6 +493,26 @@ pub struct AnalysisDiscovery {
 }
 
 impl AnalysisDiscovery {
+    /// Build a discovery prelude from an engine-owned discovery run.
+    #[must_use]
+    pub fn from_parts(
+        files: Vec<discover::DiscoveredFile>,
+        workspaces: Vec<fallow_config::WorkspaceInfo>,
+        root_pkg: Option<PackageJson>,
+        config_candidates: Vec<std::path::PathBuf>,
+        discover_ms: f64,
+        workspaces_ms: f64,
+    ) -> Self {
+        Self {
+            files,
+            workspaces,
+            root_pkg,
+            config_candidates,
+            discover_ms,
+            workspaces_ms,
+        }
+    }
+
     /// Discovered source files, indexed by stable `FileId` for this session.
     #[must_use]
     pub fn files(&self) -> &[discover::DiscoveredFile] {
@@ -561,11 +532,10 @@ impl AnalysisDiscovery {
     }
 }
 
-/// Owned state shared across one core analysis run.
+/// Owned state shared across one legacy core analysis run.
 ///
-/// This is the first non-persisted session boundary for the engine. It keeps
-/// discovery, workspace and package prelude state together so later slices can
-/// reuse pipeline products without introducing graph-cache invalidation risk.
+/// Engine-owned sessions use `fallow-engine`; this remains only for deprecated
+/// core entrypoints while core is being narrowed to detector/backend helpers.
 pub(crate) struct AnalysisSession<'a> {
     config: &'a ResolvedConfig,
     pipeline_start: Instant,
@@ -598,19 +568,6 @@ impl<'a> AnalysisSession<'a> {
             config_candidates,
             discover_ms,
             workspaces_ms,
-        }
-    }
-
-    fn from_discovery(config: &'a ResolvedConfig, discovery: AnalysisDiscovery) -> Self {
-        Self {
-            config,
-            pipeline_start: Instant::now(),
-            progress: new_analysis_progress(config),
-            project: project::ProjectState::new(discovery.files, discovery.workspaces),
-            root_pkg: discovery.root_pkg,
-            config_candidates: discovery.config_candidates,
-            discover_ms: discovery.discover_ms,
-            workspaces_ms: discovery.workspaces_ms,
         }
     }
 
@@ -816,35 +773,6 @@ fn run_analysis_setup(config: &ResolvedConfig) -> AnalysisSetup {
     AnalysisSetup {
         progress,
         project,
-        root_pkg,
-        config_candidates,
-        discover_ms,
-        workspaces_ms,
-    }
-}
-
-/// Run the shared discovery prelude once for callers that need a reusable
-/// analysis session.
-///
-/// # Panics
-///
-/// Panics only when the underlying source discovery walk hits its documented
-/// compile-time glob/template invariants.
-#[must_use]
-pub fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery {
-    let AnalysisSetup {
-        progress,
-        project,
-        root_pkg,
-        config_candidates,
-        discover_ms,
-        workspaces_ms,
-    } = run_analysis_setup(config);
-    progress.finish();
-
-    AnalysisDiscovery {
-        files: project.files().to_vec(),
-        workspaces: project.workspaces().to_vec(),
         root_pkg,
         config_candidates,
         discover_ms,
@@ -1476,23 +1404,6 @@ fn analyze_full(
 ) -> Result<AnalysisOutput, FallowError> {
     let _span = tracing::info_span!("fallow_analyze").entered();
     AnalysisSession::new(config).run_full(retain, collect_usages, need_complexity, retain_modules)
-}
-
-fn analyze_full_from_discovery(
-    config: &ResolvedConfig,
-    discovery: &AnalysisDiscovery,
-    retain: bool,
-    collect_usages: bool,
-    need_complexity: bool,
-    retain_modules: bool,
-) -> Result<AnalysisOutput, FallowError> {
-    let _span = tracing::info_span!("fallow_analyze").entered();
-    AnalysisSession::from_discovery(config, discovery.clone()).run_full(
-        retain,
-        collect_usages,
-        need_complexity,
-        retain_modules,
-    )
 }
 
 fn full_analysis_pipeline_profile(

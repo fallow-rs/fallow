@@ -196,6 +196,21 @@ mod tests {
     }
 
     #[test]
+    fn engine_session_owns_analysis_discovery() {
+        let session_source =
+            fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/session.rs"))
+                .expect("read engine session");
+        assert!(
+            session_source.contains("crate::discover::prepare_analysis_discovery"),
+            "engine session must build discovery through the engine discovery boundary"
+        );
+        assert!(
+            !session_source.contains("core_backend::prepare_analysis_discovery"),
+            "engine session must not delegate discovery orchestration to core_backend"
+        );
+    }
+
+    #[test]
     fn analysis_session_loads_config_and_discovered_files() {
         let temp = tempfile::tempdir().expect("tempdir");
         let src = temp.path().join("src");

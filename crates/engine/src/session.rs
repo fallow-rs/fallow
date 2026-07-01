@@ -80,7 +80,7 @@ impl<'a> AnalysisSessionView<'a> {
     fn new(config: &'a ResolvedConfig) -> Self {
         Self {
             config,
-            discovery: core_backend::prepare_analysis_discovery(config),
+            discovery: crate::discover::prepare_analysis_discovery(config),
         }
     }
 
@@ -160,7 +160,7 @@ impl AnalysisSession {
     /// Build a session from a previously resolved config.
     #[must_use]
     pub fn from_config(project_config: ProjectConfig) -> Self {
-        let discovery = core_backend::prepare_analysis_discovery(&project_config.config);
+        let discovery = crate::discover::prepare_analysis_discovery(&project_config.config);
         let workspace_diagnostics = merge_workspace_diagnostics(
             project_config.workspace_diagnostics,
             fallow_config::workspace_diagnostics_for(&project_config.config.root),
