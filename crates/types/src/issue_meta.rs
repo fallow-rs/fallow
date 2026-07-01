@@ -1,5 +1,7 @@
 //! Shared issue-type contract metadata.
 
+use std::sync::LazyLock;
+
 use crate::suppress::IssueKind;
 
 /// Shared contract facts for issue-like diagnostics.
@@ -1230,206 +1232,62 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
 ];
 
 /// Canonical names and aliases accepted by `IssueKind::parse`.
-pub const KNOWN_ISSUE_KIND_NAMES: &[&str] = &[
-    "unused-file",
-    "unused-export",
-    "unused-type",
-    "private-type-leak",
-    "unused-dependency",
-    "unused-dev-dependency",
-    "unused-enum-member",
-    "unused-class-member",
-    "unresolved-import",
-    "unlisted-dependency",
-    "duplicate-export",
-    "code-duplication",
-    "circular-dependency",
-    "circular-dependencies",
-    "re-export-cycle",
-    "re-export-cycles",
-    "reexport-cycle",
-    "reexport-cycles",
-    "type-only-dependency",
-    "test-only-dependency",
-    "boundary-violation",
-    "boundary-call-violation",
-    "boundary-call-violations",
-    "coverage-gaps",
-    "feature-flag",
-    "complexity",
-    "stale-suppression",
-    "unused-catalog-entry",
-    "unused-catalog-entries",
-    "empty-catalog-group",
-    "empty-catalog-groups",
-    "unresolved-catalog-reference",
-    "unresolved-catalog-references",
-    "unused-dependency-override",
-    "unused-dependency-overrides",
-    "misconfigured-dependency-override",
-    "misconfigured-dependency-overrides",
-    "security-client-server-leak",
-    "security-sink",
-    "policy-violation",
-    "policy-violations",
-    "invalid-client-export",
-    "invalid-client-exports",
-    "mixed-client-server-barrel",
-    "mixed-client-server-barrels",
-    "misplaced-directive",
-    "misplaced-directives",
-    "unused-store-member",
-    "unused-store-members",
-    "unprovided-inject",
-    "unprovided-injects",
-    "route-collision",
-    "route-collisions",
-    "dynamic-segment-name-conflict",
-    "dynamic-segment-name-conflicts",
-    "unrendered-component",
-    "unrendered-components",
-    "unused-component-prop",
-    "unused-component-props",
-    "unused-component-emit",
-    "unused-component-emits",
-    "unused-component-input",
-    "unused-component-inputs",
-    "unused-component-output",
-    "unused-component-outputs",
-    "unused-server-action",
-    "unused-server-actions",
-    "unused-load-data-key",
-    "unused-load-data-keys",
-    "prop-drilling",
-    "thin-wrapper",
-    "thin-wrappers",
-    "duplicate-prop-shape",
-    "duplicate-prop-shapes",
-    "unused-svelte-event",
-    "unused-svelte-events",
-];
+pub static KNOWN_ISSUE_KIND_NAMES: LazyLock<Vec<&'static str>> =
+    LazyLock::new(known_issue_kind_names_from_meta);
 
 /// CLI filter flags on `fallow dead-code` that scope output to one issue family.
-pub const DEAD_CODE_FILTER_FLAGS: &[&str] = &[
-    "--unused-files",
-    "--unused-exports",
-    "--unused-types",
-    "--private-type-leaks",
-    "--unused-deps",
-    "--unused-enum-members",
-    "--unused-class-members",
-    "--unused-store-members",
-    "--unprovided-injects",
-    "--unrendered-components",
-    "--unused-component-props",
-    "--unused-component-emits",
-    "--unused-component-inputs",
-    "--unused-component-outputs",
-    "--unused-svelte-events",
-    "--unused-server-actions",
-    "--unused-load-data-keys",
-    "--unresolved-imports",
-    "--unlisted-deps",
-    "--duplicate-exports",
-    "--circular-deps",
-    "--re-export-cycles",
-    "--boundary-violations",
-    "--policy-violations",
-    "--stale-suppressions",
-    "--unused-catalog-entries",
-    "--empty-catalog-groups",
-    "--unresolved-catalog-references",
-    "--unused-dependency-overrides",
-    "--misconfigured-dependency-overrides",
-];
+pub static DEAD_CODE_FILTER_FLAGS: LazyLock<Vec<&'static str>> =
+    LazyLock::new(dead_code_filter_flags_from_meta);
 
 /// MCP issue selector names mapped to dead-code CLI flags.
-pub const MCP_ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
-    ("unused-files", "--unused-files"),
-    ("unused-exports", "--unused-exports"),
-    ("unused-types", "--unused-types"),
-    ("private-type-leaks", "--private-type-leaks"),
-    ("unused-deps", "--unused-deps"),
-    ("unused-enum-members", "--unused-enum-members"),
-    ("unused-class-members", "--unused-class-members"),
-    ("unused-store-members", "--unused-store-members"),
-    ("unprovided-injects", "--unprovided-injects"),
-    ("unrendered-components", "--unrendered-components"),
-    ("unused-component-props", "--unused-component-props"),
-    ("unused-component-emits", "--unused-component-emits"),
-    ("unused-component-inputs", "--unused-component-inputs"),
-    ("unused-component-outputs", "--unused-component-outputs"),
-    ("unused-svelte-events", "--unused-svelte-events"),
-    ("unused-server-actions", "--unused-server-actions"),
-    ("unused-load-data-keys", "--unused-load-data-keys"),
-    ("unresolved-imports", "--unresolved-imports"),
-    ("unlisted-deps", "--unlisted-deps"),
-    ("duplicate-exports", "--duplicate-exports"),
-    ("circular-deps", "--circular-deps"),
-    ("re-export-cycles", "--re-export-cycles"),
-    ("boundary-violations", "--boundary-violations"),
-    ("policy-violations", "--policy-violations"),
-    ("stale-suppressions", "--stale-suppressions"),
-    ("unused-catalog-entries", "--unused-catalog-entries"),
-    ("empty-catalog-groups", "--empty-catalog-groups"),
-    (
-        "unresolved-catalog-references",
-        "--unresolved-catalog-references",
-    ),
-    (
-        "unused-dependency-overrides",
-        "--unused-dependency-overrides",
-    ),
-    (
-        "misconfigured-dependency-overrides",
-        "--misconfigured-dependency-overrides",
-    ),
-];
+pub static MCP_ISSUE_TYPE_FLAGS: LazyLock<Vec<(&'static str, &'static str)>> =
+    LazyLock::new(mcp_issue_type_flags_from_meta);
 
 /// Result issue codes emitted by the dead-code CodeClimate formatter.
-pub const CODECLIMATE_RESULT_CODES: &[&str] = &[
-    "unused-file",
-    "unused-export",
-    "unused-type",
-    "private-type-leak",
-    "unused-dependency",
-    "unused-dev-dependency",
-    "unused-optional-dependency",
-    "unused-enum-member",
-    "unused-class-member",
-    "unused-store-member",
-    "unresolved-import",
-    "unlisted-dependency",
-    "duplicate-export",
-    "type-only-dependency",
-    "test-only-dependency",
-    "circular-dependency",
-    "re-export-cycle",
-    "boundary-violation",
-    "boundary-coverage",
-    "boundary-call-violation",
-    "policy-violation",
-    "invalid-client-export",
-    "mixed-client-server-barrel",
-    "misplaced-directive",
-    "unprovided-inject",
-    "unrendered-component",
-    "unused-component-prop",
-    "unused-component-emit",
-    "unused-component-input",
-    "unused-component-output",
-    "unused-svelte-event",
-    "unused-server-action",
-    "unused-load-data-key",
-    "route-collision",
-    "dynamic-segment-name-conflict",
-    "stale-suppression",
-    "unused-catalog-entry",
-    "empty-catalog-group",
-    "unresolved-catalog-reference",
-    "unused-dependency-override",
-    "misconfigured-dependency-override",
-];
+pub static CODECLIMATE_RESULT_CODES: LazyLock<Vec<&'static str>> =
+    LazyLock::new(codeclimate_result_codes_from_meta);
+
+fn known_issue_kind_names_from_meta() -> Vec<&'static str> {
+    let mut names = Vec::new();
+    for meta in ISSUE_KIND_META.iter().filter(|meta| meta.kind.is_some()) {
+        push_unique(&mut names, meta.code);
+        for alias in meta.aliases {
+            push_unique(&mut names, *alias);
+        }
+    }
+    names
+}
+
+fn dead_code_filter_flags_from_meta() -> Vec<&'static str> {
+    let mut flags = Vec::new();
+    for meta in ISSUE_KIND_META {
+        if let Some(flag) = meta.filter_flag {
+            push_unique(&mut flags, flag);
+        }
+    }
+    flags
+}
+
+fn mcp_issue_type_flags_from_meta() -> Vec<(&'static str, &'static str)> {
+    ISSUE_KIND_META
+        .iter()
+        .filter_map(|meta| meta.mcp_pair())
+        .collect()
+}
+
+fn codeclimate_result_codes_from_meta() -> Vec<&'static str> {
+    ISSUE_RESULT_META
+        .iter()
+        .filter(|meta| meta.counts_in_total)
+        .map(|meta| meta.code)
+        .collect()
+}
+
+fn push_unique<T: Copy + PartialEq>(items: &mut Vec<T>, item: T) {
+    if !items.contains(&item) {
+        items.push(item);
+    }
+}
 
 /// Lookup metadata by canonical code.
 #[must_use]
@@ -1605,7 +1463,7 @@ mod tests {
 
     #[test]
     fn known_names_round_trip_through_metadata() {
-        for name in KNOWN_ISSUE_KIND_NAMES {
+        for name in KNOWN_ISSUE_KIND_NAMES.iter() {
             let meta = issue_meta_for_token(name)
                 .unwrap_or_else(|| panic!("known issue name {name} missing metadata row"));
             assert!(

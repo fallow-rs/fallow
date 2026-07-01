@@ -222,7 +222,7 @@ fn analyze_args_all_issue_types_accepted() {
         ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
-    for &(_, flag) in ISSUE_TYPE_FLAGS {
+    for &(_, flag) in ISSUE_TYPE_FLAGS.iter() {
         assert!(
             args.contains(&flag.to_string()),
             "missing flag {flag} in args"

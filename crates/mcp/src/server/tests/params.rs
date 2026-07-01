@@ -3,8 +3,12 @@ use crate::tools::ISSUE_TYPE_FLAGS;
 
 #[test]
 fn issue_type_flags_are_complete() {
-    assert_eq!(ISSUE_TYPE_FLAGS.len(), 30);
-    for &(name, flag) in ISSUE_TYPE_FLAGS {
+    let expected = fallow_types::issue_meta::ISSUE_KIND_META
+        .iter()
+        .filter_map(|meta| meta.mcp_pair())
+        .count();
+    assert_eq!(ISSUE_TYPE_FLAGS.len(), expected);
+    for &(name, flag) in ISSUE_TYPE_FLAGS.iter() {
         assert!(
             flag.starts_with("--"),
             "flag for {name} should start with --"

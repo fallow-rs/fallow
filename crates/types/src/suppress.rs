@@ -661,7 +661,7 @@ pub fn closest_known_kind_name(input: &str) -> Option<&'static str> {
     let input_lower = input.to_ascii_lowercase();
     let mut best: Option<(&'static str, usize)> = None;
 
-    for &candidate in KNOWN_ISSUE_KIND_NAMES {
+    for &candidate in KNOWN_ISSUE_KIND_NAMES.iter() {
         let d = levenshtein(&input_lower, candidate);
         if best.is_none_or(|(_, b_dist)| d < b_dist) {
             best = Some((candidate, d));
@@ -1148,7 +1148,7 @@ mod tests {
 
     #[test]
     fn known_issue_kind_names_parses_each_entry() {
-        for &name in KNOWN_ISSUE_KIND_NAMES {
+        for &name in KNOWN_ISSUE_KIND_NAMES.iter() {
             assert!(
                 IssueKind::parse(name).is_some(),
                 "KNOWN_ISSUE_KIND_NAMES contains '{name}' but IssueKind::parse rejects it"

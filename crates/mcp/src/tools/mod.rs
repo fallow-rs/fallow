@@ -54,7 +54,7 @@ pub use trace::{
 use std::process::Stdio;
 use std::time::Duration;
 
-use fallow_types::issue_meta::MCP_ISSUE_TYPE_FLAGS;
+pub use fallow_types::issue_meta::MCP_ISSUE_TYPE_FLAGS as ISSUE_TYPE_FLAGS;
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, Content, RawContent};
 use tokio::process::Command;
@@ -119,9 +119,6 @@ fn push_regression(
     push_str_flag(args, "--regression-baseline", baseline);
     push_str_flag(args, "--save-regression-baseline", save);
 }
-
-/// Issue type flag names mapped to their CLI flags.
-pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = MCP_ISSUE_TYPE_FLAGS;
 
 /// Valid detection modes for the `find_dupes` tool.
 pub const VALID_DUPES_MODES: &[&str] = &["strict", "mild", "weak", "semantic"];

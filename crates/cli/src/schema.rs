@@ -896,7 +896,7 @@ mod tests {
             }
         }
 
-        for name in KNOWN_ISSUE_KIND_NAMES {
+        for name in KNOWN_ISSUE_KIND_NAMES.iter() {
             let kind = IssueKind::parse(name).unwrap();
             assert!(
                 covered.contains(&kind.to_discriminant()),
@@ -1342,7 +1342,7 @@ mod tests {
                 other => panic!("unexpected filter_flag on command {other}"),
             }
         }
-        for flag in DEAD_CODE_FILTER_FLAGS {
+        for flag in DEAD_CODE_FILTER_FLAGS.iter() {
             assert!(
                 seen_dead_code_filters.contains(flag),
                 "shared filter flag {flag} is not represented by any issue_types row"
