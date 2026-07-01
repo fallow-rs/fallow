@@ -146,19 +146,15 @@ fn build_styling_findings(
     files: &[DiscoveredFile],
     config: &ResolvedConfig,
 ) -> Vec<fallow_output::StylingFinding> {
+    use fallow_config::Severity;
     use fallow_types::suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
 
     let Some(css) = css else {
         return Vec::new();
     };
-    // Per-rule gate: `off` silences the css-token-drift family entirely (no
-    // production), matching how a `rules.*: off` rule suppresses any finding.
-    if config.rules.css_token_drift == fallow_config::Severity::Off
-        || css.tailwind_arbitrary_values.is_empty()
-    {
-        return Vec::new();
-    }
 
+    // Shared: relative-path -> the file's parsed suppressions, so every family
+    // honors inline suppression at production time.
     let path_by_id: rustc_hash::FxHashMap<_, _> =
         files.iter().map(|f| (f.id, f.path.as_path())).collect();
     let mut supp_by_rel: rustc_hash::FxHashMap<String, &[Suppression]> =
@@ -173,24 +169,55 @@ fn build_styling_findings(
             supp_by_rel.insert(rel, module.suppressions.as_slice());
         }
     }
+    let suppressed = |path: &str, line: u32, kind: IssueKind| -> bool {
+        supp_by_rel.get(path).is_some_and(|supps| {
+            is_file_suppressed(supps, kind) || is_suppressed(supps, line, kind)
+        })
+    };
 
     let mut findings = Vec::new();
-    for candidate in &css.tailwind_arbitrary_values {
-        if let Some(supps) = supp_by_rel.get(candidate.path.as_str())
-            && (is_file_suppressed(supps, IssueKind::CssTokenDrift)
-                || is_suppressed(supps, candidate.line, IssueKind::CssTokenDrift))
-        {
-            continue;
+
+    // Family css-token-drift: Tailwind arbitrary values (hardcoded-instead-of-token).
+    if config.rules.css_token_drift != Severity::Off {
+        for candidate in &css.tailwind_arbitrary_values {
+            if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
+                continue;
+            }
+            findings.push(fallow_output::StylingFinding {
+                code: "css-token-drift".to_string(),
+                sub_kind: "tailwind-arbitrary-value".to_string(),
+                path: candidate.path.clone(),
+                line: candidate.line,
+                value: candidate.value.clone(),
+                actions: candidate.actions.clone(),
+            });
         }
-        findings.push(fallow_output::StylingFinding {
-            code: "css-token-drift".to_string(),
-            sub_kind: "tailwind-arbitrary-value".to_string(),
-            path: candidate.path.clone(),
-            line: candidate.line,
-            value: candidate.value.clone(),
-            actions: candidate.actions.clone(),
-        });
     }
+
+    // Family css-duplicate-block: copy-pasted declaration blocks (anchored at the
+    // first occurrence).
+    if config.rules.css_duplicate_block != Severity::Off {
+        for block in &css.duplicate_declaration_blocks {
+            let Some(first) = block.occurrences.first() else {
+                continue;
+            };
+            if suppressed(&first.path, first.line, IssueKind::CssDuplicateBlock) {
+                continue;
+            }
+            findings.push(fallow_output::StylingFinding {
+                code: "css-duplicate-block".to_string(),
+                sub_kind: "duplicate-declaration-block".to_string(),
+                path: first.path.clone(),
+                line: first.line,
+                value: format!(
+                    "{}-declaration block repeated {} times",
+                    block.declaration_count, block.occurrence_count
+                ),
+                actions: block.actions.clone(),
+            });
+        }
+    }
+
     findings
 }
 

@@ -775,6 +775,19 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         lsp: false,
         docs_category: "health",
     },
+    IssueKindMeta {
+        kind: Some(IssueKind::CssDuplicateBlock),
+        code: "css-duplicate-block",
+        aliases: &[],
+        label: "CSS Duplicate Block",
+        config_key: Some("css-duplicate-block"),
+        filter_flag: None,
+        mcp_issue_type: None,
+        suppress_token: Some("css-duplicate-block"),
+        suppress_file_level: false,
+        lsp: false,
+        docs_category: "health",
+    },
 ];
 
 /// Shared contract facts for serialized `AnalysisResults` arrays.

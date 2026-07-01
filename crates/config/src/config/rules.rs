@@ -191,6 +191,11 @@ pub struct RulesConfig {
     /// Set to `error` to gate CI on styling drift, or `off` to silence.
     #[serde(default = "Severity::default_warn", alias = "css-token-drift")]
     pub css_token_drift: Severity,
+    /// A CSS / CSS-in-JS DUPLICATE declaration block (copy-pasted rule body).
+    /// A styling-domain advisory surfaced in `fallow audit`; defaults to `warn`
+    /// (verdict-neutral). Set to `error` to gate, or `off` to silence.
+    #[serde(default = "Severity::default_warn", alias = "css-duplicate-block")]
+    pub css_duplicate_block: Severity,
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
     #[serde(default, alias = "unlisted-dependency")]
@@ -322,6 +327,7 @@ impl Default for RulesConfig {
             thin_wrapper: Severity::Off,
             duplicate_prop_shape: Severity::Off,
             css_token_drift: Severity::Warn,
+            css_duplicate_block: Severity::Warn,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -397,6 +403,7 @@ impl RulesConfig {
                 thin_wrapper,
                 duplicate_prop_shape,
                 css_token_drift,
+                css_duplicate_block,
             ]
         );
         apply_partial_rules!(
@@ -589,6 +596,12 @@ pub struct PartialRulesConfig {
     pub css_token_drift: Option<Severity>,
     #[serde(
         default,
+        alias = "css-duplicate-block",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub css_duplicate_block: Option<Severity>,
+    #[serde(
+        default,
         alias = "unresolved-import",
         skip_serializing_if = "Option::is_none"
     )]
@@ -767,6 +780,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "thin-wrapper",
     "duplicate-prop-shape",
     "css-token-drift",
+    "css-duplicate-block",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -1146,6 +1160,7 @@ mod tests {
             thin_wrapper: Some(Severity::Off),
             duplicate_prop_shape: Some(Severity::Off),
             css_token_drift: Some(Severity::Off),
+            css_duplicate_block: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),
@@ -1239,7 +1254,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 92);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 93);
     }
 
     #[test]
@@ -1280,8 +1295,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            96,
-            "expected 96 source-level alias attrs (48 per struct); got {}: {:?}",
+            98,
+            "expected 98 source-level alias attrs (49 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

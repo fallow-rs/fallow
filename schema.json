@@ -168,6 +168,7 @@
         "thin-wrapper": "off",
         "duplicate-prop-shape": "off",
         "css-token-drift": "warn",
+        "css-duplicate-block": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1105,6 +1106,11 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "css-duplicate-block": {
+          "description": "A CSS / CSS-in-JS DUPLICATE declaration block (copy-pasted rule body).\nA styling-domain advisory surfaced in `fallow audit`; defaults to `warn`\n(verdict-neutral). Set to `error` to gate, or `off` to silence.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1859,6 +1865,16 @@
           ]
         },
         "css-token-drift": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "css-duplicate-block": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

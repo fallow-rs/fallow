@@ -84,6 +84,7 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         // has a real config rule, so return it: the engine reads this to gate
         // production (off) and the audit verdict reads it for error-escalation.
         IssueKind::CssTokenDrift => rules.css_token_drift,
+        IssueKind::CssDuplicateBlock => rules.css_duplicate_block,
         IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
@@ -99,6 +100,7 @@ const NON_CORE_KINDS: &[IssueKind] = &[
     IssueKind::FeatureFlag,
     IssueKind::CodeDuplication,
     IssueKind::CssTokenDrift,
+    IssueKind::CssDuplicateBlock,
     IssueKind::UnusedDependency,
     IssueKind::UnusedDevDependency,
     IssueKind::UnlistedDependency,

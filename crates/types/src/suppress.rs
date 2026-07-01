@@ -175,6 +175,11 @@ pub enum IssueKind {
     /// token). Styling-domain finding produced by the health-time css pass (not
     /// dead-code); the rule defaults to `warn` and is verdict-neutral.
     CssTokenDrift,
+    /// A CSS / CSS-in-JS DUPLICATE declaration block: a copy-pasted rule body
+    /// repeated across selectors, a consolidation candidate. Styling-domain
+    /// advisory (rule defaults to `warn`, verdict-neutral); the audit copy of
+    /// this is changed-file-local.
+    CssDuplicateBlock,
 }
 
 impl IssueKind {
@@ -228,6 +233,7 @@ impl IssueKind {
         Self::DuplicatePropShape,
         Self::UnusedSvelteEvent,
         Self::CssTokenDrift,
+        Self::CssDuplicateBlock,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -288,6 +294,7 @@ impl IssueKind {
             Self::UnusedComponentOutput => 46,
             Self::UnusedSvelteEvent => 47,
             Self::CssTokenDrift => 48,
+            Self::CssDuplicateBlock => 49,
         }
     }
 
@@ -343,6 +350,7 @@ impl IssueKind {
             46 => Some(Self::UnusedComponentOutput),
             47 => Some(Self::UnusedSvelteEvent),
             48 => Some(Self::CssTokenDrift),
+            49 => Some(Self::CssDuplicateBlock),
             _ => None,
         }
     }

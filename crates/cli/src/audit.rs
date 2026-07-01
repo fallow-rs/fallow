@@ -170,6 +170,19 @@ use cache::{
     save_cached_base_snapshot, sorted_keys,
 };
 
+/// Whether a styling finding's per-rule severity escalates to `error` (and thus
+/// gates the verdict). Styling is verdict-NEUTRAL by default (rule `warn`); each
+/// family maps its kebab `code` to its `RulesConfig` rule. Add a match arm per
+/// graduating family.
+fn styling_finding_gates(rules: &fallow_config::RulesConfig, code: &str) -> bool {
+    let severity = match code {
+        "css-token-drift" => rules.css_token_drift,
+        "css-duplicate-block" => rules.css_duplicate_block,
+        _ => fallow_config::Severity::Warn,
+    };
+    severity == fallow_config::Severity::Error
+}
+
 fn compute_verdict(
     check: Option<&CheckResult>,
     dupes: Option<&DupesResult>,
@@ -201,8 +214,11 @@ fn compute_verdict(
     // Only a per-rule `error` escalation gates. Sole family today is
     // css-token-drift; add sibling rule checks as families graduate.
     if let Some(result) = health
-        && !result.report.styling_findings.is_empty()
-        && result.config.rules.css_token_drift == fallow_config::Severity::Error
+        && result
+            .report
+            .styling_findings
+            .iter()
+            .any(|finding| styling_finding_gates(&result.config.rules, &finding.code))
     {
         has_errors = true;
     }
@@ -312,8 +328,11 @@ fn compute_introduced_verdict(
     // changed file. Verdict-neutral by default (rule `warn`); only a per-rule
     // `error` escalation gates. Base-vs-head "introduced" narrowing is Phase 2.
     if let Some(result) = health
-        && !result.report.styling_findings.is_empty()
-        && result.config.rules.css_token_drift == fallow_config::Severity::Error
+        && result
+            .report
+            .styling_findings
+            .iter()
+            .any(|finding| styling_finding_gates(&result.config.rules, &finding.code))
     {
         has_errors = true;
     }
