@@ -43,6 +43,48 @@ impl IssueKindMeta {
             _ => None,
         }
     }
+
+    /// Whether this row owns a serialized dead-code result contract.
+    #[must_use]
+    pub fn has_result_contract(self) -> bool {
+        issue_result_meta_by_code(self.code).is_some()
+    }
+
+    /// SARIF rule ids used by CI formatters for this issue row.
+    #[must_use]
+    pub fn sarif_rule_ids(self) -> Vec<String> {
+        issue_sarif_rule_ids(self.code)
+    }
+
+    /// Whether this issue row is eligible for SARIF rule metadata.
+    #[must_use]
+    pub fn sarif_enabled(self) -> bool {
+        self.has_result_contract()
+    }
+
+    /// CodeClimate check names used by CI formatters for this issue row.
+    #[must_use]
+    pub fn codeclimate_check_names(self) -> Vec<String> {
+        issue_codeclimate_check_names(self.code)
+    }
+
+    /// Whether this issue row is eligible for CodeClimate output.
+    #[must_use]
+    pub fn codeclimate_enabled(self) -> bool {
+        !self.codeclimate_check_names().is_empty()
+    }
+
+    /// Documentation anchor under `/explanations/dead-code`.
+    #[must_use]
+    pub fn docs_anchor(self) -> Option<&'static str> {
+        issue_docs_anchor(self.code)
+    }
+
+    /// Published TypeScript backwards-compat alias policy.
+    #[must_use]
+    pub fn ts_alias(self) -> Option<TsAliasMeta> {
+        issue_ts_alias(self.code)
+    }
 }
 
 /// All shared issue metadata rows.
@@ -1620,8 +1662,10 @@ mod tests {
     #[test]
     fn result_meta_codes_have_docs_anchors() {
         for meta in ISSUE_RESULT_META {
+            let issue = issue_meta_by_code(meta.code)
+                .unwrap_or_else(|| panic!("result metadata code {} has no issue row", meta.code));
             assert_eq!(
-                issue_docs_anchor(meta.code),
+                issue.docs_anchor(),
                 Some(meta.docs_anchor),
                 "result metadata code {} has mismatched docs anchor",
                 meta.code
@@ -1680,7 +1724,10 @@ mod tests {
         assert!(codeclimate_codes.is_subset(&result_codes));
 
         for meta in result_issue_metas() {
-            let sarif_ids = issue_sarif_rule_ids(meta.code);
+            let issue = issue_meta_by_code(meta.code)
+                .unwrap_or_else(|| panic!("result metadata code {} has no issue row", meta.code));
+            assert!(issue.sarif_enabled());
+            let sarif_ids = issue.sarif_rule_ids();
             assert!(sarif_ids.contains(&format!("fallow/{}", meta.code)));
             for rule_id in sarif_ids {
                 assert!(
@@ -1689,7 +1736,7 @@ mod tests {
                     meta.code
                 );
             }
-            for check_name in issue_codeclimate_check_names(meta.code) {
+            for check_name in issue.codeclimate_check_names() {
                 assert!(
                     check_name.starts_with("fallow/"),
                     "result metadata code {} has unprefixed CodeClimate check name {check_name}",
@@ -1702,7 +1749,11 @@ mod tests {
     #[test]
     fn ts_alias_policy_is_explicit() {
         let aliases: BTreeSet<(&str, &str)> = result_issue_metas()
-            .filter_map(|meta| issue_ts_alias(meta.code).map(|alias| (alias.name, alias.parent)))
+            .filter_map(|meta| {
+                issue_meta_by_code(meta.code)
+                    .and_then(|issue| issue.ts_alias())
+                    .map(|alias| (alias.name, alias.parent))
+            })
             .collect();
 
         assert_eq!(

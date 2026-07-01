@@ -3,8 +3,7 @@ use std::collections::BTreeMap;
 use fallow_types::envelope::{Meta, MetaRule};
 pub use fallow_types::issue_meta::{CODECLIMATE_RESULT_CODES, TsAliasMeta};
 use fallow_types::issue_meta::{
-    IssueResultMeta, issue_codeclimate_check_names, issue_result_meta_by_code,
-    issue_sarif_rule_ids, issue_ts_alias, result_issue_metas,
+    IssueResultMeta, issue_meta_by_code, issue_result_meta_by_code, result_issue_metas,
 };
 
 const DOCS_BASE: &str = "https://docs.fallow.tools";
@@ -49,6 +48,12 @@ pub struct IssueOutputContract {
 impl IssueOutputContract {
     #[must_use]
     fn from_result_meta(meta: &IssueResultMeta) -> Self {
+        let issue = issue_meta_by_code(meta.code).unwrap_or_else(|| {
+            panic!(
+                "output contract must reference IssueKindMeta row: {}",
+                meta.code
+            )
+        });
         Self {
             code: meta.code,
             result_key: meta.result_key,
@@ -58,9 +63,9 @@ impl IssueOutputContract {
             meta_name: meta.meta_name,
             meta_description: meta.meta_description,
             meta_docs_path: meta.meta_docs_path,
-            sarif_rule_ids: issue_sarif_rule_ids(meta.code),
-            codeclimate_check_names: issue_codeclimate_check_names(meta.code),
-            ts_alias: issue_ts_alias(meta.code),
+            sarif_rule_ids: issue.sarif_rule_ids(),
+            codeclimate_check_names: issue.codeclimate_check_names(),
+            ts_alias: issue.ts_alias(),
         }
     }
 }
