@@ -197,6 +197,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Astro template `.map()` callbacks over a typed class array no longer report
+  the class members as unused.** An iteration variable in an Astro template
+  `{...}` expression (`{utils.map((util) => <li>{util.getter}</li>)}`) whose
+  receiver is a frontmatter binding typed as an array of a class (`Util[]`)
+  previously flagged the element class members as `unused-class-member`. Astro
+  frontmatter is visitor-parsed (so a frontmatter `.map` was already credited),
+  but the template body `{...}` expressions were only scanned for bare
+  identifiers, never run through the member-recording visitor. fallow now
+  re-parses each template expression region and runs it through the same
+  iteration-binding visitor pass, seeded with the frontmatter's element types, so
+  a template `.map` / `.forEach` / `for...of` callback credits the element class
+  the same as the frontmatter and `.tsx`. Over-credit only: a member accessed
+  nowhere still reports. (Closes
+  [#1713](https://github.com/fallow-rs/fallow/issues/1713))
+
 - **Angular `@for` / `*ngFor` loop variables over a class array no longer report
   the class members as unused.** An Angular component with an inline `template:`
   that iterates a component field typed as an array of a class (`utils: Util[]`)
@@ -239,13 +254,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unused-class-member`. Explicitly annotated callback parameters
   (`(u: Util) => ...`) already worked; this adds the implicitly-typed case. The
   change only removes false positives; a genuinely unused member on the same
-  class still reports. Astro `.map`
-  ([#1713](https://github.com/fallow-rs/fallow/issues/1713)) is tracked as a
-  follow-up; Angular `@for` / `*ngFor`
-  ([#1712](https://github.com/fallow-rs/fallow/issues/1712)) and Vue `v-for` over
-  a member-expression `props.<field>` source
-  ([#1711](https://github.com/fallow-rs/fallow/issues/1711)) are fixed above.
-  (Refs [#1707](https://github.com/fallow-rs/fallow/issues/1707))
+  class still reports. The deferred sibling cases are now fixed above: Angular
+  `@for` / `*ngFor`
+  ([#1712](https://github.com/fallow-rs/fallow/issues/1712)), Astro `.map`
+  ([#1713](https://github.com/fallow-rs/fallow/issues/1713)), and Vue `v-for`
+  over a member-expression `props.<field>` source
+  ([#1711](https://github.com/fallow-rs/fallow/issues/1711)). (Refs
+  [#1707](https://github.com/fallow-rs/fallow/issues/1707))
 
 - **Vue `v-for` loop variables iterating over a class array no longer report the
   class members as unused.** A Vue template that iterates a typed array or

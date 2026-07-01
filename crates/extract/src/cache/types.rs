@@ -712,7 +712,13 @@ use crate::MemberKind;
 /// inline `template:` is typed to the element class, so inline-Angular-component
 /// `member_accesses` gain the remapped item-member accesses a warm 218 cache
 /// lacks.
-pub(super) const CACHE_VERSION: u32 = 219;
+///
+/// Bumped to 220 for issue #1713: a `.map()` / `.forEach()` / `for...of`
+/// iteration binding in an Astro TEMPLATE `{...}` expression region (over a
+/// frontmatter-typed class array) now credits the element-class members, so
+/// `.astro` `member_accesses` gain the template-region item-member accesses a
+/// warm 219 cache lacks.
+pub(super) const CACHE_VERSION: u32 = 220;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

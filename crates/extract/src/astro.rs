@@ -222,6 +222,93 @@ fn collect_brace_expression_idents(
     }
 }
 
+/// Collect the body text of every top-level `{ ... }` expression region in the
+/// Astro markup, skipping `<script>` / `<style>` / HTML-comment ranges. Mirrors
+/// `collect_brace_expression_idents`'s scan but returns each region body verbatim
+/// (for re-parsing) instead of tokenizing identifiers. See issue #1713.
+fn collect_template_expression_regions(template: &str) -> Vec<String> {
+    let mut regions = Vec::new();
+    if template.is_empty() {
+        return regions;
+    }
+    let mut masked: Vec<(usize, usize)> = Vec::new();
+    masked.extend(
+        SCRIPT_BLOCK_RE
+            .find_iter(template)
+            .map(|m| (m.start(), m.end())),
+    );
+    masked.extend(
+        STYLE_BLOCK_RE
+            .find_iter(template)
+            .map(|m| (m.start(), m.end())),
+    );
+    masked.extend(
+        HTML_COMMENT_RE
+            .find_iter(template)
+            .map(|m| (m.start(), m.end())),
+    );
+    let is_masked = |pos: usize| masked.iter().any(|&(s, e)| pos >= s && pos < e);
+
+    let bytes = template.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        if bytes[i] != b'{' || is_masked(i) {
+            i += 1;
+            continue;
+        }
+        let start = i + 1;
+        let region_end = brace_body_end(bytes, i);
+        if let Some(region) = template.get(start..region_end) {
+            let trimmed = region.trim();
+            if !trimmed.is_empty() {
+                regions.push(trimmed.to_string());
+            }
+        }
+        i = region_end.max(start);
+    }
+    regions
+}
+
+/// Run the member-recording visitor over each Astro template `{ ... }` expression
+/// region so `.map()` / `.forEach()` / `for...of` iteration bindings in the
+/// template body credit the element-class members the same way the frontmatter
+/// does (issue #1713). Each region is parsed as a standalone TSX expression
+/// (Astro template expressions contain JSX), visited with a fresh extractor
+/// seeded with the frontmatter's array element-type map so
+/// `bind_iterable_callback_parameter` can resolve the receiver's element class,
+/// and the re-emitted class-qualified member accesses are appended to `info`.
+///
+/// Over-credit only: the drained accesses are span-less name pairs (`Util.getter`)
+/// that the analyze layer resolves through the frontmatter imports; they can only
+/// suppress a false `unused-class-member`, never introduce a finding. A region
+/// that fails to parse or resolves no element type contributes nothing.
+fn extend_template_expression_member_accesses(
+    info: &mut ModuleInfo,
+    template: &str,
+    frontmatter_array_element_types: &rustc_hash::FxHashMap<String, String>,
+) {
+    if frontmatter_array_element_types.is_empty() {
+        return;
+    }
+    for region in collect_template_expression_regions(template) {
+        // Wrap as a parenthesized expression statement so the region parses as a
+        // valid TSX program. Spans are irrelevant: only span-less member accesses
+        // are drained.
+        let wrapped = format!("({region});");
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, &wrapped, SourceType::tsx()).parse();
+        if parser_return.panicked {
+            continue;
+        }
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.seed_array_binding_element_types(frontmatter_array_element_types);
+        extractor.visit_program(&parser_return.program);
+        info.member_accesses
+            .extend(extractor.take_resolved_iteration_member_accesses());
+    }
+}
+
 /// Extract frontmatter from an Astro component.
 pub fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
     ASTRO_FRONTMATTER_RE.captures(source).map(|cap| {
@@ -414,7 +501,25 @@ pub(crate) fn parse_astro_to_module(
 
     extend_imports_from_template(&mut extractor.imports, template, template_offset);
 
+    // Capture the frontmatter's array/reactive-array element-type map before
+    // `into_module_info` consumes the extractor, so the template-expression pass
+    // below can type a `{utils.map((util) => util.getter)}` callback param to the
+    // `const utils: Util[]` element class (issue #1713).
+    let frontmatter_array_element_types = extractor.array_binding_element_types().clone();
+
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
+
+    // Run the member-recording visitor over the Astro template `{...}` expression
+    // regions so `.map()` / `.forEach()` / `for...of` iteration-binding member
+    // accesses in the TEMPLATE body are credited the same as the frontmatter
+    // (issue #1713). Over-credit only: it can only re-emit a class-qualified
+    // member access that later suppresses a false `unused-class-member`, never a
+    // new finding.
+    extend_template_expression_member_accesses(
+        &mut info,
+        template,
+        &frontmatter_array_element_types,
+    );
     // Astro-only: thread the frontmatter binding usage onto the module so
     // `referenced_import_bindings` (derived from `imports` minus
     // `unused_import_bindings` in `release_resolution_payload`) reflects ACTUAL
@@ -972,5 +1077,78 @@ mod tests {
         let info = parse_astro_to_module(FileId(0), source, 0, false);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "../Layout.astro");
+    }
+
+    #[test]
+    fn astro_template_map_callback_element_type() {
+        // Issue #1713: a `.map()` callback param in the TEMPLATE body (not the
+        // frontmatter) whose receiver is a frontmatter `Util[]` binding is typed
+        // to the `Util` element class, so `util.getter()` credits `Util.getter`.
+        let source = "---\n\
+            import { Util } from './Util'\n\
+            const utils: Util[] = [new Util()]\n\
+            ---\n\
+            <div>\n\
+              {utils.map((util) => <p>{util.getter()}</p>)}\n\
+            </div>\n";
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
+
+        let has_util_getter = info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Util" && access.member == "getter");
+        assert!(
+            has_util_getter,
+            "expected Util.getter from the template .map callback, found: {:?}",
+            info.member_accesses
+        );
+    }
+
+    #[test]
+    fn astro_template_map_does_not_credit_unrelated_member() {
+        // Control: a member NOT accessed anywhere (frontmatter or template) must
+        // not be synthesized as a Util access. Proves the pass is over-credit-only
+        // and does not blanket-credit the class.
+        let source = "---\n\
+            import { Util } from './Util'\n\
+            const utils: Util[] = [new Util()]\n\
+            ---\n\
+            <div>\n\
+              {utils.map((util) => <p>{util.getter()}</p>)}\n\
+            </div>\n";
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
+
+        let has_unused = info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Util" && access.member == "unusedMethod");
+        assert!(
+            !has_unused,
+            "Util.unusedMethod is never accessed and must not be credited, found: {:?}",
+            info.member_accesses
+        );
+    }
+
+    #[test]
+    fn astro_template_map_without_typed_array_credits_nothing() {
+        // Neuter check: no frontmatter typed array => no element type => the
+        // template pass contributes no class-qualified access.
+        let source = "---\n\
+            import { Util } from './Util'\n\
+            const utils = getUtils()\n\
+            ---\n\
+            <div>\n\
+              {utils.map((util) => <p>{util.getter()}</p>)}\n\
+            </div>\n";
+        let info = parse_astro_to_module(FileId(0), source, 0, false);
+
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object == "Util"),
+            "an untyped receiver must not credit any Util member, found: {:?}",
+            info.member_accesses
+        );
     }
 }

@@ -1,0 +1,12 @@
+---
+import { Util } from '../Util';
+
+const utils: Util[] = [new Util()];
+---
+<html>
+  <body>
+    <ul>
+      {utils.map((util) => <li>{util.getter} {util.property} {util.hello()}</li>)}
+    </ul>
+  </body>
+</html>

@@ -358,6 +358,9 @@ mod iteration_binding_element_types;
 #[path = "integration_test/issue_1712_angular_for_class_member.rs"]
 mod issue_1712_angular_for_class_member;
 
+#[path = "integration_test/astro_template_map_class_member.rs"]
+mod astro_template_map_class_member;
+
 #[path = "integration_test/issue_843_nestjs_lifecycle.rs"]
 mod issue_843_nestjs_lifecycle;
 
