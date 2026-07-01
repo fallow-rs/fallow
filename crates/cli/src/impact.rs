@@ -1628,7 +1628,7 @@ pub fn collect_clone_findings(
         .clone_groups
         .iter()
         .map(|g| CloneInput {
-            fingerprint: fallow_engine::clone_fingerprint(&g.instances),
+            fingerprint: fallow_engine::duplicates::clone_fingerprint(&g.instances),
             instance_paths: g.instances.iter().map(|i| i.file.clone()).collect(),
         })
         .collect()

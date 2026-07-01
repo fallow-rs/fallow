@@ -57,6 +57,6 @@ pub fn apply_top(report: &mut DuplicationReport, n: usize, root: &Path) {
 }
 
 fn rebuild_duplication_derived_fields(report: &mut DuplicationReport, root: &Path) {
-    fallow_engine::refresh_clone_families(report, root);
-    report.stats = fallow_engine::recompute_stats(report);
+    fallow_engine::duplicates::refresh_clone_families(report, root);
+    report.stats = fallow_engine::duplicates::recompute_stats(report);
 }

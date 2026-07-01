@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_engine::{
+use fallow_engine::duplicates::{
     CloneFingerprintSet, clone_fingerprint, dominant_identifier, fingerprint_for_fragment,
 };
 use fallow_output::{

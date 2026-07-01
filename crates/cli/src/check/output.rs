@@ -127,7 +127,8 @@ pub fn run_cross_reference(
     quiet: bool,
 ) {
     let files = fallow_engine::discover_files_with_plugin_scopes(config);
-    let dupe_report = fallow_engine::find_duplicates(&config.root, &files, &config.duplicates);
+    let dupe_report =
+        fallow_engine::duplicates::find_duplicates(&config.root, &files, &config.duplicates);
     let cross_ref = fallow_engine::cross_reference(&dupe_report, unfiltered_results);
 
     if cross_ref.has_findings() {

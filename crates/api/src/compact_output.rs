@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use fallow_engine::CloneFingerprintSet;
+use fallow_engine::duplicates::CloneFingerprintSet;
 use fallow_output::normalize_uri;
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::{AnalysisResults, UnusedExport, UnusedMember};

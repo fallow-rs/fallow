@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use fallow_engine::CloneFingerprintSet;
+use fallow_engine::duplicates::CloneFingerprintSet;
 use fallow_types::duplicates::{CloneGroup, DuplicationReport, DuplicationStats};
 use fallow_types::results::AnalysisResults;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -440,7 +440,7 @@ fn duplication_group(
     fingerprints: &CloneFingerprintSet,
 ) -> DuplicationGroup {
     let mut subset = duplication_subset_report(&attributed_groups, report);
-    subset.stats = fallow_engine::recompute_stats(&subset);
+    subset.stats = fallow_engine::duplicates::recompute_stats(&subset);
     let clone_families = clone_families_for_bucket(&attributed_groups, report, fingerprints);
     let clone_groups = attributed_groups
         .into_iter()

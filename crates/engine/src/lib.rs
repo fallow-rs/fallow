@@ -33,7 +33,7 @@ mod cross_reference;
 mod css;
 pub mod dead_code;
 mod discover;
-mod duplicates;
+pub mod duplicates;
 mod error;
 mod feature_flags;
 mod flags;
@@ -71,12 +71,6 @@ pub use discover::{
     collect_plugin_hidden_dir_scopes, discover_entry_points, discover_files,
     discover_files_with_additional_hidden_dirs, discover_files_with_plugin_scopes,
     discover_plugin_entry_points, discover_workspace_entry_points, is_allowed_hidden_dir,
-};
-pub use duplicates::{
-    CloneFingerprintSet, FINGERPRINT_PREFIX, clone_fingerprint, dominant_identifier,
-    find_duplicates, find_duplicates_touching_files_with_defaults, find_duplicates_with_defaults,
-    fingerprint_for_fragment, recompute_stats, refresh_clone_families,
-    source_token_kinds_equivalent,
 };
 pub use error::emit_error;
 use fallow_types::extract::ModuleInfo;

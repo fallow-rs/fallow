@@ -18,7 +18,7 @@ pub type EditorRefactoringSuggestion = fallow_types::duplicates::RefactoringSugg
 /// Report-scoped clone fingerprint assignment for editor-facing duplication output.
 #[derive(Debug, Clone)]
 pub struct EditorCloneFingerprintSet {
-    inner: fallow_engine::CloneFingerprintSet,
+    inner: fallow_engine::duplicates::CloneFingerprintSet,
 }
 
 impl EditorCloneFingerprintSet {
@@ -26,7 +26,7 @@ impl EditorCloneFingerprintSet {
     #[must_use]
     pub fn from_groups(groups: &[EditorCloneGroup]) -> Self {
         Self {
-            inner: fallow_engine::CloneFingerprintSet::from_groups(groups),
+            inner: fallow_engine::duplicates::CloneFingerprintSet::from_groups(groups),
         }
     }
 

@@ -6,7 +6,7 @@ use colored::Colorize;
 use fallow_api::{
     AttributedCloneGroupFinding, AttributedInstance, DuplicationGroup, DuplicationGrouping,
 };
-use fallow_engine::CloneFingerprintSet;
+use fallow_engine::duplicates::CloneFingerprintSet;
 use fallow_types::duplicates::{CloneFamily, CloneGroup, DuplicationReport};
 
 use super::{

@@ -828,7 +828,7 @@ fn js_ts_tokens_equivalent(path: &Path, current: &str, base: &str) -> bool {
     ) {
         return false;
     }
-    fallow_engine::source_token_kinds_equivalent(path, current, base, false)
+    fallow_engine::duplicates::source_token_kinds_equivalent(path, current, base, false)
 }
 
 fn remap_focus_files(
