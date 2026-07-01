@@ -1303,15 +1303,37 @@ fn try_load_analysis_graph_cache(
         input.files,
     );
     let store = graph_cache::GraphCacheStore::load(&input.config.cache_dir)?;
-    if !store.manifest.matches_inputs(&current) {
+    if store.manifest.matches_inputs(&current) {
+        let resolved = graph_cache::restore_resolved_modules(
+            &input.config.root,
+            modules,
+            input.files,
+            &store.resolved_modules,
+        )?;
+        tracing::debug!("Graph cache hit: skipping import resolution and graph build");
+
+        return Some(GraphCacheHit {
+            graph: store.graph,
+            resolved,
+            elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
+        });
+    }
+
+    if !store.manifest.matches_resolution_inputs(&current) {
         return None;
     }
-    let resolved =
-        graph_cache::restore_resolved_modules(modules, input.files, &store.resolved_modules)?;
-    tracing::debug!("Graph cache hit: skipping import resolution and graph build");
+
+    let resolved = graph_cache::restore_resolved_modules(
+        &input.config.root,
+        modules,
+        input.files,
+        &store.resolved_modules,
+    )?;
+    tracing::debug!("Graph resolver cache hit: skipping import resolution and rebuilding graph");
+    let graph = build_analysis_graph_timed(input, &resolved, entry_points, modules);
 
     Some(GraphCacheHit {
-        graph: store.graph,
+        graph: graph.graph,
         resolved,
         elapsed_ms: t.elapsed().as_secs_f64() * 1000.0,
     })
@@ -1727,11 +1749,16 @@ fn build_analysis_graph(input: &BuildAnalysisGraphInput<'_>) -> graph::ModuleGra
     credit_workspace_package_usage(&mut graph, input.resolved, input.workspaces);
 
     if let Some(manifest) = current_manifest {
+        let Some(resolved_modules) =
+            graph_cache::cache_resolved_modules(&input.config.root, input.files, input.resolved)
+        else {
+            return graph;
+        };
         let store = graph_cache::GraphCacheStore {
             version: graph_cache::GRAPH_CACHE_VERSION,
             manifest,
             graph,
-            resolved_modules: graph_cache::cache_resolved_modules(input.resolved),
+            resolved_modules,
         };
         store.save(&input.config.cache_dir);
         // `save` borrows the store, so the freshly built graph is moved back out
