@@ -179,6 +179,46 @@ pub fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, sh
             },
         );
     }
+
+    print_audit_styling_summary(result, show_headers);
+}
+
+/// One-line styling summary in the audit view: a cleanup-candidate count with a
+/// pointer to `fallow health --css` for detail. Descriptive + verdict-neutral;
+/// deliberately NOT the A-F styling grade (that stays in `fallow health` for
+/// trending, per the styling-in-audit plan). Gated on the CSS pass having run.
+fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
+    let Some(ref health) = result.health else {
+        return;
+    };
+    let Some(ref css) = health.report.css_analytics else {
+        return;
+    };
+    let s = &css.summary;
+    let candidates = s.tailwind_arbitrary_values
+        + s.duplicate_declaration_blocks
+        + s.unreferenced_css_classes
+        + s.unused_theme_tokens
+        + s.unused_font_faces
+        + s.unused_property_registrations
+        + s.unused_layers
+        + s.scoped_unused_classes
+        + s.keyframes_unreferenced
+        + s.keyframes_undefined
+        + s.unresolved_class_references;
+    if candidates == 0 {
+        return;
+    }
+    print_audit_section_header(
+        show_headers,
+        "── Styling ────────────────────────────────────────",
+    );
+    let noun = if candidates == 1 {
+        "candidate"
+    } else {
+        "candidates"
+    };
+    eprintln!("  {candidates} styling cleanup {noun} (run `fallow health --css` for detail)");
 }
 
 /// Print the TTY-only explain tip above the findings sections.
