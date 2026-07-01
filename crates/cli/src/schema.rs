@@ -228,119 +228,49 @@ fn apply_dead_code_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
     apply_catalog_issue_meta(bare_id, m);
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "flat per-issue-id metadata table (one match arm per rule); no branching logic to extract"
-)]
 fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
-        "unused-file" => {
-            m.filter_flag = Some("--unused-files");
-            m.suppress = Some(("unused-file", true));
-        }
-        "unused-export" => {
-            m.filter_flag = Some("--unused-exports");
+        "unused-export" | "unused-enum-member" => {
             m.fixable = true;
-            m.suppress = Some(("unused-export", false));
-        }
-        "unused-type" => {
-            m.filter_flag = Some("--unused-types");
-            m.suppress = Some(("unused-type", false));
         }
         "private-type-leak" => {
-            m.filter_flag = Some("--private-type-leaks");
-            m.suppress = Some(("private-type-leak", false));
             m.note = Some("Opt-in API hygiene check; the rule defaults to off");
         }
-        "unused-enum-member" => {
-            m.filter_flag = Some("--unused-enum-members");
-            m.fixable = true;
-            m.suppress = Some(("unused-enum-member", false));
-        }
-        "unused-class-member" => {
-            m.filter_flag = Some("--unused-class-members");
-            m.suppress = Some(("unused-class-member", false));
-        }
-        "unused-store-member" => {
-            m.filter_flag = Some("--unused-store-members");
-            m.suppress = Some(("unused-store-member", false));
-        }
-        "unprovided-inject" => {
-            m.filter_flag = Some("--unprovided-injects");
-            m.suppress = Some(("unprovided-inject", false));
-        }
-        "unrendered-component" => {
-            m.filter_flag = Some("--unrendered-components");
-            m.suppress = Some(("unrendered-component", false));
-        }
-        "unused-component-prop" => {
-            m.filter_flag = Some("--unused-component-props");
-            m.suppress = Some(("unused-component-prop", false));
-        }
-        "unused-component-emit" => {
-            m.filter_flag = Some("--unused-component-emits");
-            m.suppress = Some(("unused-component-emit", false));
-        }
-        "unused-component-input" => {
-            m.filter_flag = Some("--unused-component-inputs");
-            m.suppress = Some(("unused-component-input", false));
-        }
-        "unused-component-output" => {
-            m.filter_flag = Some("--unused-component-outputs");
-            m.suppress = Some(("unused-component-output", false));
-        }
-        "unused-svelte-event" => {
-            m.filter_flag = Some("--unused-svelte-events");
-            m.suppress = Some(("unused-svelte-event", false));
-        }
-        "unused-server-action" => {
-            m.filter_flag = Some("--unused-server-actions");
-            m.suppress = Some(("unused-server-action", false));
-        }
-        "unused-load-data-key" => {
-            m.filter_flag = Some("--unused-load-data-keys");
-            m.suppress = Some(("unused-load-data-key", false));
-        }
+        "unused-file"
+        | "unused-type"
+        | "unresolved-import"
+        | "missing-suppression-reason"
+        | "unused-class-member"
+        | "unused-store-member"
+        | "unprovided-inject"
+        | "unrendered-component"
+        | "unused-component-prop"
+        | "unused-component-emit"
+        | "unused-component-input"
+        | "unused-component-output"
+        | "unused-svelte-event"
+        | "unused-server-action"
+        | "unused-load-data-key" => {}
         "prop-drilling" => {
-            // Dormant health signal (rule defaults to off); suppress-only, no
-            // dead-code filter flag. The line-level suppress anchors at the
-            // source prop declaration (the first hop).
-            m.suppress = Some(("prop-drilling", false));
             m.note = Some(
                 "Opt-in: set rules.prop-drilling to warn or error to enable. Defaults to off.",
             );
         }
         "thin-wrapper" => {
-            // Dormant health signal (rule defaults to off); suppress-only, no
-            // dead-code filter flag. The line-level suppress anchors at the
-            // wrapper component definition.
-            m.suppress = Some(("thin-wrapper", false));
             m.note =
                 Some("Opt-in: set rules.thin-wrapper to warn or error to enable. Defaults to off.");
         }
         "duplicate-prop-shape" => {
-            // Dormant multi-file health signal (rule defaults to off);
-            // suppress-only, no dead-code filter flag. The line-level suppress
-            // anchors at a member's component definition; a suppressed member
-            // still appears in siblings' sharing_components.
-            m.suppress = Some(("duplicate-prop-shape", false));
             m.note = Some(
                 "Opt-in: set rules.duplicate-prop-shape to warn or error to enable. Defaults to off.",
             );
         }
-        "unresolved-import" => {
-            m.filter_flag = Some("--unresolved-imports");
-            m.suppress = Some(("unresolved-import", false));
-        }
         "duplicate-export" => {
-            m.filter_flag = Some("--duplicate-exports");
-            m.suppress = Some(("duplicate-export", true));
             m.note = Some(
                 "fallow fix can add an ignoreExports rule to the fallow config instead of editing source",
             );
         }
         "stale-suppression" => {
-            m.filter_flag = Some("--stale-suppressions");
             m.note = Some("Fix by removing the stale suppression marker itself");
         }
         _ => return false,
@@ -351,27 +281,22 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
 fn apply_dependency_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
         "unused-dependency" | "unused-dev-dependency" | "unused-optional-dependency" => {
-            m.filter_flag = Some("--unused-deps");
             m.fixable = true;
             m.note = Some(
                 "--unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, and test-only-dependency",
             );
         }
         "type-only-dependency" => {
-            m.filter_flag = Some("--unused-deps");
             m.note = Some(
                 "Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds",
             );
         }
         "test-only-dependency" => {
-            m.filter_flag = Some("--unused-deps");
             m.note = Some(
                 "Not reported in --production mode (test files are excluded there); --unused-deps scopes it together with the other dependency kinds",
             );
         }
-        "unlisted-dependency" => {
-            m.filter_flag = Some("--unlisted-deps");
-        }
+        "unlisted-dependency" => {}
         _ => return false,
     }
     true
@@ -379,42 +304,20 @@ fn apply_dependency_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
 
 fn apply_architecture_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
-        "circular-dependency" => {
-            m.filter_flag = Some("--circular-deps");
-            m.suppress = Some(("circular-dependency", false));
-        }
-        "re-export-cycle" => {
-            m.filter_flag = Some("--re-export-cycles");
-            m.suppress = Some(("re-export-cycle", true));
-        }
+        "circular-dependency" | "re-export-cycle" => {}
         "boundary-violation" => {
-            m.filter_flag = Some("--boundary-violations");
-            m.suppress = Some(("boundary-violation", false));
             m.note = Some("Requires configured boundary zones (boundaries config)");
         }
         "boundary-coverage" => {
-            m.suppress = Some(("boundary-violation", true));
             m.note = Some("Requires boundaries.coverage.requireAllFiles");
         }
         "boundary-call-violation" => {
-            m.suppress = Some(("boundary-call-violation", false));
             m.note = Some("Requires boundaries.calls.forbidden patterns");
         }
         "policy-violation" => {
-            m.filter_flag = Some("--policy-violations");
-            m.suppress = Some(("policy-violation", false));
             m.note = Some("Requires a configured rule pack (rulePacks config)");
         }
-        "invalid-client-export" => {
-            m.suppress = Some(("invalid-client-export", false));
-            m.note = Some("Requires the project to declare next");
-        }
-        "mixed-client-server-barrel" => {
-            m.suppress = Some(("mixed-client-server-barrel", false));
-            m.note = Some("Requires the project to declare next");
-        }
-        "misplaced-directive" => {
-            m.suppress = Some(("misplaced-directive", false));
+        "invalid-client-export" | "mixed-client-server-barrel" | "misplaced-directive" => {
             m.note = Some("Requires the project to declare next");
         }
         _ => return false,
@@ -425,21 +328,12 @@ fn apply_architecture_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
 fn apply_catalog_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
         "unused-catalog-entry" => {
-            m.filter_flag = Some("--unused-catalog-entries");
             m.fixable = true;
         }
-        "empty-catalog-group" => {
-            m.filter_flag = Some("--empty-catalog-groups");
-        }
-        "unresolved-catalog-reference" => {
-            m.filter_flag = Some("--unresolved-catalog-references");
-        }
-        "unused-dependency-override" => {
-            m.filter_flag = Some("--unused-dependency-overrides");
-        }
-        "misconfigured-dependency-override" => {
-            m.filter_flag = Some("--misconfigured-dependency-overrides");
-        }
+        "empty-catalog-group"
+        | "unresolved-catalog-reference"
+        | "unused-dependency-override"
+        | "misconfigured-dependency-override" => {}
         _ => return false,
     }
     true
@@ -1022,6 +916,44 @@ mod tests {
                     row["id"]
                 );
             }
+        }
+    }
+
+    #[test]
+    fn dead_code_schema_issue_contracts_follow_issue_kind_meta() {
+        let schema = schema();
+        for row in schema["issue_types"].as_array().unwrap() {
+            if row["command"].as_str().unwrap() != "dead-code" {
+                continue;
+            }
+
+            let id = row["id"].as_str().unwrap();
+            let shared = issue_meta_by_code(id)
+                .unwrap_or_else(|| panic!("dead-code row {id} has no IssueKindMeta"));
+
+            assert_eq!(
+                row["filter_flag"].as_str(),
+                shared.filter_flag,
+                "dead-code row {id} must derive filter_flag from IssueKindMeta"
+            );
+
+            let expected_comment = shared.suppress_token.map(|token| {
+                if shared.suppress_file_level {
+                    format!("// fallow-ignore-file {token}")
+                } else {
+                    format!("// fallow-ignore-next-line {token}")
+                }
+            });
+            assert_eq!(
+                row["suppressible"].as_bool().unwrap(),
+                expected_comment.is_some(),
+                "dead-code row {id} must derive suppressible from IssueKindMeta"
+            );
+            assert_eq!(
+                row["suppress_comment"].as_str(),
+                expected_comment.as_deref(),
+                "dead-code row {id} must derive suppress_comment from IssueKindMeta"
+            );
         }
     }
 
