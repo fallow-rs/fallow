@@ -167,6 +167,7 @@
         "prop-drilling": "off",
         "thin-wrapper": "off",
         "duplicate-prop-shape": "off",
+        "css-token-drift": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1099,6 +1100,11 @@
           "$ref": "#/$defs/Severity",
           "default": "off"
         },
+        "css-token-drift": {
+          "description": "A CSS / CSS-in-JS design-token DRIFT finding (a hardcoded value where a\ndesign token exists, e.g. a Tailwind arbitrary value). A styling-domain\nadvisory surfaced in `fallow audit`; defaults to `warn` (verdict-neutral).\nSet to `error` to gate CI on styling drift, or `off` to silence.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1843,6 +1849,16 @@
           ]
         },
         "duplicate-prop-shape": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "css-token-drift": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

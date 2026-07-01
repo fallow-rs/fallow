@@ -767,9 +767,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         code: "css-token-drift",
         aliases: &[],
         label: "CSS Token Drift",
-        // config_key wired in the config chunk (RulesConfig rule for error/off
-        // escalation); the finding is inline-suppressible via the suppress token.
-        config_key: None,
+        config_key: Some("css-token-drift"),
         filter_flag: None,
         mcp_issue_type: None,
         suppress_token: Some("css-token-drift"),

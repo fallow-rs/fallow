@@ -196,6 +196,17 @@ fn compute_verdict(
         has_errors = true;
     }
 
+    // Styling findings are verdict-NEUTRAL by default (the rule defaults to
+    // `warn`): a warn styling finding never flips the verdict, Pass stays Pass.
+    // Only a per-rule `error` escalation gates. Sole family today is
+    // css-token-drift; add sibling rule checks as families graduate.
+    if let Some(result) = health
+        && !result.report.styling_findings.is_empty()
+        && result.config.rules.css_token_drift == fallow_config::Severity::Error
+    {
+        has_errors = true;
+    }
+
     if let Some(result) = dupes
         && !result.report.clone_groups.is_empty()
     {
@@ -296,6 +307,15 @@ fn compute_introduced_verdict(
     }
     if let Some(result) = health {
         has_errors |= introduced_health_has_errors(result, base);
+    }
+    // Styling findings are changed-file-scoped in audit, so every one is on a
+    // changed file. Verdict-neutral by default (rule `warn`); only a per-rule
+    // `error` escalation gates. Base-vs-head "introduced" narrowing is Phase 2.
+    if let Some(result) = health
+        && !result.report.styling_findings.is_empty()
+        && result.config.rules.css_token_drift == fallow_config::Severity::Error
+    {
+        has_errors = true;
     }
     if let Some(result) = dupes {
         let (errors, warnings) = introduced_dupes_verdict(result, base);

@@ -80,12 +80,11 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::ThinWrapper => rules.thin_wrapper,
         IssueKind::DuplicatePropShape => rules.duplicate_prop_shape,
         // CssTokenDrift is a STYLING-domain finding produced by the engine css
-        // pass, not a core detector; it short-circuits via NON_CORE_KINDS so this
-        // value is unobservable (its default `warn` severity is set at production
-        // time in the engine). Mirrors Complexity / CodeDuplication.
-        IssueKind::Complexity | IssueKind::CodeDuplication | IssueKind::CssTokenDrift => {
-            Severity::Error
-        }
+        // pass (short-circuits via NON_CORE_KINDS for core suppression), but it
+        // has a real config rule, so return it: the engine reads this to gate
+        // production (off) and the audit verdict reads it for error-escalation.
+        IssueKind::CssTokenDrift => rules.css_token_drift,
+        IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
     }
 }
 

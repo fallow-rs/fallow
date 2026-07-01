@@ -151,7 +151,11 @@ fn build_styling_findings(
     let Some(css) = css else {
         return Vec::new();
     };
-    if css.tailwind_arbitrary_values.is_empty() {
+    // Per-rule gate: `off` silences the css-token-drift family entirely (no
+    // production), matching how a `rules.*: off` rule suppresses any finding.
+    if config.rules.css_token_drift == fallow_config::Severity::Off
+        || css.tailwind_arbitrary_values.is_empty()
+    {
         return Vec::new();
     }
 

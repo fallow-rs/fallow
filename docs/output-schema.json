@@ -1431,6 +1431,13 @@
           ],
           "description": "Styling-health score and letter grade: a SECOND health axis derived from\nthe CSS analytics (the design-system axis), orthogonal to the JS/TS code\n`health_score`. Present only with `--css` (the same condition as\n`css_analytics`), so a plain `fallow health` run is byte-unchanged. The\ncode score is never affected by this field."
         },
+        "styling_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StylingFinding"
+          },
+          "description": "Advisory STYLING FINDINGS: the graduation of the descriptive css\ncandidates into first-class, severity-aware, suppressible findings\nsurfaced in `fallow audit`. Verdict-neutral by default (the rule defaults\nto `warn`); the styling domain's OWN findings collection, not the dead-code\n`AnalysisResults`. Present only with `--css`; empty is skipped so a plain\nrun is byte-unchanged."
+        },
         "grouped_by": {
           "anyOf": [
             {
@@ -2442,6 +2449,13 @@
             }
           ],
           "description": "Styling-health score and letter grade: a SECOND health axis derived from\nthe CSS analytics (the design-system axis), orthogonal to the JS/TS code\n`health_score`. Present only with `--css` (the same condition as\n`css_analytics`), so a plain `fallow health` run is byte-unchanged. The\ncode score is never affected by this field."
+        },
+        "styling_findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StylingFinding"
+          },
+          "description": "Advisory STYLING FINDINGS: the graduation of the descriptive css\ncandidates into first-class, severity-aware, suppressible findings\nsurfaced in `fallow audit`. Verdict-neutral by default (the rule defaults\nto `warn`); the styling domain's OWN findings collection, not the dead-code\n`AnalysisResults`. Present only with `--css`; empty is skipped so a plain\nrun is byte-unchanged."
         }
       },
       "required": [
@@ -3134,7 +3148,7 @@
         },
         "priority": {
           "type": "number",
-          "description": "Priority score (0–100, higher = more urgent)."
+          "description": "Priority score (0\u2013100, higher = more urgent)."
         },
         "efficiency": {
           "type": "number",
@@ -6866,7 +6880,7 @@
           "description": "Large file, many functions, or high fan-in: significant effort."
         }
       ],
-      "description": "A ranked refactoring recommendation for a file.\n\n## Priority Formula\n\n```text\npriority = min(density, 1) × 30 + hotspot_boost × 25 + dead_code × 20 + fan_in_norm × 15 + fan_out_norm × 10\n```\n\nFan-in and fan-out normalization uses adaptive percentile-based thresholds\n(p95 of the project distribution, with floors) instead of fixed constants.\n\n## Efficiency (default sort)\n\n```text\nefficiency = priority / effort_numeric   (Low=1, Medium=2, High=3)\n```\n\nSurfaces quick wins: high-priority, low-effort targets rank first.\nEffort estimate for a refactoring target."
+      "description": "A ranked refactoring recommendation for a file.\n\n## Priority Formula\n\n```text\npriority = min(density, 1) \u00d7 30 + hotspot_boost \u00d7 25 + dead_code \u00d7 20 + fan_in_norm \u00d7 15 + fan_out_norm \u00d7 10\n```\n\nFan-in and fan-out normalization uses adaptive percentile-based thresholds\n(p95 of the project distribution, with floors) instead of fixed constants.\n\n## Efficiency (default sort)\n\n```text\nefficiency = priority / effort_numeric   (Low=1, Medium=2, High=3)\n```\n\nSurfaces quick wins: high-priority, low-effort targets rank first.\nEffort estimate for a refactoring target."
     },
     "Confidence": {
       "oneOf": [
@@ -9947,7 +9961,7 @@
         },
         "priority": {
           "type": "number",
-          "description": "Priority score (0–100, higher = more urgent)."
+          "description": "Priority score (0\u2013100, higher = more urgent)."
         },
         "efficiency": {
           "type": "number",
@@ -17709,6 +17723,47 @@
         }
       ],
       "description": "Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier\n`high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON\nPURPOSE: styling confidence is binary (the grade is either reliable for the\nanalyzed surface or it is not), not three distinct evidence tiers, so a\nnever-emitted `Medium` would be dead surface. Serializes lowercase (`\"high\"` /\n`\"low\"`), matching the sibling confidence enums' vocabulary."
+    },
+    "StylingFinding": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "The kebab IssueKind code, e.g. `css-token-drift`."
+        },
+        "sub_kind": {
+          "type": "string",
+          "description": "The specific sub-kind within the family, e.g. `tailwind-arbitrary-value`."
+        },
+        "path": {
+          "type": "string",
+          "description": "Workspace-relative path of the finding."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the finding."
+        },
+        "value": {
+          "type": "string",
+          "description": "The offending literal value, e.g. `w-[13px]`."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Suggested next steps (verify / suppress; never an auto-fix)."
+        }
+      },
+      "required": [
+        "code",
+        "sub_kind",
+        "path",
+        "line",
+        "value",
+        "actions"
+      ],
+      "description": "One advisory STYLING FINDING: the graduation of a descriptive css candidate\ninto a first-class, severity-aware, suppressible finding surfaced in\n`fallow audit`. The styling domain's OWN finding type (not borrowed into the\ndead-code `AnalysisResults`, and not glued in the CLI). `code` is the kebab\nIssueKind code (e.g. `css-token-drift`), so severity / inline suppression /\nSARIF / MCP all resolve via the shared `issue_meta` contract through\n`IssueKind::parse(code)`. One `Vec<StylingFinding>` carries every styling\nfamily; the `code` discriminates."
     }
   }
 }

@@ -4042,6 +4042,15 @@ css_analytics?: (CssAnalyticsReport | null)
  * code score is never affected by this field.
  */
 styling_health?: (StylingHealth | null)
+/**
+ * Advisory STYLING FINDINGS: the graduation of the descriptive css
+ * candidates into first-class, severity-aware, suppressible findings
+ * surfaced in `fallow audit`. Verdict-neutral by default (the rule defaults
+ * to `warn`); the styling domain's OWN findings collection, not the dead-code
+ * `AnalysisResults`. Present only with `--css`; empty is skipped so a plain
+ * run is byte-unchanged.
+ */
+styling_findings?: StylingFinding[]
 }
 /**
  * Wire envelope for a single complexity finding.
@@ -6762,6 +6771,42 @@ token_erosion: number
 structural: number
 }
 /**
+ * One advisory STYLING FINDING: the graduation of a descriptive css candidate
+ * into a first-class, severity-aware, suppressible finding surfaced in
+ * `fallow audit`. The styling domain's OWN finding type (not borrowed into the
+ * dead-code `AnalysisResults`, and not glued in the CLI). `code` is the kebab
+ * IssueKind code (e.g. `css-token-drift`), so severity / inline suppression /
+ * SARIF / MCP all resolve via the shared `issue_meta` contract through
+ * `IssueKind::parse(code)`. One `Vec<StylingFinding>` carries every styling
+ * family; the `code` discriminates.
+ */
+export interface StylingFinding {
+/**
+ * The kebab IssueKind code, e.g. `css-token-drift`.
+ */
+code: string
+/**
+ * The specific sub-kind within the family, e.g. `tailwind-arbitrary-value`.
+ */
+sub_kind: string
+/**
+ * Workspace-relative path of the finding.
+ */
+path: string
+/**
+ * 1-based line of the finding.
+ */
+line: number
+/**
+ * The offending literal value, e.g. `w-[13px]`.
+ */
+value: string
+/**
+ * Suggested next steps (verify / suppress; never an auto-fix).
+ */
+actions: CssCandidateAction[]
+}
+/**
  * Envelope emitted by `fallow explain <issue-type> --format json`.
  *
  * Standalone rule explanation. This command does not run project analysis
@@ -7196,6 +7241,15 @@ css_analytics?: (CssAnalyticsReport | null)
  * code score is never affected by this field.
  */
 styling_health?: (StylingHealth | null)
+/**
+ * Advisory STYLING FINDINGS: the graduation of the descriptive css
+ * candidates into first-class, severity-aware, suppressible findings
+ * surfaced in `fallow audit`. Verdict-neutral by default (the rule defaults
+ * to `warn`); the styling domain's OWN findings collection, not the dead-code
+ * `AnalysisResults`. Present only with `--css`; empty is skipped so a plain
+ * run is byte-unchanged.
+ */
+styling_findings?: StylingFinding[]
 grouped_by?: (GroupByMode | null)
 groups?: (HealthGroup[] | null)
 _meta?: (Meta | null)

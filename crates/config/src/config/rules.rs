@@ -185,6 +185,12 @@ pub struct RulesConfig {
     /// dormant until the user enables the rule.
     #[serde(default = "Severity::default_off", alias = "duplicate-prop-shape")]
     pub duplicate_prop_shape: Severity,
+    /// A CSS / CSS-in-JS design-token DRIFT finding (a hardcoded value where a
+    /// design token exists, e.g. a Tailwind arbitrary value). A styling-domain
+    /// advisory surfaced in `fallow audit`; defaults to `warn` (verdict-neutral).
+    /// Set to `error` to gate CI on styling drift, or `off` to silence.
+    #[serde(default = "Severity::default_warn", alias = "css-token-drift")]
+    pub css_token_drift: Severity,
     #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
     #[serde(default, alias = "unlisted-dependency")]
@@ -315,6 +321,7 @@ impl Default for RulesConfig {
             prop_drilling: Severity::Off,
             thin_wrapper: Severity::Off,
             duplicate_prop_shape: Severity::Off,
+            css_token_drift: Severity::Warn,
             unresolved_imports: Severity::Error,
             unlisted_dependencies: Severity::Error,
             duplicate_exports: Severity::Error,
@@ -389,6 +396,7 @@ impl RulesConfig {
                 prop_drilling,
                 thin_wrapper,
                 duplicate_prop_shape,
+                css_token_drift,
             ]
         );
         apply_partial_rules!(
@@ -575,6 +583,12 @@ pub struct PartialRulesConfig {
     pub duplicate_prop_shape: Option<Severity>,
     #[serde(
         default,
+        alias = "css-token-drift",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub css_token_drift: Option<Severity>,
+    #[serde(
+        default,
         alias = "unresolved-import",
         skip_serializing_if = "Option::is_none"
     )]
@@ -752,6 +766,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "prop-drilling",
     "thin-wrapper",
     "duplicate-prop-shape",
+    "css-token-drift",
     "unresolved-imports",
     "unlisted-dependencies",
     "duplicate-exports",
@@ -1130,6 +1145,7 @@ mod tests {
             prop_drilling: Some(Severity::Off),
             thin_wrapper: Some(Severity::Off),
             duplicate_prop_shape: Some(Severity::Off),
+            css_token_drift: Some(Severity::Off),
             unresolved_imports: Some(Severity::Off),
             unlisted_dependencies: Some(Severity::Off),
             duplicate_exports: Some(Severity::Off),
@@ -1223,7 +1239,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 91);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 92);
     }
 
     #[test]
@@ -1264,8 +1280,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            94,
-            "expected 94 source-level alias attrs (47 per struct); got {}: {:?}",
+            96,
+            "expected 96 source-level alias attrs (48 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );
