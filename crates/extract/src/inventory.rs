@@ -15,15 +15,24 @@
 //! starts at 0 and increments in pre-order AST traversal each time a function
 //! is entered without a resolvable explicit name. Name resolution precedence:
 //!
-//! 1. Parent-provided `pending_name` (from `MethodDefinition`,
-//!    `VariableDeclarator`), same pattern as the internal complexity visitor.
+//! 1. Parent-provided `pending_name`: from a `MethodDefinition` /
+//!    `VariableDeclarator` binding, OR from the callee of the call / `new`
+//!    expression a function is passed to as an argument (`arr.map(cb)` ->
+//!    "map", `foo(cb)` -> "foo", `new Promise(cb)` -> "Promise"). The callee
+//!    case matches `oxc-coverage-instrument`'s opt-in `name_callback_arguments`
+//!    (which the Fallow runtime beacon enables), so a callback's static name
+//!    lines up with its runtime-instrumented name instead of both sides drifting
+//!    to different anonymous placeholders.
 //! 2. The function's own `id` (named `function foo() {}`, named function
 //!    expression `const x = function named() {}`).
 //! 3. `(anonymous_N)` with the current counter value; counter then increments.
+//!    Only genuinely unnamed functions reach this: an immediately-invoked
+//!    function expression, an arrow returned from another function, or a
+//!    computed non-string-key call.
 //!
 //! Counter scope is per-file. Reference implementation:
-//! `oxc-coverage-instrument/src/transform.rs` (`fn_counter` field; lines 201
-//! and 612 at the time of writing).
+//! `oxc-coverage-instrument/src/transform.rs` (`resolve_function_name` +
+//! `callback_argument_name`).
 
 use std::path::Path;
 
@@ -75,6 +84,10 @@ struct InventoryVisitor<'a> {
     entries: Vec<InventoryEntry>,
     /// Parent-provided name override (method key, variable binding, etc.).
     pending_name: Option<String>,
+    /// Callee name for a function passed as a call / `new` argument. Ranks BELOW
+    /// the function's own `id` (a named function expression keeps its id), so it
+    /// is a separate slot from `pending_name` (which ranks above the id).
+    pending_callee_name: Option<String>,
     /// File-scoped monotonic counter for unnamed functions.
     anonymous_counter: u32,
 }
@@ -86,6 +99,7 @@ impl<'a> InventoryVisitor<'a> {
             line_offsets,
             entries: Vec::new(),
             pending_name: None,
+            pending_callee_name: None,
             anonymous_counter: 0,
         }
     }
@@ -97,8 +111,9 @@ impl<'a> InventoryVisitor<'a> {
     /// `add_function` advances the counter unconditionally on every
     /// instrumented function (named or not). We collapse both into one call.
     ///
-    /// Name precedence: parent `pending_name` (method key / variable binding)
-    /// → function's own `id` → counter.
+    /// Name precedence, matching the instrumenter's `resolve_function_name`:
+    /// parent `pending_name` (method key / variable binding) → function's own
+    /// `id` → call/`new` callee (`pending_callee_name`) → counter.
     fn resolve_name(&mut self, explicit: Option<&str>) -> String {
         let n = self.anonymous_counter;
         self.anonymous_counter += 1;
@@ -107,6 +122,9 @@ impl<'a> InventoryVisitor<'a> {
         }
         if let Some(name) = explicit {
             return name.to_owned();
+        }
+        if let Some(callee) = self.pending_callee_name.take() {
+            return callee;
         }
         format!("(anonymous_{n})")
     }
@@ -202,6 +220,56 @@ impl<'ast> Visit<'ast> for InventoryVisitor<'_> {
         self.pending_name = None;
         walk::walk_object_property(self, prop);
         self.pending_name = None;
+    }
+
+    /// Name each function-valued argument from the callee (`arr.map(cb)` ->
+    /// "map", `foo(cb)` -> "foo"), matching `oxc-coverage-instrument`'s
+    /// `name_callback_arguments`. The callee subtree is visited FIRST with no
+    /// inherited name, so a chained call (`a.b().c(cb)`) never leaks `b` onto
+    /// `c`'s callback; the callee's own name is then applied afresh to each
+    /// argument. A binding name from a parent (declarator / method) is already
+    /// consumed by its direct function child before the body's calls, so it
+    /// never collides here. Type arguments are skipped (types hold no function
+    /// to inventory).
+    fn visit_call_expression(&mut self, call: &CallExpression<'ast>) {
+        self.visit_expression(&call.callee);
+        let name = callee_name(&call.callee);
+        for argument in &call.arguments {
+            self.pending_callee_name.clone_from(&name);
+            self.visit_argument(argument);
+        }
+        self.pending_callee_name = None;
+    }
+
+    fn visit_new_expression(&mut self, new_expr: &NewExpression<'ast>) {
+        self.visit_expression(&new_expr.callee);
+        let name = callee_name(&new_expr.callee);
+        for argument in &new_expr.arguments {
+            self.pending_callee_name.clone_from(&name);
+            self.visit_argument(argument);
+        }
+        self.pending_callee_name = None;
+    }
+}
+
+/// Extract a display name from a call / `new` callee, matching
+/// `oxc-coverage-instrument`'s `callee_name`: a bare identifier keeps its name,
+/// a member access uses the (last) property, and a computed access uses a
+/// string-literal key. Anything else (a computed non-string index, a call
+/// result, a parenthesized expression) yields no name.
+fn callee_name(callee: &Expression<'_>) -> Option<String> {
+    match callee {
+        Expression::Identifier(ident) => Some(ident.name.to_string()),
+        Expression::StaticMemberExpression(member) => Some(member.property.name.to_string()),
+        Expression::ComputedMemberExpression(member) => match &member.expression {
+            Expression::StringLiteral(lit) => Some(lit.value.to_string()),
+            _ => None,
+        },
+        // A parenthesized callee (`(foo)(cb)`, `(a.b)(cb)`) unwraps to its inner
+        // callee, matching the instrumenter. oxc keeps paren nodes by default
+        // (`preserve_parens`), so both sides see this node.
+        Expression::ParenthesizedExpression(paren) => callee_name(&paren.expression),
+        _ => None,
     }
 }
 
@@ -348,14 +416,16 @@ mod tests {
     }
 
     #[test]
-    fn anonymous_arrow_passed_as_argument_uses_counter() {
+    fn callback_argument_takes_the_callee_name() {
+        // An arrow passed as a call argument now takes the callee name (matches
+        // the instrumenter's name_callback_arguments), not the anonymous counter.
         let entries = walk("setTimeout(() => { console.log('hi'); }, 10);");
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "(anonymous_0)");
+        assert_eq!(entries[0].name, "setTimeout");
     }
 
     #[test]
-    fn multiple_anonymous_functions_increment_counter_in_source_order() {
+    fn member_callee_names_each_callback_in_source_order() {
         let entries = walk(
             r"
             [1, 2, 3].map(() => 1);
@@ -363,11 +433,14 @@ mod tests {
             ",
         );
         let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["(anonymous_0)", "(anonymous_1)"]);
+        assert_eq!(names, vec!["map", "filter"]);
     }
 
     #[test]
     fn named_function_still_advances_counter_matching_instrumenter() {
+        // The counter still advances on every function (named or callee-named),
+        // matching the instrumenter, so a later genuinely-anonymous function
+        // gets the right N. Here the callback is callee-named "map".
         let entries = walk(
             r"
             function named() { return 1; }
@@ -375,7 +448,83 @@ mod tests {
             ",
         );
         let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["named", "(anonymous_1)"]);
+        assert_eq!(names, vec!["named", "map"]);
+    }
+
+    #[test]
+    fn plain_identifier_callee_names_the_callback() {
+        let entries = walk("useMemo(() => compute());");
+        assert_eq!(entries[0].name, "useMemo");
+    }
+
+    #[test]
+    fn new_expression_callee_names_the_callback() {
+        let entries = walk("new Promise((resolve) => resolve(1));");
+        assert_eq!(entries[0].name, "Promise");
+    }
+
+    #[test]
+    fn callback_after_a_string_argument_is_named_from_the_callee() {
+        // The event/route-handler shape: the function is a later argument, after
+        // a string. It is named from the callee, not the string.
+        let entries = walk(r#"el.addEventListener("click", () => handle());"#);
+        assert_eq!(entries[0].name, "addEventListener");
+    }
+
+    #[test]
+    fn computed_string_key_callee_is_named() {
+        let entries = walk(r#"obj["handler"](() => run());"#);
+        assert_eq!(entries[0].name, "handler");
+    }
+
+    #[test]
+    fn chained_call_does_not_leak_the_earlier_callee_onto_the_later_callback() {
+        // `.then`'s callback must be "then" and `.catch`'s must be "catch": the
+        // callee subtree (`p.then(cb).catch`) is visited before the outer
+        // arguments, so the earlier callee never leaks onto the later callback.
+        let entries = walk("p.then(() => a).catch(() => b);");
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["then", "catch"]);
+    }
+
+    #[test]
+    fn nested_callbacks_each_take_their_own_callee() {
+        let entries = walk("outer(() => inner(() => 1));");
+        let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["outer", "inner"]);
+    }
+
+    #[test]
+    fn binding_name_wins_over_callee() {
+        // A declarator binding is consumed on function entry, before the body's
+        // calls, so a bound arrow keeps its name even when its body is a call.
+        let entries = walk("const handler = () => run();");
+        assert_eq!(entries[0].name, "handler");
+    }
+
+    #[test]
+    fn named_function_expression_argument_keeps_its_own_id() {
+        let entries = walk("run(function inner() { return 1; });");
+        assert_eq!(entries[0].name, "inner");
+    }
+
+    #[test]
+    fn iife_callee_stays_anonymous() {
+        // The function is the callee, not an argument, so it is not a callback.
+        let entries = walk("(function () { return 1; })();");
+        assert_eq!(entries[0].name, "(anonymous_0)");
+    }
+
+    #[test]
+    fn computed_non_string_callee_stays_anonymous() {
+        let entries = walk("handlers[index](() => run());");
+        assert_eq!(entries[0].name, "(anonymous_0)");
+    }
+
+    #[test]
+    fn parenthesized_callee_unwraps_to_the_inner_name() {
+        assert_eq!(walk("(foo)(() => run());")[0].name, "foo");
+        assert_eq!(walk("(a.b)(() => run());")[0].name, "b");
     }
 
     #[test]
@@ -403,7 +552,7 @@ mod tests {
             ",
         );
         let names: Vec<_> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["foo", "(anonymous_1)"]);
+        assert_eq!(names, vec!["foo", "map"]);
     }
 
     #[test]
