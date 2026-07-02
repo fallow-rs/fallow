@@ -210,55 +210,10 @@ fn filters_from_params(params: &AnalyzeParams) -> Result<DeadCodeFilters, String
 }
 
 fn apply_issue_type_filter(filters: &mut DeadCodeFilters, issue_type: &str) -> Result<(), String> {
-    let Some(flag) = issue_filter_flag(issue_type) else {
+    if !filters.enable_registry_selector(issue_type) {
         return Err(unknown_issue_type_error(issue_type));
-    };
-    apply_filter_flag(filters, flag);
-    Ok(())
-}
-
-fn issue_filter_flag(issue_type: &str) -> Option<&'static str> {
-    ISSUE_TYPE_FLAGS
-        .iter()
-        .find_map(|&(name, flag)| (name == issue_type).then_some(flag))
-}
-
-fn apply_filter_flag(filters: &mut DeadCodeFilters, flag: &str) {
-    match flag {
-        "--unused-files" => filters.unused_files = true,
-        "--unused-exports" => filters.unused_exports = true,
-        "--unused-types" => filters.unused_types = true,
-        "--private-type-leaks" => filters.private_type_leaks = true,
-        "--unused-deps" => filters.unused_deps = true,
-        "--unused-enum-members" => filters.unused_enum_members = true,
-        "--unused-class-members" => filters.unused_class_members = true,
-        "--unused-store-members" => filters.unused_store_members = true,
-        "--unprovided-injects" => filters.unprovided_injects = true,
-        "--unrendered-components" => filters.unrendered_components = true,
-        "--unused-component-props" => filters.unused_component_props = true,
-        "--unused-component-emits" => filters.unused_component_emits = true,
-        "--unused-component-inputs" => filters.unused_component_inputs = true,
-        "--unused-component-outputs" => filters.unused_component_outputs = true,
-        "--unused-svelte-events" => filters.unused_svelte_events = true,
-        "--unused-server-actions" => filters.unused_server_actions = true,
-        "--unused-load-data-keys" => filters.unused_load_data_keys = true,
-        "--unresolved-imports" => filters.unresolved_imports = true,
-        "--unlisted-deps" => filters.unlisted_deps = true,
-        "--duplicate-exports" => filters.duplicate_exports = true,
-        "--circular-deps" => filters.circular_deps = true,
-        "--re-export-cycles" => filters.re_export_cycles = true,
-        "--boundary-violations" => filters.boundary_violations = true,
-        "--policy-violations" => filters.policy_violations = true,
-        "--stale-suppressions" => filters.stale_suppressions = true,
-        "--unused-catalog-entries" => filters.unused_catalog_entries = true,
-        "--empty-catalog-groups" => filters.empty_catalog_groups = true,
-        "--unresolved-catalog-references" => filters.unresolved_catalog_references = true,
-        "--unused-dependency-overrides" => filters.unused_dependency_overrides = true,
-        "--misconfigured-dependency-overrides" => {
-            filters.misconfigured_dependency_overrides = true;
-        }
-        _ => unreachable!("registry emitted unsupported dead-code filter flag: {flag}"),
     }
+    Ok(())
 }
 
 fn unknown_issue_type_error(issue_type: &str) -> String {

@@ -294,6 +294,62 @@ pub struct DeadCodeFilters {
     pub misconfigured_dependency_overrides: bool,
 }
 
+impl DeadCodeFilters {
+    /// Enable the issue filter addressed by a shared registry selector.
+    ///
+    /// Returns `false` when the selector is not registered for dead-code
+    /// filtering. Callers that expose user input should surface their own
+    /// validation error with the accepted registry values.
+    pub fn enable_registry_selector(&mut self, selector: &str) -> bool {
+        let Some(flag) = fallow_types::issue_meta::MCP_ISSUE_TYPE_FLAGS
+            .iter()
+            .find_map(|&(name, flag)| (name == selector).then_some(flag))
+        else {
+            return false;
+        };
+        self.enable_cli_filter_flag(flag);
+        true
+    }
+
+    fn enable_cli_filter_flag(&mut self, flag: &str) {
+        match flag {
+            "--unused-files" => self.unused_files = true,
+            "--unused-exports" => self.unused_exports = true,
+            "--unused-types" => self.unused_types = true,
+            "--private-type-leaks" => self.private_type_leaks = true,
+            "--unused-deps" => self.unused_deps = true,
+            "--unused-enum-members" => self.unused_enum_members = true,
+            "--unused-class-members" => self.unused_class_members = true,
+            "--unused-store-members" => self.unused_store_members = true,
+            "--unprovided-injects" => self.unprovided_injects = true,
+            "--unrendered-components" => self.unrendered_components = true,
+            "--unused-component-props" => self.unused_component_props = true,
+            "--unused-component-emits" => self.unused_component_emits = true,
+            "--unused-component-inputs" => self.unused_component_inputs = true,
+            "--unused-component-outputs" => self.unused_component_outputs = true,
+            "--unused-svelte-events" => self.unused_svelte_events = true,
+            "--unused-server-actions" => self.unused_server_actions = true,
+            "--unused-load-data-keys" => self.unused_load_data_keys = true,
+            "--unresolved-imports" => self.unresolved_imports = true,
+            "--unlisted-deps" => self.unlisted_deps = true,
+            "--duplicate-exports" => self.duplicate_exports = true,
+            "--circular-deps" => self.circular_deps = true,
+            "--re-export-cycles" => self.re_export_cycles = true,
+            "--boundary-violations" => self.boundary_violations = true,
+            "--policy-violations" => self.policy_violations = true,
+            "--stale-suppressions" => self.stale_suppressions = true,
+            "--unused-catalog-entries" => self.unused_catalog_entries = true,
+            "--empty-catalog-groups" => self.empty_catalog_groups = true,
+            "--unresolved-catalog-references" => self.unresolved_catalog_references = true,
+            "--unused-dependency-overrides" => self.unused_dependency_overrides = true,
+            "--misconfigured-dependency-overrides" => {
+                self.misconfigured_dependency_overrides = true;
+            }
+            _ => unreachable!("registry emitted unsupported dead-code filter flag: {flag}"),
+        }
+    }
+}
+
 /// Options for dead-code-oriented analyses.
 #[derive(Debug, Clone, Default)]
 pub struct DeadCodeOptions {
@@ -809,6 +865,24 @@ mod tests {
         assert_eq!(error.code.as_deref(), Some("FALLOW_TEST"));
         assert_eq!(error.help.as_deref(), Some("Try again"));
         assert_eq!(error.context.as_deref(), Some("analysis.root"));
+    }
+
+    #[test]
+    fn dead_code_filters_accept_shared_registry_selectors() {
+        for (selector, _) in fallow_types::issue_meta::MCP_ISSUE_TYPE_FLAGS.iter() {
+            let mut filters = DeadCodeFilters::default();
+            assert!(
+                filters.enable_registry_selector(selector),
+                "{selector} should be accepted"
+            );
+        }
+
+        let mut filters = DeadCodeFilters::default();
+        assert!(filters.enable_registry_selector("unused-files"));
+        assert!(filters.unused_files);
+        assert!(filters.enable_registry_selector("boundary-violations"));
+        assert!(filters.boundary_violations);
+        assert!(!filters.enable_registry_selector("not-a-real-selector"));
     }
 
     #[test]
