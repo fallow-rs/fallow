@@ -435,6 +435,9 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join("-");
+    if let Some(rule) = dead_code_registry_rule(&normalized) {
+        return Some(rule);
+    }
     let alias = dead_code_alias_id(&normalized)
         .or_else(|| catalog_alias_id(&normalized))
         .or_else(|| health_alias_id(&normalized))
@@ -472,6 +475,27 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
                     || rule.name.eq_ignore_ascii_case(trimmed)
             })
     })
+}
+
+fn dead_code_registry_rule(normalized: &str) -> Option<&'static RuleDef> {
+    let meta = fallow_types::issue_meta::ISSUE_KIND_META
+        .iter()
+        .find(|meta| issue_meta_matches_token(meta, normalized))?;
+    CHECK_RULES
+        .iter()
+        .find(|rule| rule.id.strip_prefix("fallow/") == Some(meta.code))
+}
+
+fn issue_meta_matches_token(
+    meta: &fallow_types::issue_meta::IssueKindMeta,
+    normalized: &str,
+) -> bool {
+    meta.code == normalized
+        || meta.aliases.contains(&normalized)
+        || meta.config_key == Some(normalized)
+        || meta.mcp_issue_type == Some(normalized)
+        || meta.suppress_token == Some(normalized)
+        || meta.filter_flag.map(|flag| flag.trim_start_matches("--")) == Some(normalized)
 }
 
 fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
@@ -1305,6 +1329,53 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn registry_dead_code_tokens_resolve_to_explain_rules() {
+        for meta in fallow_types::issue_meta::ISSUE_KIND_META {
+            let Some(expected) = CHECK_RULES
+                .iter()
+                .find(|rule| rule.id.strip_prefix("fallow/") == Some(meta.code))
+            else {
+                continue;
+            };
+            assert_registry_token(expected, meta.code);
+            for token in meta.aliases {
+                assert_registry_token(expected, token);
+            }
+            if let Some(token) = meta.config_key {
+                assert_registry_token(expected, token);
+            }
+            if let Some(token) = meta.mcp_issue_type {
+                assert_registry_token(expected, token);
+            }
+        }
+    }
+
+    fn assert_registry_token(expected: &RuleDef, token: &str) {
+        if !registry_token_is_unique(token) {
+            return;
+        }
+        let actual = rule_by_token(token)
+            .unwrap_or_else(|| panic!("registry token {token} did not resolve to an explain rule"));
+        assert_eq!(
+            actual.id, expected.id,
+            "registry token {token} resolved to the wrong explain rule"
+        );
+    }
+
+    fn registry_token_is_unique(token: &str) -> bool {
+        fallow_types::issue_meta::ISSUE_KIND_META
+            .iter()
+            .filter(|meta| {
+                CHECK_RULES
+                    .iter()
+                    .any(|rule| rule.id.strip_prefix("fallow/") == Some(meta.code))
+                    && issue_meta_matches_token(meta, token)
+            })
+            .count()
+            == 1
     }
 
     #[test]
