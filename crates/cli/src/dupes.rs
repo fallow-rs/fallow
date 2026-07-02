@@ -332,20 +332,30 @@ fn execute_dupes_inner(
     let config = load_dupes_config_for_analysis(opts)?;
 
     let dupes_config = build_dupes_config(opts, &config.duplicates);
-    let files = pre_discovered
-        .unwrap_or_else(|| fallow_engine::discover::discover_files_with_plugin_scopes(&config));
 
     let changed_files_from_since = resolve_changed_since(opts);
     let effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>> =
         opts.changed_files.or(changed_files_from_since.as_ref());
 
-    let (mut report, default_ignore_skips) = run_duplication_analysis(
-        opts,
-        &config,
-        &files,
-        &dupes_config,
-        effective_changed_files,
-    );
+    let (mut report, default_ignore_skips) = match pre_discovered {
+        Some(files) => run_duplication_analysis(
+            opts,
+            &config,
+            &files,
+            &dupes_config,
+            effective_changed_files,
+        ),
+        None => {
+            let session =
+                fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+            run_duplication_analysis_with_session(
+                opts,
+                &session,
+                &dupes_config,
+                effective_changed_files,
+            )
+        }
+    };
 
     if let Some(trace_spec) = opts.trace {
         // The trace view ran the full duplication analysis; record its find-state
@@ -573,6 +583,26 @@ fn run_duplication_analysis(
             dupes_config,
             cache_dir,
         )
+    };
+    (analysis.report, analysis.default_ignore_skips)
+}
+
+fn run_duplication_analysis_with_session(
+    opts: &DupesOptions<'_>,
+    session: &fallow_engine::session::AnalysisSession,
+    dupes_config: &fallow_config::DuplicatesConfig,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+) -> (DuplicationReport, DefaultIgnoreSkips) {
+    let cache_dir = (!opts.no_cache).then_some(session.config().cache_dir.as_path());
+    let analysis = if let Some(changed_files) = changed_files {
+        let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
+        session.find_duplicates_touching_files_with_defaults(
+            dupes_config,
+            &changed_files,
+            cache_dir,
+        )
+    } else {
+        session.find_duplicates_with_defaults(dupes_config, cache_dir)
     };
     (analysis.report, analysis.default_ignore_skips)
 }

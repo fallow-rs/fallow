@@ -430,6 +430,13 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
         "engine dead-code facade must not delegate reused-parse analysis to the old core monolith"
     );
 
+    let cli_dupes =
+        read_source_without_line_comments("crates/cli/src/dupes.rs").expect("read cli dupes");
+    assert!(
+        !cli_dupes.contains("discover_files_with_plugin_scopes"),
+        "standalone dupes must use AnalysisSession discovery instead of direct discovery"
+    );
+
     let changed_files = read_source_without_line_comments("crates/engine/src/changed_files.rs")
         .expect("read source");
     for forbidden in [
