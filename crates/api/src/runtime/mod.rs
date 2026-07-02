@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use fallow_engine::session::AnalysisSession;
+use fallow_engine::{dead_code::DeadCodeAnalysisArtifacts, session::AnalysisSession};
 use fallow_output::{HealthGrouping, HealthReport, RootEnvelopeMode};
 use fallow_types::output_format::OutputFormat;
 use fallow_types::workspace::WorkspaceDiagnostic;
@@ -157,19 +157,31 @@ fn programmatic_health_run_from_engine_result<GroupResolver>(
     }
 }
 
+#[cfg(test)]
 pub(super) fn run_health_with_session(
     options: &ComplexityOptions,
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<HealthProgrammaticOutput> {
+    run_health_with_session_artifacts(options, resolved, session, changed_files, None)
+}
+
+pub(super) fn run_health_with_session_artifacts(
+    options: &ComplexityOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    changed_files: Option<&FxHashSet<PathBuf>>,
+    pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
+) -> ProgrammaticResult<HealthProgrammaticOutput> {
     crate::validate_complexity_options(options)?;
     let health_options = derive_programmatic_health_execution_options(resolved, options);
-    let result = fallow_engine::health::run_ungrouped_health_with_session(
+    let result = fallow_engine::health::run_ungrouped_health_with_session_artifacts(
         &health_options,
         resolved.workspace_roots.clone(),
         session,
         changed_files.map(|files| files.iter().cloned().collect()),
+        pre_computed_analysis,
     )
     .map_err(|_| generic_health_error("health"))?;
 

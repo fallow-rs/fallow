@@ -17,7 +17,7 @@ use crate::{
 
 use super::{
     ProgrammaticResult, root_envelope_mode, run_dead_code, run_duplication, run_health,
-    run_health_with_session,
+    run_health_with_session_artifacts,
 };
 
 /// Run changed-code audit through typed programmatic runners.
@@ -240,17 +240,23 @@ fn run_audit_subanalyses(
         let resolved = resolve_programmatic_analysis_context(&dead_code_options.analysis)?;
         return resolved.install(|| {
             let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
-            let complexity =
-                run_health_with_session(&complexity_options, &resolved, &session, changed_files)?;
+            let dead_code = super::dead_code::run_dead_code_with_session_artifacts(
+                &dead_code_options,
+                &resolved,
+                &session,
+                changed_files,
+                |_| {},
+                Instant::now(),
+            )?;
+            let complexity = run_health_with_session_artifacts(
+                &complexity_options,
+                &resolved,
+                &session,
+                changed_files,
+                Some(dead_code.artifacts),
+            )?;
             Ok(AuditSubanalyses {
-                dead_code: super::dead_code::run_dead_code_with_session(
-                    &dead_code_options,
-                    &resolved,
-                    &session,
-                    changed_files,
-                    |_| {},
-                    Instant::now(),
-                )?,
+                dead_code: dead_code.output,
                 duplication: super::duplication::run_duplication_with_session(
                     &duplication_options,
                     &resolved,

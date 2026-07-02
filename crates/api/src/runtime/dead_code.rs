@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use fallow_config::ProductionAnalysis;
 use fallow_engine::{
+    dead_code::DeadCodeAnalysisArtifacts,
     project_config::{ProjectConfig, ProjectConfigOptions},
     session::AnalysisSession,
 };
@@ -25,6 +26,11 @@ use crate::{
 };
 
 use super::{ProgrammaticResult, root_envelope_mode};
+
+pub(super) struct DeadCodeProgrammaticRunWithArtifacts {
+    pub output: DeadCodeProgrammaticOutput,
+    pub artifacts: DeadCodeAnalysisArtifacts,
+}
 
 /// Run dead-code analysis and return typed API output before serialization.
 ///
@@ -95,6 +101,54 @@ pub(super) fn run_dead_code_with_session(
     apply_dead_code_filters(&options.filters, &mut results);
     post_filter(&mut results);
 
+    Ok(build_dead_code_programmatic_output(
+        options, resolved, session, results, start,
+    ))
+}
+
+pub(super) fn run_dead_code_with_session_artifacts(
+    options: &DeadCodeOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    changed_files: Option<&FxHashSet<std::path::PathBuf>>,
+    post_filter: impl FnOnce(&mut AnalysisResults),
+    start: Instant,
+) -> ProgrammaticResult<DeadCodeProgrammaticRunWithArtifacts> {
+    let mut artifacts = session
+        .analyze_dead_code_with_artifacts(true, true)
+        .map_err(|err| {
+            ProgrammaticError::new(format!("dead-code analysis failed: {err}"), 2)
+                .with_code("FALLOW_DEAD_CODE_FAILED")
+                .with_context("dead-code")
+        })?;
+
+    apply_dead_code_scope(
+        options,
+        resolved,
+        session,
+        changed_files,
+        &mut artifacts.results,
+    )?;
+    apply_dead_code_filters(&options.filters, &mut artifacts.results);
+    post_filter(&mut artifacts.results);
+
+    let output = build_dead_code_programmatic_output(
+        options,
+        resolved,
+        session,
+        artifacts.results.clone(),
+        start,
+    );
+    Ok(DeadCodeProgrammaticRunWithArtifacts { output, artifacts })
+}
+
+fn build_dead_code_programmatic_output(
+    options: &DeadCodeOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    results: AnalysisResults,
+    start: Instant,
+) -> DeadCodeProgrammaticOutput {
     let root = session.root();
     let next_steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
         suggestions_enabled: suggestions_enabled(),
@@ -118,12 +172,12 @@ pub(super) fn run_dead_code_with_session(
         workspace_diagnostics: session.workspace_diagnostics().to_vec(),
         next_steps,
     });
-    Ok(DeadCodeProgrammaticOutput {
+    DeadCodeProgrammaticOutput {
         output,
         root: session.root().to_path_buf(),
         envelope_mode: root_envelope_mode(),
         telemetry_analysis_run_id: None,
-    })
+    }
 }
 
 fn keep_circular_dependencies(results: &mut AnalysisResults) {

@@ -10,6 +10,7 @@ use rustc_hash::FxHashSet;
 
 use crate::{
     project_config::{ProjectConfigOptions, config_for_project_analysis},
+    results::DeadCodeAnalysisArtifacts,
     session::{AnalysisSession, ParsedAnalysisSessionParts},
 };
 
@@ -57,7 +58,15 @@ pub fn run_ungrouped_health(
         .and_then(|git_ref| session.changed_files_since(git_ref).ok());
     let parts = session.into_parsed_parts(true);
 
-    run_ungrouped_health_from_parts(options, ws_roots, parts, changed_files, config_ms, false)
+    run_ungrouped_health_from_parts(HealthRunPartsInput {
+        options,
+        ws_roots,
+        parts,
+        changed_files,
+        config_ms,
+        shared_parse: false,
+        pre_computed_analysis: None,
+    })
 }
 
 /// Run health analysis from an existing analysis session.
@@ -74,6 +83,22 @@ pub fn run_ungrouped_health_with_session(
     session: &AnalysisSession,
     changed_files: Option<Vec<PathBuf>>,
 ) -> Result<HealthAnalysisResult<NoGroupResolver>, ExitCode> {
+    run_ungrouped_health_with_session_artifacts(options, ws_roots, session, changed_files, None)
+}
+
+/// Run health analysis from an existing analysis session and retained
+/// dead-code artifacts.
+///
+/// # Errors
+///
+/// Returns the health command exit code for invalid inputs or analysis failures.
+pub fn run_ungrouped_health_with_session_artifacts(
+    options: &HealthExecutionOptions<'_>,
+    ws_roots: Option<Vec<PathBuf>>,
+    session: &AnalysisSession,
+    changed_files: Option<Vec<PathBuf>>,
+    pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
+) -> Result<HealthAnalysisResult<NoGroupResolver>, ExitCode> {
     validate_health_churn_file(options).map_err(|_| ExitCode::from(2))?;
 
     let changed_files = changed_files.map(FxHashSet::from_iter).or_else(|| {
@@ -84,17 +109,39 @@ pub fn run_ungrouped_health_with_session(
     let parts = session.parsed_parts(true);
     let shared_parse = parts.parse_ms == 0.0;
 
-    run_ungrouped_health_from_parts(options, ws_roots, parts, changed_files, 0.0, shared_parse)
+    run_ungrouped_health_from_parts(HealthRunPartsInput {
+        options,
+        ws_roots,
+        parts,
+        changed_files,
+        config_ms: 0.0,
+        shared_parse,
+        pre_computed_analysis,
+    })
 }
 
-fn run_ungrouped_health_from_parts(
-    options: &HealthExecutionOptions<'_>,
+struct HealthRunPartsInput<'a> {
+    options: &'a HealthExecutionOptions<'a>,
     ws_roots: Option<Vec<PathBuf>>,
     parts: ParsedAnalysisSessionParts,
     changed_files: Option<FxHashSet<PathBuf>>,
     config_ms: f64,
     shared_parse: bool,
+    pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
+}
+
+fn run_ungrouped_health_from_parts(
+    input: HealthRunPartsInput<'_>,
 ) -> Result<HealthAnalysisResult<NoGroupResolver>, ExitCode> {
+    let HealthRunPartsInput {
+        options,
+        ws_roots,
+        parts,
+        changed_files,
+        config_ms,
+        shared_parse,
+        pre_computed_analysis,
+    } = input;
     let config = parts.config;
     let files = parts.files;
     let modules = parts.modules;
@@ -124,7 +171,7 @@ fn run_ungrouped_health_from_parts(
             parse_ms,
             parse_cpu_ms,
             shared_parse,
-            pre_computed_analysis: None,
+            pre_computed_analysis,
             workspace_diagnostics,
         },
         scope_inputs,

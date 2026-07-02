@@ -230,6 +230,40 @@ fn run_health_with_session_reuses_existing_discovery() {
 }
 
 #[test]
+fn run_health_with_session_artifacts_accepts_retained_dead_code_analysis() {
+    let project = tempfile::tempdir().expect("temp dir");
+    let src = project.path().join("src");
+    std::fs::create_dir(&src).expect("src dir");
+    std::fs::write(
+        src.join("index.ts"),
+        "export function score(value: boolean) { if (value) { return 1; } return 0; }\n",
+    )
+    .expect("source file");
+
+    let options = ComplexityOptions {
+        analysis: analysis_at(project.path()),
+        file_scores: true,
+        ..ComplexityOptions::default()
+    };
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)
+        .expect("programmatic context resolves");
+    let session =
+        fallow_engine::session::AnalysisSession::load(project.path(), None).expect("session loads");
+    let artifacts = session
+        .analyze_dead_code_with_artifacts(true, true)
+        .expect("dead-code artifacts");
+    assert!(artifacts.graph.is_some());
+
+    let output = resolved
+        .install(|| {
+            run_health_with_session_artifacts(&options, &resolved, &session, None, Some(artifacts))
+        })
+        .expect("health succeeds");
+
+    assert!(!output.report.file_scores.is_empty());
+}
+
+#[test]
 fn serialize_health_report_json_tags_meta_and_strips_paths() {
     let root = Path::new("/repo");
     let json = serialize_health_report_json(HealthJsonReportInput {
