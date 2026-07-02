@@ -694,7 +694,11 @@ fn collect_caller_edges(
     config: &ResolvedConfig,
     functions: &[InventoryFunction],
 ) -> BTreeMap<String, Vec<CallerSitePayload>> {
-    let artifacts = match fallow_engine::dead_code::analyze_retaining_modules(config, false, true) {
+    let artifacts = match fallow_engine::session::AnalysisSession::from_resolved_config(
+        config.clone(),
+    )
+    .analyze_dead_code_retaining_files(false, true)
+    {
         Ok(artifacts) => artifacts,
         Err(err) => {
             eprintln!(
@@ -1993,6 +1997,45 @@ mod tests {
         let sites = map.get(&foo.identity.stable_id).expect("foo edges");
         assert_eq!(sites.len(), 1, "same importer+symbol collapses to one site");
         assert_eq!(sites[0].symbols, vec!["foo".to_owned()]);
+    }
+
+    #[test]
+    fn collect_caller_edges_reuses_session_files_and_graph() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src")).expect("create src");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"inv","type":"module"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            root.join("src/callee.ts"),
+            "export function boot() {\n  return 1;\n}\n",
+        )
+        .expect("write callee");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "import { boot } from './callee';\nboot();\n",
+        )
+        .expect("write importer");
+
+        let config = load_resolved_config(root).expect("config loads");
+        let function = InventoryFunction::from_entry(
+            "src/callee.ts",
+            "src/callee.ts",
+            entry("boot", 1, "h1"),
+            None,
+        );
+
+        let edges = collect_caller_edges(&config, std::slice::from_ref(&function));
+
+        let sites = edges
+            .get(&function.identity.stable_id)
+            .expect("caller edge should be resolved from retained graph/files");
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].file, "src/index.ts");
+        assert_eq!(sites[0].symbols, vec!["boot".to_owned()]);
     }
 
     #[test]

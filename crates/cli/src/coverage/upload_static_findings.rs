@@ -164,7 +164,8 @@ fn run_inner(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadE
     enforce_clean_worktree(args, root)?;
 
     let config = load_resolved_config(root)?;
-    let results = fallow_engine::dead_code::analyze(&config)
+    let results = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
+        .analyze_dead_code_with_artifacts(false, false)
         .map(|analysis| analysis.results)
         .map_err(|err| UploadError::Validation(format!("analysis failed: {err}")))?;
     let findings = collect_findings(&config, &results);

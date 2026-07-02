@@ -395,8 +395,9 @@ fn include_dupes_reuses_dead_code_discovery_artifacts() {
         .expect("read check output module");
     assert!(
         check.contains("opts.include_dupes")
-            && check.contains("fallow_engine::dead_code::analyze_retaining_files"),
-        "check --include-dupes must retain discovered files from the dead-code run"
+            && check.contains("AnalysisSession::from_resolved_config")
+            && check.contains(".analyze_dead_code_retaining_files"),
+        "check --include-dupes must retain discovered files from the shared AnalysisSession dead-code run"
     );
     assert!(
         check.contains("result.retained_files.as_deref()")
@@ -406,6 +407,98 @@ fn include_dupes_reuses_dead_code_discovery_artifacts() {
     assert!(
         !output.contains("discover_files_with_plugin_scopes"),
         "check cross-reference output must not rediscover files after dead-code analysis"
+    );
+}
+
+#[test]
+fn check_command_dead_code_routes_through_analysis_session() {
+    let check = read_source_without_line_comments("crates/cli/src/check/mod.rs")
+        .expect("read check module");
+    assert!(
+        check.contains("AnalysisSession::from_resolved_config"),
+        "check must build an AnalysisSession before dead-code variants"
+    );
+    for forbidden in [
+        "fallow_engine::dead_code::analyze(",
+        "fallow_engine::dead_code::analyze_with_trace",
+        "fallow_engine::dead_code::analyze_retaining_files",
+        "fallow_engine::dead_code::analyze_retaining_modules",
+    ] {
+        assert!(
+            !check.contains(forbidden),
+            "check must route dead-code analysis through AnalysisSession instead of {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn security_command_dead_code_routes_through_analysis_session() {
+    let security = read_source_without_line_comments("crates/cli/src/security.rs")
+        .expect("read security module");
+    assert!(
+        security.contains("AnalysisSession::from_resolved_config"),
+        "security must build an AnalysisSession before dead-code variants"
+    );
+    for forbidden in [
+        "fallow_engine::dead_code::analyze(",
+        "fallow_engine::dead_code::analyze_retaining_modules",
+    ] {
+        assert!(
+            !security.contains(forbidden),
+            "security must route dead-code analysis through AnalysisSession instead of {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn fix_command_dead_code_routes_through_analysis_session() {
+    let fix =
+        read_source_without_line_comments("crates/cli/src/fix/mod.rs").expect("read fix module");
+    assert!(
+        fix.contains("AnalysisSession::from_resolved_config"),
+        "fix must build an AnalysisSession before dead-code analysis"
+    );
+    assert!(
+        !fix.contains("fallow_engine::dead_code::analyze_with_file_hashes"),
+        "fix must collect file hashes through AnalysisSession artifacts"
+    );
+}
+
+#[test]
+fn coverage_upload_dead_code_routes_through_analysis_session() {
+    for source_path in [
+        "crates/cli/src/coverage/upload_static_findings.rs",
+        "crates/cli/src/coverage/upload_inventory.rs",
+    ] {
+        let source =
+            read_source_without_line_comments(source_path).expect("read coverage upload module");
+        assert!(
+            source.contains("AnalysisSession::from_resolved_config"),
+            "{source_path} must build an AnalysisSession before dead-code analysis"
+        );
+        for forbidden in [
+            "fallow_engine::dead_code::analyze(",
+            "fallow_engine::dead_code::analyze_retaining_modules",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{source_path} must route dead-code analysis through AnalysisSession instead of {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn watch_command_dead_code_routes_through_analysis_session() {
+    let watch =
+        read_source_without_line_comments("crates/cli/src/watch.rs").expect("read watch module");
+    assert!(
+        watch.contains("AnalysisSession::from_resolved_config"),
+        "watch must build an AnalysisSession before dead-code analysis"
+    );
+    assert!(
+        !watch.contains("fallow_engine::dead_code::analyze("),
+        "watch must route dead-code analysis through AnalysisSession"
     );
 }
 

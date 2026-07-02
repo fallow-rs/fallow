@@ -414,8 +414,11 @@ fn run_check_analysis(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
 ) -> Result<CheckAnalysisData, ExitCode> {
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone());
+
     if opts.retain_modules_for_health {
-        return fallow_engine::dead_code::analyze_retaining_modules(config, true, true)
+        return session
+            .analyze_dead_code_with_artifacts(true, true)
             .map(|output| CheckAnalysisData {
                 results: output.results,
                 trace_graph: output.graph,
@@ -428,24 +431,22 @@ fn run_check_analysis(
     }
 
     if opts.include_dupes {
-        return fallow_engine::dead_code::analyze_retaining_files(
-            config,
-            false,
-            opts.trace_opts.any_active(),
-        )
-        .map(|output| CheckAnalysisData {
-            results: output.results,
-            trace_graph: output.graph,
-            trace_timings: output.timings,
-            retained_modules: None,
-            retained_files: output.files,
-            script_used_packages: output.script_used_packages,
-        })
-        .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
+        return session
+            .analyze_dead_code_retaining_files(false, opts.trace_opts.any_active())
+            .map(|output| CheckAnalysisData {
+                results: output.results,
+                trace_graph: output.graph,
+                trace_timings: output.timings,
+                retained_modules: None,
+                retained_files: output.files,
+                script_used_packages: output.script_used_packages,
+            })
+            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
     if opts.trace_opts.any_active() {
-        return fallow_engine::dead_code::analyze_with_trace(config)
+        return session
+            .analyze_dead_code_with_artifacts(false, true)
             .map(|output| CheckAnalysisData {
                 results: output.results,
                 trace_graph: output.graph,
@@ -457,14 +458,15 @@ fn run_check_analysis(
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
-    fallow_engine::dead_code::analyze(config)
-        .map(|analysis| CheckAnalysisData {
-            results: analysis.results,
+    session
+        .analyze_dead_code_with_artifacts(false, false)
+        .map(|output| CheckAnalysisData {
+            results: output.results,
             trace_graph: None,
             trace_timings: None,
             retained_modules: None,
             retained_files: None,
-            script_used_packages: rustc_hash::FxHashSet::default(),
+            script_used_packages: output.script_used_packages,
         })
         .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
 }

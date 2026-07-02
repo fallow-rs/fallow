@@ -22,8 +22,10 @@ fn run_analyze(
     config: &fallow_config::ResolvedConfig,
     output: OutputFormat,
 ) -> Result<(fallow_types::results::AnalysisResults, CapturedHashes), ExitCode> {
-    let output_struct = fallow_engine::dead_code::analyze_with_file_hashes(config)
-        .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
+    let output_struct =
+        fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
+            .analyze_dead_code_with_artifacts(false, false)
+            .map_err(|e| crate::error::emit_error(&format!("Analysis error: {e}"), 2, output))?;
     Ok((output_struct.results, output_struct.file_hashes))
 }
 

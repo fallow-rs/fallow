@@ -295,13 +295,16 @@ fn print_waiting(opts: &WatchOptions<'_>) {
 
 fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOptions<'_>) -> ExitCode {
     let start = Instant::now();
-    let results = match fallow_engine::dead_code::analyze(config) {
-        Ok(analysis) => analysis.results,
-        Err(e) => {
-            eprintln!("Analysis error: {e}");
-            return ExitCode::from(2);
-        }
-    };
+    let results =
+        match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
+            .analyze_dead_code_with_artifacts(false, false)
+        {
+            Ok(analysis) => analysis.results,
+            Err(e) => {
+                eprintln!("Analysis error: {e}");
+                return ExitCode::from(2);
+            }
+        };
     // Note find-state for telemetry (issue #1650 follow-up): watch emits a
     // `code_quality_review` workflow event at process exit, so each analysis
     // cycle records its find-state (the accumulator is sticky across cycles).
