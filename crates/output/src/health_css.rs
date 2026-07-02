@@ -38,6 +38,12 @@ pub struct CssAnalyticsReport {
     /// value is sometimes the right call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tailwind_arbitrary_values: Vec<TailwindArbitraryValue>,
+    /// Located raw CSS declaration values that bypass token surfaces (`var()`,
+    /// `token()`, `theme()`) on scale-sensitive axes such as color, font-size,
+    /// line-height, radius, and shadow. Conservative candidates: a raw value can
+    /// be intentional, but introduced raw values are useful audit feedback.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raw_style_values: Vec<RawStyleValue>,
     /// Unused CSS at-rule entities: an `@property` registered but never read via
     /// `var()` in any stylesheet, or an `@layer` declared but never populated by
     /// a block. Cleanup candidates (an `@property` can be read from JS; a layer
@@ -189,6 +195,24 @@ pub struct TailwindArbitraryValue {
     /// Read-only action(s): a find-all-occurrences search so the token can be
     /// replaced with a scale token. Always at least one entry, so consumers can
     /// iterate `actions` uniformly across every finding type.
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// A located raw CSS declaration value on a scale-sensitive styling axis.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RawStyleValue {
+    /// Value axis, e.g. `color`, `font-size`, `line-height`, `radius`, or `shadow`.
+    pub axis: String,
+    /// CSS property where the raw value appears.
+    pub property: String,
+    /// Rendered declaration value.
+    pub value: String,
+    /// Project-root-relative, forward-slash path to the stylesheet.
+    pub path: String,
+    /// 1-based line of the containing style rule.
+    pub line: u32,
+    /// Read-only guidance step(s). Never auto-fixable.
     pub actions: Vec<CssCandidateAction>,
 }
 
@@ -788,6 +812,20 @@ impl CssCandidateAction {
         }
     }
 
+    /// Guidance for a raw CSS value on a scale-sensitive axis: replace with an
+    /// existing token or confirm the one-off is intentional.
+    #[must_use]
+    pub fn replace_raw_style_value(axis: &str, value: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::ReplaceWithToken,
+            auto_fixable: false,
+            description: format!(
+                "Replace this raw {axis} value with an existing design token or CSS custom property, or confirm this one-off is intentional."
+            ),
+            command: safe_token_search(value),
+        }
+    }
+
     /// Verify action for an unused CSS at-rule entity: a read-only search for
     /// any out-of-CSS consumer (JS reading an `@property`; an `@import layer()`
     /// populating a layer) before removing it.
@@ -965,6 +1003,9 @@ pub struct CssAnalyticsSummary {
     pub tailwind_arbitrary_values: u32,
     /// Total Tailwind arbitrary-value occurrences across markup.
     pub tailwind_arbitrary_value_uses: u32,
+    /// Located raw CSS declaration values that bypass token surfaces on
+    /// scale-sensitive axes. Located in `raw_style_values`.
+    pub raw_style_values: u32,
     /// `@property` registrations never referenced via `var()` in any stylesheet
     /// (located in `unused_at_rules`). Cleanup candidates.
     pub unused_property_registrations: u32,
@@ -1061,6 +1102,7 @@ mod tests {
             undefined_keyframes: Vec::new(),
             duplicate_declaration_blocks: Vec::new(),
             tailwind_arbitrary_values: Vec::new(),
+            raw_style_values: Vec::new(),
             unused_at_rules: Vec::new(),
             unresolved_class_references: Vec::new(),
             unreferenced_css_classes: Vec::new(),
@@ -1087,6 +1129,7 @@ mod tests {
             undefined_keyframes: Vec::new(),
             duplicate_declaration_blocks: Vec::new(),
             tailwind_arbitrary_values: Vec::new(),
+            raw_style_values: Vec::new(),
             unused_at_rules: Vec::new(),
             unresolved_class_references: Vec::new(),
             unreferenced_css_classes: Vec::new(),

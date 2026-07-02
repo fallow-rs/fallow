@@ -28,7 +28,7 @@ use lightningcss::values::color::CssColor;
 use lightningcss::visitor::{VisitTypes, Visitor};
 use rustc_hash::FxHashSet;
 
-use fallow_types::extract::{CssAnalytics, CssDeclarationBlock, CssRuleMetric};
+use fallow_types::extract::{CssAnalytics, CssDeclarationBlock, CssRawStyleValue, CssRuleMetric};
 
 /// Selector component count above which a rule is considered over-complex.
 const MAX_PLAIN_COMPLEXITY: u16 = 4;
@@ -50,6 +50,10 @@ const MIN_BLOCK_DECLARATIONS: usize = 4;
 /// floor already bounds compiled utility CSS (whose rules are tiny), so this
 /// only guards a pathological hand-written stylesheet.
 const MAX_DECLARATION_BLOCKS: usize = 2000;
+
+/// Upper bound on per-file located raw values. One noisy compiled stylesheet
+/// should not dominate health or audit output.
+const MAX_RAW_STYLE_VALUES: usize = 200;
 
 /// Mask for a single 10-bit CSS specificity component.
 const SPECIFICITY_COMPONENT_MASK: u32 = 0x3FF;
@@ -119,6 +123,7 @@ struct Accumulator {
     populated_layers: FxHashSet<String>,
     defined_font_faces: FxHashSet<String>,
     referenced_font_families: FxHashSet<String>,
+    raw_style_value_keys: FxHashSet<String>,
 }
 
 /// The concrete family name of a `font-family` value, or `None` for a generic
@@ -346,14 +351,14 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
         });
     }
 
-    collect_rule_property_tokens(style, acc);
+    collect_rule_property_tokens(style, acc, style.loc.line.saturating_add(1));
 }
 
 /// Scan a rule's declarations (normal + `!important`) for design-token values,
 /// custom-property definitions, and `@keyframes` / font-family references,
 /// folding them into `acc`. Colors and `var()` references are collected
 /// separately by the value visitor.
-fn collect_rule_property_tokens(style: &StyleRule<'_>, acc: &mut Accumulator) {
+fn collect_rule_property_tokens(style: &StyleRule<'_>, acc: &mut Accumulator, rule_line: u32) {
     for property in style
         .declarations
         .declarations
@@ -361,6 +366,7 @@ fn collect_rule_property_tokens(style: &StyleRule<'_>, acc: &mut Accumulator) {
         .chain(style.declarations.important_declarations.iter())
     {
         collect_property_tokens(property, acc);
+        collect_raw_style_value(property, acc, rule_line);
     }
 }
 
@@ -408,6 +414,103 @@ fn insert_rendered_css<T: ToCss>(value: &T, out: &mut FxHashSet<String>) {
     if let Ok(rendered) = value.to_css_string(PrinterOptions::default()) {
         out.insert(rendered);
     }
+}
+
+fn collect_raw_style_value(property: &Property<'_>, acc: &mut Accumulator, line: u32) {
+    if acc.analytics.raw_style_values.len() >= MAX_RAW_STYLE_VALUES {
+        return;
+    }
+    let Ok(rendered) = property.to_css_string(false, PrinterOptions::default()) else {
+        return;
+    };
+    let Some((property_name, value)) = rendered.split_once(':') else {
+        return;
+    };
+    let property_name = property_name.trim().to_ascii_lowercase();
+    if property_name.starts_with("--") {
+        return;
+    }
+    let value = value.trim().trim_end_matches(';').trim().to_string();
+    let Some(axis) = raw_style_axis(&property_name, &value) else {
+        return;
+    };
+    if !is_raw_style_literal(&value) {
+        return;
+    }
+    let key = format!("{axis}:{property_name}:{value}:{line}");
+    if !acc.raw_style_value_keys.insert(key) {
+        return;
+    }
+    acc.analytics.raw_style_values.push(CssRawStyleValue {
+        axis: axis.to_string(),
+        property: property_name,
+        value,
+        line,
+    });
+}
+
+fn raw_style_axis(property_name: &str, value: &str) -> Option<&'static str> {
+    if property_name.contains("color") && looks_like_color_literal(value) {
+        return Some("color");
+    }
+    match property_name {
+        "font-size" => Some("font-size"),
+        "line-height" => Some("line-height"),
+        "border-radius"
+        | "border-top-left-radius"
+        | "border-top-right-radius"
+        | "border-bottom-right-radius"
+        | "border-bottom-left-radius" => Some("radius"),
+        "box-shadow" | "text-shadow" => Some("shadow"),
+        _ => None,
+    }
+}
+
+fn is_raw_style_literal(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("var(") || lower.contains("token(") || lower.contains("theme(") {
+        return false;
+    }
+    if matches!(
+        lower.as_str(),
+        "0" | "none"
+            | "normal"
+            | "inherit"
+            | "initial"
+            | "unset"
+            | "revert"
+            | "currentcolor"
+            | "transparent"
+    ) {
+        return false;
+    }
+    lower.chars().any(|ch| ch.is_ascii_digit()) || looks_like_color_literal(&lower)
+}
+
+fn looks_like_color_literal(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    lower.starts_with('#')
+        || lower.contains("rgb(")
+        || lower.contains("rgba(")
+        || lower.contains("hsl(")
+        || lower.contains("hsla(")
+        || lower.contains("oklch(")
+        || lower.contains("color-mix(")
+        || matches!(
+            lower.as_str(),
+            "red"
+                | "blue"
+                | "green"
+                | "black"
+                | "white"
+                | "gray"
+                | "grey"
+                | "transparent"
+                | "yellow"
+                | "orange"
+                | "purple"
+                | "pink"
+        )
 }
 
 fn collect_box_shadow_tokens(shadows: &[BoxShadow], acc: &mut Accumulator) {
@@ -688,6 +791,55 @@ mod tests {
         let a =
             analytics(".a { font-size: 14px; } .b { font-size: 14px; } .c { font-size: 1rem; }");
         assert_eq!(a.font_sizes.len(), 2, "got {:?}", a.font_sizes);
+    }
+
+    #[test]
+    fn collects_located_raw_style_values_but_skips_tokenized_values() {
+        let a = analytics(
+            ".a { color: red; font-size: 14px; margin-top: 1rem; z-index: 10; color: transparent; }\n.b { border-radius: 6px; }",
+        );
+        assert!(
+            a.raw_style_values
+                .iter()
+                .any(|value| value.axis == "color" && value.property == "color"),
+            "raw color should be located: {:?}",
+            a.raw_style_values
+        );
+        assert!(
+            a.raw_style_values
+                .iter()
+                .any(|value| value.axis == "font-size" && value.value == "14px"),
+            "raw font size should be located: {:?}",
+            a.raw_style_values
+        );
+        assert!(
+            a.raw_style_values
+                .iter()
+                .any(|value| value.axis == "radius" && value.line == 2),
+            "raw radius should be located on the second rule: {:?}",
+            a.raw_style_values
+        );
+        assert!(
+            !a.raw_style_values
+                .iter()
+                .any(|value| value.property == "margin-top"),
+            "layout spacing should not be a raw-value candidate: {:?}",
+            a.raw_style_values
+        );
+        assert!(
+            !a.raw_style_values
+                .iter()
+                .any(|value| value.property == "z-index"),
+            "z-index should stay a scale summary, not an audit candidate: {:?}",
+            a.raw_style_values
+        );
+        assert!(
+            !a.raw_style_values
+                .iter()
+                .any(|value| value.value == "transparent"),
+            "transparent should behave like a reset keyword: {:?}",
+            a.raw_style_values
+        );
     }
 
     #[test]

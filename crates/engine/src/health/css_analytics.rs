@@ -9,6 +9,8 @@ use super::package_json::{
 use super::runtime_filter::relative_to_root;
 use super::tailwind_theme;
 
+const MAX_REPORTED_RAW_STYLE_VALUES: usize = 200;
+
 /// The per-run scan filters shared by every CSS and markup health scanner:
 /// resolved config, the ignore globset, the optional changed-file set, and
 /// the optional workspace roots.
@@ -84,6 +86,8 @@ struct CssTokenSets {
     /// invisibly to the markup / CSS / `var()` scan, so the unused-theme-token
     /// candidate hard-abstains on plugin projects (the DI blind spot).
     any_plugin_directive: bool,
+    /// Located raw CSS declaration values from authored structural stylesheets.
+    raw_style_values: Vec<fallow_output::RawStyleValue>,
 }
 
 #[derive(Clone)]
@@ -201,6 +205,21 @@ impl CssTokenSets {
             self.layer_declarers
                 .entry(name.clone())
                 .or_insert_with(|| rel.to_owned());
+        }
+        for raw in &analytics.raw_style_values {
+            if self.raw_style_values.len() >= MAX_REPORTED_RAW_STYLE_VALUES {
+                break;
+            }
+            self.raw_style_values.push(fallow_output::RawStyleValue {
+                axis: raw.axis.clone(),
+                property: raw.property.clone(),
+                value: raw.value.clone(),
+                path: rel.to_owned(),
+                line: raw.line,
+                actions: vec![fallow_output::CssCandidateAction::replace_raw_style_value(
+                    &raw.axis, &raw.value,
+                )],
+            });
         }
     }
 
@@ -3054,6 +3073,7 @@ fn walk_css_files(
             match item.policy {
                 GradePolicy::Atomic => {
                     analytics.declaration_blocks.clear();
+                    analytics.raw_style_values.clear();
                     tokens.record(&analytics, &rel);
                     scoring.atomic_declarations = scoring
                         .atomic_declarations
@@ -3265,6 +3285,9 @@ fn assemble_css_report(
         candidates
             .near_duplicate_theme_tokens
             .retain(|item| in_scope(&item.path));
+        walk.tokens
+            .raw_style_values
+            .retain(|item| in_scope(&item.path));
         token_consumers.retain(|item| in_scope(&item.definition_path));
     }
 
@@ -3280,6 +3303,17 @@ fn assemble_css_report(
     }
     let mut scoped_unused = walk.scoped_unused;
     scoped_unused.sort_by(|a, b| a.path.cmp(&b.path));
+    let mut raw_style_values = walk.tokens.raw_style_values;
+    raw_style_values.sort_by(|a, b| {
+        (&a.path, a.line, &a.axis, &a.property, &a.value).cmp(&(
+            &b.path,
+            b.line,
+            &b.axis,
+            &b.property,
+            &b.value,
+        ))
+    });
+    walk.summary.raw_style_values = saturate_len(raw_style_values.len());
     Some(CssAnalyticsReport {
         files: walk.file_reports,
         summary: walk.summary,
@@ -3288,6 +3322,7 @@ fn assemble_css_report(
         undefined_keyframes: metrics.undefined_keyframes,
         duplicate_declaration_blocks: metrics.duplicate_declaration_blocks,
         tailwind_arbitrary_values: candidates.tailwind_arbitrary_values,
+        raw_style_values,
         unused_at_rules: metrics.unused_at_rules,
         unresolved_class_references: candidates.unresolved_class_references,
         unreferenced_css_classes: candidates.unreferenced_css_classes,

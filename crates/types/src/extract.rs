@@ -954,6 +954,21 @@ pub struct CssDeclarationBlock {
     pub declaration_count: u16,
 }
 
+/// Located raw styling value authored directly in CSS rather than via a
+/// custom property or design-token helper. Internal staging for the health
+/// layer; public output adds actions and confidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CssRawStyleValue {
+    /// Value axis, e.g. `color`, `font-size`, `line-height`, `radius`, or `shadow`.
+    pub axis: String,
+    /// CSS property where the value appears.
+    pub property: String,
+    /// Rendered declaration value.
+    pub value: String,
+    /// 1-based line of the containing style rule.
+    pub line: u32,
+}
+
 /// Stylesheet-level structural CSS analytics, computed from the parsed CSS
 /// syntax tree. Feeds `fallow health` penalty weights and located findings,
 /// never a standalone CSS score.
@@ -996,6 +1011,12 @@ pub struct CssAnalytics {
     pub border_radii: Vec<String>,
     /// Distinct `line-height` declaration values in the stylesheet, sorted.
     pub line_heights: Vec<String>,
+    /// Bounded located raw styling values that bypass custom properties or
+    /// token helpers. These are conservative declaration-level candidates for
+    /// audit introduced-vs-base gating.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub raw_style_values: Vec<CssRawStyleValue>,
     /// Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted.
     pub defined_custom_properties: Vec<String>,
     /// Distinct custom properties REFERENCED via `var()` in the stylesheet.

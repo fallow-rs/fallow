@@ -131,6 +131,51 @@ const REQUIRED_STACKS = [
   "template-heavy",
 ];
 
+const VALUE_OPTION_SETTERS = {
+  "--cache-dir": (opts, value) => {
+    opts.cacheDir = value;
+  },
+  "--out-dir": (opts, value) => {
+    opts.outDir = value;
+  },
+  "--fallow-bin": (opts, value) => {
+    opts.fallowBin = value;
+  },
+  "--baseline": (opts, value) => {
+    opts.baseline = value;
+  },
+  "--project": (opts, value) => {
+    opts.projects.push(value);
+  },
+  "--max-projects": (opts, value) => {
+    opts.maxProjects = Number(value);
+  },
+  "--timeout-ms": (opts, value) => {
+    opts.timeoutMs = Number(value);
+  },
+};
+
+const FLAG_OPTION_SETTERS = {
+  "--refresh": (opts) => {
+    opts.refresh = true;
+  },
+  "--skip-clone": (opts) => {
+    opts.skipClone = true;
+  },
+  "--fail-on-spikes": (opts) => {
+    opts.failOnSpikes = true;
+  },
+  "--list": (opts) => {
+    opts.list = true;
+  },
+  "--help": (opts) => {
+    opts.help = true;
+  },
+  "-h": (opts) => {
+    opts.help = true;
+  },
+};
+
 const parseArgs = (argv) => {
   const opts = {
     cacheDir: process.env.FALLOW_STYLING_CORPUS_CACHE || DEFAULT_CACHE_DIR,
@@ -147,35 +192,8 @@ const parseArgs = (argv) => {
     help: false,
   };
 
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    const next = () => {
-      i += 1;
-      if (i >= argv.length) throw new Error(`Missing value for ${arg}`);
-      return argv[i];
-    };
-    if (arg === "--cache-dir") opts.cacheDir = next();
-    else if (arg.startsWith("--cache-dir=")) opts.cacheDir = arg.slice("--cache-dir=".length);
-    else if (arg === "--out-dir") opts.outDir = next();
-    else if (arg.startsWith("--out-dir=")) opts.outDir = arg.slice("--out-dir=".length);
-    else if (arg === "--fallow-bin") opts.fallowBin = next();
-    else if (arg.startsWith("--fallow-bin=")) opts.fallowBin = arg.slice("--fallow-bin=".length);
-    else if (arg === "--baseline") opts.baseline = next();
-    else if (arg.startsWith("--baseline=")) opts.baseline = arg.slice("--baseline=".length);
-    else if (arg === "--project") opts.projects.push(next());
-    else if (arg.startsWith("--project=")) opts.projects.push(arg.slice("--project=".length));
-    else if (arg === "--max-projects") opts.maxProjects = Number(next());
-    else if (arg.startsWith("--max-projects=")) {
-      opts.maxProjects = Number(arg.slice("--max-projects=".length));
-    } else if (arg === "--timeout-ms") opts.timeoutMs = Number(next());
-    else if (arg.startsWith("--timeout-ms="))
-      opts.timeoutMs = Number(arg.slice("--timeout-ms=".length));
-    else if (arg === "--refresh") opts.refresh = true;
-    else if (arg === "--skip-clone") opts.skipClone = true;
-    else if (arg === "--fail-on-spikes") opts.failOnSpikes = true;
-    else if (arg === "--list") opts.list = true;
-    else if (arg === "--help" || arg === "-h") opts.help = true;
-    else throw new Error(`Unknown argument: ${arg}`);
+  for (let index = 0; index < argv.length; index += 1) {
+    index = applyArg(argv, index, opts);
   }
 
   opts.cacheDir = resolve(opts.cacheDir);
@@ -185,6 +203,44 @@ const parseArgs = (argv) => {
     throw new Error("--timeout-ms must be a positive number");
   }
   return opts;
+};
+
+const applyArg = (argv, index, opts) => {
+  const arg = argv[index];
+  const inline = parseInlineValue(arg);
+  if (inline) {
+    setValueOption(opts, inline.name, inline.value);
+    return index;
+  }
+  if (VALUE_OPTION_SETTERS[arg]) {
+    setValueOption(opts, arg, readNextValue(argv, index, arg));
+    return index + 1;
+  }
+  if (FLAG_OPTION_SETTERS[arg]) {
+    FLAG_OPTION_SETTERS[arg](opts);
+    return index;
+  }
+  throw new Error(`Unknown argument: ${arg}`);
+};
+
+const parseInlineValue = (arg) => {
+  const separator = arg.indexOf("=");
+  if (separator === -1) return null;
+  const name = arg.slice(0, separator);
+  if (!VALUE_OPTION_SETTERS[name]) return null;
+  return { name, value: arg.slice(separator + 1) };
+};
+
+const readNextValue = (argv, index, arg) => {
+  const nextIndex = index + 1;
+  if (nextIndex >= argv.length) throw new Error(`Missing value for ${arg}`);
+  return argv[nextIndex];
+};
+
+const setValueOption = (opts, name, value) => {
+  const setter = VALUE_OPTION_SETTERS[name];
+  if (!setter) throw new Error(`Unknown argument: ${name}`);
+  setter(opts, value);
 };
 
 const usage = () => `Usage: node scripts/styling-corpus-smoke.mjs [options]
@@ -348,53 +404,60 @@ const computeSpikes = (results, baseline) => {
   const spikes = [];
   for (const project of results.projects) {
     for (const command of project.commands) {
-      const issueCodeCounts = new Map();
-      for (const group of command.finding_groups) {
-        const issueKey = issueCodeKey(project.name, command.id, group.code);
-        issueCodeCounts.set(issueKey, (issueCodeCounts.get(issueKey) || 0) + group.count);
-      }
-      for (const [issueKey, count] of issueCodeCounts) {
-        const issueBaseline = Number(baseline.counts[issueKey] || 0);
-        if (count <= issueBaseline || allowlist.has(issueKey)) continue;
-        const [, , code] = issueKey.split(":");
-        spikes.push({
-          scope: "issue-code",
-          key: issueKey,
-          project: project.name,
-          command: command.id,
-          code,
-          previous: issueBaseline,
-          current: count,
-        });
-      }
-      for (const group of command.finding_groups) {
-        if (group.confidence !== "high") continue;
-        const key = spikeKey(
-          project.name,
-          command.id,
-          group.code,
-          group.sub_kind,
-          group.confidence,
-        );
-        const previous = Number(baseline.counts[key] || 0);
-        if (group.count > previous && !allowlist.has(key)) {
-          spikes.push({
-            scope: "high-confidence-sub-kind",
-            key,
-            project: project.name,
-            command: command.id,
-            code: group.code,
-            sub_kind: group.sub_kind,
-            confidence: group.confidence,
-            previous,
-            current: group.count,
-          });
-        }
-      }
+      spikes.push(...issueCodeSpikes(project, command, baseline, allowlist));
+      spikes.push(...highConfidenceSpikes(project, command, baseline, allowlist));
     }
   }
   return spikes;
 };
+
+const issueCodeSpikes = (project, command, baseline, allowlist) =>
+  [...issueCodeCounts(project, command)].flatMap(([key, count]) => {
+    const previous = Number(baseline.counts[key] || 0);
+    if (count <= previous || allowlist.has(key)) return [];
+    return [
+      {
+        scope: "issue-code",
+        key,
+        project: project.name,
+        command: command.id,
+        code: key.split(":")[2],
+        previous,
+        current: count,
+      },
+    ];
+  });
+
+const issueCodeCounts = (project, command) => {
+  const counts = new Map();
+  for (const group of command.finding_groups) {
+    const key = issueCodeKey(project.name, command.id, group.code);
+    counts.set(key, (counts.get(key) || 0) + group.count);
+  }
+  return counts;
+};
+
+const highConfidenceSpikes = (project, command, baseline, allowlist) =>
+  command.finding_groups.filter(isHighConfidenceGroup).flatMap((group) => {
+    const key = spikeKey(project.name, command.id, group.code, group.sub_kind, group.confidence);
+    const previous = Number(baseline.counts[key] || 0);
+    if (group.count <= previous || allowlist.has(key)) return [];
+    return [
+      {
+        scope: "high-confidence-sub-kind",
+        key,
+        project: project.name,
+        command: command.id,
+        code: group.code,
+        sub_kind: group.sub_kind,
+        confidence: group.confidence,
+        previous,
+        current: group.count,
+      },
+    ];
+  });
+
+const isHighConfidenceGroup = (group) => group.confidence === "high";
 
 const runFallowCommand = (fallowBin, entry, dir, command, opts) => {
   const fullArgs = [...command.args, "--root", dir];
@@ -436,57 +499,123 @@ const commandStatusLabel = (command) => {
 };
 
 const renderMarkdown = (results) => {
-  const lines = [
-    "# Styling Corpus Smoke",
-    "",
-    `Generated: ${results.generated_at}`,
-    `Fallow: \`${results.fallow_bin}\``,
-    `Cache: \`${results.cache_dir}\``,
+  const lines = renderMarkdownHeader(results);
+  appendStackCoverage(lines, results.stack_coverage);
+  appendSpikes(lines, results.spikes);
+  appendProjects(lines, results.projects);
+  return `${lines.join("\n")}\n`;
+};
+
+const renderMarkdownHeader = (results) => [
+  "# Styling Corpus Smoke",
+  "",
+  `Generated: ${results.generated_at}`,
+  `Fallow: \`${results.fallow_bin}\``,
+  `Cache: \`${results.cache_dir}\``,
+];
+
+const appendStackCoverage = (lines, coverage) => {
+  lines.push(
     "",
     "## Stack Coverage",
     "",
     "| Stack | Covered |",
     "| --- | --- |",
-  ];
-  for (const item of results.stack_coverage) {
+  );
+  for (const item of coverage) {
     lines.push(`| ${item.stack} | ${item.covered ? "yes" : "no"} |`);
   }
+};
+
+const appendSpikes = (lines, spikes) => {
   lines.push("", "## Spikes", "");
-  if (results.spikes.length === 0) {
+  if (spikes.length === 0) {
     lines.push("No non-allowlisted spikes.");
-  } else {
-    lines.push("| Scope | Project | Command | Code | Sub-kind | Previous | Current |");
-    lines.push("| --- | --- | --- | --- | --- | ---: | ---: |");
-    for (const spike of results.spikes) {
-      lines.push(
-        `| ${spike.scope} | ${spike.project} | ${spike.command} | ${spike.code} | ${spike.sub_kind || "*"} | ${spike.previous} | ${spike.current} |`,
-      );
-    }
+    return;
   }
+  lines.push("| Scope | Project | Command | Code | Sub-kind | Previous | Current |");
+  lines.push("| --- | --- | --- | --- | --- | ---: | ---: |");
+  for (const spike of spikes) {
+    lines.push(
+      `| ${spike.scope} | ${spike.project} | ${spike.command} | ${spike.code} | ${spike.sub_kind || "*"} | ${spike.previous} | ${spike.current} |`,
+    );
+  }
+};
+
+const appendProjects = (lines, projects) => {
   lines.push("", "## Projects", "");
-  for (const project of results.projects) {
-    lines.push(`### ${project.name}`, "");
-    lines.push(`Repo: \`${project.repo}\` at \`${project.ref}\``);
-    lines.push(`Commit: \`${project.commit || "unknown"}\``);
-    lines.push(`Stacks: ${project.stacks.map((s) => `\`${s}\``).join(", ")}`);
-    if (project.error) {
-      lines.push(`Error: ${project.error}`, "");
-      continue;
-    }
-    lines.push("", "| Command | Status | Styling findings | Top groups |");
-    lines.push("| --- | ---: | ---: | --- |");
-    for (const command of project.commands) {
-      const top = command.finding_groups
-        .slice(0, 3)
-        .map((group) => `${group.code}/${group.sub_kind}/${group.confidence}: ${group.count}`)
-        .join("<br>");
-      lines.push(
-        `| ${command.id} | ${commandStatusLabel(command)} | ${command.total_styling_findings} | ${top || ""} |`,
-      );
-    }
-    lines.push("");
+  for (const project of projects) {
+    appendProject(lines, project);
   }
-  return `${lines.join("\n")}\n`;
+};
+
+const appendProject = (lines, project) => {
+  lines.push(`### ${project.name}`, "");
+  lines.push(`Repo: \`${project.repo}\` at \`${project.ref}\``);
+  lines.push(`Commit: \`${project.commit || "unknown"}\``);
+  lines.push(`Stacks: ${project.stacks.map((s) => `\`${s}\``).join(", ")}`);
+  if (project.error) {
+    lines.push(`Error: ${project.error}`, "");
+    return;
+  }
+  lines.push("", "| Command | Status | Styling findings | Top groups |");
+  lines.push("| --- | ---: | ---: | --- |");
+  for (const command of project.commands) {
+    lines.push(
+      `| ${command.id} | ${commandStatusLabel(command)} | ${command.total_styling_findings} | ${topGroups(command)} |`,
+    );
+  }
+  lines.push("");
+};
+
+const topGroups = (command) =>
+  command.finding_groups
+    .slice(0, 3)
+    .map((group) => `${group.code}/${group.sub_kind}/${group.confidence}: ${group.count}`)
+    .join("<br>");
+
+const initialResults = (opts, fallowBin, corpus) => ({
+  schema_version: 1,
+  generated_at: new Date().toISOString(),
+  fallow_bin: fallowBin,
+  cache_dir: opts.cacheDir,
+  baseline: opts.baseline,
+  commands: COMMANDS.map((command) => ({ id: command.id, args: command.args })),
+  corpus: corpus.map((entry) => ({
+    name: entry.name,
+    repo: entry.repo,
+    ref: entry.ref,
+    stacks: entry.stacks,
+  })),
+  stack_coverage: stackCoverage(corpus),
+  projects: [],
+  spikes: [],
+});
+
+const runProject = (entry, opts, fallowBin) => {
+  const dest = projectDir(opts.cacheDir, entry);
+  console.error(`== ${entry.name} (${entry.repo} @ ${entry.ref}) ==`);
+  const clone = cloneProject(entry, dest, opts);
+  const project = {
+    name: entry.name,
+    repo: entry.repo,
+    ref: entry.ref,
+    stacks: entry.stacks,
+    path: dest,
+    commit: clone.ok ? gitHead(dest) : "",
+    cached: clone.ok ? clone.cached : false,
+    commands: [],
+    error: clone.ok ? null : clone.error,
+  };
+  if (!clone.ok) {
+    console.error(`  skip: ${clone.error}`);
+    return project;
+  }
+  for (const command of COMMANDS) {
+    console.error(`  ${command.id}`);
+    project.commands.push(runFallowCommand(fallowBin, entry, dest, command, opts));
+  }
+  return project;
 };
 
 const main = () => {
@@ -507,48 +636,10 @@ const main = () => {
   mkdirSync(opts.cacheDir, { recursive: true });
   mkdirSync(opts.outDir, { recursive: true });
   const baseline = loadBaseline(opts.baseline);
-  const results = {
-    schema_version: 1,
-    generated_at: new Date().toISOString(),
-    fallow_bin: fallowBin,
-    cache_dir: opts.cacheDir,
-    baseline: opts.baseline,
-    commands: COMMANDS.map((command) => ({ id: command.id, args: command.args })),
-    corpus: corpus.map((entry) => ({
-      name: entry.name,
-      repo: entry.repo,
-      ref: entry.ref,
-      stacks: entry.stacks,
-    })),
-    stack_coverage: stackCoverage(corpus),
-    projects: [],
-    spikes: [],
-  };
+  const results = initialResults(opts, fallowBin, corpus);
 
   for (const entry of corpus) {
-    const dest = projectDir(opts.cacheDir, entry);
-    console.error(`== ${entry.name} (${entry.repo} @ ${entry.ref}) ==`);
-    const clone = cloneProject(entry, dest, opts);
-    const project = {
-      name: entry.name,
-      repo: entry.repo,
-      ref: entry.ref,
-      stacks: entry.stacks,
-      path: dest,
-      commit: clone.ok ? gitHead(dest) : "",
-      cached: clone.ok ? clone.cached : false,
-      commands: [],
-      error: clone.ok ? null : clone.error,
-    };
-    if (clone.ok) {
-      for (const command of COMMANDS) {
-        console.error(`  ${command.id}`);
-        project.commands.push(runFallowCommand(fallowBin, entry, dest, command, opts));
-      }
-    } else {
-      console.error(`  skip: ${clone.error}`);
-    }
-    results.projects.push(project);
+    results.projects.push(runProject(entry, opts, fallowBin));
   }
 
   results.spikes = computeSpikes(results, baseline);

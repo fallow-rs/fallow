@@ -360,6 +360,61 @@ fn audit_css_selector_complexity_new_only_ignores_inherited_styling() {
 }
 
 #[test]
+fn audit_css_token_drift_gates_introduced_raw_style_value() {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("package.json"), r#"{"name":"audit-raw-css"}"#).unwrap();
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"rules":{"css-token-drift":"error"}}"#,
+    )
+    .unwrap();
+    fs::write(root.join("src/index.ts"), "export const ok = true;\n").unwrap();
+    fs::write(
+        root.join("src/styles.css"),
+        ":root { --text-size: 1rem; }\n.title { font-size: var(--text-size); }\n",
+    )
+    .unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    fs::write(
+        root.join("src/styles.css"),
+        ":root { --text-size: 1rem; }\n.title { font-size: var(--text-size); }\n.card { font-size: 13px; }\n",
+    )
+    .unwrap();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 1,
+        "introduced raw style value should fail when css-token-drift is error. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    let findings = json["complexity"]["styling_findings"]
+        .as_array()
+        .expect("styling findings should be present");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-token-drift"
+                && finding["sub_kind"] == "raw-style-value"
+                && finding["value"] == "font-size font-size: 13px"
+        }),
+        "raw style value should appear as token drift: {findings:#?}"
+    );
+}
+
+#[test]
 fn audit_css_deep_surfaces_cross_file_styling_findings() {
     let dir = create_audit_css_deep_fixture();
     let root = dir.path();
@@ -371,10 +426,11 @@ fn audit_css_deep_surfaces_cross_file_styling_findings() {
     assert_has_deep_css_findings(default_findings);
 
     let shallow_json = audit_css_json(root, &["--no-css-deep"], 0);
-    assert!(
-        shallow_json["complexity"]["styling_findings"].is_null(),
-        "shallow audit should not emit cross-file styling findings: {shallow_json:#?}"
-    );
+    let shallow_findings = shallow_json["complexity"]["styling_findings"]
+        .as_array()
+        .expect("shallow audit should keep local styling findings");
+    assert_has_raw_style_value(shallow_findings);
+    assert_no_deep_css_findings(shallow_findings);
 
     let deep_json = audit_css_json(root, &["--css-deep"], 0);
     let findings = deep_json["complexity"]["styling_findings"]
@@ -433,6 +489,7 @@ fn audit_css_json(root: &Path, extra_args: &[&str], expected_code: i32) -> serde
 }
 
 fn assert_has_deep_css_findings(findings: &[serde_json::Value]) {
+    assert_has_raw_style_value(findings);
     assert!(
         findings.iter().any(|finding| {
             finding["code"] == "css-dead-surface"
@@ -471,6 +528,35 @@ fn assert_has_deep_css_findings(findings: &[serde_json::Value]) {
                 && finding["agent_disposition"] == "fix-confidently"
         }),
         "deep audit should include numeric near-duplicate theme token with target: {findings:#?}"
+    );
+}
+
+fn assert_has_raw_style_value(findings: &[serde_json::Value]) {
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-token-drift"
+                && finding["sub_kind"] == "raw-style-value"
+                && finding["value"] == "color color: red"
+                && finding["confidence"] == "low"
+                && finding["agent_disposition"] == "verify-first"
+        }),
+        "audit should include local raw style value: {findings:#?}"
+    );
+}
+
+fn assert_no_deep_css_findings(findings: &[serde_json::Value]) {
+    assert!(
+        !findings.iter().any(|finding| {
+            matches!(
+                finding["sub_kind"].as_str(),
+                Some(
+                    "unused-theme-token"
+                        | "unresolved-class-reference"
+                        | "near-duplicate-theme-token"
+                )
+            )
+        }),
+        "shallow audit should not emit cross-file styling findings: {findings:#?}"
     );
 }
 

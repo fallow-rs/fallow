@@ -29,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discussions skip clean zero-comment envelopes, so dead-code-only jobs no
   longer leave "0 inline findings" timeline noise.
 
+- **Audit can now flag introduced raw CSS values on design-system axes.**
+  `fallow audit` now turns located raw CSS declaration values for colors,
+  font sizes, line heights, radii, and shadows into
+  `css-token-drift` / `raw-style-value` styling findings when CSS audit
+  evidence is enabled. These findings are low-confidence and `verify-first`:
+  they can gate when `rules.css-token-drift` is set to `error`, but they tell
+  agents to confirm intent before replacing a value with an existing token or
+  custom property.
+
 ## [2.104.0] - 2026-07-01
 
 ### Added

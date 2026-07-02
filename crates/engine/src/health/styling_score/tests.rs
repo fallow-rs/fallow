@@ -40,6 +40,7 @@ fn clean_report() -> CssAnalyticsReport {
         undefined_keyframes: Vec::new(),
         duplicate_declaration_blocks: Vec::new(),
         tailwind_arbitrary_values: Vec::new(),
+        raw_style_values: Vec::new(),
         unused_at_rules: Vec::new(),
         unresolved_class_references: Vec::new(),
         unreferenced_css_classes: Vec::new(),

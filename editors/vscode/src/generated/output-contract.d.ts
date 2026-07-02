@@ -5881,6 +5881,13 @@ duplicate_declaration_blocks?: CssDuplicateBlock[]
  */
 tailwind_arbitrary_values?: TailwindArbitraryValue[]
 /**
+ * Located raw CSS declaration values that bypass token surfaces (`var()`,
+ * `token()`, `theme()`) on scale-sensitive axes such as color, font-size,
+ * line-height, radius, and shadow. Conservative candidates: a raw value can
+ * be intentional, but introduced raw values are useful audit feedback.
+ */
+raw_style_values?: RawStyleValue[]
+/**
  * Unused CSS at-rule entities: an `@property` registered but never read via
  * `var()` in any stylesheet, or an `@layer` declared but never populated by
  * a block. Cleanup candidates (an `@property` can be read from JS; a layer
@@ -6254,6 +6261,11 @@ tailwind_arbitrary_values: number
  */
 tailwind_arbitrary_value_uses: number
 /**
+ * Located raw CSS declaration values that bypass token surfaces on
+ * scale-sensitive axes. Located in `raw_style_values`.
+ */
+raw_style_values: number
+/**
  * `@property` registrations never referenced via `var()` in any stylesheet
  * (located in `unused_at_rules`). Cleanup candidates.
  */
@@ -6469,6 +6481,35 @@ line: number
  * Read-only action(s): a find-all-occurrences search so the token can be
  * replaced with a scale token. Always at least one entry, so consumers can
  * iterate `actions` uniformly across every finding type.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * A located raw CSS declaration value on a scale-sensitive styling axis.
+ */
+export interface RawStyleValue {
+/**
+ * Value axis, e.g. `color`, `font-size`, `line-height`, `radius`, or `shadow`.
+ */
+axis: string
+/**
+ * CSS property where the raw value appears.
+ */
+property: string
+/**
+ * Rendered declaration value.
+ */
+value: string
+/**
+ * Project-root-relative, forward-slash path to the stylesheet.
+ */
+path: string
+/**
+ * 1-based line of the containing style rule.
+ */
+line: number
+/**
+ * Read-only guidance step(s). Never auto-fixable.
  */
 actions: CssCandidateAction[]
 }

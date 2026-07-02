@@ -214,6 +214,28 @@ fn build_styling_findings(
                 actions: candidate.actions.clone(),
             });
         }
+        for candidate in &css.raw_style_values {
+            if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
+                continue;
+            }
+            findings.push(fallow_output::StylingFinding {
+                code: "css-token-drift".to_string(),
+                sub_kind: "raw-style-value".to_string(),
+                path: candidate.path.clone(),
+                line: candidate.line,
+                value: format!("{} {}: {}", candidate.axis, candidate.property, candidate.value),
+                effective_severity: styling_finding_severity(config.rules.css_token_drift),
+                blast_radius: None,
+                confidence: Some(fallow_output::StylingFindingConfidence::Low),
+                agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+                nearest_token: None,
+                fix_hint: Some(
+                    "Verify the raw style value is not an intentional exception, then replace it with an existing design token or CSS custom property."
+                        .to_string(),
+                ),
+                actions: candidate.actions.clone(),
+            });
+        }
         if include_cross_file_reachability {
             for candidate in &css.near_duplicate_theme_tokens {
                 if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {

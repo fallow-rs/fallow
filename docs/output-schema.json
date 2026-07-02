@@ -13947,6 +13947,13 @@
           },
           "description": "Tailwind arbitrary-value utilities (`w-[13px]`, `bg-[#abc]`) found in\nmarkup, which hardcode a one-off value instead of a configured scale\ntoken (design-token bypass). Present only when the project uses Tailwind.\nSorted by use count descending. Candidates, not findings: an arbitrary\nvalue is sometimes the right call."
         },
+        "raw_style_values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RawStyleValue"
+          },
+          "description": "Located raw CSS declaration values that bypass token surfaces (`var()`,\n`token()`, `theme()`) on scale-sensitive axes such as color, font-size,\nline-height, radius, and shadow. Conservative candidates: a raw value can\nbe intentional, but introduced raw values are useful audit feedback."
+        },
         "unused_at_rules": {
           "type": "array",
           "items": {
@@ -14346,6 +14353,10 @@
           "type": "integer",
           "description": "Total Tailwind arbitrary-value occurrences across markup."
         },
+        "raw_style_values": {
+          "type": "integer",
+          "description": "Located raw CSS declaration values that bypass token surfaces on\nscale-sensitive axes. Located in `raw_style_values`."
+        },
         "unused_property_registrations": {
           "type": "integer",
           "description": "`@property` registrations never referenced via `var()` in any stylesheet\n(located in `unused_at_rules`). Cleanup candidates."
@@ -14407,6 +14418,7 @@
         "duplicate_declarations_total",
         "tailwind_arbitrary_values",
         "tailwind_arbitrary_value_uses",
+        "raw_style_values",
         "unused_property_registrations",
         "unused_layers",
         "unresolved_class_references",
@@ -17950,6 +17962,47 @@
         "error"
       ],
       "description": "Effective configured severity for a styling finding."
+    },
+    "RawStyleValue": {
+      "type": "object",
+      "properties": {
+        "axis": {
+          "type": "string",
+          "description": "Value axis, e.g. `color`, `font-size`, `line-height`, `radius`, or `shadow`."
+        },
+        "property": {
+          "type": "string",
+          "description": "CSS property where the raw value appears."
+        },
+        "value": {
+          "type": "string",
+          "description": "Rendered declaration value."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the stylesheet."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the containing style rule."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only guidance step(s). Never auto-fixable."
+        }
+      },
+      "required": [
+        "axis",
+        "property",
+        "value",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "A located raw CSS declaration value on a scale-sensitive styling axis."
     }
   }
 }
