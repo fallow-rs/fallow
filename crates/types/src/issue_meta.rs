@@ -1347,6 +1347,100 @@ pub fn issue_sarif_rule_ids(code: &str) -> Vec<String> {
     ids
 }
 
+/// Short SARIF rule description for a rule id emitted by dead-code output.
+#[must_use]
+pub fn issue_sarif_rule_description(rule_id: &str) -> Option<&'static str> {
+    let code = rule_id.strip_prefix("fallow/")?;
+    match code {
+        "unused-file" => Some("File is not reachable from any entry point"),
+        "unused-export" => Some("Export is never imported"),
+        "unused-type" => Some("Type export is never imported"),
+        "private-type-leak" => Some("Exported signature references a private type"),
+        "unused-dependency" => Some("Dependency listed but never imported"),
+        "unused-dev-dependency" => Some("Dev dependency listed but never imported"),
+        "unused-optional-dependency" => Some("Optional dependency listed but never imported"),
+        "type-only-dependency" => Some("Production dependency only used via type-only imports"),
+        "test-only-dependency" => Some("Production dependency only imported by test files"),
+        "unused-enum-member" => Some("Enum member is never referenced"),
+        "unused-class-member" => Some("Class member is never referenced"),
+        "unused-store-member" => Some("Store member is never accessed by any consumer"),
+        "unresolved-import" => Some("Import could not be resolved"),
+        "unlisted-dependency" => Some("Dependency used but not in package.json"),
+        "duplicate-export" => Some("Export name appears in multiple modules"),
+        "circular-dependency" => Some("Circular dependency chain detected"),
+        "re-export-cycle" => Some("Two or more barrel files re-export from each other in a loop"),
+        "boundary-violation" => Some("Import crosses a configured architecture boundary"),
+        "boundary-coverage" => Some("Source file matches no configured architecture boundary zone"),
+        "boundary-call-violation" => Some("Zoned file calls a callee its zone forbids"),
+        "policy-violation" => Some("Banned usage matched a rule-pack rule"),
+        "invalid-client-export" => {
+            Some("\"use client\" file exports a server-only / route-config name")
+        }
+        "mixed-client-server-barrel" => {
+            Some("Barrel re-exports both a \"use client\" module and a server-only module")
+        }
+        "misplaced-directive" => Some(
+            "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
+        ),
+        "unprovided-inject" => {
+            Some("inject() / getContext() reads a key that no provide() / setContext() supplies")
+        }
+        "unrendered-component" => {
+            Some("A Vue / Svelte component is reachable through a barrel but rendered nowhere")
+        }
+        "unused-component-prop" => Some(
+            "A Vue, Svelte, or React component prop is referenced nowhere in its own component",
+        ),
+        "unused-component-emit" => {
+            Some("A Vue <script setup> defineEmits event is emitted nowhere in its own component")
+        }
+        "unused-component-input" => Some(
+            "An Angular @Input() / signal input() / model() input is read nowhere in its own component",
+        ),
+        "unused-component-output" => Some(
+            "An Angular @Output() / signal output() output is emitted nowhere in its own component",
+        ),
+        "unused-svelte-event" => Some(
+            "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project",
+        ),
+        "unused-server-action" => Some(
+            "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
+        ),
+        "unused-load-data-key" => {
+            Some("A SvelteKit load() return-object key is read by no consumer")
+        }
+        "prop-drilling" => Some(
+            "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer",
+        ),
+        "thin-wrapper" => Some(
+            "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
+        ),
+        "duplicate-prop-shape" => Some(
+            "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
+        ),
+        "route-collision" => {
+            Some("Two or more Next.js App Router route files resolve to the same URL")
+        }
+        "dynamic-segment-name-conflict" => Some(
+            "Sibling Next.js dynamic route segments use different slug names at the same position",
+        ),
+        "stale-suppression" => Some("Suppression comment or tag no longer matches any issue"),
+        "missing-suppression-reason" => Some("Suppression comment omits a required reason"),
+        "unused-catalog-entry" => Some("Catalog entry not referenced by any workspace package"),
+        "empty-catalog-group" => Some("Named catalog group has no entries"),
+        "unresolved-catalog-reference" => {
+            Some("package.json references a catalog that does not declare the package")
+        }
+        "unused-dependency-override" => {
+            Some("pnpm.overrides entry targets a package not declared or resolved")
+        }
+        "misconfigured-dependency-override" => {
+            Some("pnpm.overrides entry has an unparsable key or value")
+        }
+        _ => None,
+    }
+}
+
 /// CodeClimate check names used by CI formatters for a canonical issue code.
 #[must_use]
 pub fn issue_codeclimate_check_names(code: &str) -> Vec<String> {
@@ -1573,6 +1667,19 @@ mod tests {
                 assert!(
                     issue_meta_matches_contract_token(meta, token),
                     "contract token {token} should match {}",
+                    meta.code
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sarif_rule_descriptions_cover_result_metadata() {
+        for meta in result_issue_metas() {
+            for rule_id in issue_sarif_rule_ids(meta.code) {
+                assert!(
+                    issue_sarif_rule_description(&rule_id).is_some(),
+                    "SARIF rule {rule_id} for {} needs a central description",
                     meta.code
                 );
             }
