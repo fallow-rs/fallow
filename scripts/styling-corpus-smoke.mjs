@@ -388,7 +388,7 @@ const groupFindings = (findings) => {
     }
     groups.set(key, current);
   }
-  return [...groups.values()].sort(
+  return [...groups.values()].toSorted(
     (a, b) =>
       b.count - a.count || a.code.localeCompare(b.code) || a.sub_kind.localeCompare(b.sub_kind),
   );

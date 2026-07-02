@@ -52,3 +52,8 @@ Spike comparison uses
 increased issue-code count, or a new or increased high-confidence sub-kind count,
 that is not allowlisted. The default command highlights spikes but does not fail;
 add `--fail-on-spikes` when a release gate should stop on unreviewed spikes.
+
+For current PR impact, pair this with
+`npm run smoke:styling-prs`. The corpus smoke covers named framework breadth;
+the PR smoke checks recent public frontend changes in repositories that already
+use fallow.
