@@ -13,6 +13,7 @@ use crate::{
     AuditProgrammaticOutput, AuditSummary, AuditVerdict, ComplexityOptions, DeadCodeFilters,
     DeadCodeOptions, DuplicationOptions, ProgrammaticError,
     analysis_context::{changed_files_for_run, resolve_programmatic_analysis_context},
+    derive_complexity_options,
 };
 
 use super::{
@@ -240,23 +241,40 @@ fn run_audit_subanalyses(
         let resolved = resolve_programmatic_analysis_context(&dead_code_options.analysis)?;
         return resolved.install(|| {
             let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
-            let dead_code = super::dead_code::run_dead_code_with_session_artifacts(
-                &dead_code_options,
-                &resolved,
-                &session,
-                changed_files,
-                |_| {},
-                Instant::now(),
-            )?;
+            let reuse_dead_code_artifacts =
+                health_may_consume_dead_code_artifacts(&complexity_options);
+            let (dead_code, dead_code_artifacts) = if reuse_dead_code_artifacts {
+                let dead_code = super::dead_code::run_dead_code_with_session_artifacts(
+                    &dead_code_options,
+                    &resolved,
+                    &session,
+                    changed_files,
+                    |_| {},
+                    Instant::now(),
+                )?;
+                (dead_code.output, Some(dead_code.artifacts))
+            } else {
+                (
+                    super::dead_code::run_dead_code_with_session(
+                        &dead_code_options,
+                        &resolved,
+                        &session,
+                        changed_files,
+                        |_| {},
+                        Instant::now(),
+                    )?,
+                    None,
+                )
+            };
             let complexity = run_health_with_session_artifacts(
                 &complexity_options,
                 &resolved,
                 &session,
                 changed_files,
-                Some(dead_code.artifacts),
+                dead_code_artifacts,
             )?;
             Ok(AuditSubanalyses {
-                dead_code: dead_code.output,
+                dead_code,
                 duplication: super::duplication::run_duplication_with_session(
                     &duplication_options,
                     &resolved,
@@ -299,6 +317,16 @@ fn run_audit_subanalyses(
         duplication: run_duplication(&duplication_options)?,
         complexity: run_health(&complexity_options)?,
     })
+}
+
+fn health_may_consume_dead_code_artifacts(options: &ComplexityOptions) -> bool {
+    let sections = derive_complexity_options(options);
+    sections.file_scores
+        || sections.coverage_gaps
+        || sections.hotspots
+        || sections.targets
+        || sections.force_full
+        || options.max_crap.is_some()
 }
 
 fn build_programmatic_audit_summary(analyses: &AuditSubanalyses) -> AuditSummary {
@@ -683,6 +711,45 @@ mod tests {
     use fallow_config::AuditGate;
 
     use super::*;
+
+    #[test]
+    fn audit_complexity_only_health_does_not_retain_dead_code_artifacts() {
+        let options = ComplexityOptions {
+            complexity: true,
+            ..ComplexityOptions::default()
+        };
+
+        assert!(!health_may_consume_dead_code_artifacts(&options));
+    }
+
+    #[test]
+    fn audit_health_artifact_reuse_tracks_file_score_inputs() {
+        for options in [
+            ComplexityOptions {
+                file_scores: true,
+                ..ComplexityOptions::default()
+            },
+            ComplexityOptions {
+                coverage_gaps: true,
+                ..ComplexityOptions::default()
+            },
+            ComplexityOptions {
+                targets: true,
+                ..ComplexityOptions::default()
+            },
+            ComplexityOptions {
+                score: true,
+                ..ComplexityOptions::default()
+            },
+            ComplexityOptions {
+                max_crap: Some(30.0),
+                complexity: true,
+                ..ComplexityOptions::default()
+            },
+        ] {
+            assert!(health_may_consume_dead_code_artifacts(&options));
+        }
+    }
 
     #[test]
     fn run_audit_default_new_only_marks_untracked_added_file_introduced() {
