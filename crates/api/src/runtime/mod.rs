@@ -38,10 +38,21 @@ pub use trace::{run_trace_clone, run_trace_dependency, run_trace_export, run_tra
 use crate::{
     ComplexityOptions, ProgrammaticError,
     analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context},
+    derive_complexity_options,
     next_steps::{setup_pointer_applicable, suggestions_enabled},
 };
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
+
+pub(super) fn health_may_consume_dead_code_artifacts(options: &ComplexityOptions) -> bool {
+    let sections = derive_complexity_options(options);
+    sections.file_scores
+        || sections.coverage_gaps
+        || sections.hotspots
+        || sections.targets
+        || sections.force_full
+        || options.max_crap.is_some()
+}
 
 /// Runtime probes used by programmatic health output assembly.
 ///

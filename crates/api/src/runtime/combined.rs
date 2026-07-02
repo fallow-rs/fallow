@@ -9,7 +9,10 @@ use crate::{
     next_steps::{default_workspace_ref, setup_pointer_applicable, suggestions_enabled},
 };
 
-use super::{ProgrammaticResult, root_envelope_mode, run_health_with_session_artifacts};
+use super::{
+    ProgrammaticResult, health_may_consume_dead_code_artifacts, root_envelope_mode,
+    run_health_with_session_artifacts,
+};
 
 /// Run bare combined analysis through one programmatic analysis session.
 ///
@@ -37,17 +40,33 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
         let changed_files_ref = changed_files.as_ref();
         let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
 
-        let dead_code = if options.dead_code {
-            Some(super::dead_code::run_dead_code_with_session(
+        let reuse_dead_code_artifacts = options.dead_code
+            && options.health
+            && health_may_consume_dead_code_artifacts(&health_options);
+        let (dead_code, dead_code_artifacts) = if options.dead_code && reuse_dead_code_artifacts {
+            let dead_code = super::dead_code::run_dead_code_with_session_artifacts(
                 &dead_code_options,
                 &resolved,
                 &session,
                 changed_files_ref,
                 |_| {},
                 Instant::now(),
-            )?)
+            )?;
+            (Some(dead_code.output), Some(dead_code.artifacts))
+        } else if options.dead_code {
+            (
+                Some(super::dead_code::run_dead_code_with_session(
+                    &dead_code_options,
+                    &resolved,
+                    &session,
+                    changed_files_ref,
+                    |_| {},
+                    Instant::now(),
+                )?),
+                None,
+            )
         } else {
-            None
+            (None, None)
         };
 
         let duplication = if options.duplication {
@@ -68,7 +87,7 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
                 &resolved,
                 &session,
                 changed_files_ref,
-                None,
+                dead_code_artifacts,
             )?)
         } else {
             None

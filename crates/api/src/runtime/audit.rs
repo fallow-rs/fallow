@@ -13,12 +13,11 @@ use crate::{
     AuditProgrammaticOutput, AuditSummary, AuditVerdict, ComplexityOptions, DeadCodeFilters,
     DeadCodeOptions, DuplicationOptions, ProgrammaticError,
     analysis_context::{changed_files_for_run, resolve_programmatic_analysis_context},
-    derive_complexity_options,
 };
 
 use super::{
-    ProgrammaticResult, root_envelope_mode, run_dead_code, run_duplication, run_health,
-    run_health_with_session_artifacts,
+    ProgrammaticResult, health_may_consume_dead_code_artifacts, root_envelope_mode, run_dead_code,
+    run_duplication, run_health, run_health_with_session_artifacts,
 };
 
 /// Run changed-code audit through typed programmatic runners.
@@ -317,16 +316,6 @@ fn run_audit_subanalyses(
         duplication: run_duplication(&duplication_options)?,
         complexity: run_health(&complexity_options)?,
     })
-}
-
-fn health_may_consume_dead_code_artifacts(options: &ComplexityOptions) -> bool {
-    let sections = derive_complexity_options(options);
-    sections.file_scores
-        || sections.coverage_gaps
-        || sections.hotspots
-        || sections.targets
-        || sections.force_full
-        || options.max_crap.is_some()
 }
 
 fn build_programmatic_audit_summary(analyses: &AuditSubanalyses) -> AuditSummary {
