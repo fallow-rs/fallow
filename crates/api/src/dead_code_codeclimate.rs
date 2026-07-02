@@ -1683,3 +1683,38 @@ impl CodeClimateBuilder<'_> {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use fallow_output::issue_output_contracts;
+
+    fn codeclimate_check_name_literals() -> BTreeSet<String> {
+        let source = include_str!("dead_code_codeclimate.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("source before tests");
+        let mut literals = BTreeSet::new();
+        let mut rest = source;
+        while let Some(start) = rest.find("\"fallow/") {
+            let after_quote = &rest[start + 1..];
+            let Some(end) = after_quote.find('"') else {
+                break;
+            };
+            literals.insert(after_quote[..end].to_owned());
+            rest = &after_quote[end + 1..];
+        }
+        literals
+    }
+
+    #[test]
+    fn codeclimate_check_names_match_issue_contracts() {
+        let from_emitter = codeclimate_check_name_literals();
+        let from_contracts = issue_output_contracts()
+            .flat_map(|contract| contract.codeclimate_check_names)
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(from_emitter, from_contracts);
+    }
+}
