@@ -8,9 +8,7 @@ use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
 use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
 use rustc_hash::FxHashMap;
 
-use crate::dead_code::analyze_with_parse_result;
-use crate::discover::discover_files_with_plugin_scopes;
-use crate::session::{AnalysisSession, parse_files_for_config};
+use crate::session::AnalysisSession;
 use crate::suppress::{IssueKind, is_file_suppressed, is_suppressed};
 
 /// Typed result from running feature flag analysis.
@@ -20,22 +18,11 @@ pub struct FeatureFlagsAnalysis {
     pub files_scanned: usize,
 }
 
-/// Run feature flag analysis for a resolved project config.
-#[must_use]
-pub fn analyze_feature_flags(config: &ResolvedConfig) -> FeatureFlagsAnalysis {
-    let files = discover_files_with_plugin_scopes(config);
-    let flags = collect_flags_for_files(config, &files);
-    FeatureFlagsAnalysis {
-        flags,
-        files_scanned: files.len(),
-    }
-}
-
 /// Run feature flag analysis with a reusable analysis session.
 #[must_use]
 pub fn analyze_feature_flags_with_session(session: &AnalysisSession) -> FeatureFlagsAnalysis {
     let parsed = session.parsed_parts(false);
-    let flags = collect_flags_for_modules(session.config(), &parsed.files, &parsed.modules);
+    let flags = collect_flags_for_modules(session, &parsed.files, &parsed.modules);
     FeatureFlagsAnalysis {
         flags,
         files_scanned: parsed.files.len(),
@@ -54,27 +41,22 @@ pub fn builtin_sdk_providers() -> Vec<&'static str> {
     crate::feature_flags::builtin_sdk_providers()
 }
 
-fn collect_flags_for_files(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<FeatureFlag> {
-    let parse_result = parse_files_for_config(config, files, false);
-    collect_flags_for_modules(config, files, &parse_result.modules)
-}
-
 fn collect_flags_for_modules(
-    config: &ResolvedConfig,
+    session: &AnalysisSession,
     files: &[DiscoveredFile],
     modules: &[ModuleInfo],
 ) -> Vec<FeatureFlag> {
-    let mut flags = collect_flags_from_modules(config, files, modules);
-    correlate_flags_with_dead_code(&mut flags, config, modules);
+    let mut flags = collect_flags_from_modules(session.config(), files, modules);
+    correlate_flags_with_dead_code(&mut flags, session, modules);
     flags
 }
 
 fn correlate_flags_with_dead_code(
     flags: &mut [FeatureFlag],
-    config: &ResolvedConfig,
+    session: &AnalysisSession,
     modules: &[ModuleInfo],
 ) {
-    if let Ok(analysis_output) = analyze_with_parse_result(config, modules) {
+    if let Ok(analysis_output) = session.analyze_dead_code_with_parsed_modules(modules) {
         correlate_with_dead_code(flags, &analysis_output.results);
     }
 }
@@ -263,15 +245,12 @@ mod tests {
             .collect();
         assert_eq!(session_names, vec!["FEATURE_EXISTING"]);
 
-        let direct_flags = analyze_feature_flags(session.config());
-        let direct_names: Vec<_> = direct_flags
+        let second_session_flags = analyze_feature_flags_with_session(&session);
+        let second_session_names: Vec<_> = second_session_flags
             .flags
             .iter()
             .map(|flag| flag.flag_name.as_str())
             .collect();
-        assert!(
-            direct_names.contains(&"FEATURE_LATE"),
-            "direct analysis should rediscover the late file: {direct_names:?}"
-        );
+        assert_eq!(second_session_names, vec!["FEATURE_EXISTING"]);
     }
 }

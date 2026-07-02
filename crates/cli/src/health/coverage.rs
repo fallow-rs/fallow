@@ -3296,17 +3296,16 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("failed to write app.test.ts: {err}"));
 
-        let parsed = fallow_engine::session::AnalysisSession::from_resolved_config(
+        let session = fallow_engine::session::AnalysisSession::from_resolved_config(
             FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
-        )
-        .into_parsed_parts(true);
-        let config = parsed.config;
+        );
+        let parsed = session.parsed_parts(true);
         let files = parsed.files;
         let modules = parsed.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
-        let analysis_output =
-            fallow_engine::dead_code::analyze_with_parse_result(&config, &modules)
-                .unwrap_or_else(|err| panic!("failed to analyze temp project: {err}"));
+        let analysis_output = session
+            .analyze_dead_code_with_parsed_modules(&modules)
+            .unwrap_or_else(|err| panic!("failed to analyze temp project: {err}"));
         let static_signals = build_static_signal_index(&modules, &analysis_output, &file_paths)
             .unwrap_or_else(|err| panic!("failed to build static signal index: {err}"));
         let app_path = src_dir.join("app.ts");
@@ -3430,10 +3429,10 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("failed to write other.ts: {err}"));
 
-        let parsed = fallow_engine::session::AnalysisSession::from_resolved_config(
+        let session = fallow_engine::session::AnalysisSession::from_resolved_config(
             FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true, None),
-        )
-        .into_parsed_parts(true);
+        );
+        let parsed = session.parsed_parts(true);
         let files = parsed.files;
         let modules = parsed.modules;
         let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();

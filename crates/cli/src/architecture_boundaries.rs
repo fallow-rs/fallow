@@ -503,6 +503,26 @@ fn watch_command_dead_code_routes_through_analysis_session() {
 }
 
 #[test]
+fn feature_flags_reuse_session_parse_and_discovery() {
+    let flags = read_source_without_line_comments("crates/engine/src/flags.rs")
+        .expect("read engine flags module");
+    assert!(
+        flags.contains("analyze_feature_flags_with_session"),
+        "feature flags must expose the session-backed runner"
+    );
+    for forbidden in [
+        "discover_files_with_plugin_scopes",
+        "parse_files_for_config",
+        "analyze_with_parse_result",
+    ] {
+        assert!(
+            !flags.contains(forbidden),
+            "feature flags must reuse AnalysisSession parse/discovery instead of {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
     for source_path in [
         "crates/engine/src/session.rs",

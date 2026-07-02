@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use fallow_config::{DuplicatesConfig, ResolvedConfig};
 use fallow_types::discover::DiscoveredFile;
-use fallow_types::extract::{ModuleInfo, ParseResult};
+use fallow_types::extract::ModuleInfo;
 use fallow_types::source_fingerprint::SourceFingerprint;
 use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -368,6 +368,30 @@ impl AnalysisSession {
         self.analyze_dead_code_with_reuse_artifacts(need_complexity, retain_graph, true)
     }
 
+    /// Run dead-code analysis from modules already parsed through this session.
+    ///
+    /// This preserves the session's resolved config and discovered file set for
+    /// follow-up analyses that reuse parser output without redoing discovery.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if graph construction or analysis fails.
+    pub fn analyze_dead_code_with_parsed_modules(
+        &self,
+        modules: &[ModuleInfo],
+    ) -> EngineResult<DeadCodeAnalysisArtifacts> {
+        run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
+            config: &self.config,
+            discovery: &self.discovery,
+            modules: modules.to_vec(),
+            metrics: reused_parse_metrics(),
+            collect_usages: true,
+            retain_graph: true,
+            retain_modules: false,
+            retain_files: false,
+        })
+    }
+
     fn analyze_dead_code_with_reuse_artifacts(
         &self,
         need_complexity: bool,
@@ -552,21 +576,6 @@ impl AnalysisSession {
     }
 }
 
-pub fn parse_files_for_config(
-    config: &ResolvedConfig,
-    files: &[DiscoveredFile],
-    need_complexity: bool,
-) -> ParseResult {
-    let ParsedModules { modules, metrics } =
-        parse_files_with_config(config, files, need_complexity);
-    ParseResult {
-        modules,
-        cache_hits: metrics.cache_hits,
-        cache_misses: metrics.cache_misses,
-        parse_cpu_ms: metrics.parse_cpu_ms,
-    }
-}
-
 fn merge_workspace_diagnostics(
     primary: Vec<WorkspaceDiagnostic>,
     secondary: Vec<WorkspaceDiagnostic>,
@@ -616,6 +625,16 @@ fn parse_files_with_config(
     ParsedModules {
         modules: parse_result.modules,
         metrics,
+    }
+}
+
+fn reused_parse_metrics() -> core_backend::ParseMetrics {
+    core_backend::ParseMetrics {
+        parse_ms: 0.0,
+        cache_ms: 0.0,
+        cache_hits: 0,
+        cache_misses: 0,
+        parse_cpu_ms: 0.0,
     }
 }
 
@@ -816,13 +835,7 @@ pub(crate) fn analyze_dead_code_with_parse_result_from_config(
         config,
         discovery: &discovery,
         modules: modules.to_vec(),
-        metrics: core_backend::ParseMetrics {
-            parse_ms: 0.0,
-            cache_ms: 0.0,
-            cache_hits: 0,
-            cache_misses: 0,
-            parse_cpu_ms: 0.0,
-        },
+        metrics: reused_parse_metrics(),
         collect_usages: true,
         retain_graph: true,
         retain_modules: false,
