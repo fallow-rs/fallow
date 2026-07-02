@@ -372,6 +372,19 @@ mod tests {
     }
 
     #[test]
+    fn api_path_accepts_every_registry_issue_type() {
+        for (issue_type, _) in ISSUE_TYPE_FLAGS.iter() {
+            let params = AnalyzeParams {
+                issue_types: Some(vec![(*issue_type).to_string()]),
+                ..AnalyzeParams::default()
+            };
+
+            dead_code_options_from_params(&params)
+                .unwrap_or_else(|err| panic!("{issue_type} should map through API path: {err}"));
+        }
+    }
+
+    #[test]
     fn cli_fallback_keeps_cli_only_analyze_surfaces() {
         for params in [
             AnalyzeParams {
