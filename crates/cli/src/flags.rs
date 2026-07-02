@@ -33,7 +33,8 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Ok(c) => c,
         Err(code) => return code,
     };
-    let analysis = fallow_engine::flags::analyze_feature_flags(&config);
+    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config);
+    let analysis = fallow_engine::flags::analyze_feature_flags_with_session(&session);
     if analysis.files_scanned == 0 {
         return emit_error("no files discovered", 2, opts.output);
     }
@@ -55,7 +56,13 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         return code;
     }
 
-    print_flags_result(&flags, &config, opts, elapsed, analysis.files_scanned);
+    print_flags_result(
+        &flags,
+        session.config(),
+        opts,
+        elapsed,
+        analysis.files_scanned,
+    );
 
     ExitCode::SUCCESS
 }

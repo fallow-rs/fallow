@@ -4,13 +4,13 @@ use std::path::Path;
 
 use fallow_config::ResolvedConfig;
 use fallow_types::discover::DiscoveredFile;
-use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo, ParseResult};
+use fallow_types::extract::{FlagUse, FlagUseKind, ModuleInfo};
 use fallow_types::results::{AnalysisResults, FeatureFlag, FlagConfidence, FlagKind};
 use rustc_hash::FxHashMap;
 
 use crate::dead_code::analyze_with_parse_result;
 use crate::discover::discover_files_with_plugin_scopes;
-use crate::session::parse_files_for_config;
+use crate::session::{AnalysisSession, parse_files_for_config};
 use crate::suppress::{IssueKind, is_file_suppressed, is_suppressed};
 
 /// Typed result from running feature flag analysis.
@@ -31,6 +31,17 @@ pub fn analyze_feature_flags(config: &ResolvedConfig) -> FeatureFlagsAnalysis {
     }
 }
 
+/// Run feature flag analysis with a reusable analysis session.
+#[must_use]
+pub fn analyze_feature_flags_with_session(session: &AnalysisSession) -> FeatureFlagsAnalysis {
+    let parsed = session.parsed_parts(false);
+    let flags = collect_flags_for_modules(session.config(), &parsed.files, &parsed.modules);
+    FeatureFlagsAnalysis {
+        flags,
+        files_scanned: parsed.files.len(),
+    }
+}
+
 /// Built-in environment variable prefixes treated as feature flags.
 #[must_use]
 pub fn builtin_env_prefixes() -> &'static [&'static str] {
@@ -45,18 +56,25 @@ pub fn builtin_sdk_providers() -> Vec<&'static str> {
 
 fn collect_flags_for_files(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<FeatureFlag> {
     let parse_result = parse_files_for_config(config, files, false);
+    collect_flags_for_modules(config, files, &parse_result.modules)
+}
 
-    let mut flags = collect_flags_from_parse_result(config, files, &parse_result);
-    correlate_flags_with_dead_code(&mut flags, config, &parse_result);
+fn collect_flags_for_modules(
+    config: &ResolvedConfig,
+    files: &[DiscoveredFile],
+    modules: &[ModuleInfo],
+) -> Vec<FeatureFlag> {
+    let mut flags = collect_flags_from_modules(config, files, modules);
+    correlate_flags_with_dead_code(&mut flags, config, modules);
     flags
 }
 
 fn correlate_flags_with_dead_code(
     flags: &mut [FeatureFlag],
     config: &ResolvedConfig,
-    parse_result: &ParseResult,
+    modules: &[ModuleInfo],
 ) {
-    if let Ok(analysis_output) = analyze_with_parse_result(config, &parse_result.modules) {
+    if let Ok(analysis_output) = analyze_with_parse_result(config, modules) {
         correlate_with_dead_code(flags, &analysis_output.results);
     }
 }
@@ -94,10 +112,10 @@ fn correlate_with_dead_code(flags: &mut [FeatureFlag], results: &AnalysisResults
     }
 }
 
-fn collect_flags_from_parse_result(
+fn collect_flags_from_modules(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
-    parse_result: &ParseResult,
+    modules: &[ModuleInfo],
 ) -> Vec<FeatureFlag> {
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
 
@@ -118,7 +136,7 @@ fn collect_flags_from_parse_result(
         || config.flags.config_object_heuristics;
 
     let mut flags = Vec::new();
-    for module in &parse_result.modules {
+    for module in modules {
         let Some(path) = file_paths.get(&module.file_id) else {
             continue;
         };
@@ -206,5 +224,54 @@ fn flag_use_to_feature_flag(flag_use: &FlagUse, module: &ModuleInfo, path: &Path
         guard_line_start,
         guard_line_end,
         guarded_dead_exports: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_runner_uses_session_discovery_instead_of_rediscovering() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"flags-session","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "if (process.env.FEATURE_EXISTING) {}\n",
+        )
+        .expect("initial source");
+
+        let session = AnalysisSession::load(root, None).expect("session loads");
+
+        std::fs::write(
+            root.join("src/late.ts"),
+            "if (process.env.FEATURE_LATE) {}\n",
+        )
+        .expect("late source");
+
+        let session_flags = analyze_feature_flags_with_session(&session);
+        let session_names: Vec<_> = session_flags
+            .flags
+            .iter()
+            .map(|flag| flag.flag_name.as_str())
+            .collect();
+        assert_eq!(session_names, vec!["FEATURE_EXISTING"]);
+
+        let direct_flags = analyze_feature_flags(session.config());
+        let direct_names: Vec<_> = direct_flags
+            .flags
+            .iter()
+            .map(|flag| flag.flag_name.as_str())
+            .collect();
+        assert!(
+            direct_names.contains(&"FEATURE_LATE"),
+            "direct analysis should rediscover the late file: {direct_names:?}"
+        );
     }
 }
