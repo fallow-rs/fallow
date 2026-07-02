@@ -452,7 +452,9 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
     if let Some(rule) = dead_code_registry_rule(&normalized) {
         return Some(rule);
     }
-    let alias = health_alias_id(&normalized).or_else(|| security_alias_id(&normalized));
+    let alias = catalog_alias_id(&normalized)
+        .or_else(|| health_alias_id(&normalized))
+        .or_else(|| security_alias_id(&normalized));
     if let Some(id) = alias
         && let Some(rule) = rule_by_id(id)
     {
@@ -498,6 +500,29 @@ fn dead_code_registry_rule(normalized: &str) -> Option<&'static RuleDef> {
     CHECK_RULES
         .iter()
         .find(|rule| rule.id.strip_prefix("fallow/") == Some(meta.code))
+}
+
+fn catalog_alias_id(normalized: &str) -> Option<&'static str> {
+    match normalized {
+        "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
+            Some("fallow/unused-catalog-entry")
+        }
+        "empty-catalog-groups" | "empty-catalog-group" | "empty-catalog" => {
+            Some("fallow/empty-catalog-group")
+        }
+        "unresolved-catalog-references" | "unresolved-catalog-reference" | "unresolved-catalog" => {
+            Some("fallow/unresolved-catalog-reference")
+        }
+        "unused-dependency-overrides"
+        | "unused-dependency-override"
+        | "unused-override"
+        | "unused-overrides" => Some("fallow/unused-dependency-override"),
+        "misconfigured-dependency-overrides"
+        | "misconfigured-dependency-override"
+        | "misconfigured-override"
+        | "misconfigured-overrides" => Some("fallow/misconfigured-dependency-override"),
+        _ => None,
+    }
 }
 
 fn health_alias_id(normalized: &str) -> Option<&'static str> {
