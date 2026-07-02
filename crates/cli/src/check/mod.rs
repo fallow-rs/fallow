@@ -398,6 +398,7 @@ pub struct CheckResult {
     /// number. Computed from the retained graph's reverse-deps on the brief path
     /// BEFORE the graph is dropped; `None` otherwise. Internal (not serialized).
     pub internal_consumers: Option<rustc_hash::FxHashMap<String, u64>>,
+    retained_files: Option<Vec<DiscoveredFile>>,
 }
 
 struct CheckAnalysisData {
@@ -424,6 +425,23 @@ fn run_check_analysis(
                 script_used_packages: output.script_used_packages,
             })
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
+    }
+
+    if opts.include_dupes {
+        return fallow_engine::dead_code::analyze_retaining_files(
+            config,
+            false,
+            opts.trace_opts.any_active(),
+        )
+        .map(|output| CheckAnalysisData {
+            results: output.results,
+            trace_graph: output.graph,
+            trace_timings: output.timings,
+            retained_modules: None,
+            retained_files: output.files,
+            script_used_packages: output.script_used_packages,
+        })
+        .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
     if opts.trace_opts.any_active() {
@@ -669,13 +687,21 @@ fn complete_check_execution(
         trace_graph,
         trace_timings,
         retained_modules,
-        retained_files,
+        mut retained_files,
         script_used_packages,
     } = data;
 
     if let Some(sarif_path) = opts.sarif_file {
         output::write_sarif_file(&results, &config, sarif_path, opts.quiet);
     }
+
+    let retained_files_for_cross_reference = if opts.include_dupes && retained_modules.is_some() {
+        retained_files.clone()
+    } else if opts.include_dupes {
+        retained_files.take()
+    } else {
+        None
+    };
 
     let shared_parse = build_shared_parse_data(
         &results,
@@ -708,6 +734,7 @@ fn complete_check_execution(
         focus_facts: None,
         export_lines: None,
         internal_consumers: None,
+        retained_files: retained_files_for_cross_reference,
     }
 }
 
@@ -945,7 +972,14 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     );
 
     if opts.include_dupes && result.config.duplicates.enabled {
-        output::run_cross_reference(&result.config, &result.results, opts.quiet);
+        let Some(files) = result.retained_files.as_deref() else {
+            return emit_error(
+                "internal error: --include-dupes analysis did not retain discovered files",
+                2,
+                opts.output,
+            );
+        };
+        output::run_cross_reference(&result.config, &result.results, files, opts.quiet);
     }
 
     exit

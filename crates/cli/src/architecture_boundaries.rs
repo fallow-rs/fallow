@@ -388,6 +388,28 @@ fn cli_json_root_outputs_use_runtime_envelope_mode() {
 }
 
 #[test]
+fn include_dupes_reuses_dead_code_discovery_artifacts() {
+    let check = read_source_without_line_comments("crates/cli/src/check/mod.rs")
+        .expect("read check module");
+    let output = read_source_without_line_comments("crates/cli/src/check/output.rs")
+        .expect("read check output module");
+    assert!(
+        check.contains("opts.include_dupes")
+            && check.contains("fallow_engine::dead_code::analyze_retaining_files"),
+        "check --include-dupes must retain discovered files from the dead-code run"
+    );
+    assert!(
+        check.contains("result.retained_files.as_deref()")
+            || check.contains("result\n            .retained_files\n            .as_deref()"),
+        "check --include-dupes must pass retained discovered files into cross-reference"
+    );
+    assert!(
+        !output.contains("discover_files_with_plugin_scopes"),
+        "check cross-reference output must not rediscover files after dead-code analysis"
+    );
+}
+
+#[test]
 fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
     for source_path in [
         "crates/engine/src/session.rs",

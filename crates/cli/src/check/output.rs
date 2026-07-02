@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 use fallow_config::{OutputFormat, ResolvedConfig};
 use fallow_engine::module_graph::RetainedModuleGraph;
+use fallow_types::discover::DiscoveredFile;
 use rustc_hash::FxHashSet;
 
 use super::TraceOptions;
@@ -125,11 +126,11 @@ pub fn write_sarif_file(
 pub fn run_cross_reference(
     config: &ResolvedConfig,
     unfiltered_results: &fallow_types::results::AnalysisResults,
+    files: &[DiscoveredFile],
     quiet: bool,
 ) {
-    let files = fallow_engine::discover::discover_files_with_plugin_scopes(config);
     let dupe_report =
-        fallow_engine::duplicates::find_duplicates(&config.root, &files, &config.duplicates);
+        fallow_engine::duplicates::find_duplicates(&config.root, files, &config.duplicates);
     let cross_ref =
         fallow_engine::cross_reference::cross_reference(&dupe_report, unfiltered_results);
 

@@ -114,6 +114,15 @@ impl<'a> AnalysisSessionView<'a> {
         need_complexity: bool,
         retain_graph: bool,
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {
+        self.analyze_dead_code_with_reuse_artifacts(need_complexity, retain_graph, need_complexity)
+    }
+
+    fn analyze_dead_code_with_reuse_artifacts(
+        &self,
+        need_complexity: bool,
+        retain_graph: bool,
+        retain_files: bool,
+    ) -> EngineResult<DeadCodeAnalysisArtifacts> {
         let ParsedModules { modules, metrics } =
             parse_files_with_config(self.config, self.discovery.files(), need_complexity);
         run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
@@ -124,6 +133,7 @@ impl<'a> AnalysisSessionView<'a> {
             collect_usages: true,
             retain_graph,
             retain_modules: need_complexity,
+            retain_files,
         })
     }
 }
@@ -341,6 +351,29 @@ impl AnalysisSession {
         need_complexity: bool,
         retain_graph: bool,
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {
+        self.analyze_dead_code_with_reuse_artifacts(need_complexity, retain_graph, need_complexity)
+    }
+
+    /// Run dead-code analysis while retaining discovered files for downstream
+    /// command stages that reuse discovery but do not need parser modules.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parsing or analysis fails.
+    pub fn analyze_dead_code_retaining_files(
+        &self,
+        need_complexity: bool,
+        retain_graph: bool,
+    ) -> EngineResult<DeadCodeAnalysisArtifacts> {
+        self.analyze_dead_code_with_reuse_artifacts(need_complexity, retain_graph, true)
+    }
+
+    fn analyze_dead_code_with_reuse_artifacts(
+        &self,
+        need_complexity: bool,
+        retain_graph: bool,
+        retain_files: bool,
+    ) -> EngineResult<DeadCodeAnalysisArtifacts> {
         let ParsedModules { modules, metrics } = self.parse_modules(need_complexity);
         run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
             config: &self.config,
@@ -350,6 +383,7 @@ impl AnalysisSession {
             collect_usages: true,
             retain_graph,
             retain_modules: need_complexity,
+            retain_files,
         })
     }
 
@@ -669,6 +703,7 @@ struct EngineDeadCodePipelineInput<'a> {
     collect_usages: bool,
     retain_graph: bool,
     retain_modules: bool,
+    retain_files: bool,
 }
 
 fn run_engine_owned_dead_code_pipeline(
@@ -682,6 +717,7 @@ fn run_engine_owned_dead_code_pipeline(
         collect_usages,
         retain_graph,
         retain_modules,
+        retain_files,
     } = input;
     let prelude = core_backend::prepare_dead_code_backend_prelude(config, discovery)?;
     let prelude_timings = prelude.timings();
@@ -735,7 +771,7 @@ fn run_engine_owned_dead_code_pipeline(
         timings: profile.timings,
         graph: retain_graph.then_some(graph.graph),
         modules: retain_modules.then_some(modules),
-        files: retain_modules.then(|| discovery.files().to_vec()),
+        files: retain_files.then(|| discovery.files().to_vec()),
         script_used_packages,
         file_hashes,
     })
@@ -759,6 +795,18 @@ pub fn analyze_dead_code_with_artifacts_from_config(
     AnalysisSessionView::new(config).analyze_dead_code_with_artifacts(need_complexity, retain_graph)
 }
 
+pub fn analyze_dead_code_retaining_files_from_config(
+    config: &ResolvedConfig,
+    need_complexity: bool,
+    retain_graph: bool,
+) -> EngineResult<DeadCodeAnalysisArtifacts> {
+    AnalysisSessionView::new(config).analyze_dead_code_with_reuse_artifacts(
+        need_complexity,
+        retain_graph,
+        true,
+    )
+}
+
 pub(crate) fn analyze_dead_code_with_parse_result_from_config(
     config: &ResolvedConfig,
     modules: &[ModuleInfo],
@@ -778,5 +826,6 @@ pub(crate) fn analyze_dead_code_with_parse_result_from_config(
         collect_usages: true,
         retain_graph: true,
         retain_modules: false,
+        retain_files: false,
     })
 }

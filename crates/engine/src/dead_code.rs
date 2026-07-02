@@ -14,7 +14,8 @@ pub use crate::results::{
 use crate::{
     EngineResult,
     session::{
-        analyze_dead_code_from_config, analyze_dead_code_with_artifacts_from_config,
+        analyze_dead_code_from_config, analyze_dead_code_retaining_files_from_config,
+        analyze_dead_code_with_artifacts_from_config,
         analyze_dead_code_with_complexity_from_config,
         analyze_dead_code_with_parse_result_from_config,
     },
@@ -79,6 +80,20 @@ pub fn analyze_retaining_modules(
     retain_graph: bool,
 ) -> EngineResult<DeadCodeAnalysisArtifacts> {
     analyze_dead_code_with_artifacts_from_config(config, need_complexity, retain_graph)
+}
+
+/// Run dead-code analysis while retaining discovered files for downstream
+/// command stages that reuse the same project discovery.
+///
+/// # Errors
+///
+/// Returns an error if file discovery, parsing, or analysis fails.
+pub fn analyze_retaining_files(
+    config: &ResolvedConfig,
+    need_complexity: bool,
+    retain_graph: bool,
+) -> EngineResult<DeadCodeAnalysisArtifacts> {
+    analyze_dead_code_retaining_files_from_config(config, need_complexity, retain_graph)
 }
 
 /// Run dead-code analysis from pre-parsed modules.
