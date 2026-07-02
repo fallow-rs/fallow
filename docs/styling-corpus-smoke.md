@@ -25,6 +25,12 @@ styled-components, Emotion, shadcn/CVA, CSS Modules, Sass, Less, Vue, Svelte,
 Astro, and template-heavy projects. Use `--list` to inspect the current
 entries.
 
+Sass and Less coverage is parser-level and conservative: fallow inspects the
+authored stylesheet shape it can see, but it does not fully expand mixin loops,
+conditionals, or build-time importer state. Treat Sass/Less findings as styling
+consistency signals, not proof that a preprocessor compiler would emit the same
+selector graph.
+
 Useful focused runs:
 
 ```bash

@@ -284,6 +284,82 @@ fn audit_css_selector_complexity_error_escalates_verdict() {
 }
 
 #[test]
+fn audit_css_selector_complexity_new_only_ignores_inherited_styling() {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("package.json"), r#"{"name":"audit-css-pr-diff"}"#).unwrap();
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"rules":{"css-selector-complexity":"error"}}"#,
+    )
+    .unwrap();
+    fs::write(root.join("src/index.ts"), "export const ok = true;\n").unwrap();
+    fs::write(
+        root.join("src/styles.css"),
+        "#app .legacy .title { color: red; }\n",
+    )
+    .unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    fs::write(
+        root.join("src/styles.css"),
+        "#app .legacy .title { color: red; }\n.plain { color: blue; }\n",
+    )
+    .unwrap();
+    let inherited_output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        inherited_output.code, 0,
+        "inherited styling should not fail new-only audit. stdout: {}\nstderr: {}",
+        inherited_output.stdout, inherited_output.stderr
+    );
+
+    fs::write(
+        root.join("src/styles.css"),
+        "#app .legacy .title { color: red; }\n.plain { color: blue; }\n#app .introduced .title { color: green; }\n",
+    )
+    .unwrap();
+    let introduced_output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        introduced_output.code, 1,
+        "introduced styling should fail new-only audit. stdout: {}\nstderr: {}",
+        introduced_output.stdout, introduced_output.stderr
+    );
+    let json = parse_json(&introduced_output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    let findings = json["complexity"]["styling_findings"]
+        .as_array()
+        .expect("styling findings should be present");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-selector-complexity"
+                && finding["sub_kind"] == "high-specificity"
+                && finding["line"] == 3
+        }),
+        "introduced selector line should appear in styling findings: {findings:#?}"
+    );
+}
+
+#[test]
 fn audit_css_deep_surfaces_cross_file_styling_findings() {
     let dir = create_audit_css_deep_fixture();
     let root = dir.path();

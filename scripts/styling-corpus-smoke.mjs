@@ -225,7 +225,10 @@ const findFallowBin = (opts) => {
   ].filter(Boolean);
   for (const candidate of candidates) {
     const check = spawnSync(candidate, ["--version"], { encoding: "utf8" });
-    if (check.status === 0) return candidate;
+    if (check.status === 0) {
+      const hasPathSeparator = candidate.includes("/") || candidate.includes("\\");
+      return hasPathSeparator ? resolve(candidate) : candidate;
+    }
   }
   throw new Error("fallow binary not found. Build fallow or pass --fallow-bin PATH");
 };
@@ -345,20 +348,26 @@ const computeSpikes = (results, baseline) => {
   const spikes = [];
   for (const project of results.projects) {
     for (const command of project.commands) {
+      const issueCodeCounts = new Map();
       for (const group of command.finding_groups) {
         const issueKey = issueCodeKey(project.name, command.id, group.code);
+        issueCodeCounts.set(issueKey, (issueCodeCounts.get(issueKey) || 0) + group.count);
+      }
+      for (const [issueKey, count] of issueCodeCounts) {
         const issueBaseline = Number(baseline.counts[issueKey] || 0);
-        if (group.count > issueBaseline && !allowlist.has(issueKey)) {
-          spikes.push({
-            scope: "issue-code",
-            key: issueKey,
-            project: project.name,
-            command: command.id,
-            code: group.code,
-            previous: issueBaseline,
-            current: group.count,
-          });
-        }
+        if (count <= issueBaseline || allowlist.has(issueKey)) continue;
+        const [, , code] = issueKey.split(":");
+        spikes.push({
+          scope: "issue-code",
+          key: issueKey,
+          project: project.name,
+          command: command.id,
+          code,
+          previous: issueBaseline,
+          current: count,
+        });
+      }
+      for (const group of command.finding_groups) {
         if (group.confidence !== "high") continue;
         const key = spikeKey(
           project.name,
@@ -402,6 +411,7 @@ const runFallowCommand = (fallowBin, entry, dir, command, opts) => {
     status: proc.status,
     signal: proc.signal || null,
     timed_out: Boolean(proc.error && proc.error.code === "ETIMEDOUT"),
+    spawn_error: proc.error ? proc.error.message : null,
     parse_error: parsed.ok ? null : parsed.error,
     stderr_sample: (proc.stderr || "").trim().slice(0, 2000),
     finding_groups: groupFindings(findings),
@@ -416,6 +426,13 @@ const stackCoverage = (projects) => {
     for (const stack of project.stacks) covered.add(stack);
   }
   return REQUIRED_STACKS.map((stack) => ({ stack, covered: covered.has(stack) }));
+};
+
+const commandStatusLabel = (command) => {
+  if (command.status !== null) return String(command.status);
+  if (command.timed_out) return "timeout";
+  if (command.spawn_error) return `spawn error: ${command.spawn_error}`;
+  return command.signal || "signal";
 };
 
 const renderMarkdown = (results) => {
@@ -464,7 +481,7 @@ const renderMarkdown = (results) => {
         .map((group) => `${group.code}/${group.sub_kind}/${group.confidence}: ${group.count}`)
         .join("<br>");
       lines.push(
-        `| ${command.id} | ${command.status ?? "signal"} | ${command.total_styling_findings} | ${top || ""} |`,
+        `| ${command.id} | ${commandStatusLabel(command)} | ${command.total_styling_findings} | ${top || ""} |`,
       );
     }
     lines.push("");

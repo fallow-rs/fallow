@@ -16,7 +16,9 @@ use crate::report;
 use crate::report::plural;
 use crate::report::sink::outln;
 
-use super::keys::{annotate_dead_code_json, annotate_dupes_json, annotate_health_json};
+use super::keys::{
+    annotate_dead_code_json, annotate_dupes_json, annotate_health_json, styling_finding_key,
+};
 use super::{AuditResult, AuditSummary, AuditVerdict};
 
 /// Print audit results and return the appropriate exit code.
@@ -267,10 +269,11 @@ fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
     let visible_count = TOP_N.max(gated_count);
     for finding in sorted.iter().take(visible_count) {
         outln!(
-            "  {}  {}  {}",
+            "  {}  {}  {}  {}",
             format!("{}:{}", finding.path, finding.line).dimmed(),
             finding.code,
-            finding.value
+            finding.value,
+            styling_finding_audit_context(result, finding).dimmed()
         );
     }
     let hidden = sorted.len().saturating_sub(visible_count);
@@ -285,6 +288,11 @@ fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
 }
 
 fn styling_finding_is_error_gated(rules: &RulesConfig, code: &str) -> bool {
+    let (_, severity) = styling_finding_rule_context(rules, code);
+    severity == Severity::Error
+}
+
+fn styling_finding_rule_context(rules: &RulesConfig, code: &str) -> (String, Severity) {
     let severity = match code {
         "css-token-drift" => rules.css_token_drift,
         "css-duplicate-block" => rules.css_duplicate_block,
@@ -293,7 +301,51 @@ fn styling_finding_is_error_gated(rules: &RulesConfig, code: &str) -> bool {
         "css-broken-reference" => rules.css_broken_reference,
         _ => Severity::Warn,
     };
-    severity == Severity::Error
+    (format!("rules.{code}"), severity)
+}
+
+fn styling_finding_audit_context(
+    result: &AuditResult,
+    finding: &fallow_output::StylingFinding,
+) -> String {
+    let Some(health) = result.health.as_ref() else {
+        let (rule, severity) = styling_finding_rule_context(&RulesConfig::default(), &finding.code);
+        return styling_finding_audit_context_label(severity, &rule, None, result.attribution.gate);
+    };
+    let (rule, severity) = styling_finding_rule_context(&health.config.rules, &finding.code);
+    let base_state = result.base_snapshot.as_ref().map(|snapshot| {
+        let key = styling_finding_key(finding, &health.config.root);
+        if snapshot.styling.contains(&key) {
+            format!("inherited from {}", short_base_ref(&result.base_ref))
+        } else {
+            format!("introduced since {}", short_base_ref(&result.base_ref))
+        }
+    });
+    styling_finding_audit_context_label(severity, &rule, base_state, result.attribution.gate)
+}
+
+fn styling_finding_audit_context_label(
+    severity: Severity,
+    rule: &str,
+    base_state: Option<String>,
+    gate: AuditGate,
+) -> String {
+    let severity_label = match severity {
+        Severity::Off => "off",
+        Severity::Warn => "warn",
+        Severity::Error => "error",
+    };
+    let prefix = match (severity, gate, base_state.as_deref()) {
+        (Severity::Error, AuditGate::NewOnly, Some(state)) if state.starts_with("inherited") => {
+            "not gated"
+        }
+        (Severity::Error, _, _) => "gated",
+        _ => "advisory",
+    };
+    match base_state {
+        Some(state) => format!("({prefix}: {rule}={severity_label}, {state})"),
+        None => format!("({prefix}: {rule}={severity_label})"),
+    }
 }
 
 /// Print the TTY-only explain tip above the findings sections.
@@ -712,7 +764,7 @@ mod tests {
     use super::{
         audit_decision_conclusion, build_audit_codeclimate, build_audit_json_output,
         build_status_parts, build_vital_sign_parts, format_scope_line_parts, print_audit_result,
-        short_base_ref,
+        short_base_ref, styling_finding_audit_context_label,
     };
 
     fn audit_result(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
@@ -787,6 +839,37 @@ mod tests {
         assert_eq!(
             format_scope_line_parts(3, "origin/main", None, None),
             "Audit scope: 3 changed files vs origin/main"
+        );
+    }
+
+    #[test]
+    fn styling_finding_audit_context_label_explains_gate_state() {
+        assert_eq!(
+            styling_finding_audit_context_label(
+                fallow_config::Severity::Error,
+                "rules.css-selector-complexity",
+                Some("introduced since HEAD".to_string()),
+                AuditGate::NewOnly,
+            ),
+            "(gated: rules.css-selector-complexity=error, introduced since HEAD)"
+        );
+        assert_eq!(
+            styling_finding_audit_context_label(
+                fallow_config::Severity::Error,
+                "rules.css-selector-complexity",
+                Some("inherited from HEAD".to_string()),
+                AuditGate::NewOnly,
+            ),
+            "(not gated: rules.css-selector-complexity=error, inherited from HEAD)"
+        );
+        assert_eq!(
+            styling_finding_audit_context_label(
+                fallow_config::Severity::Warn,
+                "rules.css-selector-complexity",
+                None,
+                AuditGate::All,
+            ),
+            "(advisory: rules.css-selector-complexity=warn)"
         );
     }
 
