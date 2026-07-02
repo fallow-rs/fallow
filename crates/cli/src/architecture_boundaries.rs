@@ -551,6 +551,28 @@ fn list_surfaces_reuse_session_discovery() {
 }
 
 #[test]
+fn coverage_inventory_reuses_session_discovery() {
+    let source = read_source_without_line_comments("crates/cli/src/coverage/upload_inventory.rs")
+        .expect("read coverage upload inventory");
+    assert!(
+        source.contains("AnalysisSession::from_resolved_config"),
+        "coverage upload-inventory must create one AnalysisSession for inventory discovery"
+    );
+    assert!(
+        source.contains("fn collect_inventory(\n    session: &AnalysisSession"),
+        "coverage inventory collection must receive the shared AnalysisSession"
+    );
+    assert!(
+        source.contains("fn collect_caller_edges(\n    session: &AnalysisSession"),
+        "caller-edge collection must reuse the inventory AnalysisSession"
+    );
+    assert!(
+        !source.contains("discover_files_with_plugin_scopes"),
+        "coverage upload-inventory must reuse AnalysisSession discovery instead of direct discovery"
+    );
+}
+
+#[test]
 fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
     for source_path in [
         "crates/engine/src/session.rs",

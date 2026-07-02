@@ -23,7 +23,7 @@ use std::process::ExitCode;
 use fallow_config::ResolvedConfig;
 use fallow_cov_protocol::{FunctionIdentity, IdentityResolution, function_identity_id};
 use fallow_engine::churn::{ChurnResult, ChurnTrend, FileChurn, analyze_churn_cached, parse_since};
-use fallow_engine::discover::discover_files_with_plugin_scopes;
+use fallow_engine::session::AnalysisSession;
 use fallow_engine::source::inventory::{
     InventoryComplexity, InventoryEntry, walk_source_with_complexity,
 };
@@ -214,8 +214,9 @@ fn run_inner(args: &UploadInventoryArgs, root: &Path) -> Result<(), UploadError>
     enforce_clean_worktree(args, root)?;
 
     let config = load_resolved_config(root)?;
+    let session = AnalysisSession::from_resolved_config(config.clone());
     let exclude_matcher = compile_exclude_matcher(&args.exclude_paths)?;
-    let functions = collect_inventory(&config, &exclude_matcher, path_prefix.as_deref());
+    let functions = collect_inventory(&session, &exclude_matcher, path_prefix.as_deref());
     let churn_by_path = collect_churn(&config, path_prefix.as_deref());
 
     if functions.is_empty() {
@@ -241,7 +242,7 @@ fn run_inner(args: &UploadInventoryArgs, root: &Path) -> Result<(), UploadError>
     // get the import graph, while the default upload is a fast per-file walk.
     // Best-effort, so a graph-build failure still ships the inventory.
     let caller_edges = if args.with_callers {
-        collect_caller_edges(&config, &functions)
+        collect_caller_edges(&session, &functions)
     } else {
         BTreeMap::new()
     };
@@ -336,14 +337,14 @@ fn compile_exclude_matcher(patterns: &[String]) -> Result<GlobSet, UploadError> 
 }
 
 fn collect_inventory(
-    config: &ResolvedConfig,
+    session: &AnalysisSession,
     exclude_matcher: &GlobSet,
     path_prefix: Option<&str>,
 ) -> Vec<InventoryFunction> {
-    let files = discover_files_with_plugin_scopes(config);
+    let config = session.config();
     let mut seen: FxHashSet<(String, String, u32)> = FxHashSet::default();
     let mut out: Vec<InventoryFunction> = Vec::new();
-    for file in files {
+    for file in session.files() {
         let rel = file
             .path
             .strip_prefix(&config.root)
@@ -691,14 +692,10 @@ fn attribute_caller_edges(
 /// yields an empty map so the upload still ships the inventory. Never a verdict
 /// input on the server side.
 fn collect_caller_edges(
-    config: &ResolvedConfig,
+    session: &AnalysisSession,
     functions: &[InventoryFunction],
 ) -> BTreeMap<String, Vec<CallerSitePayload>> {
-    let artifacts = match fallow_engine::session::AnalysisSession::from_resolved_config(
-        config.clone(),
-    )
-    .analyze_dead_code_retaining_files(false, true)
-    {
+    let artifacts = match session.analyze_dead_code_retaining_files(false, true) {
         Ok(artifacts) => artifacts,
         Err(err) => {
             eprintln!(
@@ -711,6 +708,7 @@ fn collect_caller_edges(
     let (Some(graph), Some(files)) = (artifacts.graph.as_ref(), artifacts.files.as_ref()) else {
         return BTreeMap::new();
     };
+    let config = session.config();
 
     // FileId -> repo-relative posix path, matching collect_inventory's shape so
     // the callee/importer paths join the inventory functions' identity.file.
@@ -1262,16 +1260,17 @@ mod tests {
     fn collect_inventory_applies_path_prefix_and_excludes() {
         let project = project_with_one_function();
         let config = load_resolved_config(project.path()).unwrap();
+        let session = AnalysisSession::from_resolved_config(config);
         let include_all = compile_exclude_matcher(&[]).unwrap();
 
-        let functions = collect_inventory(&config, &include_all, Some("/app"));
+        let functions = collect_inventory(&session, &include_all, Some("/app"));
 
         assert_eq!(functions.len(), 1);
         assert_eq!(functions[0].file_path, "/app/src/index.ts");
         assert_eq!(functions[0].identity.file, "src/index.ts");
 
         let exclude_src = compile_exclude_matcher(&["src/**".to_owned()]).unwrap();
-        assert!(collect_inventory(&config, &exclude_src, Some("/app")).is_empty());
+        assert!(collect_inventory(&session, &exclude_src, Some("/app")).is_empty());
     }
 
     #[test]
@@ -1674,8 +1673,9 @@ mod tests {
         // regression in the source_hash join surfaces as a missing metric.
         let project = project_with_branchy_function();
         let config = load_resolved_config(project.path()).unwrap();
+        let session = AnalysisSession::from_resolved_config(config);
         let include_all = compile_exclude_matcher(&[]).unwrap();
-        let functions = collect_inventory(&config, &include_all, None);
+        let functions = collect_inventory(&session, &include_all, None);
         let branchy = functions
             .iter()
             .find(|f| f.function_name == "branchy")
@@ -1760,7 +1760,8 @@ mod tests {
         assert!(entry.trend.is_some(), "trend present");
         // The prefixed inventory path and the churn key must use the same shape.
         let include_all = compile_exclude_matcher(&[]).unwrap();
-        let functions = collect_inventory(&config, &include_all, Some("/app"));
+        let session = AnalysisSession::from_resolved_config(config);
+        let functions = collect_inventory(&session, &include_all, Some("/app"));
         let a_fn = functions
             .iter()
             .find(|f| f.file_path == "/app/src/a.ts")
@@ -1787,8 +1788,9 @@ mod tests {
     fn request_serializes_v2_version_and_churn_when_present() {
         let repo = git_repo_with_history();
         let config = load_resolved_config(repo.path()).unwrap();
+        let session = AnalysisSession::from_resolved_config(config.clone());
         let include_all = compile_exclude_matcher(&[]).unwrap();
-        let functions = collect_inventory(&config, &include_all, None);
+        let functions = collect_inventory(&session, &include_all, None);
         let churn_by_path = collect_churn(&config, None);
         let request = InventoryRequest {
             version: INVENTORY_BLOB_VERSION,
@@ -2021,6 +2023,7 @@ mod tests {
         .expect("write importer");
 
         let config = load_resolved_config(root).expect("config loads");
+        let session = AnalysisSession::from_resolved_config(config);
         let function = InventoryFunction::from_entry(
             "src/callee.ts",
             "src/callee.ts",
@@ -2028,7 +2031,7 @@ mod tests {
             None,
         );
 
-        let edges = collect_caller_edges(&config, std::slice::from_ref(&function));
+        let edges = collect_caller_edges(&session, std::slice::from_ref(&function));
 
         let sites = edges
             .get(&function.identity.stable_id)
