@@ -1303,6 +1303,28 @@ pub fn issue_meta_for_token(token: &str) -> Option<&'static IssueKindMeta> {
         .find(|meta| meta.code == token || meta.aliases.contains(&token))
 }
 
+/// Lookup metadata by any shared contract token: canonical code, alias,
+/// config key, MCP selector, suppression token, or CLI filter flag.
+#[must_use]
+pub fn issue_meta_for_contract_token(token: &str) -> Option<&'static IssueKindMeta> {
+    let normalized = token.trim().trim_start_matches("--").replace('_', "-");
+    ISSUE_KIND_META
+        .iter()
+        .find(|meta| issue_meta_matches_contract_token(meta, &normalized))
+}
+
+/// Whether a metadata row owns the provided shared contract token.
+#[must_use]
+pub fn issue_meta_matches_contract_token(meta: &IssueKindMeta, token: &str) -> bool {
+    let normalized = token.trim().trim_start_matches("--").replace('_', "-");
+    meta.code == normalized
+        || meta.aliases.contains(&normalized.as_str())
+        || meta.config_key == Some(normalized.as_str())
+        || meta.mcp_issue_type == Some(normalized.as_str())
+        || meta.suppress_token == Some(normalized.as_str())
+        || meta.filter_flag.map(|flag| flag.trim_start_matches("--")) == Some(normalized.as_str())
+}
+
 /// Lookup metadata by backing issue kind.
 #[must_use]
 pub fn issue_meta_by_kind(kind: IssueKind) -> Option<&'static IssueKindMeta> {
@@ -1516,6 +1538,44 @@ mod tests {
         let mut seen = BTreeSet::new();
         for meta in ISSUE_KIND_META {
             assert!(seen.insert(meta.code), "duplicate issue code {}", meta.code);
+        }
+    }
+
+    #[test]
+    fn contract_tokens_resolve_through_metadata() {
+        for meta in ISSUE_KIND_META {
+            assert_eq!(
+                issue_meta_for_contract_token(meta.code).map(|resolved| resolved.code),
+                Some(meta.code),
+                "canonical issue code {} should resolve through contract token lookup",
+                meta.code
+            );
+            for token in meta.aliases {
+                assert!(
+                    issue_meta_matches_contract_token(meta, token),
+                    "alias {token} should match {}",
+                    meta.code
+                );
+            }
+            for token in [
+                meta.config_key,
+                meta.mcp_issue_type,
+                meta.suppress_token,
+                meta.filter_flag,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                assert!(
+                    issue_meta_for_contract_token(token).is_some(),
+                    "contract token {token} should resolve through metadata"
+                );
+                assert!(
+                    issue_meta_matches_contract_token(meta, token),
+                    "contract token {token} should match {}",
+                    meta.code
+                );
+            }
         }
     }
 

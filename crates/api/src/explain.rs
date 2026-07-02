@@ -478,24 +478,10 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
 }
 
 fn dead_code_registry_rule(normalized: &str) -> Option<&'static RuleDef> {
-    let meta = fallow_types::issue_meta::ISSUE_KIND_META
-        .iter()
-        .find(|meta| issue_meta_matches_token(meta, normalized))?;
+    let meta = fallow_types::issue_meta::issue_meta_for_contract_token(normalized)?;
     CHECK_RULES
         .iter()
         .find(|rule| rule.id.strip_prefix("fallow/") == Some(meta.code))
-}
-
-fn issue_meta_matches_token(
-    meta: &fallow_types::issue_meta::IssueKindMeta,
-    normalized: &str,
-) -> bool {
-    meta.code == normalized
-        || meta.aliases.contains(&normalized)
-        || meta.config_key == Some(normalized)
-        || meta.mcp_issue_type == Some(normalized)
-        || meta.suppress_token == Some(normalized)
-        || meta.filter_flag.map(|flag| flag.trim_start_matches("--")) == Some(normalized)
 }
 
 fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
@@ -1372,7 +1358,7 @@ mod tests {
                 CHECK_RULES
                     .iter()
                     .any(|rule| rule.id.strip_prefix("fallow/") == Some(meta.code))
-                    && issue_meta_matches_token(meta, token)
+                    && fallow_types::issue_meta::issue_meta_matches_contract_token(meta, token)
             })
             .count()
             == 1
