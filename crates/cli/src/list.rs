@@ -88,13 +88,12 @@ fn collect_list_data(
 
     let need_plugin_result = opts.plugins || opts.entry_points || show_all;
     let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries);
-    let discovered = if need_files || need_plugin_result {
-        Some(fallow_engine::discover::discover_files_with_plugin_scopes(
-            config,
-        ))
+    let session = if need_files || need_plugin_result {
+        Some(fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()))
     } else {
         None
     };
+    let discovered = session.as_ref().map(|session| session.files().to_vec());
 
     let plugin_result = collect_plugin_result(opts, config, show_all, discovered.as_deref())?;
 
@@ -231,14 +230,8 @@ fn collect_plugin_result(
     if !(opts.plugins || opts.entry_points || show_all) {
         return Ok(None);
     }
-    let fallback_discovered;
-    let disc = match discovered {
-        Some(discovered) => discovered,
-        None => {
-            fallback_discovered =
-                fallow_engine::discover::discover_files_with_plugin_scopes(config);
-            &fallback_discovered
-        }
+    let Some(disc) = discovered else {
+        return Ok(None);
     };
     let file_paths: Vec<std::path::PathBuf> = disc.iter().map(|f| f.path.clone()).collect();
     let registry = fallow_engine::plugins::PluginRegistry::new(config.external_plugins.clone());

@@ -157,10 +157,8 @@ pub fn run_list_boundaries(
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
         let project_config = load_list_project_config(&resolved)?;
-
-        let files =
-            fallow_engine::discover::discover_files_with_plugin_scopes(&project_config.config);
-        let data = compute_boundary_data(&project_config.config, Some(&files));
+        let session = fallow_engine::session::AnalysisSession::from_config(project_config);
+        let data = compute_boundary_data(session.config(), Some(session.files()));
 
         Ok(ListBoundariesProgrammaticOutput {
             boundaries: boundary_data_to_output(&data),
@@ -181,36 +179,30 @@ pub fn run_project_info(
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
         let project_config = load_list_project_config(&resolved)?;
-        let config = &project_config.config;
+        let session = fallow_engine::session::AnalysisSession::from_config(project_config);
+        let config = session.config();
         let show_all = project_info_should_show_all(options);
         let need_plugin_result = options.plugins || options.entry_points || show_all;
         let need_files = options.files || options.entry_points || options.boundaries || show_all;
         let discovered = if need_files || need_plugin_result {
-            Some(fallow_engine::discover::discover_files_with_plugin_scopes(
-                config,
-            ))
+            Some(session.files())
         } else {
             None
         };
 
-        let plugin_result = collect_plugin_result(
-            resolved.root(),
-            config,
-            options,
-            show_all,
-            discovered.as_deref(),
-        )?;
+        let plugin_result =
+            collect_plugin_result(resolved.root(), config, options, show_all, discovered)?;
         let entry_points = collect_entry_points(
             resolved.root(),
             config,
             options,
             show_all,
-            discovered.as_deref(),
+            discovered,
             plugin_result.as_ref(),
         );
-        let boundaries = options.boundaries.then(|| {
-            boundary_data_to_output(&compute_boundary_data(config, discovered.as_deref()))
-        });
+        let boundaries = options
+            .boundaries
+            .then(|| boundary_data_to_output(&compute_boundary_data(config, discovered)));
         let workspaces = if show_all {
             Some(collect_workspace_output(resolved.root(), config)?)
         } else {
@@ -224,7 +216,7 @@ pub fn run_project_info(
 
         Ok(ProjectInfoProgrammaticOutput {
             plugins: collect_plugins(options, show_all, plugin_result.as_ref()),
-            files: collect_files(options, show_all, discovered.as_deref(), resolved.root()),
+            files: collect_files(options, show_all, discovered, resolved.root()),
             entry_points: entry_points
                 .map(|entries| entry_points_to_output(&entries, resolved.root())),
             boundaries,
@@ -301,14 +293,8 @@ fn collect_plugin_result(
     if !(options.plugins || options.entry_points || show_all) {
         return Ok(None);
     }
-    let fallback_discovered;
-    let files = match discovered {
-        Some(discovered) => discovered,
-        None => {
-            fallback_discovered =
-                fallow_engine::discover::discover_files_with_plugin_scopes(config);
-            &fallback_discovered
-        }
+    let Some(files) = discovered else {
+        return Ok(None);
     };
     let file_paths: Vec<std::path::PathBuf> = files.iter().map(|file| file.path.clone()).collect();
     let registry = fallow_engine::plugins::PluginRegistry::new(config.external_plugins.clone());

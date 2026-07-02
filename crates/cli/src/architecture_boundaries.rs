@@ -523,6 +523,21 @@ fn feature_flags_reuse_session_parse_and_discovery() {
 }
 
 #[test]
+fn list_surfaces_reuse_session_discovery() {
+    for source_path in ["crates/cli/src/list.rs", "crates/api/src/list_runtime.rs"] {
+        let source = read_source_without_line_comments(source_path).expect("read source");
+        assert!(
+            source.contains("AnalysisSession::from_"),
+            "{source_path} must build an AnalysisSession before collecting discovered files"
+        );
+        assert!(
+            !source.contains("discover_files_with_plugin_scopes"),
+            "{source_path} must reuse AnalysisSession discovery instead of direct discovery"
+        );
+    }
+}
+
+#[test]
 fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
     for source_path in [
         "crates/engine/src/session.rs",
