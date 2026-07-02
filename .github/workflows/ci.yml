@@ -314,8 +314,8 @@ jobs:
         run: npm run lint:js
       - name: oxfmt --check
         run: npm run fmt:js:check
-      - name: Agent-docs generator tests
-        run: node --test scripts/generate-agent-docs.test.mjs
+      - name: Script tests
+        run: node --test scripts/*.test.mjs
 
   npm-package:
     name: npm Package
