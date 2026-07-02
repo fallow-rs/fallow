@@ -22,7 +22,7 @@ use fallow_config::OutputFormat;
 use fallow_engine::health::{
     HealthExecutionOptions, HealthGateOptions, HealthGroupResolver, HealthPipelineInputs,
     HealthScopeInputs, HealthSeams, HealthSharedParseData, HealthSort, RuntimeCoverageSeamInput,
-    execute_health_inner, validate_health_churn_file,
+    execute_health_inner, health_may_consume_dead_code_artifacts, validate_health_churn_file,
 };
 
 use crate::check::{get_changed_files, resolve_workspace_scope};
@@ -235,13 +235,62 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     let t = Instant::now();
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
-    let session = session.into_parsed_parts(true);
-    let config = session.config;
-    let files = session.files;
-    let modules = session.modules;
-    let workspace_diagnostics = session.workspace_diagnostics;
-    let parse_ms = session.parse_ms;
-    let parse_cpu_ms = session.parse_cpu_ms;
+    let retain_dead_code_artifacts = health_may_consume_dead_code_artifacts(opts, session.config());
+    let (
+        config,
+        files,
+        modules,
+        workspace_diagnostics,
+        parse_ms,
+        parse_cpu_ms,
+        pre_computed_analysis,
+    ) = if retain_dead_code_artifacts {
+        let mut artifacts = session
+            .analyze_dead_code_with_artifacts(true, true)
+            .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))?;
+        let files = artifacts.files.take().ok_or_else(|| {
+            emit_error(
+                "Analysis error: retained health files missing from session artifacts",
+                2,
+                opts.output,
+            )
+        })?;
+        let modules = artifacts.modules.take().ok_or_else(|| {
+            emit_error(
+                "Analysis error: retained health modules missing from session artifacts",
+                2,
+                opts.output,
+            )
+        })?;
+        let parse_ms = artifacts
+            .timings
+            .as_ref()
+            .map_or(0.0, |timings| timings.parse_extract_ms);
+        let parse_cpu_ms = artifacts
+            .timings
+            .as_ref()
+            .map_or(0.0, |timings| timings.parse_cpu_ms);
+        (
+            session.config().clone(),
+            files,
+            modules,
+            session.workspace_diagnostics().to_vec(),
+            parse_ms,
+            parse_cpu_ms,
+            Some(artifacts),
+        )
+    } else {
+        let session = session.into_parsed_parts(true);
+        (
+            session.config,
+            session.files,
+            session.modules,
+            session.workspace_diagnostics,
+            session.parse_ms,
+            session.parse_cpu_ms,
+            None,
+        )
+    };
 
     let scope_inputs = build_health_scope_inputs(opts, &config)?;
     let seams = health_seams();
@@ -256,7 +305,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
             parse_ms,
             parse_cpu_ms,
             shared_parse: false,
-            pre_computed_analysis: None,
+            pre_computed_analysis,
             workspace_diagnostics,
         },
         scope_inputs,

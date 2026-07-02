@@ -9,6 +9,7 @@ use fallow_types::output_format::OutputFormat;
 use rustc_hash::FxHashSet;
 
 use crate::{
+    EngineError,
     project_config::{ProjectConfigOptions, config_for_project_analysis},
     results::DeadCodeAnalysisArtifacts,
     session::{AnalysisSession, ParsedAnalysisSessionParts},
@@ -17,7 +18,7 @@ use crate::{
 use super::{
     HealthAnalysisResult, HealthExecutionOptions, HealthPipelineInputs, HealthScopeInputs,
     HealthSeams, NoGroupResolver, RuntimeCoverageOptions, RuntimeCoverageSeamInput,
-    validate_health_churn_file,
+    health_may_consume_dead_code_artifacts, validate_health_churn_file,
 };
 
 /// Run health analysis without a presentation grouping resolver.
@@ -56,7 +57,13 @@ pub fn run_ungrouped_health(
     let changed_files = options
         .changed_since
         .and_then(|git_ref| session.changed_files_since(git_ref).ok());
-    let parts = session.into_parsed_parts(true);
+    let retain_dead_code_artifacts =
+        health_may_consume_dead_code_artifacts(options, session.config());
+    let (parts, pre_computed_analysis) = if retain_dead_code_artifacts {
+        retained_health_parts(&session).map_err(|_| ExitCode::from(2))?
+    } else {
+        (session.into_parsed_parts(true), None)
+    };
 
     run_ungrouped_health_from_parts(HealthRunPartsInput {
         options,
@@ -65,7 +72,7 @@ pub fn run_ungrouped_health(
         changed_files,
         config_ms,
         shared_parse: false,
-        pre_computed_analysis: None,
+        pre_computed_analysis,
     })
 }
 
@@ -177,6 +184,36 @@ fn run_ungrouped_health_from_parts(
         scope_inputs,
         &seams,
     )
+}
+
+fn retained_health_parts(
+    session: &AnalysisSession,
+) -> crate::EngineResult<(
+    ParsedAnalysisSessionParts,
+    Option<DeadCodeAnalysisArtifacts>,
+)> {
+    let mut artifacts = session.analyze_dead_code_with_artifacts(true, true)?;
+    let timings = artifacts.timings.as_ref();
+    let modules = artifacts.modules.take().ok_or_else(|| {
+        EngineError::new("retained health modules missing from session artifacts")
+    })?;
+    let files = artifacts
+        .files
+        .take()
+        .ok_or_else(|| EngineError::new("retained health files missing from session artifacts"))?;
+    let parts = ParsedAnalysisSessionParts {
+        config: session.config().clone(),
+        config_path: session.config_path().map(PathBuf::from),
+        files,
+        modules,
+        workspace_diagnostics: session.workspace_diagnostics().to_vec(),
+        parse_ms: timings.map_or(0.0, |timings| timings.parse_extract_ms),
+        cache_update_ms: timings.map_or(0.0, |timings| timings.cache_update_ms),
+        cache_hits: timings.map_or(0, |timings| timings.cache_hits),
+        cache_misses: timings.map_or(0, |timings| timings.cache_misses),
+        parse_cpu_ms: timings.map_or(0.0, |timings| timings.parse_cpu_ms),
+    };
+    Ok((parts, Some(artifacts)))
 }
 
 fn programmatic_runtime_coverage_seam(

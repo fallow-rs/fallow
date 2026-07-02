@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::EmailMode;
+use fallow_config::{EmailMode, ResolvedConfig, Severity};
 use fallow_output::{
     DiffIndex, EffortEstimate, FindingSeverity, GroupByMode, RuntimeCoverageReport,
     RuntimeCoverageWatermark,
@@ -449,6 +449,36 @@ pub fn derive_health_run_options(input: HealthRunOptionsInput<'_>) -> HealthRunO
     }
 }
 
+/// Return whether a health run may consume retained dead-code artifacts.
+///
+/// These sections need graph-backed analysis output in addition to parsed
+/// modules. Keeping the check here lets CLI and programmatic runners make the
+/// same retain-or-parse decision before entering the core pipeline.
+#[must_use]
+pub fn health_may_consume_dead_code_artifacts(
+    options: &HealthExecutionOptions<'_>,
+    config: &ResolvedConfig,
+) -> bool {
+    let coverage_gaps_enabled = config.rules.coverage_gaps != Severity::Off;
+    let reports_coverage_gaps =
+        options.coverage_gaps || (options.config_activates_coverage_gaps && coverage_gaps_enabled);
+    let enforces_coverage_gaps =
+        options.enforce_coverage_gap_gate && config.rules.coverage_gaps == Severity::Error;
+    let max_crap = options
+        .thresholds
+        .max_crap
+        .unwrap_or(config.health.max_crap);
+
+    options.file_scores
+        || reports_coverage_gaps
+        || enforces_coverage_gaps
+        || options.hotspots
+        || options.targets
+        || options.force_full
+        || max_crap > 0.0
+        || options.runtime_coverage.is_some()
+}
+
 fn is_health_score_only_output(options: &HealthSectionOptions, score: bool) -> bool {
     score
         && !options.complexity
@@ -566,6 +596,17 @@ pub struct HealthSharedParseData {
 mod tests {
     use super::*;
 
+    fn resolved_health_config() -> ResolvedConfig {
+        fallow_config::FallowConfig::default().resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        )
+    }
+
     fn health_run_input() -> HealthRunOptionsInput<'static> {
         HealthRunOptionsInput {
             output: OutputFormat::Json,
@@ -590,6 +631,117 @@ mod tests {
             coverage_inputs: HealthCoverageInputs::default(),
             runtime_coverage: None,
         }
+    }
+
+    #[expect(
+        clippy::ref_option,
+        reason = "test helper mirrors the HealthExecutionOptions config_path contract"
+    )]
+    fn health_execution_options<'a>(
+        root: &'a Path,
+        config_path: &'a Option<PathBuf>,
+    ) -> HealthExecutionOptions<'a> {
+        HealthExecutionOptions {
+            root,
+            config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            complexity_breakdown: false,
+            thresholds: HealthThresholdOverrides::default(),
+            top: None,
+            sort: HealthSort::Cyclomatic,
+            production: false,
+            production_override: None,
+            changed_since: None,
+            diff_index: None,
+            use_shared_diff_index: false,
+            workspace: None,
+            changed_workspaces: None,
+            baseline: None,
+            save_baseline: None,
+            complexity: false,
+            file_scores: false,
+            coverage_gaps: false,
+            config_activates_coverage_gaps: false,
+            hotspots: false,
+            ownership: false,
+            ownership_emails: None,
+            targets: false,
+            css: false,
+            force_full: false,
+            score_only_output: false,
+            enforce_coverage_gap_gate: false,
+            effort: None,
+            score: false,
+            gates: HealthGateOptions::default(),
+            since: None,
+            min_commits: None,
+            explain: false,
+            summary: false,
+            save_snapshot: None,
+            trend: false,
+            coverage_inputs: HealthCoverageInputs::default(),
+            performance: false,
+            runtime_coverage: None,
+            churn_file: None,
+            group_by: None,
+        }
+    }
+
+    #[test]
+    fn health_artifact_reuse_tracks_graph_backed_sections() {
+        let root = Path::new("/project");
+        let config_path = None;
+        let config = resolved_health_config();
+        let mut options = health_execution_options(root, &config_path);
+
+        options.file_scores = true;
+        assert!(health_may_consume_dead_code_artifacts(&options, &config));
+
+        options.file_scores = false;
+        options.targets = true;
+        assert!(health_may_consume_dead_code_artifacts(&options, &config));
+
+        options.targets = false;
+        options.runtime_coverage = Some(RuntimeCoverageOptions {
+            path: PathBuf::from("coverage/v8"),
+            min_invocations_hot: 1,
+            min_observation_volume: None,
+            low_traffic_threshold: None,
+            license_jwt: "test.jwt".to_string(),
+            watermark: None,
+        });
+        assert!(health_may_consume_dead_code_artifacts(&options, &config));
+    }
+
+    #[test]
+    fn health_artifact_reuse_skips_complexity_only_without_crap_gate() {
+        let root = Path::new("/project");
+        let config_path = None;
+        let mut config = resolved_health_config();
+        config.health.max_crap = 0.0;
+        let mut options = health_execution_options(root, &config_path);
+        options.complexity = true;
+
+        assert!(!health_may_consume_dead_code_artifacts(&options, &config));
+    }
+
+    #[test]
+    fn health_artifact_reuse_tracks_configured_coverage_gap_gate() {
+        let root = Path::new("/project");
+        let config_path = None;
+        let mut config = resolved_health_config();
+        config.rules.coverage_gaps = Severity::Error;
+        let mut options = health_execution_options(root, &config_path);
+
+        options.config_activates_coverage_gaps = true;
+        assert!(health_may_consume_dead_code_artifacts(&options, &config));
+
+        options.config_activates_coverage_gaps = false;
+        options.enforce_coverage_gap_gate = true;
+        assert!(health_may_consume_dead_code_artifacts(&options, &config));
     }
 
     #[test]
