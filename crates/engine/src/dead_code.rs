@@ -12,7 +12,7 @@ pub use crate::results::{
 };
 
 use crate::{
-    EngineResult, core_backend,
+    EngineResult,
     session::{
         analyze_dead_code_from_config, analyze_dead_code_with_artifacts_from_config,
         analyze_dead_code_with_complexity_from_config,
@@ -128,7 +128,7 @@ pub fn filter_to_workspaces(results: &mut AnalysisResults, ws_roots: &[PathBuf])
     reason = "fallow standardizes on FxHashSet across the workspace"
 )]
 pub fn filter_by_changed_files(results: &mut AnalysisResults, changed_files: &FxHashSet<PathBuf>) {
-    core_backend::filter_results_by_changed_files(results, changed_files);
+    crate::changed_files::filter_results_by_changed_files(results, changed_files);
 }
 
 fn filter_workspace_source_findings(

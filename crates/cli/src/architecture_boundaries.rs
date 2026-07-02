@@ -455,12 +455,21 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
         "fallow_core::changed_files::try_get_changed_files",
         "fallow_core::changed_files::try_get_changed_diff",
         "fallow_core::changed_files::get_changed_files",
+        "fallow_core::changed_files::filter_results_by_changed_files",
+        "fallow_core::changed_files::filter_duplication_by_changed_files",
     ] {
         assert!(
             !core_backend.contains(forbidden),
-            "engine core_backend must not re-introduce changed-files git orchestration through {forbidden}"
+            "engine core_backend must not re-introduce changed-files orchestration through {forbidden}"
         );
     }
+
+    let core_lib =
+        read_source_without_line_comments("crates/core/src/lib.rs").expect("read core lib source");
+    assert!(
+        !core_lib.contains("pub mod changed_files"),
+        "fallow-core must not re-publish changed-file orchestration after it moved to fallow-engine"
+    );
 }
 
 #[test]

@@ -318,13 +318,6 @@ impl From<ParseMetrics> for fallow_core::AnalysisParseMetrics {
     }
 }
 
-pub fn filter_results_by_changed_files(
-    results: &mut AnalysisResults,
-    changed_files: &FxHashSet<PathBuf>,
-) {
-    fallow_core::changed_files::filter_results_by_changed_files(results, changed_files);
-}
-
 fn dead_code_kind(kind: fallow_core::cross_reference::DeadCodeKind) -> EngineDeadCodeKind {
     match kind {
         fallow_core::cross_reference::DeadCodeKind::UnusedFile => EngineDeadCodeKind::UnusedFile,
@@ -429,14 +422,6 @@ pub fn trace_symbol_chain(
     query: fallow_types::trace_chain::SymbolChainQuery<'_>,
 ) -> Option<fallow_types::trace_chain::SymbolChainTrace> {
     fallow_core::trace_chain::trace_symbol_chain(graph, modules, root, query)
-}
-
-pub fn filter_duplication_by_changed_files(
-    report: &mut DuplicationReport,
-    changed_files: &FxHashSet<PathBuf>,
-    root: &Path,
-) {
-    fallow_core::changed_files::filter_duplication_by_changed_files(report, changed_files, root);
 }
 
 #[derive(Debug, Clone)]
