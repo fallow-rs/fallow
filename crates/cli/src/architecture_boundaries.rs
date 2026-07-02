@@ -429,6 +429,38 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
         !dead_code.contains("core_backend::analyze_with_parse_result"),
         "engine dead-code facade must not delegate reused-parse analysis to the old core monolith"
     );
+
+    let changed_files = read_source_without_line_comments("crates/engine/src/changed_files.rs")
+        .expect("read source");
+    for forbidden in [
+        "core_backend::set_changed_files_spawn_hook",
+        "core_backend::validate_git_ref",
+        "core_backend::resolve_git_toplevel",
+        "core_backend::resolve_git_common_dir",
+        "core_backend::try_get_changed_files",
+        "core_backend::try_get_changed_diff",
+        "core_backend::get_changed_files",
+    ] {
+        assert!(
+            !changed_files.contains(forbidden),
+            "engine changed-files git orchestration must be owned by changed_files.rs, not {forbidden}"
+        );
+    }
+
+    for forbidden in [
+        "fallow_core::changed_files::set_spawn_hook",
+        "fallow_core::changed_files::validate_git_ref",
+        "fallow_core::changed_files::resolve_git_toplevel",
+        "fallow_core::changed_files::resolve_git_common_dir",
+        "fallow_core::changed_files::try_get_changed_files",
+        "fallow_core::changed_files::try_get_changed_diff",
+        "fallow_core::changed_files::get_changed_files",
+    ] {
+        assert!(
+            !core_backend.contains(forbidden),
+            "engine core_backend must not re-introduce changed-files git orchestration through {forbidden}"
+        );
+    }
 }
 
 #[test]
