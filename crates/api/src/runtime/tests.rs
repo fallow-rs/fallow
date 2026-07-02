@@ -272,6 +272,23 @@ fn run_health_with_session_reuses_existing_discovery() {
 }
 
 #[test]
+fn audit_reuses_dead_code_artifacts_when_only_health_scope_matches() {
+    let source = include_str!("audit.rs");
+    assert!(
+        source.contains("fn run_dead_code_and_health_with_session("),
+        "programmatic audit must keep dead-code plus health artifact reuse in one helper"
+    );
+    assert!(
+        source.contains("if options.production_dead_code == options.production_health"),
+        "programmatic audit must reuse dead-code artifacts when health shares the dead-code production scope, even if dupes does not"
+    );
+    assert!(
+        source.contains("duplication: run_duplication(&duplication_options)?"),
+        "the mixed-scope audit branch must only isolate duplication instead of isolating health too"
+    );
+}
+
+#[test]
 fn run_health_with_session_artifacts_accepts_retained_dead_code_analysis() {
     let project = tempfile::tempdir().expect("temp dir");
     let src = project.path().join("src");

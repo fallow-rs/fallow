@@ -3,7 +3,7 @@ use std::process::Command;
 use std::time::{Instant, SystemTime};
 
 use fallow_config::AuditGate;
-use fallow_engine::changed_files::clear_ambient_git_env;
+use fallow_engine::{changed_files::clear_ambient_git_env, session::AnalysisSession};
 use fallow_output::build_audit_next_steps;
 use fallow_types::output::NextStep;
 use rustc_hash::FxHashSet;
@@ -12,7 +12,9 @@ use crate::{
     AnalysisOptions, AuditAttribution, AuditOptions, AuditProgrammaticKeySnapshot,
     AuditProgrammaticOutput, AuditSummary, AuditVerdict, ComplexityOptions, DeadCodeFilters,
     DeadCodeOptions, DuplicationOptions, ProgrammaticError,
-    analysis_context::{changed_files_for_run, resolve_programmatic_analysis_context},
+    analysis_context::{
+        ProgrammaticAnalysisContext, changed_files_for_run, resolve_programmatic_analysis_context,
+    },
 };
 
 use super::{
@@ -240,37 +242,12 @@ fn run_audit_subanalyses(
         let resolved = resolve_programmatic_analysis_context(&dead_code_options.analysis)?;
         return resolved.install(|| {
             let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
-            let reuse_dead_code_artifacts =
-                health_may_consume_dead_code_artifacts(&complexity_options);
-            let (dead_code, dead_code_artifacts) = if reuse_dead_code_artifacts {
-                let dead_code = super::dead_code::run_dead_code_with_session_artifacts(
-                    &dead_code_options,
-                    &resolved,
-                    &session,
-                    changed_files,
-                    |_| {},
-                    Instant::now(),
-                )?;
-                (dead_code.output, Some(dead_code.artifacts))
-            } else {
-                (
-                    super::dead_code::run_dead_code_with_session(
-                        &dead_code_options,
-                        &resolved,
-                        &session,
-                        changed_files,
-                        |_| {},
-                        Instant::now(),
-                    )?,
-                    None,
-                )
-            };
-            let complexity = run_health_with_session_artifacts(
+            let (dead_code, complexity) = run_dead_code_and_health_with_session(
+                &dead_code_options,
                 &complexity_options,
                 &resolved,
                 &session,
                 changed_files,
-                dead_code_artifacts,
             )?;
             Ok(AuditSubanalyses {
                 dead_code,
@@ -281,6 +258,25 @@ fn run_audit_subanalyses(
                     changed_files,
                     Instant::now(),
                 )?,
+                complexity,
+            })
+        });
+    }
+
+    if options.production_dead_code == options.production_health {
+        let resolved = resolve_programmatic_analysis_context(&dead_code_options.analysis)?;
+        return resolved.install(|| {
+            let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
+            let (dead_code, complexity) = run_dead_code_and_health_with_session(
+                &dead_code_options,
+                &complexity_options,
+                &resolved,
+                &session,
+                changed_files,
+            )?;
+            Ok(AuditSubanalyses {
+                dead_code,
+                duplication: run_duplication(&duplication_options)?,
                 complexity,
             })
         });
@@ -316,6 +312,50 @@ fn run_audit_subanalyses(
         duplication: run_duplication(&duplication_options)?,
         complexity: run_health(&complexity_options)?,
     })
+}
+
+fn run_dead_code_and_health_with_session(
+    dead_code_options: &DeadCodeOptions,
+    complexity_options: &ComplexityOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    changed_files: Option<&FxHashSet<PathBuf>>,
+) -> ProgrammaticResult<(
+    crate::DeadCodeProgrammaticOutput,
+    crate::HealthProgrammaticOutput,
+)> {
+    let reuse_dead_code_artifacts = health_may_consume_dead_code_artifacts(complexity_options);
+    let (dead_code, dead_code_artifacts) = if reuse_dead_code_artifacts {
+        let dead_code = super::dead_code::run_dead_code_with_session_artifacts(
+            dead_code_options,
+            resolved,
+            session,
+            changed_files,
+            |_| {},
+            Instant::now(),
+        )?;
+        (dead_code.output, Some(dead_code.artifacts))
+    } else {
+        (
+            super::dead_code::run_dead_code_with_session(
+                dead_code_options,
+                resolved,
+                session,
+                changed_files,
+                |_| {},
+                Instant::now(),
+            )?,
+            None,
+        )
+    };
+    let complexity = run_health_with_session_artifacts(
+        complexity_options,
+        resolved,
+        session,
+        changed_files,
+        dead_code_artifacts,
+    )?;
+    Ok((dead_code, complexity))
 }
 
 fn build_programmatic_audit_summary(analyses: &AuditSubanalyses) -> AuditSummary {
