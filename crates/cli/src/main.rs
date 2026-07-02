@@ -117,7 +117,7 @@ Analysis:
   health         Analyze complexity, maintainability, hotspots, and coverage gaps
   flags          Detect feature flag usage patterns
   security       Surface local security candidates for agent verification (opt-in)
-  audit          Review changed files for dead code, complexity, and duplication
+  audit          Review changed files for dead code, complexity, duplication, and styling
 
 Workflow:
   watch          Re-run analysis as files change

@@ -898,7 +898,7 @@ fn build_pre_commit_hook_content(fallback_base_ref: &str) -> String {
     format!(
         r#"#!/bin/sh
 {GIT_HOOK_MARKER}
-# fallow pre-commit hook -- gate commits on dead code, complexity, and duplication.
+# fallow pre-commit hook -- gate commits on dead code, complexity, duplication, and styling.
 # Audit defaults to gate=new-only, so inherited findings on touched files do not block
 # commits; only findings introduced by the changeset fail the gate. Set audit.gate = "all"
 # in fallow.toml to fail on every finding in changed files.
