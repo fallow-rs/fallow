@@ -575,8 +575,9 @@ mod tests {
             },
         )
         .expect("project config loads");
-        let trace = crate::trace_chain::trace_symbol_chain(
-            &project_config.config,
+        let session = AnalysisSession::from_config(project_config);
+        let trace = crate::trace_chain::trace_symbol_chain_with_session(
+            &session,
             fallow_types::trace_chain::SymbolChainQuery {
                 file: "src/util.ts",
                 symbol: "helper",
