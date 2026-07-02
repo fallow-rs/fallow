@@ -64,6 +64,70 @@ pub struct AnalyzeParams {
     pub threads: Option<usize>,
 }
 
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct CombinedParams {
+    pub root: Option<String>,
+
+    pub config: Option<String>,
+
+    pub production: Option<bool>,
+
+    pub workspace: Option<String>,
+
+    /// Git ref to compare against when limiting all combined sections to
+    /// changed files.
+    pub changed_since: Option<String>,
+
+    pub include_entry_exports: Option<bool>,
+
+    pub no_cache: Option<bool>,
+
+    pub threads: Option<usize>,
+
+    pub dupes_mode: Option<String>,
+
+    pub dupes_min_tokens: Option<u32>,
+
+    pub dupes_min_lines: Option<u32>,
+
+    #[schemars(range(min = 2))]
+    pub dupes_min_occurrences: Option<u32>,
+
+    pub dupes_threshold: Option<f64>,
+
+    pub dupes_skip_local: Option<bool>,
+
+    pub dupes_cross_language: Option<bool>,
+
+    /// Exclude import declarations from clone detection. Defaults to the
+    /// project config.
+    pub dupes_ignore_imports: Option<bool>,
+
+    /// Include only complexity findings in the health section.
+    pub complexity: Option<bool>,
+
+    /// Include per-file scores in the health section.
+    pub file_scores: Option<bool>,
+
+    /// Include project health score in the health section.
+    pub score: Option<bool>,
+
+    /// Include refactoring targets in the health section.
+    pub targets: Option<bool>,
+
+    /// Include hotspots in the health section.
+    pub hotspots: Option<bool>,
+
+    /// Maximum cyclomatic complexity threshold.
+    pub max_cyclomatic: Option<u16>,
+
+    /// Maximum cognitive complexity threshold.
+    pub max_cognitive: Option<u16>,
+
+    /// Maximum CRAP score threshold.
+    pub max_crap: Option<f64>,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct CheckChangedParams {
     pub root: Option<String>,

@@ -545,6 +545,43 @@ mod tests {
     }
 
     #[test]
+    fn api_backed_combined_does_not_spawn_binary() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::create_dir(temp.path().join("src")).expect("src dir");
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"code-mode-combined-test","type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("package json");
+        fs::write(
+            temp.path().join("src/index.ts"),
+            "export const unused = 1;\n",
+        )
+        .expect("source");
+
+        let output = execute_code_mode(
+            "/definitely/not/fallow".to_string(),
+            CodeExecuteParams {
+                code: "return fallow.combined({ no_cache: true, score: true });".to_string(),
+                root: Some(temp.path().display().to_string()),
+                timeout_ms: Some(5_000),
+                max_output_bytes: Some(200_000),
+            },
+        )
+        .expect("api-backed combined should not need the binary");
+
+        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
+        assert_eq!(json["ok"].as_bool(), Some(true));
+        assert_eq!(json["result"]["kind"].as_str(), Some("combined"));
+        assert!(json["result"]["check"]["summary"].is_object());
+        assert!(json["result"]["check"]["unused_exports"].is_array());
+        assert!(json["result"]["dupes"]["stats"].is_object());
+        assert!(json["result"]["health"]["summary"].is_object());
+        assert_eq!(json["calls"][0]["tool"].as_str(), Some("combined"));
+        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(true));
+    }
+
+    #[test]
     fn api_backed_check_changed_does_not_spawn_binary() {
         let temp = tempfile::tempdir().expect("tempdir");
         fs::create_dir(temp.path().join("src")).expect("src dir");
@@ -786,6 +823,7 @@ mod tests {
     fn all_valid_tool_names_parse_successfully() {
         let valid = [
             "analyze",
+            "combined",
             "check_changed",
             "security_candidates",
             "find_dupes",
@@ -852,6 +890,7 @@ mod tests {
     fn tool_name_round_trips_through_from_name_and_name() {
         let pairs: &[(&str, &str)] = &[
             ("analyze", "analyze"),
+            ("combined", "combined"),
             ("check_changed", "check_changed"),
             ("security_candidates", "security_candidates"),
             ("find_dupes", "find_dupes"),
@@ -1152,6 +1191,18 @@ mod tests {
         assert!(args.contains(&"dead-code".to_string()));
         assert!(args.contains(&"--format".to_string()));
         assert!(args.contains(&"json".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_combined_uses_bare_command_flags() {
+        let params = serde_json::json!({ "root": "/tmp/proj", "dupes_mode": "semantic" });
+        let args =
+            build_tool_args(CodeModeTool::Combined, params).expect("combined args should build");
+        assert!(!args.contains(&"dead-code".to_string()));
+        assert!(args.contains(&"--format".to_string()));
+        assert!(args.contains(&"json".to_string()));
+        assert!(args.contains(&"--dupes-mode".to_string()));
+        assert!(args.contains(&"semantic".to_string()));
     }
 
     #[test]

@@ -1,14 +1,19 @@
 use crate::params::{
-    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, ExplainParams,
-    FeatureFlagsParams, FindDupesParams, HealthParams, ImpactParams, ListBoundariesParams,
-    ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams, TraceDependencyParams,
-    TraceExportParams, TraceFileParams,
+    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CombinedParams,
+    ExplainParams, FeatureFlagsParams, FindDupesParams, HealthParams, ImpactParams,
+    ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams,
+    TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 
-use fallow_api::{RootEnvelopeMode, serialize_explain_programmatic_json};
+use fallow_api::{
+    AnalysisOptions, CombinedOptions, ComplexityOptions, DuplicationMode, DuplicationOptions,
+    RootEnvelopeMode, run_combined, serialize_combined_programmatic_json,
+    serialize_explain_programmatic_json,
+};
 
 use super::super::{
     analyze::run_analyze_api_value,
+    api_runtime::{env_diff_file, non_empty_path, non_empty_string},
     audit::run_audit_api_value,
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
@@ -23,6 +28,7 @@ use super::super::{
     health::run_health_api_value,
     list_boundaries::run_list_boundaries_api_value,
     project_info::run_project_info_api_value,
+    push_global,
     trace::{
         run_trace_clone_api_value, run_trace_dependency_api_value, run_trace_export_api_value,
         run_trace_file_api_value,
@@ -32,6 +38,7 @@ use super::super::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CodeModeTool {
     Analyze,
+    Combined,
     CheckChanged,
     SecurityCandidates,
     FindDupes,
@@ -57,6 +64,7 @@ impl CodeModeTool {
     pub(super) fn from_name(name: &str) -> Result<Self, String> {
         match name {
             "analyze" => Ok(Self::Analyze),
+            "combined" => Ok(Self::Combined),
             "check_changed" => Ok(Self::CheckChanged),
             "security_candidates" => Ok(Self::SecurityCandidates),
             "find_dupes" => Ok(Self::FindDupes),
@@ -87,6 +95,7 @@ impl CodeModeTool {
     pub(super) fn name(self) -> &'static str {
         match self {
             Self::Analyze => "analyze",
+            Self::Combined => "combined",
             Self::CheckChanged => "check_changed",
             Self::SecurityCandidates => "security_candidates",
             Self::FindDupes => "find_dupes",
@@ -116,6 +125,7 @@ impl CodeModeTool {
 
 pub(super) const CODE_MODE_ALIASES: &[(&str, &str)] = &[
     ("analyze", "analyze"),
+    ("combined", "combined"),
     ("checkChanged", "check_changed"),
     ("securityCandidates", "security_candidates"),
     ("findDupes", "find_dupes"),
@@ -139,6 +149,7 @@ pub(super) const CODE_MODE_ALIASES: &[(&str, &str)] = &[
 
 pub(super) const API_BACKED_CODE_MODE_TOOLS: &[CodeModeTool] = &[
     CodeModeTool::Analyze,
+    CodeModeTool::Combined,
     CodeModeTool::CheckChanged,
     CodeModeTool::FindDupes,
     CodeModeTool::ProjectInfo,
@@ -186,6 +197,10 @@ pub(super) fn run_api_tool(
         CodeModeTool::Analyze => {
             let params: AnalyzeParams = parse_params(params)?;
             run_analyze_api_value(&params)
+        }
+        CodeModeTool::Combined => {
+            let params: CombinedParams = parse_params(params)?;
+            run_combined_api_value(&params)
         }
         CodeModeTool::CheckChanged => {
             let params: CheckChangedParams = parse_params(params)?;
@@ -256,6 +271,7 @@ pub(super) fn build_tool_args(
 ) -> Result<Vec<String>, String> {
     match tool {
         CodeModeTool::Analyze
+        | CodeModeTool::Combined
         | CodeModeTool::CheckChanged
         | CodeModeTool::SecurityCandidates
         | CodeModeTool::FindDupes
@@ -286,6 +302,10 @@ fn build_project_tool_args(
         CodeModeTool::Analyze => {
             let params: AnalyzeParams = parse_params(params)?;
             build_analyze_args(&params)
+        }
+        CodeModeTool::Combined => {
+            let params: CombinedParams = parse_params(params)?;
+            Ok(build_combined_args(&params))
         }
         CodeModeTool::CheckChanged => {
             let params: CheckChangedParams = parse_params(params)?;
@@ -394,6 +414,151 @@ fn build_runtime_coverage_tool_args(
     }
 }
 
+fn run_combined_api_value(params: &CombinedParams) -> Result<Option<serde_json::Value>, String> {
+    let options = combined_options_from_params(params)?;
+    let value = run_combined(&options)
+        .and_then(serialize_combined_programmatic_json)
+        .map_err(|err| err.to_string())?;
+
+    Ok(Some(value))
+}
+
+fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptions, String> {
+    Ok(CombinedOptions {
+        analysis: AnalysisOptions {
+            root: non_empty_path(params.root.as_deref()),
+            config_path: non_empty_path(params.config.as_deref()),
+            no_cache: params.no_cache.unwrap_or(false),
+            threads: params.threads,
+            production: params.production.unwrap_or(false),
+            production_override: params.production,
+            changed_since: non_empty_string(params.changed_since.as_deref()),
+            diff_file: env_diff_file(),
+            workspace: non_empty_string(params.workspace.as_deref())
+                .map(|workspace| vec![workspace]),
+            explain: true,
+            ..AnalysisOptions::default()
+        },
+        include_entry_exports: params.include_entry_exports.unwrap_or(false),
+        duplication_options: DuplicationOptions {
+            mode: combined_duplication_mode(params.dupes_mode.as_deref())?,
+            min_tokens: params.dupes_min_tokens.map(|value| value as usize),
+            min_lines: params.dupes_min_lines.map(|value| value as usize),
+            min_occurrences: params.dupes_min_occurrences.map(|value| value as usize),
+            threshold: params.dupes_threshold,
+            skip_local: params.dupes_skip_local,
+            cross_language: params.dupes_cross_language,
+            ignore_imports: params.dupes_ignore_imports,
+            ..DuplicationOptions::default()
+        },
+        health_options: ComplexityOptions {
+            max_cyclomatic: params.max_cyclomatic,
+            max_cognitive: params.max_cognitive,
+            max_crap: params.max_crap,
+            complexity: params.complexity.unwrap_or(false),
+            file_scores: params.file_scores.unwrap_or(false),
+            hotspots: params.hotspots.unwrap_or(false),
+            targets: params.targets.unwrap_or(false),
+            score: params.score.unwrap_or(false),
+            ..ComplexityOptions::default()
+        },
+        ..CombinedOptions::default()
+    })
+}
+
+fn combined_duplication_mode(value: Option<&str>) -> Result<Option<DuplicationMode>, String> {
+    match value {
+        None | Some("") => Ok(None),
+        Some("strict") => Ok(Some(DuplicationMode::Strict)),
+        Some("mild") => Ok(Some(DuplicationMode::Mild)),
+        Some("weak") => Ok(Some(DuplicationMode::Weak)),
+        Some("semantic") => Ok(Some(DuplicationMode::Semantic)),
+        Some(value) => Err(format!(
+            "Invalid dupes_mode '{value}'. Valid values: strict, mild, weak, semantic"
+        )),
+    }
+}
+
+fn build_combined_args(params: &CombinedParams) -> Vec<String> {
+    let mut args = vec![
+        "--format".to_string(),
+        "json".to_string(),
+        "--quiet".to_string(),
+        "--explain".to_string(),
+    ];
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
+    if params.production == Some(true) {
+        args.push("--production".to_string());
+    }
+    push_opt_arg(&mut args, "--workspace", params.workspace.as_deref());
+    push_opt_arg(
+        &mut args,
+        "--changed-since",
+        params.changed_since.as_deref(),
+    );
+    if params.include_entry_exports == Some(true) {
+        args.push("--include-entry-exports".to_string());
+    }
+    push_opt_arg(&mut args, "--dupes-mode", params.dupes_mode.as_deref());
+    push_opt_arg(
+        &mut args,
+        "--dupes-min-tokens",
+        params
+            .dupes_min_tokens
+            .map(|value| value.to_string())
+            .as_deref(),
+    );
+    push_opt_arg(
+        &mut args,
+        "--dupes-min-lines",
+        params
+            .dupes_min_lines
+            .map(|value| value.to_string())
+            .as_deref(),
+    );
+    push_opt_arg(
+        &mut args,
+        "--dupes-min-occurrences",
+        params
+            .dupes_min_occurrences
+            .map(|value| value.to_string())
+            .as_deref(),
+    );
+    push_opt_arg(
+        &mut args,
+        "--dupes-threshold",
+        params
+            .dupes_threshold
+            .map(|value| value.to_string())
+            .as_deref(),
+    );
+    if params.dupes_skip_local == Some(true) {
+        args.push("--dupes-skip-local".to_string());
+    }
+    if params.dupes_cross_language == Some(true) {
+        args.push("--dupes-cross-language".to_string());
+    }
+    if params.dupes_ignore_imports == Some(false) {
+        args.push("--dupes-no-ignore-imports".to_string());
+    }
+    if params.score == Some(true) {
+        args.push("--score".to_string());
+    }
+    args
+}
+
+fn push_opt_arg(args: &mut Vec<String>, flag: &str, value: Option<&str>) {
+    if let Some(value) = value.filter(|value| !value.is_empty()) {
+        args.extend([flag.to_string(), value.to_string()]);
+    }
+}
+
 fn parse_params<T>(params: serde_json::Value) -> Result<T, String>
 where
     T: serde::de::DeserializeOwned,
@@ -416,6 +581,7 @@ mod tests {
             names,
             vec![
                 "analyze",
+                "combined",
                 "check_changed",
                 "find_dupes",
                 "project_info",
