@@ -1177,6 +1177,7 @@ fn security_runtime_health_options<'a>(
         ownership_emails: None,
         targets: false,
         css: false,
+        css_deep: false,
         force_full: false,
         score_only_output: false,
         enforce_coverage_gap_gate: false,

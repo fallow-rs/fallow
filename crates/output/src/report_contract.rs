@@ -537,7 +537,7 @@ fn health_runtime_metrics() -> [(String, MetaMetric); 5] {
     ]
 }
 
-fn health_styling_metrics() -> [(String, MetaMetric); 7] {
+fn health_styling_metrics() -> [(String, MetaMetric); 10] {
     [
         health_metric(
             "styling_health.score",
@@ -587,6 +587,27 @@ fn health_styling_metrics() -> [(String, MetaMetric); 7] {
             "Points deducted for !important density above a healthy floor and deep style-rule nesting. Present only under --css.",
             Some("[0, 10]"),
             "lower is better; 0 means no structural smells",
+        ),
+        health_metric(
+            "css_analytics.summary.near_duplicate_theme_tokens",
+            "Near-Duplicate Theme Tokens",
+            "Count of Tailwind v4 theme tokens whose comparable values are close to another token in the same theme dictionary. Present only in deep CSS analysis.",
+            Some("[0, infinity)"),
+            "0 means no near-duplicate token candidates were found",
+        ),
+        health_metric(
+            "styling_findings[].blast_radius",
+            "Styling Finding Blast Radius",
+            "Static lower-bound count of known consumers affected by a styling finding. Omitted when the family has no reliable blast-radius model.",
+            Some("[0, infinity)"),
+            "0 means no static consumers were found; omitted means unknown",
+        ),
+        health_metric(
+            "styling_findings[].nearest_token.distance",
+            "Nearest Styling Token Distance",
+            "Distance between a token-drift finding and its nearest comparable token. Units depend on the token namespace.",
+            Some("(0, infinity)"),
+            "lower means closer; compare only within the same token namespace",
         ),
     ]
 }

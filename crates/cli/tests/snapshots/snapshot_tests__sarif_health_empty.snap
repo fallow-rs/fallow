@@ -1,6 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 2571
+assertion_line: 2968
 expression: redact_health_sarif_version(&json_str)
 ---
 {
@@ -218,6 +218,71 @@ expression: redact_health_sarif_version(&json_str)
                 "text": "Coverage intelligence found hot production code that is covered by tests but still has high CRAP. Refactor carefully while preserving behavior."
               },
               "helpUri": "https://docs.fallow.tools/explanations/health#coverage-intelligence",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/css-token-drift",
+              "shortDescription": {
+                "text": "CSS or CSS-in-JS hardcoded styling value bypasses the design token system"
+              },
+              "fullDescription": {
+                "text": "A styling value appears to bypass the project's design token system, for example a Tailwind arbitrary value in markup. The finding is advisory by default and does not affect the audit verdict unless rules.css-token-drift is set to error. Verify the value and replace it with an existing scale token when appropriate."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#css-token-drift",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/css-duplicate-block",
+              "shortDescription": {
+                "text": "CSS or CSS-in-JS declaration block is duplicated across rules"
+              },
+              "fullDescription": {
+                "text": "A style rule declaration block is repeated across selectors, suggesting copy-pasted styling that can often be consolidated. The finding is advisory by default and does not affect the audit verdict unless rules.css-duplicate-block is set to error."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#css-duplicate-block",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/css-selector-complexity",
+              "shortDescription": {
+                "text": "CSS selector, nesting, or important usage is structurally complex"
+              },
+              "fullDescription": {
+                "text": "A CSS or CSS-in-JS rule crosses the structural floor for selector specificity, selector complexity, nesting depth, or important usage. The finding is advisory by default and does not affect the audit verdict unless rules.css-selector-complexity is set to error."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#css-selector-complexity",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/css-dead-surface",
+              "shortDescription": {
+                "text": "CSS or CSS-in-JS surface appears unused"
+              },
+              "fullDescription": {
+                "text": "A styling surface appears unused in the analyzed project, such as a scoped SFC class with no component-local use. The finding is advisory by default and does not affect the audit verdict unless rules.css-dead-surface is set to error. Verify dynamic consumers before deleting."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#css-dead-surface",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/css-broken-reference",
+              "shortDescription": {
+                "text": "CSS or CSS-in-JS reference resolves to no stylesheet definition"
+              },
+              "fullDescription": {
+                "text": "A styling reference appears unresolved, such as a class token or keyframes name that has no stylesheet definition in the analyzed project. The finding is advisory by default and does not affect the audit verdict unless rules.css-broken-reference is set to error. Verify external or CSS-in-JS definitions before fixing."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#css-broken-reference",
               "defaultConfiguration": {
                 "level": "warning"
               }

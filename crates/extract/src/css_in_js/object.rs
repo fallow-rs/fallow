@@ -512,6 +512,7 @@ enum CallKind {
 /// gate, which decides whether the file is scanned at all).
 pub(super) fn module_library(specifier: &str) -> Option<Lib> {
     match specifier {
+        "@pandacss/dev" => Some(Lib::Panda),
         "@vanilla-extract/css" | "@vanilla-extract/recipes" => Some(Lib::VanillaExtract),
         "@emotion/react" | "@emotion/css" => Some(Lib::Emotion),
         "@emotion/styled" => Some(Lib::EmotionStyled),

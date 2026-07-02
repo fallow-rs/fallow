@@ -553,6 +553,7 @@ pub fn build_health_compact_lines(
     push_health_score_compact(&mut lines, report);
     push_vital_signs_compact(&mut lines, report);
     push_health_findings_compact(&mut lines, &report.findings, root);
+    push_styling_findings_compact(&mut lines, &report.styling_findings, root);
     push_threshold_overrides_compact(&mut lines, &report.threshold_overrides, root);
     push_file_scores_compact(&mut lines, &report.file_scores, root);
     push_coverage_gaps_compact(&mut lines, report, root);
@@ -561,6 +562,33 @@ pub fn build_health_compact_lines(
     push_health_trend_compact(&mut lines, report);
     push_refactoring_targets_compact(&mut lines, &report.targets, root);
     lines
+}
+
+fn push_styling_findings_compact(
+    lines: &mut Vec<String>,
+    findings: &[fallow_output::StylingFinding],
+    root: &Path,
+) {
+    for finding in findings {
+        let relative = health_compact_path(Path::new(&finding.path), root);
+        let severity = match finding.effective_severity {
+            fallow_output::StylingFindingSeverity::Error => "error",
+            fallow_output::StylingFindingSeverity::Warn => "warn",
+        };
+        let value = compact_field_value(&finding.value);
+        lines.push(format!(
+            "{}:{}:{}:{}:severity={},value={}",
+            finding.code, relative, finding.line, finding.sub_kind, severity, value
+        ));
+    }
+}
+
+fn compact_field_value(value: &str) -> String {
+    value
+        .replace([':', ',', '\n', '\r'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn push_threshold_overrides_compact(
@@ -1049,6 +1077,37 @@ mod tests {
         assert_eq!(
             lines[1],
             "vital-signs:total_loc=120,avg_cyclomatic=3.4,p90_cyclomatic=8"
+        );
+    }
+
+    #[test]
+    fn health_compact_lines_include_styling_findings() {
+        let root = PathBuf::from("/project");
+        let report = fallow_output::HealthReport {
+            styling_findings: vec![fallow_output::StylingFinding {
+                code: "css-token-drift".to_string(),
+                sub_kind: "tailwind-arbitrary-value".to_string(),
+                path: "/project/src/app.css".to_string(),
+                line: 6,
+                value: "--color-brand: rgb(240, 90, 41)".to_string(),
+                effective_severity: fallow_output::StylingFindingSeverity::Warn,
+                blast_radius: None,
+                confidence: None,
+                agent_disposition: None,
+                nearest_token: None,
+                fix_hint: None,
+                actions: Vec::new(),
+            }],
+            ..Default::default()
+        };
+
+        let lines = build_health_compact_lines(&report, &root);
+
+        assert_eq!(
+            lines,
+            vec![
+                "css-token-drift:src/app.css:6:tailwind-arbitrary-value:severity=warn,value=--color-brand rgb(240 90 41)"
+            ]
         );
     }
 }

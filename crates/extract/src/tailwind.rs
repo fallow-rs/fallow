@@ -40,6 +40,9 @@ pub struct TailwindArbitraryUse {
 pub fn scan_tailwind_arbitrary_values(source: &str) -> Vec<TailwindArbitraryUse> {
     let mut out = Vec::new();
     for m in ARBITRARY_VALUE_RE.find_iter(source) {
+        if is_arbitrary_variant_match(source.as_bytes(), m.end()) {
+            continue;
+        }
         let line = 1 + source[..m.start()].bytes().filter(|&b| b == b'\n').count();
         out.push(TailwindArbitraryUse {
             value: m.as_str().to_owned(),
@@ -47,6 +50,23 @@ pub fn scan_tailwind_arbitrary_values(source: &str) -> Vec<TailwindArbitraryUse>
         });
     }
     out
+}
+
+fn is_arbitrary_variant_match(source: &[u8], end: usize) -> bool {
+    if source.get(end) == Some(&b':') {
+        return true;
+    }
+    if source.get(end) != Some(&b'/') {
+        return false;
+    }
+    for &byte in &source[end + 1..] {
+        match byte {
+            b':' => return true,
+            b' ' | b'\n' | b'\r' | b'\t' | b'"' | b'\'' | b'`' => return false,
+            _ => {}
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -96,5 +116,19 @@ mod tests {
         // value is.
         let v = values(r#"<a class="hover:w-[20px]">x</a>"#);
         assert_eq!(v, vec!["w-[20px]"]);
+    }
+
+    #[test]
+    fn ignores_arbitrary_variants() {
+        let v = values(
+            r#"<div class="data-[side=left]:slide-in min-[320px]:text-sm group-data-[collapsible=icon]:hidden group-data-[size=sm]/dialog:grid peer-data-[size=lg]/button:top-2 hover:w-[20px]">x</div>"#,
+        );
+        assert_eq!(v, vec!["w-[20px]"]);
+    }
+
+    #[test]
+    fn keeps_arbitrary_value_modifiers() {
+        let v = values(r#"<div class="bg-[#fff]/50 ring-[3px]">x</div>"#);
+        assert_eq!(v, vec!["bg-[#fff]", "ring-[3px]"]);
     }
 }

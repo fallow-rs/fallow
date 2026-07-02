@@ -105,13 +105,20 @@ pub(super) fn finalize_health_result<R>(
 
 fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<'_>) {
     if input.opts.css {
+        let scan_changed_files = if input.opts.css_deep {
+            None
+        } else {
+            input.changed_files
+        };
+        let output_changed_files = input.opts.css_deep.then_some(input.changed_files).flatten();
         let computation = compute_css_analytics_report(
             input.files,
             input.modules,
             HealthScanCtx {
                 config: input.config,
                 ignore_set: input.ignore_set,
-                changed_files: input.changed_files,
+                changed_files: scan_changed_files,
+                output_changed_files,
                 ws_roots: input.ws_roots,
             },
         );
@@ -130,21 +137,27 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
             input.modules,
             input.files,
             input.config,
+            input.opts.css_deep,
         );
     }
 }
 
-/// Graduate the descriptive css candidates into first-class [`StylingFinding`]s.
+/// Graduate the descriptive css candidates into first-class `StylingFinding`s.
 /// Honors inline suppression (`// fallow-ignore-next-line css-token-drift` /
 /// `-file`) at production time, matched by the candidate's relative path against
 /// the module's parsed suppressions. First family: `css-token-drift` (Tailwind
 /// arbitrary values = hardcoded-instead-of-token). Default severity `warn` is
 /// applied downstream; the finding is verdict-neutral by default.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Styling findings are mapped family-by-family so each output shape stays local."
+)]
 fn build_styling_findings(
     css: Option<&fallow_output::CssAnalyticsReport>,
     modules: &[fallow_types::extract::ModuleInfo],
     files: &[DiscoveredFile],
     config: &ResolvedConfig,
+    include_cross_file_reachability: bool,
 ) -> Vec<fallow_output::StylingFinding> {
     use fallow_config::Severity;
     use fallow_types::suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
@@ -189,8 +202,41 @@ fn build_styling_findings(
                 path: candidate.path.clone(),
                 line: candidate.line,
                 value: candidate.value.clone(),
+                effective_severity: styling_finding_severity(config.rules.css_token_drift),
+                blast_radius: None,
+                confidence: Some(fallow_output::StylingFindingConfidence::High),
+                agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
+                nearest_token: None,
+                fix_hint: Some(
+                    "Replace the one-off Tailwind arbitrary value with an existing scale token, or confirm it is intentional."
+                        .to_string(),
+                ),
                 actions: candidate.actions.clone(),
             });
+        }
+        if include_cross_file_reachability {
+            for candidate in &css.near_duplicate_theme_tokens {
+                if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
+                    continue;
+                }
+                findings.push(fallow_output::StylingFinding {
+                    code: "css-token-drift".to_string(),
+                    sub_kind: "near-duplicate-theme-token".to_string(),
+                    path: candidate.path.clone(),
+                    line: candidate.line,
+                    value: format!("{}: {}", candidate.token, candidate.value),
+                    effective_severity: styling_finding_severity(config.rules.css_token_drift),
+                    blast_radius: None,
+                    confidence: Some(fallow_output::StylingFindingConfidence::High),
+                    agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
+                    nearest_token: Some(candidate.nearest_token.clone()),
+                    fix_hint: Some(format!(
+                        "Reuse {} instead of adding {} after verifying the semantic intent.",
+                        candidate.nearest_token.name, candidate.token
+                    )),
+                    actions: candidate.actions.clone(),
+                });
+            }
         }
     }
 
@@ -213,12 +259,316 @@ fn build_styling_findings(
                     "{}-declaration block repeated {} times",
                     block.declaration_count, block.occurrence_count
                 ),
+                effective_severity: styling_finding_severity(config.rules.css_duplicate_block),
+                blast_radius: None,
+                confidence: Some(fallow_output::StylingFindingConfidence::High),
+                agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
+                nearest_token: None,
+                fix_hint: Some(
+                    "Consolidate the repeated declaration block after checking cascade order."
+                        .to_string(),
+                ),
                 actions: block.actions.clone(),
             });
         }
     }
 
+    // Family css-selector-complexity: parser-bounded notable rules (high
+    // specificity, deep nesting, or important density), all changed-file-local.
+    if config.rules.css_selector_complexity != Severity::Off {
+        for file in &css.files {
+            for rule in &file.analytics.notable_rules {
+                if suppressed(&file.path, rule.line, IssueKind::CssSelectorComplexity) {
+                    continue;
+                }
+                let (sub_kind, value, reason) = selector_complexity_finding(rule);
+                findings.push(fallow_output::StylingFinding {
+                    code: "css-selector-complexity".to_string(),
+                    sub_kind: sub_kind.to_string(),
+                    path: file.path.clone(),
+                    line: rule.line,
+                    value,
+                    effective_severity: styling_finding_severity(
+                        config.rules.css_selector_complexity,
+                    ),
+                    blast_radius: None,
+                    confidence: Some(fallow_output::StylingFindingConfidence::High),
+                    agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
+                    nearest_token: None,
+                    fix_hint: Some(
+                        "Simplify the selector or rule after checking cascade impact.".to_string(),
+                    ),
+                    actions: vec![fallow_output::CssCandidateAction::simplify_selector(reason)],
+                });
+            }
+        }
+    }
+
+    // Family css-dead-surface: local scoped SFC classes by default, plus
+    // cross-file reachability candidates when deep CSS mode produced them.
+    if config.rules.css_dead_surface != Severity::Off {
+        for candidate in &css.scoped_unused {
+            if suppressed(&candidate.path, 1, IssueKind::CssDeadSurface) {
+                continue;
+            }
+            findings.push(fallow_output::StylingFinding {
+                code: "css-dead-surface".to_string(),
+                sub_kind: "scoped-unused-class".to_string(),
+                path: candidate.path.clone(),
+                line: 1,
+                value: format!(
+                    "{} scoped {} unused: {}",
+                    candidate.classes.len(),
+                    if candidate.classes.len() == 1 {
+                        "class"
+                    } else {
+                        "classes"
+                    },
+                    candidate.classes.join(", ")
+                ),
+                effective_severity: styling_finding_severity(config.rules.css_dead_surface),
+                blast_radius: None,
+                confidence: Some(fallow_output::StylingFindingConfidence::Low),
+                agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+                nearest_token: None,
+                fix_hint: Some(
+                    "Verify no dynamic component-local use exists before removing the scoped class."
+                        .to_string(),
+                ),
+                actions: candidate.actions.clone(),
+            });
+        }
+        if include_cross_file_reachability {
+            for candidate in &css.unused_theme_tokens {
+                if suppressed(&candidate.path, candidate.line, IssueKind::CssDeadSurface) {
+                    continue;
+                }
+                findings.push(fallow_output::StylingFinding {
+                    code: "css-dead-surface".to_string(),
+                    sub_kind: "unused-theme-token".to_string(),
+                    path: candidate.path.clone(),
+                    line: candidate.line,
+                    value: candidate.token.clone(),
+                    effective_severity: styling_finding_severity(config.rules.css_dead_surface),
+                    blast_radius: Some(0),
+                    confidence: Some(fallow_output::StylingFindingConfidence::Low),
+                    agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+                    nearest_token: None,
+                    fix_hint: Some(
+                        "Verify no external or plugin consumer exists before removing the unused theme token."
+                            .to_string(),
+                    ),
+                    actions: candidate.actions.clone(),
+                });
+            }
+            for candidate in &css.unreferenced_css_classes {
+                if suppressed(&candidate.path, candidate.line, IssueKind::CssDeadSurface) {
+                    continue;
+                }
+                findings.push(fallow_output::StylingFinding {
+                    code: "css-dead-surface".to_string(),
+                    sub_kind: "unreferenced-css-class".to_string(),
+                    path: candidate.path.clone(),
+                    line: candidate.line,
+                    value: candidate.class.clone(),
+                    effective_severity: styling_finding_severity(config.rules.css_dead_surface),
+                    blast_radius: None,
+                    confidence: Some(fallow_output::StylingFindingConfidence::Low),
+                    agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+                    nearest_token: None,
+                    fix_hint: Some(
+                        "Verify no dynamic or external markup consumer exists before removing the class."
+                            .to_string(),
+                    ),
+                    actions: candidate.actions.clone(),
+                });
+            }
+            for candidate in &css.unreferenced_keyframes {
+                if suppressed(&candidate.path, 1, IssueKind::CssDeadSurface) {
+                    continue;
+                }
+                findings.push(fallow_output::StylingFinding {
+                    code: "css-dead-surface".to_string(),
+                    sub_kind: "unreferenced-keyframes".to_string(),
+                    path: candidate.path.clone(),
+                    line: 1,
+                    value: candidate.name.clone(),
+                    effective_severity: styling_finding_severity(config.rules.css_dead_surface),
+                    blast_radius: None,
+                    confidence: Some(fallow_output::StylingFindingConfidence::Low),
+                    agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+                    nearest_token: None,
+                    fix_hint: Some(
+                        "Verify no JavaScript animation reference exists before removing the keyframes."
+                            .to_string(),
+                    ),
+                    actions: candidate.actions.clone(),
+                });
+            }
+            for candidate in &css.unused_font_faces {
+                if suppressed(&candidate.path, 1, IssueKind::CssDeadSurface) {
+                    continue;
+                }
+                findings.push(fallow_output::StylingFinding {
+                    code: "css-dead-surface".to_string(),
+                    sub_kind: "unused-font-face".to_string(),
+                    path: candidate.path.clone(),
+                    line: 1,
+                    value: candidate.family.clone(),
+                    effective_severity: styling_finding_severity(config.rules.css_dead_surface),
+                    blast_radius: None,
+                    confidence: Some(fallow_output::StylingFindingConfidence::Low),
+                    agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+                    nearest_token: None,
+                    fix_hint: Some(
+                        "Verify no inline style or JavaScript font-family use exists before removing the font face."
+                            .to_string(),
+                    ),
+                    actions: candidate.actions.clone(),
+                });
+            }
+            for candidate in &css.unused_at_rules {
+                if suppressed(&candidate.path, 1, IssueKind::CssDeadSurface) {
+                    continue;
+                }
+                findings.push(fallow_output::StylingFinding {
+                    code: "css-dead-surface".to_string(),
+                    sub_kind: match candidate.kind {
+                        fallow_output::UnusedAtRuleKind::PropertyRegistration => {
+                            "unused-property-registration"
+                        }
+                        fallow_output::UnusedAtRuleKind::Layer => "unused-layer",
+                    }
+                    .to_string(),
+                    path: candidate.path.clone(),
+                    line: 1,
+                    value: candidate.name.clone(),
+                    effective_severity: styling_finding_severity(config.rules.css_dead_surface),
+                    blast_radius: None,
+                    confidence: Some(fallow_output::StylingFindingConfidence::Low),
+                    agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+                    nearest_token: None,
+                    fix_hint: Some(
+                        "Verify no dynamic stylesheet consumer exists before removing the at-rule."
+                            .to_string(),
+                    ),
+                    actions: candidate.actions.clone(),
+                });
+            }
+        }
+    }
+
+    if include_cross_file_reachability && config.rules.css_broken_reference != Severity::Off {
+        for candidate in &css.unresolved_class_references {
+            if suppressed(
+                &candidate.path,
+                candidate.line,
+                IssueKind::CssBrokenReference,
+            ) {
+                continue;
+            }
+            findings.push(fallow_output::StylingFinding {
+                code: "css-broken-reference".to_string(),
+                sub_kind: "unresolved-class-reference".to_string(),
+                path: candidate.path.clone(),
+                line: candidate.line,
+                value: format!("{} -> {}", candidate.class, candidate.suggestion),
+                effective_severity: styling_finding_severity(config.rules.css_broken_reference),
+                blast_radius: None,
+                confidence: Some(fallow_output::StylingFindingConfidence::Low),
+                agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+                nearest_token: None,
+                fix_hint: Some(format!(
+                    "Verify the class is not defined externally, then replace {} with {}.",
+                    candidate.class, candidate.suggestion
+                )),
+                actions: candidate.actions.clone(),
+            });
+        }
+        for candidate in &css.undefined_keyframes {
+            if suppressed(&candidate.path, 1, IssueKind::CssBrokenReference) {
+                continue;
+            }
+            findings.push(fallow_output::StylingFinding {
+                code: "css-broken-reference".to_string(),
+                sub_kind: "undefined-keyframes".to_string(),
+                path: candidate.path.clone(),
+                line: 1,
+                value: candidate.name.clone(),
+                effective_severity: styling_finding_severity(config.rules.css_broken_reference),
+                blast_radius: None,
+                confidence: Some(fallow_output::StylingFindingConfidence::Low),
+                agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+                nearest_token: None,
+                fix_hint: Some(
+                    "Verify the keyframes are not defined externally before fixing the animation reference."
+                        .to_string(),
+                ),
+                actions: candidate.actions.clone(),
+            });
+        }
+    }
+
     findings
+}
+
+fn styling_finding_severity(
+    severity: fallow_config::Severity,
+) -> fallow_output::StylingFindingSeverity {
+    match severity {
+        fallow_config::Severity::Error => fallow_output::StylingFindingSeverity::Error,
+        fallow_config::Severity::Warn | fallow_config::Severity::Off => {
+            fallow_output::StylingFindingSeverity::Warn
+        }
+    }
+}
+
+fn selector_complexity_finding(
+    rule: &fallow_types::extract::CssRuleMetric,
+) -> (&'static str, String, &'static str) {
+    if rule.specificity_a > 0 {
+        return (
+            "high-specificity",
+            format!(
+                "specificity {}-{}-{}",
+                rule.specificity_a, rule.specificity_b, rule.specificity_c
+            ),
+            "it uses an id selector",
+        );
+    }
+    if rule.nesting_depth >= 3 {
+        return (
+            "deep-nesting",
+            format!("nesting depth {}", rule.nesting_depth),
+            "it is deeply nested",
+        );
+    }
+    if rule.important_count > 0 {
+        return (
+            "important-density",
+            format!(
+                "{} !important {} across {} {}",
+                rule.important_count,
+                if rule.important_count == 1 {
+                    "declaration"
+                } else {
+                    "declarations"
+                },
+                rule.declaration_count,
+                if rule.declaration_count == 1 {
+                    "declaration"
+                } else {
+                    "declarations"
+                }
+            ),
+            "it relies on !important",
+        );
+    }
+    (
+        "complex-selector",
+        format!("selector complexity {}", rule.complexity),
+        "the selector is structurally complex",
+    )
 }
 
 fn build_health_result<R>(input: HealthResultInput<R>) -> HealthAnalysisResult<R> {

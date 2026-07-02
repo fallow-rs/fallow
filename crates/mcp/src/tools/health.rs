@@ -338,6 +338,7 @@ fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions
             .map(ownership_email_mode_from_param),
         targets: params.targets.unwrap_or(false),
         css: params.css.unwrap_or(false),
+        css_deep: false,
         effort: target_effort_from_param(params.effort.as_deref())?,
         score: params.score.unwrap_or(false),
         since: non_empty_string(params.since.as_deref()),

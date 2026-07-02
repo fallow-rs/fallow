@@ -902,6 +902,46 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         docs_path: "explanations/health#refactoring-targets",
     },
     RuleDef {
+        id: "fallow/css-token-drift",
+        category: "Health",
+        name: "CSS Token Drift",
+        short: "CSS or CSS-in-JS hardcoded styling value bypasses the design token system",
+        full: "A styling value appears to bypass the project's design token system, for example a Tailwind arbitrary value in markup. The finding is advisory by default and does not affect the audit verdict unless rules.css-token-drift is set to error. Verify the value and replace it with an existing scale token when appropriate.",
+        docs_path: "explanations/health#css-token-drift",
+    },
+    RuleDef {
+        id: "fallow/css-duplicate-block",
+        category: "Health",
+        name: "CSS Duplicate Block",
+        short: "CSS or CSS-in-JS declaration block is duplicated across rules",
+        full: "A style rule declaration block is repeated across selectors, suggesting copy-pasted styling that can often be consolidated. The finding is advisory by default and does not affect the audit verdict unless rules.css-duplicate-block is set to error.",
+        docs_path: "explanations/health#css-duplicate-block",
+    },
+    RuleDef {
+        id: "fallow/css-selector-complexity",
+        category: "Health",
+        name: "CSS Selector Complexity",
+        short: "CSS selector, nesting, or important usage is structurally complex",
+        full: "A CSS or CSS-in-JS rule crosses the structural floor for selector specificity, selector complexity, nesting depth, or important usage. The finding is advisory by default and does not affect the audit verdict unless rules.css-selector-complexity is set to error.",
+        docs_path: "explanations/health#css-selector-complexity",
+    },
+    RuleDef {
+        id: "fallow/css-dead-surface",
+        category: "Health",
+        name: "CSS Dead Surface",
+        short: "CSS or CSS-in-JS surface appears unused",
+        full: "A styling surface appears unused in the analyzed project, such as a scoped SFC class with no component-local use. The finding is advisory by default and does not affect the audit verdict unless rules.css-dead-surface is set to error. Verify dynamic consumers before deleting.",
+        docs_path: "explanations/health#css-dead-surface",
+    },
+    RuleDef {
+        id: "fallow/css-broken-reference",
+        category: "Health",
+        name: "CSS Broken Reference",
+        short: "CSS or CSS-in-JS reference resolves to no stylesheet definition",
+        full: "A styling reference appears unresolved, such as a class token or keyframes name that has no stylesheet definition in the analyzed project. The finding is advisory by default and does not affect the audit verdict unless rules.css-broken-reference is set to error. Verify external or CSS-in-JS definitions before fixing.",
+        docs_path: "explanations/health#css-broken-reference",
+    },
+    RuleDef {
         id: "fallow/untested-file",
         category: "Health",
         name: "Untested File",
@@ -1867,7 +1907,7 @@ mod tests {
 
     #[test]
     fn health_rules_count() {
-        assert_eq!(HEALTH_RULES.len(), 16);
+        assert_eq!(HEALTH_RULES.len(), 21);
     }
 
     #[test]

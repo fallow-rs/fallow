@@ -2230,9 +2230,28 @@ pub fn health_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashS
 pub fn health_finding_key(finding: &fallow_output::ComplexityViolation, root: &Path) -> String {
     format!(
         "complexity:{}:{}:{:?}",
-        relative_key_path(&finding.path, root),
+        relative_key_path(Path::new(&finding.path), root),
         finding.name,
         finding.exceeded
+    )
+}
+
+pub fn styling_keys(report: &fallow_output::HealthReport, root: &Path) -> FxHashSet<String> {
+    report
+        .styling_findings
+        .iter()
+        .map(|finding| styling_finding_key(finding, root))
+        .collect()
+}
+
+pub fn styling_finding_key(finding: &fallow_output::StylingFinding, root: &Path) -> String {
+    format!(
+        "styling:{}:{}:{}:{}:{}",
+        finding.code,
+        finding.sub_kind,
+        relative_key_path(Path::new(&finding.path), root),
+        finding.line,
+        finding.value
     )
 }
 

@@ -866,6 +866,11 @@ fn sarif_mixed_severity_snapshot() {
         prop_drilling: fallow_config::Severity::Off,
         thin_wrapper: fallow_config::Severity::Off,
         duplicate_prop_shape: fallow_config::Severity::Off,
+        css_token_drift: fallow_config::Severity::Off,
+        css_duplicate_block: fallow_config::Severity::Off,
+        css_selector_complexity: fallow_config::Severity::Off,
+        css_dead_surface: fallow_config::Severity::Off,
+        css_broken_reference: fallow_config::Severity::Off,
         unresolved_imports: fallow_config::Severity::Error,
         unlisted_dependencies: fallow_config::Severity::Error,
         duplicate_exports: fallow_config::Severity::Warn,
@@ -1766,6 +1771,11 @@ fn codeclimate_mixed_severity_snapshot() {
         prop_drilling: fallow_config::Severity::Off,
         thin_wrapper: fallow_config::Severity::Off,
         duplicate_prop_shape: fallow_config::Severity::Off,
+        css_token_drift: fallow_config::Severity::Off,
+        css_duplicate_block: fallow_config::Severity::Off,
+        css_selector_complexity: fallow_config::Severity::Off,
+        css_dead_surface: fallow_config::Severity::Off,
+        css_broken_reference: fallow_config::Severity::Off,
         unresolved_imports: fallow_config::Severity::Error,
         unlisted_dependencies: fallow_config::Severity::Error,
         duplicate_exports: fallow_config::Severity::Warn,
@@ -2607,6 +2617,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         framework_health: None,
         css_analytics: None,
         styling_health: None,
+        styling_findings: vec![],
         render_fan_in_top: rustc_hash::FxHashMap::default(),
     }
 }
@@ -2879,6 +2890,7 @@ fn empty_health_report() -> HealthReport {
         framework_health: None,
         css_analytics: None,
         styling_health: None,
+        styling_findings: vec![],
         render_fan_in_top: rustc_hash::FxHashMap::default(),
     }
 }

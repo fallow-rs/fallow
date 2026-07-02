@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "description": "Baseline and allowlist for scripts/styling-corpus-smoke.mjs. Update counts deliberately after reviewing public-corpus output.",
+  "counts": {},
+  "allowlist": []
+}

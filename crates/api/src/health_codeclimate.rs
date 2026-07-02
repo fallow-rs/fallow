@@ -6,8 +6,8 @@ use fallow_output::{
     CodeClimateIssue, CodeClimateIssueInput, CodeClimateSeverity, ComplexityViolation,
     CoverageIntelligenceFinding, CoverageIntelligenceRecommendation, CoverageIntelligenceVerdict,
     ExceededThreshold, FindingSeverity, HealthReport, RuntimeCoverageFinding,
-    RuntimeCoverageVerdict, UntestedExportFinding, UntestedFileFinding, build_codeclimate_issue,
-    codeclimate_fingerprint_hash, normalize_uri,
+    RuntimeCoverageVerdict, StylingFinding, StylingFindingSeverity, UntestedExportFinding,
+    UntestedFileFinding, build_codeclimate_issue, codeclimate_fingerprint_hash, normalize_uri,
 };
 
 struct HealthCodeClimateContext<'a> {
@@ -28,6 +28,29 @@ impl HealthCodeClimateContext<'_> {
             description: &self.complexity_description(finding),
             severity: health_finding_severity(finding.severity),
             category: "Complexity",
+            path: &path,
+            begin_line: Some(finding.line),
+            fingerprint: &fp,
+        })
+    }
+
+    fn styling_issue(&self, finding: &StylingFinding) -> CodeClimateIssue {
+        let path = codeclimate_path(Path::new(&finding.path), self.root);
+        let check_name = format!("fallow/{}", finding.code);
+        let description = format!("[{}] {}: {}", finding.code, finding.sub_kind, finding.value);
+        let line_str = finding.line.to_string();
+        let fp = codeclimate_fingerprint_hash(&[
+            &check_name,
+            &path,
+            &line_str,
+            &finding.sub_kind,
+            &finding.value,
+        ]);
+        build_codeclimate_issue(CodeClimateIssueInput {
+            check_name: &check_name,
+            description: &description,
+            severity: styling_finding_severity(finding.effective_severity),
+            category: "Style",
             path: &path,
             begin_line: Some(finding.line),
             fingerprint: &fp,
@@ -187,6 +210,9 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> Vec<CodeC
     for finding in &report.findings {
         issues.push(ctx.complexity_issue(finding));
     }
+    for finding in &report.styling_findings {
+        issues.push(ctx.styling_issue(finding));
+    }
 
     if let Some(ref production) = report.runtime_coverage {
         for finding in &production.findings {
@@ -264,6 +290,13 @@ const fn health_finding_severity(severity: FindingSeverity) -> CodeClimateSeveri
     }
 }
 
+const fn styling_finding_severity(severity: StylingFindingSeverity) -> CodeClimateSeverity {
+    match severity {
+        StylingFindingSeverity::Error => CodeClimateSeverity::Major,
+        StylingFindingSeverity::Warn => CodeClimateSeverity::Minor,
+    }
+}
+
 const fn runtime_coverage_check_name(verdict: RuntimeCoverageVerdict) -> &'static str {
     match verdict {
         RuntimeCoverageVerdict::SafeToDelete => "fallow/runtime-safe-to-delete",
@@ -302,6 +335,7 @@ mod tests {
 
     use fallow_output::{
         ComplexityViolation, ExceededThreshold, FindingSeverity, HealthReport, HealthSummary,
+        StylingFinding, StylingFindingSeverity,
     };
 
     use super::*;
@@ -353,6 +387,36 @@ mod tests {
         assert_eq!(issue.check_name, "fallow/high-complexity");
         assert_eq!(issue.location.path, "app/%5Bid%5D/page.tsx");
         assert_eq!(issue.location.lines.begin, 7);
+        assert_eq!(issue.severity, CodeClimateSeverity::Major);
+    }
+
+    #[test]
+    fn health_codeclimate_includes_styling_findings() {
+        let report = HealthReport {
+            styling_findings: vec![StylingFinding {
+                code: "css-selector-complexity".to_string(),
+                sub_kind: "high-specificity".to_string(),
+                path: "src/styles.css".to_string(),
+                line: 4,
+                value: "#app .card .title".to_string(),
+                effective_severity: StylingFindingSeverity::Error,
+                blast_radius: None,
+                confidence: None,
+                agent_disposition: None,
+                nearest_token: None,
+                fix_hint: None,
+                actions: Vec::new(),
+            }],
+            ..HealthReport::default()
+        };
+
+        let issues = build_health_codeclimate(&report, Path::new("/root"));
+
+        assert_eq!(issues.len(), 1);
+        let issue = &issues[0];
+        assert_eq!(issue.check_name, "fallow/css-selector-complexity");
+        assert_eq!(issue.location.path, "src/styles.css");
+        assert_eq!(issue.location.lines.begin, 4);
         assert_eq!(issue.severity, CodeClimateSeverity::Major);
     }
 }

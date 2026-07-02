@@ -459,6 +459,12 @@ pub struct AuditConfig {
     pub gate: AuditGate,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub css: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub css_deep: Option<bool>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_code_baseline: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -475,6 +481,8 @@ impl AuditConfig {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.gate.is_default()
+            && self.css.is_none()
+            && self.css_deep.is_none()
             && self.dead_code_baseline.is_none()
             && self.health_baseline.is_none()
             && self.dupes_baseline.is_none()

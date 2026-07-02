@@ -3401,6 +3401,31 @@ fn health_css_unreferenced_class_credits_dynamic_string_and_dependency() {
 }
 
 #[test]
+fn health_css_unreferenced_class_credits_dynamic_status_literals() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"dynamic-status"}"#);
+    write_file(
+        &root.join("src/app.css"),
+        ".realtime-refresh.stale{}\n.realtime-refresh.unavailable{}\n.helper-only{}\n.really-dead-class{}\n",
+    );
+    write_file(
+        &root.join("src/status.ts"),
+        "export type Status = 'connected' | 'stale' | 'unavailable';\nexport const helper = 'helper-only';\nexport const label = (status: Status) => status === 'stale' ? 'Stale' : 'Ready';\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "import type { Status } from './status';\nexport const A = ({ status }: { status: Status }) => <div className={`live-refresh realtime-refresh ${status}`}>x</div>;\n",
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_css_classes", "class"),
+        vec!["helper-only".to_string(), "really-dead-class".to_string()],
+        "status literal classes interpolated through className must be credited"
+    );
+}
+
+#[test]
 fn health_css_font_face_credited_by_custom_property_value() {
     let dir = tempdir().unwrap();
     let root = dir.path();
@@ -3449,6 +3474,63 @@ fn health_css_global_override_class_not_unreferenced_candidate() {
         css_list_names(root, "unreferenced_css_classes", "class"),
         vec!["dead-local".to_string()],
         "a :global(...) override is not an unreferenced-class candidate"
+    );
+}
+
+#[test]
+fn health_css_module_camel_case_property_reference_credits_class() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"mod-camel","version":"1.0.0"}"#,
+    );
+    write_file(
+        &root.join("src/Card.module.css"),
+        ".dialog-panel { padding: 1rem; }\n.dead-local { display: none; }\n",
+    );
+    write_file(
+        &root.join("src/Card.tsx"),
+        "import styles from './Card.module.css';\nexport const Card = () => <section className={styles.dialogPanel} />;\n",
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_css_classes", "class"),
+        vec!["dead-local".to_string()],
+        "CSS Modules camelCase property references must credit dashed classes"
+    );
+}
+
+#[test]
+fn health_css_unreferenced_classes_include_sass_and_less_when_not_dominant() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"sass-less-classes","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/base.css"), ".base-used { color: black; }\n");
+    write_file(
+        &root.join("src/extra.css"),
+        ".extra-used { color: gray; }\n",
+    );
+    write_file(
+        &root.join("src/theme.less"),
+        ".used-less { color: red; }\n.dead-less { color: blue; }\n",
+    );
+    write_file(
+        &root.join("src/theme.sass"),
+        ".used-sass\n  color: red\n.dead-sass\n  color: blue\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "export const App = () => <div className=\"base-used extra-used used-less used-sass\" />;\n",
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_css_classes", "class"),
+        vec!["dead-less".to_string(), "dead-sass".to_string()],
+        "Sass and Less stylesheet classes should join the located unreferenced-class pass"
     );
 }
 
@@ -4452,6 +4534,62 @@ fn health_css_flags_tailwind_arbitrary_values() {
             && human.stdout.contains("w-[13px] (2x)"),
         "human renders the Tailwind arbitrary-value section: stdout={:?}",
         human.stdout
+    );
+}
+
+#[test]
+fn health_css_emits_selector_and_dead_surface_styling_findings() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        root.join("package.json").as_path(),
+        r#"{"name":"css-findings"}"#,
+    );
+    write_file(root.join("src/index.ts").as_path(), "export const x = 1;\n");
+    write_file(
+        root.join("src/styles.css").as_path(),
+        "#app .card .title { color: red; }\n",
+    );
+    write_file(
+        root.join("src/Card.vue").as_path(),
+        "<template><div class=\"used\">x</div></template>\n\
+         <style scoped>\n\
+         .used { color: green; }\n\
+         .dead { color: red; }\n\
+         </style>\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let findings = json["styling_findings"]
+        .as_array()
+        .expect("styling findings array");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-selector-complexity"
+                && finding["sub_kind"] == "high-specificity"
+                && finding["path"] == "src/styles.css"
+        }),
+        "selector-complexity finding present: {findings:#?}"
+    );
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-dead-surface"
+                && finding["sub_kind"] == "scoped-unused-class"
+                && finding["path"] == "src/Card.vue"
+        }),
+        "dead-surface finding present: {findings:#?}"
     );
 }
 

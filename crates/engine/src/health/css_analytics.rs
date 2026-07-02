@@ -17,6 +17,7 @@ pub(super) struct HealthScanCtx<'a> {
     pub(super) config: &'a ResolvedConfig,
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    pub(super) output_changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
 }
 
@@ -62,8 +63,8 @@ struct CssTokenSets {
     referenced_font_families: rustc_hash::FxHashSet<String>,
     font_face_definers: rustc_hash::FxHashMap<String, String>,
     /// Tailwind v4 `@theme` tokens (custom-property name without `--`) -> first
-    /// `(path, line)`, for the unused-theme-token candidate.
-    theme_token_definers: rustc_hash::FxHashMap<String, (String, u32)>,
+    /// definition, for token reachability and drift candidates.
+    theme_token_definers: rustc_hash::FxHashMap<String, ThemeTokenDefinition>,
     /// Utility tokens referenced in `@apply` bodies across all CSS, so a theme
     /// token whose utility is applied only in plain CSS is credited as used.
     apply_tokens: rustc_hash::FxHashSet<String>,
@@ -83,6 +84,13 @@ struct CssTokenSets {
     /// invisibly to the markup / CSS / `var()` scan, so the unused-theme-token
     /// candidate hard-abstains on plugin projects (the DI blind spot).
     any_plugin_directive: bool,
+}
+
+#[derive(Clone)]
+struct ThemeTokenDefinition {
+    path: String,
+    line: u32,
+    value: String,
 }
 
 impl CssTokenSets {
@@ -206,7 +214,11 @@ impl CssTokenSets {
         for token in scan.tokens {
             self.theme_token_definers
                 .entry(token.name)
-                .or_insert_with(|| (rel.to_owned(), token.line));
+                .or_insert_with(|| ThemeTokenDefinition {
+                    path: rel.to_owned(),
+                    line: token.line,
+                    value: token.value,
+                });
         }
         for (name, line) in scan.theme_var_reads {
             self.theme_var_reads.insert(name.clone());
@@ -526,6 +538,7 @@ fn read_markup_scan_source(
         config,
         ignore_set,
         changed_files,
+        output_changed_files: _,
         ws_roots,
     } = ctx;
 
@@ -1173,12 +1186,13 @@ fn extract_dotted_class_names(selector: &str, out: &mut rustc_hash::FxHashSet<St
     }
 }
 
-/// Per-stylesheet located class definitions from STANDALONE `.css`/`.scss` files
-/// (not SFC `<style>` blocks, which are component-scoped and covered by the
-/// scoped-unused check). Returns `(rel_path, [(class, 1-based line)])`, each
-/// class deduped to its first definition. The defined surface for the
-/// unreferenced-global-class candidate. Classes wrapped in `:global(...)` are
-/// dropped: they target externally-applied DOM and are never authored in markup.
+/// Per-stylesheet located class definitions from STANDALONE `.css`/`.scss`/
+/// `.sass`/`.less` files (not SFC `<style>` blocks, which are component-scoped
+/// and covered by the scoped-unused check). Returns `(rel_path, [(class, 1-based
+/// line)])`, each class deduped to its first definition. The defined surface for
+/// the unreferenced-global-class candidate. Classes wrapped in `:global(...)`
+/// are dropped: they target externally-applied DOM and are never authored in
+/// markup.
 fn collect_defined_css_classes_located(
     files: &[fallow_types::discover::DiscoveredFile],
     config: &ResolvedConfig,
@@ -1189,8 +1203,8 @@ fn collect_defined_css_classes_located(
     for file in files {
         let path = &file.path;
         let extension = path.extension().and_then(|ext| ext.to_str());
-        let is_scss = extension == Some("scss");
-        if extension != Some("css") && !is_scss {
+        let is_preprocessor = matches!(extension, Some("scss" | "sass" | "less"));
+        if extension != Some("css") && !is_preprocessor {
             continue;
         }
         let relative = path.strip_prefix(&config.root).unwrap_or(path);
@@ -1204,7 +1218,7 @@ fn collect_defined_css_classes_located(
         collect_global_scoped_classes(&source, &mut global_scoped);
         let mut seen: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         let mut classes: Vec<(String, u32)> = Vec::new();
-        for export in crate::css::extract_css_module_exports(&source, is_scss) {
+        for export in crate::css::extract_css_module_exports(&source, is_preprocessor) {
             let ExportName::Named(name) = export.name else {
                 continue;
             };
@@ -1253,6 +1267,7 @@ fn scan_unreferenced_css_classes(
         config,
         ignore_set,
         changed_files,
+        output_changed_files: _,
         ws_roots,
     } = ctx;
 
@@ -1299,13 +1314,26 @@ fn scan_unreferenced_css_classes(
 struct CssReferenceSurface {
     static_tokens: rustc_hash::FxHashSet<String>,
     dynamic_corpus: String,
+    source_corpus: String,
+    dynamic_interpolants: rustc_hash::FxHashSet<String>,
 }
 
 impl CssReferenceSurface {
     fn references(&self, class: &str) -> bool {
         self.static_tokens.contains(class)
             || self.dynamic_corpus.contains(class)
+            || self.css_module_property_referenced(class)
             || self.dynamic_prefix_referenced(class)
+            || self.dynamic_literal_referenced(class)
+    }
+
+    fn css_module_property_referenced(&self, class: &str) -> bool {
+        let Some(alias) = css_module_property_alias(class) else {
+            return false;
+        };
+        self.source_corpus.contains(&format!(".{alias}"))
+            || self.source_corpus.contains(&format!("['{alias}']"))
+            || self.source_corpus.contains(&format!("[\"{alias}\"]"))
     }
 
     fn dynamic_prefix_referenced(&self, class: &str) -> bool {
@@ -1318,6 +1346,121 @@ impl CssReferenceSurface {
             .iter()
             .any(|marker| self.dynamic_corpus.contains(&format!("{head}{marker}")))
     }
+
+    fn dynamic_literal_referenced(&self, class: &str) -> bool {
+        if !is_plain_dynamic_class_value(class) || self.dynamic_interpolants.is_empty() {
+            return false;
+        }
+        class_literal_occurrences(&self.source_corpus, class).any(|offset| {
+            let start = offset.saturating_sub(120);
+            let end = self.source_corpus.len().min(offset + class.len() + 120);
+            let Some(window) = self.source_corpus.get(start..end) else {
+                return false;
+            };
+            let window = window.to_ascii_lowercase();
+            self.dynamic_interpolants
+                .iter()
+                .any(|name| window.contains(&name.to_ascii_lowercase()))
+        })
+    }
+}
+
+fn css_module_property_alias(class: &str) -> Option<String> {
+    if !class.contains('-') {
+        return None;
+    }
+    let mut alias = String::with_capacity(class.len());
+    let mut uppercase_next = false;
+    for c in class.chars() {
+        if c == '-' {
+            uppercase_next = true;
+            continue;
+        }
+        if uppercase_next {
+            alias.extend(c.to_uppercase());
+            uppercase_next = false;
+        } else {
+            alias.push(c);
+        }
+    }
+    (alias != class && is_valid_js_property_ident(&alias)).then_some(alias)
+}
+
+fn is_valid_js_property_ident(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first == '_' || first == '$' || first.is_ascii_alphabetic())
+        && chars.all(|c| c == '_' || c == '$' || c.is_ascii_alphanumeric())
+}
+
+fn is_plain_dynamic_class_value(class: &str) -> bool {
+    class.len() >= MIN_UNREF_CLASS_LEN
+        && class
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+fn class_literal_occurrences<'a>(
+    source: &'a str,
+    class: &'a str,
+) -> impl Iterator<Item = usize> + 'a {
+    source.match_indices(class).filter_map(move |(offset, _)| {
+        let before = source.as_bytes().get(offset.wrapping_sub(1)).copied();
+        let after = source.as_bytes().get(offset + class.len()).copied();
+        match (before, after) {
+            (Some(b'\''), Some(b'\'' | b',' | b';' | b')' | b']' | b'}'))
+            | (Some(b'"'), Some(b'"' | b',' | b';' | b')' | b']' | b'}'))
+            | (Some(b'`'), Some(b'`' | b',' | b';' | b')' | b']' | b'}')) => Some(offset),
+            _ => None,
+        }
+    })
+}
+
+fn collect_dynamic_class_interpolants(source: &str, out: &mut rustc_hash::FxHashSet<String>) {
+    let bytes = source.as_bytes();
+    let mut i = 0usize;
+    while let Some(rel) = source.get(i..).and_then(|tail| tail.find("${")) {
+        let start = i + rel + 2;
+        let mut name_start = start;
+        while bytes
+            .get(name_start)
+            .is_some_and(|b| b.is_ascii_whitespace())
+        {
+            name_start += 1;
+        }
+        let Some(first) = bytes.get(name_start).copied() else {
+            break;
+        };
+        if !is_js_identifier_start(first) {
+            i = start;
+            continue;
+        }
+        let mut name_end = name_start + 1;
+        while bytes
+            .get(name_end)
+            .is_some_and(|b| is_js_identifier_continue(*b))
+        {
+            name_end += 1;
+        }
+        let mut cursor = name_end;
+        while bytes.get(cursor).is_some_and(|b| b.is_ascii_whitespace()) {
+            cursor += 1;
+        }
+        if bytes.get(cursor) == Some(&b'}') {
+            out.insert(source[name_start..name_end].to_owned());
+        }
+        i = cursor.saturating_add(1);
+    }
+}
+
+fn is_js_identifier_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_' || byte == b'$'
+}
+
+fn is_js_identifier_continue(byte: u8) -> bool {
+    is_js_identifier_start(byte) || byte.is_ascii_digit()
 }
 
 fn css_reference_surface(
@@ -1328,6 +1471,8 @@ fn css_reference_surface(
     let mut surface = CssReferenceSurface {
         static_tokens: rustc_hash::FxHashSet::default(),
         dynamic_corpus: String::new(),
+        source_corpus: String::new(),
+        dynamic_interpolants: rustc_hash::FxHashSet::default(),
     };
     for file in files {
         collect_css_reference_surface_file(&mut surface, file, config, ignore_set);
@@ -1345,7 +1490,7 @@ fn collect_css_reference_surface_file(
     let extension = path.extension().and_then(|ext| ext.to_str());
     if !matches!(
         extension,
-        Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
+        Some("js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" | "html" | "astro" | "vue" | "svelte")
     ) {
         return;
     }
@@ -1356,12 +1501,22 @@ fn collect_css_reference_surface_file(
     let Ok(source) = std::fs::read_to_string(path) else {
         return;
     };
+    surface.source_corpus.push_str(&source);
+    surface.source_corpus.push('\n');
+    let is_markup_surface = matches!(
+        extension,
+        Some("jsx" | "tsx" | "html" | "astro" | "vue" | "svelte")
+    );
+    if !is_markup_surface {
+        return;
+    }
     let scan = crate::css::scan_markup_class_tokens(&source);
     for token in scan.static_tokens {
         surface.static_tokens.insert(token.value);
     }
     collect_quoted_class_tokens(&source, &mut surface.static_tokens, true);
     if scan.has_dynamic {
+        collect_dynamic_class_interpolants(&source, &mut surface.dynamic_interpolants);
         surface.dynamic_corpus.push_str(&source);
         surface.dynamic_corpus.push('\n');
     }
@@ -1511,6 +1666,7 @@ struct UnusedThemeTokenScanInput<'a> {
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    output_changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
     summary: &'a mut fallow_output::CssAnalyticsSummary,
 }
@@ -1521,6 +1677,7 @@ struct ThemeTokenCandidate {
     token: String,
     namespace: String,
     name: String,
+    value: String,
     path: String,
     line: u32,
 }
@@ -1532,8 +1689,8 @@ fn classify_theme_token_candidates(
 ) -> Vec<ThemeTokenCandidate> {
     let published = published_css_paths(input.config);
     let mut candidates: Vec<ThemeTokenCandidate> = Vec::new();
-    for (raw, (path, line)) in &input.tokens.theme_token_definers {
-        if published.contains(path) {
+    for (raw, definition) in &input.tokens.theme_token_definers {
+        if published.contains(&definition.path) {
             continue;
         }
         let Some(classified) = tailwind_theme::classify(raw) else {
@@ -1546,8 +1703,9 @@ fn classify_theme_token_candidates(
             token: format!("--{raw}"),
             namespace: classified.namespace,
             name: classified.name,
-            path: path.clone(),
-            line: *line,
+            value: definition.value.clone(),
+            path: definition.path.clone(),
+            line: definition.line,
         });
     }
     candidates
@@ -1650,6 +1808,327 @@ fn scan_unused_theme_tokens(
     out
 }
 
+const NEAR_DUPLICATE_COLOR_DISTANCE: f64 = 2.0;
+const NEAR_DUPLICATE_LENGTH_DISTANCE_PX: f64 = 0.5;
+const NEAR_DUPLICATE_DURATION_DISTANCE_MS: f64 = 10.0;
+const NEAR_DUPLICATE_SHADOW_DISTANCE_PX: f64 = 1.0;
+
+#[derive(Clone)]
+struct ComparableThemeTokenCandidate {
+    token: String,
+    namespace: String,
+    name: String,
+    value: String,
+    path: String,
+    line: u32,
+    metric: ThemeTokenMetric,
+}
+
+#[derive(Clone)]
+enum ThemeTokenMetric {
+    Color(OklabColor),
+    LengthPx(f64),
+    DurationMs(f64),
+    ShadowPx(Vec<f64>),
+}
+
+impl ThemeTokenMetric {
+    fn distance(&self, other: &Self) -> Option<f64> {
+        match (self, other) {
+            (Self::Color(left), Self::Color(right)) => Some(oklab_distance(*left, *right)),
+            (Self::LengthPx(left), Self::LengthPx(right))
+            | (Self::DurationMs(left), Self::DurationMs(right)) => Some((left - right).abs()),
+            (Self::ShadowPx(left), Self::ShadowPx(right)) if left.len() == right.len() => Some(
+                left.iter()
+                    .zip(right)
+                    .map(|(l, r)| {
+                        let delta = l - r;
+                        delta * delta
+                    })
+                    .sum::<f64>()
+                    .sqrt(),
+            ),
+            _ => None,
+        }
+    }
+
+    fn threshold(&self) -> f64 {
+        match self {
+            Self::Color(_) => NEAR_DUPLICATE_COLOR_DISTANCE,
+            Self::LengthPx(_) => NEAR_DUPLICATE_LENGTH_DISTANCE_PX,
+            Self::DurationMs(_) => NEAR_DUPLICATE_DURATION_DISTANCE_MS,
+            Self::ShadowPx(_) => NEAR_DUPLICATE_SHADOW_DISTANCE_PX,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct OklabColor {
+    l: f64,
+    a: f64,
+    b: f64,
+}
+
+fn scan_near_duplicate_theme_tokens(
+    input: &mut UnusedThemeTokenScanInput<'_>,
+) -> Vec<fallow_output::NearDuplicateThemeToken> {
+    use fallow_output::{CssCandidateAction, NearDuplicateThemeToken, NearestStylingToken};
+
+    if input.changed_files.is_some() || input.ws_roots.is_some() {
+        return Vec::new();
+    }
+    if input.tokens.theme_token_definers.is_empty() || !project_uses_tailwind(&input.config.root) {
+        return Vec::new();
+    }
+    if project_uses_tailwind_plugin(input.tokens.any_plugin_directive, &input.config.root) {
+        return Vec::new();
+    }
+
+    let mut candidates: Vec<ComparableThemeTokenCandidate> = classify_theme_token_candidates(input)
+        .into_iter()
+        .filter_map(|candidate| {
+            let metric = parse_theme_token_metric(&candidate.namespace, &candidate.value)?;
+            Some(ComparableThemeTokenCandidate {
+                token: candidate.token,
+                namespace: candidate.namespace,
+                name: candidate.name,
+                value: normalize_theme_token_value(&candidate.value),
+                path: candidate.path,
+                line: candidate.line,
+                metric,
+            })
+        })
+        .collect();
+    candidates.sort_by(|a, b| theme_token_sort_key(a).cmp(&theme_token_sort_key(b)));
+    if candidates.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    let changed = input.output_changed_files;
+    for candidate in &candidates {
+        if let Some(changed) = changed
+            && !css_output_path_in_changed_scope(&candidate.path, input.config, changed)
+        {
+            continue;
+        }
+        let nearest = candidates
+            .iter()
+            .filter(|other| other.token != candidate.token)
+            .filter(|other| other.namespace == candidate.namespace)
+            .filter(|other| {
+                changed.is_some() || theme_token_sort_key(other) < theme_token_sort_key(candidate)
+            })
+            .filter(|other| !theme_token_names_are_deliberate_pair(&candidate.name, &other.name))
+            .filter_map(|other| {
+                let distance = candidate.metric.distance(&other.metric)?;
+                if distance > 0.0 && distance <= candidate.metric.threshold() {
+                    Some((other, distance))
+                } else {
+                    None
+                }
+            })
+            .min_by(
+                |(left_candidate, left_distance), (right_candidate, right_distance)| {
+                    left_distance
+                        .partial_cmp(right_distance)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| {
+                            theme_token_sort_key(left_candidate)
+                                .cmp(&theme_token_sort_key(right_candidate))
+                        })
+                },
+            );
+
+        let Some((nearest, distance)) = nearest else {
+            continue;
+        };
+        let distance = round_distance(distance);
+        let nearest_token = NearestStylingToken {
+            name: nearest.token.clone(),
+            value: nearest.value.clone(),
+            path: nearest.path.clone(),
+            line: nearest.line,
+            distance,
+        };
+        out.push(NearDuplicateThemeToken {
+            token: candidate.token.clone(),
+            value: candidate.value.clone(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            actions: vec![CssCandidateAction::replace_near_duplicate_token(
+                &candidate.token,
+                &nearest.token,
+            )],
+            nearest_token,
+        });
+    }
+    out.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.token.cmp(&b.token))
+    });
+    input.summary.near_duplicate_theme_tokens = saturate_len(out.len());
+    out
+}
+
+fn theme_token_sort_key(candidate: &ComparableThemeTokenCandidate) -> (&str, u32, &str) {
+    (&candidate.path, candidate.line, &candidate.token)
+}
+
+fn normalize_theme_token_value(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn parse_theme_token_metric(namespace: &str, value: &str) -> Option<ThemeTokenMetric> {
+    match namespace {
+        "color" => fallow_extract::parse_css_color_rgb(value)
+            .map(rgb_to_oklab)
+            .map(ThemeTokenMetric::Color),
+        "spacing" | "radius" => parse_length_px(value).map(ThemeTokenMetric::LengthPx),
+        "duration" => parse_duration_ms(value).map(ThemeTokenMetric::DurationMs),
+        "shadow" => parse_shadow_lengths_px(value).map(ThemeTokenMetric::ShadowPx),
+        _ => None,
+    }
+}
+
+fn parse_length_px(value: &str) -> Option<f64> {
+    let (number, unit) = parse_number_with_unit(value.trim())?;
+    match unit {
+        "" if number == 0.0 => Some(0.0),
+        "px" => Some(number),
+        "rem" | "em" => Some(number * 16.0),
+        _ => None,
+    }
+}
+
+fn parse_duration_ms(value: &str) -> Option<f64> {
+    let (number, unit) = parse_number_with_unit(value.trim())?;
+    match unit {
+        "ms" => Some(number),
+        "s" => Some(number * 1000.0),
+        _ => None,
+    }
+}
+
+fn parse_shadow_lengths_px(value: &str) -> Option<Vec<f64>> {
+    if value.contains(',') {
+        return None;
+    }
+    let mut lengths = Vec::new();
+    for part in value.split_whitespace() {
+        let Some(length) = parse_length_px(part) else {
+            break;
+        };
+        lengths.push(length);
+    }
+    if (2..=4).contains(&lengths.len()) {
+        Some(lengths)
+    } else {
+        None
+    }
+}
+
+fn parse_number_with_unit(value: &str) -> Option<(f64, &str)> {
+    let split = value
+        .char_indices()
+        .find(|(idx, c)| *idx > 0 && !matches!(c, '0'..='9' | '.' | '+' | '-'))
+        .map_or(value.len(), |(idx, _)| idx);
+    let number = value[..split].parse::<f64>().ok()?;
+    let unit = &value[split..];
+    if number.is_finite() {
+        Some((number, unit))
+    } else {
+        None
+    }
+}
+
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "OKLab conversion mirrors the reference matrix; mul_add obscures the coefficients."
+)]
+fn rgb_to_oklab((red, green, blue): (f64, f64, f64)) -> OklabColor {
+    let linear_red = srgb_to_linear(red / 255.0);
+    let linear_green = srgb_to_linear(green / 255.0);
+    let linear_blue = srgb_to_linear(blue / 255.0);
+    let long_cone = 0.412_221_470_8 * linear_red
+        + 0.536_332_536_3 * linear_green
+        + 0.051_445_992_9 * linear_blue;
+    let medium_cone = 0.211_903_498_2 * linear_red
+        + 0.680_699_545_1 * linear_green
+        + 0.107_396_956_6 * linear_blue;
+    let short_cone = 0.088_302_461_9 * linear_red
+        + 0.281_718_837_6 * linear_green
+        + 0.629_978_700_5 * linear_blue;
+    let long_cone = long_cone.cbrt();
+    let medium_cone = medium_cone.cbrt();
+    let short_cone = short_cone.cbrt();
+    OklabColor {
+        l: 0.210_454_255_3 * long_cone + 0.793_617_785_0 * medium_cone
+            - 0.004_072_046_8 * short_cone,
+        a: 1.977_998_495_1 * long_cone - 2.428_592_205_0 * medium_cone
+            + 0.450_593_709_9 * short_cone,
+        b: 0.025_904_037_1 * long_cone + 0.782_771_766_2 * medium_cone
+            - 0.808_675_766_0 * short_cone,
+    }
+}
+
+fn srgb_to_linear(channel: f64) -> f64 {
+    if channel <= 0.04045 {
+        channel / 12.92
+    } else {
+        ((channel + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "Distance formula is clearer in expanded Euclidean form."
+)]
+fn oklab_distance(left: OklabColor, right: OklabColor) -> f64 {
+    let l = left.l - right.l;
+    let a = left.a - right.a;
+    let b = left.b - right.b;
+    ((l * l + a * a + b * b).sqrt()) * 100.0
+}
+
+fn round_distance(distance: f64) -> f64 {
+    (distance * 100.0).round() / 100.0
+}
+
+fn theme_token_names_are_deliberate_pair(left: &str, right: &str) -> bool {
+    if let (Some((left_base, _)), Some((right_base, _))) =
+        (split_numeric_suffix(left), split_numeric_suffix(right))
+        && left_base == right_base
+    {
+        return true;
+    }
+    let state_suffixes = [
+        "-hover",
+        "-active",
+        "-focus",
+        "-disabled",
+        "-pressed",
+        "-selected",
+    ];
+    state_suffixes.iter().any(|suffix| {
+        left.strip_suffix(suffix) == Some(right) || right.strip_suffix(suffix) == Some(left)
+    })
+}
+
+fn split_numeric_suffix(name: &str) -> Option<(&str, &str)> {
+    let split = name
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !c.is_ascii_digit())
+        .map(|(idx, c)| idx + c.len_utf8())?;
+    if split == name.len() {
+        return None;
+    }
+    Some((&name[..split], &name[split..]))
+}
+
 /// Input for the location-aware reverse index of Tailwind v4 `@theme` token
 /// consumers. The index is descriptive only and sets no summary count.
 struct TokenConsumersInput<'a> {
@@ -1705,6 +2184,7 @@ fn build_token_consumers(input: &TokenConsumersInput<'_>) -> Vec<fallow_output::
         config: input.config,
         ignore_set: input.ignore_set,
         changed_files: input.changed_files,
+        output_changed_files: None,
         ws_roots: input.ws_roots,
         summary: &mut summary,
     });
@@ -1788,6 +2268,7 @@ fn build_token_consumers(input: &TokenConsumersInput<'_>) -> Vec<fallow_output::
 struct CssInJsDefiner {
     rel_path: String,
     binding: String,
+    origin: fallow_extract::CssInJsTokenOrigin,
     leaves: Vec<fallow_extract::CssInJsToken>,
 }
 
@@ -1800,14 +2281,19 @@ struct CssInJsDefiners {
     paths: rustc_hash::FxHashSet<std::path::PathBuf>,
 }
 
-/// Whether a specifier names a CSS-in-JS token-DEFINITION library (cut 1: StyleX +
-/// vanilla-extract). `@vanilla-extract/recipes` is excluded: it exports no
-/// token-definition function (`createTheme` family lives in `@vanilla-extract/css`),
-/// so it is not a definer-pass pre-filter source. Panda's `defineTokens` is deferred
-/// (3e), so it is not a definer source here even though `project_uses_css_in_js`
-/// admits Panda projects.
+type CssInJsConsumerKey = (usize, String);
+type CssInJsConsumerHit = (String, u32, fallow_output::ConsumerKind);
+type CssInJsConsumerHits =
+    rustc_hash::FxHashMap<CssInJsConsumerKey, rustc_hash::FxHashSet<CssInJsConsumerHit>>;
+
+/// Whether a specifier names a CSS-in-JS token-DEFINITION library. `@vanilla-extract/recipes`
+/// is excluded: it exports no token-definition function (`createTheme` family lives
+/// in `@vanilla-extract/css`), so it is not a definer-pass pre-filter source.
 fn is_css_in_js_token_lib(specifier: &str) -> bool {
-    matches!(specifier, "@stylexjs/stylex" | "@vanilla-extract/css")
+    matches!(
+        specifier,
+        "@stylexjs/stylex" | "@vanilla-extract/css" | "@pandacss/dev"
+    )
 }
 
 /// A cheap source pre-filter: only re-parse a token-lib-importing file as a
@@ -1818,6 +2304,27 @@ fn source_mentions_token_definer(source: &str) -> bool {
         || source.contains("createThemeContract")
         || source.contains("createGlobalTheme")
         || source.contains("createTheme")
+        || source.contains("defineTokens")
+}
+
+fn source_mentions_theme_definer(source: &str) -> bool {
+    source.contains("theme") || source.contains("Theme")
+}
+
+fn is_theme_provider_source(specifier: &str) -> bool {
+    matches!(specifier, "styled-components" | "@emotion/react")
+}
+
+fn project_imports_theme_provider(modules: &[fallow_types::extract::ModuleInfo]) -> bool {
+    use fallow_types::extract::ImportedName;
+
+    modules.iter().any(|module| {
+        module.imports.iter().any(|import| {
+            !import.is_type_only
+                && is_theme_provider_source(&import.source)
+                && matches!(&import.imported_name, ImportedName::Named(name) if name == "ThemeProvider")
+        })
+    })
 }
 
 /// Whether an import specifier is a relative path (the only shape the light
@@ -1825,6 +2332,12 @@ fn source_mentions_token_definer(source: &str) -> bool {
 /// keeping `consumer_count` a documented lower bound).
 fn is_relative_specifier(specifier: &str) -> bool {
     specifier.starts_with('.')
+}
+
+fn is_panda_generated_specifier(specifier: &str) -> bool {
+    specifier
+        .split(['/', '\\'])
+        .any(|segment| segment == "styled-system")
 }
 
 /// Lexically normalize a path (resolve `.` / `..` without touching the
@@ -1893,25 +2406,26 @@ fn collect_css_in_js_definers(
         rustc_hash::FxHashMap::default();
     let mut definer_paths: rustc_hash::FxHashSet<std::path::PathBuf> =
         rustc_hash::FxHashSet::default();
+    let has_theme_provider = project_imports_theme_provider(modules);
 
     for module in modules {
         let imports_token_lib = module
             .imports
             .iter()
             .any(|i| !i.is_type_only && is_css_in_js_token_lib(&i.source));
-        if !imports_token_lib {
-            continue;
-        }
         let Some(abs) = path_by_id.get(&module.file_id).copied() else {
             continue;
         };
         let Ok(source) = std::fs::read_to_string(abs) else {
             continue;
         };
-        if !source_mentions_token_definer(&source) {
-            continue;
+        let mut defs = Vec::new();
+        if imports_token_lib && source_mentions_token_definer(&source) {
+            defs.extend(fallow_extract::css_in_js_token_defs(&source, abs));
         }
-        let defs = fallow_extract::css_in_js_token_defs(&source, abs);
+        if has_theme_provider && source_mentions_theme_definer(&source) {
+            defs.extend(fallow_extract::css_in_js_theme_token_defs(&source, abs));
+        }
         if defs.is_empty() {
             continue;
         }
@@ -1926,6 +2440,7 @@ fn collect_css_in_js_definers(
             definers.push(CssInJsDefiner {
                 rel_path: rel.clone(),
                 binding: def.binding,
+                origin: def.origin,
                 leaves: def.tokens,
             });
         }
@@ -1945,10 +2460,14 @@ fn collect_css_in_js_consumers(
     path_by_id: &rustc_hash::FxHashMap<fallow_types::discover::FileId, &std::path::Path>,
     config: &ResolvedConfig,
     definers: &CssInJsDefiners,
-) -> rustc_hash::FxHashMap<(usize, String), rustc_hash::FxHashSet<(String, u32)>> {
+) -> CssInJsConsumerHits {
+    use fallow_output::ConsumerKind;
     use fallow_types::extract::ImportedName;
-    let mut hits: rustc_hash::FxHashMap<(usize, String), rustc_hash::FxHashSet<(String, u32)>> =
-        rustc_hash::FxHashMap::default();
+    let mut hits: CssInJsConsumerHits = rustc_hash::FxHashMap::default();
+    let has_theme_definers = definers
+        .entries
+        .iter()
+        .any(|definer| definer.origin == fallow_extract::CssInJsTokenOrigin::Theme);
 
     for module in modules {
         let Some(consumer_abs) = path_by_id.get(&module.file_id).copied() else {
@@ -1975,7 +2494,12 @@ fn collect_css_in_js_consumers(
                 matches.push((idx, import.local_name.as_str()));
             }
         }
-        if matches.is_empty() {
+        let has_panda_token_alias = module.imports.iter().any(|import| {
+            !import.is_type_only
+                && is_panda_generated_specifier(&import.source)
+                && matches!(&import.imported_name, ImportedName::Named(name) if name == "token")
+        });
+        if matches.is_empty() && !has_panda_token_alias && !has_theme_definers {
             continue;
         }
         let Ok(source) = std::fs::read_to_string(consumer_abs) else {
@@ -1993,13 +2517,93 @@ fn collect_css_in_js_consumers(
             for hit in
                 fallow_extract::css_in_js_token_consumers(&source, consumer_abs, alias, &leaf_set)
             {
-                hits.entry((idx, hit.token_path))
-                    .or_default()
-                    .insert((consumer_rel.clone(), hit.line));
+                hits.entry((idx, hit.token_path)).or_default().insert((
+                    consumer_rel.clone(),
+                    hit.line,
+                    ConsumerKind::JsMember,
+                ));
+            }
+        }
+        collect_panda_token_call_consumers(
+            module,
+            consumer_abs,
+            &source,
+            &consumer_rel,
+            definers,
+            &mut hits,
+        );
+        collect_theme_member_consumers(&source, consumer_abs, &consumer_rel, definers, &mut hits);
+    }
+    hits
+}
+
+fn collect_theme_member_consumers(
+    source: &str,
+    consumer_abs: &std::path::Path,
+    consumer_rel: &str,
+    definers: &CssInJsDefiners,
+    hits: &mut CssInJsConsumerHits,
+) {
+    use fallow_output::ConsumerKind;
+
+    for (idx, definer) in definers.entries.iter().enumerate() {
+        if definer.origin != fallow_extract::CssInJsTokenOrigin::Theme {
+            continue;
+        }
+        let leaf_set: rustc_hash::FxHashSet<String> =
+            definer.leaves.iter().map(|t| t.path.clone()).collect();
+        for hit in fallow_extract::css_in_js_theme_consumers(source, consumer_abs, &leaf_set) {
+            hits.entry((idx, hit.token_path)).or_default().insert((
+                consumer_rel.to_owned(),
+                hit.line,
+                ConsumerKind::JsMember,
+            ));
+        }
+    }
+}
+
+fn collect_panda_token_call_consumers(
+    module: &fallow_types::extract::ModuleInfo,
+    consumer_abs: &std::path::Path,
+    source: &str,
+    consumer_rel: &str,
+    definers: &CssInJsDefiners,
+    hits: &mut CssInJsConsumerHits,
+) {
+    use fallow_output::ConsumerKind;
+    use fallow_types::extract::ImportedName;
+
+    let token_aliases: Vec<&str> = module
+        .imports
+        .iter()
+        .filter(|import| {
+            !import.is_type_only
+                && is_panda_generated_specifier(&import.source)
+                && matches!(&import.imported_name, ImportedName::Named(name) if name == "token")
+        })
+        .map(|import| import.local_name.as_str())
+        .collect();
+    if token_aliases.is_empty() {
+        return;
+    }
+    for (idx, definer) in definers.entries.iter().enumerate() {
+        if definer.origin != fallow_extract::CssInJsTokenOrigin::Panda {
+            continue;
+        }
+        let leaf_set: rustc_hash::FxHashSet<String> =
+            definer.leaves.iter().map(|t| t.path.clone()).collect();
+        for alias in &token_aliases {
+            for hit in
+                fallow_extract::panda_token_call_consumers(source, consumer_abs, alias, &leaf_set)
+            {
+                hits.entry((idx, hit.token_path)).or_default().insert((
+                    consumer_rel.to_owned(),
+                    hit.line,
+                    ConsumerKind::JsCall,
+                ));
             }
         }
     }
-    hits
 }
 
 /// Build the CSS-in-JS design-token blast-radius (Phase 3d): for StyleX
@@ -2012,9 +2616,7 @@ fn build_css_in_js_token_consumers(
     modules: &[fallow_types::extract::ModuleInfo],
     config: &ResolvedConfig,
 ) -> Vec<fallow_output::TokenConsumers> {
-    use fallow_output::{
-        ConsumerKind, TOKEN_CONSUMER_SAMPLE_CAP, TokenConsumerLocation, TokenConsumers,
-    };
+    use fallow_output::{TOKEN_CONSUMER_SAMPLE_CAP, TokenConsumerLocation, TokenConsumers};
 
     if !project_uses_css_in_js(&config.root) {
         return Vec::new();
@@ -2035,10 +2637,10 @@ fn build_css_in_js_token_consumers(
                 .get(&(idx, leaf.path.clone()))
                 .map(|set| {
                     set.iter()
-                        .map(|(path, line)| TokenConsumerLocation {
+                        .map(|(path, line, kind)| TokenConsumerLocation {
                             path: path.clone(),
                             line: *line,
-                            kind: ConsumerKind::JsMember,
+                            kind: *kind,
                         })
                         .collect()
                 })
@@ -2076,6 +2678,7 @@ fn consumer_kind_rank(kind: fallow_output::ConsumerKind) -> u8 {
         ConsumerKind::Utility => 2,
         ConsumerKind::Apply => 3,
         ConsumerKind::JsMember => 4,
+        ConsumerKind::JsCall => 5,
     }
 }
 
@@ -2086,6 +2689,7 @@ struct MarkupCssCandidates {
     unresolved_class_references: Vec<fallow_output::UnresolvedClassReference>,
     unreferenced_css_classes: Vec<fallow_output::UnreferencedCssClass>,
     unused_theme_tokens: Vec<fallow_output::UnusedThemeToken>,
+    near_duplicate_theme_tokens: Vec<fallow_output::NearDuplicateThemeToken>,
 }
 
 /// Run the markup / source-scanning CSS candidates (Tailwind arbitrary values,
@@ -2098,6 +2702,8 @@ struct MarkupCssCandidateInput<'a> {
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    output_changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    css_deep: bool,
     ws_roots: Option<&'a [std::path::PathBuf]>,
     summary: &'a mut fallow_output::CssAnalyticsSummary,
 }
@@ -2111,6 +2717,7 @@ fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Markup
                 config: input.config,
                 ignore_set: input.ignore_set,
                 changed_files: input.changed_files,
+                output_changed_files: None,
                 ws_roots: input.ws_roots,
             },
             input.summary,
@@ -2122,6 +2729,7 @@ fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Markup
                 config: input.config,
                 ignore_set: input.ignore_set,
                 changed_files: input.changed_files,
+                output_changed_files: None,
                 ws_roots: input.ws_roots,
             },
             input.summary,
@@ -2133,6 +2741,7 @@ fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Markup
                 config: input.config,
                 ignore_set: input.ignore_set,
                 changed_files: input.changed_files,
+                output_changed_files: None,
                 ws_roots: input.ws_roots,
             },
             input.summary,
@@ -2145,9 +2754,25 @@ fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Markup
             config: input.config,
             ignore_set: input.ignore_set,
             changed_files: input.changed_files,
+            output_changed_files: input.output_changed_files,
             ws_roots: input.ws_roots,
             summary: input.summary,
         }),
+        // Perceptually-close Tailwind v4 color tokens, whole-scope only.
+        near_duplicate_theme_tokens: if input.css_deep {
+            scan_near_duplicate_theme_tokens(&mut UnusedThemeTokenScanInput {
+                tokens: input.tokens,
+                files: input.files,
+                config: input.config,
+                ignore_set: input.ignore_set,
+                changed_files: input.changed_files,
+                output_changed_files: input.output_changed_files,
+                ws_roots: input.ws_roots,
+                summary: input.summary,
+            })
+        } else {
+            Vec::new()
+        },
     }
 }
 
@@ -2194,6 +2819,7 @@ fn css_report_scan_target<'a>(
         config,
         ignore_set,
         changed_files,
+        output_changed_files: _,
         ws_roots,
     } = ctx;
 
@@ -2517,8 +3143,10 @@ pub(super) fn compute_css_analytics_report(
         config,
         ignore_set,
         changed_files,
+        output_changed_files,
         ws_roots,
     } = ctx;
+    let css_deep = output_changed_files.is_some();
 
     let mut walk = walk_css_files(files, ctx);
     let metrics = finalize_css_token_metrics(
@@ -2534,6 +3162,8 @@ pub(super) fn compute_css_analytics_report(
         config,
         ignore_set,
         changed_files,
+        output_changed_files,
+        css_deep,
         ws_roots,
         summary: &mut walk.summary,
     });
@@ -2565,7 +3195,14 @@ pub(super) fn compute_css_analytics_report(
         non_atomic_max_nesting_depth: walk.scoring.non_atomic_max_nesting_depth,
         atomic_declarations: walk.scoring.atomic_declarations,
     };
-    let report = assemble_css_report(walk, metrics, candidates, token_consumers)?;
+    let report = assemble_css_report(
+        walk,
+        metrics,
+        candidates,
+        token_consumers,
+        config,
+        output_changed_files,
+    )?;
     Some(CssAnalyticsComputation {
         report,
         scoring_inputs,
@@ -2576,18 +3213,67 @@ pub(super) fn compute_css_analytics_report(
 /// token metrics, and markup candidates; returns `None` when nothing notable was
 /// found (no analyzed files and every candidate list empty).
 fn assemble_css_report(
-    walk: CssWalkAccum,
-    metrics: CssTokenMetrics,
-    candidates: MarkupCssCandidates,
-    token_consumers: Vec<fallow_output::TokenConsumers>,
+    mut walk: CssWalkAccum,
+    mut metrics: CssTokenMetrics,
+    mut candidates: MarkupCssCandidates,
+    mut token_consumers: Vec<fallow_output::TokenConsumers>,
+    config: &ResolvedConfig,
+    output_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
 ) -> Option<fallow_output::CssAnalyticsReport> {
     use fallow_output::CssAnalyticsReport;
+
+    if let Some(changed) = output_changed_files {
+        let in_scope = |path: &str| css_output_path_in_changed_scope(path, config, changed);
+        walk.file_reports.retain(|file| in_scope(&file.path));
+        walk.scoped_unused.retain(|item| in_scope(&item.path));
+        metrics
+            .unreferenced_keyframes
+            .retain(|item| in_scope(&item.path));
+        metrics
+            .undefined_keyframes
+            .retain(|item| in_scope(&item.path));
+        metrics.duplicate_declaration_blocks.retain_mut(|block| {
+            let has_scoped_occurrence = block.occurrences.iter().any(|item| in_scope(&item.path));
+            if has_scoped_occurrence {
+                block.occurrences.sort_by(|a, b| {
+                    let a_out_of_scope = !in_scope(&a.path);
+                    let b_out_of_scope = !in_scope(&b.path);
+                    a_out_of_scope
+                        .cmp(&b_out_of_scope)
+                        .then_with(|| a.path.cmp(&b.path))
+                        .then_with(|| a.line.cmp(&b.line))
+                });
+            }
+            has_scoped_occurrence
+        });
+        metrics.unused_at_rules.retain(|item| in_scope(&item.path));
+        metrics
+            .unused_font_faces
+            .retain(|item| in_scope(&item.path));
+        candidates
+            .tailwind_arbitrary_values
+            .retain(|item| in_scope(&item.path));
+        candidates
+            .unresolved_class_references
+            .retain(|item| in_scope(&item.path));
+        candidates
+            .unreferenced_css_classes
+            .retain(|item| in_scope(&item.path));
+        candidates
+            .unused_theme_tokens
+            .retain(|item| in_scope(&item.path));
+        candidates
+            .near_duplicate_theme_tokens
+            .retain(|item| in_scope(&item.path));
+        token_consumers.retain(|item| in_scope(&item.definition_path));
+    }
 
     let candidates_empty = candidates.tailwind_arbitrary_values.is_empty()
         && candidates.unresolved_class_references.is_empty()
         && candidates.unreferenced_css_classes.is_empty()
         && metrics.unused_font_faces.is_empty()
         && candidates.unused_theme_tokens.is_empty()
+        && candidates.near_duplicate_theme_tokens.is_empty()
         && token_consumers.is_empty();
     if walk.summary.files_analyzed == 0 && walk.scoped_unused.is_empty() && candidates_empty {
         return None;
@@ -2607,9 +3293,20 @@ fn assemble_css_report(
         unreferenced_css_classes: candidates.unreferenced_css_classes,
         unused_font_faces: metrics.unused_font_faces,
         unused_theme_tokens: candidates.unused_theme_tokens,
+        near_duplicate_theme_tokens: candidates.near_duplicate_theme_tokens,
         token_consumers,
         font_size_unit_mix: metrics.font_size_unit_mix,
     })
+}
+
+fn css_output_path_in_changed_scope(
+    path: &str,
+    config: &ResolvedConfig,
+    changed: &rustc_hash::FxHashSet<std::path::PathBuf>,
+) -> bool {
+    let relative = std::path::Path::new(path);
+    let absolute = config.root.join(relative);
+    changed.contains(relative) || changed.contains(&absolute)
 }
 
 #[cfg(test)]
@@ -2897,6 +3594,7 @@ mod token_consumer_tests {
                 config: &config,
                 ignore_set: &globset::GlobSet::empty(),
                 changed_files: None,
+                output_changed_files: None,
                 ws_roots: None,
             },
         )
@@ -2923,6 +3621,7 @@ mod token_consumer_tests {
                 config: &config,
                 ignore_set: &globset::GlobSet::empty(),
                 changed_files: None,
+                output_changed_files: None,
                 ws_roots: None,
             },
         )
@@ -2998,6 +3697,44 @@ mod token_consumer_tests {
         let secondary =
             find_token(&computation, "vars.color.secondary").expect("secondary present");
         assert_eq!(secondary.consumer_count, 0);
+    }
+
+    #[test]
+    fn pandacss_define_tokens_blast_radius_located_js_call_consumers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@pandacss/dev":"0.54.0"}}"#,
+        )
+        .unwrap();
+        let def = write_file(
+            root,
+            0,
+            "panda.config.ts",
+            "import { defineTokens } from '@pandacss/dev';\n\
+             export const tokens = defineTokens({ colors: { brand: { value: '#f05a28' }, accent: { value: '#111' } } });\n",
+        );
+        let consumer = write_file(
+            root,
+            1,
+            "src/card.ts",
+            "import { css } from '../styled-system/css';\n\
+             import { token } from '../styled-system/tokens';\n\
+             export const card = css({ color: token('colors.brand') });\n",
+        );
+        let computation = css_computation_3d(root, &[def, consumer]);
+        let brand = find_token(&computation, "tokens.colors.brand")
+            .expect("Panda token blast radius present");
+        assert_eq!(brand.namespace, "tokens");
+        assert_eq!(brand.definition_path, "panda.config.ts");
+        assert_eq!(brand.consumer_count, 1);
+        assert_eq!(brand.consumers.len(), 1);
+        assert_eq!(brand.consumers[0].kind, fallow_output::ConsumerKind::JsCall);
+        assert_eq!(brand.consumers[0].path, "src/card.ts");
+        let accent = find_token(&computation, "tokens.colors.accent")
+            .expect("unconsumed Panda token still present");
+        assert_eq!(accent.consumer_count, 0);
     }
 
     #[test]
@@ -3095,6 +3832,99 @@ mod token_consumer_tests {
         assert_eq!(
             brand.consumers[0].kind,
             fallow_output::ConsumerKind::JsMember
+        );
+    }
+
+    #[test]
+    fn styled_components_and_emotion_theme_reads_feed_token_consumers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"styled-components":"6.1.0","@emotion/react":"11.0.0","@emotion/styled":"11.0.0"}}"#,
+        )
+        .unwrap();
+        let theme = write_file(
+            root,
+            0,
+            "src/theme.ts",
+            "export const appTheme = { colors: { brand: '#f05a28' }, space: { card: '1rem' } };\n",
+        );
+        let provider = write_file(
+            root,
+            1,
+            "src/App.tsx",
+            "import { ThemeProvider } from 'styled-components';\n\
+             import { appTheme } from './theme';\n\
+             export const App = ({ children }) => <ThemeProvider theme={appTheme}>{children}</ThemeProvider>;\n",
+        );
+        let styled_template = write_file(
+            root,
+            2,
+            "src/Card.tsx",
+            "import styled from 'styled-components';\n\
+             export const Card = styled.div`\n\
+               color: ${({ theme }) => theme.colors.brand};\n\
+               margin: ${props => props.theme.space.card};\n\
+             `;\n",
+        );
+        let emotion = write_file(
+            root,
+            3,
+            "src/Emotion.tsx",
+            "import styled from '@emotion/styled';\n\
+             export const Link = styled.a(({ theme }) => ({ color: theme.colors.brand }));\n\
+             export const Box = () => <div css={(theme) => ({ margin: theme.space.card })} />;\n",
+        );
+
+        let computation = css_computation_3d(root, &[theme, provider, styled_template, emotion]);
+        let brand = find_token(&computation, "appTheme.colors.brand")
+            .expect("theme brand blast radius present");
+        assert_eq!(brand.definition_path, "src/theme.ts");
+        assert_eq!(brand.consumer_count, 2);
+        assert!(
+            brand
+                .consumers
+                .iter()
+                .all(|consumer| consumer.kind == fallow_output::ConsumerKind::JsMember)
+        );
+        let space = find_token(&computation, "appTheme.space.card")
+            .expect("theme spacing blast radius present");
+        assert_eq!(space.consumer_count, 2);
+        let paths: Vec<&str> = space
+            .consumers
+            .iter()
+            .map(|consumer| consumer.path.as_str())
+            .collect();
+        assert!(paths.contains(&"src/Card.tsx") && paths.contains(&"src/Emotion.tsx"));
+    }
+
+    #[test]
+    fn theme_object_without_theme_provider_is_not_a_token_surface() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"styled-components":"6.1.0"}}"#,
+        )
+        .unwrap();
+        let theme = write_file(
+            root,
+            0,
+            "src/theme.ts",
+            "export const appTheme = { colors: { brand: '#f05a28' } };\n",
+        );
+        let consumer = write_file(
+            root,
+            1,
+            "src/Card.tsx",
+            "import styled from 'styled-components';\n\
+             export const Card = styled.div`${({ theme }) => theme.colors.brand}`;\n",
+        );
+        let computation = css_computation_3d(root, &[theme, consumer]);
+        assert!(
+            find_token(&computation, "appTheme.colors.brand").is_none(),
+            "theme-like objects require ThemeProvider wiring"
         );
     }
 
@@ -3237,6 +4067,7 @@ mod token_consumer_tests {
                 config: &config,
                 ignore_set: &globset::GlobSet::empty(),
                 changed_files: None,
+                output_changed_files: None,
                 ws_roots: None,
             },
         );

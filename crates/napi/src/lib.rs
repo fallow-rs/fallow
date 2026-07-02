@@ -128,6 +128,7 @@ pub struct ComplexityOptions {
     pub ownership_emails: Option<String>,
     pub targets: Option<bool>,
     pub css: Option<bool>,
+    pub css_deep: Option<bool>,
     pub effort: Option<String>,
     pub score: Option<bool>,
     pub since: Option<String>,
@@ -430,6 +431,7 @@ impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
             ownership_emails: parse_ownership_email_mode(value.ownership_emails)?,
             targets: value.targets.unwrap_or(false),
             css: value.css.unwrap_or(false),
+            css_deep: value.css_deep.unwrap_or(false),
             effort: parse_target_effort(value.effort)?,
             score: value.score.unwrap_or(false),
             since: value.since,
@@ -1073,6 +1075,8 @@ mod tests {
             ownership: Some(true),
             ownership_emails: Some("hash".to_string()),
             targets: Some(true),
+            css: Some(true),
+            css_deep: Some(true),
             effort: Some("HIGH".to_string()),
             score: Some(true),
             since: Some("90d".to_string()),
@@ -1099,6 +1103,8 @@ mod tests {
             Some(api::OwnershipEmailMode::Hash)
         ));
         assert!(options.targets);
+        assert!(options.css);
+        assert!(options.css_deep);
         assert!(matches!(options.effort, Some(api::TargetEffort::High)));
         assert!(options.score);
         assert_eq!(options.since.as_deref(), Some("90d"));

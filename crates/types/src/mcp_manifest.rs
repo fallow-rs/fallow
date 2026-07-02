@@ -128,9 +128,10 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "check_health",
         kind: "analysis",
-        description: "Complexity metrics, health score, hotspots, ownership, refactoring targets, and coverage gaps",
+        description: "Complexity, styling health, hotspots, ownership, refactoring targets, coverage gaps, and CSS/CSS-in-JS candidates",
         key_params: &[
             "score",
+            "css",
             "file_scores",
             "hotspots",
             "targets",
@@ -206,8 +207,15 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "audit",
         kind: "analysis",
-        description: "Combined dead-code, complexity, and duplication audit for changed files with a pass/warn/fail verdict",
-        key_params: &["gate", "base", "max_crap", "coverage", "runtime_coverage"],
+        description: "Combined dead-code, complexity, duplication, and styling audit for changed files with a pass/warn/fail verdict",
+        key_params: &[
+            "gate",
+            "base",
+            "css_deep",
+            "max_crap",
+            "coverage",
+            "runtime_coverage",
+        ],
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,

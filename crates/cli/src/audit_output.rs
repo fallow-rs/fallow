@@ -6,7 +6,7 @@ use fallow_api::{
     AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput, AuditSarifOutputInput,
     DupesReportPayload,
 };
-use fallow_config::{AuditGate, OutputFormat};
+use fallow_config::{AuditGate, OutputFormat, RulesConfig, Severity};
 use fallow_output::PrDecisionConclusion;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::results::AnalysisResults;
@@ -250,25 +250,50 @@ fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
         );
         return;
     }
-    for finding in findings.iter().take(TOP_N) {
+    let rules = &health.config.rules;
+    let mut sorted: Vec<_> = findings.iter().collect();
+    sorted.sort_by(|a, b| {
+        styling_finding_is_error_gated(rules, &b.code)
+            .cmp(&styling_finding_is_error_gated(rules, &a.code))
+            .then_with(|| a.path.cmp(&b.path))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.code.cmp(&b.code))
+            .then_with(|| a.value.cmp(&b.value))
+    });
+    let gated_count = sorted
+        .iter()
+        .filter(|finding| styling_finding_is_error_gated(rules, &finding.code))
+        .count();
+    let visible_count = TOP_N.max(gated_count);
+    for finding in sorted.iter().take(visible_count) {
         outln!(
             "  {}  {}  {}",
+            format!("{}:{}", finding.path, finding.line).dimmed(),
             finding.code,
-            finding.value,
-            format!("{}:{}", finding.path, finding.line).dimmed()
+            finding.value
         );
     }
-    let hidden = findings.len().saturating_sub(TOP_N);
+    let hidden = sorted.len().saturating_sub(visible_count);
     if hidden > 0 {
-        outln!(
-            "  {}",
-            format!("+ {hidden} more styling finding(s)").dimmed()
-        );
+        let noun = if hidden == 1 { "finding" } else { "findings" };
+        outln!("  {}", format!("+ {hidden} more styling {noun}").dimmed());
     }
     outln!(
         "  {}",
-        "(run `fallow health --css` for full styling detail)".dimmed()
+        "(run `fallow audit --format json` for full styling detail)".dimmed()
     );
+}
+
+fn styling_finding_is_error_gated(rules: &RulesConfig, code: &str) -> bool {
+    let severity = match code {
+        "css-token-drift" => rules.css_token_drift,
+        "css-duplicate-block" => rules.css_duplicate_block,
+        "css-selector-complexity" => rules.css_selector_complexity,
+        "css-dead-surface" => rules.css_dead_surface,
+        "css-broken-reference" => rules.css_broken_reference,
+        _ => Severity::Warn,
+    };
+    severity == Severity::Error
 }
 
 /// Print the TTY-only explain tip above the findings sections.

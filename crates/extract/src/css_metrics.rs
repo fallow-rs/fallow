@@ -168,6 +168,47 @@ impl Visitor<'_> for ValueCollector {
     }
 }
 
+#[derive(Default)]
+struct FirstRgbColorCollector {
+    rgb: Option<(f64, f64, f64)>,
+}
+
+impl Visitor<'_> for FirstRgbColorCollector {
+    type Error = std::convert::Infallible;
+
+    fn visit_types(&self) -> VisitTypes {
+        VisitTypes::COLORS
+    }
+
+    fn visit_color(&mut self, color: &mut CssColor) -> Result<(), Self::Error> {
+        if self.rgb.is_none()
+            && let CssColor::RGBA(rgba) = color
+        {
+            self.rgb = Some((
+                f64::from(rgba.red),
+                f64::from(rgba.green),
+                f64::from(rgba.blue),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Parse one CSS color value and return its sRGB channels when lightningcss can
+/// normalize it to RGB. Supports hex, named colors, rgb(), hsl(), and hwb().
+#[must_use]
+pub fn parse_css_color_rgb(value: &str) -> Option<(f64, f64, f64)> {
+    let source = format!(".x{{color:{value};}}");
+    let options = ParserOptions {
+        error_recovery: true,
+        ..ParserOptions::default()
+    };
+    let mut stylesheet = StyleSheet::parse(&source, options).ok()?;
+    let mut collector = FirstRgbColorCollector::default();
+    let _ = collector.visit_stylesheet(&mut stylesheet);
+    collector.rgb
+}
+
 fn sorted_vec(set: FxHashSet<String>) -> Vec<String> {
     let mut values: Vec<String> = set.into_iter().collect();
     values.sort_unstable();
@@ -617,6 +658,17 @@ mod tests {
     fn collects_distinct_colors() {
         let a = analytics(".a { color: red; } .b { color: blue; } .c { color: red; }");
         assert_eq!(a.colors.len(), 2, "distinct colors deduped: {:?}", a.colors);
+    }
+
+    #[test]
+    fn parses_theme_color_values_to_rgb() {
+        assert_eq!(parse_css_color_rgb("#f00"), Some((255.0, 0.0, 0.0)));
+        assert_eq!(parse_css_color_rgb("rgb(255 0 0)"), Some((255.0, 0.0, 0.0)));
+        assert_eq!(
+            parse_css_color_rgb("hsl(0 100% 50%)"),
+            Some((255.0, 0.0, 0.0))
+        );
+        assert!(parse_css_color_rgb("var(--brand)").is_none());
     }
 
     #[test]

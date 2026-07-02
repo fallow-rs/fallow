@@ -81,6 +81,14 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
     push_str_flag(&mut args, "--base", params.base.as_deref());
     push_scope(&mut args, params.production, params.workspace.as_deref());
     push_audit_production_flags(&mut args, params);
+    if params.css == Some(false) {
+        args.push("--no-css".to_string());
+    }
+    if params.css_deep == Some(true) {
+        args.push("--css-deep".to_string());
+    } else if params.css_deep == Some(false) {
+        args.push("--no-css-deep".to_string());
+    }
     push_str_flag(&mut args, "--group-by", params.group_by.as_deref());
     push_str_flag(&mut args, "--gate", params.gate.as_deref());
     push_audit_baseline_flags(&mut args, params);
@@ -178,6 +186,8 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
         production_dead_code: params.production_dead_code,
         production_health: params.production_health,
         production_dupes: params.production_dupes,
+        css: params.css,
+        css_deep: params.css_deep,
         gate,
         max_crap: params.max_crap,
         coverage: non_empty_path(params.coverage.as_deref()),

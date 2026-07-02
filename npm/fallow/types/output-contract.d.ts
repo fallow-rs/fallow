@@ -593,7 +593,7 @@ export type FrameworkHealthDetectorStatus = ("active" | "disabled_by_config" | "
 /**
  * Discriminant for [`CssCandidateAction::kind`].
  */
-export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "consolidate" | "replace-with-token" | "standardize")
+export type CssCandidateActionType = ("verify-unused" | "verify-undefined" | "consolidate" | "replace-with-token" | "standardize" | "simplify-selector")
 /**
  * Discriminant for [`UnusedAtRule::kind`].
  */
@@ -601,12 +601,12 @@ export type UnusedAtRuleKind = ("property-registration" | "layer")
 /**
  * The surface through which a design token is consumed. The `theme-var` /
  * `css-var` / `utility` / `apply` kinds are Tailwind v4 `@theme` consumption; the
- * `js-member` kind is CSS-in-JS consumption (a cross-module member access on an
- * imported StyleX/vanilla-extract token binding). The kind is the disjoint origin
- * signal that distinguishes a Tailwind token entry from a CSS-in-JS token entry in
- * the shared `token_consumers` list.
+ * `js-member` / `js-call` kinds are CSS-in-JS consumption (member access on an
+ * imported StyleX/vanilla-extract token binding, or a PandaCSS `token('...')`
+ * call). The kind is the disjoint origin signal that distinguishes a Tailwind
+ * token entry from a CSS-in-JS token entry in the shared `token_consumers` list.
  */
-export type ConsumerKind = ("theme-var" | "css-var" | "utility" | "apply" | "js-member")
+export type ConsumerKind = ("theme-var" | "css-var" | "utility" | "apply" | "js-member" | "js-call")
 /**
  * Trust level for a [`StylingHealth`] grade. TWO variants (not the three-tier
  * `high`/`medium`/`low` of [`crate::Confidence`] / `FeatureFlagConfidence`) ON
@@ -616,6 +616,18 @@ export type ConsumerKind = ("theme-var" | "css-var" | "utility" | "apply" | "js-
  * `"low"`), matching the sibling confidence enums' vocabulary.
  */
 export type StylingHealthConfidence = ("high" | "low")
+/**
+ * Effective configured severity for a styling finding.
+ */
+export type StylingFindingSeverity = ("warn" | "error")
+/**
+ * Confidence hint for a [`StylingFinding`].
+ */
+export type StylingFindingConfidence = ("high" | "low")
+/**
+ * Agent handling hint for a [`StylingFinding`].
+ */
+export type StylingAgentDisposition = ("fix-confidently" | "verify-first")
 export type InspectTargetDescriptor = ({
 file: string
 type: "file"
@@ -5917,6 +5929,12 @@ unused_font_faces?: UnusedFontFace[]
  */
 unused_theme_tokens?: UnusedThemeToken[]
 /**
+ * Tailwind v4 theme tokens whose comparable values are close to another
+ * token in the same theme dictionary. These are opt-in `--css-deep`
+ * candidates because they need whole-project token context.
+ */
+near_duplicate_theme_tokens?: NearDuplicateThemeToken[]
+/**
  * A location-aware reverse index of Tailwind v4 `@theme` token consumers:
  * per token, where it is consumed (`var()` reads, `@apply` bodies, generated
  * utility classes) and through which surface, plus the full `consumer_count`
@@ -6271,6 +6289,12 @@ unused_font_faces: number
  */
 unused_theme_tokens: number
 /**
+ * Tailwind v4 theme tokens whose comparable values are close to another
+ * token in the same theme dictionary. Located in
+ * `near_duplicate_theme_tokens`.
+ */
+near_duplicate_theme_tokens: number
+/**
  * Number of distinct `font-size` units (`px` / `rem` / `em` / `%`) authored
  * across the codebase. Mixing units is a type-scale consistency smell,
  * broken out in `font_size_unit_mix`.
@@ -6578,6 +6602,60 @@ line: number
 actions: CssCandidateAction[]
 }
 /**
+ * A Tailwind v4 `@theme` token that appears to duplicate an existing token by
+ * value. Emitted conservatively for comparable token namespaces, with the
+ * nearest existing token named so an agent has a concrete reuse target.
+ */
+export interface NearDuplicateThemeToken {
+/**
+ * The full custom property as authored, including the `--` prefix.
+ */
+token: string
+/**
+ * The normalized authored token value.
+ */
+value: string
+/**
+ * Project-root-relative, forward-slash path to the token definition.
+ */
+path: string
+/**
+ * 1-based line of the token definition inside the `@theme` block.
+ */
+line: number
+nearest_token: NearestStylingToken
+/**
+ * Read-only guidance step(s) before replacing the token reference.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * A styling token candidate that can replace or explain a finding.
+ */
+export interface NearestStylingToken {
+/**
+ * Token name, e.g. `--color-brand`.
+ */
+name: string
+/**
+ * Normalized token value.
+ */
+value: string
+/**
+ * Project-root-relative, forward-slash definition path.
+ */
+path: string
+/**
+ * 1-based definition line.
+ */
+line: number
+/**
+ * Distance from the finding value. Lower is closer; units depend on the
+ * comparable token namespace.
+ */
+distance: number
+}
+/**
  * A location-aware reverse index of where one design token is consumed, so an
  * agent editing the token can see its blast radius before changing or removing
  * it. Covers TWO token origins. The always-available discriminator is the `token`
@@ -6592,12 +6670,13 @@ actions: CssCandidateAction[]
  *   `apply`), built from the same gated candidate set as `unused_theme_tokens`
  *   (v4 + non-plugin + non-published + whole-scope), so a `consumer_count: 0`
  *   corroborates the `unused_theme_tokens` "nothing consumes this" finding.
- * - CSS-in-JS tokens (kind `js-member`) from StyleX `defineVars` /
- *   vanilla-extract `createTheme` family definitions, consumed via cross-module
- *   member access. NOTE: CSS-in-JS has NO corroborating dead-token finding (there
- *   is no `unused_theme_tokens` analogue), so a CSS-in-JS `consumer_count: 0` is a
- *   weaker signal than the Tailwind case (and the cross-file scan is relative-import
- *   only, so alias / bare-package imports are not counted).
+ * - CSS-in-JS tokens (kind `js-member` / `js-call`) from StyleX `defineVars`,
+ *   vanilla-extract `createTheme` family definitions, and PandaCSS `defineTokens`,
+ *   consumed via cross-module member access or PandaCSS `token('...')` calls. NOTE:
+ *   CSS-in-JS has NO corroborating dead-token finding (there is no
+ *   `unused_theme_tokens` analogue), so a CSS-in-JS `consumer_count: 0` is a weaker
+ *   signal than the Tailwind case (and the cross-file scan is relative-import or
+ *   generated-token-helper only, so alias / bare-package imports are not counted).
  *
  * This is DESCRIPTIVE context (a blast-radius lookup), not a finding, so it
  * deliberately carries no `actions` array (unlike the cleanup-candidate types in
@@ -6801,6 +6880,30 @@ line: number
  * The offending literal value, e.g. `w-[13px]`.
  */
 value: string
+effective_severity: StylingFindingSeverity
+/**
+ * Optional static lower-bound blast radius. For a dead design token this is
+ * `0`; for other styling findings it is omitted.
+ */
+blast_radius?: (number | null)
+/**
+ * Confidence hint for agents and review UIs. Structural findings are high,
+ * reachability findings are low because dynamic consumers may exist.
+ */
+confidence?: (StylingFindingConfidence | null)
+/**
+ * Suggested handling posture for agents. This is advisory data, fallow
+ * still never applies styling changes automatically.
+ */
+agent_disposition?: (StylingAgentDisposition | null)
+/**
+ * Concrete reuse target for token-drift findings, when one can be resolved.
+ */
+nearest_token?: (NearestStylingToken | null)
+/**
+ * One concise machine-readable edit hint for agent consumers.
+ */
+fix_hint?: (string | null)
 /**
  * Suggested next steps (verify / suppress; never an auto-fix).
  */

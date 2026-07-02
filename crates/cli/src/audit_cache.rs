@@ -13,7 +13,7 @@ use super::{AuditKeySnapshot, AuditOptions};
 use crate::base_worktree::{git_rev_parse, git_toplevel};
 use crate::error::emit_error;
 
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 3;
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 4;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 pub(super) struct AuditBaseSnapshotCacheKey {
@@ -29,6 +29,7 @@ pub(super) struct CachedAuditKeySnapshot {
     pub(super) base_sha: String,
     pub(super) dead_code: Vec<String>,
     pub(super) health: Vec<String>,
+    pub(super) styling: Vec<String>,
     pub(super) dupes: Vec<String>,
     pub(super) boundary_edges: Vec<String>,
     pub(super) cycles: Vec<String>,
@@ -45,6 +46,7 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> AuditKeySn
     AuditKeySnapshot {
         dead_code: cached.dead_code.into_iter().collect(),
         health: cached.health.into_iter().collect(),
+        styling: cached.styling.into_iter().collect(),
         dupes: cached.dupes.into_iter().collect(),
         boundary_edges: cached.boundary_edges.into_iter().collect(),
         cycles: cached.cycles.into_iter().collect(),
@@ -63,6 +65,7 @@ pub(super) fn cached_from_snapshot(
         base_sha: key.base_sha.clone(),
         dead_code: sorted_keys(&snapshot.dead_code),
         health: sorted_keys(&snapshot.health),
+        styling: sorted_keys(&snapshot.styling),
         dupes: sorted_keys(&snapshot.dupes),
         boundary_edges: sorted_keys(&snapshot.boundary_edges),
         cycles: sorted_keys(&snapshot.cycles),
@@ -255,6 +258,7 @@ pub(super) fn audit_base_snapshot_cache_key(
         coverage_file,
         opts.coverage_root.map(|p| p.to_string_lossy().to_string()),
     )
+    .styling(opts.css, opts.css_deep)
     .baselines(
         opts.dead_code_baseline
             .map(|p| p.to_string_lossy().to_string()),

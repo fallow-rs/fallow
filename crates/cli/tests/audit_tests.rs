@@ -233,6 +233,171 @@ fn audit_pass_verdict_when_no_changes() {
     );
 }
 
+#[test]
+fn audit_css_selector_complexity_error_escalates_verdict() {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(root.join("package.json"), r#"{"name":"audit-css"}"#).unwrap();
+    fs::write(root.join("src/index.ts"), "export const ok = true;\n").unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"rules":{"css-selector-complexity":"error"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/styles.css"),
+        "#app .card .title { color: red; }\n",
+    )
+    .unwrap();
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 1,
+        "css selector error escalation should fail audit. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    let findings = json["complexity"]["styling_findings"]
+        .as_array()
+        .expect("styling findings should be present");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-selector-complexity"
+                && finding["sub_kind"] == "high-specificity"
+        }),
+        "styling findings include selector complexity: {findings:#?}"
+    );
+}
+
+#[test]
+fn audit_css_deep_surfaces_cross_file_styling_findings() {
+    let dir = create_audit_css_deep_fixture();
+    let root = dir.path();
+
+    let default_json = audit_css_json(root, &[], 0);
+    let default_findings = default_json["complexity"]["styling_findings"]
+        .as_array()
+        .expect("default audit should include deep styling findings");
+    assert_has_deep_css_findings(default_findings);
+
+    let shallow_json = audit_css_json(root, &["--no-css-deep"], 0);
+    assert!(
+        shallow_json["complexity"]["styling_findings"].is_null(),
+        "shallow audit should not emit cross-file styling findings: {shallow_json:#?}"
+    );
+
+    let deep_json = audit_css_json(root, &["--css-deep"], 0);
+    let findings = deep_json["complexity"]["styling_findings"]
+        .as_array()
+        .expect("deep styling findings should be present");
+    assert_has_deep_css_findings(findings);
+}
+
+fn create_audit_css_deep_fixture() -> TempDir {
+    let dir = TempDir::new().expect("create temp dir");
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"audit-css-deep","devDependencies":{"tailwindcss":"^4.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/app.jsx"),
+        "export const App = () => <div />;\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/styles.css"),
+        "@theme {\n  --color-zbrand: #f05a28;\n  --spacing-zcard: 1rem;\n}\n.btn-primary { color: red; }\n",
+    )
+    .unwrap();
+    git(root, &["init", "-b", "main"]);
+    commit_all(root, "initial");
+
+    fs::write(
+        root.join("src/app.jsx"),
+        "export const App = () => <div className=\"btn-prmary bg-abrand\" />;\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/styles.css"),
+        "@theme {\n  --color-zbrand: #f05a28;\n  --color-abrand: rgb(240 90 41);\n  --spacing-zcard: 1rem;\n  --spacing-acard: 16.25px;\n  --shadow-glow: 0 0 8px red;\n}\n.btn-primary { color: red; }\n",
+    )
+    .unwrap();
+    dir
+}
+
+fn audit_css_json(root: &Path, extra_args: &[&str], expected_code: i32) -> serde_json::Value {
+    let root = root.to_str().unwrap();
+    let mut args = vec!["audit", "--root", root, "--base", "HEAD"];
+    args.extend_from_slice(extra_args);
+    args.extend_from_slice(&["--format", "json", "--quiet"]);
+    let output = run_fallow_raw(&args);
+    assert_eq!(
+        output.code, expected_code,
+        "audit exited unexpectedly. stderr: {}",
+        output.stderr
+    );
+    parse_json(&output)
+}
+
+fn assert_has_deep_css_findings(findings: &[serde_json::Value]) {
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-dead-surface"
+                && finding["sub_kind"] == "unused-theme-token"
+                && finding["value"] == "--shadow-glow"
+                && finding["blast_radius"] == 0
+        }),
+        "deep audit should include dead theme token with blast radius: {findings:#?}"
+    );
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-broken-reference"
+                && finding["sub_kind"] == "unresolved-class-reference"
+                && finding["value"] == "btn-prmary -> btn-primary"
+        }),
+        "deep audit should include unresolved class reference: {findings:#?}"
+    );
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-token-drift"
+                && finding["sub_kind"] == "near-duplicate-theme-token"
+                && finding["value"] == "--color-abrand: rgb(240 90 41)"
+                && finding["nearest_token"]["name"] == "--color-zbrand"
+                && finding["confidence"] == "high"
+                && finding["agent_disposition"] == "fix-confidently"
+        }),
+        "deep audit should include near-duplicate theme token with target: {findings:#?}"
+    );
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-token-drift"
+                && finding["sub_kind"] == "near-duplicate-theme-token"
+                && finding["value"] == "--spacing-acard: 16.25px"
+                && finding["nearest_token"]["name"] == "--spacing-zcard"
+                && finding["confidence"] == "high"
+                && finding["agent_disposition"] == "fix-confidently"
+        }),
+        "deep audit should include numeric near-duplicate theme token with target: {findings:#?}"
+    );
+}
+
 /// Audit's HEAD analyses and base-snapshot computation run concurrently via
 /// `rayon::join`; inside the base snapshot, check and dupes also run
 /// concurrently. Verify nondeterministic scheduling does not leak into the

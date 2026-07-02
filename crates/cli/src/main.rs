@@ -1155,6 +1155,20 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         coverage_root: Option<PathBuf>,
 
+        /// Disable styling analytics in audit.
+        #[arg(long = "no-css")]
+        no_css: bool,
+
+        /// Enable deep CSS analysis for audit explicitly: project-wide styling
+        /// reachability, narrowed back to changed anchors. Deep CSS is on by
+        /// default; use this to override `audit.cssDeep = false`.
+        #[arg(long)]
+        css_deep: bool,
+
+        /// Disable deep CSS analysis while keeping local styling analytics on.
+        #[arg(long = "no-css-deep")]
+        no_css_deep: bool,
+
         /// Which findings affect the audit verdict.
         ///
         /// new-only (default): fail only on findings introduced by the current
@@ -3453,6 +3467,9 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         max_crap,
         coverage,
         coverage_root,
+        no_css,
+        css_deep,
+        no_css_deep,
         gate,
         runtime_coverage,
         min_invocations_hot,
@@ -3486,6 +3503,9 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             max_crap,
             coverage,
             coverage_root,
+            no_css,
+            css_deep,
+            no_css_deep,
             gate,
             runtime_coverage,
             min_invocations_hot,
@@ -4070,6 +4090,9 @@ struct AuditDispatchArgs {
     max_crap: Option<f64>,
     coverage: Option<PathBuf>,
     coverage_root: Option<PathBuf>,
+    no_css: bool,
+    css_deep: bool,
+    no_css_deep: bool,
     gate: Option<AuditGateArg>,
     runtime_coverage: Option<PathBuf>,
     min_invocations_hot: u64,
@@ -4180,6 +4203,16 @@ fn resolve_audit_inputs(
     })
 }
 
+fn audit_css_enabled(config: &fallow_config::AuditConfig, args: &AuditDispatchArgs) -> bool {
+    !args.no_css && config.css.unwrap_or(true)
+}
+
+fn audit_css_deep_enabled(config: &fallow_config::AuditConfig, args: &AuditDispatchArgs) -> bool {
+    audit_css_enabled(config, args)
+        && !args.no_css_deep
+        && (args.css_deep || config.css_deep.unwrap_or(true))
+}
+
 fn run_resolved_audit(
     dispatch: &DispatchContext<'_>,
     args: &AuditDispatchArgs,
@@ -4214,9 +4247,11 @@ fn run_resolved_audit(
             coverage_root: args.coverage_root.as_deref(),
             gate: args.gate.map_or(inputs.audit_cfg.gate, Into::into),
             include_entry_exports: cli.include_entry_exports,
-            // Styling analytics on by default in `fallow audit` (Slice 1);
-            // descriptive + verdict-neutral. Opt-out flag is a follow-up.
-            css: true,
+            // Styling analytics, including deep cross-file reachability, is on
+            // by default in `fallow audit`; both layers remain verdict-neutral
+            // unless a user escalates a styling rule to error.
+            css: audit_css_enabled(&inputs.audit_cfg, args),
+            css_deep: audit_css_deep_enabled(&inputs.audit_cfg, args),
             runtime_coverage: args.runtime_coverage.as_deref(),
             min_invocations_hot: args.min_invocations_hot,
             brief: args.brief,
@@ -4249,6 +4284,9 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
         max_crap: None,
         coverage: None,
         coverage_root: None,
+        no_css: true,
+        css_deep: false,
+        no_css_deep: false,
         gate: None,
         runtime_coverage: None,
         min_invocations_hot: 0,
@@ -4295,6 +4333,7 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
         include_entry_exports: cli.include_entry_exports,
         // Decision-surface (brief apex) does not render styling; keep it lean.
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 0,
         brief: true,
@@ -4557,6 +4596,7 @@ fn run_health_dispatch(
         ownership_emails: run.ownership_emails,
         targets: sections.targets,
         css: sections.css,
+        css_deep: false,
         force_full: sections.force_full,
         score_only_output: sections.score_only_output,
         enforce_coverage_gap_gate: true,

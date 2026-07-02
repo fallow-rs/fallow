@@ -348,6 +348,7 @@ fn derive_programmatic_health_execution_options<'a>(
         ownership: run.sections.ownership,
         targets: run.sections.targets,
         css: run.css,
+        css_deep: run.css_deep,
         force_full: run.sections.force_full,
         score_only_output: run.sections.score_only_output,
         enforce_coverage_gap_gate: true,

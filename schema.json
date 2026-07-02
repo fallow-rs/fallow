@@ -169,6 +169,9 @@
         "duplicate-prop-shape": "off",
         "css-token-drift": "warn",
         "css-duplicate-block": "warn",
+        "css-selector-complexity": "warn",
+        "css-dead-surface": "warn",
+        "css-broken-reference": "warn",
         "unresolved-imports": "error",
         "unlisted-dependencies": "error",
         "duplicate-exports": "error",
@@ -1111,6 +1114,21 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "css-selector-complexity": {
+          "description": "CSS selector / nesting / important-density complexity. A styling-domain\nadvisory surfaced in `fallow audit`; defaults to `warn`\n(verdict-neutral). Set to `error` to gate, or `off` to silence.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "css-dead-surface": {
+          "description": "CSS dead surface, such as unused scoped SFC classes. A styling-domain\nadvisory surfaced in `fallow audit`; defaults to `warn`\n(verdict-neutral). Set to `error` to gate, or `off` to silence.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
+        "css-broken-reference": {
+          "description": "CSS broken references, such as missing classes or keyframes. A\nstyling-domain advisory surfaced by deep CSS audit mode; defaults\nto `warn` (verdict-neutral). Set to `error` to gate, or `off` to silence.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "unresolved-imports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1884,6 +1902,36 @@
             }
           ]
         },
+        "css-selector-complexity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "css-dead-surface": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "css-broken-reference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "unresolved-imports": {
           "anyOf": [
             {
@@ -2281,6 +2329,18 @@
       "properties": {
         "gate": {
           "$ref": "#/$defs/AuditGate"
+        },
+        "css": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cssDeep": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "deadCodeBaseline": {
           "type": [

@@ -39,6 +39,10 @@ fn escape_backticks(s: &str) -> String {
     s.replace('`', "\\`")
 }
 
+fn escape_table_code_span(s: &str) -> String {
+    escape_backticks(s).replace('|', "\\|")
+}
+
 fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
     match name {
         "<template>" => Cow::Borrowed("<template> (template complexity)"),
@@ -1090,6 +1094,7 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
         && report.coverage_intelligence.is_none()
         && report.threshold_overrides.is_empty()
         && report.css_analytics.is_none()
+        && report.styling_findings.is_empty()
     {
         if report.vital_signs.is_none() {
             let _ = write!(
@@ -1106,6 +1111,7 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
     }
 
     write_findings_section(&mut out, report, root);
+    write_styling_findings_section(&mut out, report, root);
     write_threshold_overrides_section(&mut out, report, root);
     write_runtime_coverage_section(&mut out, report, root);
     write_coverage_intelligence_section(&mut out, report, root);
@@ -1117,6 +1123,40 @@ pub fn build_health_markdown(report: &fallow_output::HealthReport, root: &Path) 
     write_metric_legend(&mut out, report);
 
     out
+}
+
+fn write_styling_findings_section(
+    out: &mut String,
+    report: &fallow_output::HealthReport,
+    root: &Path,
+) {
+    if report.styling_findings.is_empty() {
+        return;
+    }
+    if !out.is_empty() && !out.ends_with("\n\n") {
+        out.push('\n');
+    }
+    out.push_str("## Styling Findings\n\n");
+    out.push_str("| File | Rule | Severity | Value |\n");
+    out.push_str("|:-----|:-----|:---------|:------|\n");
+    for finding in report.styling_findings.iter().take(20) {
+        let path = markdown_relative_path(Path::new(&finding.path), root);
+        let severity = match finding.effective_severity {
+            fallow_output::StylingFindingSeverity::Error => "error",
+            fallow_output::StylingFindingSeverity::Warn => "warn",
+        };
+        let value = escape_table_code_span(&finding.value);
+        let _ = writeln!(
+            out,
+            "| `{path}:{}` | `{}` / `{}` | {severity} | `{value}` |",
+            finding.line, finding.code, finding.sub_kind
+        );
+    }
+    if report.styling_findings.len() > 20 {
+        let more = report.styling_findings.len() - 20;
+        let _ = writeln!(out, "\n... and {more} more styling findings.");
+    }
+    out.push('\n');
 }
 
 /// Render the opt-in `## CSS Health` markdown section (present only with
@@ -2356,6 +2396,42 @@ fn walkthrough_effort_label(effort: fallow_output::ReviewEffort) -> &'static str
         fallow_output::ReviewEffort::Glance => "glance",
         fallow_output::ReviewEffort::Review => "review",
         fallow_output::ReviewEffort::DeepDive => "deep-dive",
+    }
+}
+
+#[cfg(test)]
+mod health_markdown_tests {
+    use std::path::Path;
+
+    use fallow_output::{HealthReport, StylingFinding, StylingFindingSeverity};
+
+    use super::build_health_markdown;
+
+    #[test]
+    fn health_markdown_includes_styling_findings() {
+        let report = HealthReport {
+            styling_findings: vec![StylingFinding {
+                code: "css-broken-reference".to_string(),
+                sub_kind: "unresolved-class-reference".to_string(),
+                path: "src/app.css".to_string(),
+                line: 9,
+                value: "btn-prmary | btn-primary".to_string(),
+                effective_severity: StylingFindingSeverity::Warn,
+                blast_radius: None,
+                confidence: None,
+                agent_disposition: None,
+                nearest_token: None,
+                fix_hint: None,
+                actions: Vec::new(),
+            }],
+            ..HealthReport::default()
+        };
+
+        let output = build_health_markdown(&report, Path::new("/project"));
+
+        assert!(output.contains("## Styling Findings"));
+        assert!(output.contains("css-broken-reference"));
+        assert!(output.contains("btn-prmary \\| btn-primary"));
     }
 }
 

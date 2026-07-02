@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use fallow_output::{
     CoverageIntelligenceRecommendation, CoverageIntelligenceReport, CoverageIntelligenceVerdict,
     ExceededThreshold, FindingSeverity, HealthReport, RuntimeCoverageReport,
-    RuntimeCoverageVerdict, SarifDocumentInput, SarifResultInput, build_sarif_document,
-    build_sarif_result, normalize_uri,
+    RuntimeCoverageVerdict, SarifDocumentInput, SarifResultInput, StylingFindingSeverity,
+    build_sarif_document, build_sarif_result, normalize_uri,
 };
 use fallow_types::duplicates::{CloneGroup, DuplicationReport};
 use rustc_hash::FxHashMap;
@@ -117,7 +117,7 @@ pub fn build_health_sarif(
     let mut snippets = SourceSnippetCache::default();
 
     append_health_sarif_results(report, root, &mut sarif_results, &mut snippets);
-    let health_rules = health_sarif_rules(rule_builder);
+    let health_rules = health_sarif_rules(rule_builder, report);
     sarif_document(&sarif_results, &health_rules)
 }
 
@@ -198,7 +198,7 @@ fn append_styling_sarif_results(
         );
         sarif_results.push(sarif_result(
             &format!("fallow/{}", finding.code),
-            "warning",
+            styling_sarif_level(finding.effective_severity),
             &message,
             &uri,
             Some((finding.line, 1)),
@@ -206,20 +206,65 @@ fn append_styling_sarif_results(
     }
 }
 
-fn health_styling_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<serde_json::Value> {
-    vec![rule_builder(
-        "fallow/css-token-drift",
-        "CSS / CSS-in-JS design-token drift (a hardcoded value where a token exists)",
-        "warning",
-    )]
+fn health_styling_sarif_rules(
+    rule_builder: &SarifRuleBuilder<'_>,
+    report: &HealthReport,
+) -> Vec<serde_json::Value> {
+    vec![
+        rule_builder(
+            "fallow/css-token-drift",
+            "CSS / CSS-in-JS design-token drift (a hardcoded value where a token exists)",
+            styling_rule_default_level(report, "css-token-drift"),
+        ),
+        rule_builder(
+            "fallow/css-duplicate-block",
+            "CSS / CSS-in-JS duplicate declaration block",
+            styling_rule_default_level(report, "css-duplicate-block"),
+        ),
+        rule_builder(
+            "fallow/css-selector-complexity",
+            "CSS selector complexity, deep nesting, or important density",
+            styling_rule_default_level(report, "css-selector-complexity"),
+        ),
+        rule_builder(
+            "fallow/css-dead-surface",
+            "CSS / CSS-in-JS dead styling surface",
+            styling_rule_default_level(report, "css-dead-surface"),
+        ),
+        rule_builder(
+            "fallow/css-broken-reference",
+            "CSS / CSS-in-JS reference resolves to no known styling definition",
+            styling_rule_default_level(report, "css-broken-reference"),
+        ),
+    ]
 }
 
-fn health_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<serde_json::Value> {
+fn health_sarif_rules(
+    rule_builder: &SarifRuleBuilder<'_>,
+    report: &HealthReport,
+) -> Vec<serde_json::Value> {
     let mut rules = health_complexity_sarif_rules(rule_builder);
     rules.extend(health_runtime_sarif_rules(rule_builder));
     rules.extend(health_coverage_intelligence_sarif_rules(rule_builder));
-    rules.extend(health_styling_sarif_rules(rule_builder));
+    rules.extend(health_styling_sarif_rules(rule_builder, report));
     rules
+}
+
+fn styling_rule_default_level(report: &HealthReport, code: &str) -> &'static str {
+    if report.styling_findings.iter().any(|finding| {
+        finding.code == code && finding.effective_severity == StylingFindingSeverity::Error
+    }) {
+        "error"
+    } else {
+        "warning"
+    }
+}
+
+const fn styling_sarif_level(severity: StylingFindingSeverity) -> &'static str {
+    match severity {
+        StylingFindingSeverity::Error => "error",
+        StylingFindingSeverity::Warn => "warning",
+    }
 }
 
 fn health_complexity_sarif_rules(rule_builder: &SarifRuleBuilder<'_>) -> Vec<serde_json::Value> {

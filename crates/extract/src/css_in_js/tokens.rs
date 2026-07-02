@@ -15,7 +15,7 @@
 //! Health-time-only, like the 3b/3c CSS-in-JS lifters: it runs over file SOURCE
 //! and persists nothing to the extraction cache (no `CACHE_VERSION` bump).
 //!
-//! # Recognized definition shapes (cut 1: StyleX + vanilla-extract)
+//! # Recognized definition shapes
 //!
 //! Recognition is gated on the callee binding being imported from a recognized
 //! token library in THIS file (a local `defineVars` helper or an unrelated
@@ -31,6 +31,9 @@
 //!   class string, not a token surface.
 //! - vanilla-extract `createGlobalTheme(selector, {...})` (2-arg): returns the
 //!   vars object; binding = the assigned identifier.
+//! - PandaCSS `defineTokens({...})`: binding = the assigned identifier; token
+//!   objects with a `value` field collapse to the token path (`colors.brand`),
+//!   matching `token('colors.brand')` consumers.
 //!
 //! The two CONTRACT-IMPLEMENTATION forms are deliberately NOT definition sites
 //! here, because the contract they fill was already declared by
@@ -39,9 +42,6 @@
 //!   the existing `contract`.
 //! - `createGlobalTheme(selector, contract, {...})` (3-arg) returns void.
 //!
-//! Panda (`defineTokens` / `token('...')`) is deferred to a 3e follow-on (its
-//! dominant consumption is bare-string-in-style-value, a different consumer scan).
-
 use std::path::Path;
 
 use oxc_allocator::Allocator;
@@ -75,8 +75,23 @@ pub struct CssInJsTokenDef {
     /// The identifier the token surface is bound to (`vars`), the receiver of
     /// cross-module member access (`vars.color.primary`).
     pub binding: String,
+    /// Which CSS-in-JS family defined the tokens.
+    pub origin: CssInJsTokenOrigin,
     /// The flattened leaf tokens defined on `binding`.
     pub tokens: Vec<CssInJsToken>,
+}
+
+/// The CSS-in-JS token system that produced a token definition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CssInJsTokenOrigin {
+    /// StyleX `defineVars`.
+    StyleX,
+    /// vanilla-extract `createTheme` family definitions.
+    VanillaExtract,
+    /// PandaCSS `defineTokens`.
+    Panda,
+    /// styled-components / Emotion theme object definitions.
+    Theme,
 }
 
 /// Walk a JS/TS source for CSS-in-JS design-token DEFINITIONS, returning each
@@ -143,6 +158,81 @@ pub fn css_in_js_token_consumers(
     collector.hits
 }
 
+/// Walk a consuming JS/TS source for PandaCSS `token('path.to.token')` calls.
+/// The caller supplies the local alias imported from Panda's generated
+/// `styled-system` token module and the set of defined leaf paths.
+#[must_use]
+#[expect(
+    clippy::implicit_hasher,
+    reason = "callers build an FxHashSet; std HashSet is a disallowed type here"
+)]
+pub fn panda_token_call_consumers(
+    source: &str,
+    path: &Path,
+    alias: &str,
+    leaf_paths: &FxHashSet<String>,
+) -> Vec<TokenConsumerHit> {
+    if alias.is_empty() || leaf_paths.is_empty() {
+        return Vec::new();
+    }
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let allocator = Allocator::default();
+    let ret = Parser::new(&allocator, source, source_type).parse();
+    let mut collector = PandaTokenCallCollector {
+        source,
+        alias,
+        leaf_paths,
+        hits: Vec::new(),
+    };
+    collector.visit_program(&ret.program);
+    collector.hits
+}
+
+/// Walk a JS/TS source for statically-authored theme object definitions used by
+/// styled-components and Emotion. A `theme` or `*Theme` variable with an object
+/// literal initializer becomes a token surface, with nested scalar leaves exposed
+/// as dotted paths.
+#[must_use]
+pub fn css_in_js_theme_token_defs(source: &str, path: &Path) -> Vec<CssInJsTokenDef> {
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let allocator = Allocator::default();
+    let ret = Parser::new(&allocator, source, source_type).parse();
+
+    let mut collector = ThemeDefCollector {
+        source,
+        defs: Vec::new(),
+    };
+    collector.visit_program(&ret.program);
+    collector.defs
+}
+
+/// Walk a consuming JS/TS source for styled-components / Emotion theme reads such
+/// as `theme.colors.brand` and `props.theme.colors.brand`.
+#[must_use]
+#[expect(
+    clippy::implicit_hasher,
+    reason = "callers build an FxHashSet; std HashSet is a disallowed type here"
+)]
+pub fn css_in_js_theme_consumers(
+    source: &str,
+    path: &Path,
+    leaf_paths: &FxHashSet<String>,
+) -> Vec<TokenConsumerHit> {
+    if leaf_paths.is_empty() {
+        return Vec::new();
+    }
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let allocator = Allocator::default();
+    let ret = Parser::new(&allocator, source, source_type).parse();
+    let mut collector = ThemeConsumerCollector {
+        source,
+        leaf_paths,
+        hits: Vec::new(),
+    };
+    collector.visit_program(&ret.program);
+    collector.hits
+}
+
 /// Walks a consuming program for member accesses on a token binding alias.
 struct ConsumerCollector<'a, 'b> {
     source: &'a str,
@@ -188,6 +278,124 @@ impl<'a> Visit<'a> for ConsumerCollector<'a, '_> {
         // (hyphenated `gray-100`, digit-leading `0x`), which design-token systems use
         // heavily. Non-literal computed keys (`vars.color[k]`) cannot be resolved
         // statically and are skipped (a documented lower-bound miss).
+        let mut chain = access_object_chain(&member.object);
+        if let (Some((_, segments)), Some(key)) =
+            (chain.as_mut(), string_literal_key(&member.expression))
+        {
+            segments.push(key);
+        } else {
+            chain = None;
+        }
+        self.record(chain, member.span().start);
+        walk::walk_computed_member_expression(self, member);
+    }
+}
+
+struct PandaTokenCallCollector<'a, 'b> {
+    source: &'a str,
+    alias: &'b str,
+    leaf_paths: &'b FxHashSet<String>,
+    hits: Vec<TokenConsumerHit>,
+}
+
+impl<'a> Visit<'a> for PandaTokenCallCollector<'a, '_> {
+    fn visit_call_expression(&mut self, call: &oxc_ast::ast::CallExpression<'a>) {
+        let Expression::Identifier(callee) = &call.callee else {
+            walk::walk_call_expression(self, call);
+            return;
+        };
+        if callee.name.as_str() == self.alias
+            && let Some(Argument::StringLiteral(lit)) = call.arguments.first()
+        {
+            let token_path = lit.value.as_str();
+            if self.leaf_paths.contains(token_path) {
+                self.hits.push(TokenConsumerHit {
+                    token_path: token_path.to_owned(),
+                    line: line_at(self.source, call.span().start),
+                });
+            }
+        }
+        walk::walk_call_expression(self, call);
+    }
+}
+
+struct ThemeDefCollector<'a> {
+    source: &'a str,
+    defs: Vec<CssInJsTokenDef>,
+}
+
+impl<'a> ThemeDefCollector<'a> {
+    fn process_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        let BindingPattern::BindingIdentifier(binding) = &decl.id else {
+            return;
+        };
+        let binding_name = binding.name.as_str();
+        if !is_theme_binding_name(binding_name) {
+            return;
+        }
+        let Some(Expression::ObjectExpression(obj)) = &decl.init else {
+            return;
+        };
+        let mut tokens = Vec::new();
+        collect_token_leaves(self.source, obj, "", CssInJsTokenOrigin::Theme, &mut tokens);
+        if tokens.is_empty() {
+            return;
+        }
+        self.defs.push(CssInJsTokenDef {
+            binding: binding_name.to_owned(),
+            origin: CssInJsTokenOrigin::Theme,
+            tokens,
+        });
+    }
+}
+
+impl<'a> Visit<'a> for ThemeDefCollector<'a> {
+    fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        self.process_declarator(decl);
+        walk::walk_variable_declarator(self, decl);
+    }
+}
+
+struct ThemeConsumerCollector<'a, 'b> {
+    source: &'a str,
+    leaf_paths: &'b FxHashSet<String>,
+    hits: Vec<TokenConsumerHit>,
+}
+
+impl<'a> ThemeConsumerCollector<'a, '_> {
+    fn record(&mut self, chain: Option<(&'a str, Vec<&'a str>)>, span_start: u32) {
+        let Some((base, segments)) = chain else {
+            return;
+        };
+        let token_segments: &[&str] = match base {
+            "theme" => &segments,
+            "props" if segments.first().copied() == Some("theme") => &segments[1..],
+            _ => return,
+        };
+        if token_segments.is_empty() {
+            return;
+        }
+        let token_path = token_segments.join(".");
+        if self.leaf_paths.contains(&token_path) {
+            self.hits.push(TokenConsumerHit {
+                token_path,
+                line: line_at(self.source, span_start),
+            });
+        }
+    }
+}
+
+impl<'a> Visit<'a> for ThemeConsumerCollector<'a, '_> {
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        let mut chain = access_object_chain(&member.object);
+        if let Some((_, segments)) = chain.as_mut() {
+            segments.push(member.property.name.as_str());
+        }
+        self.record(chain, member.span().start);
+        walk::walk_static_member_expression(self, member);
+    }
+
+    fn visit_computed_member_expression(&mut self, member: &ComputedMemberExpression<'a>) {
         let mut chain = access_object_chain(&member.object);
         if let (Some((_, segments)), Some(key)) =
             (chain.as_mut(), string_literal_key(&member.expression))
@@ -247,6 +455,7 @@ enum BindingSource {
 struct Recognized {
     binding_source: BindingSource,
     tokens_arg: usize,
+    origin: CssInJsTokenOrigin,
 }
 
 /// Collects token-definition sites, gated on import provenance.
@@ -324,19 +533,19 @@ impl<'a> TokenDefCollector<'a> {
     /// form, or `None` (unrecognized, or a contract-implementation form whose
     /// contract is the canonical definition).
     fn recognize(lib: Lib, role: &str, arg_count: usize) -> Option<Recognized> {
-        let single = |tokens_arg| {
+        let single = |tokens_arg, origin| {
             Some(Recognized {
                 binding_source: BindingSource::LhsIdent,
                 tokens_arg,
+                origin,
             })
         };
         match (lib, role) {
             // `defineVars(obj)` / `createThemeContract(obj)`: binding = the assigned
             // identifier, token object = arg 0.
-            (Lib::StyleX, "defineVars") | (Lib::VanillaExtract, "createThemeContract")
-                if arg_count >= 1 =>
-            {
-                single(0)
+            (Lib::StyleX, "defineVars") if arg_count >= 1 => single(0, CssInJsTokenOrigin::StyleX),
+            (Lib::VanillaExtract, "createThemeContract") if arg_count >= 1 => {
+                single(0, CssInJsTokenOrigin::VanillaExtract)
             }
             // 1-arg createTheme returns [themeClass, vars]; tokens on the second
             // destructure element. The 2-arg (contract, tokens) form fills an
@@ -344,11 +553,15 @@ impl<'a> TokenDefCollector<'a> {
             (Lib::VanillaExtract, "createTheme") if arg_count == 1 => Some(Recognized {
                 binding_source: BindingSource::TupleElement(1),
                 tokens_arg: 0,
+                origin: CssInJsTokenOrigin::VanillaExtract,
             }),
             // 2-arg createGlobalTheme(selector, tokens) returns the vars object;
             // the 3-arg (selector, contract, tokens) form returns void (contract
             // canonical), so only the 2-arg form is a definition site here.
-            (Lib::VanillaExtract, "createGlobalTheme") if arg_count == 2 => single(1),
+            (Lib::VanillaExtract, "createGlobalTheme") if arg_count == 2 => {
+                single(1, CssInJsTokenOrigin::VanillaExtract)
+            }
+            (Lib::Panda, "defineTokens") if arg_count >= 1 => single(0, CssInJsTokenOrigin::Panda),
             _ => None,
         }
     }
@@ -392,56 +605,83 @@ impl<'a> TokenDefCollector<'a> {
             return;
         };
         let mut tokens = Vec::new();
-        self.collect_leaves(obj, "", &mut tokens);
+        collect_token_leaves(self.source, obj, "", recognized.origin, &mut tokens);
         if tokens.is_empty() {
             return;
         }
         self.defs.push(CssInJsTokenDef {
             binding: binding.to_owned(),
+            origin: recognized.origin,
             tokens,
         });
     }
+}
 
-    /// Flatten an object literal into dotted LEAF paths. An inline-object value
-    /// recurses (an intermediate token GROUP, not a token); a value-producing
-    /// expression (string / number / `null` contract leaf / call like
-    /// `px(2 * grid)` / template / member access like `colors.red['500']`) is a
-    /// LEAF token. A BARE IDENTIFIER value (`palette: tailwindPalette`) is SKIPPED:
-    /// it references something whose structure is invisible here, most often an
-    /// imported token GROUP (recording it as a leaf would invent a phantom token
-    /// and wrongly credit every `vars.palette.<x>` access to it); the rarer
-    /// identifier-scalar leaf is a lower-bound miss. Spreads and computed keys are
-    /// skipped (cannot resolve statically).
-    fn collect_leaves(
-        &self,
-        obj: &ObjectExpression<'a>,
-        prefix: &str,
-        out: &mut Vec<CssInJsToken>,
-    ) {
-        for prop in &obj.properties {
-            let ObjectPropertyKind::ObjectProperty(prop) = prop else {
-                continue;
-            };
-            let Some(key) = prop.key.static_name() else {
-                continue;
-            };
-            let path = if prefix.is_empty() {
-                key.to_string()
-            } else {
-                format!("{prefix}.{key}")
-            };
-            match &prop.value {
-                Expression::ObjectExpression(nested) => self.collect_leaves(nested, &path, out),
-                // A bare identifier is an unresolvable reference, usually an imported
-                // token group; do not record it as a leaf (avoids a phantom token).
-                Expression::Identifier(_) => {}
-                _ => out.push(CssInJsToken {
+/// Flatten an object literal into dotted LEAF paths. An inline-object value
+/// recurses (an intermediate token GROUP, not a token); a value-producing
+/// expression (string / number / `null` contract leaf / call like
+/// `px(2 * grid)` / template / member access like `colors.red['500']`) is a LEAF
+/// token. A BARE IDENTIFIER value (`palette: tailwindPalette`) is SKIPPED: it
+/// references something whose structure is invisible here, most often an imported
+/// token GROUP (recording it as a leaf would invent a phantom token and wrongly
+/// credit every `vars.palette.<x>` access to it). Spreads and computed keys are
+/// skipped because they cannot be resolved statically.
+fn collect_token_leaves(
+    source: &str,
+    obj: &ObjectExpression<'_>,
+    prefix: &str,
+    origin: CssInJsTokenOrigin,
+    out: &mut Vec<CssInJsToken>,
+) {
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            continue;
+        };
+        let Some(key) = prop.key.static_name() else {
+            continue;
+        };
+        let path = if prefix.is_empty() {
+            key.to_string()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        match &prop.value {
+            Expression::ObjectExpression(nested)
+                if origin == CssInJsTokenOrigin::Panda
+                    && !prefix.is_empty()
+                    && object_has_static_key(nested, "value") =>
+            {
+                out.push(CssInJsToken {
                     path,
-                    def_line: line_at(self.source, prop.key.span().start),
-                }),
+                    def_line: line_at(source, prop.key.span().start),
+                });
             }
+            Expression::ObjectExpression(nested) => {
+                collect_token_leaves(source, nested, &path, origin, out);
+            }
+            // A bare identifier is an unresolvable reference, usually an imported
+            // token group; do not record it as a leaf.
+            Expression::Identifier(_) => {}
+            _ => out.push(CssInJsToken {
+                path,
+                def_line: line_at(source, prop.key.span().start),
+            }),
         }
     }
+}
+
+fn is_theme_binding_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == "theme" || lower.ends_with("theme")
+}
+
+fn object_has_static_key(obj: &ObjectExpression<'_>, wanted: &str) -> bool {
+    obj.properties.iter().any(|prop| {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            return false;
+        };
+        prop.key.static_name().is_some_and(|key| key == wanted)
+    })
 }
 
 impl<'a> Visit<'a> for TokenDefCollector<'a> {
@@ -477,6 +717,10 @@ mod tests {
             .unwrap_or_default()
     }
 
+    fn theme_defs(source: &str) -> Vec<CssInJsTokenDef> {
+        css_in_js_theme_token_defs(source, Path::new("theme.ts"))
+    }
+
     #[test]
     fn stylex_define_vars_flat_namespace_call() {
         let d = defs(
@@ -497,6 +741,73 @@ export const vars = defineVars({ color: { primary: '#000', secondary: '#fff' } }
 ",
         );
         assert_eq!(paths(&d, "vars"), vec!["color.primary", "color.secondary"]);
+    }
+
+    #[test]
+    fn panda_define_tokens_collapses_value_objects() {
+        let d = defs(
+            r"
+import { defineTokens } from '@pandacss/dev';
+export const tokens = defineTokens({
+  colors: {
+    brand: { value: '#f05a28' },
+    accent: { value: '{colors.brand}' },
+  },
+  spacing: { card: { value: '1rem' } },
+});
+",
+        );
+        assert_eq!(
+            paths(&d, "tokens"),
+            vec!["colors.brand", "colors.accent", "spacing.card"]
+        );
+        assert_eq!(
+            d.iter().find(|d| d.binding == "tokens").unwrap().origin,
+            CssInJsTokenOrigin::Panda
+        );
+    }
+
+    #[test]
+    fn theme_object_definitions_flatten_static_leaves() {
+        let d = theme_defs(
+            r"
+export const appTheme = {
+  colors: { brand: '#f05a28', accent: '#111' },
+  space: { card: '1rem' },
+  dynamic: palette,
+};
+",
+        );
+        assert_eq!(
+            paths(&d, "appTheme"),
+            vec!["colors.brand", "colors.accent", "space.card"]
+        );
+        assert_eq!(
+            d.iter().find(|d| d.binding == "appTheme").unwrap().origin,
+            CssInJsTokenOrigin::Theme
+        );
+    }
+
+    #[test]
+    fn theme_consumers_credit_props_and_destructured_theme_reads() {
+        let leaves = ["colors.brand", "space.card"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let hits = css_in_js_theme_consumers(
+            r"
+import styled from 'styled-components';
+export const Card = styled.div`
+  color: ${({ theme }) => theme.colors.brand};
+  margin: ${props => props.theme.space.card};
+`;
+",
+            Path::new("card.tsx"),
+            &leaves,
+        );
+        let mut token_paths: Vec<String> = hits.into_iter().map(|hit| hit.token_path).collect();
+        token_paths.sort();
+        assert_eq!(token_paths, vec!["colors.brand", "space.card"]);
     }
 
     #[test]
@@ -695,6 +1006,10 @@ export const vars = createGlobalTheme(':root', {
         css_in_js_token_consumers(source, Path::new("card.ts"), alias, &leaves(paths))
     }
 
+    fn panda_consumers(source: &str, alias: &str, paths: &[&str]) -> Vec<TokenConsumerHit> {
+        panda_token_call_consumers(source, Path::new("card.ts"), alias, &leaves(paths))
+    }
+
     #[test]
     fn consumer_matches_deepest_leaf_not_intermediate_group() {
         // `vars.color.primary` is the leaf; `vars.color` (an intermediate group)
@@ -736,6 +1051,17 @@ export const vars = createGlobalTheme(':root', {
         );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].token_path, "color.primary");
+    }
+
+    #[test]
+    fn panda_token_call_consumer_matches_string_literal() {
+        let hits = panda_consumers(
+            "export const c = css({ color: token('colors.brand') });",
+            "token",
+            &["colors.brand", "colors.accent"],
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].token_path, "colors.brand");
     }
 
     #[test]

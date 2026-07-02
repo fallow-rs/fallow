@@ -69,6 +69,10 @@ pub struct AuditCacheKeyPayload {
     pub coverage: Option<AuditCoverageFingerprint>,
     /// Coverage root override.
     pub coverage_root: Option<String>,
+    /// Whether audit health computed styling keys for the base snapshot.
+    pub css: bool,
+    /// Whether audit health used deep CSS analysis for the base snapshot.
+    pub css_deep: bool,
     /// Dead-code baseline path.
     pub dead_code_baseline: Option<String>,
     /// Health baseline path.
@@ -111,6 +115,8 @@ impl AuditCacheKeyBuilder {
                 max_crap: None,
                 coverage: None,
                 coverage_root: None,
+                css: false,
+                css_deep: false,
                 dead_code_baseline: None,
                 health_baseline: None,
                 dupes_baseline: None,
@@ -161,6 +167,14 @@ impl AuditCacheKeyBuilder {
         self.payload.max_crap = max_crap;
         self.payload.coverage = coverage;
         self.payload.coverage_root = coverage_root;
+        self
+    }
+
+    /// Set styling-analysis options that affect base health snapshot keys.
+    #[must_use]
+    pub const fn styling(mut self, css: bool, css_deep: bool) -> Self {
+        self.payload.css = css;
+        self.payload.css_deep = css_deep;
         self
     }
 
@@ -226,6 +240,7 @@ mod tests {
                     true,
                 )
                 .health(Some(42.0), Some(coverage), Some("/workspace".to_string()))
+                .styling(true, true)
                 .baselines(
                     Some("dead.json".to_string()),
                     Some("health.json".to_string()),
@@ -237,6 +252,8 @@ mod tests {
         assert_eq!(payload.base_sha, "abc123");
         assert_eq!(payload.workspace.as_deref(), Some(&["web".to_string()][..]));
         assert!(payload.include_entry_exports);
+        assert!(payload.css);
+        assert!(payload.css_deep);
         assert_eq!(
             payload.coverage.as_ref().and_then(|c| c.source),
             Some(SourceFingerprint::new(12, 34))

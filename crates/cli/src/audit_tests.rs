@@ -1111,6 +1111,7 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
             .into_iter()
             .collect(),
         health: std::iter::once("health:a".to_string()).collect(),
+        styling: std::iter::once("styling:a".to_string()).collect(),
         dupes: ["dupe:a".to_string(), "dupe:b".to_string()]
             .into_iter()
             .collect(),
@@ -1128,6 +1129,7 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
     let decoded = snapshot_from_cached(cached);
     assert_eq!(decoded.dead_code, snapshot.dead_code);
     assert_eq!(decoded.health, snapshot.health);
+    assert_eq!(decoded.styling, snapshot.styling);
     assert_eq!(decoded.dupes, snapshot.dupes);
     assert_eq!(decoded.boundary_edges, snapshot.boundary_edges);
     assert_eq!(decoded.cycles, snapshot.cycles);
@@ -1181,6 +1183,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -1199,6 +1202,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
     let snapshot = AuditKeySnapshot {
         dead_code: std::iter::once("dead:a".to_string()).collect(),
         health: std::iter::once("health:a".to_string()).collect(),
+        styling: std::iter::once("styling:a".to_string()).collect(),
         dupes: std::iter::once("dupe:a".to_string()).collect(),
         boundary_edges: FxHashSet::default(),
         cycles: FxHashSet::default(),
@@ -1250,6 +1254,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -1272,6 +1277,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         base_sha: "other".to_string(),
         dead_code: vec!["dead:a".to_string()],
         health: vec![],
+        styling: vec![],
         dupes: vec![],
         boundary_edges: vec![],
         cycles: vec![],
@@ -1333,6 +1339,7 @@ fn audit_base_snapshot_cache_key_includes_extended_config() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -1414,6 +1421,7 @@ fn audit_gate_all_skips_base_snapshot() {
         gate: AuditGate::All,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -1500,6 +1508,7 @@ fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -1602,6 +1611,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -1688,6 +1698,7 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -1853,6 +1864,7 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -1996,6 +2008,7 @@ export function App() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -2146,6 +2159,7 @@ export function App() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -2237,6 +2251,7 @@ fn audit_base_uses_new_explicit_config_without_hard_failure() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -2322,6 +2337,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -2413,6 +2429,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         gate: AuditGate::NewOnly,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,
@@ -2527,6 +2544,7 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
         gate: AuditGate::All,
         include_entry_exports: false,
         css: false,
+        css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
         brief: false,

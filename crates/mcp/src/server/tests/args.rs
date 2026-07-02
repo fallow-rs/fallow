@@ -2084,6 +2084,8 @@ fn audit_args_with_all_options() {
         production_dead_code: None,
         production_health: Some(true),
         production_dupes: None,
+        css: None,
+        css_deep: Some(true),
         workspace: Some("@app/core".to_string()),
         no_cache: Some(true),
         threads: Some(4),
@@ -2109,6 +2111,7 @@ fn audit_args_with_all_options() {
     assert!(args.contains(&"develop".to_string()));
     assert!(args.contains(&"--production".to_string()));
     assert!(args.contains(&"--production-health".to_string()));
+    assert!(args.contains(&"--css-deep".to_string()));
     assert!(args.contains(&"--workspace".to_string()));
     assert!(args.contains(&"@app/core".to_string()));
     assert!(args.contains(&"--no-cache".to_string()));
@@ -2132,6 +2135,19 @@ fn audit_args_with_all_options() {
         args.windows(2)
             .any(|w| w == ["--min-invocations-hot", "250"])
     );
+}
+
+#[test]
+fn audit_args_css_opt_outs_forward_to_cli() {
+    let args = build_audit_args(&AuditParams {
+        css: Some(false),
+        css_deep: Some(false),
+        ..Default::default()
+    })
+    .expect("css opt-outs are valid");
+
+    assert!(args.contains(&"--no-css".to_string()));
+    assert!(args.contains(&"--no-css-deep".to_string()));
 }
 
 #[test]

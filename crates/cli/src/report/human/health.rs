@@ -232,6 +232,7 @@ fn render_css_analytics(
     render_css_unreferenced_classes(lines, css);
     render_css_unused_font_faces(lines, css);
     render_css_unused_theme_tokens(lines, css);
+    render_css_near_duplicate_theme_tokens(lines, css);
     render_css_font_size_unit_mix(lines, css);
     render_css_notable_rules(lines, css);
 }
@@ -630,6 +631,40 @@ fn render_css_unused_theme_tokens(
     ));
     for entry in css.unused_theme_tokens.iter().take(5) {
         lines.push(format!("  {}:{}: {}", entry.path, entry.line, entry.token));
+    }
+    if total > 5 {
+        let more = total - 5;
+        lines.push(
+            format!("  ... and {more} more (--format json for full list)")
+                .dimmed()
+                .to_string(),
+        );
+    }
+}
+
+/// Render Tailwind v4 `@theme` tokens whose comparable values are close to an
+/// existing token, naming the nearest reuse target. Up to 5 located entries.
+fn render_css_near_duplicate_theme_tokens(
+    lines: &mut Vec<String>,
+    css: &fallow_output::CssAnalyticsReport,
+) {
+    if css.near_duplicate_theme_tokens.is_empty() {
+        return;
+    }
+    let total = css.near_duplicate_theme_tokens.len();
+    lines.push(format!(
+        "  {total} near-duplicate Tailwind @theme token{} (candidates; verify semantic intent before reusing the nearest token):",
+        plural(total),
+    ));
+    for entry in css.near_duplicate_theme_tokens.iter().take(5) {
+        lines.push(format!(
+            "  {}:{}: {} ~= {} (distance {:.2})",
+            entry.path,
+            entry.line,
+            entry.token,
+            entry.nearest_token.name,
+            entry.nearest_token.distance
+        ));
     }
     if total > 5 {
         let more = total - 5;

@@ -236,6 +236,8 @@ fn run_audit_subanalyses(
         analysis: analysis_with_production(analysis, options.production_health),
         max_crap: options.max_crap,
         complexity: true,
+        css: options.css.unwrap_or(true),
+        css_deep: options.css.unwrap_or(true) && options.css_deep.unwrap_or(true),
         coverage: options.coverage.clone(),
         coverage_root: options.coverage_root.clone(),
         ..ComplexityOptions::default()

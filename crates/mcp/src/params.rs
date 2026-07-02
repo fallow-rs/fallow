@@ -473,8 +473,9 @@ pub struct HealthParams {
     /// hotspots, `!important` density, over-complex selectors, deep nesting,
     /// design-token sprawl (distinct colors / font-sizes / z-indexes), and
     /// unreferenced custom-property / `@keyframes` cleanup candidates. Forwards
-    /// `--css`. Opt-in because it reads and parses every project stylesheet
-    /// (standard CSS; SCSS is skipped).
+    /// `--css`. Opt-in because it reads and parses project stylesheets. Standard
+    /// CSS is parsed structurally; Sass/Less sources are scanned only where
+    /// fallow can stay conservative without expanding preprocessor semantics.
     pub css: Option<bool>,
 
     /// Show only per-file health scores, sorted by risk-aware triage concern:
@@ -708,6 +709,15 @@ pub struct AuditParams {
 
     /// Run only the duplication sub-analysis in production mode.
     pub production_dupes: Option<bool>,
+
+    /// Enable or disable styling analytics in audit. Defaults to enabled.
+    pub css: Option<bool>,
+
+    /// Enable or disable deep CSS analysis for audit: project-wide styling
+    /// reachability and near-duplicate theme-token candidates, narrowed back to
+    /// changed anchors. Defaults to enabled; set `false` to pass
+    /// `--no-css-deep` on the CLI fallback path.
+    pub css_deep: Option<bool>,
 
     /// Scope analysis to one or more workspaces. Accepts a single package name
     /// for the common case, or a comma-separated list with globs and `!` negation

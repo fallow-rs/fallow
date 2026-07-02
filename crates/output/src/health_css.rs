@@ -81,6 +81,11 @@ pub struct CssAnalyticsReport {
     /// downstream repo. Sorted by `(path, line, token)`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_theme_tokens: Vec<UnusedThemeToken>,
+    /// Tailwind v4 theme tokens whose comparable values are close to another
+    /// token in the same theme dictionary. These are opt-in `--css-deep`
+    /// candidates because they need whole-project token context.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub near_duplicate_theme_tokens: Vec<NearDuplicateThemeToken>,
     /// A location-aware reverse index of Tailwind v4 `@theme` token consumers:
     /// per token, where it is consumed (`var()` reads, `@apply` bodies, generated
     /// utility classes) and through which surface, plus the full `consumer_count`
@@ -155,7 +160,7 @@ pub struct UnusedAtRule {
 }
 
 /// Discriminant for [`UnusedAtRule::kind`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 #[repr(u8)]
@@ -273,6 +278,43 @@ pub struct UnusedThemeToken {
     pub actions: Vec<CssCandidateAction>,
 }
 
+/// A Tailwind v4 `@theme` token that appears to duplicate an existing token by
+/// value. Emitted conservatively for comparable token namespaces, with the
+/// nearest existing token named so an agent has a concrete reuse target.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct NearDuplicateThemeToken {
+    /// The full custom property as authored, including the `--` prefix.
+    pub token: String,
+    /// The normalized authored token value.
+    pub value: String,
+    /// Project-root-relative, forward-slash path to the token definition.
+    pub path: String,
+    /// 1-based line of the token definition inside the `@theme` block.
+    pub line: u32,
+    /// The nearest existing token candidate to reuse instead.
+    pub nearest_token: NearestStylingToken,
+    /// Read-only guidance step(s) before replacing the token reference.
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// A styling token candidate that can replace or explain a finding.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct NearestStylingToken {
+    /// Token name, e.g. `--color-brand`.
+    pub name: String,
+    /// Normalized token value.
+    pub value: String,
+    /// Project-root-relative, forward-slash definition path.
+    pub path: String,
+    /// 1-based definition line.
+    pub line: u32,
+    /// Distance from the finding value. Lower is closer; units depend on the
+    /// comparable token namespace.
+    pub distance: f64,
+}
+
 /// Where one Tailwind v4 `@theme` token is consumed, and through which surface.
 /// One entry in a [`TokenConsumers::consumers`] sample.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -288,11 +330,11 @@ pub struct TokenConsumerLocation {
 
 /// The surface through which a design token is consumed. The `theme-var` /
 /// `css-var` / `utility` / `apply` kinds are Tailwind v4 `@theme` consumption; the
-/// `js-member` kind is CSS-in-JS consumption (a cross-module member access on an
-/// imported StyleX/vanilla-extract token binding). The kind is the disjoint origin
-/// signal that distinguishes a Tailwind token entry from a CSS-in-JS token entry in
-/// the shared `token_consumers` list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+/// `js-member` / `js-call` kinds are CSS-in-JS consumption (member access on an
+/// imported StyleX/vanilla-extract token binding, or a PandaCSS `token('...')`
+/// call). The kind is the disjoint origin signal that distinguishes a Tailwind
+/// token entry from a CSS-in-JS token entry in the shared `token_consumers` list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ConsumerKind {
@@ -310,6 +352,9 @@ pub enum ConsumerKind {
     /// (`import { vars } from './tokens'; vars.color.primary`), for StyleX
     /// `defineVars` / vanilla-extract `createTheme` family tokens.
     JsMember,
+    /// A CSS-in-JS function call that consumes a token by path, currently
+    /// PandaCSS `token('colors.brand')`.
+    JsCall,
 }
 
 /// A location-aware reverse index of where one design token is consumed, so an
@@ -326,12 +371,13 @@ pub enum ConsumerKind {
 ///   `apply`), built from the same gated candidate set as `unused_theme_tokens`
 ///   (v4 + non-plugin + non-published + whole-scope), so a `consumer_count: 0`
 ///   corroborates the `unused_theme_tokens` "nothing consumes this" finding.
-/// - CSS-in-JS tokens (kind `js-member`) from StyleX `defineVars` /
-///   vanilla-extract `createTheme` family definitions, consumed via cross-module
-///   member access. NOTE: CSS-in-JS has NO corroborating dead-token finding (there
-///   is no `unused_theme_tokens` analogue), so a CSS-in-JS `consumer_count: 0` is a
-///   weaker signal than the Tailwind case (and the cross-file scan is relative-import
-///   only, so alias / bare-package imports are not counted).
+/// - CSS-in-JS tokens (kind `js-member` / `js-call`) from StyleX `defineVars`,
+///   vanilla-extract `createTheme` family definitions, and PandaCSS `defineTokens`,
+///   consumed via cross-module member access or PandaCSS `token('...')` calls. NOTE:
+///   CSS-in-JS has NO corroborating dead-token finding (there is no
+///   `unused_theme_tokens` analogue), so a CSS-in-JS `consumer_count: 0` is a weaker
+///   signal than the Tailwind case (and the cross-file scan is relative-import or
+///   generated-token-helper only, so alias / bare-package imports are not counted).
 ///
 /// This is DESCRIPTIVE context (a blast-radius lookup), not a finding, so it
 /// deliberately carries no `actions` array (unlike the cleanup-candidate types in
@@ -471,8 +517,61 @@ pub struct StylingFinding {
     pub line: u32,
     /// The offending literal value, e.g. `w-[13px]`.
     pub value: String,
+    /// Effective severity after applying `rules.css-*` config. Styling defaults
+    /// to `warn`, but projects can escalate a family to `error` for audit gates
+    /// and CI formats.
+    pub effective_severity: StylingFindingSeverity,
+    /// Optional static lower-bound blast radius. For a dead design token this is
+    /// `0`; for other styling findings it is omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blast_radius: Option<u32>,
+    /// Confidence hint for agents and review UIs. Structural findings are high,
+    /// reachability findings are low because dynamic consumers may exist.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<StylingFindingConfidence>,
+    /// Suggested handling posture for agents. This is advisory data, fallow
+    /// still never applies styling changes automatically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_disposition: Option<StylingAgentDisposition>,
+    /// Concrete reuse target for token-drift findings, when one can be resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nearest_token: Option<NearestStylingToken>,
+    /// One concise machine-readable edit hint for agent consumers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix_hint: Option<String>,
     /// Suggested next steps (verify / suppress; never an auto-fix).
     pub actions: Vec<CssCandidateAction>,
+}
+
+/// Effective configured severity for a styling finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub enum StylingFindingSeverity {
+    Warn,
+    Error,
+}
+
+/// Confidence hint for a [`StylingFinding`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum StylingFindingConfidence {
+    /// The finding is local and structural.
+    High,
+    /// The finding depends on reachability and should be verified.
+    Low,
+}
+
+/// Agent handling hint for a [`StylingFinding`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum StylingAgentDisposition {
+    /// The finding names a concrete structural edit target.
+    FixConfidently,
+    /// Verify dynamic or external consumers before changing code.
+    VerifyFirst,
 }
 
 /// A read-only verification step attached to a CSS cleanup candidate.
@@ -523,9 +622,25 @@ pub enum CssCandidateActionType {
     /// Standardize an inconsistent value axis on a single notation (the
     /// color-format / length-unit mixing candidates).
     Standardize,
+    /// Simplify a selector, reduce nesting, or remove unnecessary `!important`
+    /// usage after verifying the cascade.
+    SimplifySelector,
 }
 
 impl CssCandidateAction {
+    /// Read-only guidance for a selector / nesting / important-density finding.
+    #[must_use]
+    pub fn simplify_selector(reason: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::SimplifySelector,
+            auto_fixable: false,
+            description: format!(
+                "Review cascade impact, then simplify this selector or rule because {reason}."
+            ),
+            command: None,
+        }
+    }
+
     /// Verify action for an unused `@font-face` family: a read-only token search
     /// for any inline-style or JavaScript application of the family before
     /// removing the dead web-font.
@@ -555,6 +670,20 @@ impl CssCandidateAction {
                 "Confirm the {token} @theme token is used by nothing, no `*-{name}` utility (e.g. `bg-{name}` / `text-{name}` / `{namespace}-{name}`) in markup or @apply, no `var({token})` read in any stylesheet or JS, and no arbitrary `[{token}]` value, before removing it from the @theme block."
             ),
             command: theme_token_search(namespace, name),
+        }
+    }
+
+    /// Guidance for a near-duplicate theme token: reuse the named existing
+    /// token after checking semantic intent.
+    #[must_use]
+    pub fn replace_near_duplicate_token(token: &str, nearest: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::ReplaceWithToken,
+            auto_fixable: false,
+            description: format!(
+                "Verify {token} is not an intentional semantic alias, then reuse {nearest} instead."
+            ),
+            command: safe_token_search(token),
         }
     }
 
@@ -859,6 +988,10 @@ pub struct CssAnalyticsSummary {
     /// the project is not Tailwind v4 or a plugin / published-library /
     /// partial-scope run gated the scan out.
     pub unused_theme_tokens: u32,
+    /// Tailwind v4 theme tokens whose comparable values are close to another
+    /// token in the same theme dictionary. Located in
+    /// `near_duplicate_theme_tokens`.
+    pub near_duplicate_theme_tokens: u32,
     /// Number of distinct `font-size` units (`px` / `rem` / `em` / `%`) authored
     /// across the codebase. Mixing units is a type-scale consistency smell,
     /// broken out in `font_size_unit_mix`.
@@ -933,6 +1066,7 @@ mod tests {
             unreferenced_css_classes: Vec::new(),
             unused_font_faces: Vec::new(),
             unused_theme_tokens: Vec::new(),
+            near_duplicate_theme_tokens: Vec::new(),
             token_consumers: Vec::new(),
             font_size_unit_mix: None,
         };
@@ -958,6 +1092,7 @@ mod tests {
             unreferenced_css_classes: Vec::new(),
             unused_font_faces: Vec::new(),
             unused_theme_tokens: Vec::new(),
+            near_duplicate_theme_tokens: Vec::new(),
             token_consumers: vec![TokenConsumers {
                 token: "--color-brand".to_string(),
                 namespace: "color".to_string(),

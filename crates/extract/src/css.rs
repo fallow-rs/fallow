@@ -296,6 +296,9 @@ static CSS_VAR_REF_RE: LazyLock<regex::Regex> =
 pub struct ThemeTokenDef {
     /// The custom-property name with the `--` prefix stripped (`color-brand`).
     pub name: String,
+    /// The normalized top-level declaration value, with internal whitespace
+    /// collapsed. Empty only when the value could not be recovered.
+    pub value: String,
     /// 1-based line of the declaration in the original source.
     pub line: u32,
 }
@@ -547,17 +550,45 @@ fn scan_theme_declaration(scan: &mut ThemeDeclarationScan<'_, '_>, b: u8, i: usi
     if k < scan.end && bytes[k] == b':' {
         let name = &scan.masked[id_start + 2..j];
         if !name.is_empty() && scan.seen.insert(name.to_owned()) {
+            let value = theme_declaration_value(scan.source, scan.masked, k + 1, scan.end);
             let line = 1 + scan
                 .source
                 .get(..id_start)
                 .map_or(0, |s| s.bytes().filter(|&x| x == b'\n').count());
             scan.out.push(ThemeTokenDef {
                 name: name.to_owned(),
+                value,
                 line: u32::try_from(line).unwrap_or(u32::MAX),
             });
         }
     }
     j
+}
+
+fn theme_declaration_value(source: &str, masked: &str, start: usize, end: usize) -> String {
+    let bytes = masked.as_bytes();
+    let mut depth = 0usize;
+    let mut i = start;
+    while i < end {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            b';' if depth == 0 => break,
+            _ => {}
+        }
+        i += 1;
+    }
+    source
+        .get(start..i)
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Extract the utility tokens referenced in `@apply` directive bodies across a
@@ -1730,6 +1761,13 @@ mod tests {
     fn theme_single_block_collects_tokens() {
         let names = theme_token_names("@theme { --color-brand: #f00; --radius-card: 8px; }");
         assert_eq!(names, vec!["color-brand", "radius-card"]);
+    }
+
+    #[test]
+    fn theme_token_values_are_normalized() {
+        let scan = scan_theme_blocks("@theme {\n  --color-brand: rgb( 255 0 0 );\n}");
+        assert_eq!(scan.tokens[0].name, "color-brand");
+        assert_eq!(scan.tokens[0].value, "rgb( 255 0 0 )");
     }
 
     #[test]
