@@ -1931,33 +1931,7 @@ fn scan_near_duplicate_theme_tokens(
         {
             continue;
         }
-        let nearest = candidates
-            .iter()
-            .filter(|other| other.token != candidate.token)
-            .filter(|other| other.namespace == candidate.namespace)
-            .filter(|other| {
-                changed.is_some() || theme_token_sort_key(other) < theme_token_sort_key(candidate)
-            })
-            .filter(|other| !theme_token_names_are_deliberate_pair(&candidate.name, &other.name))
-            .filter_map(|other| {
-                let distance = candidate.metric.distance(&other.metric)?;
-                if distance > 0.0 && distance <= candidate.metric.threshold() {
-                    Some((other, distance))
-                } else {
-                    None
-                }
-            })
-            .min_by(
-                |(left_candidate, left_distance), (right_candidate, right_distance)| {
-                    left_distance
-                        .partial_cmp(right_distance)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                        .then_with(|| {
-                            theme_token_sort_key(left_candidate)
-                                .cmp(&theme_token_sort_key(right_candidate))
-                        })
-                },
-            );
+        let nearest = find_nearest_duplicate_theme_token(candidate, &candidates, changed.is_some());
 
         let Some((nearest, distance)) = nearest else {
             continue;
@@ -1990,6 +1964,46 @@ fn scan_near_duplicate_theme_tokens(
     });
     input.summary.near_duplicate_theme_tokens = saturate_len(out.len());
     out
+}
+
+fn find_nearest_duplicate_theme_token<'a>(
+    candidate: &'a ComparableThemeTokenCandidate,
+    candidates: &'a [ComparableThemeTokenCandidate],
+    include_later_tokens: bool,
+) -> Option<(&'a ComparableThemeTokenCandidate, f64)> {
+    candidates
+        .iter()
+        .filter(|other| other.token != candidate.token)
+        .filter(|other| other.namespace == candidate.namespace)
+        .filter(|other| {
+            include_later_tokens || theme_token_sort_key(other) < theme_token_sort_key(candidate)
+        })
+        .filter(|other| {
+            !theme_token_names_are_deliberate_pair(
+                &candidate.namespace,
+                &candidate.name,
+                &other.name,
+            )
+        })
+        .filter_map(|other| {
+            let distance = candidate.metric.distance(&other.metric)?;
+            if distance > 0.0 && distance <= candidate.metric.threshold() {
+                Some((other, distance))
+            } else {
+                None
+            }
+        })
+        .min_by(
+            |(left_candidate, left_distance), (right_candidate, right_distance)| {
+                left_distance
+                    .partial_cmp(right_distance)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| {
+                        theme_token_sort_key(left_candidate)
+                            .cmp(&theme_token_sort_key(right_candidate))
+                    })
+            },
+        )
 }
 
 fn theme_token_sort_key(candidate: &ComparableThemeTokenCandidate) -> (&str, u32, &str) {
@@ -2116,7 +2130,10 @@ fn round_distance(distance: f64) -> f64 {
     (distance * 100.0).round() / 100.0
 }
 
-fn theme_token_names_are_deliberate_pair(left: &str, right: &str) -> bool {
+fn theme_token_names_are_deliberate_pair(namespace: &str, left: &str, right: &str) -> bool {
+    if namespace == "color" && color_token_name_is_semantic_ui_role(left, right) {
+        return true;
+    }
     if let (Some((left_base, _)), Some((right_base, _))) =
         (split_numeric_suffix(left), split_numeric_suffix(right))
         && left_base == right_base
@@ -2134,6 +2151,31 @@ fn theme_token_names_are_deliberate_pair(left: &str, right: &str) -> bool {
     state_suffixes.iter().any(|suffix| {
         left.strip_suffix(suffix) == Some(right) || right.strip_suffix(suffix) == Some(left)
     })
+}
+
+fn color_token_name_is_semantic_ui_role(left: &str, right: &str) -> bool {
+    const ROLES: &[&str] = &[
+        "accent",
+        "accent-foreground",
+        "background",
+        "border",
+        "card",
+        "card-foreground",
+        "destructive",
+        "destructive-foreground",
+        "foreground",
+        "input",
+        "muted",
+        "muted-foreground",
+        "popover",
+        "popover-foreground",
+        "primary",
+        "primary-foreground",
+        "ring",
+        "secondary",
+        "secondary-foreground",
+    ];
+    ROLES.contains(&left) || ROLES.contains(&right)
 }
 
 fn split_numeric_suffix(name: &str) -> Option<(&str, &str)> {

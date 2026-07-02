@@ -468,7 +468,7 @@ fn create_audit_css_deep_fixture() -> TempDir {
     .unwrap();
     fs::write(
         root.join("src/styles.css"),
-        "@theme {\n  --color-zbrand: #f05a28;\n  --color-abrand: rgb(240 90 41);\n  --spacing-zcard: 1rem;\n  --spacing-acard: 16.25px;\n  --shadow-glow: 0 0 8px red;\n}\n.btn-primary { color: red; }\n",
+        "@theme {\n  --color-zbrand: #f05a28;\n  --color-abrand: rgb(240 90 41);\n  --color-status-queued-bg: rgb(240 90 42);\n  --color-secondary: hsl(40 6% 93%);\n  --color-muted: hsl(40 6% 93%);\n  --spacing-zcard: 1rem;\n  --spacing-acard: 16.25px;\n  --shadow-glow: 0 0 8px red;\n}\n.btn-primary { color: red; }\n",
     )
     .unwrap();
     dir
@@ -528,6 +528,26 @@ fn assert_has_deep_css_findings(findings: &[serde_json::Value]) {
                 && finding["agent_disposition"] == "fix-confidently"
         }),
         "deep audit should include numeric near-duplicate theme token with target: {findings:#?}"
+    );
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-token-drift"
+                && finding["sub_kind"] == "near-duplicate-theme-token"
+                && finding["value"] == "--color-status-queued-bg: rgb(240 90 42)"
+                && finding["confidence"] == "low"
+                && finding["agent_disposition"] == "verify-first"
+        }),
+        "semantic product color aliases should be review-first: {findings:#?}"
+    );
+    assert!(
+        !findings.iter().any(|finding| {
+            finding["code"] == "css-token-drift"
+                && finding["sub_kind"] == "near-duplicate-theme-token"
+                && finding["value"].as_str().is_some_and(|value| {
+                    value.starts_with("--color-secondary:") || value.starts_with("--color-muted:")
+                })
+        }),
+        "semantic shadcn-style aliases must not be near-duplicate token findings: {findings:#?}"
     );
 }
 

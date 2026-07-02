@@ -241,6 +241,18 @@ fn build_styling_findings(
                 if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
                     continue;
                 }
+                let semantic_color_alias = near_duplicate_is_semantic_color_alias(candidate);
+                let (confidence, agent_disposition) = if semantic_color_alias {
+                    (
+                        fallow_output::StylingFindingConfidence::Low,
+                        fallow_output::StylingAgentDisposition::VerifyFirst,
+                    )
+                } else {
+                    (
+                        fallow_output::StylingFindingConfidence::High,
+                        fallow_output::StylingAgentDisposition::FixConfidently,
+                    )
+                };
                 findings.push(fallow_output::StylingFinding {
                     code: "css-token-drift".to_string(),
                     sub_kind: "near-duplicate-theme-token".to_string(),
@@ -249,8 +261,8 @@ fn build_styling_findings(
                     value: format!("{}: {}", candidate.token, candidate.value),
                     effective_severity: styling_finding_severity(config.rules.css_token_drift),
                     blast_radius: None,
-                    confidence: Some(fallow_output::StylingFindingConfidence::High),
-                    agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
+                    confidence: Some(confidence),
+                    agent_disposition: Some(agent_disposition),
                     nearest_token: Some(candidate.nearest_token.clone()),
                     fix_hint: Some(format!(
                         "Reuse {} instead of adding {} after verifying the semantic intent.",
@@ -532,6 +544,51 @@ fn build_styling_findings(
     }
 
     findings
+}
+
+fn near_duplicate_is_semantic_color_alias(
+    candidate: &fallow_output::NearDuplicateThemeToken,
+) -> bool {
+    let Some(token_name) = candidate.token.strip_prefix("--color-") else {
+        return false;
+    };
+    let Some(nearest_name) = candidate.nearest_token.name.strip_prefix("--color-") else {
+        return false;
+    };
+    color_token_name_is_semantic_alias(token_name)
+        || color_token_name_is_semantic_alias(nearest_name)
+}
+
+fn color_token_name_is_semantic_alias(name: &str) -> bool {
+    const UI_ROLES: &[&str] = &[
+        "accent",
+        "accent-foreground",
+        "background",
+        "border",
+        "card",
+        "card-foreground",
+        "destructive",
+        "destructive-foreground",
+        "foreground",
+        "input",
+        "muted",
+        "muted-foreground",
+        "popover",
+        "popover-foreground",
+        "primary",
+        "primary-foreground",
+        "ring",
+        "secondary",
+        "secondary-foreground",
+    ];
+    UI_ROLES.contains(&name)
+        || name.ends_with("-bg")
+        || name.ends_with("-background")
+        || name.ends_with("-fg")
+        || name.ends_with("-foreground")
+        || name.ends_with("-text")
+        || name.ends_with("-border")
+        || name.ends_with("-surface")
 }
 
 fn styling_finding_severity(
