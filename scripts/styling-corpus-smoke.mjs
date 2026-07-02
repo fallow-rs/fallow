@@ -515,13 +515,7 @@ const renderMarkdownHeader = (results) => [
 ];
 
 const appendStackCoverage = (lines, coverage) => {
-  lines.push(
-    "",
-    "## Stack Coverage",
-    "",
-    "| Stack | Covered |",
-    "| --- | --- |",
-  );
+  lines.push("", "## Stack Coverage", "", "| Stack | Covered |", "| --- | --- |");
   for (const item of coverage) {
     lines.push(`| ${item.stack} | ${item.covered ? "yes" : "no"} |`);
   }

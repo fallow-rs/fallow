@@ -1085,11 +1085,11 @@ enum Command {
         issue_type: Vec<String>,
     },
 
-    /// Audit changed files for dead code, complexity, and duplication.
+    /// Audit changed files for dead code, complexity, duplication, and styling.
     ///
     /// Purpose-built for reviewing AI-generated code and PR quality gates.
-    /// Combines dead-code + complexity + duplication scoped to changed files
-    /// and returns a verdict (pass/warn/fail).
+    /// Combines dead-code + complexity + duplication + styling scoped to
+    /// changed files and returns a verdict (pass/warn/fail).
     ///
     /// `fallow audit` answers "will CI block this?": it gates (exit 1 on a
     /// fail verdict). The `review` alias plus `--brief` answer "where do I
