@@ -10,6 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 description = "Analysis orchestration for fallow codebase intelligence (dead code, duplication, plugins, cross-reference)"
 readme = "../../README.md"
+publish = false
 
 [lib]
 doctest = false

@@ -3,9 +3,8 @@
 ADR-008 makes `fallow-core` an internal implementation crate. Starting with
 2.76.0, the top-level `fallow_core::analyze*` entry points plus the
 detector helpers under `fallow_core::analyze::*` emit deprecation
-warnings. The publish cutoff is now tracked as part of the next
-breaking-compatible cleanup release so it can align with the `fallow-api`
-surface.
+warnings. `fallow-core` is no longer published as a crates.io surface; use the
+published `fallow-api` facade or the typed `fallow-engine` layer instead.
 
 Use the supported embedder API in `fallow_api`. New Rust consumers should call
 the typed `run_*` functions (`run_dead_code`, `run_duplication`,

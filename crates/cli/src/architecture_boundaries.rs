@@ -86,6 +86,19 @@ fn api_and_engine_do_not_depend_on_cli() {
 }
 
 #[test]
+fn core_is_internal_and_not_published() {
+    let manifest = read_manifest("crates/core/Cargo.toml");
+    assert_eq!(
+        manifest
+            .get("package")
+            .and_then(Value::as_table)
+            .and_then(|package| package.get("publish")),
+        Some(&Value::Boolean(false)),
+        "fallow-core must stay internal; publish fallow-engine/fallow-api instead"
+    );
+}
+
+#[test]
 fn api_does_not_depend_on_core_or_cli() {
     assert_no_deps("crates/api/Cargo.toml", &["fallow-core", "fallow-cli"]);
     for source_path in rust_sources_under(["crates/api/src"]) {
