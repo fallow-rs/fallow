@@ -1,6 +1,6 @@
 ---
 name: fallow
-description: Codebase intelligence for JavaScript and TypeScript. Free static layer reports quality, changed-code risk, cleanup opportunities (unused files, exports, types, dependencies), code duplication, circular dependencies, complexity hotspots, architecture boundary violations, feature flag patterns, and opt-in security candidates. Runtime coverage merges production execution data into the same health report for hot-path review, cold-path deletion confidence, and stale-flag evidence, with a single local capture available by default and continuous/cloud runtime monitoring available as an optional mode. 123 framework plugins, zero configuration, sub-second static analysis. Use when asked to analyze code health, audit PR risk, find cleanup opportunities or unused code, detect duplicates, check circular dependencies, audit complexity, check architecture boundaries, detect feature flags, surface security candidates, clean up the codebase, auto-fix issues, merge runtime coverage, or run fallow.
+description: Codebase intelligence for JavaScript, TypeScript, and styling. The static layer reports quality, changed-code risk, cleanup opportunities (unused files, exports, types, dependencies), code duplication, circular dependencies, complexity hotspots, architecture boundary violations, design-system styling drift, feature flag patterns, and opt-in security candidates. Runtime coverage merges production execution data into the same health report for hot-path review, cold-path deletion confidence, and stale-flag evidence, with a single local capture available by default and continuous/cloud runtime monitoring available as an optional mode. 123 framework plugins, zero configuration, sub-second static analysis. Use when asked to analyze code health, audit PR risk, find cleanup opportunities or unused code, detect duplicates, check circular dependencies, audit complexity, check styling consistency, check architecture boundaries, detect feature flags, surface security candidates, clean up the codebase, auto-fix issues, merge runtime coverage, or run fallow.
 license: MIT
 metadata:
   author: Bart Waardenburg
@@ -8,13 +8,16 @@ metadata:
   homepage: https://docs.fallow.tools
 ---
 
-# Fallow: codebase intelligence for JavaScript and TypeScript
-Codebase intelligence for JavaScript and TypeScript. The free static layer reports quality, changed-code risk, cleanup opportunities, circular dependencies, code duplication, complexity hotspots, architecture boundary violations, feature flag patterns, and opt-in security candidates. Runtime coverage merges production execution data into the same `fallow health` report for hot-path review, cold-path deletion confidence, and stale-flag evidence, with a single local capture available by default and continuous/cloud runtime monitoring available as an optional mode. 123 framework plugins, zero configuration, sub-second static analysis.
+# Fallow: codebase intelligence for JavaScript, TypeScript, and styling
+
+Codebase intelligence for JavaScript, TypeScript, and styling. The static layer reports quality, changed-code risk, cleanup opportunities, circular dependencies, code duplication, complexity hotspots, architecture boundary violations, design-system styling drift, feature flag patterns, and opt-in security candidates. Runtime coverage merges production execution data into the same `fallow health` report for hot-path review, cold-path deletion confidence, and stale-flag evidence, with a single local capture available by default and continuous/cloud runtime monitoring available as an optional mode. 123 framework plugins, zero configuration, sub-second static analysis.
+
 ## When to Use
 - Finding cleanup opportunities (unused files, exports, types, enum/class members)
 - Finding unused or unlisted dependencies
 - Detecting code duplication and clones
 - Checking code health and complexity hotspots
+- Checking styling consistency, CSS dead surface, and design-token drift
 - Cleaning up a codebase before a release or refactor
 - Auditing a project for structural issues
 - Setting up CI quality gates or duplication thresholds

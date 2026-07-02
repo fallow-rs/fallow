@@ -1,18 +1,18 @@
 # fallow
 
-**Deterministic codebase intelligence for TypeScript and JavaScript.**
+**Deterministic codebase intelligence for TypeScript, JavaScript, and styling.**
 
-Quality, risk, architecture, dependencies, duplication, and safe cleanup evidence for humans, CI, and agents.
+Quality, risk, architecture, dependencies, duplication, design-system drift, and safe cleanup evidence for humans, CI, and agents.
 
 [![CI](https://github.com/fallow-rs/fallow/actions/workflows/ci.yml/badge.svg)](https://github.com/fallow-rs/fallow/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/fallow.svg)](https://www.npmjs.com/package/fallow)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/fallow-rs/fallow/blob/main/LICENSE)
 
-Fallow turns a JS/TS repository into a trusted quality report: health score, changed-code risk, hotspots, duplication, architecture issues, dependency hygiene, and cleanup opportunities.
+Fallow turns a frontend repository into a trusted quality report: health score, changed-code risk, hotspots, duplication, architecture issues, dependency hygiene, styling consistency, and cleanup opportunities.
 
 It helps you answer: what changed, what got riskier, what should be reviewed, what should be refactored, and what can be safely removed. No AI inside the analyzer. Fallow produces deterministic findings, typed output contracts, and traceable explanations that downstream tools can trust.
 
-Static analysis is free and open source. An optional paid runtime layer (Fallow Runtime) adds production execution evidence. Rust-native, sub-second, 123 framework plugins, no Node.js runtime dependency for analysis. fallow's edge is doing more in one pass: dead code, duplication, dependencies, complexity, architecture, and security in a single tool. For head-to-head timings against [knip](https://knip.dev) and [jscpd](https://github.com/kucherenko/jscpd), see the [benchmarks](https://github.com/fallow-rs/fallow/tree/main/benchmarks): fallow is faster than knip on smaller projects, knip is faster on several larger repos, and jscpd's Rust rewrite is faster for raw duplication scanning.
+Static analysis is open source. An optional runtime layer adds production execution evidence. Rust-native, sub-second, 123 framework plugins, no Node.js runtime dependency for analysis. fallow's edge is doing more in one pass: dead code, duplication, dependencies, complexity, architecture, styling consistency, and security candidates in a single tool. For head-to-head timings against [knip](https://knip.dev) and [jscpd](https://github.com/kucherenko/jscpd), see the [benchmarks](https://github.com/fallow-rs/fallow/tree/main/benchmarks): fallow is faster than knip on smaller projects, knip is faster on several larger repos, and jscpd's Rust rewrite is faster for raw duplication scanning.
 
 ## Installation
 
@@ -59,10 +59,11 @@ npx fallow fix --dry-run         # Preview automatic cleanup
 - **PR risk** -- changed-code analysis with pass / warn / fail verdict and per-finding attribution
 - **Hotspots** -- functions, files, and packages combining complexity, churn, size, and coupling
 - **Duplication** -- clone families across four detection modes (strict, mild, weak, semantic)
+- **Design-system styling** -- CSS, Sass/Less, CSS Modules, Tailwind/shadcn/CVA, StyleX/PandaCSS, vanilla-extract, styled-components, and Emotion consistency signals
 - **Architecture** -- circular dependencies, boundary violations, re-export chains
 - **Dependency hygiene** -- unused, unlisted, unresolved, duplicate, and type-only deps; pnpm catalog and overrides
 - **Cleanup opportunities** -- unused files, exports, types, enum members, class members, stale suppressions
-- **Runtime intelligence (optional, paid)** -- hot paths, cold code, runtime-weighted health, stale flags
+- **Runtime intelligence (optional)** -- hot paths, cold code, runtime-weighted health, stale flags
 
 Cleanup opportunities are findings that look safe to review for removal because no graph evidence supports keeping them. Dead code is one category of cleanup, not the product identity.
 

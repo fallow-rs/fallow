@@ -7,9 +7,9 @@
 </p>
 
 <p align="center">
-  <strong>Deterministic codebase intelligence for TypeScript and JavaScript.</strong><br>
-  Quality, risk, architecture, dependencies, duplication, and safe cleanup evidence for humans, CI, and agents.<br>
-  Static analysis is free and open source. Optional runtime intelligence (Fallow Runtime) adds production execution evidence.<br>
+  <strong>Deterministic codebase intelligence for TypeScript, JavaScript, and styling.</strong><br>
+  Quality, risk, architecture, dependencies, duplication, design-system drift, and safe cleanup evidence for humans, CI, and agents.<br>
+  Static analysis is open source. Optional runtime intelligence (Fallow Runtime) adds production execution evidence.<br>
   <strong>Rust-native. Zero config. Sub-second. No AI inside the analyzer.</strong>
 </p>
 
@@ -26,7 +26,7 @@
 
 ---
 
-Fallow turns a JS/TS repository into a trusted quality report: health score, changed-code risk, hotspots, duplication, architecture issues, dependency hygiene, and cleanup opportunities. It helps you answer:
+Fallow turns a frontend repository into a trusted quality report: health score, changed-code risk, hotspots, duplication, architecture issues, dependency hygiene, styling consistency, and cleanup opportunities. It helps you answer:
 
 - What changed?
 - What got riskier?
@@ -36,7 +36,7 @@ Fallow turns a JS/TS repository into a trusted quality report: health score, cha
 
 Fallow is built for maintainers, CI pipelines, editors, and AI agents that need structured evidence instead of guesses. No AI inside the analyzer. Fallow produces deterministic findings, typed output contracts, and traceable explanations that downstream tools can trust.
 
-Fallow dogfoods its shipped JavaScript and TypeScript surfaces in CI: the VS Code extension and npm wrapper package are analyzed with fallow on every relevant change.
+Fallow dogfoods its shipped JavaScript, TypeScript, and styling surfaces in CI: the VS Code extension, npm wrapper package, and authored CSS-facing fixtures are analyzed with fallow on every relevant change.
 
 ## Quick start
 
@@ -89,9 +89,9 @@ npx fallow dead-code
 
 ## What is Fallow?
 
-Fallow is a codebase intelligence engine for TypeScript and JavaScript projects.
+Fallow is a codebase intelligence engine for TypeScript, JavaScript, and frontend styling projects.
 
-It analyzes your repository as a system, not just as a list of files. It connects static structure, dependency relationships, duplication, complexity, architecture boundaries, package hygiene, and optional runtime evidence into one quality report.
+It analyzes your repository as a system, not just as a list of files. It connects static structure, dependency relationships, duplication, complexity, architecture boundaries, styling consistency, package hygiene, and optional runtime evidence into one quality report.
 
 Fallow helps teams:
 
@@ -402,7 +402,7 @@ Static analysis answers: **what is connected to what?**
 
 Runtime intelligence answers: **what actually ran?**
 
-Fallow Runtime is the optional paid team layer. It uses runtime coverage as the collection engine (V8 dumps via `NODE_V8_COVERAGE=...` and Istanbul `coverage-final.json` files), then merges that evidence into `fallow health` so teams and coding agents can:
+Fallow Runtime uses runtime coverage as the collection engine (V8 dumps via `NODE_V8_COVERAGE=...` and Istanbul `coverage-final.json` files), then merges that evidence into `fallow health` so teams and coding agents can:
 
 - review changes on hot production paths more carefully
 - delete cold code with stronger evidence
