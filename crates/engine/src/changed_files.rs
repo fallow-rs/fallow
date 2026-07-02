@@ -751,6 +751,38 @@ mod tests {
     }
 
     #[test]
+    fn validate_git_ref_rejects_option_like_ref() {
+        assert!(validate_git_ref("--upload-pack=evil").is_err());
+        assert!(validate_git_ref("-flag").is_err());
+    }
+
+    #[test]
+    fn validate_git_ref_allows_reflog_relative_date() {
+        assert!(validate_git_ref("HEAD@{1 week ago}").is_ok());
+    }
+
+    #[test]
+    fn git_command_clears_parent_git_environment() {
+        let command = git_command(Path::new("."), &["status"]);
+        let envs: Vec<_> = command.get_envs().collect();
+
+        for var in AMBIENT_GIT_ENV_VARS {
+            assert!(
+                envs.iter()
+                    .any(|(key, value)| key.to_str() == Some(*var) && value.is_none()),
+                "{var} should be cleared from the command env",
+            );
+        }
+    }
+
+    #[test]
+    fn try_get_changed_files_not_a_repository() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let result = try_get_changed_files(temp.path(), "main");
+        assert!(matches!(result, Err(ChangedFilesError::NotARepository)));
+    }
+
+    #[test]
     fn changed_files_error_describe_matches_core_contract() {
         assert_eq!(
             ChangedFilesError::InvalidRef("bad ref".to_string()).describe(),
