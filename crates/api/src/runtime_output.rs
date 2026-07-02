@@ -62,6 +62,20 @@ pub struct HealthJsonReportInput<'a> {
     pub telemetry_analysis_run_id: Option<&'a str>,
 }
 
+/// Typed programmatic combined output before JSON serialization.
+#[derive(Debug, Clone)]
+pub struct CombinedProgrammaticOutput {
+    pub dead_code: Option<DeadCodeProgrammaticOutput>,
+    pub duplication: Option<DuplicationProgrammaticOutput>,
+    pub health: Option<HealthProgrammaticOutput>,
+    pub root: PathBuf,
+    pub elapsed: std::time::Duration,
+    pub explain: bool,
+    pub next_steps: Vec<NextStep>,
+    pub envelope_mode: RootEnvelopeMode,
+    pub telemetry_analysis_run_id: Option<String>,
+}
+
 /// Typed programmatic dead-code output before JSON serialization.
 ///
 /// This is the API boundary embedders should use when they need access to the

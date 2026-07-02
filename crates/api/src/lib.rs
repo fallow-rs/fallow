@@ -149,25 +149,27 @@ pub use output_contracts::{
 pub use runtime::{
     AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
     BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
-    CircularDependenciesProgrammaticOutput, DeadCodeOutput, DeadCodeProgrammaticOutput,
-    DecisionSurfaceProgrammaticOutput, DuplicationOutput, DuplicationProgrammaticOutput,
-    EngineHealthRunner, FeatureFlagsOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
-    HealthProgrammaticOutput, ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts,
-    ProgrammaticHealthRun, ProgrammaticHealthRunner, TraceCloneOutput,
-    TraceCloneProgrammaticOutput, TraceDependencyOutput, TraceDependencyProgrammaticOutput,
-    TraceExportOutput, TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
-    run_audit, run_boundary_violations, run_circular_dependencies, run_complexity_with_runner,
+    CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput, DeadCodeOutput,
+    DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput, DuplicationOutput,
+    DuplicationProgrammaticOutput, EngineHealthRunner, FeatureFlagsOutput,
+    FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
+    ProgrammaticHealthAnalysis, ProgrammaticHealthNextStepFacts, ProgrammaticHealthRun,
+    ProgrammaticHealthRunner, TraceCloneOutput, TraceCloneProgrammaticOutput,
+    TraceDependencyOutput, TraceDependencyProgrammaticOutput, TraceExportOutput,
+    TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput, run_audit,
+    run_boundary_violations, run_circular_dependencies, run_combined, run_complexity_with_runner,
     run_dead_code, run_decision_surface, run_duplication, run_feature_flags, run_health,
     run_health_with_runner, run_trace_clone, run_trace_dependency, run_trace_export,
     run_trace_file, serialize_health_report_json,
 };
 pub use runtime_json::{
     serialize_audit_programmatic_json, serialize_boundary_violations_programmatic_json,
-    serialize_circular_dependencies_programmatic_json, serialize_dead_code_programmatic_json,
-    serialize_decision_surface_programmatic_json, serialize_duplication_programmatic_json,
-    serialize_feature_flags_programmatic_json, serialize_health_programmatic_json,
-    serialize_trace_clone_programmatic_json, serialize_trace_dependency_programmatic_json,
-    serialize_trace_export_programmatic_json, serialize_trace_file_programmatic_json,
+    serialize_circular_dependencies_programmatic_json, serialize_combined_programmatic_json,
+    serialize_dead_code_programmatic_json, serialize_decision_surface_programmatic_json,
+    serialize_duplication_programmatic_json, serialize_feature_flags_programmatic_json,
+    serialize_health_programmatic_json, serialize_trace_clone_programmatic_json,
+    serialize_trace_dependency_programmatic_json, serialize_trace_export_programmatic_json,
+    serialize_trace_file_programmatic_json,
 };
 pub use sarif_output::{
     annotate_sarif_results, build_duplication_sarif, build_grouped_duplication_sarif,
@@ -317,6 +319,32 @@ pub struct AuditOptions {
     pub include_entry_exports: bool,
     pub runtime_coverage: Option<PathBuf>,
     pub min_invocations_hot: u64,
+}
+
+/// Options for bare combined analysis through the programmatic API.
+#[derive(Debug, Clone)]
+pub struct CombinedOptions {
+    pub analysis: AnalysisOptions,
+    pub dead_code: bool,
+    pub duplication: bool,
+    pub health: bool,
+    pub include_entry_exports: bool,
+    pub duplication_options: DuplicationOptions,
+    pub health_options: ComplexityOptions,
+}
+
+impl Default for CombinedOptions {
+    fn default() -> Self {
+        Self {
+            analysis: AnalysisOptions::default(),
+            dead_code: true,
+            duplication: true,
+            health: true,
+            include_entry_exports: false,
+            duplication_options: DuplicationOptions::default(),
+            health_options: ComplexityOptions::default(),
+        }
+    }
 }
 
 /// Options for changed-code decision-surface analysis.

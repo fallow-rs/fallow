@@ -9,6 +9,7 @@ use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::FxHashSet;
 
 mod audit;
+mod combined;
 mod dead_code;
 mod decision_surface;
 mod duplication;
@@ -18,15 +19,16 @@ mod trace;
 pub use crate::runtime_output::{
     AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,
     BoundaryViolationsProgrammaticOutput, CircularDependenciesOutput,
-    CircularDependenciesProgrammaticOutput, DeadCodeOutput, DeadCodeProgrammaticOutput,
-    DecisionSurfaceProgrammaticOutput, DuplicationOutput, DuplicationProgrammaticOutput,
-    FeatureFlagsOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
-    HealthProgrammaticOutput, TraceCloneOutput, TraceCloneProgrammaticOutput,
-    TraceDependencyOutput, TraceDependencyProgrammaticOutput, TraceExportOutput,
-    TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
+    CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput, DeadCodeOutput,
+    DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput, DuplicationOutput,
+    DuplicationProgrammaticOutput, FeatureFlagsOutput, FeatureFlagsProgrammaticOutput,
+    HealthJsonReportInput, HealthProgrammaticOutput, TraceCloneOutput,
+    TraceCloneProgrammaticOutput, TraceDependencyOutput, TraceDependencyProgrammaticOutput,
+    TraceExportOutput, TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
     serialize_health_report_json,
 };
 pub use audit::run_audit;
+pub use combined::run_combined;
 pub use dead_code::{run_boundary_violations, run_circular_dependencies, run_dead_code};
 pub use decision_surface::run_decision_surface;
 pub use duplication::run_duplication;

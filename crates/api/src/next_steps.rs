@@ -29,6 +29,9 @@ pub fn setup_pointer_applicable(root: &Path) -> bool {
 /// Resolve a concrete `--changed-workspaces` ref for the `scope-workspaces`
 /// next step, or `None` when no workspace or resolvable ref exists.
 pub fn default_workspace_ref(root: &Path) -> Option<String> {
+    if !fallow_engine::churn::is_git_repo(root) {
+        return None;
+    }
     if fallow_config::discover_workspaces(root).is_empty() {
         return None;
     }

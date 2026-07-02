@@ -7,13 +7,14 @@ use fallow_types::output::NextStep;
 use super::*;
 use crate::runtime_json::{
     serialize_boundary_violations_programmatic_json,
-    serialize_circular_dependencies_programmatic_json, serialize_dead_code_programmatic_json,
-    serialize_duplication_programmatic_json, serialize_feature_flags_programmatic_json,
-    serialize_health_programmatic_json,
+    serialize_circular_dependencies_programmatic_json, serialize_combined_programmatic_json,
+    serialize_dead_code_programmatic_json, serialize_duplication_programmatic_json,
+    serialize_feature_flags_programmatic_json, serialize_health_programmatic_json,
 };
 use crate::runtime_output::HEALTH_SCHEMA_VERSION;
 use crate::{
-    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, DuplicationOptions, FeatureFlagsOptions,
+    AnalysisOptions, CombinedOptions, DeadCodeFilters, DeadCodeOptions, DuplicationOptions,
+    FeatureFlagsOptions,
     analysis_context::resolve_workspace_filters,
     duplication_filters::{filter_by_diff, filter_by_workspaces},
 };
@@ -111,6 +112,7 @@ fn runtime_entrypoint_modules_return_typed_outputs_before_json() {
     );
 
     for (module, source) in [
+        ("combined", include_str!("combined.rs")),
         ("dead_code", include_str!("dead_code.rs")),
         ("duplication", include_str!("duplication.rs")),
         ("feature_flags", include_str!("feature_flags.rs")),
@@ -129,6 +131,46 @@ fn runtime_entrypoint_modules_return_typed_outputs_before_json() {
             "runtime::{module} must use typed run_* naming for inner execution"
         );
     }
+}
+
+#[test]
+fn run_combined_returns_typed_sections_before_json() {
+    let project = tempfile::tempdir().expect("project");
+    let root = project.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"combined-api","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("write package");
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export const used = 1;\nconsole.log(used);\n",
+    )
+    .expect("write entry");
+    std::fs::write(root.join("src/unused.ts"), "export const unused = 1;\n").expect("write unused");
+
+    let output = run_combined(&CombinedOptions {
+        analysis: analysis_at(root),
+        health_options: ComplexityOptions {
+            complexity: true,
+            file_scores: true,
+            score: true,
+            ..ComplexityOptions::default()
+        },
+        ..CombinedOptions::default()
+    })
+    .expect("combined output");
+
+    assert!(output.dead_code.is_some());
+    assert!(output.duplication.is_some());
+    assert!(output.health.is_some());
+
+    let json = serialize_combined_programmatic_json(output).expect("combined json");
+    assert_eq!(json["kind"], "combined");
+    assert!(json.get("check").is_some());
+    assert!(json.get("dupes").is_some());
+    assert!(json.get("health").is_some());
 }
 
 #[test]

@@ -11,9 +11,10 @@ use std::process::Command;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_api::{
-    AnalysisOptions, AuditOptions, ComplexityOptions, DeadCodeOptions, DuplicationMode,
-    DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, run_audit,
-    run_circular_dependencies, run_dead_code, run_duplication, run_health_with_runner,
+    AnalysisOptions, AuditOptions, CombinedOptions, ComplexityOptions, DeadCodeOptions,
+    DuplicationMode, DuplicationOptions, EditorAnalysisSession, EngineHealthRunner, run_audit,
+    run_circular_dependencies, run_combined, run_dead_code, run_duplication,
+    run_health_with_runner,
 };
 use fallow_core::{
     cache::{CacheStore, module_to_cached},
@@ -866,6 +867,31 @@ fn run_programmatic_combined(input: &CommandInput) {
     let _ = run_health_with_runner(&health, &EngineHealthRunner).expect("combined health succeeds");
 }
 
+fn run_programmatic_combined_session(input: &CommandInput) {
+    let duplication = DuplicationOptions {
+        mode: Some(DuplicationMode::Mild),
+        min_tokens: Some(35),
+        min_lines: Some(5),
+        min_occurrences: Some(2),
+        ..DuplicationOptions::default()
+    };
+    let health = ComplexityOptions {
+        complexity: true,
+        file_scores: true,
+        score: true,
+        ..ComplexityOptions::default()
+    };
+
+    let options = CombinedOptions {
+        analysis: analysis_options(&input.root, true),
+        duplication_options: duplication,
+        health_options: health,
+        ..CombinedOptions::default()
+    };
+
+    let _ = run_combined(&options).expect("combined succeeds");
+}
+
 fn create_editor_session_workspace_project() -> EditorSessionInput {
     let CommandInput {
         _temp_dir: temp_dir,
@@ -985,6 +1011,16 @@ fn combined_workspace_programmatic_all_sections(c: &mut Criterion) {
         bencher.iter_batched_ref(
             create_workspace_project,
             |input| run_programmatic_combined(input),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn combined_workspace_programmatic_session_reuse(c: &mut Criterion) {
+    c.bench_function("combined_workspace_programmatic_session_reuse", |bencher| {
+        bencher.iter_batched_ref(
+            create_workspace_project,
+            |input| run_programmatic_combined_session(input),
             BatchSize::LargeInput,
         );
     });
@@ -1111,6 +1147,7 @@ criterion_group!(
     audit_clean_workspace_no_changes,
     audit_changed_workspace_new_export,
     combined_workspace_programmatic_all_sections,
+    combined_workspace_programmatic_session_reuse,
     editor_workspace_repeated_session_analysis,
     duplication_next_route_callbacks_repeated_auth,
     circular_dependencies_domain_graph_cycles,

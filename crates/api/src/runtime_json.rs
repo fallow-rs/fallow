@@ -8,10 +8,10 @@ use crate::{
     ProgrammaticError,
     runtime::{
         AuditProgrammaticOutput, BoundaryViolationsProgrammaticOutput,
-        CircularDependenciesProgrammaticOutput, DeadCodeProgrammaticOutput,
-        DecisionSurfaceProgrammaticOutput, DuplicationProgrammaticOutput,
-        FeatureFlagsProgrammaticOutput, HealthJsonReportInput, HealthProgrammaticOutput,
-        TraceCloneProgrammaticOutput, TraceDependencyProgrammaticOutput,
+        CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput,
+        DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput,
+        DuplicationProgrammaticOutput, FeatureFlagsProgrammaticOutput, HealthJsonReportInput,
+        HealthProgrammaticOutput, TraceCloneProgrammaticOutput, TraceDependencyProgrammaticOutput,
         TraceExportProgrammaticOutput, TraceFileProgrammaticOutput, serialize_health_report_json,
     },
 };
@@ -27,6 +27,53 @@ use std::path::Path;
 use std::time::Duration;
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
+
+/// Serialize typed combined output into the stable JSON compatibility contract.
+///
+/// # Errors
+///
+/// Returns a structured error if one of the combined sections cannot serialize.
+pub fn serialize_combined_programmatic_json(
+    output: CombinedProgrammaticOutput,
+) -> ProgrammaticResult<serde_json::Value> {
+    let CombinedProgrammaticOutput {
+        dead_code,
+        duplication,
+        health,
+        root,
+        elapsed,
+        explain,
+        next_steps,
+        envelope_mode,
+        telemetry_analysis_run_id,
+    } = output;
+    crate::serialize_combined_json(crate::CombinedJsonOutputInput {
+        check: dead_code
+            .as_ref()
+            .map(|dead_code| crate::CombinedCheckJsonSection {
+                results: &dead_code.output.results,
+                root: &dead_code.root,
+                elapsed: Duration::from_millis(dead_code.output.elapsed_ms.0),
+                config_fixable: false,
+                extras: crate::CheckJsonExtraOutputs::default(),
+            }),
+        dupes: duplication
+            .as_ref()
+            .map(|duplication| &duplication.output.report),
+        health: health.as_ref().map(|health| &health.report),
+        root: &root,
+        elapsed,
+        explain,
+        next_steps,
+        envelope_mode,
+        telemetry_analysis_run_id: telemetry_analysis_run_id.as_deref(),
+    })
+    .map_err(|err| {
+        ProgrammaticError::new(format!("failed to serialize combined report: {err}"), 2)
+            .with_code("FALLOW_SERIALIZE_COMBINED_REPORT")
+            .with_context("combined")
+    })
+}
 
 /// Serialize typed decision-surface output into the stable JSON contract.
 ///
