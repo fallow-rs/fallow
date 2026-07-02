@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { remoteBranchRefspec } from "./styling-pr-smoke.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const SCRIPT_PATH = resolve(SCRIPT_DIR, "styling-pr-smoke.mjs");
@@ -43,4 +44,9 @@ test("styling PR smoke rejects mutually exclusive modes", () => {
 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /--run-only and --select-only are mutually exclusive/);
+});
+
+test("styling PR smoke fetches base refs into origin remote tracking branches", () => {
+  assert.equal(remoteBranchRefspec("main"), "refs/heads/main:refs/remotes/origin/main");
+  assert.equal(remoteBranchRefspec("master"), "refs/heads/master:refs/remotes/origin/master");
 });

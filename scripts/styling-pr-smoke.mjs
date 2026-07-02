@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const DEFAULT_OUT_DIR = join(REPO_ROOT, "target", "styling-pr-smoke");
-const DEFAULT_CLONE_DEPTH = 80;
+const DEFAULT_CLONE_DEPTH = 1000;
 const DEFAULT_MAX_PRS = 24;
 const DEFAULT_PRS_PER_REPO = 2;
 const DEFAULT_PR_LOOKBACK = 15;
@@ -290,6 +290,15 @@ const selectPrs = (opts) => {
 
 const slug = (repo) => repo.replace("/", "__");
 
+export const remoteBranchRefspec = (branch) => `refs/heads/${branch}:refs/remotes/origin/${branch}`;
+
+const fetchRemoteBranch = (dir, branch, opts) =>
+  run(
+    "git",
+    ["-C", dir, "fetch", "origin", remoteBranchRefspec(branch), "--depth", String(opts.cloneDepth)],
+    { timeout: 120_000 },
+  );
+
 const ensureClone = (repo, baseRef, opts) => {
   const dir = join(opts.cacheDir, slug(repo));
   if (!existsSync(join(dir, ".git"))) {
@@ -311,19 +320,14 @@ const ensureClone = (repo, baseRef, opts) => {
     if (clone.status !== 0) {
       return { ok: false, dir, error: (clone.stderr || clone.stdout || "clone failed").trim() };
     }
-  } else {
-    const fetchBase = run(
-      "git",
-      ["-C", dir, "fetch", "origin", baseRef, "--depth", String(opts.cloneDepth)],
-      { timeout: 120_000 },
-    );
-    if (fetchBase.status !== 0) {
-      return {
-        ok: false,
-        dir,
-        error: (fetchBase.stderr || fetchBase.stdout || "fetch base failed").trim(),
-      };
-    }
+  }
+  const fetchBase = fetchRemoteBranch(dir, baseRef, opts);
+  if (fetchBase.status !== 0) {
+    return {
+      ok: false,
+      dir,
+      error: (fetchBase.stderr || fetchBase.stdout || "fetch base failed").trim(),
+    };
   }
   return { ok: true, dir };
 };
@@ -573,9 +577,11 @@ const main = () => {
   console.log(JSON.stringify({ count: report.count, valid_audits: report.valid_audits }, null, 2));
 };
 
-try {
-  main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
