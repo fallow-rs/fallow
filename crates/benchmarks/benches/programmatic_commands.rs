@@ -24,6 +24,8 @@ use fallow_core::{
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
+const LARGE_AUDIT_PACKAGE_COUNT: usize = 8;
+const LARGE_AUDIT_MODULES_PER_PACKAGE: usize = 20;
 
 struct CommandInput {
     _temp_dir: TempDir,
@@ -833,6 +835,158 @@ export const introducedUnusedHelper = (): string => "unused";
     input
 }
 
+fn create_large_audit_project(changed: bool) -> CommandInput {
+    let temp_dir = TempDir::new().unwrap();
+    let root = temp_dir.path().to_path_buf();
+
+    write_file(
+        &root,
+        "package.json",
+        r#"{
+  "name": "bench-large-audit-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "workspaces": ["packages/*"],
+  "dependencies": {}
+}"#,
+    );
+    write_file(
+        &root,
+        "pnpm-workspace.yaml",
+        r#"
+packages:
+  - "packages/*"
+"#,
+    );
+
+    for package_index in 0..LARGE_AUDIT_PACKAGE_COUNT {
+        let package_name = format!("@bench/large-{package_index}");
+        let dependency_block = if package_index == 0 {
+            "{}".to_string()
+        } else {
+            format!(r#"{{"@bench/large-{}":"workspace:*"}}"#, package_index - 1)
+        };
+        write_file(
+            &root,
+            &format!("packages/pkg-{package_index}/package.json"),
+            format!(
+                r#"{{"name":"{package_name}","main":"src/index.ts","dependencies":{dependency_block}}}"#
+            ),
+        );
+
+        let mut index_source = String::new();
+        if package_index > 0 {
+            writeln!(
+                &mut index_source,
+                r#"import {{ package{}Summary }} from "@bench/large-{}";"#,
+                package_index - 1,
+                package_index - 1
+            )
+            .unwrap();
+        }
+        for module_index in 0..LARGE_AUDIT_MODULES_PER_PACKAGE {
+            writeln!(
+                &mut index_source,
+                r#"export {{ value{package_index}_{module_index}, compute{package_index}_{module_index} }} from "./module_{module_index}";"#
+            )
+            .unwrap();
+        }
+        writeln!(
+            &mut index_source,
+            "export const package{package_index}Summary = (): string => {{"
+        )
+        .unwrap();
+        if package_index == 0 {
+            writeln!(&mut index_source, r#"  return "pkg-0";"#).unwrap();
+        } else {
+            writeln!(
+                &mut index_source,
+                r"  return `${{package{}Summary()}}:pkg-{package_index}`;",
+                package_index - 1
+            )
+            .unwrap();
+        }
+        writeln!(&mut index_source, "}};").unwrap();
+        write_file(
+            &root,
+            &format!("packages/pkg-{package_index}/src/index.ts"),
+            index_source,
+        );
+
+        for module_index in 0..LARGE_AUDIT_MODULES_PER_PACKAGE {
+            write_file(
+                &root,
+                &format!("packages/pkg-{package_index}/src/module_{module_index}.ts"),
+                format!(
+                    r#"
+export const value{package_index}_{module_index} = "pkg-{package_index}-{module_index}";
+
+export const compute{package_index}_{module_index} = (seed: string): string => {{
+  const normalized = seed.trim().toLowerCase();
+  return `${{normalized}}:${{value{package_index}_{module_index}}}`;
+}};
+
+export const unusedInternal{package_index}_{module_index} = (): string => "unused";
+"#
+                ),
+            );
+        }
+    }
+
+    write_file(
+        &root,
+        "packages/app/package.json",
+        r#"{"name":"@bench/large-app","main":"src/index.ts","dependencies":{"@bench/large-7":"workspace:*"}}"#,
+    );
+    write_file(
+        &root,
+        "packages/app/src/index.ts",
+        r#"
+import { package7Summary } from "@bench/large-7";
+
+export const render = (): string => package7Summary();
+"#,
+    );
+
+    let input = CommandInput {
+        _temp_dir: temp_dir,
+        root,
+    };
+
+    run_git(&input.root, &["init", "-q"]);
+    run_git(&input.root, &["add", "."]);
+    run_git(
+        &input.root,
+        &[
+            "-c",
+            "user.name=Fallow Bench",
+            "-c",
+            "user.email=bench@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "initial",
+        ],
+    );
+
+    if changed {
+        write_file(
+            &input.root,
+            "packages/pkg-7/src/introduced.ts",
+            r#"
+export const introducedLargeWorkspaceHelper = (): string => "unused";
+"#,
+        );
+        let index = input.root.join("packages/pkg-7/src/index.ts");
+        let mut source = fs::read_to_string(&index).expect("large workspace index is readable");
+        source.push_str("\nexport { introducedLargeWorkspaceHelper } from \"./introduced\";\n");
+        fs::write(index, source).expect("large workspace index is writable");
+    }
+
+    input
+}
+
 fn audit_options(root: &Path) -> AuditOptions {
     AuditOptions {
         analysis: analysis_options(root, true),
@@ -1006,6 +1160,16 @@ fn audit_changed_workspace_new_export(c: &mut Criterion) {
     });
 }
 
+fn audit_large_workspace_changed_export(c: &mut Criterion) {
+    c.bench_function("audit_large_workspace_changed_export", |bencher| {
+        bencher.iter_batched_ref(
+            || create_large_audit_project(true),
+            |input| run_audit(&audit_options(&input.root)),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 fn combined_workspace_programmatic_all_sections(c: &mut Criterion) {
     c.bench_function("combined_workspace_programmatic_all_sections", |bencher| {
         bencher.iter_batched_ref(
@@ -1146,6 +1310,7 @@ criterion_group!(
     extract_workspace_monorepo_warm_hash_hit,
     audit_clean_workspace_no_changes,
     audit_changed_workspace_new_export,
+    audit_large_workspace_changed_export,
     combined_workspace_programmatic_all_sections,
     combined_workspace_programmatic_session_reuse,
     editor_workspace_repeated_session_analysis,
