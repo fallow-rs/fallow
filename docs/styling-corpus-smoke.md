@@ -18,7 +18,8 @@ It runs these commands per project:
 
 - `fallow health --css`
 - `fallow health --css --production`
-- `fallow audit --css-deep --base HEAD~1`
+- `fallow audit --css-deep --base HEAD~1` (explicitly pins the default deep
+  styling path, useful when a project config sets `audit.cssDeep: false`)
 
 The corpus covers Tailwind, StyleX, vanilla-extract, PandaCSS,
 styled-components, Emotion, shadcn/CVA, CSS Modules, Sass, Less, Vue, Svelte,
@@ -30,6 +31,12 @@ authored stylesheet shape it can see, but it does not fully expand mixin loops,
 conditionals, or build-time importer state. Treat Sass/Less findings as styling
 consistency signals, not proof that a preprocessor compiler would emit the same
 selector graph.
+
+Before a release that changes styling detection, read the top findings for
+`css-token-drift` sub-kinds, especially `raw-style-value`. Raw style values are
+low-confidence verify-first candidates by design: the smoke result should prove
+they point at plausible design-system drift, not random one-off CSS that an agent
+would churn.
 
 Useful focused runs:
 

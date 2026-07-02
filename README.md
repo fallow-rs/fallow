@@ -170,7 +170,7 @@ A compact health score for the current state of the repository, with targets for
 
 ### PR risk
 
-Changed-code analysis (`fallow audit`) that highlights files and symbols most likely to need review before merge. Returns a verdict (pass / warn / fail) and an attribution split between findings the PR introduced and pre-existing ones.
+Changed-code analysis (`fallow audit`) that highlights files and symbols most likely to need review before merge, including styling drift in CSS and CSS-in-JS. Returns a verdict (pass / warn / fail) and an attribution split between findings the PR introduced and pre-existing ones.
 
 ### Hotspots
 
@@ -179,6 +179,10 @@ Functions, files, and packages that combine complexity, churn, size, coupling, a
 ### Duplication
 
 Clone families and duplicated implementation patterns that increase maintenance cost. Four detection modes from exact token match to semantic clones with renamed variables. Covers JS, TS, CSS-family stylesheets, Vue and Svelte template and style regions, and Astro template and style regions.
+
+### Design-system styling
+
+Styling analytics for CSS, Sass/Less, CSS Modules, Tailwind/shadcn/CVA, StyleX/PandaCSS, vanilla-extract, styled-components, and Emotion. `fallow audit` surfaces token drift, raw one-off style values, near-duplicate tokens, dead styling surface, broken references, duplicate declaration blocks, and selector complexity in the same JSON stream as JS/TS findings. Fallow does not replace stylelint or a formatter: it leaves property syntax, value syntax, vendor prefixes, quotes, whitespace, and declaration ordering to dedicated CSS tooling.
 
 ### Architecture
 
@@ -269,7 +273,7 @@ Fallow answers those questions with deterministic, graph-based analysis and stru
 
 ```bash
 fallow                       # Full codebase analysis: cleanup + duplication + health
-fallow audit                 # Audit changed files (verdict: pass/warn/fail)
+fallow audit                 # Audit changed files, including styling (verdict: pass/warn/fail)
 fallow review                # Advisory review brief over changed files (always exits 0)
 fallow decision-surface      # Ranked structural decisions a change embeds
 fallow trace src/utils.ts:formatDate  # Symbol-level call chains (callers up, callees down)
@@ -447,7 +451,7 @@ Read more: [Static vs runtime intelligence](https://docs.fallow.tools/explanatio
 
 ## Audit
 
-PR risk gate for human and AI-generated code. Combines changed-file cleanup findings from the dead-code pass with changed-file complexity and duplication findings, then emits a verdict.
+PR risk gate for human and AI-generated code. Combines changed-file cleanup findings from the dead-code pass with changed-file complexity, duplication, and styling findings, then emits a verdict.
 
 ```bash
 fallow audit                              # Auto-detects base branch
@@ -455,6 +459,8 @@ fallow audit --base main                  # Explicit base ref
 fallow audit --base HEAD~3               # Audit last 3 commits
 fallow audit --production-health          # Production health, full dead-code/dupes
 fallow audit --coverage artifacts/coverage-final.json --coverage-root /home/runner/work/myapp
+fallow audit --no-css                     # Disable audit styling analytics
+fallow audit --no-css-deep                # Keep local styling checks, skip project-wide reachability
 fallow audit --gate all                   # Fail on inherited findings too
 fallow audit --format json                # Structured output with verdict
 ```
@@ -462,6 +468,8 @@ fallow audit --format json                # Structured output with verdict
 Returns a verdict: **pass** (exit 0), **warn** (exit 0, warn-severity only), or **fail** (exit 1). By default, audit compares the current tree with the base ref and gates only findings introduced by the changeset; inherited findings are counted in JSON `attribution`, individual issue objects get `introduced: true|false`, and inherited findings are shown as context. Set `--gate all` or `audit.gate: "all"` to fail on every finding in changed files without running the extra base-snapshot attribution pass.
 
 `audit` forwards `--coverage` and `--coverage-root` to its health sub-analysis for exact Istanbul-backed CRAP scoring. Relative `--coverage` paths resolve against `--root`; `--coverage-root` must be an absolute prefix from the coverage data. `FALLOW_COVERAGE` and `FALLOW_COVERAGE_ROOT` are used as fallbacks when the corresponding CLI flags are omitted. Health JSON includes `coverage_source` on CRAP findings and `summary.coverage_source_consistency` when those findings use a uniform source or mix Istanbul data with estimates.
+
+Styling analytics are on by default in audit. The default deep pass scans the whole styling surface, then narrows cross-file findings back to changed anchors so agents see design-token drift, dead styling surface, broken references, and raw one-off values while reviewing a PR. Set `audit.css: false` or pass `--no-css` to disable styling entirely. Set `audit.cssDeep: false` or pass `--no-css-deep` to keep the local CSS checks but skip project-wide reachability. Styling actions are report-only (`auto_fixable: false`): Fallow tells the agent what to inspect, but the agent still verifies and edits manually.
 
 Audit caches base snapshots under `.fallow/cache/` by default and may keep a SHA-scoped temporary git worktree for reuse across runs against the same base ref. Set `cache.dir` or `FALLOW_CACHE_DIR` to relocate the persistent analysis cache; relative paths resolve from the project root. When the current checkout has `node_modules`, audit links it into the base worktree so tsconfig `extends` chains into installed packages and path aliases resolve like the working tree. Transient worktrees are removed on normal exit. Use `--no-cache` to disable snapshot and reusable-worktree caching; if a process is force-killed, run `git worktree prune` to clean up stale `.git/worktrees/fallow-audit-base-*` entries.
 
@@ -967,7 +975,7 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 | **Testing** | Vitest, Jest, Playwright, Cypress, Storybook, Stryker, Mocha, Ava, tap, tsd |
 | **CI/CD & Release** | Danger, Commitlint, Commitizen, Semantic Release |
 | **Deployment** | Vercel, Wrangler, Sentry, OpenNext Cloudflare |
-| **CSS** | Tailwind, PostCSS, UnoCSS, PandaCSS |
+| **CSS & Styling** | Tailwind, shadcn/CVA, PostCSS, UnoCSS, PandaCSS, StyleX, vanilla-extract, styled-components, Emotion, CSS Modules, Sass/Less |
 | **Databases & Backend** | Prisma, Drizzle, Knex, TypeORM, Kysely, Convex |
 | **Blockchain** | Hardhat |
 | **Monorepos** | Turborepo, Nx, Changesets, Syncpack, pnpm |

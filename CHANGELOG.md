@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discussions skip clean zero-comment envelopes, so dead-code-only jobs no
   longer leave "0 inline findings" timeline noise.
 
+- **`fallow audit` now includes styling findings by default.**
+  Audit now runs CSS and CSS-in-JS analytics in the normal PR gate and emits
+  verdict-neutral styling findings for design-system drift, duplicate CSS
+  blocks, selector complexity, dead styling surface, broken references,
+  near-duplicate theme tokens, and raw one-off values. The default deep pass
+  scans the project-wide styling surface and narrows cross-file results back to
+  changed anchors, so agents see styling consistency feedback in the same JSON
+  stream as JS/TS findings. Use `--no-css` / `audit.css: false` to disable
+  styling entirely, or `--no-css-deep` / `audit.cssDeep: false` to keep local
+  styling checks while skipping project-wide reachability. Styling actions stay
+  report-only (`auto_fixable: false`); agents must verify and edit manually.
+
 - **Audit can now flag introduced raw CSS values on design-system axes.**
   `fallow audit` now turns located raw CSS declaration values for colors,
   font sizes, line heights, radii, and shadows into
