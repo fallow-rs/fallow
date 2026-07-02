@@ -64,6 +64,45 @@ pub struct IssueFilters {
 }
 
 impl IssueFilters {
+    pub fn enable_cli_filter_flag(&mut self, flag: &str) -> bool {
+        match flag {
+            "--unused-files" => self.unused_files = true,
+            "--unused-exports" => self.unused_exports = true,
+            "--unused-deps" => self.unused_deps = true,
+            "--unused-types" => self.unused_types = true,
+            "--private-type-leaks" => self.private_type_leaks = true,
+            "--unused-enum-members" => self.unused_enum_members = true,
+            "--unused-class-members" => self.unused_class_members = true,
+            "--unused-store-members" => self.unused_store_members = true,
+            "--unprovided-injects" => self.unprovided_injects = true,
+            "--unrendered-components" => self.unrendered_components = true,
+            "--unused-component-props" => self.unused_component_props = true,
+            "--unused-component-emits" => self.unused_component_emits = true,
+            "--unused-component-inputs" => self.unused_component_inputs = true,
+            "--unused-component-outputs" => self.unused_component_outputs = true,
+            "--unused-svelte-events" => self.unused_svelte_events = true,
+            "--unused-server-actions" => self.unused_server_actions = true,
+            "--unused-load-data-keys" => self.unused_load_data_keys = true,
+            "--unresolved-imports" => self.unresolved_imports = true,
+            "--unlisted-deps" => self.unlisted_deps = true,
+            "--duplicate-exports" => self.duplicate_exports = true,
+            "--circular-deps" => self.circular_deps = true,
+            "--re-export-cycles" => self.re_export_cycles = true,
+            "--boundary-violations" => self.boundary_violations = true,
+            "--policy-violations" => self.policy_violations = true,
+            "--stale-suppressions" => self.stale_suppressions = true,
+            "--unused-catalog-entries" => self.unused_catalog_entries = true,
+            "--empty-catalog-groups" => self.empty_catalog_groups = true,
+            "--unresolved-catalog-references" => self.unresolved_catalog_references = true,
+            "--unused-dependency-overrides" => self.unused_dependency_overrides = true,
+            "--misconfigured-dependency-overrides" => {
+                self.misconfigured_dependency_overrides = true;
+            }
+            _ => return false,
+        }
+        true
+    }
+
     pub const fn any_active(&self) -> bool {
         self.unused_files
             || self.unused_exports
@@ -1207,25 +1246,17 @@ mod tests {
     }
 
     #[test]
-    fn each_filter_flag_registers_as_active() {
-        let flags: Vec<fn(&mut IssueFilters)> = vec![
-            |f| f.unused_files = true,
-            |f| f.unused_exports = true,
-            |f| f.unused_deps = true,
-            |f| f.unused_types = true,
-            |f| f.unused_enum_members = true,
-            |f| f.unused_class_members = true,
-            |f| f.unresolved_imports = true,
-            |f| f.unlisted_deps = true,
-            |f| f.duplicate_exports = true,
-            |f| f.circular_deps = true,
-            |f| f.re_export_cycles = true,
-            |f| f.boundary_violations = true,
-        ];
-        for setter in flags {
+    fn every_registry_filter_flag_registers_as_active() {
+        for flag in fallow_types::issue_meta::DEAD_CODE_FILTER_FLAGS.iter() {
             let mut f = no_filters();
-            setter(&mut f);
-            assert!(f.any_active());
+            assert!(
+                f.enable_cli_filter_flag(flag),
+                "registry filter flag {flag} has no CLI IssueFilters mapping"
+            );
+            assert!(
+                f.any_active(),
+                "registry filter flag {flag} stayed inactive"
+            );
         }
     }
 
