@@ -57,6 +57,7 @@ mod path_util;
 mod rayon_pool;
 mod regression;
 mod report;
+mod rule_pack;
 mod runtime_support;
 mod schema;
 mod security;
@@ -756,6 +757,12 @@ enum Command {
 
     /// Print the JSON Schema for rule pack files
     RulePackSchema,
+
+    /// Manage declarative rule packs (policy-as-code)
+    RulePack {
+        #[command(subcommand)]
+        subcommand: RulePackCli,
+    },
 
     /// Show the resolved config and which config file was loaded
     ///
@@ -2045,6 +2052,39 @@ enum CiCli {
     },
 }
 
+#[derive(Subcommand)]
+enum RulePackCli {
+    /// Scaffold a new rule pack file and wire it into the config
+    Init {
+        /// Pack name (default: the template name, or "team-policy")
+        name: Option<String>,
+
+        /// Template: starter, ai-safe-repo, side-effect-free-domain, clean-architecture, next-app-router
+        #[arg(long, default_value = "starter")]
+        template: String,
+
+        /// Directory for the pack file, relative to the project root
+        #[arg(long, default_value = "rule-packs")]
+        dir: String,
+
+        /// Only write the pack file; do not modify the config
+        #[arg(long)]
+        no_config: bool,
+    },
+
+    /// List configured rule packs and their rules
+    List,
+
+    /// Evaluate a pack (or all configured packs) against this project and print matches
+    Test {
+        /// Path to a pack file to test in isolation (default: all configured packs)
+        pack: Option<PathBuf>,
+    },
+
+    /// Print the JSON Schema for rule pack files
+    Schema,
+}
+
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum CiProviderArg {
     Github,
@@ -2673,6 +2713,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::ConfigSchema => init::run_config_schema(),
         Command::PluginSchema => init::run_plugin_schema(),
         Command::RulePackSchema => init::run_rule_pack_schema(),
+        Command::RulePack { subcommand } => dispatch_rule_pack_command(dispatch, subcommand),
         Command::CiTemplate { subcommand } => dispatch_ci_template_command(subcommand),
         Command::Config { path } => config::run_config(root, cli.config.as_deref(), path, output),
         list @ (Command::Workspaces | Command::List { .. }) => {
@@ -3485,6 +3526,39 @@ fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) ->
         explain: cli.explain,
         top,
     })
+}
+
+fn dispatch_rule_pack_command(dispatch: &DispatchContext<'_>, subcommand: RulePackCli) -> ExitCode {
+    let ctx = rule_pack::RulePackContext {
+        root: dispatch.root,
+        config_path: &dispatch.cli.config,
+        output: dispatch.output,
+        quiet: dispatch.quiet,
+        no_cache: dispatch.cli.no_cache,
+        threads: Some(dispatch.threads),
+    };
+    rule_pack::run(&map_rule_pack_subcommand(subcommand), &ctx)
+}
+
+fn map_rule_pack_subcommand(subcommand: RulePackCli) -> rule_pack::RulePackSubcommand {
+    match subcommand {
+        RulePackCli::Init {
+            name,
+            template,
+            dir,
+            no_config,
+        } => rule_pack::RulePackSubcommand::Init(rule_pack::InitArgs {
+            name,
+            template,
+            dir,
+            no_config,
+        }),
+        RulePackCli::List => rule_pack::RulePackSubcommand::List,
+        RulePackCli::Test { pack } => {
+            rule_pack::RulePackSubcommand::Test(rule_pack::TestArgs { pack })
+        }
+        RulePackCli::Schema => rule_pack::RulePackSubcommand::Schema,
+    }
 }
 
 fn map_license_subcommand(sub: LicenseCli) -> license::LicenseSubcommand {

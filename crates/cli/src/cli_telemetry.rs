@@ -250,6 +250,7 @@ pub fn telemetry_workflow_for_command(
             | Command::ConfigSchema
             | Command::PluginSchema
             | Command::RulePackSchema
+            | Command::RulePack { .. }
             | Command::Config { .. }
             | Command::CiTemplate { .. }
             | Command::Migrate { .. }
