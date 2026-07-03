@@ -28,7 +28,8 @@ use fallow_types::results::{
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 
-use super::{LineOffsetsMap, byte_offset_to_line_col, catalogue::catalogue};
+use super::{LineOffsetsMap, byte_offset_to_line_col};
+use fallow_security::catalogue;
 
 const UNUSED_FILE_GUIDANCE: &str = "This sink sits in a file fallow also reports as unused. Verify the dead-code finding, then delete the file instead of hardening the sink.";
 const UNUSED_EXPORT_GUIDANCE: &str = "This sink sits on an export fallow also reports as unused. Verify the dead-code finding, then remove the export instead of hardening the sink.";

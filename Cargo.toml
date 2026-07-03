@@ -21,6 +21,7 @@ fallow-extract = { version = "2.104.0", path = "crates/extract" }
 fallow-engine = { version = "2.104.0", path = "crates/engine" }
 fallow-graph = { version = "2.104.0", path = "crates/graph" }
 fallow-output = { version = "2.104.0", path = "crates/output" }
+fallow-security = { version = "2.104.0", path = "crates/security" }
 fallow-types = { version = "2.104.0", path = "crates/types" }
 
 # Parsing & analysis

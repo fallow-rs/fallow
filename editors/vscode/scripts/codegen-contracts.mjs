@@ -52,13 +52,12 @@ const BANNER = `/**
  *   1. Edit the Rust struct in \`crates/types/src/results.rs\` (or the
  *      duplicates crate at \`crates/core/src/duplicates/types.rs\`). The Rust
  *      side is the runtime source of truth for the JSON output.
- *   2. Update \`docs/output-schema.json\` to match. The schema is
- *      hand-maintained against the Rust structs; the drift-guard test in
- *      \`crates/cli/src/report/json.rs\` enforces only a subset of the
- *      contract (the \`HealthFindingAction\` enum). Field-level drift between
- *      Rust and the schema is currently caught by code review.
+ *   2. Regenerate \`docs/output-schema.json\` with
+ *      \`cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit\`.
+ *      The schema-emit drift tests compare the committed schema against the
+ *      Rust-derived definitions.
  *   3. Run \`pnpm --filter fallow-vscode codegen:contracts\` from anywhere.
- *   4. Commit both regenerated files alongside the schema edit.
+ *   4. Commit the regenerated schema and generated contract files together.
  *
  * CI runs \`pnpm --filter fallow-vscode check:contracts\` which fails when
  * either committed file disagrees with what regen would produce.
@@ -459,43 +458,64 @@ function deadCodeAliasesFromCapabilitySchema(schema) {
   return { singles, unions };
 }
 
-function issueRegistryFromCapabilitySchema(schema) {
+function registryIndex(issue) {
+  return Number.isInteger(issue.registry_index)
+    ? issue.registry_index
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function issueTypeRow(issue) {
+  if (issue.lsp !== true || typeof issue.config_key !== "string") {
+    return null;
+  }
+  return {
+    key: issue.config_key,
+    registryIndex: registryIndex(issue),
+  };
+}
+
+function hasDiagnosticCategoryFields(issue) {
+  return typeof issue.id === "string" && typeof issue.label === "string";
+}
+
+function diagnosticCategoryRow(issue, seenDiagnosticCodes) {
+  if (issue.lsp !== true || !hasDiagnosticCategoryFields(issue)) {
+    return null;
+  }
+  if (seenDiagnosticCodes.has(issue.id)) {
+    return null;
+  }
+  seenDiagnosticCodes.add(issue.id);
+  return {
+    code: issue.id,
+    label: issue.label,
+    registryIndex: registryIndex(issue),
+  };
+}
+
+function pushIfPresent(rows, row) {
+  if (row) {
+    rows.push(row);
+  }
+}
+
+function collectIssueRegistryRows(schema) {
   const issueTypeRows = [];
-  const issueTypeAliases = {};
   const diagnosticCategories = [];
   const seenDiagnosticCodes = new Set();
 
   for (const issue of schema.issue_types ?? []) {
-    if (issue.lsp === true && typeof issue.config_key === "string") {
-      issueTypeRows.push({
-        key: issue.config_key,
-        registryIndex: Number.isInteger(issue.registry_index)
-          ? issue.registry_index
-          : Number.MAX_SAFE_INTEGER,
-      });
-      for (const alias of [issue.id, ...(Array.isArray(issue.aliases) ? issue.aliases : [])]) {
-        if (typeof alias === "string" && alias !== issue.config_key) {
-          issueTypeAliases[alias] = issue.config_key;
-        }
-      }
-    }
-    if (
-      issue.lsp === true &&
-      typeof issue.id === "string" &&
-      typeof issue.label === "string" &&
-      !seenDiagnosticCodes.has(issue.id)
-    ) {
-      seenDiagnosticCodes.add(issue.id);
-      diagnosticCategories.push({
-        code: issue.id,
-        label: issue.label,
-        registryIndex: Number.isInteger(issue.registry_index)
-          ? issue.registry_index
-          : Number.MAX_SAFE_INTEGER,
-      });
-    }
+    pushIfPresent(issueTypeRows, issueTypeRow(issue));
+    pushIfPresent(
+      diagnosticCategories,
+      diagnosticCategoryRow(issue, seenDiagnosticCodes),
+    );
   }
 
+  return { issueTypeRows, diagnosticCategories };
+}
+
+function buildIssueTypeDefaults(issueTypeRows) {
   const seenIssueTypeKeys = new Set();
   const issueTypeDefaults = {};
   for (const row of issueTypeRows.sort(
@@ -506,27 +526,75 @@ function issueRegistryFromCapabilitySchema(schema) {
       issueTypeDefaults[row.key] = true;
     }
   }
-  diagnosticCategories.sort(
-    (a, b) => a.registryIndex - b.registryIndex || a.code.localeCompare(b.code),
-  );
-  const publicDiagnosticCategories = diagnosticCategories.map(({ code, label }) => ({
-    code,
-    label,
-  }));
+  return { issueTypeDefaults, seenIssueTypeKeys };
+}
 
+function configKeyForIssueAliases(issue, seenIssueTypeKeys) {
+  const configKey = issue.config_key;
+  if (typeof configKey !== "string" || !seenIssueTypeKeys.has(configKey)) {
+    return null;
+  }
+  return configKey;
+}
+
+function aliasesForIssue(issue) {
+  return [issue.id, ...(Array.isArray(issue.aliases) ? issue.aliases : [])];
+}
+
+function addIssueTypeAliases(issueTypeAliases, configKey, aliases) {
+  for (const alias of aliases) {
+    if (typeof alias === "string" && alias !== configKey) {
+      issueTypeAliases[alias] = configKey;
+    }
+  }
+}
+
+function sortedRecord(record) {
+  return Object.fromEntries(
+    Object.entries(record).sort(([a], [b]) => a.localeCompare(b)),
+  );
+}
+
+function buildIssueTypeAliases(schema, seenIssueTypeKeys) {
+  const issueTypeAliases = {};
+  for (const issue of schema.issue_types ?? []) {
+    const configKey = configKeyForIssueAliases(issue, seenIssueTypeKeys);
+    if (configKey) {
+      addIssueTypeAliases(issueTypeAliases, configKey, aliasesForIssue(issue));
+    }
+  }
+  return sortedRecord(issueTypeAliases);
+}
+
+function publicDiagnosticCategories(diagnosticCategories) {
+  return diagnosticCategories
+    .sort(
+    (a, b) => a.registryIndex - b.registryIndex || a.code.localeCompare(b.code),
+    )
+    .map(({ code, label }) => ({ code, label }));
+}
+
+function assertIssueRegistryHasRows(issueTypeDefaults, diagnosticCategories) {
   if (Object.keys(issueTypeDefaults).length === 0) {
     throw new Error("No IssueKindMeta-derived config keys found in fallow schema");
   }
-  if (publicDiagnosticCategories.length === 0) {
+  if (diagnosticCategories.length === 0) {
     throw new Error("No IssueKindMeta-derived LSP diagnostic categories found in fallow schema");
   }
+}
+
+function issueRegistryFromCapabilitySchema(schema) {
+  const { issueTypeRows, diagnosticCategories } =
+    collectIssueRegistryRows(schema);
+  const { issueTypeDefaults, seenIssueTypeKeys } =
+    buildIssueTypeDefaults(issueTypeRows);
+  const publicCategories = publicDiagnosticCategories(diagnosticCategories);
+  assertIssueRegistryHasRows(issueTypeDefaults, publicCategories);
 
   return {
-    issueTypeAliases: Object.fromEntries(
-      Object.entries(issueTypeAliases).sort(([a], [b]) => a.localeCompare(b)),
-    ),
+    issueTypeAliases: buildIssueTypeAliases(schema, seenIssueTypeKeys),
     issueTypeDefaults,
-    diagnosticCategories: publicDiagnosticCategories,
+    diagnosticCategories: publicCategories,
   };
 }
 

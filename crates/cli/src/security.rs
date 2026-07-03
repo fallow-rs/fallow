@@ -1136,6 +1136,7 @@ fn analyze_security_runtime(
         fallow_engine::health::HealthSharedParseData {
             files,
             modules,
+            workspaces: Vec::new(),
             analysis_output: Some(analysis_output),
         },
     )?;

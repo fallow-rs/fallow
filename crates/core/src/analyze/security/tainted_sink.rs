@@ -25,11 +25,11 @@ use fallow_types::results::{
 };
 use fallow_types::suppress::IssueKind;
 
-use super::catalogue::{Matcher, catalogue};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
 use crate::suppress::SuppressionContext;
+use fallow_security::{CalleePattern, Matcher, catalogue};
 
 /// The inline suppression kind token for the tainted-sink catalogue rule. ONE
 /// token covers every catalogue category.
@@ -250,7 +250,7 @@ fn tainted_sink_evidence(
 ) -> String {
     let pattern = matcher
         .first_matching_pattern(&sink.callee_path)
-        .map_or("", super::catalogue::CalleePattern::raw);
+        .map_or("", CalleePattern::raw);
     // The `{callee}` / `{pattern}` tokens are catalogue placeholders, not Rust
     // format args; the clippy lint misreads the literal.
     #[expect(

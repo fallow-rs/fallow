@@ -45,34 +45,21 @@ use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
 use crate::suppress::SuppressionContext;
 
-mod catalogue;
 mod hardcoded_secret;
 mod rank;
 mod tainted_sink;
 
 pub use hardcoded_secret::find_hardcoded_secret_candidates;
-pub use rank::{
-    SecurityRankingInput, annotate_dead_code_cross_links, derive_security_severity,
-    rank_security_findings,
-};
+pub use rank::{SecurityRankingInput, annotate_dead_code_cross_links, rank_security_findings};
 pub use tainted_sink::{CategoryFilter, TaintedSinkContext, find_tainted_sinks};
 
 /// Segment-aware callee pattern matcher, re-exported for the boundary
 /// forbidden-call detector (`analyze::boundary_calls`).
-pub use catalogue::{CalleePattern, Matcher};
+pub use fallow_security::{CalleePattern, Matcher};
 
 #[must_use]
 pub fn catalogue_matchers() -> &'static [Matcher] {
-    catalogue::catalogue().matchers()
-}
-
-#[must_use]
-pub fn catalogue_title(id: &str) -> Option<&'static str> {
-    if id == hardcoded_secret::CATEGORY_ID {
-        Some(hardcoded_secret::CATEGORY_TITLE)
-    } else {
-        catalogue::catalogue_title(id)
-    }
+    fallow_security::catalogue().matchers()
 }
 
 /// The inline suppression kind token for the client-server-leak rule.

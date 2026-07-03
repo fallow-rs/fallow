@@ -84,11 +84,9 @@ mod tests {
     fn cli_fallback_surfaces_are_explicitly_owned() {
         let tools_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/tools");
         let unconditional_cli_backed = [
-            "audit.rs",
             "check_runtime_coverage.rs",
             "code_mode.rs",
             "code_mode_subprocess.rs",
-            "decision_surface.rs",
             "fix.rs",
             "impact.rs",
             "inspect_target.rs",
@@ -115,7 +113,7 @@ mod tests {
                 continue;
             }
             let source = std::fs::read_to_string(&path).expect("read mcp tool source");
-            let invokes_cli = source.contains("run_tool(") || source.contains("run_fallow(");
+            let invokes_cli = invokes_cli_dispatch(&source);
             let is_unconditional = unconditional_cli_backed.contains(&file_name);
             let is_conditional = conditional_cli_backed.contains(&file_name);
 
@@ -141,11 +139,27 @@ mod tests {
                 );
             }
         }
+
+        for file_name in unconditional_cli_backed {
+            let path = tools_dir.join(file_name);
+            let source = std::fs::read_to_string(&path).expect("read mcp tool source");
+            assert!(
+                invokes_cli_dispatch(&source),
+                "{file_name} is listed as unconditional CLI-backed but production code no longer spawns the CLI"
+            );
+        }
     }
 
     fn file_name(path: &Path) -> &str {
         path.file_name()
             .and_then(|name| name.to_str())
             .expect("utf-8 filename")
+    }
+
+    fn invokes_cli_dispatch(source: &str) -> bool {
+        source.contains("run_tool(binary")
+            || source.contains("run_fallow(binary")
+            || source.contains("run_fallow_sync(")
+            || source.contains("Command::new(binary)")
     }
 }

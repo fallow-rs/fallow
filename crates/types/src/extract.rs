@@ -550,7 +550,7 @@ pub struct SkippedSecurityCalleeSite {
 /// The syntactic shape of a captured security sink site. Category-blind: the
 /// extractor records the shape and the dotted/bare callee path; the analyze
 /// layer matches it against the data-driven catalogue. See
-/// `crates/core/data/security_matchers.toml`.
+/// `crates/security/data/security_matchers.toml`.
 #[derive(
     Debug,
     Clone,

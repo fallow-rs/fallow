@@ -20,6 +20,7 @@ fallow-core = { workspace = true }
 fallow-extract = { workspace = true }
 fallow-graph = { workspace = true }
 fallow-output = { workspace = true }
+fallow-security = { workspace = true }
 fallow-types = { workspace = true }
 colored = { workspace = true }
 dunce = { workspace = true }

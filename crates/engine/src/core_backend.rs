@@ -10,9 +10,8 @@ use fallow_config::{
 use fallow_graph::graph::ModuleGraph;
 use fallow_types::discover::{DiscoveredFile, EntryPoint};
 use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationReport};
-use fallow_types::results::{SecurityFinding, SecuritySeverity};
 use fallow_types::trace::PipelineTimings;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
@@ -70,17 +69,6 @@ impl BackendAnalysisDiscovery {
     pub fn into_files(self) -> Vec<DiscoveredFile> {
         self.inner.into_files()
     }
-}
-
-pub fn config_for_project(
-    root: &Path,
-    config_path: Option<&Path>,
-) -> EngineResult<(ResolvedConfig, Option<PathBuf>)> {
-    fallow_core::config_for_project(root, config_path).map_err(engine_error)
-}
-
-pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
-    fallow_core::resolve_cache_max_size_bytes(config)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -290,20 +278,6 @@ pub fn dead_code_pipeline_profile(
             total_ms: prelude.elapsed_ms(),
         }),
     }
-}
-
-pub fn collect_file_hashes(
-    modules: &[ModuleInfo],
-    files: &[DiscoveredFile],
-) -> FxHashMap<PathBuf, u64> {
-    modules
-        .iter()
-        .filter_map(|module| {
-            files
-                .get(module.file_id.0 as usize)
-                .map(|file| (file.path.clone(), module.content_hash))
-        })
-        .collect()
 }
 
 impl From<ParseMetrics> for fallow_core::AnalysisParseMetrics {
@@ -641,23 +615,6 @@ pub fn analyze_churn_cached(
         .map(|(result, cache_hit)| (churn_result(result), cache_hit))
 }
 
-pub fn derive_security_severity(finding: &SecurityFinding) -> SecuritySeverity {
-    fallow_core::analyze::derive_security_severity(finding)
-}
-
-pub fn security_catalogue_title(kind: &str) -> Option<&'static str> {
-    fallow_core::analyze::security_catalogue_title(kind)
-}
-
-pub fn public_api_package_entry_points(
-    graph: &ModuleGraph,
-    config: &ResolvedConfig,
-    root_pkg: Option<&fallow_config::PackageJson>,
-    workspaces: &[fallow_config::WorkspaceInfo],
-) -> FxHashSet<fallow_types::discover::FileId> {
-    fallow_core::analyze::public_api_package_entry_points(graph, config, root_pkg, workspaces)
-}
-
 fn hidden_dir_scope(value: &fallow_core::discover::HiddenDirScope) -> HiddenDirScope {
     HiddenDirScope::new(value.root().to_path_buf(), value.dirs().to_vec())
 }
@@ -696,28 +653,12 @@ pub fn collect_hidden_dir_scopes(
         .collect()
 }
 
-pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
-    fallow_core::discover::discover_files(config)
-}
-
 pub fn discover_files_and_config_candidates(
     config: &ResolvedConfig,
     additional_hidden_dir_scopes: &[HiddenDirScope],
 ) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
     let scopes = core_hidden_dir_scopes(additional_hidden_dir_scopes);
     fallow_core::discover::discover_files_and_config_candidates(config, &scopes)
-}
-
-pub fn discover_files_with_additional_hidden_dirs(
-    config: &ResolvedConfig,
-    additional_hidden_dir_scopes: &[HiddenDirScope],
-) -> Vec<DiscoveredFile> {
-    let scopes = core_hidden_dir_scopes(additional_hidden_dir_scopes);
-    fallow_core::discover::discover_files_with_additional_hidden_dirs(config, &scopes)
-}
-
-pub fn discover_files_with_plugin_scopes(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
-    fallow_core::discover::discover_files_with_plugin_scopes(config)
 }
 
 pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {

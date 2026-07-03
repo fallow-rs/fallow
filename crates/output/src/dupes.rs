@@ -1,9 +1,8 @@
 //! Shared output contracts for duplication action arrays.
 //!
-//! The duplication report body still lives close to the CLI renderer because
-//! it wraps clone types owned by `fallow-core`. These action DTOs are
-//! core-independent and are shared by CLI schema emission, JSON output, and
-//! future API/LSP consumers.
+//! The duplication report body is assembled by API/CLI layers while clone
+//! contracts live in `fallow-types`. These envelope DTOs stay engine-neutral
+//! and are shared by schema emission, JSON output, and programmatic consumers.
 
 use std::time::Duration;
 

@@ -7,6 +7,7 @@ use fallow_api::{
 };
 use fallow_config::DuplicatesConfig;
 use ls_types::MessageType;
+use rustc_hash::FxHashSet;
 
 use crate::initialization::LspDuplicationOptions;
 use crate::protocol::config_load_error_detail;
@@ -21,6 +22,7 @@ pub struct ProjectRootAnalysisInput<'a> {
     pub duplication_options: Option<&'a LspDuplicationOptions>,
     pub production_override: Option<bool>,
     pub inline_complexity_enabled: bool,
+    pub changed_files: Option<&'a FxHashSet<PathBuf>>,
     pub merged_analysis: &'a mut EditorAnalysisOutput,
     pub merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
     pub config_messages: &'a mut Vec<(MessageType, String)>,
@@ -42,6 +44,7 @@ pub struct BlockingAnalysisOutput {
     pub inline_complexity: Vec<InlineComplexityFinding>,
     pub config_messages: Vec<(MessageType, String)>,
     pub changed_message: Option<(MessageType, String)>,
+    pub applied_changed_since: Option<String>,
 }
 
 pub struct LspAnalysisSnapshot {
@@ -129,9 +132,11 @@ fn run_typed_project_analysis(
     session: &AnalysisSession,
     duplicates_config: &DuplicatesConfig,
 ) {
-    if let Ok(output) =
-        session.analyze_project_with(duplicates_config, input.inline_complexity_enabled)
-    {
+    if let Ok(output) = session.analyze_project_with_changed_files(
+        duplicates_config,
+        input.inline_complexity_enabled,
+        input.changed_files,
+    ) {
         if input.inline_complexity_enabled {
             input
                 .merged_inline_complexity
@@ -149,6 +154,11 @@ pub fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisO
     let mut inline_complexity = Vec::new();
     let mut config_messages: Vec<(MessageType, String)> =
         Vec::with_capacity(input.project_roots.len());
+    let changed_scope = resolve_changed_since_scope(
+        input.changed_since.as_deref(),
+        input.toplevel.as_deref().unwrap_or(input.root.as_path()),
+        &input.root,
+    );
     for project_root in &input.project_roots {
         analyze_project_root(&mut ProjectRootAnalysisInput {
             project_root,
@@ -156,25 +166,27 @@ pub fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisO
             duplication_options: input.duplication_options.as_ref(),
             production_override: input.production_override,
             inline_complexity_enabled: input.inline_complexity_enabled,
+            changed_files: changed_scope.files.as_ref(),
             merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,
             config_messages: &mut config_messages,
         });
     }
 
-    let changed_message = apply_changed_since_filter(
-        input.changed_since.as_deref(),
-        input.toplevel.as_deref().unwrap_or(input.root.as_path()),
-        &input.root,
-        &mut analysis,
-        &mut inline_complexity,
-    );
+    if let Some(changed_files) = changed_scope.files.as_ref() {
+        analysis.filter_by_changed_files(changed_files, &input.root);
+        fallow_api::filter_inline_complexity_by_changed_files(
+            &mut inline_complexity,
+            changed_files,
+        );
+    }
 
     BlockingAnalysisOutput {
         analysis,
         inline_complexity,
         config_messages,
-        changed_message,
+        changed_message: changed_scope.message,
+        applied_changed_since: changed_scope.applied_ref,
     }
 }
 
@@ -195,33 +207,47 @@ pub fn merge_duplication(target: &mut DuplicationReport, source: DuplicationRepo
     *target = output.duplication;
 }
 
-fn apply_changed_since_filter(
+struct ChangedSinceScope {
+    files: Option<FxHashSet<PathBuf>>,
+    message: Option<(MessageType, String)>,
+    applied_ref: Option<String>,
+}
+
+fn resolve_changed_since_scope(
     changed_since: Option<&str>,
     toplevel: &Path,
     root: &Path,
-    analysis: &mut EditorAnalysisOutput,
-    inline_complexity: &mut Vec<InlineComplexityFinding>,
-) -> Option<(MessageType, String)> {
-    let git_ref = changed_since?;
+) -> ChangedSinceScope {
+    let Some(git_ref) = changed_since else {
+        return ChangedSinceScope {
+            files: None,
+            message: None,
+            applied_ref: None,
+        };
+    };
 
     match fallow_api::try_get_changed_files_with_toplevel(root, toplevel, git_ref) {
         Ok(changed) => {
-            analysis.filter_by_changed_files(&changed, root);
-            fallow_api::filter_inline_complexity_by_changed_files(inline_complexity, &changed);
-            Some((
-                MessageType::INFO,
-                format!(
-                    "changedSince '{git_ref}': scoped to {} changed file(s)",
-                    changed.len()
-                ),
-            ))
+            let count = changed.len();
+            ChangedSinceScope {
+                files: Some(changed),
+                applied_ref: Some(git_ref.to_string()),
+                message: Some((
+                    MessageType::INFO,
+                    format!("changedSince '{git_ref}': scoped to {count} changed file(s)"),
+                )),
+            }
         }
-        Err(err) => Some((
-            MessageType::WARNING,
-            format!(
-                "changedSince '{git_ref}' ignored: {} (showing full-scope results)",
-                err.describe()
-            ),
-        )),
+        Err(err) => ChangedSinceScope {
+            files: None,
+            applied_ref: None,
+            message: Some((
+                MessageType::WARNING,
+                format!(
+                    "changedSince '{git_ref}' ignored: {} (showing full-scope results)",
+                    err.describe()
+                ),
+            )),
+        },
     }
 }

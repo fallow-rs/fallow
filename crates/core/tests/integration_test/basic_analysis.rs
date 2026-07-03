@@ -106,13 +106,6 @@ fn analysis_returns_correct_total_count() {
 }
 
 #[test]
-fn analyze_project_convenience_function() {
-    let root = fixture_path("basic-project");
-    let results = fallow_core::analyze_project(&root).expect("analysis should succeed");
-    assert!(results.has_issues());
-}
-
-#[test]
 fn cjs_project_detects_orphan() {
     let root = fixture_path("cjs-project");
     let config = create_config(root);

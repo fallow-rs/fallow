@@ -13,7 +13,8 @@ use crate::{
     DupesReportPayload, DuplicationGroup, DuplicationMode, DuplicationOptions,
     DuplicationProgrammaticOutput, ProgrammaticError,
     analysis_context::{
-        ProgrammaticAnalysisContext, changed_files_for_run, resolve_programmatic_analysis_context,
+        ProgrammaticAnalysisContext, changed_files_for_run,
+        resolve_programmatic_analysis_context_deferred_workspace, workspace_roots_for_session,
     },
     duplication_filters::{apply_top, filter_by_diff, filter_by_workspaces},
     next_steps::{setup_pointer_applicable, suggestions_enabled},
@@ -32,7 +33,7 @@ pub(super) const SCHEMA_VERSION: u32 = 1;
 pub fn run_duplication(
     options: &DuplicationOptions,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
-    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
     resolved.install(|| run_duplication_inner(options, &resolved))
 }
 
@@ -59,8 +60,7 @@ pub(super) fn run_duplication_with_session(
         changed_files_for_run(resolved)?
     };
     let cache_dir = (!resolved.no_cache).then_some(session.config().cache_dir.as_path());
-    let mut report = if let Some(changed_files) = changed_files.or(resolved_changed_files.as_ref())
-    {
+    let report = if let Some(changed_files) = changed_files.or(resolved_changed_files.as_ref()) {
         let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
         session
             .find_duplicates_touching_files_with_defaults(&dupes_config, &changed_files, cache_dir)
@@ -71,10 +71,22 @@ pub(super) fn run_duplication_with_session(
             .report
     };
 
+    run_duplication_report_with_session(options, resolved, session, report, start)
+}
+
+pub(super) fn run_duplication_report_with_session(
+    options: &DuplicationOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    mut report: fallow_engine::duplicates::DuplicationReport,
+    start: Instant,
+) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
+    let dupes_config = build_dupes_config(options, &session.config().duplicates);
     if let Some(diff) = resolved.diff.as_ref() {
         filter_by_diff(&mut report, diff, session.root());
     }
-    if let Some(workspace_roots) = resolved.workspace_roots.as_ref() {
+    let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
+    if let Some(workspace_roots) = workspace_roots.as_ref() {
         filter_by_workspaces(&mut report, workspace_roots, session.root());
     }
     if let Some(top) = options.top {

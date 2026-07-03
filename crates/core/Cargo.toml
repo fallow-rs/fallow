@@ -8,9 +8,8 @@ homepage.workspace = true
 documentation.workspace = true
 keywords.workspace = true
 categories.workspace = true
-description = "Analysis orchestration for fallow codebase intelligence (dead code, duplication, plugins, cross-reference)"
+description = "Internal detector backend for fallow-engine and fallow-api"
 readme = "../../README.md"
-publish = false
 
 [lib]
 doctest = false
@@ -19,6 +18,7 @@ doctest = false
 fallow-config = { workspace = true }
 fallow-extract = { workspace = true }
 fallow-graph = { workspace = true }
+fallow-security = { workspace = true }
 fallow-types = { workspace = true }
 
 # Parsing & analysis

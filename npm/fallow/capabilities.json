@@ -2009,7 +2009,10 @@
       "label": "Unused Dev Dependencies",
       "config_key": "unused-dev-dependencies",
       "registry_index": 6,
-      "aliases": [],
+      "aliases": [
+        "unused-dev-deps",
+        "unused-dev-dependencies"
+      ],
       "lsp": true,
       "filter_flag": "--unused-deps",
       "result_key": "unused_dev_dependencies",
@@ -2043,7 +2046,10 @@
       "label": "Unused Optional Dependencies",
       "config_key": "unused-optional-dependencies",
       "registry_index": 7,
-      "aliases": [],
+      "aliases": [
+        "unused-optional-deps",
+        "unused-optional-dependencies"
+      ],
       "lsp": true,
       "filter_flag": "--unused-deps",
       "result_key": "unused_optional_dependencies",
@@ -2493,6 +2499,7 @@
       "config_key": "boundary-violation",
       "registry_index": 20,
       "aliases": [
+        "boundary-calls",
         "boundary-call-violations"
       ],
       "lsp": false,
@@ -2621,6 +2628,7 @@
       "config_key": "unused-catalog-entries",
       "registry_index": 38,
       "aliases": [
+        "catalog",
         "unused-catalog-entries"
       ],
       "lsp": true,
@@ -2657,6 +2665,7 @@
       "config_key": "empty-catalog-groups",
       "registry_index": 39,
       "aliases": [
+        "empty-catalog",
         "empty-catalog-groups"
       ],
       "lsp": true,
@@ -2693,6 +2702,7 @@
       "config_key": "unresolved-catalog-references",
       "registry_index": 40,
       "aliases": [
+        "unresolved-catalog",
         "unresolved-catalog-references"
       ],
       "lsp": true,
@@ -2729,7 +2739,9 @@
       "config_key": "unused-dependency-overrides",
       "registry_index": 41,
       "aliases": [
-        "unused-dependency-overrides"
+        "unused-dependency-overrides",
+        "unused-override",
+        "unused-overrides"
       ],
       "lsp": true,
       "filter_flag": "--unused-dependency-overrides",
@@ -2765,7 +2777,9 @@
       "config_key": "misconfigured-dependency-overrides",
       "registry_index": 42,
       "aliases": [
-        "misconfigured-dependency-overrides"
+        "misconfigured-dependency-overrides",
+        "misconfigured-override",
+        "misconfigured-overrides"
       ],
       "lsp": true,
       "filter_flag": "--misconfigured-dependency-overrides",

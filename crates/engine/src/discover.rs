@@ -176,6 +176,42 @@ pub fn prepare_analysis_discovery(config: &ResolvedConfig) -> AnalysisDiscovery 
     )
 }
 
+/// Run source discovery with workspace metadata already resolved by config load.
+///
+/// This is the normal [`AnalysisSession`](crate::session::AnalysisSession) path:
+/// config loading already expanded workspace globs and collected diagnostics, so
+/// source discovery can reuse that set instead of walking workspace manifests a
+/// second time.
+#[must_use]
+pub fn prepare_analysis_discovery_with_workspaces(
+    config: &ResolvedConfig,
+    workspaces: &[WorkspaceInfo],
+    workspaces_ms: f64,
+) -> AnalysisDiscovery {
+    warn_missing_node_modules(config);
+
+    if !workspaces.is_empty() {
+        tracing::info!(count = workspaces.len(), "workspaces discovered");
+    }
+
+    let root_pkg = PackageJson::load(&config.root.join("package.json")).ok();
+    let hidden_dir_scopes = collect_hidden_dir_scopes(config, root_pkg.as_ref(), workspaces);
+
+    let discover_start = Instant::now();
+    let (files, config_candidates) =
+        discover_files_and_config_candidates(config, &hidden_dir_scopes);
+    let discover_ms = discover_start.elapsed().as_secs_f64() * 1000.0;
+
+    AnalysisDiscovery::from_parts(
+        files,
+        workspaces.to_vec(),
+        root_pkg,
+        config_candidates,
+        discover_ms,
+        workspaces_ms,
+    )
+}
+
 fn warn_missing_node_modules(config: &ResolvedConfig) {
     if config.root.join("node_modules").is_dir() {
         return;
@@ -304,12 +340,6 @@ pub fn collect_hidden_dir_scopes(
     core_backend::collect_hidden_dir_scopes(config, root_pkg, workspaces)
 }
 
-/// Discover source files for a resolved config.
-#[must_use]
-pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
-    core_backend::discover_files(config)
-}
-
 /// Discover source files and non-source config candidates in one traversal.
 #[must_use]
 pub fn discover_files_and_config_candidates(
@@ -317,21 +347,6 @@ pub fn discover_files_and_config_candidates(
     additional_hidden_dir_scopes: &[HiddenDirScope],
 ) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
     core_backend::discover_files_and_config_candidates(config, additional_hidden_dir_scopes)
-}
-
-/// Discover source files with additional package-scoped hidden directories.
-#[must_use]
-pub fn discover_files_with_additional_hidden_dirs(
-    config: &ResolvedConfig,
-    additional_hidden_dir_scopes: &[HiddenDirScope],
-) -> Vec<DiscoveredFile> {
-    core_backend::discover_files_with_additional_hidden_dirs(config, additional_hidden_dir_scopes)
-}
-
-/// Discover source files for a resolved config, including plugin scopes.
-#[must_use]
-pub fn discover_files_with_plugin_scopes(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
-    core_backend::discover_files_with_plugin_scopes(config)
 }
 
 /// Discover configured and inferred entry points.

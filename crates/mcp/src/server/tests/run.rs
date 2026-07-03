@@ -423,12 +423,20 @@ async fn run_fallow_timeout_returns_mcp_error() {
         &["-c".to_string(), "sleep 10".to_string()],
         Duration::from_millis(20),
     )
-    .await;
+    .await
+    .expect("timeout should stay a tool result");
 
-    assert!(result.is_err(), "timeout should produce an MCP error");
-    let err = result.unwrap_err();
-    assert!(err.message.contains("timed out"));
-    assert!(err.message.contains("FALLOW_TIMEOUT_SECS"));
+    assert_eq!(result.is_error, Some(true));
+    let body: serde_json::Value =
+        serde_json::from_str(extract_text(&result)).expect("timeout body is JSON");
+    assert_eq!(body["error"], true);
+    assert_eq!(body["exit_code"], 2);
+    assert_eq!(body["code"], "FALLOW_MCP_SUBPROCESS_TIMEOUT");
+    assert!(
+        body["help"]
+            .as_str()
+            .is_some_and(|help| help.contains("FALLOW_TIMEOUT_SECS"))
+    );
 }
 
 #[cfg(unix)]

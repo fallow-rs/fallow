@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use fallow_config::ResolvedConfig;
+use fallow_config::{ResolvedConfig, WorkspaceInfo};
 use fallow_output::{
     ComplexityViolation, FileHealthScore, HealthGrouping, HealthTimings, HotspotEntry,
     HotspotSummary, RefactoringTarget,
@@ -23,7 +23,6 @@ use super::{
 
 pub(super) struct HealthOutputContextInput<'a, R> {
     pub(super) config: &'a ResolvedConfig,
-    pub(super) files: &'a [fallow_types::discover::DiscoveredFile],
     pub(super) modules: &'a [crate::source::ModuleInfo],
     pub(super) scope: &'a HealthScope<'a, R>,
     pub(super) needs_file_scores: bool,
@@ -34,6 +33,7 @@ pub(super) struct HealthOutputContextInput<'a, R> {
     pub(super) derived_sections: HealthDerivedSections,
     pub(super) vital_data: HealthVitalData,
     pub(super) timings: HealthPipelineTimings,
+    pub(super) workspaces: &'a [WorkspaceInfo],
     pub(super) start: &'a Instant,
 }
 
@@ -44,7 +44,6 @@ pub(super) struct HealthOutputContext<'a, R> {
 
 pub(super) struct HealthOutputBuildInput<'a, R> {
     config: &'a ResolvedConfig,
-    files: &'a [fallow_types::discover::DiscoveredFile],
     modules: &'a [crate::source::ModuleInfo],
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     group_resolver: Option<&'a R>,
@@ -55,6 +54,7 @@ pub(super) struct HealthOutputBuildInput<'a, R> {
     max_cyclomatic: u16,
     max_cognitive: u16,
     max_crap: f64,
+    workspaces: &'a [WorkspaceInfo],
     files_analyzed: usize,
     total_functions: usize,
     total_above_threshold: usize,
@@ -96,7 +96,6 @@ pub(super) fn prepare_health_output_context<R>(
     HealthOutputContext {
         build: HealthOutputBuildInput {
             config: input.config,
-            files: input.files,
             modules: input.modules,
             file_paths: &input.scope.file_paths,
             group_resolver: input.scope.group_resolver.as_ref(),
@@ -107,6 +106,7 @@ pub(super) fn prepare_health_output_context<R>(
             max_cyclomatic: input.scope.max_cyclomatic,
             max_cognitive: input.scope.max_cognitive,
             max_crap: input.scope.max_crap,
+            workspaces: input.workspaces,
             files_analyzed,
             total_functions,
             total_above_threshold,
@@ -157,8 +157,11 @@ pub(super) fn build_health_output_parts<R: super::HealthGroupResolver>(
             action_ctx: &action_ctx,
         });
 
-    let framework_health =
-        build_framework_health_diagnostics(build.config, analysis_data.framework_health_facts);
+    let framework_health = build_framework_health_diagnostics(
+        build.config,
+        build.workspaces,
+        analysis_data.framework_health_facts,
+    );
 
     let report = build_health_report_from_pipeline(
         opts,
@@ -252,7 +255,6 @@ fn build_health_output_grouping<R: super::HealthGroupResolver>(
         config: input.build.config,
         group_resolver: input.build.group_resolver,
         candidate_paths: &input.derived_sections.candidate_paths,
-        files: input.build.files,
         modules: input.build.modules,
         file_paths: input.build.file_paths,
         score_output: input.analysis_data.score_output.as_ref(),
@@ -261,6 +263,7 @@ fn build_health_output_grouping<R: super::HealthGroupResolver>(
         hotspots: &input.derived_sections.hotspots,
         vital_data: input.vital_data,
         targets: &input.derived_sections.targets,
+        dupes_report: input.derived_sections.dupes_report.as_ref(),
         needs_file_scores: input.build.needs_file_scores,
         action_ctx: input.action_ctx,
     })
@@ -334,7 +337,6 @@ struct HealthGroupingContextInput<'a, R> {
     config: &'a ResolvedConfig,
     group_resolver: Option<&'a R>,
     candidate_paths: &'a rustc_hash::FxHashSet<std::path::PathBuf>,
-    files: &'a [fallow_types::discover::DiscoveredFile],
     modules: &'a [crate::source::ModuleInfo],
     file_paths: &'a rustc_hash::FxHashMap<crate::discover::FileId, &'a std::path::PathBuf>,
     score_output: Option<&'a scoring::FileScoreOutput>,
@@ -343,6 +345,7 @@ struct HealthGroupingContextInput<'a, R> {
     hotspots: &'a [HotspotEntry],
     vital_data: &'a HealthVitalData,
     targets: &'a [RefactoringTarget],
+    dupes_report: Option<&'a crate::duplicates::DuplicationReport>,
     needs_file_scores: bool,
     action_ctx: &'a fallow_output::HealthActionContext,
 }
@@ -359,7 +362,6 @@ fn build_health_grouping_from_context<R: super::HealthGroupResolver>(
         &input.config.root,
         input.candidate_paths,
         &grouping::HealthGroupingInput {
-            files: input.files,
             modules: input.modules,
             file_paths: input.file_paths,
             score_output: input.score_output,
@@ -369,7 +371,7 @@ fn build_health_grouping_from_context<R: super::HealthGroupResolver>(
             large_functions: &input.vital_data.large_functions,
             targets: input.targets,
             score_requested: input.opts.score,
-            duplicates_config: input.opts.score.then_some(&input.config.duplicates),
+            dupes_report: input.opts.score.then_some(input.dupes_report).flatten(),
             needs_file_scores: input.needs_file_scores,
             needs_hotspots: input.opts.hotspots || input.opts.targets,
             show_vital_signs: !input.opts.score_only_output,

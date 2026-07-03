@@ -1,7 +1,7 @@
 //! Data-driven catalogue of syntactic security-sink candidate matchers.
 //!
 //! The catalogue is community-maintainable: every matcher lives in
-//! `crates/core/data/security_matchers.toml`, embedded via `include_str!` and
+//! `crates/security/data/security_matchers.toml`, embedded via `include_str!` and
 //! parsed once behind a `OnceLock`. There is NO regeneration step. Adding a
 //! category is a single `[[matcher]]` TOML edit plus ZERO Rust enum or
 //! discriminant churn (the `tainted_sink` detector matches captured
@@ -16,10 +16,13 @@ use fallow_config::EffectKind;
 use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape};
 use rustc_hash::FxHashSet;
 
+pub const HARDCODED_SECRET_CATEGORY_ID: &str = "hardcoded-secret";
+pub const HARDCODED_SECRET_CATEGORY_TITLE: &str = "Hardcoded secret candidate";
+
 /// Embedded catalogue source. Because it is `include_str!`-embedded at compile
 /// time, a green `security_catalogue_parses` test guarantees the released
 /// binary parses.
-const CATALOGUE_TOML: &str = include_str!("../../../data/security_matchers.toml");
+const CATALOGUE_TOML: &str = include_str!("../data/security_matchers.toml");
 
 #[derive(serde::Deserialize)]
 struct RawCatalogue {
@@ -924,13 +927,18 @@ pub fn catalogue() -> &'static Catalogue {
     static CATALOGUE: std::sync::OnceLock<Catalogue> = std::sync::OnceLock::new();
     CATALOGUE.get_or_init(|| {
         parse_catalogue(CATALOGUE_TOML).expect(
-            "embedded crates/core/data/security_matchers.toml must parse; run \
-             `cargo test -p fallow-core security_catalogue_parses` to see the error",
+            "embedded crates/security/data/security_matchers.toml must parse; run \
+             `cargo test -p fallow-security security_catalogue_parses` to see the error",
         )
     })
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "catalogue parser tests assert fixture invariants directly"
+)]
 mod tests {
     use super::*;
     use rustc_hash::FxHashSet;

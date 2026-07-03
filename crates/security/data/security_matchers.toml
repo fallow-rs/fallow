@@ -9,7 +9,7 @@
 # predicates.
 #
 # This file is the single source of truth: embedded via include_str! and parsed
-# once behind a OnceLock (see crates/core/src/analyze/security/catalogue.rs).
+# once behind a OnceLock (see crates/security/src/lib.rs).
 # There is NO regen step. Adding a category = one [[matcher]] below + ZERO Rust
 # enum/discriminant churn.
 #

@@ -2227,6 +2227,10 @@ fn health_group_by_package_emits_per_workspace_envelope() {
 }
 ";
     write_file(
+        &root.join("packages/alpha/src/cross_group_dup.ts"),
+        duplicated_beta_function,
+    );
+    write_file(
         &root.join("packages/beta/src/dup_a.ts"),
         duplicated_beta_function,
     );

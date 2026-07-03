@@ -172,7 +172,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     IssueKindMeta {
         kind: Some(IssueKind::UnusedDevDependency),
         code: "unused-dev-dependency",
-        aliases: &[],
+        aliases: &["unused-dev-deps", "unused-dev-dependencies"],
         label: "Unused Dev Dependencies",
         config_key: Some("unused-dev-dependencies"),
         filter_flag: Some("--unused-deps"),
@@ -185,7 +185,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     IssueKindMeta {
         kind: None,
         code: "unused-optional-dependency",
-        aliases: &[],
+        aliases: &["unused-optional-deps", "unused-optional-dependencies"],
         label: "Unused Optional Dependencies",
         config_key: Some("unused-optional-dependencies"),
         filter_flag: Some("--unused-deps"),
@@ -354,7 +354,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     IssueKindMeta {
         kind: Some(IssueKind::BoundaryViolation),
         code: "boundary-call-violation",
-        aliases: &["boundary-call-violations"],
+        aliases: &["boundary-calls", "boundary-call-violations"],
         label: "Boundary Call Violations",
         config_key: Some("boundary-violation"),
         filter_flag: Some("--boundary-violations"),
@@ -588,7 +588,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     IssueKindMeta {
         kind: Some(IssueKind::PnpmCatalogEntry),
         code: "unused-catalog-entry",
-        aliases: &["unused-catalog-entries"],
+        aliases: &["catalog", "unused-catalog-entries"],
         label: "Unused Catalog Entries",
         config_key: Some("unused-catalog-entries"),
         filter_flag: Some("--unused-catalog-entries"),
@@ -601,7 +601,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     IssueKindMeta {
         kind: Some(IssueKind::EmptyCatalogGroup),
         code: "empty-catalog-group",
-        aliases: &["empty-catalog-groups"],
+        aliases: &["empty-catalog", "empty-catalog-groups"],
         label: "Empty Catalog Groups",
         config_key: Some("empty-catalog-groups"),
         filter_flag: Some("--empty-catalog-groups"),
@@ -614,7 +614,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     IssueKindMeta {
         kind: Some(IssueKind::UnresolvedCatalogReference),
         code: "unresolved-catalog-reference",
-        aliases: &["unresolved-catalog-references"],
+        aliases: &["unresolved-catalog", "unresolved-catalog-references"],
         label: "Unresolved Catalog References",
         config_key: Some("unresolved-catalog-references"),
         filter_flag: Some("--unresolved-catalog-references"),
@@ -627,7 +627,11 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     IssueKindMeta {
         kind: Some(IssueKind::UnusedDependencyOverride),
         code: "unused-dependency-override",
-        aliases: &["unused-dependency-overrides"],
+        aliases: &[
+            "unused-dependency-overrides",
+            "unused-override",
+            "unused-overrides",
+        ],
         label: "Unused Dependency Overrides",
         config_key: Some("unused-dependency-overrides"),
         filter_flag: Some("--unused-dependency-overrides"),
@@ -640,7 +644,11 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     IssueKindMeta {
         kind: Some(IssueKind::MisconfiguredDependencyOverride),
         code: "misconfigured-dependency-override",
-        aliases: &["misconfigured-dependency-overrides"],
+        aliases: &[
+            "misconfigured-dependency-overrides",
+            "misconfigured-override",
+            "misconfigured-overrides",
+        ],
         label: "Misconfigured Dependency Overrides",
         config_key: Some("misconfigured-dependency-overrides"),
         filter_flag: Some("--misconfigured-dependency-overrides"),
@@ -762,6 +770,8 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
 pub struct IssueResultMeta {
     /// Canonical issue code that owns this result array.
     pub code: &'static str,
+    /// Short SARIF rule description.
+    pub sarif_description: &'static str,
     /// Explanation emitted in dead-code `_meta.rules`.
     pub meta_description: &'static str,
     /// Documentation path emitted in dead-code `_meta.rules`.
@@ -787,10 +797,178 @@ pub struct TsAliasMeta {
     pub parent: &'static str,
 }
 
+/// TypeScript backwards-compat alias row for a dead-code result code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IssueTsAliasMeta {
+    /// Canonical issue code that owns this alias.
+    pub code: &'static str,
+    /// Published TypeScript alias policy.
+    pub alias: TsAliasMeta,
+}
+
+/// Published TypeScript backwards-compat aliases.
+pub const ISSUE_TS_ALIAS_META: &[IssueTsAliasMeta] = &[
+    IssueTsAliasMeta {
+        code: "unused-file",
+        alias: TsAliasMeta {
+            name: "UnusedFile",
+            parent: "UnusedFileFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unused-export",
+        alias: TsAliasMeta {
+            name: "UnusedExport",
+            parent: "UnusedExportFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "private-type-leak",
+        alias: TsAliasMeta {
+            name: "PrivateTypeLeak",
+            parent: "PrivateTypeLeakFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unused-dependency",
+        alias: TsAliasMeta {
+            name: "UnusedDependency",
+            parent: "UnusedDependencyFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unused-dev-dependency",
+        alias: TsAliasMeta {
+            name: "UnusedDependency",
+            parent: "UnusedDevDependencyFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unused-optional-dependency",
+        alias: TsAliasMeta {
+            name: "UnusedDependency",
+            parent: "UnusedOptionalDependencyFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unused-enum-member",
+        alias: TsAliasMeta {
+            name: "UnusedMember",
+            parent: "UnusedEnumMemberFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unused-class-member",
+        alias: TsAliasMeta {
+            name: "UnusedMember",
+            parent: "UnusedClassMemberFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unused-store-member",
+        alias: TsAliasMeta {
+            name: "UnusedMember",
+            parent: "UnusedStoreMemberFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unresolved-import",
+        alias: TsAliasMeta {
+            name: "UnresolvedImport",
+            parent: "UnresolvedImportFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unlisted-dependency",
+        alias: TsAliasMeta {
+            name: "UnlistedDependency",
+            parent: "UnlistedDependencyFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "duplicate-export",
+        alias: TsAliasMeta {
+            name: "DuplicateExport",
+            parent: "DuplicateExportFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "type-only-dependency",
+        alias: TsAliasMeta {
+            name: "TypeOnlyDependency",
+            parent: "TypeOnlyDependencyFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "test-only-dependency",
+        alias: TsAliasMeta {
+            name: "TestOnlyDependency",
+            parent: "TestOnlyDependencyFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "circular-dependency",
+        alias: TsAliasMeta {
+            name: "CircularDependency",
+            parent: "CircularDependencyFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "re-export-cycle",
+        alias: TsAliasMeta {
+            name: "ReExportCycle",
+            parent: "ReExportCycleFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "boundary-violation",
+        alias: TsAliasMeta {
+            name: "BoundaryViolation",
+            parent: "BoundaryViolationFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unused-catalog-entry",
+        alias: TsAliasMeta {
+            name: "UnusedCatalogEntry",
+            parent: "UnusedCatalogEntryFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "empty-catalog-group",
+        alias: TsAliasMeta {
+            name: "EmptyCatalogGroup",
+            parent: "EmptyCatalogGroupFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unresolved-catalog-reference",
+        alias: TsAliasMeta {
+            name: "UnresolvedCatalogReference",
+            parent: "UnresolvedCatalogReferenceFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "unused-dependency-override",
+        alias: TsAliasMeta {
+            name: "UnusedDependencyOverride",
+            parent: "UnusedDependencyOverrideFinding",
+        },
+    },
+    IssueTsAliasMeta {
+        code: "misconfigured-dependency-override",
+        alias: TsAliasMeta {
+            name: "MisconfiguredDependencyOverride",
+            parent: "MisconfiguredDependencyOverrideFinding",
+        },
+    },
+];
+
 /// All shared issue-to-result metadata rows.
 pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     IssueResultMeta {
         code: "unused-file",
+        sarif_description: "File is not reachable from any entry point",
         meta_description: "Source files that are not imported by any other module and are not entry points. Detection uses graph reachability from configured entry points.",
         meta_docs_path: "explanations/dead-code#unused-files",
         meta_name: "Unused Files",
@@ -801,6 +979,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-export",
+        sarif_description: "Export is never imported",
         meta_description: "Named exports that are never imported by any other module in the project, including direct exports and re-exports through barrel files.",
         meta_docs_path: "explanations/dead-code#unused-exports",
         meta_name: "Unused Exports",
@@ -811,6 +990,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-type",
+        sarif_description: "Type export is never imported",
         meta_description: "Type-only exports that are never imported. These do not generate runtime code but add maintenance burden.",
         meta_docs_path: "explanations/dead-code#unused-types",
         meta_name: "Unused Type Exports",
@@ -821,6 +1001,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "private-type-leak",
+        sarif_description: "Exported signature references a private type",
         meta_description: "Exported values or types whose public TypeScript signature references a same-file type declaration that is not exported.",
         meta_docs_path: "explanations/dead-code#private-type-leaks",
         meta_name: "Private Type Leaks",
@@ -831,6 +1012,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dependency",
+        sarif_description: "Dependency listed but never imported",
         meta_description: "Packages listed in dependencies that are never imported or required by any source file.",
         meta_docs_path: "explanations/dead-code#unused-dependencies",
         meta_name: "Unused Dependencies",
@@ -841,6 +1023,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dev-dependency",
+        sarif_description: "Dev dependency listed but never imported",
         meta_description: "Packages listed in devDependencies that are never imported by test files, config files, or scripts.",
         meta_docs_path: "explanations/dead-code#unused-devdependencies",
         meta_name: "Unused Dev Dependencies",
@@ -851,6 +1034,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-optional-dependency",
+        sarif_description: "Optional dependency listed but never imported",
         meta_description: "Packages listed in optionalDependencies that are never imported.",
         meta_docs_path: "explanations/dead-code#unused-optionaldependencies",
         meta_name: "Unused Optional Dependencies",
@@ -861,6 +1045,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-enum-member",
+        sarif_description: "Enum member is never referenced",
         meta_description: "Enum members that are never referenced in the codebase.",
         meta_docs_path: "explanations/dead-code#unused-enum-members",
         meta_name: "Unused Enum Members",
@@ -871,6 +1056,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-class-member",
+        sarif_description: "Class member is never referenced",
         meta_description: "Class methods and properties that are never referenced outside the class.",
         meta_docs_path: "explanations/dead-code#unused-class-members",
         meta_name: "Unused Class Members",
@@ -881,6 +1067,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-store-member",
+        sarif_description: "Store member is never accessed by any consumer",
         meta_description: "Pinia store members declared but never accessed by any consumer project-wide.",
         meta_docs_path: "explanations/dead-code#unused-store-members",
         meta_name: "Unused Store Members",
@@ -891,6 +1078,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unresolved-import",
+        sarif_description: "Import could not be resolved",
         meta_description: "Import specifiers that could not be resolved to a file on disk.",
         meta_docs_path: "explanations/dead-code#unresolved-imports",
         meta_name: "Unresolved Imports",
@@ -901,6 +1089,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unlisted-dependency",
+        sarif_description: "Dependency used but not in package.json",
         meta_description: "Packages imported in source code but not listed in package.json.",
         meta_docs_path: "explanations/dead-code#unlisted-dependencies",
         meta_name: "Unlisted Dependencies",
@@ -911,6 +1100,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "duplicate-export",
+        sarif_description: "Export name appears in multiple modules",
         meta_description: "The same export name is defined in multiple modules.",
         meta_docs_path: "explanations/dead-code#duplicate-exports",
         meta_name: "Duplicate Exports",
@@ -921,6 +1111,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "type-only-dependency",
+        sarif_description: "Production dependency only used via type-only imports",
         meta_description: "Production dependencies that are only imported via type-only imports.",
         meta_docs_path: "explanations/dead-code#type-only-dependencies",
         meta_name: "Type-only Dependencies",
@@ -931,6 +1122,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "test-only-dependency",
+        sarif_description: "Production dependency only imported by test files",
         meta_description: "Production dependencies that are only imported from test files.",
         meta_docs_path: "explanations/dead-code#test-only-dependencies",
         meta_name: "Test-only Dependencies",
@@ -941,6 +1133,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "circular-dependency",
+        sarif_description: "Circular dependency chain detected",
         meta_description: "A cycle in the module import graph.",
         meta_docs_path: "explanations/dead-code#circular-dependencies",
         meta_name: "Circular Dependencies",
@@ -951,6 +1144,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "re-export-cycle",
+        sarif_description: "Two or more barrel files re-export from each other in a loop",
         meta_description: "A barrel file re-exports from another barrel that ultimately re-exports back.",
         meta_docs_path: "explanations/dead-code#re-export-cycles",
         meta_name: "Re-Export Cycles",
@@ -961,6 +1155,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-violation",
+        sarif_description: "Import crosses a configured architecture boundary",
         meta_description: "A module imports from a zone that its configured boundary rules do not allow.",
         meta_docs_path: "explanations/dead-code#boundary-violations",
         meta_name: "Boundary Violations",
@@ -971,6 +1166,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-coverage",
+        sarif_description: "Source file matches no configured architecture boundary zone",
         meta_description: "A reachable source file is not assigned to any configured boundary zone while boundary coverage is required.",
         meta_docs_path: "explanations/dead-code#boundary-violations",
         meta_name: "Boundary Coverage",
@@ -981,6 +1177,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "boundary-call-violation",
+        sarif_description: "Zoned file calls a callee its zone forbids",
         meta_description: "A file classified into a boundary zone calls a callee matching one of the zone's forbidden call patterns.",
         meta_docs_path: "explanations/dead-code#boundary-violations",
         meta_name: "Boundary Call Violation",
@@ -991,6 +1188,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "policy-violation",
+        sarif_description: "Banned usage matched a rule-pack rule",
         meta_description: "A call site, import, or catalogue-derived effect matched a configured rule pack rule.",
         meta_docs_path: "explanations/dead-code#policy-violations",
         meta_name: "Policy Violation",
@@ -1001,6 +1199,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "invalid-client-export",
+        sarif_description: "\"use client\" file exports a server-only / route-config name",
         meta_description: "A file carrying the use client directive also exports a Next.js server-only or route-segment config name.",
         meta_docs_path: "explanations/dead-code#invalid-client-exports",
         meta_name: "Invalid client export",
@@ -1011,6 +1210,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "mixed-client-server-barrel",
+        sarif_description: "Barrel re-exports both a \"use client\" module and a server-only module",
         meta_description: "A barrel file forwards a name from a use client module alongside a name from a server-only module.",
         meta_docs_path: "explanations/dead-code#mixed-client-server-barrels",
         meta_name: "Mixed client/server barrel",
@@ -1021,6 +1221,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "misplaced-directive",
+        sarif_description: "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
         meta_description: "A use client or use server directive string appears after a non-directive statement and is ignored.",
         meta_docs_path: "explanations/dead-code#misplaced-directives",
         meta_name: "Misplaced directive",
@@ -1031,6 +1232,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unprovided-inject",
+        sarif_description: "inject() / getContext() reads a key that no provide() / setContext() supplies",
         meta_description: "A Vue inject or Svelte getContext reads a dependency-injection key that no matching provider supplies.",
         meta_docs_path: "explanations/dead-code#unprovided-injects",
         meta_name: "Unprovided injects",
@@ -1041,6 +1243,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unrendered-component",
+        sarif_description: "A Vue / Svelte component is reachable through a barrel but rendered nowhere",
         meta_description: "A Vue or Svelte single-file component is reachable through the graph but rendered nowhere in the project.",
         meta_docs_path: "explanations/dead-code#unrendered-components",
         meta_name: "Unrendered components",
@@ -1051,6 +1254,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-prop",
+        sarif_description: "A Vue, Svelte, or React component prop is referenced nowhere in its own component",
         meta_description: "A declared Vue, Svelte, React, or Preact component prop is referenced nowhere inside its own component.",
         meta_docs_path: "explanations/dead-code#unused-component-props",
         meta_name: "Unused component props",
@@ -1061,6 +1265,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-emit",
+        sarif_description: "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
         meta_description: "A Vue script setup defineEmits event is emitted nowhere in its own component.",
         meta_docs_path: "explanations/dead-code#unused-component-emits",
         meta_name: "Unused component emits",
@@ -1071,6 +1276,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-input",
+        sarif_description: "An Angular @Input() / signal input() / model() input is read nowhere in its own component",
         meta_description: "An Angular input is read nowhere in its own component.",
         meta_docs_path: "explanations/dead-code#unused-component-inputs",
         meta_name: "Unused component inputs",
@@ -1081,6 +1287,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-component-output",
+        sarif_description: "An Angular @Output() / signal output() output is emitted nowhere in its own component",
         meta_description: "An Angular output is emitted nowhere in its own component.",
         meta_docs_path: "explanations/dead-code#unused-component-outputs",
         meta_name: "Unused component outputs",
@@ -1091,6 +1298,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-svelte-event",
+        sarif_description: "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project",
         meta_description: "A Svelte component dispatches a custom event whose name is listened to nowhere in the analyzed project.",
         meta_docs_path: "explanations/dead-code#unused-svelte-events",
         meta_name: "Unused Svelte events",
@@ -1101,6 +1309,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-server-action",
+        sarif_description: "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
         meta_description: "A Next.js Server Action exported from a use server file is referenced by no code in the project.",
         meta_docs_path: "explanations/dead-code#unused-server-actions",
         meta_name: "Unused server actions",
@@ -1111,6 +1320,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-load-data-key",
+        sarif_description: "A SvelteKit load() return-object key is read by no consumer",
         meta_description: "A SvelteKit load return-object key is read by no route or project-wide consumer.",
         meta_docs_path: "explanations/dead-code#unused-load-data-keys",
         meta_name: "Unused load data keys",
@@ -1121,6 +1331,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "route-collision",
+        sarif_description: "Two or more Next.js App Router route files resolve to the same URL",
         meta_description: "Two or more Next.js App Router route files resolve to the same URL within one app root.",
         meta_docs_path: "explanations/dead-code#route-collisions",
         meta_name: "Route collision",
@@ -1131,6 +1342,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "dynamic-segment-name-conflict",
+        sarif_description: "Sibling Next.js dynamic route segments use different slug names at the same position",
         meta_description: "Sibling Next.js dynamic route segments use different slug names at the same position.",
         meta_docs_path: "explanations/dead-code#dynamic-segment-name-conflicts",
         meta_name: "Dynamic segment name conflict",
@@ -1141,6 +1353,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "stale-suppression",
+        sarif_description: "Suppression comment or tag no longer matches any issue",
         meta_description: "A fallow suppression comment or tag no longer matches any active issue.",
         meta_docs_path: "explanations/dead-code#stale-suppressions",
         meta_name: "Stale Suppressions",
@@ -1151,6 +1364,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-catalog-entry",
+        sarif_description: "Catalog entry not referenced by any workspace package",
         meta_description: "A package manager catalog entry is not referenced by any workspace package.json.",
         meta_docs_path: "explanations/dead-code#unused-catalog-entries",
         meta_name: "Unused catalog entry",
@@ -1161,6 +1375,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "empty-catalog-group",
+        sarif_description: "Named catalog group has no entries",
         meta_description: "A named package manager catalog group has no package entries.",
         meta_docs_path: "explanations/dead-code#empty-catalog-groups",
         meta_name: "Empty catalog group",
@@ -1171,6 +1386,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unresolved-catalog-reference",
+        sarif_description: "package.json references a catalog that does not declare the package",
         meta_description: "A workspace package.json uses a catalog protocol reference that no catalog declares.",
         meta_docs_path: "explanations/dead-code#unresolved-catalog-references",
         meta_name: "Unresolved catalog reference",
@@ -1181,6 +1397,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "unused-dependency-override",
+        sarif_description: "pnpm.overrides entry targets a package not declared or resolved",
         meta_description: "A pnpm dependency override targets a package not declared by any workspace package and not present in the lockfile.",
         meta_docs_path: "explanations/dead-code#unused-dependency-overrides",
         meta_name: "Unused pnpm dependency override",
@@ -1191,6 +1408,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "misconfigured-dependency-override",
+        sarif_description: "pnpm.overrides entry has an unparsable key or value",
         meta_description: "A pnpm dependency override key or value does not parse as a valid override spec.",
         meta_docs_path: "explanations/dead-code#misconfigured-dependency-overrides",
         meta_name: "Misconfigured pnpm dependency override",
@@ -1201,6 +1419,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "prop-drilling",
+        sarif_description: "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer",
         meta_description: "A React or Preact prop is forwarded unchanged through multiple pass-through components to a distant consumer.",
         meta_docs_path: "explanations/dead-code#prop-drilling",
         meta_name: "Prop drilling",
@@ -1211,6 +1430,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "thin-wrapper",
+        sarif_description: "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
         meta_description: "A React or Preact component is structural indirection around a single spread-forwarded child render.",
         meta_docs_path: "explanations/dead-code#thin-wrapper",
         meta_name: "Thin wrapper",
@@ -1221,6 +1441,7 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
     },
     IssueResultMeta {
         code: "duplicate-prop-shape",
+        sarif_description: "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
         meta_description: "Multiple React or Preact components declare an identical significant prop-name set.",
         meta_docs_path: "explanations/dead-code#duplicate-prop-shape",
         meta_name: "Duplicate prop shape",
@@ -1351,94 +1572,10 @@ pub fn issue_sarif_rule_ids(code: &str) -> Vec<String> {
 #[must_use]
 pub fn issue_sarif_rule_description(rule_id: &str) -> Option<&'static str> {
     let code = rule_id.strip_prefix("fallow/")?;
-    match code {
-        "unused-file" => Some("File is not reachable from any entry point"),
-        "unused-export" => Some("Export is never imported"),
-        "unused-type" => Some("Type export is never imported"),
-        "private-type-leak" => Some("Exported signature references a private type"),
-        "unused-dependency" => Some("Dependency listed but never imported"),
-        "unused-dev-dependency" => Some("Dev dependency listed but never imported"),
-        "unused-optional-dependency" => Some("Optional dependency listed but never imported"),
-        "type-only-dependency" => Some("Production dependency only used via type-only imports"),
-        "test-only-dependency" => Some("Production dependency only imported by test files"),
-        "unused-enum-member" => Some("Enum member is never referenced"),
-        "unused-class-member" => Some("Class member is never referenced"),
-        "unused-store-member" => Some("Store member is never accessed by any consumer"),
-        "unresolved-import" => Some("Import could not be resolved"),
-        "unlisted-dependency" => Some("Dependency used but not in package.json"),
-        "duplicate-export" => Some("Export name appears in multiple modules"),
-        "circular-dependency" => Some("Circular dependency chain detected"),
-        "re-export-cycle" => Some("Two or more barrel files re-export from each other in a loop"),
-        "boundary-violation" => Some("Import crosses a configured architecture boundary"),
-        "boundary-coverage" => Some("Source file matches no configured architecture boundary zone"),
-        "boundary-call-violation" => Some("Zoned file calls a callee its zone forbids"),
-        "policy-violation" => Some("Banned usage matched a rule-pack rule"),
-        "invalid-client-export" => {
-            Some("\"use client\" file exports a server-only / route-config name")
-        }
-        "mixed-client-server-barrel" => {
-            Some("Barrel re-exports both a \"use client\" module and a server-only module")
-        }
-        "misplaced-directive" => Some(
-            "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
-        ),
-        "unprovided-inject" => {
-            Some("inject() / getContext() reads a key that no provide() / setContext() supplies")
-        }
-        "unrendered-component" => {
-            Some("A Vue / Svelte component is reachable through a barrel but rendered nowhere")
-        }
-        "unused-component-prop" => Some(
-            "A Vue, Svelte, or React component prop is referenced nowhere in its own component",
-        ),
-        "unused-component-emit" => {
-            Some("A Vue <script setup> defineEmits event is emitted nowhere in its own component")
-        }
-        "unused-component-input" => Some(
-            "An Angular @Input() / signal input() / model() input is read nowhere in its own component",
-        ),
-        "unused-component-output" => Some(
-            "An Angular @Output() / signal output() output is emitted nowhere in its own component",
-        ),
-        "unused-svelte-event" => Some(
-            "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project",
-        ),
-        "unused-server-action" => Some(
-            "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
-        ),
-        "unused-load-data-key" => {
-            Some("A SvelteKit load() return-object key is read by no consumer")
-        }
-        "prop-drilling" => Some(
-            "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer",
-        ),
-        "thin-wrapper" => Some(
-            "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
-        ),
-        "duplicate-prop-shape" => Some(
-            "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
-        ),
-        "route-collision" => {
-            Some("Two or more Next.js App Router route files resolve to the same URL")
-        }
-        "dynamic-segment-name-conflict" => Some(
-            "Sibling Next.js dynamic route segments use different slug names at the same position",
-        ),
-        "stale-suppression" => Some("Suppression comment or tag no longer matches any issue"),
-        "missing-suppression-reason" => Some("Suppression comment omits a required reason"),
-        "unused-catalog-entry" => Some("Catalog entry not referenced by any workspace package"),
-        "empty-catalog-group" => Some("Named catalog group has no entries"),
-        "unresolved-catalog-reference" => {
-            Some("package.json references a catalog that does not declare the package")
-        }
-        "unused-dependency-override" => {
-            Some("pnpm.overrides entry targets a package not declared or resolved")
-        }
-        "misconfigured-dependency-override" => {
-            Some("pnpm.overrides entry has an unparsable key or value")
-        }
-        _ => None,
+    if code == "missing-suppression-reason" {
+        return Some("Suppression comment omits a required reason");
     }
+    issue_result_meta_by_code(code).map(|meta| meta.sarif_description)
 }
 
 /// CodeClimate check names used by CI formatters for a canonical issue code.
@@ -1460,98 +1597,10 @@ pub fn issue_docs_anchor(code: &str) -> Option<&'static str> {
 /// Published TypeScript alias policy for backwards-compatible bare names.
 #[must_use]
 pub fn issue_ts_alias(code: &str) -> Option<TsAliasMeta> {
-    let alias = match code {
-        "unused-file" => TsAliasMeta {
-            name: "UnusedFile",
-            parent: "UnusedFileFinding",
-        },
-        "unused-export" => TsAliasMeta {
-            name: "UnusedExport",
-            parent: "UnusedExportFinding",
-        },
-        "private-type-leak" => TsAliasMeta {
-            name: "PrivateTypeLeak",
-            parent: "PrivateTypeLeakFinding",
-        },
-        "unused-dependency" => TsAliasMeta {
-            name: "UnusedDependency",
-            parent: "UnusedDependencyFinding",
-        },
-        "unused-dev-dependency" => TsAliasMeta {
-            name: "UnusedDependency",
-            parent: "UnusedDevDependencyFinding",
-        },
-        "unused-optional-dependency" => TsAliasMeta {
-            name: "UnusedDependency",
-            parent: "UnusedOptionalDependencyFinding",
-        },
-        "unused-enum-member" => TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedEnumMemberFinding",
-        },
-        "unused-class-member" => TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedClassMemberFinding",
-        },
-        "unused-store-member" => TsAliasMeta {
-            name: "UnusedMember",
-            parent: "UnusedStoreMemberFinding",
-        },
-        "unresolved-import" => TsAliasMeta {
-            name: "UnresolvedImport",
-            parent: "UnresolvedImportFinding",
-        },
-        "unlisted-dependency" => TsAliasMeta {
-            name: "UnlistedDependency",
-            parent: "UnlistedDependencyFinding",
-        },
-        "duplicate-export" => TsAliasMeta {
-            name: "DuplicateExport",
-            parent: "DuplicateExportFinding",
-        },
-        "type-only-dependency" => TsAliasMeta {
-            name: "TypeOnlyDependency",
-            parent: "TypeOnlyDependencyFinding",
-        },
-        "test-only-dependency" => TsAliasMeta {
-            name: "TestOnlyDependency",
-            parent: "TestOnlyDependencyFinding",
-        },
-        "circular-dependency" => TsAliasMeta {
-            name: "CircularDependency",
-            parent: "CircularDependencyFinding",
-        },
-        "re-export-cycle" => TsAliasMeta {
-            name: "ReExportCycle",
-            parent: "ReExportCycleFinding",
-        },
-        "boundary-violation" => TsAliasMeta {
-            name: "BoundaryViolation",
-            parent: "BoundaryViolationFinding",
-        },
-        "unused-catalog-entry" => TsAliasMeta {
-            name: "UnusedCatalogEntry",
-            parent: "UnusedCatalogEntryFinding",
-        },
-        "empty-catalog-group" => TsAliasMeta {
-            name: "EmptyCatalogGroup",
-            parent: "EmptyCatalogGroupFinding",
-        },
-        "unresolved-catalog-reference" => TsAliasMeta {
-            name: "UnresolvedCatalogReference",
-            parent: "UnresolvedCatalogReferenceFinding",
-        },
-        "unused-dependency-override" => TsAliasMeta {
-            name: "UnusedDependencyOverride",
-            parent: "UnusedDependencyOverrideFinding",
-        },
-        "misconfigured-dependency-override" => TsAliasMeta {
-            name: "MisconfiguredDependencyOverride",
-            parent: "MisconfiguredDependencyOverrideFinding",
-        },
-        _ => return None,
-    };
-    Some(alias)
+    ISSUE_TS_ALIAS_META
+        .iter()
+        .find(|meta| meta.code == code)
+        .map(|meta| meta.alias)
 }
 
 /// Rows exposed by the LSP issue-type capability.
@@ -1785,13 +1834,74 @@ mod tests {
     }
 
     #[test]
+    fn ci_summary_check_tables_match_result_metadata() {
+        assert_summary_check_table_matches_result_metadata(
+            include_str!("../../../action/jq/summary-check.jq"),
+            "action/jq/summary-check.jq",
+        );
+        assert_summary_check_table_matches_result_metadata(
+            include_str!("../../../ci/jq/summary-check.jq"),
+            "ci/jq/summary-check.jq",
+        );
+    }
+
+    #[test]
+    fn ci_summary_combined_tables_match_result_metadata() {
+        assert_summary_combined_table_matches_result_metadata(
+            include_str!("../../../action/jq/summary-combined.jq"),
+            "action/jq/summary-combined.jq",
+        );
+        assert_summary_combined_table_matches_result_metadata(
+            include_str!("../../../ci/jq/summary-combined.jq"),
+            "ci/jq/summary-combined.jq",
+        );
+    }
+
+    fn assert_summary_check_table_matches_result_metadata(source: &str, path: &str) {
+        for meta in counted_result_issue_metas() {
+            let expected = format!(
+                r#"table_row("{}"; "{}"; "{}")"#,
+                meta.summary_label, meta.result_key, meta.docs_anchor
+            );
+            assert!(
+                source.contains(&expected),
+                "{path} must include registry row for {} as `{expected}`",
+                meta.code
+            );
+        }
+    }
+
+    fn assert_summary_combined_table_matches_result_metadata(source: &str, path: &str) {
+        for meta in counted_result_issue_metas() {
+            let row = source
+                .lines()
+                .find(|line| line.contains(&format!(".check.{}", meta.result_key)))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{path} must include combined summary row for {} ({})",
+                        meta.code, meta.result_key
+                    )
+                });
+            assert!(
+                row.contains(&format!("[{}]", meta.summary_label)),
+                "{path} row for {} must use registry label `{}`: {row}",
+                meta.code,
+                meta.summary_label
+            );
+            assert!(
+                row.contains(&format!(r#"docs("{}")"#, meta.docs_anchor)),
+                "{path} row for {} must use registry docs anchor `{}`: {row}",
+                meta.code,
+                meta.docs_anchor
+            );
+        }
+    }
+
+    #[test]
     fn ts_alias_policy_is_explicit() {
-        let aliases: BTreeSet<(&str, &str)> = result_issue_metas()
-            .filter_map(|meta| {
-                issue_meta_by_code(meta.code)
-                    .and_then(|issue| issue.ts_alias())
-                    .map(|alias| (alias.name, alias.parent))
-            })
+        let aliases: BTreeSet<(&str, &str)> = ISSUE_TS_ALIAS_META
+            .iter()
+            .map(|meta| (meta.alias.name, meta.alias.parent))
             .collect();
 
         assert_eq!(
@@ -1830,6 +1940,35 @@ mod tests {
             ]),
             aliases
         );
+    }
+
+    #[test]
+    fn ts_alias_registry_rows_match_result_metadata() {
+        let result_codes: BTreeSet<&str> = result_issue_metas().map(|meta| meta.code).collect();
+        let mut seen_codes = BTreeSet::new();
+        for meta in ISSUE_TS_ALIAS_META {
+            assert!(
+                seen_codes.insert(meta.code),
+                "duplicate TypeScript alias row for {}",
+                meta.code
+            );
+            assert!(
+                result_codes.contains(meta.code),
+                "TypeScript alias row {} has no result metadata",
+                meta.code
+            );
+            assert!(
+                meta.alias.parent.ends_with("Finding"),
+                "TypeScript alias row {} must point at a generated Finding wrapper",
+                meta.code
+            );
+            assert_eq!(
+                Some(meta.alias),
+                issue_meta_by_code(meta.code).and_then(|issue| issue.ts_alias()),
+                "IssueKindMeta helper must resolve TypeScript alias row {} through the registry",
+                meta.code
+            );
+        }
     }
 
     #[test]

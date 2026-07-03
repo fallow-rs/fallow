@@ -995,6 +995,13 @@ fn audit_options(root: &Path) -> AuditOptions {
     }
 }
 
+fn audit_options_with_crap(root: &Path) -> AuditOptions {
+    AuditOptions {
+        max_crap: Some(30.0),
+        ..audit_options(root)
+    }
+}
+
 fn run_programmatic_combined(input: &CommandInput) {
     let dead_code = DeadCodeOptions {
         analysis: analysis_options(&input.root, true),
@@ -1170,6 +1177,16 @@ fn audit_large_workspace_changed_export(c: &mut Criterion) {
     });
 }
 
+fn audit_large_workspace_crap_graph_reuse(c: &mut Criterion) {
+    c.bench_function("audit_large_workspace_crap_graph_reuse", |bencher| {
+        bencher.iter_batched_ref(
+            || create_large_audit_project(true),
+            |input| run_audit(&audit_options_with_crap(&input.root)),
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 fn combined_workspace_programmatic_all_sections(c: &mut Criterion) {
     c.bench_function("combined_workspace_programmatic_all_sections", |bencher| {
         bencher.iter_batched_ref(
@@ -1311,6 +1328,7 @@ criterion_group!(
     audit_clean_workspace_no_changes,
     audit_changed_workspace_new_export,
     audit_large_workspace_changed_export,
+    audit_large_workspace_crap_graph_reuse,
     combined_workspace_programmatic_all_sections,
     combined_workspace_programmatic_session_reuse,
     editor_workspace_repeated_session_analysis,

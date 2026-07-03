@@ -1,16 +1,19 @@
 //! Programmatic list-command runtime helpers.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus, ResolvedBoundaryConfig};
-use fallow_output::{ListEntryPointOutput, RootEnvelopeMode, WorkspaceInfo, WorkspacesOutput};
+use fallow_output::{
+    ListEntryPointOutput, RootEnvelopeMode, WorkspaceInfo as WorkspaceOutputInfo, WorkspacesOutput,
+};
 use fallow_types::discover::{DiscoveredFile, EntryPoint};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::{
     AnalysisOptions, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
     BoundariesListing, ListJsonEnvelope, ListJsonOutputInput, ProgrammaticError,
-    resolve_programmatic_analysis_context, serialize_list_json_output,
+    analysis_context::changed_files_for_run, resolve_programmatic_analysis_context,
+    serialize_list_json_output,
 };
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
@@ -158,7 +161,9 @@ pub fn run_list_boundaries(
     resolved.install(|| {
         let project_config = load_list_project_config(&resolved)?;
         let session = fallow_engine::session::AnalysisSession::from_config(project_config);
-        let data = compute_boundary_data(session.config(), Some(session.files()));
+        let changed_files = changed_files_for_run(&resolved)?;
+        let discovered = scoped_discovered_files(session.files(), changed_files.as_ref());
+        let data = compute_boundary_data(session.config(), Some(&discovered));
 
         Ok(ListBoundariesProgrammaticOutput {
             boundaries: boundary_data_to_output(&data),
@@ -181,30 +186,46 @@ pub fn run_project_info(
         let project_config = load_list_project_config(&resolved)?;
         let session = fallow_engine::session::AnalysisSession::from_config(project_config);
         let config = session.config();
+        let workspaces = session.workspaces();
         let show_all = project_info_should_show_all(options);
         let need_plugin_result = options.plugins || options.entry_points || show_all;
         let need_files = options.files || options.entry_points || options.boundaries || show_all;
+        let changed_files = changed_files_for_run(&resolved)?;
         let discovered = if need_files || need_plugin_result {
-            Some(session.files())
+            Some(scoped_discovered_files(
+                session.files(),
+                changed_files.as_ref(),
+            ))
         } else {
             None
         };
+        let discovered_ref = discovered.as_deref();
 
-        let plugin_result =
-            collect_plugin_result(resolved.root(), config, options, show_all, discovered)?;
-        let entry_points = collect_entry_points(
+        let plugin_result = collect_plugin_result(
             resolved.root(),
             config,
             options,
             show_all,
-            discovered,
+            discovered_ref,
+            workspaces,
+        )?;
+        let entry_points = collect_entry_points(
+            config,
+            options,
+            show_all,
+            discovered_ref,
+            workspaces,
             plugin_result.as_ref(),
         );
         let boundaries = options
             .boundaries
-            .then(|| boundary_data_to_output(&compute_boundary_data(config, discovered)));
+            .then(|| boundary_data_to_output(&compute_boundary_data(config, discovered_ref)));
         let workspaces = if show_all {
-            Some(collect_workspace_output(resolved.root(), config)?)
+            Some(collect_workspace_output(
+                resolved.root(),
+                workspaces,
+                session.workspace_diagnostics(),
+            ))
         } else {
             None
         };
@@ -216,7 +237,7 @@ pub fn run_project_info(
 
         Ok(ProjectInfoProgrammaticOutput {
             plugins: collect_plugins(options, show_all, plugin_result.as_ref()),
-            files: collect_files(options, show_all, discovered, resolved.root()),
+            files: collect_files(options, show_all, discovered_ref, resolved.root()),
             entry_points: entry_points
                 .map(|entries| entry_points_to_output(&entries, resolved.root())),
             boundaries,
@@ -225,6 +246,20 @@ pub fn run_project_info(
             envelope_mode: RootEnvelopeMode::Tagged,
         })
     })
+}
+
+fn scoped_discovered_files(
+    files: &[DiscoveredFile],
+    changed_files: Option<&rustc_hash::FxHashSet<PathBuf>>,
+) -> Vec<DiscoveredFile> {
+    let Some(changed_files) = changed_files else {
+        return files.to_vec();
+    };
+    files
+        .iter()
+        .filter(|file| changed_files.contains(&file.path))
+        .cloned()
+        .collect()
 }
 
 fn load_list_project_config(
@@ -289,6 +324,7 @@ fn collect_plugin_result(
     options: &ProjectInfoOptions,
     show_all: bool,
     discovered: Option<&[DiscoveredFile]>,
+    workspaces: &[fallow_config::WorkspaceInfo],
 ) -> ProgrammaticResult<Option<fallow_engine::plugins::AggregatedPluginResult>> {
     if !(options.plugins || options.entry_points || show_all) {
         return Ok(None);
@@ -300,7 +336,7 @@ fn collect_plugin_result(
     let registry = fallow_engine::plugins::PluginRegistry::new(config.external_plugins.clone());
     let mut result = run_package_plugins(&registry, &root.join("package.json"), root, &file_paths)?
         .unwrap_or_default();
-    merge_workspace_plugins(root, &registry, &file_paths, &mut result)?;
+    merge_workspace_plugins(workspaces, &registry, &file_paths, &mut result)?;
     Ok(Some(result))
 }
 
@@ -327,12 +363,12 @@ fn run_package_plugins(
 }
 
 fn merge_workspace_plugins(
-    root: &Path,
+    workspaces: &[fallow_config::WorkspaceInfo],
     registry: &fallow_engine::plugins::PluginRegistry,
     file_paths: &[std::path::PathBuf],
     result: &mut fallow_engine::plugins::AggregatedPluginResult,
 ) -> ProgrammaticResult<()> {
-    for workspace in &fallow_config::discover_workspaces(root) {
+    for workspace in workspaces {
         let Some(workspace_result) = run_package_plugins(
             registry,
             &workspace.root.join("package.json"),
@@ -348,11 +384,11 @@ fn merge_workspace_plugins(
 }
 
 fn collect_entry_points(
-    root: &Path,
     config: &fallow_config::ResolvedConfig,
     options: &ProjectInfoOptions,
     show_all: bool,
     discovered: Option<&[DiscoveredFile]>,
+    workspaces: &[fallow_config::WorkspaceInfo],
     plugin_result: Option<&fallow_engine::plugins::AggregatedPluginResult>,
 ) -> Option<Vec<EntryPoint>> {
     if !(options.entry_points || show_all) {
@@ -360,7 +396,7 @@ fn collect_entry_points(
     }
     let discovered = discovered?;
     let mut entries = fallow_engine::discover::discover_entry_points(config, discovered);
-    for workspace in &fallow_config::discover_workspaces(root) {
+    for workspace in workspaces {
         entries.extend(fallow_engine::discover::discover_workspace_entry_points(
             &workspace.root,
             config,
@@ -389,57 +425,24 @@ fn entry_points_to_output(entries: &[EntryPoint], root: &Path) -> Vec<ListEntryP
 
 fn collect_workspace_output(
     root: &Path,
-    config: &fallow_config::ResolvedConfig,
-) -> ProgrammaticResult<WorkspacesOutput<fallow_config::WorkspaceDiagnostic>> {
-    let (workspaces, mut diagnostics) =
-        fallow_config::discover_workspaces_with_diagnostics(root, &config.ignore_patterns)
-            .map_err(|err| {
-                ProgrammaticError::new(err.to_string(), 2)
-                    .with_code("FALLOW_WORKSPACE_DISCOVERY_FAILED")
-                    .with_context("project_info.workspaces")
-            })?;
-    append_undeclared_workspace_diagnostics(root, config, &workspaces, &mut diagnostics);
+    workspaces: &[fallow_config::WorkspaceInfo],
+    diagnostics: &[fallow_config::WorkspaceDiagnostic],
+) -> WorkspacesOutput<fallow_config::WorkspaceDiagnostic> {
     let workspaces = workspaces
         .iter()
         .map(|workspace| {
             let relative = workspace.root.strip_prefix(root).unwrap_or(&workspace.root);
-            WorkspaceInfo {
+            WorkspaceOutputInfo {
                 name: workspace.name.clone(),
                 path: relative.display().to_string().replace('\\', "/"),
                 is_internal_dependency: workspace.is_internal_dependency,
             }
         })
         .collect::<Vec<_>>();
-    Ok(WorkspacesOutput {
+    WorkspacesOutput {
         workspace_count: workspaces.len(),
         workspaces,
-        workspace_diagnostics: diagnostics,
-    })
-}
-
-fn append_undeclared_workspace_diagnostics(
-    root: &Path,
-    config: &fallow_config::ResolvedConfig,
-    workspaces: &[fallow_config::WorkspaceInfo],
-    diagnostics: &mut Vec<fallow_config::WorkspaceDiagnostic>,
-) {
-    let undeclared = fallow_config::find_undeclared_workspaces_with_ignores(
-        root,
-        workspaces,
-        &config.ignore_patterns,
-    );
-    let already_flagged: FxHashSet<std::path::PathBuf> = diagnostics
-        .iter()
-        .map(|diagnostic| {
-            std::fs::canonicalize(&diagnostic.path).unwrap_or_else(|_| diagnostic.path.clone())
-        })
-        .collect();
-    for diagnostic in undeclared {
-        let canonical =
-            std::fs::canonicalize(&diagnostic.path).unwrap_or_else(|_| diagnostic.path.clone());
-        if !already_flagged.contains(&canonical) {
-            diagnostics.push(diagnostic);
-        }
+        workspace_diagnostics: diagnostics.to_vec(),
     }
 }
 
@@ -638,6 +641,8 @@ fn logical_group_info_to_output(group: &LogicalGroupInfo) -> BoundariesListLogic
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use serde_json::json;
 
     use super::*;
@@ -654,6 +659,64 @@ mod tests {
     fn boundary_data_to_json(data: &BoundaryData) -> serde_json::Value {
         serde_json::to_value(boundary_data_to_output(data))
             .expect("boundary list output should serialize")
+    }
+
+    fn git(project: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(project)
+            .status()
+            .expect("git command should run");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn setup_changed_boundary_project() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"changed-list-api","main":"src/app/index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{
+                "boundaries": {
+                    "zones": [
+                        { "name": "app", "patterns": ["src/app/**"] },
+                        { "name": "shared", "patterns": ["src/shared/**"] }
+                    ]
+                }
+            }"#,
+        )
+        .expect("write config");
+        std::fs::create_dir_all(project.path().join("src/app")).expect("create app");
+        std::fs::create_dir_all(project.path().join("src/shared")).expect("create shared");
+        std::fs::write(
+            project.path().join("src/app/index.ts"),
+            "export const app = 1;\n",
+        )
+        .expect("write app");
+        std::fs::write(
+            project.path().join("src/shared/index.ts"),
+            "export const shared = 1;\n",
+        )
+        .expect("write shared");
+
+        git(project.path(), &["init", "-q"]);
+        git(
+            project.path(),
+            &["config", "user.email", "test@example.com"],
+        );
+        git(project.path(), &["config", "user.name", "Test User"]);
+        git(project.path(), &["config", "commit.gpgsign", "false"]);
+        git(project.path(), &["add", "."]);
+        git(project.path(), &["commit", "-qm", "initial"]);
+        std::fs::write(
+            project.path().join("src/app/index.ts"),
+            "export const app = 2;\n",
+        )
+        .expect("modify app");
+        project
     }
 
     #[test]
@@ -689,6 +752,111 @@ mod tests {
         assert_eq!(output["entry_point_count"], 1);
         assert_eq!(output["workspace_count"], 0);
         assert!(output.get("kind").is_none());
+    }
+
+    #[test]
+    fn project_info_surfaces_malformed_root_package_json() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(project.path().join("package.json"), "{").expect("write package");
+
+        let err = run_project_info(&ProjectInfoOptions {
+            analysis: AnalysisOptions {
+                root: Some(project.path().to_path_buf()),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            ..ProjectInfoOptions::default()
+        })
+        .expect_err("malformed root package.json must fail project info");
+
+        assert_eq!(err.exit_code, 2);
+        assert_eq!(err.code.as_deref(), Some("FALLOW_CONFIG_LOAD_FAILED"));
+        assert!(
+            err.message.contains("package.json"),
+            "error should name the malformed root package.json"
+        );
+    }
+
+    #[test]
+    fn project_info_default_sections_include_undeclared_workspace_diagnostic() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"project-info-api","workspaces":["packages/*"]}"#,
+        )
+        .expect("write package");
+        std::fs::create_dir_all(project.path().join("packages/app")).expect("workspace dir");
+        std::fs::write(
+            project.path().join("packages/app/package.json"),
+            r#"{"name":"app","main":"src/index.ts"}"#,
+        )
+        .expect("write workspace package");
+        std::fs::create_dir_all(project.path().join("tools/extra")).expect("extra package dir");
+        std::fs::write(
+            project.path().join("tools/extra/package.json"),
+            r#"{"name":"extra"}"#,
+        )
+        .expect("write extra package");
+
+        let output = serialize_project_info_programmatic_json(
+            run_project_info(&ProjectInfoOptions {
+                analysis: AnalysisOptions {
+                    root: Some(project.path().to_path_buf()),
+                    no_cache: true,
+                    ..AnalysisOptions::default()
+                },
+                ..ProjectInfoOptions::default()
+            })
+            .expect("project info should run"),
+        )
+        .expect("project info should serialize");
+
+        let diagnostics = output["workspace_diagnostics"]
+            .as_array()
+            .expect("project info should include workspace_diagnostics");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic["kind"].as_str() == Some("undeclared-workspace")
+                    && diagnostic["path"]
+                        .as_str()
+                        .is_some_and(|path| path.replace('\\', "/").ends_with("/tools/extra"))
+            }),
+            "project info must include undeclared workspace diagnostics from the reused session, got {diagnostics:#?}"
+        );
+    }
+
+    #[test]
+    fn list_runtimes_scope_files_and_boundary_counts_to_changed_since() {
+        let project = setup_changed_boundary_project();
+        let analysis = AnalysisOptions {
+            root: Some(project.path().to_path_buf()),
+            changed_since: Some("HEAD".to_string()),
+            no_cache: true,
+            ..AnalysisOptions::default()
+        };
+
+        let project_info = serialize_project_info_programmatic_json(
+            run_project_info(&ProjectInfoOptions {
+                analysis: analysis.clone(),
+                files: true,
+                boundaries: true,
+                ..ProjectInfoOptions::default()
+            })
+            .expect("project info should run"),
+        )
+        .expect("project info should serialize");
+        let files = project_info["files"].as_array().expect("files array");
+        assert_eq!(files, &[json!("src/app/index.ts")]);
+        assert_eq!(project_info["boundaries"]["zones"][0]["file_count"], 1);
+        assert_eq!(project_info["boundaries"]["zones"][1]["file_count"], 0);
+
+        let boundaries = serialize_list_boundaries_programmatic_json(
+            run_list_boundaries(&ListBoundariesOptions { analysis })
+                .expect("list boundaries should run"),
+        )
+        .expect("list boundaries should serialize");
+        assert_eq!(boundaries["boundaries"]["zones"][0]["file_count"], 1);
+        assert_eq!(boundaries["boundaries"]["zones"][1]["file_count"], 0);
     }
 
     #[test]

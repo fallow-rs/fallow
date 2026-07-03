@@ -1086,6 +1086,7 @@ dependencies = [
  "fallow-config",
  "fallow-extract",
  "fallow-graph",
+ "fallow-security",
  "fallow-types",
  "glob",
  "globset",
@@ -1135,6 +1136,7 @@ dependencies = [
  "fallow-extract",
  "fallow-graph",
  "fallow-output",
+ "fallow-security",
  "fallow-types",
  "globset",
  "oxc_coverage_instrument",
@@ -1260,6 +1262,17 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "fallow-security"
+version = "2.104.0"
+dependencies = [
+ "fallow-config",
+ "fallow-types",
+ "rustc-hash 2.1.2",
+ "serde",
+ "toml",
 ]
 
 [[package]]

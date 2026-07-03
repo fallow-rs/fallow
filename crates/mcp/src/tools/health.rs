@@ -9,8 +9,8 @@ use rmcp::model::{CallToolResult, Content};
 
 use super::{
     api_runtime::{
-        env_diff_file, json_success, non_empty_path, non_empty_string, programmatic_error_body,
-        run_api_blocking,
+        changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
+        programmatic_error_body, run_api_blocking,
     },
     fallback_policy::{
         CliFallbackReason, baseline_fallback_reason, filled, grouped_fallback_reason,
@@ -315,7 +315,7 @@ fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions
             threads: params.threads,
             production: params.production.unwrap_or(false),
             production_override: params.production,
-            changed_since: non_empty_string(params.changed_since.as_deref()),
+            changed_since: changed_since_from_param(params.changed_since.as_deref()),
             diff_file: env_diff_file(),
             workspace: non_empty_string(params.workspace.as_deref())
                 .map(|workspace| vec![workspace]),

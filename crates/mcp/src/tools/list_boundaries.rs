@@ -9,7 +9,8 @@ use rmcp::model::{CallToolResult, Content};
 
 use super::{
     api_runtime::{
-        env_diff_file, json_success, non_empty_path, programmatic_error_body, run_api_blocking,
+        changed_since_from_param, env_diff_file, json_success, non_empty_path,
+        programmatic_error_body, run_api_blocking,
     },
     push_global,
 };
@@ -71,7 +72,7 @@ fn list_boundaries_options_from_params(params: &ListBoundariesParams) -> ListBou
             diff_file: env_diff_file(),
             production: false,
             production_override: None,
-            changed_since: None,
+            changed_since: changed_since_from_param(None),
             workspace: None,
             changed_workspaces: None,
             explain: false,

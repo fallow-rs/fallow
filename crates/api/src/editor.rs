@@ -429,6 +429,34 @@ impl EditorAnalysisSession {
             .map(EditorProjectAnalysisOutput::from_engine)
     }
 
+    /// Run dead-code and duplication analysis, optionally focusing duplication
+    /// to files the editor already resolved as changed.
+    ///
+    /// Dead-code still runs with full graph context so downstream editor
+    /// filters can preserve existing diagnostic semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an engine error when dead-code parsing or analysis fails.
+    pub fn analyze_project_with_changed_files(
+        &self,
+        duplicates_config: &fallow_config::DuplicatesConfig,
+        retain_complexity_artifacts: bool,
+        changed_files: Option<&FxHashSet<PathBuf>>,
+    ) -> fallow_engine::EngineResult<EditorProjectAnalysisOutput> {
+        self.inner
+            .analyze_project_with_artifacts(
+                duplicates_config,
+                fallow_engine::project_analysis::ProjectAnalysisArtifactOptions {
+                    retain_complexity_artifacts,
+                    changed_files: changed_files.cloned(),
+                    ..fallow_engine::project_analysis::ProjectAnalysisArtifactOptions::default()
+                },
+            )
+            .map(fallow_engine::project_analysis::ProjectAnalysisArtifacts::into_output)
+            .map(EditorProjectAnalysisOutput::from_engine)
+    }
+
     const fn from_engine(inner: fallow_engine::session::AnalysisSession) -> Self {
         Self { inner }
     }
@@ -628,6 +656,39 @@ mod tests {
                 .as_ref()
                 .is_some_and(|files| !files.is_empty())
         );
+    }
+
+    #[test]
+    fn editor_session_scopes_duplication_to_changed_files() {
+        let temp = tempfile::tempdir().expect("temp project");
+        let root = temp.path();
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("src dir");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"editor-api-session","main":"src/a.ts"}"#,
+        )
+        .expect("package.json");
+        let repeated =
+            "export function repeated() {\n  return ['alpha', 'beta', 'gamma'].join(',');\n}\n";
+        std::fs::write(src.join("a.ts"), repeated).expect("source a");
+        std::fs::write(src.join("b.ts"), repeated).expect("source b");
+
+        let session = EditorAnalysisSession::load(root, None).expect("session loads");
+        let mut config = session.config().duplicates.clone();
+        config.min_tokens = 1;
+        config.min_lines = 1;
+        let full = session
+            .analyze_project_with(&config, false)
+            .expect("analysis runs");
+        assert!(!full.duplication.clone_groups.is_empty());
+
+        let mut changed_files = FxHashSet::default();
+        changed_files.insert(src.join("unrelated.ts"));
+        let scoped = session
+            .analyze_project_with_changed_files(&config, false, Some(&changed_files))
+            .expect("analysis runs");
+        assert!(scoped.duplication.clone_groups.is_empty());
     }
 
     #[test]

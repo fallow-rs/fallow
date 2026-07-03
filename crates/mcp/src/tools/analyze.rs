@@ -12,7 +12,7 @@ use rmcp::model::{CallToolResult, Content};
 
 use super::{
     ISSUE_TYPE_FLAGS,
-    api_runtime::{env_diff_file, run_api_blocking},
+    api_runtime::{changed_since_from_param, env_diff_file, run_api_blocking},
     api_runtime::{json_success, non_empty_path, non_empty_string, programmatic_error_body},
     fallback_policy::{
         CliFallbackReason, baseline_fallback_reason, grouped_fallback_reason,
@@ -176,6 +176,7 @@ fn dead_code_options_from_params(params: &AnalyzeParams) -> Result<DeadCodeOptio
             threads: params.threads,
             production: params.production.unwrap_or(false),
             production_override: params.production,
+            changed_since: changed_since_from_param(None),
             diff_file: env_diff_file(),
             workspace: non_empty_string(params.workspace.as_deref())
                 .map(|workspace| vec![workspace]),

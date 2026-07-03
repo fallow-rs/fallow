@@ -38,6 +38,7 @@ fn analyze_project_root_for_test(
         duplication_options,
         production_override,
         inline_complexity_enabled,
+        changed_files: None,
         merged_analysis: &mut merged_analysis,
         merged_inline_complexity,
         config_messages,
@@ -1619,6 +1620,106 @@ fn attach_changed_since_data_noop_when_filter_absent() {
     assert!(
         map[&uri][0].data.is_none(),
         "unfiltered runs must not stamp data.changedSince"
+    );
+}
+
+fn git(root: &Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .status()
+        .expect("git command starts");
+    assert!(status.success(), "git command failed: {args:?}");
+}
+
+#[test]
+fn run_blocking_analysis_only_stamps_applied_changed_since_scope() {
+    let temp = tempfile::tempdir().expect("temp project");
+    let root = temp.path();
+    let src = root.join("src");
+    std::fs::create_dir(&src).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"lsp-changed-since","type":"module","main":"src/index.ts"}"#,
+    )
+    .expect("package json");
+    std::fs::write(src.join("index.ts"), "export const entry = 1;\n").expect("index source");
+    std::fs::write(src.join("old.ts"), "export const oldUnused = 1;\n").expect("old source");
+    let clone_body = "export function duplicate() {\n  const values = ['alpha', 'beta', 'gamma'];\n  return values.join(',');\n}\n";
+    std::fs::write(src.join("dupe-a.ts"), clone_body).expect("dupe a");
+    std::fs::write(src.join("dupe-b.ts"), clone_body).expect("dupe b");
+
+    git(root, &["init"]);
+    git(root, &["config", "user.email", "test@example.com"]);
+    git(root, &["config", "user.name", "Test User"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-m", "initial"]);
+
+    std::fs::write(src.join("changed.ts"), "export const changedUnused = 1;\n")
+        .expect("changed source");
+
+    let output = run_blocking_analysis(&BlockingAnalysisInput {
+        project_roots: vec![root.to_path_buf()],
+        config_path: None,
+        duplication_options: Some(LspDuplicationOptions {
+            min_tokens: Some(1),
+            min_lines: Some(1),
+            ..LspDuplicationOptions::default()
+        }),
+        production_override: None,
+        inline_complexity_enabled: false,
+        root: root.to_path_buf(),
+        toplevel: Some(root.to_path_buf()),
+        changed_since: Some("HEAD".to_string()),
+    });
+
+    assert_eq!(output.applied_changed_since.as_deref(), Some("HEAD"));
+    assert!(
+        output
+            .analysis
+            .results
+            .unused_files
+            .iter()
+            .all(|finding| finding.file.path.ends_with("changed.ts")),
+        "changedSince must exclude unchanged dead-code diagnostics"
+    );
+    assert!(
+        output
+            .analysis
+            .duplication
+            .clone_groups
+            .iter()
+            .all(|group| {
+                group
+                    .instances
+                    .iter()
+                    .any(|instance| instance.file.ends_with("changed.ts"))
+            }),
+        "changedSince must exclude clone groups that only touch unchanged files"
+    );
+
+    let invalid = run_blocking_analysis(&BlockingAnalysisInput {
+        project_roots: vec![root.to_path_buf()],
+        config_path: None,
+        duplication_options: None,
+        production_override: None,
+        inline_complexity_enabled: false,
+        root: root.to_path_buf(),
+        toplevel: Some(root.to_path_buf()),
+        changed_since: Some("definitely-not-a-ref".to_string()),
+    });
+
+    assert!(
+        invalid.applied_changed_since.is_none(),
+        "ignored changedSince refs must not be stamped on full-scope diagnostics"
+    );
+    assert!(
+        invalid
+            .changed_message
+            .as_ref()
+            .is_some_and(|(_, message)| message.contains("ignored")),
+        "invalid refs should still report a warning message"
     );
 }
 

@@ -8,8 +8,8 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, Content};
 
 use super::api_runtime::{
-    env_diff_file, json_success, non_empty_path, non_empty_string, programmatic_error_body,
-    run_api_blocking,
+    changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
+    programmatic_error_body, run_api_blocking,
 };
 
 /// Run the `decision_surface` tool through the typed programmatic API.
@@ -37,6 +37,7 @@ fn decision_surface_options_from_params(params: &DecisionSurfaceParams) -> Decis
             no_cache: params.no_cache.unwrap_or(false),
             threads: params.threads,
             diff_file: env_diff_file(),
+            changed_since: changed_since_from_param(None),
             workspace: non_empty_string(params.workspace.as_deref()).map(|value| vec![value]),
             explain: false,
             ..AnalysisOptions::default()

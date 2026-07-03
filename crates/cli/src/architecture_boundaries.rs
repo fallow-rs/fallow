@@ -74,6 +74,16 @@ fn lower_contract_crates_do_not_depend_upward() {
         ],
     );
     assert_no_deps(
+        "crates/security/Cargo.toml",
+        &[
+            "fallow-output",
+            "fallow-api",
+            "fallow-engine",
+            "fallow-cli",
+            "fallow-core",
+        ],
+    );
+    assert_no_deps(
         "crates/output/Cargo.toml",
         &["fallow-api", "fallow-engine", "fallow-cli", "fallow-core"],
     );
@@ -86,15 +96,46 @@ fn api_and_engine_do_not_depend_on_cli() {
 }
 
 #[test]
-fn core_is_internal_and_not_published() {
+fn core_publish_status_matches_engine_dependency() {
     let manifest = read_manifest("crates/core/Cargo.toml");
-    assert_eq!(
-        manifest
-            .get("package")
-            .and_then(Value::as_table)
-            .and_then(|package| package.get("publish")),
-        Some(&Value::Boolean(false)),
-        "fallow-core must stay internal; publish fallow-engine/fallow-api instead"
+    let engine = read_manifest("crates/engine/Cargo.toml");
+    let engine_depends_on_core = section_has_dep(&engine, "dependencies", "fallow-core");
+    let core_publish_disabled = manifest
+        .get("package")
+        .and_then(Value::as_table)
+        .and_then(|package| package.get("publish"))
+        == Some(&Value::Boolean(false));
+    assert!(
+        !engine_depends_on_core || !core_publish_disabled,
+        "fallow-core cannot be publish=false while fallow-engine has a normal dependency on it"
+    );
+
+    let release_workflow =
+        std::fs::read_to_string(workspace_root().join(".github/workflows/release.yml"))
+            .expect("read release workflow");
+    assert!(
+        !engine_depends_on_core || release_workflow.contains("fallow-core fallow-engine"),
+        "release workflow must publish fallow-core before fallow-engine until engine no longer depends on it"
+    );
+}
+
+#[test]
+fn engine_owns_parse_cache_size_policy() {
+    let project_config = read_source_without_line_comments("crates/engine/src/project_config.rs")
+        .expect("read engine project config");
+    let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
+        .expect("read core backend adapter");
+    assert!(
+        project_config.contains("fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE"),
+        "engine project config must own parse-cache max-size fallback policy"
+    );
+    assert!(
+        !core_backend.contains("resolve_cache_max_size_bytes"),
+        "parse-cache size policy must not round-trip through the fallow-core adapter"
+    );
+    assert!(
+        !core_backend.contains("collect_file_hashes"),
+        "session-owned artifact metadata must not live in the fallow-core adapter"
     );
 }
 
@@ -547,6 +588,13 @@ fn list_surfaces_reuse_session_discovery() {
             !source.contains("discover_files_with_plugin_scopes"),
             "{source_path} must reuse AnalysisSession discovery instead of direct discovery"
         );
+        if source_path == "crates/cli/src/list.rs" {
+            assert!(
+                source.contains("session.workspaces()")
+                    && source.contains("session.workspace_diagnostics()"),
+                "{source_path} must reuse AnalysisSession workspace metadata when a session already exists"
+            );
+        }
     }
 }
 
@@ -587,7 +635,267 @@ fn decision_surface_reuses_session_workspace_metadata() {
 }
 
 #[test]
+fn project_info_reuses_session_workspace_metadata() {
+    let source = read_source_without_line_comments("crates/api/src/list_runtime.rs")
+        .expect("read list runtime");
+    assert!(
+        source.contains("let workspaces = session.workspaces();"),
+        "project info must read workspace metadata from the shared AnalysisSession"
+    );
+    assert!(
+        !source.contains("discover_workspaces(")
+            && !source.contains("discover_workspaces_with_diagnostics("),
+        "project info must not rediscover workspaces after building an AnalysisSession"
+    );
+}
+
+#[test]
+fn session_backed_api_runtimes_defer_workspace_scope_to_session() {
+    for source_path in [
+        "crates/api/src/runtime/combined.rs",
+        "crates/api/src/runtime/dead_code.rs",
+        "crates/api/src/runtime/duplication.rs",
+        "crates/api/src/runtime/feature_flags.rs",
+        "crates/api/src/runtime/decision_surface.rs",
+    ] {
+        let source = read_source_without_line_comments(source_path).expect("read runtime source");
+        assert!(
+            source.contains("resolve_programmatic_analysis_context_deferred_workspace"),
+            "{source_path} must defer workspace scope until an AnalysisSession has workspace metadata"
+        );
+    }
+
+    for source_path in [
+        "crates/api/src/runtime/dead_code.rs",
+        "crates/api/src/runtime/duplication.rs",
+        "crates/api/src/runtime/feature_flags.rs",
+        "crates/api/src/runtime/decision_surface.rs",
+        "crates/api/src/runtime/mod.rs",
+    ] {
+        let source = read_source_without_line_comments(source_path).expect("read runtime source");
+        assert!(
+            source.contains("workspace_roots_for_session("),
+            "{source_path} must resolve workspace filters from session.workspaces()"
+        );
+        assert!(
+            !source.contains("resolved.workspace_roots.as_ref()"),
+            "{source_path} must not apply eager workspace roots in session-backed analysis"
+        );
+    }
+}
+
+#[test]
+fn session_backed_api_next_steps_reuse_session_workspaces() {
+    let dead_code = read_source_without_line_comments("crates/api/src/runtime/dead_code.rs")
+        .expect("read dead-code runtime source");
+    assert!(
+        dead_code.contains("default_workspace_ref_for_workspaces(root, session.workspaces())"),
+        "dead-code next steps must reuse AnalysisSession workspace metadata"
+    );
+    assert!(
+        !dead_code.contains("default_workspace_ref(root)"),
+        "dead-code next steps must not rediscover workspaces after building an AnalysisSession"
+    );
+
+    let combined = read_source_without_line_comments("crates/api/src/runtime/combined.rs")
+        .expect("read combined runtime source");
+    assert!(
+        combined.contains("workspaces: Some(session.workspaces().to_vec())")
+            && combined.contains("default_workspace_ref_for_workspaces(root, workspaces)"),
+        "combined next steps must carry session workspace metadata into shared-session output"
+    );
+}
+
+#[test]
+fn combined_and_audit_share_project_analysis_artifacts() {
+    for source_path in [
+        "crates/api/src/runtime/combined.rs",
+        "crates/api/src/runtime/audit.rs",
+    ] {
+        let source = read_source_without_line_comments(source_path).expect("read runtime source");
+        assert!(
+            source.contains("analyze_project_with_artifacts"),
+            "{source_path} must reuse one engine-owned project artifact run for shared dead-code and duplication paths"
+        );
+        assert!(
+            source.contains("run_dead_code_from_artifacts")
+                && source.contains("run_duplication_report_with_session"),
+            "{source_path} must build API outputs from retained artifacts instead of rerunning dead-code or duplication"
+        );
+        assert!(
+            source.contains("health_may_consume_duplication_report")
+                && source.contains("project.duplication.clone()")
+                && (source.contains("pre_computed_duplication")
+                    || source.contains("duplication_artifacts")),
+            "{source_path} must pass the already computed project duplication report into health when score or targets need it"
+        );
+    }
+}
+
+#[test]
+fn grouped_health_reuses_project_duplication_artifacts() {
+    let output_build =
+        read_source_without_line_comments("crates/engine/src/health/output_build.rs")
+            .expect("read health output build");
+    let grouping = read_source_without_line_comments("crates/engine/src/health/grouping.rs")
+        .expect("read health grouping");
+    assert!(
+        output_build.contains("derived_sections.dupes_report.as_ref()"),
+        "health grouping must receive the already computed project duplication report"
+    );
+    assert!(
+        grouping.contains("dupes_report: Option<&'a DuplicationReport>"),
+        "health grouping must model duplication as an artifact input"
+    );
+    assert!(
+        !grouping.contains("find_duplicates(")
+            && !grouping.contains("find_duplicates_cached(")
+            && !grouping.contains("duplicates::find_duplicates"),
+        "health grouping must not run an additional duplicate analysis per group"
+    );
+}
+
+#[test]
+fn standalone_health_parse_precompute_does_not_fill_session_cache() {
+    for source_path in [
+        "crates/cli/src/health/mod.rs",
+        "crates/engine/src/health/runner.rs",
+    ] {
+        let source = read_source_without_line_comments(source_path).expect("read health source");
+        assert!(
+            source.contains("parsed_parts_uncached(true)"),
+            "{source_path} must avoid retaining an extra full module vector for one-shot health precompute"
+        );
+    }
+}
+
+#[test]
+fn framework_health_reuses_pipeline_workspaces() {
+    let framework_health =
+        read_source_without_line_comments("crates/engine/src/health/framework_health.rs")
+            .expect("read framework health source");
+    assert!(
+        !framework_health.contains("discover_workspaces("),
+        "framework health diagnostics must use HealthPipelineInputs workspaces instead of rediscovering"
+    );
+    let execute = read_source_without_line_comments("crates/engine/src/health/execute.rs")
+        .expect("read health execute source");
+    assert!(
+        execute.contains("workspaces,") && execute.contains("workspaces: &workspaces"),
+        "health execute must thread pipeline workspaces into output assembly"
+    );
+}
+
+#[test]
+fn explain_dead_code_aliases_route_through_issue_registry() {
+    let source = read_source_without_line_comments("crates/api/src/explain.rs")
+        .expect("read explain source");
+    assert!(
+        source.contains("issue_meta_for_contract_token"),
+        "fallow explain must resolve dead-code tokens through IssueKindMeta"
+    );
+    assert!(
+        source.contains("rule_result_meta(rule).map_or(rule.name, |meta| meta.meta_name)")
+            && source.contains(
+                "rule_result_meta(rule).map_or(rule.short, |meta| meta.sarif_description)"
+            )
+            && source.contains(
+                "rule_result_meta(rule).map_or(rule.docs_path, |meta| meta.meta_docs_path)"
+            ),
+        "standalone explain output must derive shared contract fields from IssueResultMeta"
+    );
+    assert!(
+        !source.contains("dead_code_alias_id(") && !source.contains("catalog_alias_id("),
+        "dead-code and catalog explain aliases must not be mirrored outside IssueKindMeta"
+    );
+}
+
+#[test]
+fn sarif_rule_descriptions_live_in_issue_result_registry() {
+    let source = read_source_without_line_comments("crates/types/src/issue_meta.rs")
+        .expect("read issue metadata source");
+    assert!(
+        source.contains("pub sarif_description: &'static str"),
+        "IssueResultMeta must own SARIF short descriptions"
+    );
+    assert!(
+        source.contains("issue_result_meta_by_code(code).map(|meta| meta.sarif_description)"),
+        "SARIF rule descriptions must resolve from IssueResultMeta"
+    );
+    assert!(
+        !source.contains("\"unused-file\" => Some(")
+            && !source.contains("\"unused-export\" => Some(")
+            && !source.contains("\"unresolved-import\" => Some("),
+        "SARIF descriptions must not be mirrored in a per-issue match"
+    );
+}
+
+#[test]
+fn typescript_alias_policy_routes_through_issue_registry() {
+    let source = read_source_without_line_comments("crates/types/src/issue_meta.rs")
+        .expect("read issue metadata source");
+    assert!(
+        source.contains("pub const ISSUE_TS_ALIAS_META"),
+        "TypeScript alias policy must live in registry data"
+    );
+    assert!(
+        source.contains("ISSUE_TS_ALIAS_META")
+            && source.contains(".find(|meta| meta.code == code)")
+            && source.contains(".map(|meta| meta.alias)"),
+        "issue_ts_alias must resolve from ISSUE_TS_ALIAS_META"
+    );
+    assert!(
+        !source.contains("\"unused-file\" => TsAliasMeta")
+            && !source.contains("\"unused-export\" => TsAliasMeta")
+            && !source.contains("\"unresolved-import\" => TsAliasMeta"),
+        "TypeScript aliases must not be mirrored in a per-issue match"
+    );
+}
+
+#[test]
+fn vscode_tree_labels_route_through_generated_issue_registry() {
+    let source = std::fs::read_to_string(workspace_root().join("editors/vscode/src/labels.ts"))
+        .expect("read vscode labels");
+    assert!(
+        source.contains("DIAGNOSTIC_CATEGORIES"),
+        "VS Code tree labels must read labels from the generated IssueKindMeta surface"
+    );
+    assert!(
+        !source.contains("\"Unused Files\"")
+            && !source.contains("\"Unused Exports\"")
+            && !source.contains("\"Code Duplication\""),
+        "VS Code tree labels must not mirror issue labels as a hand-maintained string table"
+    );
+}
+
+#[test]
+fn lsp_changed_since_scopes_editor_project_analysis_before_duplication() {
+    let source =
+        read_source_without_line_comments("crates/lsp/src/analysis.rs").expect("read lsp analysis");
+    assert!(
+        source.contains("resolve_changed_since_scope("),
+        "LSP must resolve changedSince before per-root analysis so shared project artifacts can receive the scope"
+    );
+    assert!(
+        source.contains("analyze_project_with_changed_files"),
+        "LSP editor analysis must pass changed files into the typed editor API before duplication runs"
+    );
+    assert!(
+        source.contains("analysis.filter_by_changed_files"),
+        "LSP must keep the existing post-analysis changedSince filter for dead-code and inline complexity semantics"
+    );
+}
+
+#[test]
 fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
+    assert_engine_modules_do_not_call_core_directly();
+    assert_engine_session_owns_parse_orchestration();
+    assert_engine_dead_code_facade_has_no_analysis_bypasses();
+    assert_engine_discovery_exposes_session_oriented_surface();
+    assert_engine_changed_files_owns_git_orchestration();
+}
+
+fn assert_engine_modules_do_not_call_core_directly() {
     for source_path in [
         "crates/engine/src/session.rs",
         "crates/engine/src/dead_code.rs",
@@ -601,25 +909,46 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
             "{source_path} must use engine::core_backend instead of direct fallow_core calls"
         );
     }
+}
 
+fn assert_engine_session_owns_parse_orchestration() {
     let session = read_source_without_line_comments("crates/engine/src/session.rs")
         .expect("read engine session source");
     for forbidden in [
         "analyze_with_usages_from_discovery",
         "analyze_with_usages_and_complexity_from_discovery",
         "analyze_retaining_modules_from_discovery",
+        "pub fn analyze_dead_code_from_config",
+        "pub fn analyze_dead_code_with_complexity_from_config",
+        "pub fn analyze_dead_code_with_artifacts_from_config",
+        "pub fn analyze_dead_code_retaining_files_from_config",
+        "pub fn analyze_dead_code_with_parse_result_from_config",
     ] {
         assert!(
             !session.contains(forbidden),
             "engine session must own dead-code parse orchestration instead of calling {forbidden}"
         );
     }
+}
 
+fn assert_engine_dead_code_facade_has_no_analysis_bypasses() {
     let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
         .expect("read engine core backend source");
     assert!(
         !core_backend.contains("fallow_core::analyze_with_parse_result"),
         "engine reused-parse analysis must use the engine-owned dead-code phase pipeline"
+    );
+    assert!(
+        !core_backend.contains("fallow_core::analyze::derive_security_severity"),
+        "engine security severity policy must stay in fallow-engine, not the core analyze namespace"
+    );
+    assert!(
+        !core_backend.contains("fallow_core::analyze::public_api_package_entry_points"),
+        "engine public API entry-point selection must stay in fallow-engine, not the core analyze namespace"
+    );
+    assert!(
+        !core_backend.contains("fallow_core::config_for_project"),
+        "engine project config resolution must stay owned by fallow-engine, not the old core monolith"
     );
 
     let dead_code =
@@ -628,6 +957,21 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
         !dead_code.contains("core_backend::analyze_with_parse_result"),
         "engine dead-code facade must not delegate reused-parse analysis to the old core monolith"
     );
+    for forbidden in [
+        "pub fn analyze(",
+        "pub fn analyze_with_usages(",
+        "pub fn analyze_with_file_hashes(",
+        "pub fn analyze_with_trace(",
+        "pub fn analyze_retaining_modules(",
+        "pub fn analyze_retaining_files(",
+        "pub fn analyze_with_parse_result(",
+        "pub fn analyze_with_usages_and_complexity(",
+    ] {
+        assert!(
+            !dead_code.contains(forbidden),
+            "engine dead-code facade must not expose direct analysis bypass {forbidden}; use AnalysisSession"
+        );
+    }
 
     let cli_dupes =
         read_source_without_line_comments("crates/cli/src/dupes.rs").expect("read cli dupes");
@@ -636,6 +980,30 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
         "standalone dupes must use AnalysisSession discovery instead of direct discovery"
     );
 
+    let project_config = read_source_without_line_comments("crates/engine/src/project_config.rs")
+        .expect("read engine project config source");
+    assert!(
+        !project_config.contains("core_backend::config_for_project"),
+        "engine project config must not route through the core backend adapter"
+    );
+}
+
+fn assert_engine_discovery_exposes_session_oriented_surface() {
+    let engine_discover = read_source_without_line_comments("crates/engine/src/discover.rs")
+        .expect("read engine discover");
+    for forbidden in [
+        "pub fn discover_files(",
+        "pub fn discover_files_with_additional_hidden_dirs(",
+        "pub fn discover_files_with_plugin_scopes(",
+    ] {
+        assert!(
+            !engine_discover.contains(forbidden),
+            "engine discovery must expose session-oriented discovery instead of leftover direct helper {forbidden}"
+        );
+    }
+}
+
+fn assert_engine_changed_files_owns_git_orchestration() {
     let changed_files = read_source_without_line_comments("crates/engine/src/changed_files.rs")
         .expect("read source");
     for forbidden in [
@@ -653,6 +1021,8 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
         );
     }
 
+    let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
+        .expect("read engine core backend source");
     for forbidden in [
         "fallow_core::changed_files::set_spawn_hook",
         "fallow_core::changed_files::validate_git_ref",
@@ -679,6 +1049,87 @@ fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
 }
 
 #[test]
+fn core_legacy_orchestration_is_hidden_from_public_docs() {
+    let source = std::fs::read_to_string(workspace_root().join("crates/core/src/lib.rs"))
+        .expect("read core lib");
+    for item in [
+        "pub struct AnalysisOutput",
+        "pub struct AnalysisParseMetrics",
+        "pub struct AnalysisDiscovery",
+        "pub struct DeadCodePreludeTimings",
+        "pub struct DeadCodeBackendPrelude",
+        "pub struct DeadCodeEntryPoints",
+        "pub struct DeadCodeResolvedModules",
+        "pub struct DeadCodeGraphRun",
+        "pub struct DeadCodeDetectorRun",
+        "pub fn analyze(",
+        "pub fn analyze_with_usages(",
+        "pub fn analyze_with_trace(",
+        "pub fn analyze_retaining_modules(",
+    ] {
+        assert_doc_hidden_before(&source, item);
+    }
+    assert!(
+        !source.contains("pub fn config_for_project("),
+        "fallow-core config_for_project must stay crate-private now that fallow-engine owns project config resolution"
+    );
+    assert!(
+        !source.contains("pub fn analyze_project("),
+        "fallow-core analyze_project must stay crate-private now that fallow-api owns the public project analysis surface"
+    );
+    assert!(
+        !source.contains("pub fn analyze_with_usages_and_complexity("),
+        "fallow-core analyze_with_usages_and_complexity must stay removed; LSP now composes typed API and health artifacts"
+    );
+    assert!(
+        !source.contains("pub fn analyze_with_file_hashes("),
+        "fallow-core analyze_with_file_hashes must stay removed; fix and CLI callers use AnalysisSession artifacts"
+    );
+    assert!(
+        !source.contains("pub fn analyze_with_parse_result("),
+        "fallow-core analyze_with_parse_result must stay removed; pre-parsed reuse stays behind fallow-engine AnalysisSession"
+    );
+    assert!(
+        !source.contains("pub fn public_api_package_entry_points("),
+        "fallow-core public_api_package_entry_points must stay private; engine owns the public API entrypoint surface"
+    );
+    assert!(
+        !source.contains("pub use entry_points::resolve_entry_path"),
+        "fallow-core resolve_entry_path must not be externally re-exported; engine owns public API entrypoint resolution"
+    );
+}
+
+#[test]
+fn core_legacy_orchestration_wrappers_stay_out_of_production_call_paths() {
+    for source_path in rust_sources_under([
+        "crates/api/src",
+        "crates/cli/src",
+        "crates/engine/src",
+        "crates/lsp/src",
+        "crates/mcp/src",
+        "crates/napi/src",
+    ]) {
+        if source_path == "crates/cli/src/architecture_boundaries.rs" {
+            continue;
+        }
+        let source = read_source_without_line_comments(&source_path)
+            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+        for forbidden in [
+            "fallow_core::analyze(",
+            "fallow_core::analyze_with_usages(",
+            "fallow_core::analyze_with_trace(",
+            "fallow_core::analyze_retaining_modules(",
+            "fallow_core::analyze_with_parse_result(",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{source_path} must not call legacy fallow-core orchestration wrapper {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
 fn api_consumers_do_not_reference_engine_core_or_cli_sources() {
     for source_path in rust_sources_under(["crates/lsp/src", "crates/mcp/src", "crates/napi/src"]) {
         let source = read_source_without_line_comments(&source_path)
@@ -696,6 +1147,29 @@ fn api_consumers_do_not_reference_engine_core_or_cli_sources() {
                 "{source_path} must consume fallow-api instead of {forbidden}"
             );
         }
+    }
+}
+
+#[test]
+fn mcp_api_routes_honor_ambient_changed_since_scope() {
+    for source_path in [
+        "crates/mcp/src/tools/analyze.rs",
+        "crates/mcp/src/tools/audit.rs",
+        "crates/mcp/src/tools/code_mode_tools.rs",
+        "crates/mcp/src/tools/decision_surface.rs",
+        "crates/mcp/src/tools/dupes.rs",
+        "crates/mcp/src/tools/flags.rs",
+        "crates/mcp/src/tools/health.rs",
+        "crates/mcp/src/tools/list_boundaries.rs",
+        "crates/mcp/src/tools/project_info.rs",
+        "crates/mcp/src/tools/trace.rs",
+    ] {
+        let source = read_source_without_line_comments(source_path)
+            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+        assert!(
+            source.contains("changed_since_from_param("),
+            "{source_path} must apply FALLOW_CHANGED_SINCE when tool params omit changed_since"
+        );
     }
 }
 
@@ -858,6 +1332,20 @@ fn read_source_without_line_comments(path: &str) -> std::io::Result<String> {
         .filter(|line| !line.trim_start().starts_with("//"))
         .collect::<Vec<_>>()
         .join("\n"))
+}
+
+fn assert_doc_hidden_before(source: &str, item: &str) {
+    let index = source
+        .find(item)
+        .unwrap_or_else(|| panic!("expected to find {item}"));
+    let prefix = &source[..index];
+    let recent_attributes = prefix
+        .rsplit_once("\n\n")
+        .map_or(prefix, |(_, recent)| recent);
+    assert!(
+        recent_attributes.contains("#[doc(hidden)]"),
+        "{item} must stay hidden from fallow-core rustdoc; expose engine/api wrappers instead"
+    );
 }
 
 fn assert_no_deps(manifest_path: &str, forbidden: &[&str]) {

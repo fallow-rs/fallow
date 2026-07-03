@@ -199,19 +199,8 @@ async fn spawn_fallow(
             .env("FALLOW_INTEGRATION_SURFACE", "mcp")
             .env("FALLOW_MCP_TOOL", tool);
     }
-    let output = tokio::time::timeout(timeout, command.output())
-        .await
-        .map_err(|_| {
-            McpError::internal_error(
-                format!(
-                    "fallow subprocess timed out after {}s. \
-                 Set FALLOW_TIMEOUT_SECS to increase the limit.",
-                    timeout.as_secs()
-                ),
-                None,
-            )
-        })?
-        .map_err(|e| {
+    let output = match tokio::time::timeout(timeout, command.output()).await {
+        Ok(output) => output.map_err(|e| {
             McpError::internal_error(
                 format!(
                     "Failed to execute fallow binary '{binary}': {e}. \
@@ -220,7 +209,9 @@ async fn spawn_fallow(
                 ),
                 None,
             )
-        })?;
+        })?,
+        Err(_) => return Ok(timeout_result(timeout)),
+    };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -273,6 +264,18 @@ fn non_success_result(exit_code: i32, stdout: &str, stderr: &str) -> CallToolRes
         "exit_code": exit_code,
     });
 
+    CallToolResult::error(vec![Content::text(error_json.to_string())])
+}
+
+fn timeout_result(timeout: Duration) -> CallToolResult {
+    let error_json = serde_json::json!({
+        "error": true,
+        "message": format!("fallow subprocess timed out after {}s", timeout.as_secs()),
+        "exit_code": 2,
+        "code": "FALLOW_MCP_SUBPROCESS_TIMEOUT",
+        "help": "Set FALLOW_TIMEOUT_SECS to increase the limit.",
+        "context": "subprocess",
+    });
     CallToolResult::error(vec![Content::text(error_json.to_string())])
 }
 

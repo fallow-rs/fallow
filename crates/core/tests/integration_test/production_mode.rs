@@ -229,7 +229,15 @@ fn analyze_project_honors_per_analysis_dead_code_production() {
     )
     .unwrap();
 
-    let results = fallow_core::analyze_project(root).expect("analysis should succeed");
+    let (mut loaded, _) = FallowConfig::find_and_load(root)
+        .expect("config discovery should succeed")
+        .expect("fixture config should be discovered");
+    loaded.production = loaded
+        .production
+        .for_analysis(fallow_config::ProductionAnalysis::DeadCode)
+        .into();
+    let config = loaded.resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true, None);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
     let unused_file_names: Vec<String> = results
         .unused_files

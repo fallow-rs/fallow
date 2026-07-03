@@ -13,7 +13,7 @@ use fallow_api::{
 
 use super::super::{
     analyze::run_analyze_api_value,
-    api_runtime::{env_diff_file, non_empty_path, non_empty_string},
+    api_runtime::{changed_since_from_param, env_diff_file, non_empty_path, non_empty_string},
     audit::run_audit_api_value,
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
@@ -120,6 +120,14 @@ impl CodeModeTool {
 
     pub(super) fn is_api_backed(self) -> bool {
         API_BACKED_CODE_MODE_TOOLS.contains(&self)
+    }
+
+    pub(super) fn is_code_mode_api_backed(self) -> bool {
+        self.is_api_backed()
+            && !matches!(
+                self,
+                Self::Analyze | Self::Combined | Self::FindDupes | Self::CheckHealth | Self::Audit
+            )
     }
 }
 
@@ -432,7 +440,7 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
             threads: params.threads,
             production: params.production.unwrap_or(false),
             production_override: params.production,
-            changed_since: non_empty_string(params.changed_since.as_deref()),
+            changed_since: changed_since_from_param(params.changed_since.as_deref()),
             diff_file: env_diff_file(),
             workspace: non_empty_string(params.workspace.as_deref())
                 .map(|workspace| vec![workspace]),
@@ -544,8 +552,10 @@ fn build_combined_args(params: &CombinedParams) -> Vec<String> {
     if params.dupes_cross_language == Some(true) {
         args.push("--dupes-cross-language".to_string());
     }
-    if params.dupes_ignore_imports == Some(false) {
-        args.push("--dupes-no-ignore-imports".to_string());
+    match params.dupes_ignore_imports {
+        Some(true) => args.push("--dupes-ignore-imports".to_string()),
+        Some(false) => args.push("--dupes-no-ignore-imports".to_string()),
+        None => {}
     }
     if params.score == Some(true) {
         args.push("--score".to_string());
@@ -607,6 +617,28 @@ mod tests {
     }
 
     #[test]
+    fn heavy_code_mode_tools_keep_cancellable_cli_path() {
+        for tool in [
+            CodeModeTool::Analyze,
+            CodeModeTool::Combined,
+            CodeModeTool::FindDupes,
+            CodeModeTool::CheckHealth,
+            CodeModeTool::Audit,
+        ] {
+            assert!(
+                tool.is_api_backed(),
+                "{} should still be API-backed for standalone MCP tools",
+                tool.name()
+            );
+            assert!(
+                !tool.is_code_mode_api_backed(),
+                "{} should use Code Mode's cancellable subprocess path",
+                tool.name()
+            );
+        }
+    }
+
+    #[test]
     fn combined_params_default_to_cli_combined_health_sections() {
         let options =
             combined_options_from_params(&CombinedParams::default()).expect("combined options");
@@ -616,6 +648,25 @@ mod tests {
         assert!(options.health_options.hotspots);
         assert!(options.health_options.targets);
         assert!(!options.health_options.score);
+    }
+
+    #[test]
+    fn combined_args_preserve_ignore_imports_override() {
+        let args = build_combined_args(&CombinedParams {
+            dupes_ignore_imports: Some(true),
+            ..CombinedParams::default()
+        });
+
+        assert!(args.contains(&"--dupes-ignore-imports".to_string()));
+        assert!(!args.contains(&"--dupes-no-ignore-imports".to_string()));
+
+        let args = build_combined_args(&CombinedParams {
+            dupes_ignore_imports: Some(false),
+            ..CombinedParams::default()
+        });
+
+        assert!(args.contains(&"--dupes-no-ignore-imports".to_string()));
+        assert!(!args.contains(&"--dupes-ignore-imports".to_string()));
     }
 
     #[test]

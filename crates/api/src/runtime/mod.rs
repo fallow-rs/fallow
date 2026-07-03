@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 
 use fallow_config::{FallowConfig, ProductionAnalysis, ProductionConfig};
-use fallow_engine::{dead_code::DeadCodeAnalysisArtifacts, session::AnalysisSession};
+use fallow_engine::{
+    dead_code::DeadCodeAnalysisArtifacts, duplicates::DuplicationReport, session::AnalysisSession,
+};
 use fallow_output::{HealthGrouping, HealthReport, RootEnvelopeMode};
 use fallow_types::output_format::OutputFormat;
 use fallow_types::workspace::WorkspaceDiagnostic;
@@ -38,7 +40,10 @@ pub use trace::{run_trace_clone, run_trace_dependency, run_trace_export, run_tra
 
 use crate::{
     ComplexityOptions, ProgrammaticError,
-    analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context},
+    analysis_context::{
+        ProgrammaticAnalysisContext, resolve_programmatic_analysis_context,
+        workspace_roots_for_session,
+    },
     derive_complexity_options,
     next_steps::{setup_pointer_applicable, suggestions_enabled},
 };
@@ -113,14 +118,23 @@ fn load_context_production_config(
     Ok(loaded.map_or_else(ProductionConfig::default, |config| config.production))
 }
 
-pub(super) fn health_may_consume_dead_code_artifacts(options: &ComplexityOptions) -> bool {
+pub(super) fn health_may_consume_dead_code_artifacts(
+    options: &ComplexityOptions,
+    config: &fallow_config::ResolvedConfig,
+) -> bool {
     let sections = derive_complexity_options(options);
+    let max_crap = options.max_crap.unwrap_or(config.health.max_crap);
     sections.file_scores
         || sections.coverage_gaps
         || sections.hotspots
         || sections.targets
         || sections.force_full
-        || options.max_crap.is_some()
+        || max_crap > 0.0
+}
+
+pub(super) fn health_may_consume_duplication_report(options: &ComplexityOptions) -> bool {
+    let sections = derive_complexity_options(options);
+    sections.score || sections.targets
 }
 
 /// Runtime probes used by programmatic health output assembly.
@@ -246,7 +260,7 @@ pub(super) fn run_health_with_session(
     session: &AnalysisSession,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<HealthProgrammaticOutput> {
-    run_health_with_session_artifacts(options, resolved, session, changed_files, None)
+    run_health_with_session_artifacts(options, resolved, session, changed_files, None, None)
 }
 
 pub(super) fn run_health_with_session_artifacts(
@@ -255,15 +269,18 @@ pub(super) fn run_health_with_session_artifacts(
     session: &AnalysisSession,
     changed_files: Option<&FxHashSet<PathBuf>>,
     pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
+    pre_computed_duplication: Option<DuplicationReport>,
 ) -> ProgrammaticResult<HealthProgrammaticOutput> {
     crate::validate_complexity_options(options)?;
     let health_options = derive_programmatic_health_execution_options(resolved, options);
+    let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
     let result = fallow_engine::health::run_ungrouped_health_with_session_artifacts(
         &health_options,
-        resolved.workspace_roots.clone(),
+        workspace_roots,
         session,
         changed_files.map(|files| files.iter().cloned().collect()),
         pre_computed_analysis,
+        pre_computed_duplication,
     )
     .map_err(|_| generic_health_error("health"))?;
 

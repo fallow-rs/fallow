@@ -56,6 +56,8 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
         parse_cpu_ms,
         shared_parse,
         pre_computed_analysis,
+        pre_computed_duplication,
+        workspaces,
         workspace_diagnostics,
     } = input;
     let timings = HealthPipelineTimings {
@@ -84,13 +86,13 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
         modules: &modules,
         scope: &scope,
         pre_computed_analysis,
+        pre_computed_duplication,
         seams,
     })?;
 
     let HealthOutputContext { build, sections } =
         prepare_health_output_context(HealthOutputContextInput {
             config: &config,
-            files: &files,
             modules: &modules,
             scope: &scope,
             needs_file_scores,
@@ -101,6 +103,7 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
             derived_sections,
             vital_data,
             timings,
+            workspaces: &workspaces,
             start: &start,
         });
 

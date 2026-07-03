@@ -402,7 +402,21 @@ pub fn rule_by_id(id: &str) -> Option<&'static RuleDef> {
 /// Build the docs URL for a rule.
 #[must_use]
 pub fn rule_docs_url(rule: &RuleDef) -> String {
-    format!("{DOCS_BASE}/{}", rule.docs_path)
+    let docs_path = rule_result_meta(rule).map_or(rule.docs_path, |meta| meta.meta_docs_path);
+    format!("{DOCS_BASE}/{docs_path}")
+}
+
+fn rule_result_meta(rule: &RuleDef) -> Option<&'static fallow_types::issue_meta::IssueResultMeta> {
+    let code = rule.id.strip_prefix("fallow/")?;
+    fallow_types::issue_meta::issue_result_meta_by_code(code)
+}
+
+fn rule_explain_name(rule: &RuleDef) -> &'static str {
+    rule_result_meta(rule).map_or(rule.name, |meta| meta.meta_name)
+}
+
+fn rule_explain_summary(rule: &RuleDef) -> &'static str {
+    rule_result_meta(rule).map_or(rule.short, |meta| meta.sarif_description)
 }
 
 /// Extra educational content for the standalone `fallow explain <issue-type>`
@@ -438,10 +452,7 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
     if let Some(rule) = dead_code_registry_rule(&normalized) {
         return Some(rule);
     }
-    let alias = dead_code_alias_id(&normalized)
-        .or_else(|| catalog_alias_id(&normalized))
-        .or_else(|| health_alias_id(&normalized))
-        .or_else(|| security_alias_id(&normalized));
+    let alias = health_alias_id(&normalized).or_else(|| security_alias_id(&normalized));
     if let Some(id) = alias
         && let Some(rule) = rule_by_id(id)
     {
@@ -472,6 +483,11 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
             .find(|rule| {
                 rule.docs_path.ends_with(&normalized)
                     || rule.docs_path.ends_with(singular)
+                    || rule_result_meta(rule).is_some_and(|meta| {
+                        meta.meta_docs_path.ends_with(&normalized)
+                            || meta.meta_docs_path.ends_with(singular)
+                            || meta.meta_name.eq_ignore_ascii_case(trimmed)
+                    })
                     || rule.name.eq_ignore_ascii_case(trimmed)
             })
     })
@@ -482,77 +498,6 @@ fn dead_code_registry_rule(normalized: &str) -> Option<&'static RuleDef> {
     CHECK_RULES
         .iter()
         .find(|rule| rule.id.strip_prefix("fallow/") == Some(meta.code))
-}
-
-fn dead_code_alias_id(normalized: &str) -> Option<&'static str> {
-    match normalized {
-        "unused-files" => Some("fallow/unused-file"),
-        "unused-exports" => Some("fallow/unused-export"),
-        "unused-types" => Some("fallow/unused-type"),
-        "private-type-leaks" => Some("fallow/private-type-leak"),
-        "unused-deps" | "unused-dependencies" => Some("fallow/unused-dependency"),
-        "unused-dev-deps" | "unused-dev-dependencies" => Some("fallow/unused-dev-dependency"),
-        "unused-optional-deps" | "unused-optional-dependencies" => {
-            Some("fallow/unused-optional-dependency")
-        }
-        "type-only-deps" | "type-only-dependencies" => Some("fallow/type-only-dependency"),
-        "test-only-deps" | "test-only-dependencies" => Some("fallow/test-only-dependency"),
-        "unused-enum-members" => Some("fallow/unused-enum-member"),
-        "unused-class-members" => Some("fallow/unused-class-member"),
-        "unused-store-members" => Some("fallow/unused-store-member"),
-        "unprovided-injects" | "unprovided-inject" => Some("fallow/unprovided-inject"),
-        "unrendered-components" | "unrendered-component" => Some("fallow/unrendered-component"),
-        "unused-component-props" | "unused-component-prop" => Some("fallow/unused-component-prop"),
-        "unused-component-emits" | "unused-component-emit" => Some("fallow/unused-component-emit"),
-        "unused-component-inputs" | "unused-component-input" => {
-            Some("fallow/unused-component-input")
-        }
-        "unused-component-outputs" | "unused-component-output" => {
-            Some("fallow/unused-component-output")
-        }
-        "unused-svelte-events" | "unused-svelte-event" => Some("fallow/unused-svelte-event"),
-        "unused-server-actions" | "unused-server-action" => Some("fallow/unused-server-action"),
-        "unused-load-data-keys" | "unused-load-data-key" => Some("fallow/unused-load-data-key"),
-        "prop-drilling" => Some("fallow/prop-drilling"),
-        "thin-wrapper" | "thin-wrappers" => Some("fallow/thin-wrapper"),
-        "duplicate-prop-shape" | "duplicate-prop-shapes" => Some("fallow/duplicate-prop-shape"),
-        "unresolved-imports" => Some("fallow/unresolved-import"),
-        "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
-        "duplicate-exports" => Some("fallow/duplicate-export"),
-        "circular-deps" | "circular-dependencies" => Some("fallow/circular-dependency"),
-        "boundary-violations" => Some("fallow/boundary-violation"),
-        "boundary-coverage" | "boundary-coverage-violations" => Some("fallow/boundary-coverage"),
-        "boundary-calls" | "boundary-call-violations" => Some("fallow/boundary-call-violation"),
-        "policy-violation" | "policy-violations" => Some("fallow/policy-violation"),
-        "stale-suppressions" => Some("fallow/stale-suppression"),
-        "missing-suppression-reason" | "missing-suppression-reasons" => {
-            Some("fallow/missing-suppression-reason")
-        }
-        _ => None,
-    }
-}
-
-fn catalog_alias_id(normalized: &str) -> Option<&'static str> {
-    match normalized {
-        "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
-            Some("fallow/unused-catalog-entry")
-        }
-        "empty-catalog-groups" | "empty-catalog-group" | "empty-catalog" => {
-            Some("fallow/empty-catalog-group")
-        }
-        "unresolved-catalog-references" | "unresolved-catalog-reference" | "unresolved-catalog" => {
-            Some("fallow/unresolved-catalog-reference")
-        }
-        "unused-dependency-overrides"
-        | "unused-dependency-override"
-        | "unused-override"
-        | "unused-overrides" => Some("fallow/unused-dependency-override"),
-        "misconfigured-dependency-overrides"
-        | "misconfigured-dependency-override"
-        | "misconfigured-override"
-        | "misconfigured-overrides" => Some("fallow/misconfigured-dependency-override"),
-        _ => None,
-    }
 }
 
 fn health_alias_id(normalized: &str) -> Option<&'static str> {
@@ -864,8 +809,8 @@ pub fn explain_issue_type(
     let guide = rule_guide(rule);
     Ok(fallow_output::ExplainOutput {
         id: rule.id.to_string(),
-        name: rule.name.to_string(),
-        summary: rule.short.to_string(),
+        name: rule_explain_name(rule).to_string(),
+        summary: rule_explain_summary(rule).to_string(),
         rationale: rule.full.to_string(),
         example: guide.example.to_string(),
         how_to_fix: guide.how_to_fix.to_string(),
@@ -1305,6 +1250,18 @@ mod tests {
     }
 
     #[test]
+    fn explain_output_prefers_issue_result_registry_contract_fields() {
+        let output = explain_issue_type("unused-type").unwrap();
+        let meta = fallow_types::issue_meta::issue_result_meta_by_code("unused-type").unwrap();
+        assert_eq!(output.name, meta.meta_name);
+        assert_eq!(output.summary, meta.sarif_description);
+        assert_eq!(
+            output.docs,
+            format!("https://docs.fallow.tools/{}", meta.meta_docs_path)
+        );
+    }
+
+    #[test]
     fn result_sarif_rule_ids_have_explain_metadata() {
         for contract in fallow_output::issue_output_contracts() {
             for rule_id in contract.sarif_rule_ids {
@@ -1334,6 +1291,12 @@ mod tests {
                 assert_registry_token(expected, token);
             }
             if let Some(token) = meta.mcp_issue_type {
+                assert_registry_token(expected, token);
+            }
+            if let Some(token) = meta.filter_flag {
+                assert_registry_token(expected, token);
+            }
+            if let Some(token) = meta.suppress_token {
                 assert_registry_token(expected, token);
             }
         }
@@ -2015,7 +1978,7 @@ mod tests {
     }
 
     fn matcher_entries_from_security_catalogue() -> Vec<MatcherEntry> {
-        let toml = include_str!("../../core/data/security_matchers.toml");
+        let toml = include_str!("../../security/data/security_matchers.toml");
         let mut entries = Vec::new();
         let mut in_matcher = false;
         let mut id = None;

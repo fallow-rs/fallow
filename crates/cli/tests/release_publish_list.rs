@@ -70,6 +70,10 @@ fn publishable_crates(root: &Path) -> BTreeSet<String> {
 
 /// Crate names from the `for crate in ...; do` publish loop in `release.yml`.
 fn release_publish_list(root: &Path) -> BTreeSet<String> {
+    release_publish_sequence(root).into_iter().collect()
+}
+
+fn release_publish_sequence(root: &Path) -> Vec<String> {
     let yml = fs::read_to_string(root.join(".github/workflows/release.yml"))
         .expect("read .github/workflows/release.yml");
     yml.lines()
@@ -82,6 +86,24 @@ fn release_publish_list(root: &Path) -> BTreeSet<String> {
             Some(spec.split_whitespace().map(String::from).collect())
         })
         .unwrap_or_default()
+}
+
+fn local_publishable_dependencies(
+    manifest: &str,
+    publishable: &BTreeSet<String>,
+) -> BTreeSet<String> {
+    manifest
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if !trimmed.starts_with("fallow-") {
+                return None;
+            }
+            let (name, _) = trimmed.split_once('=')?;
+            let name = name.trim();
+            publishable.contains(name).then(|| name.to_string())
+        })
+        .collect()
 }
 
 #[test]
@@ -105,4 +127,44 @@ fn release_publish_list_matches_publishable_workspace_crates() {
          dependency order): {missing_from_list:?}\n  listed but NOT publishable \
          (drop them, or remove `publish = false`): {extra_in_list:?}"
     );
+}
+
+#[test]
+fn release_publish_list_orders_workspace_dependencies_first() {
+    let root = repo_root();
+    let publishable = publishable_crates(&root);
+    let sequence = release_publish_sequence(&root);
+    assert!(
+        !sequence.is_empty(),
+        "could not parse the `for crate in ...; do` publish loop out of \
+         .github/workflows/release.yml; the loop format may have changed"
+    );
+
+    for entry in fs::read_dir(root.join("crates")).expect("read crates/ dir") {
+        let manifest_path = entry.expect("crates/ dir entry").path().join("Cargo.toml");
+        let Ok(manifest) = fs::read_to_string(&manifest_path) else {
+            continue;
+        };
+        if is_publish_false(&manifest) {
+            continue;
+        }
+        let crate_name = package_name(&manifest).unwrap_or_else(|| {
+            panic!("no package name in {}", manifest_path.display());
+        });
+        let Some(crate_index) = sequence.iter().position(|name| name == &crate_name) else {
+            continue;
+        };
+        for dependency in local_publishable_dependencies(&manifest, &publishable) {
+            let dependency_index = sequence
+                .iter()
+                .position(|name| name == &dependency)
+                .unwrap_or_else(|| {
+                    panic!("{crate_name} depends on publishable crate {dependency}, but it is missing from release.yml")
+                });
+            assert!(
+                dependency_index < crate_index,
+                "{crate_name} depends on {dependency}, so release.yml must publish {dependency} first"
+            );
+        }
+    }
 }

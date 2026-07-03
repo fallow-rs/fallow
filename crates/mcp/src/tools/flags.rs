@@ -8,8 +8,8 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, Content};
 
 use super::api_runtime::{
-    env_diff_file, json_success, non_empty_path, non_empty_string, programmatic_error_body,
-    run_api_blocking,
+    changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
+    programmatic_error_body, run_api_blocking,
 };
 
 /// Run `feature_flags` through the typed API.
@@ -84,7 +84,7 @@ fn feature_flags_options_from_params(params: &FeatureFlagsParams) -> FeatureFlag
             diff_file: env_diff_file(),
             production: params.production == Some(true),
             production_override: params.production,
-            changed_since: None,
+            changed_since: changed_since_from_param(None),
             workspace: non_empty_string(params.workspace.as_deref())
                 .map(|workspace| vec![workspace]),
             changed_workspaces: None,

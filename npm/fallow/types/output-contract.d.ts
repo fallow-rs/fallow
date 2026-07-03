@@ -10,13 +10,12 @@
  *   1. Edit the Rust struct in `crates/types/src/results.rs` (or the
  *      duplicates crate at `crates/core/src/duplicates/types.rs`). The Rust
  *      side is the runtime source of truth for the JSON output.
- *   2. Update `docs/output-schema.json` to match. The schema is
- *      hand-maintained against the Rust structs; the drift-guard test in
- *      `crates/cli/src/report/json.rs` enforces only a subset of the
- *      contract (the `HealthFindingAction` enum). Field-level drift between
- *      Rust and the schema is currently caught by code review.
+ *   2. Regenerate `docs/output-schema.json` with
+ *      `cargo run -p fallow-cli --features schema-emit --bin fallow-schema-emit`.
+ *      The schema-emit drift tests compare the committed schema against the
+ *      Rust-derived definitions.
  *   3. Run `pnpm --filter fallow-vscode codegen:contracts` from anywhere.
- *   4. Commit both regenerated files alongside the schema edit.
+ *   4. Commit the regenerated schema and generated contract files together.
  *
  * CI runs `pnpm --filter fallow-vscode check:contracts` which fails when
  * either committed file disagrees with what regen would produce.

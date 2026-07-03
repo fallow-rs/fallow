@@ -356,7 +356,14 @@ fn run_health_with_session_artifacts_accepts_retained_dead_code_analysis() {
 
     let output = resolved
         .install(|| {
-            run_health_with_session_artifacts(&options, &resolved, &session, None, Some(artifacts))
+            run_health_with_session_artifacts(
+                &options,
+                &resolved,
+                &session,
+                None,
+                Some(artifacts),
+                None,
+            )
         })
         .expect("health succeeds");
 
@@ -771,6 +778,25 @@ fn serialized_dead_code_marks_duplicate_export_config_action_fixable() {
     .expect("dead-code succeeds");
 
     let action = &json["duplicate_exports"][0]["actions"][0];
+    assert_eq!(action["type"], "add-to-config");
+    assert_eq!(action["auto_fixable"], true);
+}
+
+#[test]
+fn serialized_combined_marks_duplicate_export_config_action_fixable() {
+    let project = duplicate_export_project();
+    let root = project.path();
+
+    let output = run_combined(&CombinedOptions {
+        analysis: analysis_at(root),
+        duplication: false,
+        health: false,
+        ..CombinedOptions::default()
+    })
+    .expect("combined succeeds");
+    let json = serialize_combined_programmatic_json(output).expect("combined json");
+
+    let action = &json["check"]["duplicate_exports"][0]["actions"][0];
     assert_eq!(action["type"], "add-to-config");
     assert_eq!(action["auto_fixable"], true);
 }

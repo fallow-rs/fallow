@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::EmailMode;
+use fallow_config::{EmailMode, WorkspaceInfo};
 use fallow_output::{
     DiffIndex, EffortEstimate, FindingSeverity, GroupByMode, RuntimeCoverageReport,
     RuntimeCoverageWatermark,
@@ -88,6 +88,7 @@ pub fn shared_parse_data_from_artifacts(
     graph: Option<RetainedModuleGraph>,
     modules: Option<Vec<crate::source::ModuleInfo>>,
     files: Option<Vec<crate::discover::DiscoveredFile>>,
+    workspaces: Vec<WorkspaceInfo>,
     script_used_packages: impl IntoIterator<Item = String>,
 ) -> Option<HealthSharedParseData> {
     let (Some(modules), Some(files)) = (modules, files) else {
@@ -105,8 +106,33 @@ pub fn shared_parse_data_from_artifacts(
     Some(HealthSharedParseData {
         files,
         modules,
+        workspaces,
         analysis_output,
     })
+}
+
+/// Return true when health sections will need dead-code analysis artifacts.
+///
+/// Callers that already have a session and parsed modules can precompute these
+/// artifacts once, then pass them into [`HealthPipelineInputs`] to avoid a
+/// second graph and dead-code analysis inside the health pipeline.
+#[must_use]
+pub fn should_precompute_dead_code_analysis(
+    options: &HealthExecutionOptions<'_>,
+    config: &fallow_config::ResolvedConfig,
+) -> bool {
+    let max_crap = options
+        .thresholds
+        .max_crap
+        .unwrap_or(config.health.max_crap);
+    options.file_scores
+        || options.coverage_gaps
+        || options.config_activates_coverage_gaps
+        || options.hotspots
+        || options.targets
+        || options.force_full
+        || max_crap > 0.0
+        || options.runtime_coverage.is_some()
 }
 
 /// Command-neutral grouping resolver contract for `--group-by` health output.
@@ -558,6 +584,7 @@ pub struct RuntimeCoverageOptions {
 pub struct HealthSharedParseData {
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
     pub modules: Vec<fallow_types::extract::ModuleInfo>,
+    pub workspaces: Vec<WorkspaceInfo>,
     /// Full analysis output (graph + results) for file scoring.
     pub analysis_output: Option<DeadCodeAnalysisArtifacts>,
 }
@@ -701,6 +728,99 @@ mod tests {
 
         assert!(run.sections.targets);
         assert_eq!(run.effort, Some(EffortEstimate::Low));
+    }
+
+    struct HealthExecutionOptionsFixture {
+        config_path: Option<PathBuf>,
+    }
+
+    impl HealthExecutionOptionsFixture {
+        const fn new() -> Self {
+            Self { config_path: None }
+        }
+
+        fn options<'a>(&'a self, root: &'a Path) -> HealthExecutionOptions<'a> {
+            HealthExecutionOptions {
+                root,
+                config_path: &self.config_path,
+                output: OutputFormat::Human,
+                no_cache: true,
+                threads: 1,
+                quiet: true,
+                complexity_breakdown: false,
+                thresholds: HealthThresholdOverrides::default(),
+                top: None,
+                sort: HealthSort::Cyclomatic,
+                production: false,
+                production_override: None,
+                changed_since: None,
+                diff_index: None,
+                use_shared_diff_index: false,
+                workspace: None,
+                changed_workspaces: None,
+                baseline: None,
+                save_baseline: None,
+                complexity: true,
+                file_scores: false,
+                coverage_gaps: false,
+                config_activates_coverage_gaps: false,
+                hotspots: false,
+                ownership: false,
+                ownership_emails: None,
+                targets: false,
+                css: false,
+                force_full: false,
+                score_only_output: false,
+                enforce_coverage_gap_gate: true,
+                effort: None,
+                score: false,
+                gates: HealthGateOptions::default(),
+                since: None,
+                min_commits: None,
+                explain: false,
+                summary: false,
+                save_snapshot: None,
+                trend: false,
+                coverage_inputs: HealthCoverageInputs::default(),
+                performance: false,
+                runtime_coverage: None,
+                churn_file: None,
+                group_by: None,
+            }
+        }
+    }
+
+    #[test]
+    fn standalone_health_precomputes_dead_code_when_default_crap_can_use_graph() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let fixture = HealthExecutionOptionsFixture::new();
+        let options = fixture.options(project.path());
+        let config = crate::project_config::default_project_config(project.path()).config;
+
+        assert!(should_precompute_dead_code_analysis(&options, &config));
+    }
+
+    #[test]
+    fn standalone_health_skips_precompute_when_no_section_needs_analysis_artifacts() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let fixture = HealthExecutionOptionsFixture::new();
+        let mut options = fixture.options(project.path());
+        options.thresholds.max_crap = Some(0.0);
+        let config = crate::project_config::default_project_config(project.path()).config;
+
+        assert!(!should_precompute_dead_code_analysis(&options, &config));
+    }
+
+    #[test]
+    fn standalone_health_precomputes_dead_code_for_target_sections() {
+        let project = tempfile::tempdir().expect("temp dir");
+        let fixture = HealthExecutionOptionsFixture::new();
+        let mut options = fixture.options(project.path());
+        options.thresholds.max_crap = Some(0.0);
+        options.targets = true;
+        let config = crate::project_config::default_project_config(project.path()).config;
+
+        assert!(should_precompute_dead_code_analysis(&options, &config));
     }
 
     #[test]

@@ -41,6 +41,19 @@ pub struct ProgrammaticAnalysisContext {
 pub fn resolve_programmatic_analysis_context(
     options: &AnalysisOptions,
 ) -> ProgrammaticResult<ProgrammaticAnalysisContext> {
+    resolve_programmatic_analysis_context_inner(options, true)
+}
+
+pub fn resolve_programmatic_analysis_context_deferred_workspace(
+    options: &AnalysisOptions,
+) -> ProgrammaticResult<ProgrammaticAnalysisContext> {
+    resolve_programmatic_analysis_context_inner(options, false)
+}
+
+fn resolve_programmatic_analysis_context_inner(
+    options: &AnalysisOptions,
+    resolve_workspace: bool,
+) -> ProgrammaticResult<ProgrammaticAnalysisContext> {
     validate_analysis_option_shape(options)?;
     let root = resolve_analysis_root(options.root.as_deref())?;
     validate_analysis_config_path(options.config_path.as_deref())?;
@@ -58,11 +71,15 @@ pub fn resolve_programmatic_analysis_context(
         .as_deref()
         .map(|path| load_explicit_diff_file(path, &root))
         .transpose()?;
-    let workspace_roots = resolve_workspace_scope(
-        &root,
-        options.workspace.as_deref(),
-        options.changed_workspaces.as_deref(),
-    )?;
+    let workspace_roots = if resolve_workspace {
+        resolve_workspace_scope(
+            &root,
+            options.workspace.as_deref(),
+            options.changed_workspaces.as_deref(),
+        )?
+    } else {
+        None
+    };
     Ok(ProgrammaticAnalysisContext {
         root,
         config_path: options.config_path.clone(),
@@ -281,6 +298,18 @@ pub fn changed_files_for_run(
         })
 }
 
+pub fn workspace_roots_for_session(
+    resolved: &ProgrammaticAnalysisContext,
+    workspaces: &[WorkspaceInfo],
+) -> ProgrammaticResult<Option<Vec<PathBuf>>> {
+    resolve_workspace_scope_from_workspaces(
+        &resolved.root,
+        resolved.workspace.as_deref(),
+        resolved.changed_workspaces.as_deref(),
+        workspaces,
+    )
+}
+
 fn resolve_workspace_scope(
     root: &Path,
     workspace: Option<&[String]>,
@@ -299,11 +328,42 @@ fn resolve_workspace_scope(
     }
 }
 
+fn resolve_workspace_scope_from_workspaces(
+    root: &Path,
+    workspace: Option<&[String]>,
+    changed_workspaces: Option<&str>,
+    workspaces: &[WorkspaceInfo],
+) -> ProgrammaticResult<Option<Vec<PathBuf>>> {
+    match (workspace, changed_workspaces) {
+        (Some(patterns), None) => {
+            resolve_workspace_filters_from_workspaces(root, patterns, workspaces).map(Some)
+        }
+        (None, Some(git_ref)) => {
+            resolve_changed_workspaces_from_workspaces(root, git_ref, workspaces).map(Some)
+        }
+        (None, None) => Ok(None),
+        (Some(_), Some(_)) => Err(ProgrammaticError::new(
+            "`workspace` and `changed_workspaces` are mutually exclusive",
+            2,
+        )
+        .with_code("FALLOW_MUTUALLY_EXCLUSIVE_SCOPE")
+        .with_context("analysis.workspace")),
+    }
+}
+
 pub fn resolve_workspace_filters(
     root: &Path,
     patterns: &[String],
 ) -> ProgrammaticResult<Vec<PathBuf>> {
     let workspaces = fallow_config::discover_workspaces(root);
+    resolve_workspace_filters_from_workspaces(root, patterns, &workspaces)
+}
+
+fn resolve_workspace_filters_from_workspaces(
+    root: &Path,
+    patterns: &[String],
+    workspaces: &[WorkspaceInfo],
+) -> ProgrammaticResult<Vec<PathBuf>> {
     if workspaces.is_empty() {
         let joined = patterns
             .iter()
@@ -325,10 +385,10 @@ pub fn resolve_workspace_filters(
         .map(|workspace| relative_workspace_path(&workspace.root, root))
         .collect::<Vec<_>>();
     let (positive, negative) = split_workspace_patterns(patterns);
-    let mut matched = match_positive_workspace_patterns(&positive, &workspaces, &rel_paths)?;
+    let mut matched = match_positive_workspace_patterns(&positive, workspaces, &rel_paths)?;
 
     for pattern in &negative {
-        for index in find_workspace_matches(pattern, &workspaces, &rel_paths)? {
+        for index in find_workspace_matches(pattern, workspaces, &rel_paths)? {
             matched.remove(&index);
         }
     }
@@ -351,6 +411,14 @@ pub fn resolve_workspace_filters(
 
 fn resolve_changed_workspaces(root: &Path, git_ref: &str) -> ProgrammaticResult<Vec<PathBuf>> {
     let workspaces = fallow_config::discover_workspaces(root);
+    resolve_changed_workspaces_from_workspaces(root, git_ref, &workspaces)
+}
+
+fn resolve_changed_workspaces_from_workspaces(
+    root: &Path,
+    git_ref: &str,
+    workspaces: &[WorkspaceInfo],
+) -> ProgrammaticResult<Vec<PathBuf>> {
     if workspaces.is_empty() {
         return Err(ProgrammaticError::new(
             format!(
@@ -374,13 +442,13 @@ fn resolve_changed_workspaces(root: &Path, git_ref: &str) -> ProgrammaticResult<
             .with_context("analysis.changedWorkspaces")
         })?;
     let mut roots = workspaces
-        .into_iter()
+        .iter()
         .filter(|workspace| {
             changed_files
                 .iter()
                 .any(|file| file.starts_with(&workspace.root))
         })
-        .map(|workspace| workspace.root)
+        .map(|workspace| workspace.root.clone())
         .collect::<Vec<_>>();
     roots.sort();
     Ok(roots)

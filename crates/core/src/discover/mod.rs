@@ -8,9 +8,6 @@ use std::path::{Component, Path};
 use fallow_config::{PackageJson, ResolvedConfig};
 use rustc_hash::FxHashSet;
 
-pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-
-pub(crate) use entry_points::resolve_entry_path;
 pub use entry_points::{
     CategorizedEntryPoints, compile_glob_set, discover_dynamically_loaded_entry_points,
     discover_entry_points, discover_plugin_entry_point_sets, discover_plugin_entry_points,
@@ -18,8 +15,10 @@ pub use entry_points::{
 };
 pub(crate) use entry_points::{
     EntryPointDiscovery, discover_entry_points_with_warnings_from_pkg,
-    discover_workspace_entry_points_with_warnings_from_pkg, warn_skipped_entry_summary,
+    discover_workspace_entry_points_with_warnings_from_pkg, resolve_entry_path,
+    warn_skipped_entry_summary,
 };
+pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 pub use infrastructure::discover_infrastructure_entry_points;
 pub use walk::{
     HiddenDirScope, PRODUCTION_EXCLUDE_PATTERNS, SOURCE_EXTENSIONS, discover_files,

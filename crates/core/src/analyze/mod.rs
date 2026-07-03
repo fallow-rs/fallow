@@ -43,12 +43,6 @@ pub(crate) mod test_support;
 #[cfg(test)]
 pub(crate) use unused_deps::matches_virtual_prefix;
 
-/// Human-readable title for a security catalogue category id, for the CLI
-/// renderer. Re-exported so the `fallow security` command can label a
-/// `TaintedSink` finding without reaching into the private `security` module.
-pub use security::catalogue_title as security_catalogue_title;
-pub use security::derive_security_severity;
-
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::{PackageJson, ResolvedConfig, Severity};
@@ -413,7 +407,7 @@ fn add_exportless_package_source_indexes(
 /// public; a no-`exports` copy is internal). Exposed for the review brief,
 /// which feeds it into [`ModuleGraph::public_export_keys`] to compute the
 /// exports-aware public-API surface delta.
-pub fn public_api_package_entry_points(
+fn public_api_package_entry_points(
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,

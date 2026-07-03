@@ -13,8 +13,8 @@ use rmcp::model::{CallToolResult, Content};
 use super::{
     VALID_DUPES_MODES,
     api_runtime::{
-        env_diff_file, json_success, non_empty_path, non_empty_string, programmatic_error_body,
-        run_api_blocking,
+        changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
+        programmatic_error_body, run_api_blocking,
     },
     push_global, push_scope, validation_error_body,
 };
@@ -382,6 +382,7 @@ fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceClo
                 config_path: non_empty_path(params.config.as_deref()),
                 no_cache: params.no_cache.unwrap_or(false),
                 threads: params.threads,
+                changed_since: changed_since_from_param(None),
                 workspace: non_empty_string(params.workspace.as_deref()).map(|value| vec![value]),
                 ..AnalysisOptions::default()
             },
@@ -414,6 +415,7 @@ fn dead_code_analysis_options(
         threads,
         production: production.unwrap_or(false),
         production_override: production,
+        changed_since: changed_since_from_param(None),
         diff_file: env_diff_file(),
         workspace: non_empty_string(workspace).map(|value| vec![value]),
         ..AnalysisOptions::default()

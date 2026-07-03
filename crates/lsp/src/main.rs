@@ -558,7 +558,6 @@ impl FallowLspServer {
             .await;
 
         let changed_since = self.changed_since.read().await.clone();
-        let changed_since_for_data = changed_since.clone();
         let config_path = self.config_path.read().await.clone();
         let duplication_options = self.duplication_options.read().await.clone();
         let production_override = *self.production_override.read().await;
@@ -585,13 +584,8 @@ impl FallowLspServer {
 
         match join_result {
             Ok(output) => {
-                self.apply_analysis_output(
-                    output,
-                    &root,
-                    &version_snapshot,
-                    changed_since_for_data.as_deref(),
-                )
-                .await;
+                self.apply_analysis_output(output, &root, &version_snapshot)
+                    .await;
             }
             Err(e) => {
                 self.client
@@ -628,7 +622,6 @@ impl FallowLspServer {
         output: BlockingAnalysisOutput,
         root: &Path,
         version_snapshot: &VersionSnapshot,
-        changed_since_for_data: Option<&str>,
     ) {
         if self.cancellation.load(Ordering::SeqCst) {
             return;
@@ -648,7 +641,10 @@ impl FallowLspServer {
                 &output.analysis.duplication,
                 root,
             ));
-        attach_changed_since_data(&mut all_diagnostics, changed_since_for_data);
+        attach_changed_since_data(
+            &mut all_diagnostics,
+            output.applied_changed_since.as_deref(),
+        );
         self.publish_collected_diagnostics(all_diagnostics, version_snapshot)
             .await;
 

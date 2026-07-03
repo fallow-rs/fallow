@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use fallow_config::{OutputFormat, ResolvedConfig, RulesConfig, Severity};
+use fallow_config::{OutputFormat, ResolvedConfig, RulesConfig, Severity, WorkspaceInfo};
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::AnalysisResults;
@@ -398,6 +398,7 @@ pub struct CheckResult {
     /// number. Computed from the retained graph's reverse-deps on the brief path
     /// BEFORE the graph is dropped; `None` otherwise. Internal (not serialized).
     pub internal_consumers: Option<rustc_hash::FxHashMap<String, u64>>,
+    pub workspaces: Vec<WorkspaceInfo>,
     retained_files: Option<Vec<DiscoveredFile>>,
 }
 
@@ -407,6 +408,7 @@ struct CheckAnalysisData {
     trace_timings: Option<fallow_types::trace::PipelineTimings>,
     retained_modules: Option<Vec<ModuleInfo>>,
     retained_files: Option<Vec<DiscoveredFile>>,
+    workspaces: Vec<WorkspaceInfo>,
     script_used_packages: rustc_hash::FxHashSet<String>,
 }
 
@@ -425,6 +427,7 @@ fn run_check_analysis(
                 trace_timings: output.timings,
                 retained_modules: output.modules,
                 retained_files: output.files,
+                workspaces: session.workspaces().to_vec(),
                 script_used_packages: output.script_used_packages,
             })
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
@@ -439,6 +442,7 @@ fn run_check_analysis(
                 trace_timings: output.timings,
                 retained_modules: None,
                 retained_files: output.files,
+                workspaces: session.workspaces().to_vec(),
                 script_used_packages: output.script_used_packages,
             })
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
@@ -453,6 +457,7 @@ fn run_check_analysis(
                 trace_timings: output.timings,
                 retained_modules: None,
                 retained_files: None,
+                workspaces: session.workspaces().to_vec(),
                 script_used_packages: output.script_used_packages,
             })
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
@@ -466,6 +471,7 @@ fn run_check_analysis(
             trace_timings: None,
             retained_modules: None,
             retained_files: None,
+            workspaces: session.workspaces().to_vec(),
             script_used_packages: output.script_used_packages,
         })
         .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
@@ -644,6 +650,7 @@ fn build_shared_parse_data(
     trace_graph: Option<fallow_engine::module_graph::RetainedModuleGraph>,
     retained_modules: Option<Vec<ModuleInfo>>,
     retained_files: Option<Vec<DiscoveredFile>>,
+    workspaces: Vec<WorkspaceInfo>,
     script_used_packages: &rustc_hash::FxHashSet<String>,
 ) -> Option<fallow_engine::health::HealthSharedParseData> {
     fallow_engine::health::shared_parse_data_from_artifacts(
@@ -651,6 +658,7 @@ fn build_shared_parse_data(
         trace_graph,
         retained_modules,
         retained_files,
+        workspaces,
         script_used_packages.iter().cloned(),
     )
 }
@@ -690,6 +698,7 @@ fn complete_check_execution(
         trace_timings,
         retained_modules,
         mut retained_files,
+        workspaces,
         script_used_packages,
     } = data;
 
@@ -710,6 +719,7 @@ fn complete_check_execution(
         trace_graph,
         retained_modules,
         retained_files,
+        workspaces.clone(),
         &script_used_packages,
     );
 
@@ -736,6 +746,7 @@ fn complete_check_execution(
         focus_facts: None,
         export_lines: None,
         internal_consumers: None,
+        workspaces,
         retained_files: retained_files_for_cross_reference,
     }
 }

@@ -207,6 +207,7 @@ pub fn execute_health_with_shared_parse(
     let (config, config_ms) = load_health_config(opts)?;
     let scope_inputs = build_health_scope_inputs(opts, &config)?;
     let workspace_diagnostics = fallow_config::workspace_diagnostics_for(&config.root);
+    let workspaces = shared.workspaces;
     let seams = health_seams();
     let result = execute_health_inner(
         opts,
@@ -220,6 +221,8 @@ pub fn execute_health_with_shared_parse(
             parse_cpu_ms: 0.0,
             shared_parse: true,
             pre_computed_analysis: shared.analysis_output,
+            pre_computed_duplication: None,
+            workspaces,
             workspace_diagnostics,
         },
         scope_inputs,
@@ -235,13 +238,19 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     let t = Instant::now();
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
-    let session = session.into_parsed_parts(true);
-    let config = session.config;
-    let files = session.files;
-    let modules = session.modules;
-    let workspace_diagnostics = session.workspace_diagnostics;
-    let parse_ms = session.parse_ms;
-    let parse_cpu_ms = session.parse_cpu_ms;
+    let parts = session.parsed_parts_uncached(true);
+    let pre_computed_analysis =
+        fallow_engine::health::should_precompute_dead_code_analysis(opts, session.config())
+            .then(|| session.analyze_dead_code_with_parsed_modules(&parts.modules))
+            .transpose()
+            .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, opts.output))?;
+    let config = parts.config;
+    let files = parts.files;
+    let modules = parts.modules;
+    let workspaces = parts.workspaces;
+    let workspace_diagnostics = parts.workspace_diagnostics;
+    let parse_ms = parts.parse_ms;
+    let parse_cpu_ms = parts.parse_cpu_ms;
 
     let scope_inputs = build_health_scope_inputs(opts, &config)?;
     let seams = health_seams();
@@ -256,7 +265,9 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
             parse_ms,
             parse_cpu_ms,
             shared_parse: false,
-            pre_computed_analysis: None,
+            pre_computed_analysis,
+            pre_computed_duplication: None,
+            workspaces,
             workspace_diagnostics,
         },
         scope_inputs,

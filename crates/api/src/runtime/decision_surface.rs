@@ -8,7 +8,8 @@ use crate::{
     AnalysisOptions, AuditOptions, DecisionSurfaceOptions, DecisionSurfaceProgrammaticOutput,
     ProgrammaticError,
     analysis_context::{
-        ProgrammaticAnalysisContext, changed_files_for_run, resolve_programmatic_analysis_context,
+        ProgrammaticAnalysisContext, changed_files_for_run,
+        resolve_programmatic_analysis_context_deferred_workspace, workspace_roots_for_session,
     },
     decision_surface::{
         BoundaryAnchor, CoordinationAnchor, DEFAULT_DECISION_CAP, DecisionInputs,
@@ -34,7 +35,7 @@ pub fn run_decision_surface(
         changed_since: Some(resolved_base.git_ref.clone()),
         ..options.analysis.clone()
     };
-    let resolved = resolve_programmatic_analysis_context(&analysis)?;
+    let resolved = resolve_programmatic_analysis_context_deferred_workspace(&analysis)?;
     let changed_files = changed_files_for_run(&resolved)?.unwrap_or_default();
     if changed_files.is_empty() {
         return Ok(DecisionSurfaceProgrammaticOutput {
@@ -100,7 +101,8 @@ fn run_decision_analysis(
     } = artifacts;
     let changed_files = changed_files.as_ref();
 
-    if let Some(workspace_roots) = resolved.workspace_roots.as_ref() {
+    let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
+    if let Some(workspace_roots) = workspace_roots.as_ref() {
         fallow_engine::dead_code::filter_to_workspaces(&mut output.results, workspace_roots);
     }
     if let Some(changed_files) = changed_files {
@@ -163,7 +165,7 @@ fn compute_base_decision_snapshot(
         explain: false,
         ..options.analysis.clone()
     };
-    let resolved = resolve_programmatic_analysis_context(&base_analysis)?;
+    let resolved = resolve_programmatic_analysis_context_deferred_workspace(&base_analysis)?;
     let base = run_decision_analysis(&resolved, None)?;
     Ok(snapshot_from_decision_analysis(&base))
 }

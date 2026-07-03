@@ -93,12 +93,16 @@ mod tests {
     use super::*;
     use crate::{
         project_analysis::ProjectAnalysisArtifactOptions,
-        project_config::{ProjectConfigOptions, config_for_project, config_for_project_analysis},
+        project_config::{
+            ProjectConfigOptions, config_for_project, config_for_project_analysis,
+            resolve_cache_max_size_bytes,
+        },
         session::AnalysisSession,
     };
     use fallow_config::ProductionAnalysis;
     use fallow_types::output_format::OutputFormat;
     use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn engine_error_displays_message() {
@@ -106,6 +110,31 @@ mod tests {
 
         assert_eq!(err.message(), "config failed");
         assert_eq!(err.to_string(), "config failed");
+    }
+
+    #[test]
+    fn engine_resolves_parse_cache_size_policy() {
+        let mut config = fallow_config::FallowConfig::default().resolve(
+            PathBuf::from("/repo"),
+            OutputFormat::Json,
+            1,
+            false,
+            true,
+            None,
+        );
+        assert_eq!(
+            resolve_cache_max_size_bytes(&config),
+            fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE
+        );
+
+        config.cache_max_size_mb = Some(3);
+        assert_eq!(resolve_cache_max_size_bytes(&config), 3 * 1024 * 1024);
+
+        config.cache_max_size_mb = Some(u32::MAX);
+        assert_eq!(
+            resolve_cache_max_size_bytes(&config),
+            (u32::MAX as usize).saturating_mul(1024 * 1024)
+        );
     }
 
     #[test]
@@ -169,6 +198,14 @@ mod tests {
             "engine session must build discovery through the engine discovery boundary"
         );
         assert!(
+            session_source.contains("prepare_analysis_discovery_with_workspaces"),
+            "engine session must reuse workspace metadata captured during config load"
+        );
+        assert!(
+            session_source.contains("workspace_discovery_ms.is_some()"),
+            "AnalysisSession::from_config must only reuse workspace metadata when ProjectConfig preloaded it"
+        );
+        assert!(
             !session_source.contains("core_backend::prepare_analysis_discovery"),
             "engine session must not delegate discovery orchestration to core_backend"
         );
@@ -216,6 +253,46 @@ mod tests {
     }
 
     #[test]
+    fn analysis_session_config_adjustment_invalidates_preloaded_workspaces() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"root","workspaces":["packages/*"]}"#,
+        )
+        .expect("root package");
+        std::fs::create_dir_all(temp.path().join("packages/a")).expect("workspace dir");
+        std::fs::create_dir_all(temp.path().join("packages/ignored")).expect("ignored dir");
+        std::fs::write(
+            temp.path().join("packages/a/package.json"),
+            r#"{"name":"a","main":"src/index.ts"}"#,
+        )
+        .expect("workspace package");
+
+        let session = AnalysisSession::load_with_config(temp.path(), None, |config| {
+            config.ignore_patterns = globset::GlobSetBuilder::new()
+                .add(globset::Glob::new("packages/ignored").expect("ignore glob"))
+                .build()
+                .expect("ignore set");
+        })
+        .expect("session loads");
+
+        assert!(
+            session
+                .workspaces()
+                .iter()
+                .all(|workspace| workspace.name != "ignored"),
+            "config mutations that affect workspace discovery must not reuse preloaded workspaces"
+        );
+        assert!(
+            !session
+                .workspace_diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.path.ends_with("packages/ignored")),
+            "config mutations that affect workspace diagnostics must not reuse stale diagnostics"
+        );
+    }
+
+    #[test]
     fn analysis_session_captures_workspace_diagnostics() {
         let temp = tempfile::tempdir().expect("tempdir");
         std::fs::write(
@@ -237,6 +314,45 @@ mod tests {
             diagnostic.kind.id() == "glob-matched-no-package-json"
                 && diagnostic.path.ends_with("packages/empty")
         }));
+    }
+
+    #[test]
+    fn analysis_session_from_resolved_config_discovers_workspaces() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"root","workspaces":["packages/*"]}"#,
+        )
+        .expect("root package");
+        std::fs::create_dir_all(temp.path().join("packages/a/src")).expect("workspace dir");
+        std::fs::write(
+            temp.path().join("packages/a/package.json"),
+            r#"{"name":"pkg-a","main":"src/index.ts"}"#,
+        )
+        .expect("workspace package");
+        std::fs::write(
+            temp.path().join("packages/a/src/index.ts"),
+            "export const value = 1;\n",
+        )
+        .expect("workspace source");
+
+        let config = fallow_config::FallowConfig::default().resolve(
+            temp.path().to_path_buf(),
+            OutputFormat::Json,
+            1,
+            false,
+            true,
+            None,
+        );
+        let session = AnalysisSession::from_resolved_config(config);
+
+        assert!(
+            session
+                .workspaces()
+                .iter()
+                .any(|workspace| workspace.name == "pkg-a"),
+            "resolved-config sessions must expose workspaces found during fallback discovery"
+        );
     }
 
     #[test]
@@ -520,6 +636,54 @@ mod tests {
         let output = artifacts.into_output();
         assert!(output.dead_code.modules.is_some());
         assert!(output.dead_code.files.is_some());
+    }
+
+    #[test]
+    fn project_artifacts_focus_duplication_to_changed_files() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        let repeated =
+            "export function repeated() {\n  return ['alpha', 'beta', 'gamma'].join(',');\n}\n";
+        let a = src.join("a.ts");
+        std::fs::write(&a, repeated).expect("source file");
+        std::fs::write(src.join("b.ts"), repeated).expect("source file");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        let mut config = session.config().duplicates.clone();
+        config.min_tokens = 1;
+        config.min_lines = 1;
+
+        let full = session
+            .analyze_project_with_artifacts(&config, ProjectAnalysisArtifactOptions::default())
+            .expect("project analysis succeeds");
+        assert!(!full.duplication.clone_groups.is_empty());
+
+        let mut unrelated = rustc_hash::FxHashSet::default();
+        unrelated.insert(src.join("unrelated.ts"));
+        let focused_empty = session
+            .analyze_project_with_artifacts(
+                &config,
+                ProjectAnalysisArtifactOptions {
+                    changed_files: Some(unrelated),
+                    ..ProjectAnalysisArtifactOptions::default()
+                },
+            )
+            .expect("project analysis succeeds");
+        assert!(focused_empty.duplication.clone_groups.is_empty());
+
+        let mut changed = rustc_hash::FxHashSet::default();
+        changed.insert(a);
+        let focused = session
+            .analyze_project_with_artifacts(
+                &config,
+                ProjectAnalysisArtifactOptions {
+                    changed_files: Some(changed),
+                    ..ProjectAnalysisArtifactOptions::default()
+                },
+            )
+            .expect("project analysis succeeds");
+        assert!(!focused.duplication.clone_groups.is_empty());
     }
 
     #[test]

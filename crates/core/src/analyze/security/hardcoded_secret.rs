@@ -19,8 +19,7 @@ use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
 use crate::suppress::SuppressionContext;
 
-pub const CATEGORY_ID: &str = "hardcoded-secret";
-pub const CATEGORY_TITLE: &str = "Hardcoded secret candidate";
+pub const CATEGORY_ID: &str = fallow_security::HARDCODED_SECRET_CATEGORY_ID;
 const CWE_ID: u32 = 798;
 const MIN_ENTROPY_LENGTH: usize = 20;
 const MIN_ENTROPY_BITS_PER_CHAR: f64 = 4.0;

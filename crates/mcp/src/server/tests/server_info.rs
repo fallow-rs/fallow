@@ -277,6 +277,19 @@ fn code_execute_schema_contains_expected_properties() {
 }
 
 #[test]
+fn code_execute_description_lists_combined_host_call() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "code_execute").unwrap();
+    let description = tool.description.as_deref().expect("description");
+
+    assert!(
+        description.contains("combined"),
+        "code_execute description must list the combined host call"
+    );
+}
+
+#[test]
 fn analyze_schema_contains_expected_properties() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();

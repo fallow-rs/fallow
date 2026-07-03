@@ -6,8 +6,8 @@
 //! with the matching `serialize_*_programmatic_json` helper only at a protocol
 //! boundary. See ADR-008 for the policy, and `docs/fallow-core-migration.md`
 //! for the function-by-function migration map. Items in this crate may change
-//! in any release, including patch releases; a subsequent minor will flip
-//! `publish = false` so the crate is no longer fetchable from crates.io.
+//! in any release, including patch releases. Publishing remains transitional
+//! while `fallow-engine` still depends on core internals.
 
 #![cfg_attr(not(test), deny(clippy::disallowed_methods))]
 #![cfg_attr(
@@ -141,6 +141,7 @@ fn credit_package_path_references(graph: &mut graph::ModuleGraph, modules: &[ext
 }
 
 /// Result of the full analysis pipeline, including optional performance timings.
+#[doc(hidden)]
 pub struct AnalysisOutput {
     pub results: AnalysisResults,
     pub timings: Option<PipelineTimings>,
@@ -170,6 +171,7 @@ pub struct AnalysisOutput {
 /// Parse/cache phase metrics supplied by callers that own parsing before
 /// handing modules back to the core detector backend.
 #[derive(Debug, Clone, Copy)]
+#[doc(hidden)]
 pub struct AnalysisParseMetrics {
     pub parse_ms: f64,
     pub cache_ms: f64,
@@ -325,6 +327,7 @@ fn warn_undeclared_workspaces(
 /// # Errors
 ///
 /// Returns an error if file discovery, parsing, or analysis fails.
+#[doc(hidden)]
 #[deprecated(
     since = "2.76.0",
     note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
@@ -339,6 +342,7 @@ pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> 
 /// # Errors
 ///
 /// Returns an error if file discovery, parsing, or analysis fails.
+#[doc(hidden)]
 #[deprecated(
     since = "2.76.0",
     note = "fallow_core is internal; use fallow_api::run_dead_code for public typed output. NOTE: export-usage collection is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
@@ -348,53 +352,18 @@ pub fn analyze_with_usages(config: &ResolvedConfig) -> Result<AnalysisResults, F
     Ok(output.results)
 }
 
-/// Run the full analysis pipeline with export usage collection and retained
-/// per-function complexity modules.
-///
-/// Used by the LSP when opt-in inline complexity code lenses are enabled so
-/// the editor keeps existing export reference lenses while also reading
-/// complexity data from the same parse.
-///
-/// # Errors
-///
-/// Returns an error if file discovery, parsing, or analysis fails.
-#[deprecated(
-    since = "2.90.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code and run_health instead. NOTE: this combined LSP-only typed surface is not exposed externally. See docs/fallow-core-migration.md and ADR-008."
-)]
-pub fn analyze_with_usages_and_complexity(
-    config: &ResolvedConfig,
-) -> Result<AnalysisOutput, FallowError> {
-    analyze_full(config, false, true, true, true)
-}
-
 /// Run the full analysis pipeline with optional performance timings and graph retention.
 ///
 /// # Errors
 ///
 /// Returns an error if file discovery, parsing, or analysis fails.
+#[doc(hidden)]
 #[deprecated(
     since = "2.76.0",
     note = "fallow_core is internal; use fallow_api::run_dead_code for public typed output. NOTE: trace timings are not exposed in the programmatic surface today; use `fallow dead-code --performance` for CLI-side timings. See docs/fallow-core-migration.md and ADR-008."
 )]
 pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, FallowError> {
     analyze_full(config, true, false, false, false)
-}
-
-/// Run the full analysis pipeline and return the full `AnalysisOutput`, including
-/// `file_hashes` (used by `fallow fix` to detect on-disk drift between analysis
-/// and per-file write). Graphs and modules are NOT retained; the only difference
-/// from `analyze` is that the caller can access `AnalysisOutput.file_hashes`.
-///
-/// # Errors
-///
-/// Returns an error if file discovery, parsing, or analysis fails.
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; the CLI fix command uses this via the workspace path dependency. External embedders should use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. See docs/fallow-core-migration.md and ADR-008."
-)]
-pub fn analyze_with_file_hashes(config: &ResolvedConfig) -> Result<AnalysisOutput, FallowError> {
-    analyze_full(config, false, false, false, false)
 }
 
 /// Run the full analysis pipeline, retaining parsed modules and discovered files.
@@ -406,6 +375,7 @@ pub fn analyze_with_file_hashes(config: &ResolvedConfig) -> Result<AnalysisOutpu
 /// # Errors
 ///
 /// Returns an error if file discovery, parsing, or analysis fails.
+#[doc(hidden)]
 #[deprecated(
     since = "2.76.0",
     note = "fallow_core is internal; use fallow_api::run_dead_code for public typed output. NOTE: combined-mode module retention is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
@@ -482,6 +452,7 @@ struct AnalysisSetup {
 /// that plugin detection needs, so engine sessions can run several analyses
 /// over one stable discovery boundary without re-walking the project.
 #[derive(Debug, Clone)]
+#[doc(hidden)]
 pub struct AnalysisDiscovery {
     files: Vec<discover::DiscoveredFile>,
     workspaces: Vec<fallow_config::WorkspaceInfo>,
@@ -706,48 +677,6 @@ impl<'a> AnalysisSession<'a> {
             retain_modules,
         ))
     }
-
-    fn run_with_parse_result(
-        self,
-        modules: &[extract::ModuleInfo],
-    ) -> Result<AnalysisOutput, FallowError> {
-        let workspace_pkgs = self.load_workspace_packages();
-        let (plugin_result, plugins_ms, scripts_ms) =
-            self.run_plugins_and_scripts(&workspace_pkgs)?;
-
-        let core = run_reused_analysis_core(&ReusedAnalysisCoreInput {
-            config: self.config,
-            progress: &self.progress,
-            files: self.files(),
-            workspaces: self.workspaces(),
-            root_pkg: self.root_pkg.as_ref(),
-            workspace_pkgs: &workspace_pkgs,
-            plugin_result: &plugin_result,
-            modules,
-        });
-        self.progress.finish();
-
-        let timings = self.prelude_timings(plugins_ms, scripts_ms);
-        let prelude = prelude_metrics(
-            &timings,
-            self.pipeline_start,
-            self.files(),
-            self.workspaces(),
-            modules.len(),
-        );
-        let profile = reused_pipeline_profile(&prelude, &core);
-        trace_reused_pipeline_profile(&profile);
-
-        Ok(AnalysisOutput {
-            results: core.result,
-            timings: retained_pipeline_timings(true, &profile),
-            graph: Some(core.graph),
-            modules: None,
-            files: None,
-            script_used_packages: plugin_result.script_used_packages,
-            file_hashes: collect_file_hashes(modules, self.files()),
-        })
-    }
 }
 
 /// Run the shared prelude: progress setup, node_modules check, workspace and
@@ -822,6 +751,7 @@ fn run_plugins_and_scripts(
 
 /// Timings captured by the dead-code backend prelude.
 #[derive(Debug, Clone, Copy)]
+#[doc(hidden)]
 pub struct DeadCodePreludeTimings {
     pub discover_ms: f64,
     pub workspaces_ms: f64,
@@ -833,6 +763,7 @@ pub struct DeadCodePreludeTimings {
 ///
 /// The engine owns the phase ordering. Core keeps the detector/backend state
 /// needed by those phases private.
+#[doc(hidden)]
 pub struct DeadCodeBackendPrelude<'a> {
     config: &'a ResolvedConfig,
     pipeline_start: Instant,
@@ -871,6 +802,7 @@ impl DeadCodeBackendPrelude<'_> {
 }
 
 /// Entry-point discovery result for an engine-owned dead-code pipeline.
+#[doc(hidden)]
 pub struct DeadCodeEntryPoints {
     inner: TimedEntryPoints,
 }
@@ -888,18 +820,21 @@ impl DeadCodeEntryPoints {
 }
 
 /// Import-resolution result for an engine-owned dead-code pipeline.
+#[doc(hidden)]
 pub struct DeadCodeResolvedModules {
     pub resolved: Vec<resolve::ResolvedModule>,
     pub elapsed_ms: f64,
 }
 
 /// Graph build or graph-cache result for an engine-owned dead-code pipeline.
+#[doc(hidden)]
 pub struct DeadCodeGraphRun {
     pub graph: graph::ModuleGraph,
     pub elapsed_ms: f64,
 }
 
 /// Detector result for an engine-owned dead-code pipeline.
+#[doc(hidden)]
 pub struct DeadCodeDetectorRun {
     pub results: AnalysisResults,
     pub elapsed_ms: f64,
@@ -1041,29 +976,6 @@ impl<'a> DeadCodeBackendPrelude<'a> {
     }
 }
 
-/// Run the analysis pipeline using pre-parsed modules, skipping the parsing stage.
-///
-/// This avoids re-parsing files when the caller already has a `ParseResult` (e.g., from
-/// `fallow_core::extract::parse_all_files`). Discovery, plugins, scripts, entry points,
-/// import resolution, graph construction, and dead code detection still run normally.
-/// The graph is always retained (needed for file scores). Caller-owned modules
-/// are borrowed and are not compacted by this API.
-///
-/// # Errors
-///
-/// Returns an error if discovery, graph construction, or analysis fails.
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for public typed output. NOTE: pre-parsed module reuse is not exposed in the programmatic surface today. See docs/fallow-core-migration.md and ADR-008."
-)]
-pub fn analyze_with_parse_result(
-    config: &ResolvedConfig,
-    modules: &[extract::ModuleInfo],
-) -> Result<AnalysisOutput, FallowError> {
-    let _span = tracing::info_span!("fallow_analyze_with_parse_result").entered();
-    AnalysisSession::new(config).run_with_parse_result(modules)
-}
-
 /// Prelude/aggregate metrics shared between the parse and reuse pipeline paths
 /// when assembling the `PipelineProfile`.
 struct PreludeMetrics {
@@ -1110,55 +1022,6 @@ fn prelude_metrics(
     }
 }
 
-/// Assemble the `PipelineProfile` for the reused-module path (parse/cache phases
-/// are skipped, so their timings are zero).
-fn reused_pipeline_profile(prelude: &PreludeMetrics, core: &ReusedAnalysisCore) -> PipelineProfile {
-    PipelineProfile {
-        discover_ms: prelude.discover_ms,
-        workspaces_ms: prelude.workspaces_ms,
-        plugins_ms: prelude.plugins_ms,
-        scripts_ms: prelude.scripts_ms,
-        parse_ms: 0.0,
-        cache_ms: 0.0,
-        entry_points_ms: core.entry_points_ms,
-        resolve_ms: core.resolve_ms,
-        graph_ms: core.graph_ms,
-        analyze_ms: core.analyze_ms,
-        total_ms: prelude.total_ms,
-        file_count: prelude.file_count,
-        workspace_count: prelude.workspace_count,
-        module_count: prelude.module_count,
-        entry_point_count: core.entry_point_count,
-        cache_hits: 0,
-        cache_misses: 0,
-        parse_cpu_ms: 0.0,
-    }
-}
-
-/// Borrowed inputs for `run_reused_analysis_core`.
-struct ReusedAnalysisCoreInput<'a> {
-    config: &'a ResolvedConfig,
-    progress: &'a progress::AnalysisProgress,
-    files: &'a [discover::DiscoveredFile],
-    workspaces: &'a [fallow_config::WorkspaceInfo],
-    root_pkg: Option<&'a PackageJson>,
-    workspace_pkgs: &'a [LoadedWorkspacePackage<'a>],
-    plugin_result: &'a plugins::AggregatedPluginResult,
-    modules: &'a [extract::ModuleInfo],
-}
-
-/// Result of the reused-module analysis core, with the per-phase timings the
-/// caller folds into the pipeline profile.
-struct ReusedAnalysisCore {
-    result: AnalysisResults,
-    graph: graph::ModuleGraph,
-    entry_point_count: usize,
-    entry_points_ms: f64,
-    resolve_ms: f64,
-    graph_ms: f64,
-    analyze_ms: f64,
-}
-
 struct AnalysisCoreSharedInput<'a> {
     config: &'a ResolvedConfig,
     progress: &'a progress::AnalysisProgress,
@@ -1195,71 +1058,6 @@ struct GraphCacheHit {
 struct TimedAnalysis {
     result: AnalysisResults,
     elapsed_ms: f64,
-}
-
-/// Run entry-point discovery, import resolution, graph construction, and dead-code
-/// analysis over caller-owned modules (which are copied before payload release).
-fn run_reused_analysis_core(input: &ReusedAnalysisCoreInput<'_>) -> ReusedAnalysisCore {
-    let &ReusedAnalysisCoreInput {
-        config,
-        progress,
-        files,
-        workspaces,
-        root_pkg,
-        workspace_pkgs,
-        plugin_result,
-        modules,
-    } = input;
-    let shared = AnalysisCoreSharedInput {
-        config,
-        progress,
-        files,
-        workspaces,
-        root_pkg,
-        workspace_pkgs,
-        plugin_result,
-    };
-
-    let entry_points = discover_analysis_entry_points(&shared);
-    let (resolved, graph) = if let Some(hit) =
-        try_load_analysis_graph_cache(&shared, &entry_points, modules)
-    {
-        (
-            TimedResolvedModules {
-                resolved: hit.resolved,
-                elapsed_ms: 0.0,
-            },
-            TimedGraph {
-                graph: hit.graph,
-                elapsed_ms: hit.elapsed_ms,
-            },
-        )
-    } else {
-        let resolved = resolve_analysis_imports_timed(&shared, modules);
-        let graph = build_analysis_graph_timed(&shared, &resolved.resolved, &entry_points, modules);
-        (resolved, graph)
-    };
-
-    let mut analysis_modules = modules.to_vec();
-    release_resolution_payloads(&mut analysis_modules);
-    let analysis = analyze_dead_code_timed(
-        &shared,
-        &graph.graph,
-        &resolved.resolved,
-        &analysis_modules,
-        false,
-        entry_points.summary,
-    );
-
-    ReusedAnalysisCore {
-        result: analysis.result,
-        graph: graph.graph,
-        entry_point_count: entry_points.count,
-        entry_points_ms: entry_points.elapsed_ms,
-        resolve_ms: resolved.elapsed_ms,
-        graph_ms: graph.elapsed_ms,
-        analyze_ms: analysis.elapsed_ms,
-    }
 }
 
 fn discover_analysis_entry_points(input: &AnalysisCoreSharedInput<'_>) -> TimedEntryPoints {
@@ -1626,36 +1424,6 @@ fn retained_pipeline_timings(retain: bool, profile: &PipelineProfile) -> Option<
         duplication_ms: None,
         total_ms: profile.total_ms,
     })
-}
-
-fn trace_reused_pipeline_profile(profile: &PipelineProfile) {
-    tracing::debug!(
-        "\n┌─ Pipeline Profile (reuse) ─────────────────────\n\
-         │  discover files:   {:>8.1}ms  ({} files)\n\
-         │  workspaces:       {:>8.1}ms\n\
-         │  plugins:          {:>8.1}ms\n\
-         │  script analysis:  {:>8.1}ms\n\
-         │  parse/extract:    SKIPPED (reused {} modules)\n\
-         │  entry points:     {:>8.1}ms  ({} entries)\n\
-         │  resolve imports:  {:>8.1}ms\n\
-         │  build graph:      {:>8.1}ms\n\
-         │  analyze:          {:>8.1}ms\n\
-         │  ────────────────────────────────────────────\n\
-         │  TOTAL:            {:>8.1}ms\n\
-         └─────────────────────────────────────────────────",
-        profile.discover_ms,
-        profile.file_count,
-        profile.workspaces_ms,
-        profile.plugins_ms,
-        profile.scripts_ms,
-        profile.module_count,
-        profile.entry_points_ms,
-        profile.entry_point_count,
-        profile.resolve_ms,
-        profile.graph_ms,
-        profile.analyze_ms,
-        profile.total_ms,
-    );
 }
 
 fn update_parse_cache_if_enabled(
@@ -2620,24 +2388,6 @@ fn collect_config_search_roots(
     roots_vec
 }
 
-/// Run analysis on a project directory (with export usages for LSP Code Lens).
-///
-/// # Errors
-///
-/// Returns an error if config loading, file discovery, parsing, or analysis fails.
-#[deprecated(
-    since = "2.76.0",
-    note = "fallow_core is internal; use fallow_api::run_dead_code for typed output; serialize with fallow_api::serialize_dead_code_programmatic_json for JSON output. Build a `DeadCodeOptions { analysis: AnalysisOptions { root, ..default() }, ..default() }`. See docs/fallow-core-migration.md and ADR-008."
-)]
-pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
-    let config = default_config(root);
-    #[expect(
-        deprecated,
-        reason = "ADR-008: thin wrapper, internal call into the same deprecated surface"
-    )]
-    analyze_with_usages(&config)
-}
-
 /// Resolve the analysis config for a project, mirroring the CLI's `--config`
 /// behavior when `config_path` is provided.
 ///
@@ -2645,7 +2395,7 @@ pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
 ///
 /// Returns an error when an explicit config cannot be loaded or automatic
 /// config discovery finds an invalid config.
-pub fn config_for_project(
+pub(crate) fn config_for_project(
     root: &Path,
     config_path: Option<&Path>,
 ) -> Result<(ResolvedConfig, Option<std::path::PathBuf>), FallowError> {
@@ -2917,29 +2667,6 @@ mod tests {
                     .path
                     .ends_with("src/index.ts")),
             "session parsing should return modules keyed to session files"
-        );
-    }
-
-    #[test]
-    fn analysis_session_reuses_parse_result_with_matching_results() {
-        let dir = tempfile::tempdir().expect("create temp dir");
-        write_session_fixture(dir.path());
-        let config = session_config(dir.path());
-
-        let fresh = AnalysisSession::new(&config)
-            .run_full(true, false, false, true)
-            .expect("fresh analysis succeeds");
-        let modules = fresh.modules.as_ref().expect("fresh modules retained");
-        let reused = AnalysisSession::new(&config)
-            .run_with_parse_result(modules)
-            .expect("reused analysis succeeds");
-
-        assert!(reused.graph.is_some());
-        assert!(reused.timings.is_some());
-        assert_eq!(reused.file_hashes, fresh.file_hashes);
-        assert_eq!(
-            serde_json::to_value(&reused.results).expect("serialize reused results"),
-            serde_json::to_value(&fresh.results).expect("serialize fresh results")
         );
     }
 

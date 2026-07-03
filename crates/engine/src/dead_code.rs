@@ -12,111 +12,19 @@ pub use crate::results::{
 };
 
 use crate::{
-    EngineResult,
-    session::{
-        analyze_dead_code_from_config, analyze_dead_code_retaining_files_from_config,
-        analyze_dead_code_with_artifacts_from_config,
-        analyze_dead_code_with_complexity_from_config,
-        analyze_dead_code_with_parse_result_from_config,
-    },
-    source::ModuleInfo,
+    EngineResult, session::analyze_dead_code_with_parse_result_from_config, source::ModuleInfo,
 };
-
-/// Run dead-code analysis for a resolved config.
-///
-/// # Errors
-///
-/// Returns an error if file discovery, parsing, or analysis fails.
-pub fn analyze(config: &ResolvedConfig) -> EngineResult<DeadCodeAnalysis> {
-    analyze_dead_code_with_artifacts_from_config(config, false, false).map(|output| {
-        DeadCodeAnalysis {
-            results: output.results,
-        }
-    })
-}
-
-/// Run dead-code analysis with export usage collection for a resolved config.
-///
-/// # Errors
-///
-/// Returns an error if file discovery, parsing, or analysis fails.
-pub fn analyze_with_usages(config: &ResolvedConfig) -> EngineResult<DeadCodeAnalysis> {
-    analyze_dead_code_from_config(config)
-}
-
-/// Run dead-code analysis with source hashes for drift-sensitive fixers.
-///
-/// # Errors
-///
-/// Returns an error if file discovery, parsing, or analysis fails.
-pub fn analyze_with_file_hashes(
-    config: &ResolvedConfig,
-) -> EngineResult<DeadCodeAnalysisWithHashes> {
-    analyze_dead_code_with_artifacts_from_config(config, false, false).map(|output| {
-        DeadCodeAnalysisWithHashes {
-            results: output.results,
-            file_hashes: output.file_hashes,
-        }
-    })
-}
-
-/// Run dead-code analysis with trace timings and retained graph artifacts.
-///
-/// # Errors
-///
-/// Returns an error if file discovery, parsing, or analysis fails.
-pub fn analyze_with_trace(config: &ResolvedConfig) -> EngineResult<DeadCodeAnalysisArtifacts> {
-    analyze_dead_code_with_artifacts_from_config(config, false, true)
-}
-
-/// Run dead-code analysis while retaining module and file artifacts.
-///
-/// # Errors
-///
-/// Returns an error if file discovery, parsing, or analysis fails.
-pub fn analyze_retaining_modules(
-    config: &ResolvedConfig,
-    need_complexity: bool,
-    retain_graph: bool,
-) -> EngineResult<DeadCodeAnalysisArtifacts> {
-    analyze_dead_code_with_artifacts_from_config(config, need_complexity, retain_graph)
-}
-
-/// Run dead-code analysis while retaining discovered files for downstream
-/// command stages that reuse the same project discovery.
-///
-/// # Errors
-///
-/// Returns an error if file discovery, parsing, or analysis fails.
-pub fn analyze_retaining_files(
-    config: &ResolvedConfig,
-    need_complexity: bool,
-    retain_graph: bool,
-) -> EngineResult<DeadCodeAnalysisArtifacts> {
-    analyze_dead_code_retaining_files_from_config(config, need_complexity, retain_graph)
-}
 
 /// Run dead-code analysis from pre-parsed modules.
 ///
 /// # Errors
 ///
 /// Returns an error if discovery, graph construction, or analysis fails.
-pub fn analyze_with_parse_result(
+pub(crate) fn analyze_with_parse_result(
     config: &ResolvedConfig,
     modules: &[ModuleInfo],
 ) -> EngineResult<DeadCodeAnalysisArtifacts> {
     analyze_dead_code_with_parse_result_from_config(config, modules)
-}
-
-/// Run dead-code analysis with export usage and retained complexity artifacts.
-///
-/// # Errors
-///
-/// Returns an error if file discovery, parsing, or analysis fails.
-pub fn analyze_with_usages_and_complexity(
-    config: &ResolvedConfig,
-) -> EngineResult<DeadCodeAnalysisOutput> {
-    analyze_dead_code_with_complexity_from_config(config)
 }
 
 /// Scope dead-code results to the union of the given workspace roots.

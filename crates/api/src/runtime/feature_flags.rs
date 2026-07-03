@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::time::Instant;
 
 use fallow_engine::{project_config::ProjectConfig, session::AnalysisSession};
@@ -12,7 +11,8 @@ use fallow_types::results::FeatureFlag;
 use crate::{
     FeatureFlagsOptions, FeatureFlagsProgrammaticOutput, ProgrammaticError,
     analysis_context::{
-        ProgrammaticAnalysisContext, changed_files_for_run, resolve_programmatic_analysis_context,
+        ProgrammaticAnalysisContext, changed_files_for_run,
+        resolve_programmatic_analysis_context_deferred_workspace, workspace_roots_for_session,
     },
 };
 
@@ -27,7 +27,7 @@ use super::{ProgrammaticResult, root_envelope_mode};
 pub fn run_feature_flags(
     options: &FeatureFlagsOptions,
 ) -> ProgrammaticResult<FeatureFlagsProgrammaticOutput> {
-    let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
+    let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
     resolved.install(|| run_feature_flags_inner(options, &resolved))
 }
 
@@ -45,7 +45,7 @@ fn run_feature_flags_inner(
     }
 
     let mut flags = analysis.flags;
-    apply_feature_flags_scope(&mut flags, resolved, session.root())?;
+    apply_feature_flags_scope(&mut flags, resolved, &session)?;
     sort_and_limit_feature_flags(&mut flags, options.top);
 
     let output = build_feature_flags_output(FeatureFlagsOutputInput {
@@ -97,9 +97,10 @@ fn configure_project_for_feature_flags(
 fn apply_feature_flags_scope(
     flags: &mut Vec<FeatureFlag>,
     resolved: &ProgrammaticAnalysisContext,
-    root: &Path,
+    session: &AnalysisSession,
 ) -> ProgrammaticResult<()> {
-    if let Some(workspace_roots) = resolved.workspace_roots.as_ref() {
+    let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
+    if let Some(workspace_roots) = workspace_roots.as_ref() {
         flags.retain(|flag| {
             workspace_roots
                 .iter()
@@ -111,7 +112,8 @@ fn apply_feature_flags_scope(
     }
     if let Some(diff) = resolved.diff.as_ref() {
         flags.retain(|flag| {
-            relative_to_diff_path(&flag.path, root).is_none_or(|rel| diff.touches_file(&rel))
+            relative_to_diff_path(&flag.path, session.root())
+                .is_none_or(|rel| diff.touches_file(&rel))
         });
     }
     Ok(())

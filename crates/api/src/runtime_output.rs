@@ -85,6 +85,7 @@ pub struct CombinedProgrammaticOutput {
 pub struct DeadCodeProgrammaticOutput {
     pub output: DeadCodeOutput,
     pub root: PathBuf,
+    pub config_fixable: bool,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<String>,
 }

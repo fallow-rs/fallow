@@ -6,8 +6,9 @@ use fallow_config::{
     FallowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic, WorkspaceInfo,
 };
 use fallow_types::output_format::OutputFormat;
+use rustc_hash::FxHashSet;
 
-use crate::{EngineError, EngineResult, core_backend};
+use crate::{EngineError, EngineResult};
 
 /// Resolved project config plus the config file path when one was loaded.
 #[derive(Debug)]
@@ -16,6 +17,7 @@ pub struct ProjectConfig {
     pub path: Option<PathBuf>,
     pub workspaces: Vec<WorkspaceInfo>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    pub workspace_discovery_ms: Option<f64>,
 }
 
 /// Scalar config-loading knobs for one analysis family.
@@ -36,37 +38,66 @@ pub struct ProjectConfigOptions {
 /// Returns an error when an explicit config cannot be loaded or automatic
 /// config discovery finds an invalid config.
 pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResult<ProjectConfig> {
-    core_backend::config_for_project(root, config_path).map(|(config, path)| {
-        let (workspaces, workspace_diagnostics) = collect_workspace_metadata(&config);
-        ProjectConfig {
-            config,
-            path,
-            workspaces,
-            workspace_diagnostics,
-        }
+    let user_config = load_user_config(root, config_path)?;
+    let (mut config, path) = match user_config {
+        Some((config, path)) => (config, Some(path)),
+        None => (FallowConfig::default(), None),
+    };
+    if path.is_some() {
+        config.production = config
+            .production
+            .for_analysis(ProductionAnalysis::DeadCode)
+            .into();
+        validate_boundaries_and_rule_packs(root, &config)?;
+    }
+    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    let resolved = config.resolve(
+        root.to_path_buf(),
+        OutputFormat::Human,
+        threads,
+        false,
+        true,
+        None,
+    );
+    let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
+        collect_workspace_metadata(&resolved)?;
+    Ok(ProjectConfig {
+        config: resolved,
+        path,
+        workspaces,
+        workspace_diagnostics,
+        workspace_discovery_ms: Some(workspace_discovery_ms),
     })
 }
 
 /// Resolve the parse-cache size limit for a resolved config.
 #[must_use]
 pub fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
-    core_backend::resolve_cache_max_size_bytes(config)
+    config
+        .cache_max_size_mb
+        .map_or(fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE, |mb| {
+            (mb as usize).saturating_mul(1024 * 1024)
+        })
 }
 
 pub fn default_project_config(root: &Path) -> ProjectConfig {
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    let config = FallowConfig::default().resolve(
+        root.to_path_buf(),
+        OutputFormat::Human,
+        threads,
+        false,
+        true,
+        None,
+    );
+    let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
+        collect_workspace_metadata_lossy(&config);
     ProjectConfig {
-        config: FallowConfig::default().resolve(
-            root.to_path_buf(),
-            OutputFormat::Human,
-            threads,
-            false,
-            true,
-            None,
-        ),
+        config,
         path: None,
-        workspaces: Vec::new(),
-        workspace_diagnostics: Vec::new(),
+        workspaces,
+        workspace_diagnostics,
+        workspace_discovery_ms: Some(workspace_discovery_ms),
     }
 }
 
@@ -113,20 +144,58 @@ pub fn config_for_project_analysis(
         options.quiet,
         None,
     );
-    let (workspaces, workspace_diagnostics) = collect_workspace_metadata(&resolved);
+    let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
+        collect_workspace_metadata(&resolved)?;
     Ok(ProjectConfig {
         config: resolved,
         path,
         workspaces,
         workspace_diagnostics,
+        workspace_discovery_ms: Some(workspace_discovery_ms),
     })
 }
 
 fn collect_workspace_metadata(
     config: &ResolvedConfig,
-) -> (Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>) {
-    fallow_config::discover_workspaces_with_diagnostics(&config.root, &config.ignore_patterns)
-        .unwrap_or_default()
+) -> EngineResult<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>, f64)> {
+    let start = std::time::Instant::now();
+    let (workspaces, diagnostics) =
+        fallow_config::discover_workspaces_with_diagnostics(&config.root, &config.ignore_patterns)
+            .map_err(|err| EngineError::new(err.to_string()))?;
+    let diagnostics = with_undeclared_workspace_diagnostics(config, &workspaces, diagnostics);
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    Ok((workspaces, diagnostics, elapsed_ms))
+}
+
+fn collect_workspace_metadata_lossy(
+    config: &ResolvedConfig,
+) -> (Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>, f64) {
+    collect_workspace_metadata(config).unwrap_or_default()
+}
+
+fn with_undeclared_workspace_diagnostics(
+    config: &ResolvedConfig,
+    workspaces: &[WorkspaceInfo],
+    mut diagnostics: Vec<WorkspaceDiagnostic>,
+) -> Vec<WorkspaceDiagnostic> {
+    let mut existing: FxHashSet<PathBuf> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            dunce::canonicalize(&diagnostic.path).unwrap_or_else(|_| diagnostic.path.clone())
+        })
+        .collect();
+    for diagnostic in fallow_config::find_undeclared_workspaces_with_ignores(
+        &config.root,
+        workspaces,
+        &config.ignore_patterns,
+    ) {
+        let canonical =
+            dunce::canonicalize(&diagnostic.path).unwrap_or_else(|_| diagnostic.path.clone());
+        if existing.insert(canonical) {
+            diagnostics.push(diagnostic);
+        }
+    }
+    diagnostics
 }
 
 fn load_user_config(
@@ -145,6 +214,10 @@ fn load_user_config(
 fn validate_config(root: &Path, config: &FallowConfig) -> EngineResult<()> {
     fallow_config::discover_and_validate_external_plugins(root, &config.plugins)
         .map_err(|errors| joined_config_errors("invalid external plugin definition", &errors))?;
+    validate_boundaries_and_rule_packs(root, config)
+}
+
+fn validate_boundaries_and_rule_packs(root: &Path, config: &FallowConfig) -> EngineResult<()> {
     config
         .validate_resolved_boundaries(root)
         .map_err(|errors| joined_config_errors("invalid boundary configuration", &errors))?;

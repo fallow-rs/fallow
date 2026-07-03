@@ -6,6 +6,7 @@ use fallow_config::ResolvedConfig;
 use fallow_output::{ComplexityViolation, FileHealthScore, RefactoringTarget};
 
 use crate::baseline::HealthBaselineData;
+use crate::duplicates::DuplicationReport;
 
 use super::analysis_data::HealthAnalysisData;
 use super::findings_pipeline::save_health_baseline_if_requested;
@@ -29,6 +30,7 @@ pub(super) struct HealthRuntimeSectionsInput<'a> {
     pub(super) loaded_baseline: Option<&'a HealthBaselineData>,
     pub(super) findings: &'a [ComplexityViolation],
     pub(super) analysis_data: HealthAnalysisData,
+    pub(super) pre_computed_duplication: Option<DuplicationReport>,
     pub(super) has_istanbul_coverage: bool,
     pub(super) needs_file_scores: bool,
 }
@@ -49,6 +51,8 @@ pub(super) fn prepare_health_runtime_sections(
         HealthDerivedSectionInput {
             config: input.config,
             files: input.files,
+            modules: input.modules,
+            file_paths: input.file_paths,
             ignore_set: input.ignore_set,
             changed_files: input.changed_files,
             ws_roots: input.ws_roots,
@@ -57,6 +61,7 @@ pub(super) fn prepare_health_runtime_sections(
             diff_index: input.diff_index,
             score_output: input.analysis_data.score_output.as_ref(),
             loaded_baseline: input.loaded_baseline,
+            pre_computed_duplication: input.pre_computed_duplication.take(),
         },
     );
 

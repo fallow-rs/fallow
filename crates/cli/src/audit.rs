@@ -504,8 +504,8 @@ fn snapshot_from_results(
 
 /// Compute the exports-aware public-export key set from a check result's retained
 /// graph. Returns an empty set when the graph was not retained (off the brief
-/// path) so non-brief base snapshots stay cheap. Loads the root `package.json`
-/// and discovers workspaces so the exports-aware entry resolution (R4) can run.
+/// path) so non-brief base snapshots stay cheap. Reuses the check session's
+/// workspaces so the exports-aware entry resolution (R4) does not rescan.
 fn public_api_keys_from_check(check: Option<&CheckResult>, root: &Path) -> FxHashSet<String> {
     let Some(check) = check else {
         return FxHashSet::default();
@@ -519,12 +519,11 @@ fn public_api_keys_from_check(check: Option<&CheckResult>, root: &Path) -> FxHas
         return FxHashSet::default();
     };
     let root_pkg = fallow_config::PackageJson::load(&check.config.root.join("package.json")).ok();
-    let workspaces = fallow_config::discover_workspaces(&check.config.root);
     review_deltas::public_export_keys_for(
         graph,
         &check.config,
         root_pkg.as_ref(),
-        &workspaces,
+        &check.workspaces,
         root,
     )
 }

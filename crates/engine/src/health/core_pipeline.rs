@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use fallow_config::ResolvedConfig;
 
-use crate::results::DeadCodeAnalysisArtifacts;
+use crate::{duplicates::DuplicationReport, results::DeadCodeAnalysisArtifacts};
 
 use super::analysis_data::{
     HealthAnalysisData, HealthAnalysisDataInput, prepare_health_analysis_data,
@@ -24,6 +24,7 @@ pub(super) struct HealthCoreSectionsInput<'a, R> {
     pub(super) modules: &'a [crate::source::ModuleInfo],
     pub(super) scope: &'a HealthScope<'a, R>,
     pub(super) pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
+    pub(super) pre_computed_duplication: Option<DuplicationReport>,
     pub(super) seams: &'a HealthSeams<'a>,
 }
 
@@ -73,6 +74,7 @@ pub(super) fn prepare_health_core_sections<R>(
         modules,
         scope,
         pre_computed_analysis,
+        pre_computed_duplication,
         seams,
     } = input;
 
@@ -117,6 +119,7 @@ pub(super) fn prepare_health_core_sections<R>(
             loaded_baseline: findings_data.loaded_baseline.as_ref(),
             findings: &findings_data.findings,
             analysis_data,
+            pre_computed_duplication,
             has_istanbul_coverage,
             needs_file_scores,
         },

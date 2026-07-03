@@ -54,7 +54,7 @@ pub fn serialize_combined_programmatic_json(
                 results: &dead_code.output.results,
                 root: &dead_code.root,
                 elapsed: Duration::from_millis(dead_code.output.elapsed_ms.0),
-                config_fixable: false,
+                config_fixable: dead_code.config_fixable,
                 extras: crate::CheckJsonExtraOutputs::default(),
             }),
         dupes: duplication
@@ -167,7 +167,7 @@ fn serialize_audit_dead_code(
         results: &output.output.results,
         root: &output.root,
         elapsed: Duration::from_millis(output.output.elapsed_ms.0),
-        config_fixable: false,
+        config_fixable: output.config_fixable,
         extras: crate::CheckJsonExtraOutputs::default(),
         workspace_diagnostics: Vec::new(),
     })
@@ -259,6 +259,7 @@ pub fn serialize_dead_code_programmatic_json(
     let DeadCodeProgrammaticOutput {
         output,
         root,
+        config_fixable: _,
         envelope_mode,
         telemetry_analysis_run_id,
     } = output;

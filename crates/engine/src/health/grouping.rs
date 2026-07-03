@@ -16,7 +16,7 @@ use super::{
     compute_vital_signs_and_counts,
 };
 use crate::vital_signs;
-use crate::{discover::FileId, duplicates, source::ModuleInfo};
+use crate::{discover::FileId, duplicates::DuplicationReport, source::ModuleInfo};
 use fallow_output::{
     ComplexityViolation, FileHealthScore, HealthActionsMeta, HealthFinding, HealthGroup,
     HealthGrouping, HotspotEntry, HotspotFinding, LargeFunctionEntry, RefactoringTarget,
@@ -31,7 +31,6 @@ struct GroupBucket {
 }
 
 pub(super) struct HealthGroupingInput<'a> {
-    pub files: &'a [fallow_types::discover::DiscoveredFile],
     pub modules: &'a [ModuleInfo],
     pub file_paths: &'a FxHashMap<FileId, &'a PathBuf>,
     pub score_output: Option<&'a FileScoreOutput>,
@@ -41,7 +40,7 @@ pub(super) struct HealthGroupingInput<'a> {
     pub large_functions: &'a [LargeFunctionEntry],
     pub targets: &'a [RefactoringTarget],
     pub score_requested: bool,
-    pub duplicates_config: Option<&'a fallow_config::DuplicatesConfig>,
+    pub dupes_report: Option<&'a DuplicationReport>,
     pub needs_file_scores: bool,
     pub needs_hotspots: bool,
     pub show_vital_signs: bool,
@@ -126,14 +125,8 @@ fn build_group(
     let group_large_functions =
         filter_group_items(input.large_functions, &paths, |function| &function.path);
     let total_files = paths.len();
-    let (vital_signs, _) = compute_group_vital_signs(
-        project_root,
-        input,
-        &paths,
-        &subset,
-        &group_file_scores,
-        &group_hotspots,
-    );
+    let (vital_signs, _) =
+        compute_group_vital_signs(input, &paths, &subset, &group_file_scores, &group_hotspots);
     let health_score = input
         .score_requested
         .then(|| vital_signs::compute_health_score(&vital_signs, total_files));
@@ -175,7 +168,6 @@ fn filter_group_items<T: Clone>(
 }
 
 fn compute_group_vital_signs(
-    project_root: &Path,
     input: &HealthGroupingInput<'_>,
     paths: &FxHashSet<PathBuf>,
     subset: &SubsetFilter<'_>,
@@ -194,23 +186,107 @@ fn compute_group_vital_signs(
         subset,
     };
     let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(&vital_signs_input);
-    apply_group_duplication_metrics(project_root, input, paths, &mut vital_signs, &mut counts);
+    apply_group_duplication_metrics(input, paths, &mut vital_signs, &mut counts);
     (vital_signs, counts)
 }
 
 fn apply_group_duplication_metrics(
-    project_root: &Path,
     input: &HealthGroupingInput<'_>,
     paths: &FxHashSet<PathBuf>,
     vital_signs: &mut VitalSigns,
     counts: &mut VitalSignsCounts,
 ) {
-    let Some(config) = input.duplicates_config else {
+    let Some(report) = input.dupes_report else {
         return;
     };
-    let group_files = filter_group_items(input.files, paths, |file| &file.path);
-    let dupes_report = duplicates::find_duplicates(project_root, &group_files, config);
+    let dupes_report = subset_duplication_report(report, input, paths);
     apply_duplication_metrics(vital_signs, counts, &dupes_report);
+}
+
+fn subset_duplication_report(
+    report: &DuplicationReport,
+    input: &HealthGroupingInput<'_>,
+    paths: &FxHashSet<PathBuf>,
+) -> DuplicationReport {
+    let clone_groups = report
+        .clone_groups
+        .iter()
+        .filter_map(|group| {
+            let instances = group
+                .instances
+                .iter()
+                .filter(|instance| paths.contains(&instance.file))
+                .cloned()
+                .collect::<Vec<_>>();
+            (instances.len() > 1).then_some(fallow_types::duplicates::CloneGroup {
+                instances,
+                token_count: group.token_count,
+                line_count: group.line_count,
+            })
+        })
+        .collect::<Vec<_>>();
+    DuplicationReport {
+        stats: subset_duplication_stats(report, input, paths, &clone_groups),
+        clone_groups,
+        clone_families: Vec::new(),
+        mirrored_directories: Vec::new(),
+    }
+}
+
+fn subset_duplication_stats(
+    report: &DuplicationReport,
+    input: &HealthGroupingInput<'_>,
+    paths: &FxHashSet<PathBuf>,
+    clone_groups: &[fallow_types::duplicates::CloneGroup],
+) -> fallow_types::duplicates::DuplicationStats {
+    let mut files_with_clones: FxHashSet<&Path> = FxHashSet::default();
+    let mut file_dup_lines: rustc_hash::FxHashMap<&Path, FxHashSet<usize>> =
+        rustc_hash::FxHashMap::default();
+    let mut duplicated_tokens = 0usize;
+    let mut clone_instances = 0usize;
+
+    for group in clone_groups {
+        for instance in &group.instances {
+            files_with_clones.insert(&instance.file);
+            clone_instances += 1;
+            let lines = file_dup_lines.entry(&instance.file).or_default();
+            for line in instance.start_line..=instance.end_line {
+                lines.insert(line);
+            }
+        }
+        duplicated_tokens += group.token_count * group.instances.len().saturating_sub(1);
+    }
+
+    let duplicated_lines = file_dup_lines.values().map(FxHashSet::len).sum::<usize>();
+    let total_lines = total_lines_for_paths(input, paths);
+
+    fallow_types::duplicates::DuplicationStats {
+        total_files: paths.len(),
+        files_with_clones: files_with_clones.len(),
+        total_lines,
+        duplicated_lines,
+        total_tokens: report.stats.total_tokens,
+        duplicated_tokens: duplicated_tokens.min(report.stats.total_tokens),
+        clone_groups: clone_groups.len(),
+        clone_instances,
+        duplication_percentage: if total_lines > 0 {
+            (duplicated_lines as f64 / total_lines as f64) * 100.0
+        } else {
+            0.0
+        },
+        clone_groups_below_min_occurrences: report.stats.clone_groups_below_min_occurrences,
+    }
+}
+
+fn total_lines_for_paths(input: &HealthGroupingInput<'_>, paths: &FxHashSet<PathBuf>) -> usize {
+    input
+        .modules
+        .iter()
+        .filter_map(|module| {
+            let path = input.file_paths.get(&module.file_id)?;
+            paths.contains(*path).then_some(module.line_offsets.len())
+        })
+        .sum()
 }
 
 fn wrap_group_findings(

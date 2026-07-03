@@ -1,6 +1,6 @@
 //! Framework detector coverage diagnostics for health output.
 
-use fallow_config::{PackageJson, ResolvedConfig, RulesConfig, Severity};
+use fallow_config::{PackageJson, ResolvedConfig, RulesConfig, Severity, WorkspaceInfo};
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct FrameworkHealthFacts {
@@ -9,10 +9,11 @@ pub(super) struct FrameworkHealthFacts {
 
 pub(super) fn build_framework_health_diagnostics(
     config: &ResolvedConfig,
+    workspaces: &[WorkspaceInfo],
     facts: Option<FrameworkHealthFacts>,
 ) -> Option<fallow_output::FrameworkHealthDiagnostics> {
     let facts = facts?;
-    let detected_frameworks = detect_frameworks(config);
+    let detected_frameworks = detect_frameworks(config, workspaces);
     if detected_frameworks.is_empty() {
         return None;
     }
@@ -32,12 +33,12 @@ pub(super) fn build_framework_health_diagnostics(
     })
 }
 
-fn detect_frameworks(config: &ResolvedConfig) -> Vec<String> {
+fn detect_frameworks(config: &ResolvedConfig, workspaces: &[WorkspaceInfo]) -> Vec<String> {
     let mut deps = rustc_hash::FxHashSet::default();
     if let Ok(pkg) = PackageJson::load(&config.root.join("package.json")) {
         deps.extend(pkg.all_dependency_names());
     }
-    for workspace in fallow_config::discover_workspaces(&config.root) {
+    for workspace in workspaces {
         if let Ok(pkg) = PackageJson::load(&workspace.root.join("package.json")) {
             deps.extend(pkg.all_dependency_names());
         }

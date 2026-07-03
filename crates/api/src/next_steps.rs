@@ -6,6 +6,8 @@
 
 use std::path::Path;
 
+use fallow_config::WorkspaceInfo;
+
 /// `FALLOW_SUGGESTIONS=off` (or `0`/`false`/`no`/`disabled`) disables the
 /// `next_steps[]` array. Mirrors `report::suggestions::suggestions_enabled`.
 pub fn suggestions_enabled() -> bool {
@@ -29,10 +31,17 @@ pub fn setup_pointer_applicable(root: &Path) -> bool {
 /// Resolve a concrete `--changed-workspaces` ref for the `scope-workspaces`
 /// next step, or `None` when no workspace or resolvable ref exists.
 pub fn default_workspace_ref(root: &Path) -> Option<String> {
-    if !fallow_engine::churn::is_git_repo(root) {
-        return None;
-    }
-    if fallow_config::discover_workspaces(root).is_empty() {
+    let workspaces = fallow_config::discover_workspaces(root);
+    default_workspace_ref_for_workspaces(root, &workspaces)
+}
+
+/// Resolve a concrete `--changed-workspaces` ref using already discovered
+/// workspace metadata from an analysis session.
+pub fn default_workspace_ref_for_workspaces(
+    root: &Path,
+    workspaces: &[WorkspaceInfo],
+) -> Option<String> {
+    if !fallow_engine::churn::is_git_repo(root) || workspaces.is_empty() {
         return None;
     }
     if let Some(reference) = run_git(
