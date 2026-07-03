@@ -458,6 +458,8 @@ pub struct AuthoredRule {
 pub struct ResolvedZone {
     /// Zone name.
     pub name: String,
+    /// Authored membership patterns.
+    pub patterns: Vec<String>,
     /// Compiled matchers.
     pub matchers: Vec<globset::GlobMatcher>,
     /// Normalized subtree scope.
@@ -997,6 +999,7 @@ impl BoundaryConfig {
                 let root = zone.root.as_deref().map(normalize_zone_root);
                 ResolvedZone {
                     name: zone.name.clone(),
+                    patterns: zone.patterns.clone(),
                     matchers,
                     root,
                 }

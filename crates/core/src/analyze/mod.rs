@@ -37,6 +37,8 @@ mod unused_overrides;
 mod unused_server_action;
 mod unused_svelte_event;
 
+pub use policy::rules_applying_to_path;
+
 #[cfg(test)]
 pub(crate) mod test_support;
 

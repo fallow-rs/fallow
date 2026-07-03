@@ -35,6 +35,7 @@ mod feature_flags;
 pub mod flags;
 #[path = "git_env.rs"]
 mod git_env;
+pub mod guard;
 pub mod health;
 pub mod module_graph;
 pub mod plugins;
