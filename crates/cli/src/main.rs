@@ -166,6 +166,7 @@ When the agent is about to...
   check untested-but-reachable code        fallow health --coverage-gaps
   consolidate duplication                  fallow dupes --trace dup:<fingerprint>
   find feature flags                       fallow flags
+  check architecture rules before editing  fallow guard <files>
   surface security candidates              fallow security
   inspect a target before editing          fallow inspect --file <path>
   understand a finding                     fallow explain <issue-type>

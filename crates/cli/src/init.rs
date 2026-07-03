@@ -50,6 +50,7 @@ This file gives coding agents project-specific context. Keep it short and update
 | check untested-but-reachable code | `fallow health --coverage-gaps` |
 | consolidate duplication | `fallow dupes --trace dup:<fingerprint>` |
 | find feature flags | `fallow flags` |
+| check which architecture rules apply to a file before changing it | `fallow guard <files>` |
 | surface security candidates | `fallow security` |
 | understand a finding | `fallow explain <issue-type>` |
 | scope a monorepo | `--workspace <glob> / --changed-workspaces <ref>` (global flags, prefix any command) |

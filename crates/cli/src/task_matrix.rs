@@ -92,6 +92,12 @@ pub const TASK_MATRIX: &[TaskRow] = &[
         probe: &["flags"],
     },
     TaskRow {
+        task: "check which architecture rules apply to a file before changing it",
+        command: "fallow guard <files>",
+        note: None,
+        probe: &["guard", "src/index.ts"],
+    },
+    TaskRow {
         task: "surface security candidates",
         command: "fallow security",
         note: None,
