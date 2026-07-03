@@ -191,6 +191,35 @@ pub fn panda_token_call_consumers(
     collector.hits
 }
 
+/// Walk a consuming JS/TS source for common PandaCSS style calls whose object
+/// literal values statically name token paths.
+#[must_use]
+#[expect(
+    clippy::implicit_hasher,
+    reason = "callers build FxHashSet values; std HashSet is a disallowed type here"
+)]
+pub fn panda_style_value_consumers(
+    source: &str,
+    path: &Path,
+    aliases: &FxHashSet<String>,
+    leaf_paths: &FxHashSet<String>,
+) -> Vec<TokenConsumerHit> {
+    if aliases.is_empty() || leaf_paths.is_empty() {
+        return Vec::new();
+    }
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let allocator = Allocator::default();
+    let ret = Parser::new(&allocator, source, source_type).parse();
+    let mut collector = PandaStyleValueCollector {
+        source,
+        aliases,
+        leaf_paths,
+        hits: Vec::new(),
+    };
+    collector.visit_program(&ret.program);
+    collector.hits
+}
+
 /// Walk a JS/TS source for statically-authored theme object definitions used by
 /// styled-components and Emotion. A `theme` or `*Theme` variable with an object
 /// literal initializer becomes a token surface, with nested scalar leaves exposed
@@ -316,6 +345,57 @@ impl<'a> Visit<'a> for PandaTokenCallCollector<'a, '_> {
                     token_path: token_path.to_owned(),
                     line: line_at(self.source, call.span().start),
                 });
+            }
+        }
+        walk::walk_call_expression(self, call);
+    }
+}
+
+struct PandaStyleValueCollector<'a, 'b> {
+    source: &'a str,
+    aliases: &'b FxHashSet<String>,
+    leaf_paths: &'b FxHashSet<String>,
+    hits: Vec<TokenConsumerHit>,
+}
+
+impl<'a> PandaStyleValueCollector<'a, '_> {
+    fn record_object(&mut self, obj: &ObjectExpression<'a>) {
+        for prop in &obj.properties {
+            let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                continue;
+            };
+            self.record_expression(&prop.value);
+        }
+    }
+
+    fn record_expression(&mut self, expr: &Expression<'a>) {
+        match expr {
+            Expression::StringLiteral(lit) => {
+                let token_path = lit.value.as_str();
+                if self.leaf_paths.contains(token_path) {
+                    self.hits.push(TokenConsumerHit {
+                        token_path: token_path.to_owned(),
+                        line: line_at(self.source, lit.span().start),
+                    });
+                }
+            }
+            Expression::ObjectExpression(obj) => self.record_object(obj),
+            _ => {}
+        }
+    }
+}
+
+impl<'a> Visit<'a> for PandaStyleValueCollector<'a, '_> {
+    fn visit_call_expression(&mut self, call: &oxc_ast::ast::CallExpression<'a>) {
+        let Expression::Identifier(callee) = &call.callee else {
+            walk::walk_call_expression(self, call);
+            return;
+        };
+        if self.aliases.contains(callee.name.as_str()) {
+            for arg in &call.arguments {
+                if let Argument::ObjectExpression(obj) = arg {
+                    self.record_object(obj);
+                }
             }
         }
         walk::walk_call_expression(self, call);
@@ -1090,6 +1170,15 @@ export const vars = createGlobalTheme(':root', {
         panda_token_call_consumers(source, Path::new("card.ts"), alias, &leaves(paths))
     }
 
+    fn panda_style_consumers(
+        source: &str,
+        aliases: &[&str],
+        paths: &[&str],
+    ) -> Vec<TokenConsumerHit> {
+        let aliases = aliases.iter().map(|s| (*s).to_string()).collect();
+        panda_style_value_consumers(source, Path::new("card.ts"), &aliases, &leaves(paths))
+    }
+
     #[test]
     fn consumer_matches_deepest_leaf_not_intermediate_group() {
         // `vars.color.primary` is the leaf; `vars.color` (an intermediate group)
@@ -1142,6 +1231,27 @@ export const vars = createGlobalTheme(':root', {
         );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].token_path, "colors.brand");
+    }
+
+    #[test]
+    fn panda_style_value_consumer_matches_known_token_string() {
+        let hits = panda_style_consumers(
+            "export const c = css({ color: 'colors.brand', _hover: { bg: 'colors.accent' } });",
+            &["css"],
+            &["colors.brand", "colors.accent", "colors.unused"],
+        );
+        let paths: Vec<_> = hits.iter().map(|hit| hit.token_path.as_str()).collect();
+        assert_eq!(paths, vec!["colors.brand", "colors.accent"]);
+    }
+
+    #[test]
+    fn panda_style_value_consumer_ignores_unimported_alias() {
+        let hits = panda_style_consumers(
+            "export const c = notPanda({ color: 'colors.brand' });",
+            &["css"],
+            &["colors.brand"],
+        );
+        assert!(hits.is_empty());
     }
 
     #[test]

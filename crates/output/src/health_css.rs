@@ -426,8 +426,8 @@ pub enum ConsumerKind {
     /// (`import { vars } from './tokens'; vars.color.primary`), for StyleX
     /// `defineVars` / vanilla-extract `createTheme` family tokens.
     JsMember,
-    /// A CSS-in-JS function call that consumes a token by path, currently
-    /// PandaCSS `token('colors.brand')`.
+    /// A CSS-in-JS function call that consumes a token by path, such as
+    /// PandaCSS `token('colors.brand')` or `css({ color: 'colors.brand' })`.
     JsCall,
 }
 

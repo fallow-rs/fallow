@@ -22,5 +22,5 @@ pub use template::css_in_js_virtual_stylesheet;
 pub use tokens::{
     CssInJsToken, CssInJsTokenDef, CssInJsTokenOrigin, TokenConsumerHit, css_in_js_theme_consumers,
     css_in_js_theme_token_defs, css_in_js_token_consumers, css_in_js_token_defs,
-    panda_token_call_consumers,
+    panda_style_value_consumers, panda_token_call_consumers,
 };

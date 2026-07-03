@@ -3098,6 +3098,10 @@ fn is_panda_generated_specifier(specifier: &str) -> bool {
         .any(|segment| segment == "styled-system")
 }
 
+fn is_panda_style_function(name: &str) -> bool {
+    matches!(name, "css" | "cva" | "sva" | "recipe" | "styled")
+}
+
 /// Lexically normalize a path (resolve `.` / `..` without touching the
 /// filesystem), so a consumer-relative join compares equal to a definer's
 /// discovered absolute path regardless of `./` / `../` segments.
@@ -3336,12 +3340,12 @@ fn collect_css_in_js_consumers(
                 matches.push((idx, import.local_name.as_str()));
             }
         }
-        let has_panda_token_alias = module.imports.iter().any(|import| {
+        let has_panda_generated_alias = module.imports.iter().any(|import| {
             !import.is_type_only
                 && is_panda_generated_specifier(&import.source)
-                && matches!(&import.imported_name, ImportedName::Named(name) if name == "token")
+                && matches!(&import.imported_name, ImportedName::Named(name) if name == "token" || is_panda_style_function(name))
         });
-        if matches.is_empty() && !has_panda_token_alias && !has_theme_definers {
+        if matches.is_empty() && !has_panda_generated_alias && !has_theme_definers {
             continue;
         }
         let Ok(source) = std::fs::read_to_string(consumer_abs) else {
@@ -3425,7 +3429,17 @@ fn collect_panda_token_call_consumers(
         })
         .map(|import| import.local_name.as_str())
         .collect();
-    if token_aliases.is_empty() {
+    let style_aliases: rustc_hash::FxHashSet<String> = module
+        .imports
+        .iter()
+        .filter(|import| {
+            !import.is_type_only
+                && is_panda_generated_specifier(&import.source)
+                && matches!(&import.imported_name, ImportedName::Named(name) if is_panda_style_function(name))
+        })
+        .map(|import| import.local_name.clone())
+        .collect();
+    if token_aliases.is_empty() && style_aliases.is_empty() {
         return;
     }
     for (idx, definer) in definers.entries.iter().enumerate() {
@@ -3444,6 +3458,18 @@ fn collect_panda_token_call_consumers(
                     ConsumerKind::JsCall,
                 ));
             }
+        }
+        for hit in fallow_extract::panda_style_value_consumers(
+            source,
+            consumer_abs,
+            &style_aliases,
+            &leaf_set,
+        ) {
+            hits.entry((idx, hit.token_path)).or_default().insert((
+                consumer_rel.to_owned(),
+                hit.line,
+                ConsumerKind::JsCall,
+            ));
         }
     }
 }
@@ -5096,6 +5122,43 @@ mod token_consumer_tests {
         let accent = find_token(&computation, "tokens.colors.accent")
             .expect("unconsumed Panda token still present");
         assert_eq!(accent.consumer_count, 0);
+    }
+
+    #[test]
+    fn pandacss_define_tokens_blast_radius_counts_style_object_token_strings() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@pandacss/dev":"0.54.0"}}"#,
+        )
+        .unwrap();
+        let def = write_file(
+            root,
+            0,
+            "panda.config.ts",
+            "import { defineTokens } from '@pandacss/dev';\n\
+             export const tokens = defineTokens({ colors: { brand: { value: '#f05a28' }, accent: { value: '#111' } } });\n",
+        );
+        let consumer = write_file(
+            root,
+            1,
+            "src/card.ts",
+            "import { css } from '../styled-system/css';\n\
+             export const card = css({ color: 'colors.brand', _hover: { bg: 'colors.accent' } });\n",
+        );
+        let computation = css_computation_3d(root, &[def, consumer]);
+        let brand = find_token(&computation, "tokens.colors.brand").expect("brand token present");
+        assert_eq!(brand.consumer_count, 1);
+        assert_eq!(brand.consumers[0].kind, fallow_output::ConsumerKind::JsCall);
+        assert_eq!(brand.consumers[0].path, "src/card.ts");
+        let accent =
+            find_token(&computation, "tokens.colors.accent").expect("accent token present");
+        assert_eq!(accent.consumer_count, 1);
+        assert_eq!(
+            accent.consumers[0].kind,
+            fallow_output::ConsumerKind::JsCall
+        );
     }
 
     #[test]
