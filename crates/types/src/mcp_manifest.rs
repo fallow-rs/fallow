@@ -117,6 +117,15 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         read_only: true,
     },
     McpToolInfo {
+        name: "guard",
+        kind: "introspection",
+        description: "Report the architecture rules that apply to given files before editing them: boundary zone, allowed import zones, forbidden calls, and rule-pack policies",
+        key_params: &["files"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+    },
+    McpToolInfo {
         name: "find_dupes",
         kind: "analysis",
         description: "Code duplication detection with clone groups and refactoring suggestions",

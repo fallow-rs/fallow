@@ -6,16 +6,16 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
     DecisionSurfaceParams, ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams,
-    GetTokenBlastRadiusParams, HealthParams, ImpactAllParams, ImpactParams, InspectTargetParams,
-    ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams,
-    TraceDependencyParams, TraceExportParams, TraceFileParams,
+    GetTokenBlastRadiusParams, GuardParams, HealthParams, ImpactAllParams, ImpactParams,
+    InspectTargetParams, ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams,
+    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 use crate::tools::{
     execute_code_mode, inspect_target, run_analyze, run_audit, run_check_changed,
     run_check_runtime_coverage, run_decision_surface, run_explain, run_feature_flags,
     run_find_dupes, run_fix_apply, run_fix_preview, run_get_blast_radius,
     run_get_cleanup_candidates, run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
-    run_health, run_impact, run_impact_all, run_list_boundaries, run_project_info,
+    run_guard, run_health, run_impact, run_impact_all, run_list_boundaries, run_project_info,
     run_security_candidates, run_trace_clone_tool, run_trace_dependency_tool,
     run_trace_export_tool, run_trace_file_tool,
 };
@@ -125,6 +125,14 @@ impl FallowMcp {
         params: Parameters<InspectTargetParams>,
     ) -> Result<CallToolResult, McpError> {
         inspect_target(&self.binary, &params.0).await
+    }
+
+    #[tool(
+        description = "Report the architecture rules that apply to specific files BEFORE editing them: boundary zone, which zones the file may import from, forbidden call patterns, and every rule-pack policy in scope with its severity and suppression token. Works for files that do not exist yet, so call it before writing new code.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn guard(&self, params: Parameters<GuardParams>) -> Result<CallToolResult, McpError> {
+        run_guard(&self.binary, params.0).await
     }
 
     #[tool(
@@ -372,6 +380,7 @@ impl ServerHandler for FallowMcp {
                  analyze (full analysis), check_changed (incremental/PR analysis), \
                  security_candidates (unverified local security candidates for agent verification), \
                  inspect_target (one evidence bundle for a file or exported symbol), \
+                 guard (architecture rules that apply to files before editing them), \
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points, boundary zones), \
                  trace_export / trace_file / trace_dependency / trace_clone (graph and clone evidence), \

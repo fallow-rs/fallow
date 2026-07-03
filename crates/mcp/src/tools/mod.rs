@@ -10,6 +10,7 @@ mod explain;
 mod fallback_policy;
 mod fix;
 mod flags;
+mod guard;
 mod health;
 mod impact;
 mod inspect_target;
@@ -37,6 +38,9 @@ pub use explain::{build_explain_args, run_explain};
 pub use fix::{build_fix_apply_args, build_fix_preview_args};
 pub use fix::{run_fix_apply, run_fix_preview};
 pub use flags::{build_feature_flags_args, run_feature_flags};
+#[cfg(test)]
+pub use guard::build_guard_args;
+pub use guard::run_guard;
 pub use health::{build_health_args, run_health};
 #[cfg(test)]
 pub use impact::build_impact_all_args;

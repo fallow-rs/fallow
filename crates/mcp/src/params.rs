@@ -315,6 +315,16 @@ pub struct InspectTargetParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct GuardParams {
+    /// Files to report on, project-root-relative. They do not need to exist yet.
+    #[schemars(length(min = 1))]
+    pub files: Vec<String>,
+
+    /// Project root. Defaults to the MCP server's working directory.
+    pub root: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InspectTarget {
     File {
