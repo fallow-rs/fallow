@@ -79,6 +79,14 @@ inputs:
     description: 'GitHub token for PR comments and SARIF upload'
     required: false
     default: ${{ github.token }}
+  branded-token:
+    description: 'Post PR comments and reviews as the Fallow app (branded) when the workflow grants `permissions: id-token: write`. Set to false to always post with github-token. Falls back to github-token automatically when id-token is unavailable.'
+    required: false
+    default: 'true'
+  broker-url:
+    description: 'Base URL of the Fallow token broker used to mint the branded app token. Defaults to Fallow Cloud.'
+    required: false
+    default: 'https://api.fallow.cloud'
   annotations:
     description: 'Emit findings as inline PR annotations via workflow commands (no Advanced Security required)'
     required: false
@@ -321,6 +329,14 @@ runs:
         INPUT_ROOT: ${{ inputs.root }}
       run: bash ${{ github.action_path }}/action/scripts/install.sh
 
+    - name: Fallow branded token
+      id: fallow-token
+      shell: bash
+      env:
+        BRANDED_TOKEN: ${{ inputs.branded-token }}
+        BROKER_URL: ${{ inputs.broker-url }}
+      run: bash ${{ github.action_path }}/action/scripts/broker-token.sh
+
     - name: Cache analysis results
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
       with:
@@ -472,7 +488,7 @@ runs:
         steps.analyze.outputs.issues != ''
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ steps.fallow-token.outputs.token || inputs.github-token }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         GH_REPO: ${{ github.repository }}
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
@@ -501,7 +517,7 @@ runs:
         steps.analyze.outputs.issues != ''
       shell: bash
       env:
-        GH_TOKEN: ${{ inputs.github-token }}
+        GH_TOKEN: ${{ steps.fallow-token.outputs.token || inputs.github-token }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         GH_REPO: ${{ github.repository }}
