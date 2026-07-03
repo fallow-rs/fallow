@@ -102,6 +102,7 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 | `config-schema` | Print the JSON Schema for fallow configuration files |  |
 | `plugin-schema` | Print the JSON Schema for external plugin files |  |
 | `rule-pack-schema` | Print the JSON Schema for rule pack files |  |
+| `rule-pack` | Manage declarative rule packs (policy-as-code) |  |
 | `config` | Show the loaded config path and resolved config (verifies which `.fallowrc.json` is in effect) | `--path` |
 | `list` | Inspect project structure | `--files`, `--entry-points`, `--plugins`, `--boundaries`, `--workspaces` |
 | `workspaces` | Inspect monorepo workspaces + discovery diagnostics (shorthand for `list --workspaces`) | (no flags) |

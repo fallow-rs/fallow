@@ -991,6 +991,11 @@
       "flags": []
     },
     {
+      "name": "rule-pack",
+      "description": "Manage declarative rule packs (policy-as-code)",
+      "flags": []
+    },
+    {
       "name": "config",
       "description": "Show the resolved config and which config file was loaded",
       "flags": [
@@ -5174,6 +5179,8 @@
     "FALLOW_PRODUCTION_DUPES": "Set to true/false to override production mode for duplication analysis.",
     "FALLOW_REVIEW_GUIDANCE": "Set to true to append collapsed guidance blocks to review-github/review-gitlab inline comment bodies.",
     "FALLOW_SUMMARY_SCOPE": "Summary scope for pr-comment-github/pr-comment-gitlab: all (default) keeps project-level dependency/catalog/override findings outside the diff filter; diff applies the diff filter to them too. Inline review comments are unaffected.",
+    "FALLOW_PR_COMMENT_LAYOUT": "Sticky PR comment layout: default, compact, gate-only, or details.",
+    "FALLOW_CONSOLIDATED_STATUS": "When split PR gate check runs are enabled, truthy values add one aggregate Fallow check alongside the per-gate checks.",
     "FALLOW_DIFF_CONTEXT": "Line radius around changed diff lines when scoping findings to a diff in the review/PR-comment formats (default 3).",
     "FALLOW_BOT_LOGIN": "Bot or token username treated as fallow's own when reconciling existing PR/MR comments in review-github/review-gitlab. Required when posting with a personal access token (the author then carries a human identity).",
     "FALLOW_API_RETRIES": "Maximum HTTP attempts for review-comment reconciliation API calls (default 3).",
