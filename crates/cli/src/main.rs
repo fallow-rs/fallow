@@ -132,7 +132,7 @@ Project inspection:
 
 Setup and configuration:
   init              Create a fallow config, optionally with a Git hook
-  migrate           Migrate knip or jscpd config to fallow
+  migrate           Migrate knip, jscpd, or stylelint config to fallow
   config            Show the resolved config and loaded config file
   config-schema     Print the fallow config JSON Schema
   plugin-schema     Print the external plugin JSON Schema
@@ -1392,7 +1392,7 @@ enum Command {
         subcommand: CiTemplateCli,
     },
 
-    /// Migrate configuration from knip or jscpd to fallow
+    /// Migrate configuration from knip, jscpd, or stylelint to fallow
     Migrate {
         /// Generate `fallow.toml` instead of JSONC
         #[arg(long, conflicts_with = "jsonc")]

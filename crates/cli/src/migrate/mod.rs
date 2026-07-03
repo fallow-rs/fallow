@@ -3,6 +3,7 @@ mod jsonc;
 mod knip;
 mod knip_fields;
 mod knip_tables;
+mod stylelint;
 #[cfg(test)]
 mod tests;
 mod toml_gen;
@@ -13,6 +14,7 @@ use std::process::ExitCode;
 use jscpd::migrate_jscpd;
 use jsonc::generate_jsonc;
 use knip::migrate_knip;
+use stylelint::migrate_stylelint;
 use toml_gen::generate_toml;
 
 /// A warning about a config field that could not be migrated.
@@ -113,7 +115,7 @@ pub fn run_migrate(
     };
 
     if result.sources.is_empty() {
-        eprintln!("No knip or jscpd configuration found to migrate.");
+        eprintln!("No knip, jscpd, or stylelint configuration found to migrate.");
         return ExitCode::from(2);
     }
 
@@ -184,7 +186,7 @@ fn report_migration_outcome(result: &MigrationResult) {
     }
 }
 
-/// Auto-detect and migrate from knip and/or jscpd configs in the given root.
+/// Auto-detect and migrate from knip, jscpd, and/or stylelint configs in the given root.
 fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
     let mut config = serde_json::Map::new();
     let mut warnings = Vec::new();
@@ -201,13 +203,17 @@ fn migrate_auto_detect(root: &Path) -> Result<MigrationResult, String> {
         found_jscpd_file = true;
     }
 
-    let need_pkg_knip = sources.is_empty();
-    let need_pkg_jscpd = !found_jscpd_file;
-    if need_pkg_knip || need_pkg_jscpd {
+    migrate_first_stylelint_file(root, &mut config, &mut warnings, &mut sources)?;
+
+    let package_needs = PackageJsonMigrationNeeds {
+        knip: sources.is_empty(),
+        jscpd: !found_jscpd_file,
+        stylelint: !sources.iter().any(|source| source.contains("stylelint")),
+    };
+    if package_needs.any() {
         migrate_package_json_keys(
             root,
-            need_pkg_knip,
-            need_pkg_jscpd,
+            package_needs,
             &mut config,
             &mut warnings,
             &mut sources,
@@ -266,12 +272,52 @@ fn migrate_first_knip_file(
     Ok(())
 }
 
-/// Migrate the `knip` / `jscpd` keys embedded in `package.json` when no
+/// Find and migrate the first standalone Stylelint config under `root`.
+fn migrate_first_stylelint_file(
+    root: &Path,
+    config: &mut serde_json::Map<String, serde_json::Value>,
+    warnings: &mut Vec<MigrationWarning>,
+    sources: &mut Vec<String>,
+) -> Result<(), String> {
+    let stylelint_files = [
+        ".stylelintrc",
+        ".stylelintrc.json",
+        ".stylelintrc.jsonc",
+        "stylelint.config.js",
+        "stylelint.config.cjs",
+        "stylelint.config.mjs",
+    ];
+
+    for name in &stylelint_files {
+        let path = root.join(name);
+        if path.exists() {
+            let stylelint_value = load_stylelint_config(&path)?;
+            migrate_stylelint(&stylelint_value, config, warnings);
+            sources.push(name.to_string());
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// Migrate the `knip` / `jscpd` / `stylelint` keys embedded in `package.json` when no
 /// standalone config supplied them.
+#[derive(Clone, Copy)]
+struct PackageJsonMigrationNeeds {
+    knip: bool,
+    jscpd: bool,
+    stylelint: bool,
+}
+
+impl PackageJsonMigrationNeeds {
+    const fn any(self) -> bool {
+        self.knip || self.jscpd || self.stylelint
+    }
+}
+
 fn migrate_package_json_keys(
     root: &Path,
-    need_pkg_knip: bool,
-    need_pkg_jscpd: bool,
+    needs: PackageJsonMigrationNeeds,
     config: &mut serde_json::Map<String, serde_json::Value>,
     warnings: &mut Vec<MigrationWarning>,
     sources: &mut Vec<String>,
@@ -284,13 +330,23 @@ fn migrate_package_json_keys(
         .map_err(|e| format!("failed to read package.json: {e}"))?;
     let pkg_value: serde_json::Value = serde_json::from_str(&pkg_content)
         .map_err(|e| format!("failed to parse package.json: {e}"))?;
-    if need_pkg_knip && let Some(knip_config) = pkg_value.get("knip") {
+    if needs.knip
+        && let Some(knip_config) = pkg_value.get("knip")
+    {
         migrate_knip(knip_config, config, warnings);
         sources.push("package.json (knip key)".to_string());
     }
-    if need_pkg_jscpd && let Some(jscpd_config) = pkg_value.get("jscpd") {
+    if needs.jscpd
+        && let Some(jscpd_config) = pkg_value.get("jscpd")
+    {
         migrate_jscpd(jscpd_config, config, warnings);
         sources.push("package.json (jscpd key)".to_string());
+    }
+    if needs.stylelint
+        && let Some(stylelint_config) = pkg_value.get("stylelint")
+    {
+        migrate_stylelint(stylelint_config, config, warnings);
+        sources.push("package.json (stylelint key)".to_string());
     }
     Ok(())
 }
@@ -328,6 +384,10 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
         let jscpd_value = load_json_or_jsonc(path)?;
         migrate_jscpd(&jscpd_value, &mut config, &mut warnings);
         sources.push(path.display().to_string());
+    } else if filename.contains("stylelint") || filename.starts_with(".stylelintrc") {
+        let stylelint_value = load_stylelint_config(path)?;
+        migrate_stylelint(&stylelint_value, &mut config, &mut warnings);
+        sources.push(path.display().to_string());
     } else if filename == "package.json" {
         migrate_package_json_file(path, &mut config, &mut warnings, &mut sources)?;
     } else {
@@ -341,7 +401,7 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
     })
 }
 
-/// Migrate the `knip` / `jscpd` keys from an explicitly named `package.json`.
+/// Migrate the `knip` / `jscpd` / `stylelint` keys from an explicitly named `package.json`.
 fn migrate_package_json_file(
     path: &Path,
     config: &mut serde_json::Map<String, serde_json::Value>,
@@ -360,9 +420,13 @@ fn migrate_package_json_file(
         migrate_jscpd(jscpd_config, config, warnings);
         sources.push(format!("{} (jscpd key)", path.display()));
     }
+    if let Some(stylelint_config) = pkg_value.get("stylelint") {
+        migrate_stylelint(stylelint_config, config, warnings);
+        sources.push(format!("{} (stylelint key)", path.display()));
+    }
     if sources.is_empty() {
         return Err(format!(
-            "no knip or jscpd configuration found in {}",
+            "no knip, jscpd, or stylelint configuration found in {}",
             path.display()
         ));
     }
@@ -370,7 +434,7 @@ fn migrate_package_json_file(
 }
 
 /// Migrate a config file whose name does not reveal its tool by sniffing
-/// distinctive knip / jscpd keys in its contents.
+/// distinctive knip / jscpd / stylelint keys in its contents.
 fn migrate_unnamed_config_file(
     path: &Path,
     config: &mut serde_json::Map<String, serde_json::Value>,
@@ -394,6 +458,9 @@ fn migrate_unnamed_config_file(
     {
         migrate_jscpd(&value, config, warnings);
         sources.push(format!("{} (jscpd config)", path.display()));
+    } else if value.get("rules").is_some() && value.get("extends").is_some() {
+        migrate_stylelint(&value, config, warnings);
+        sources.push(format!("{} (stylelint config)", path.display()));
     } else {
         return Err(format!(
             "could not determine config format for {}",
@@ -410,6 +477,58 @@ fn load_json_or_jsonc(path: &Path) -> Result<serde_json::Value, String> {
 
     jsonc_parser::parse_to_serde_value(&content, &jsonc_parse_options())
         .map_err(|e| format!("failed to parse {}: {e}", path.display()))
+}
+
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "config file extensions are always lowercase"
+)]
+fn load_stylelint_config(path: &Path) -> Result<serde_json::Value, String> {
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    if filename.ends_with(".js") || filename.ends_with(".cjs") || filename.ends_with(".mjs") {
+        return load_stylelint_js_config(path);
+    }
+    load_json_or_jsonc(path)
+}
+
+fn load_stylelint_js_config(path: &Path) -> Result<serde_json::Value, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let Some(start) = content.find('{') else {
+        return Err(format!(
+            "failed to parse {}: no object literal found",
+            path.display()
+        ));
+    };
+    let Some(end) = content.rfind('}') else {
+        return Err(format!(
+            "failed to parse {}: no object literal end found",
+            path.display()
+        ));
+    };
+    if start >= end {
+        return Err(format!(
+            "failed to parse {}: invalid object literal",
+            path.display()
+        ));
+    }
+    let object = &content[start..=end];
+    jsonc_parser::parse_to_serde_value(
+        object,
+        &jsonc_parser::ParseOptions {
+            allow_comments: true,
+            allow_loose_object_property_names: true,
+            allow_trailing_commas: true,
+            allow_missing_commas: false,
+            allow_single_quoted_strings: true,
+            allow_hexadecimal_numbers: false,
+            allow_unary_plus_numbers: false,
+        },
+    )
+    .map_err(|e| format!("failed to parse {}: {e}", path.display()))
 }
 
 fn jsonc_parse_options() -> jsonc_parser::ParseOptions {

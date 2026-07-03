@@ -1743,7 +1743,7 @@
     },
     {
       "name": "migrate",
-      "description": "Migrate configuration from knip or jscpd to fallow",
+      "description": "Migrate configuration from knip, jscpd, or stylelint to fallow",
       "flags": [
         {
           "name": "--toml",

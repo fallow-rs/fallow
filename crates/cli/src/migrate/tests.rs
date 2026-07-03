@@ -1,6 +1,7 @@
 use super::jscpd::migrate_jscpd;
 use super::jsonc::{generate_jsonc, indent_json_value};
 use super::knip::migrate_knip;
+use super::stylelint::migrate_stylelint;
 use super::toml_gen::generate_toml;
 use super::{
     MigrationResult, MigrationWarning, OutputFormat, load_json_or_jsonc, migrate_auto_detect,
@@ -35,6 +36,87 @@ fn migrate_both_knip_and_jscpd() {
     assert_eq!(dupes.get("minTokens").unwrap(), 100);
     assert_eq!(dupes.get("skipLocal").unwrap(), true);
     assert!(warnings.is_empty());
+}
+
+#[test]
+fn migrate_stylelint_with_selector_thresholds() {
+    let stylelint: serde_json::Value = serde_json::from_str(
+        r#"{"rules":{"selector-max-id":0,"selector-max-specificity":"0,3,0"}}"#,
+    )
+    .unwrap();
+    let mut config_map = empty_config();
+    let mut warnings = Vec::new();
+    migrate_stylelint(&stylelint, &mut config_map, &mut warnings);
+
+    assert_eq!(
+        config_map.get("rules").unwrap()["css-selector-complexity"],
+        serde_json::json!("warn")
+    );
+    assert_eq!(
+        config_map.get("audit").unwrap()["cssDeep"],
+        serde_json::json!(true)
+    );
+    assert!(warnings.is_empty());
+}
+
+#[test]
+fn migrate_stylelint_js_config_file() {
+    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-stylelint-js");
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    std::fs::create_dir_all(&tmpdir).unwrap();
+    let path = tmpdir.join("stylelint.config.js");
+    std::fs::write(
+        &path,
+        "module.exports = { rules: { 'max-nesting-depth': [3], 'color-hex-case': 'lower' } };\n",
+    )
+    .unwrap();
+
+    let result = migrate_from_file(&path).unwrap();
+
+    assert_eq!(result.config["rules"]["css-selector-complexity"], "warn");
+    assert_eq!(result.config["audit"]["css"], true);
+    assert_eq!(result.warnings.len(), 1);
+    assert_eq!(result.warnings[0].field, "color-hex-case");
+    let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
+#[test]
+fn auto_detect_stylelintrc_json() {
+    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-stylelintrc-json");
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    std::fs::create_dir_all(&tmpdir).unwrap();
+    std::fs::write(
+        tmpdir.join(".stylelintrc.json"),
+        r#"{"rules":{"selector-max-combinators":3}}"#,
+    )
+    .unwrap();
+
+    let result = migrate_auto_detect(&tmpdir).unwrap();
+
+    assert_eq!(result.sources, vec![".stylelintrc.json"]);
+    assert_eq!(result.config["rules"]["css-selector-complexity"], "warn");
+    assert_eq!(result.config["audit"]["cssDeep"], true);
+    let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
+#[test]
+fn migrate_package_json_stylelint_key() {
+    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-pkg-stylelint");
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    std::fs::create_dir_all(&tmpdir).unwrap();
+    let path = tmpdir.join("package.json");
+    std::fs::write(
+        &path,
+        r#"{"name":"test","stylelint":{"rules":{"declaration-no-important":true}}}"#,
+    )
+    .unwrap();
+
+    let result = migrate_from_file(&path).unwrap();
+
+    assert_eq!(result.sources.len(), 1);
+    assert!(result.sources[0].contains("stylelint"));
+    assert_eq!(result.config["rules"]["css-selector-complexity"], "warn");
+    let _ = std::fs::remove_dir_all(&tmpdir);
 }
 
 #[test]
@@ -87,6 +169,24 @@ fn toml_output_rules_section() {
     assert!(output.contains("[rules]"));
     assert!(output.contains("unused-files = \"error\""));
     assert!(output.contains("unused-exports = \"warn\""));
+}
+
+#[test]
+fn toml_output_audit_section() {
+    let result = MigrationResult {
+        config: serde_json::json!({
+            "audit": {
+                "css": true,
+                "cssDeep": true
+            }
+        }),
+        warnings: vec![],
+        sources: vec!["stylelint.config.js".to_string()],
+    };
+    let output = generate_toml(&result);
+    assert!(output.contains("[audit]"));
+    assert!(output.contains("css = true"));
+    assert!(output.contains("cssDeep = true"));
 }
 
 #[test]
@@ -503,15 +603,15 @@ fn migrate_from_file_package_json_with_both_knip_and_jscpd() {
 }
 
 #[test]
-fn migrate_from_file_package_json_without_knip_or_jscpd() {
+fn migrate_from_file_package_json_without_known_migrate_keys() {
     let tmpdir = std::env::temp_dir().join("fallow-test-migrate-pkg-empty");
     let _ = std::fs::create_dir_all(&tmpdir);
     let path = tmpdir.join("package.json");
     std::fs::write(&path, r#"{"name": "test", "version": "1.0.0"}"#).unwrap();
 
     match migrate_from_file(&path) {
-        Err(err) => assert!(err.contains("no knip or jscpd configuration found")),
-        Ok(_) => panic!("expected error for package.json without knip/jscpd"),
+        Err(err) => assert!(err.contains("no knip, jscpd, or stylelint configuration found")),
+        Ok(_) => panic!("expected error for package.json without migration keys"),
     }
 
     let _ = std::fs::remove_dir_all(&tmpdir);

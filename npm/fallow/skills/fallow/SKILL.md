@@ -412,13 +412,13 @@ fallow dead-code --format json --quiet --trace-file src/utils.ts        # trace 
 fallow dead-code --format json --quiet --trace-dependency lodash        # trace where a dependency is used
 ```
 
-### Migrate from knip or jscpd
+### Migrate from knip, jscpd, or Stylelint
 ```bash
 fallow migrate --dry-run   # preview
 fallow migrate             # apply; mirrors the source extension (knip.jsonc -> .fallowrc.jsonc); --jsonc / --toml force a format
 ```
 
-Auto-detects `knip.json`, `knip.jsonc`, `.knip.json`, `.knip.jsonc`, `.jscpd.json`, and package.json embedded configs.
+Auto-detects `knip.json`, `knip.jsonc`, `.knip.json`, `.knip.jsonc`, `.jscpd.json`, `.stylelintrc.json`, `stylelint.config.js`, and package.json embedded configs. Stylelint migration maps adjacent selector, nesting, and important-usage quality gates to Fallow styling audit settings. Formatting, syntax, vendor-prefix, declaration-order, and naming-convention rules stay in Stylelint and are reported as skipped fields.
 
 ### Initialize a new config
 ```bash

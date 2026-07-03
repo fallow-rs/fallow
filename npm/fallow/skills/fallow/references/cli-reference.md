@@ -372,6 +372,8 @@ fallow migrate --toml           # output as fallow.toml
 fallow migrate --from knip.jsonc
 ```
 
+The migrator understands knip, jscpd, and Stylelint configs. Stylelint support maps selector, nesting, and important-usage quality rules to Fallow styling audit settings, while formatting, syntax, vendor-prefix, declaration-order, and naming-convention rules remain Stylelint-owned and are reported as skipped fields.
+
 ---
 
 ## `health`: Function Complexity & File Health Analysis

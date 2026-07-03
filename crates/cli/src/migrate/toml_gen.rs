@@ -23,10 +23,31 @@ pub(super) fn generate_toml(result: &MigrationResult) -> String {
 
     write_string_array_fields(&mut output, obj);
     write_ignore_exports_used_in_file(&mut output, obj);
+    write_boolean_section(&mut output, obj, "audit");
     write_string_section(&mut output, obj, "rules");
     write_duplicates_section(&mut output, obj);
 
     output
+}
+
+fn write_boolean_section(
+    output: &mut String,
+    obj: &serde_json::Map<String, serde_json::Value>,
+    section: &str,
+) {
+    let Some(section_obj) = obj.get(section).and_then(serde_json::Value::as_object) else {
+        return;
+    };
+    if section_obj.is_empty() {
+        return;
+    }
+
+    let _ = writeln!(output, "\n[{section}]");
+    for (key, value) in section_obj {
+        if let Some(enabled) = value.as_bool() {
+            let _ = writeln!(output, "{key} = {enabled}");
+        }
+    }
 }
 
 fn write_string_array_fields(
