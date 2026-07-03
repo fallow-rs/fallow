@@ -21,6 +21,47 @@ fn write_project(root: &std::path::Path) {
         .expect("write fallow config");
 }
 
+fn write_project_with_rule_pack(root: &std::path::Path) {
+    write_project(root);
+    std::fs::create_dir_all(root.join("rule-packs")).expect("create rule-packs dir");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{
+  "rules": {
+    "policy-violation": "warn"
+  },
+  "rulePacks": ["rule-packs/team-policy.jsonc"]
+}
+"#,
+    )
+    .expect("write config");
+    std::fs::write(
+        root.join("rule-packs/team-policy.jsonc"),
+        r#"{
+  "version": 1,
+  "name": "team-policy",
+  "description": "Repository policy guardrails",
+  "rules": [
+    {
+      "id": "no-moment",
+      "kind": "banned-import",
+      "specifiers": ["moment"],
+      "severity": "error",
+      "message": "Use date-fns."
+    },
+    {
+      "id": "no-network",
+      "kind": "banned-effect",
+      "effects": ["network"],
+      "files": ["src/domain/**"]
+    }
+  ]
+}
+"#,
+    )
+    .expect("write rule pack");
+}
+
 #[test]
 fn rule_pack_schema_matches_legacy_top_level_command() {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -123,4 +164,52 @@ fn rule_pack_init_json_output_reports_config_update() {
     assert_eq!(json["template"], "starter");
     assert_eq!(json["config_updated"], true);
     assert_eq!(json["config_path"], ".fallowrc.json");
+}
+
+#[test]
+fn rule_pack_list_json_reports_loaded_packs() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_project_with_rule_pack(dir.path());
+
+    let output = run_rule_pack(dir.path(), &["list", "--format", "json"]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["kind"], "rule-pack-list");
+    assert_eq!(json["packs"][0]["name"], "team-policy");
+    assert_eq!(json["packs"][0]["source"], "rule-packs/team-policy.jsonc");
+    assert_eq!(
+        json["packs"][0]["description"],
+        "Repository policy guardrails"
+    );
+    assert_eq!(json["packs"][0]["rules"][0]["id"], "no-moment");
+    assert_eq!(json["packs"][0]["rules"][0]["kind"], "banned-import");
+    assert_eq!(json["packs"][0]["rules"][0]["severity"], "error");
+    assert_eq!(
+        json["packs"][0]["rules"][0]["patterns"],
+        serde_json::json!(["moment"])
+    );
+    assert_eq!(json["packs"][0]["rules"][1]["id"], "no-network");
+    assert_eq!(json["packs"][0]["rules"][1]["kind"], "banned-effect");
+    assert_eq!(json["packs"][0]["rules"][1]["severity"], "warn");
+    assert_eq!(
+        json["packs"][0]["rules"][1]["patterns"],
+        serde_json::json!(["network"])
+    );
+    assert_eq!(
+        json["packs"][0]["rules"][1]["files"],
+        serde_json::json!(["src/domain/**"])
+    );
+}
+
+#[test]
+fn rule_pack_list_empty_human_points_to_init() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_project(dir.path());
+
+    let output = run_rule_pack(dir.path(), &["list"]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(output.stdout.contains("No rule packs configured."));
+    assert!(output.stdout.contains("fallow rule-pack init"));
 }

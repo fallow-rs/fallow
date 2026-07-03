@@ -191,6 +191,9 @@ pub struct ResolvedConfig {
     /// gate in the CLI and programmatic entry points); a pack that fails to
     /// load here is skipped with a `tracing::error!` as defense in depth.
     pub rule_packs: Vec<crate::rule_pack::RulePackDef>,
+    /// Source paths from the `rulePacks` config key, index-aligned with
+    /// [`Self::rule_packs`] when every configured pack loaded successfully.
+    pub rule_pack_sources: Vec<PathBuf>,
     pub production: bool,
     pub quiet: bool,
     pub external_plugins: Vec<ExternalPluginDef>,
@@ -470,6 +473,7 @@ fn compile_ignore_settings(config: &FallowConfig) -> CompiledIgnoreSettings {
 struct ResolvedPluginSettings {
     external_plugins: Vec<ExternalPluginDef>,
     rule_packs: Vec<crate::rule_pack::RulePackDef>,
+    rule_pack_sources: Vec<PathBuf>,
 }
 
 fn resolve_plugin_settings(
@@ -481,16 +485,24 @@ fn resolve_plugin_settings(
     let mut external_plugins = discover_external_plugins(root, configured_plugins);
     external_plugins.extend(framework);
 
-    let rule_packs = crate::rule_pack::load_rule_packs(root, rule_packs).unwrap_or_else(|errors| {
-        for error in &errors {
-            tracing::error!("invalid rule pack: {error}");
-        }
+    let configured_rule_packs = rule_packs;
+    let rule_packs =
+        crate::rule_pack::load_rule_packs(root, configured_rule_packs).unwrap_or_else(|errors| {
+            for error in &errors {
+                tracing::error!("invalid rule pack: {error}");
+            }
+            Vec::new()
+        });
+    let rule_pack_sources = if rule_packs.len() == configured_rule_packs.len() {
+        configured_rule_packs.iter().map(PathBuf::from).collect()
+    } else {
         Vec::new()
-    });
+    };
 
     ResolvedPluginSettings {
         external_plugins,
         rule_packs,
+        rule_pack_sources,
     }
 }
 
@@ -637,6 +649,7 @@ impl FallowConfig {
             rules: production_rules.rules,
             boundaries: path_policy.boundaries,
             rule_packs: plugins.rule_packs,
+            rule_pack_sources: plugins.rule_pack_sources,
             production: production_rules.production,
             quiet,
             external_plugins: plugins.external_plugins,
@@ -1101,6 +1114,47 @@ mod tests {
             auto_imports: false,
             cache: CacheConfig::default(),
         }
+    }
+
+    #[test]
+    fn resolve_tracks_rule_pack_sources_in_config_order() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("rule-packs")).unwrap();
+        std::fs::write(
+            dir.path().join("rule-packs/team-policy.jsonc"),
+            r#"{
+  "version": 1,
+  "name": "team-policy",
+  "rules": [
+    {
+      "id": "no-moment",
+      "kind": "banned-import",
+      "specifiers": ["moment"]
+    }
+  ]
+}
+"#,
+        )
+        .unwrap();
+
+        let mut config = make_config(false);
+        config.rule_packs = vec!["rule-packs/team-policy.jsonc".to_string()];
+
+        let resolved = config.resolve(
+            dir.path().to_path_buf(),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        assert_eq!(resolved.rule_packs.len(), 1);
+        assert_eq!(resolved.rule_packs[0].name, "team-policy");
+        assert_eq!(
+            resolved.rule_pack_sources,
+            vec![PathBuf::from("rule-packs/team-policy.jsonc")]
+        );
     }
 
     #[test]

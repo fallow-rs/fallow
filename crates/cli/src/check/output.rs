@@ -233,6 +233,7 @@ mod tests {
             quiet: true,
             external_plugins: vec![],
             rule_packs: vec![],
+            rule_pack_sources: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,

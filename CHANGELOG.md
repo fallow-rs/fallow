@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rule-pack authoring commands for repo-wide policy linting.** `fallow rule-pack`
+  now exposes `init`, `list`, `test`, and `schema` as one command family. `init`
+  can scaffold starter and architecture-oriented packs, wire them into the local
+  config when possible, and print a manual snippet otherwise. `list` shows the
+  loaded packs, source files, effective severities, matcher patterns, and rule
+  messages in human or JSON form, giving teams a clearer path to project-specific
+  guardrails without hand-authoring every file from scratch.
+
 - **Richer PR and MR reporting for GitHub Actions and GitLab CI.** The bundled
   CI integrations now render sticky summary comments from typed Rust output,
   with a gate table, an attention banner, top fixes, and sidecar artifacts for
