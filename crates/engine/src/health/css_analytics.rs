@@ -2382,6 +2382,22 @@ struct ComparableThemeTokenCandidate {
     path: String,
     line: u32,
     metric: ThemeTokenMetric,
+    origin: ComparableTokenOrigin,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ComparableTokenOrigin {
+    Explicit,
+    ProjectVocabulary,
+}
+
+impl ComparableTokenOrigin {
+    fn priority(self) -> u8 {
+        match self {
+            Self::Explicit => 0,
+            Self::ProjectVocabulary => 1,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2500,6 +2516,7 @@ fn annotate_raw_style_value_nearest_tokens(
     if tokens.raw_style_values.is_empty() || candidates.is_empty() {
         return;
     }
+    let raw_value_counts = raw_style_value_counts(&tokens.raw_style_values);
     for raw in &mut tokens.raw_style_values {
         let Some(namespace) = raw_style_token_namespace(&raw.axis) else {
             continue;
@@ -2511,12 +2528,23 @@ fn annotate_raw_style_value_nearest_tokens(
             .iter()
             .filter(|candidate| candidate.namespace == namespace)
             .filter_map(|candidate| {
+                if candidate.origin == ComparableTokenOrigin::ProjectVocabulary {
+                    let raw_value = normalize_theme_token_value(&raw.value);
+                    let raw_key = (namespace.to_string(), raw_value.clone());
+                    if raw_value == candidate.value
+                        || raw_value_counts.get(&raw_key).copied().unwrap_or(0) > 1
+                        || (namespace == "color" && color_value_has_alpha(&raw_value))
+                    {
+                        return None;
+                    }
+                }
                 let distance = metric.distance(&candidate.metric)?;
                 (distance <= metric.threshold()).then_some((candidate, round_distance(distance)))
             })
             .min_by(|(left, left_distance), (right, right_distance)| {
                 left_distance
                     .total_cmp(right_distance)
+                    .then_with(|| left.origin.priority().cmp(&right.origin.priority()))
                     .then_with(|| theme_token_sort_key(left).cmp(&theme_token_sort_key(right)))
             });
         if let Some((nearest, distance)) = nearest {
@@ -2529,6 +2557,24 @@ fn annotate_raw_style_value_nearest_tokens(
             });
         }
     }
+}
+
+fn raw_style_value_counts(
+    raw_values: &[fallow_output::RawStyleValue],
+) -> rustc_hash::FxHashMap<(String, String), u32> {
+    let mut counts = rustc_hash::FxHashMap::default();
+    for raw in raw_values {
+        let Some(namespace) = raw_style_token_namespace(&raw.axis) else {
+            continue;
+        };
+        *counts
+            .entry((
+                namespace.to_string(),
+                normalize_theme_token_value(&raw.value),
+            ))
+            .or_insert(0) += 1;
+    }
+    counts
 }
 
 fn comparable_css_in_js_token_candidates(
@@ -2558,10 +2604,11 @@ fn comparable_css_in_js_token_candidates(
                 token: format!("{}.{}", definer.binding, leaf.path),
                 namespace: namespace.to_string(),
                 name: leaf.path,
-                value,
+                value: normalize_theme_token_value(&value),
                 path: definer.rel_path.clone(),
                 line: leaf.def_line,
                 metric,
+                origin: ComparableTokenOrigin::Explicit,
             });
         }
     }
@@ -2615,13 +2662,87 @@ fn comparable_custom_property_token_candidates(
                 token: token.clone(),
                 namespace: namespace.to_string(),
                 name: token.trim_start_matches('-').to_owned(),
-                value: definition.value.clone(),
+                value: normalize_theme_token_value(&definition.value),
                 path: definition.path.clone(),
                 line: definition.line,
                 metric,
+                origin: ComparableTokenOrigin::Explicit,
             })
         })
         .collect()
+}
+
+fn comparable_project_vocabulary_candidates(
+    tokens: &CssTokenSets,
+) -> Vec<ComparableThemeTokenCandidate> {
+    let mut groups: rustc_hash::FxHashMap<(String, String), ProjectVocabularyValue> =
+        rustc_hash::FxHashMap::default();
+    for raw in &tokens.raw_style_values {
+        let Some(namespace) = raw_style_token_namespace(&raw.axis) else {
+            continue;
+        };
+        let value = normalize_theme_token_value(&raw.value);
+        if namespace == "color" && color_value_has_alpha(&value) {
+            continue;
+        }
+        let Some(metric) = parse_theme_token_metric(namespace, &value) else {
+            continue;
+        };
+        let key = (namespace.to_string(), value.clone());
+        let entry = groups.entry(key).or_insert_with(|| ProjectVocabularyValue {
+            namespace: namespace.to_string(),
+            value,
+            path: raw.path.clone(),
+            line: raw.line,
+            count: 0,
+            metric,
+        });
+        entry.count += 1;
+        if (raw.path.as_str(), raw.line) < (entry.path.as_str(), entry.line) {
+            entry.path.clone_from(&raw.path);
+            entry.line = raw.line;
+        }
+    }
+
+    let mut candidates: Vec<ComparableThemeTokenCandidate> = groups
+        .into_values()
+        .filter(|value| value.count >= 2)
+        .map(|value| ComparableThemeTokenCandidate {
+            token: project_vocabulary_token_name(&value.namespace, &value.value),
+            namespace: value.namespace.clone(),
+            name: value.value.clone(),
+            value: value.value,
+            path: value.path,
+            line: value.line,
+            metric: value.metric,
+            origin: ComparableTokenOrigin::ProjectVocabulary,
+        })
+        .collect();
+    candidates.sort_by(|a, b| theme_token_sort_key(a).cmp(&theme_token_sort_key(b)));
+    candidates
+}
+
+#[derive(Clone, Debug)]
+struct ProjectVocabularyValue {
+    namespace: String,
+    value: String,
+    path: String,
+    line: u32,
+    count: u32,
+    metric: ThemeTokenMetric,
+}
+
+fn project_vocabulary_token_name(namespace: &str, value: &str) -> String {
+    let stable_value = value.split_whitespace().collect::<Vec<_>>().join("_");
+    format!("project-vocabulary.{namespace}.{stable_value}")
+}
+
+fn color_value_has_alpha(value: &str) -> bool {
+    let trimmed = value.trim();
+    let Some(hex) = trimmed.strip_prefix('#') else {
+        return false;
+    };
+    matches!(hex.len(), 4 | 8)
 }
 
 fn custom_property_token_namespace(token: &str) -> Option<&'static str> {
@@ -2655,6 +2776,7 @@ fn comparable_theme_token_candidates(
                 path: candidate.path,
                 line: candidate.line,
                 metric,
+                origin: ComparableTokenOrigin::Explicit,
             })
         })
         .collect()
@@ -4353,6 +4475,7 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
     styling_token_candidates.extend(comparable_css_in_js_token_candidates(
         files, modules, config,
     ));
+    styling_token_candidates.extend(comparable_project_vocabulary_candidates(&walk.tokens));
     styling_token_candidates.sort_by(|a, b| theme_token_sort_key(a).cmp(&theme_token_sort_key(b)));
     annotate_raw_style_value_nearest_tokens(&mut walk.tokens, &styling_token_candidates);
     let metrics = finalize_css_token_metrics(
@@ -5216,6 +5339,123 @@ mod token_consumer_tests {
                     .is_some_and(|token| token.name == "pandaConfig.colors.brand")
             }),
             "raw CSS should point at the static Panda config token"
+        );
+    }
+
+    #[test]
+    fn style_vocabulary_repeated_project_values_explain_nearby_raw_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+        let base = write_file(
+            root,
+            0,
+            "src/base.css",
+            ".card { color: #33679a; }\n.panel { border-color: #33679a; }\n",
+        );
+        let feature = write_file(root, 1, "src/feature.css", ".feature { color: #33679b; }\n");
+
+        let computation = css_computation(root, &[base, feature]).expect("raw CSS keeps report");
+        let feature_value = computation
+            .report
+            .raw_style_values
+            .iter()
+            .find(|raw| raw.path == "src/feature.css" && raw.value == "#33679b")
+            .expect("feature raw value is reported");
+        let nearest = feature_value
+            .nearest_token
+            .as_ref()
+            .expect("nearby project vocabulary value is suggested");
+        assert_eq!(nearest.name, "project-vocabulary.color.#33679a");
+        assert_eq!(nearest.value, "#33679a");
+        assert_eq!(nearest.path, "src/base.css");
+    }
+
+    #[test]
+    fn style_vocabulary_abstains_on_alpha_color_nearest_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+        let base = write_file(
+            root,
+            0,
+            "src/base.css",
+            ".overlay { color: #00000040; }\n.scrim { border-color: #00000040; }\n",
+        );
+        let feature = write_file(root, 1, "src/feature.css", ".feature { color: #0000; }\n");
+
+        let computation = css_computation(root, &[base, feature]).expect("raw CSS keeps report");
+        let feature_value = computation
+            .report
+            .raw_style_values
+            .iter()
+            .find(|raw| raw.path == "src/feature.css" && raw.value == "#0000")
+            .expect("feature alpha raw value is reported");
+        assert!(
+            feature_value.nearest_token.is_none(),
+            "project-vocabulary should not compare alpha-bearing color values through RGB-only distance"
+        );
+    }
+
+    #[test]
+    fn style_vocabulary_abstains_when_raw_alpha_color_is_near_opaque_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+        let base = write_file(
+            root,
+            0,
+            "src/base.css",
+            ".card { color: #ffffff; }\n.panel { border-color: #ffffff; }\n",
+        );
+        let feature = write_file(
+            root,
+            1,
+            "src/feature.css",
+            ".feature { color: #ffffff80; }\n",
+        );
+
+        let computation = css_computation(root, &[base, feature]).expect("raw CSS keeps report");
+        let feature_value = computation
+            .report
+            .raw_style_values
+            .iter()
+            .find(|raw| raw.path == "src/feature.css" && raw.value == "#ffffff80")
+            .expect("feature alpha raw value is reported");
+        assert!(
+            feature_value.nearest_token.is_none(),
+            "project-vocabulary should not compare alpha raw values through RGB-only distance"
+        );
+    }
+
+    #[test]
+    fn style_vocabulary_abstains_between_two_repeated_project_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+        let base = write_file(
+            root,
+            0,
+            "src/base.css",
+            ".card { color: #ffffff; }\n.panel { border-color: #ffffff; }\n",
+        );
+        let alternate = write_file(
+            root,
+            1,
+            "src/alternate.css",
+            ".soft { color: #fafafa; }\n.muted { border-color: #fafafa; }\n",
+        );
+
+        let computation = css_computation(root, &[base, alternate]).expect("raw CSS keeps report");
+        let repeated_with_suggestions = computation
+            .report
+            .raw_style_values
+            .iter()
+            .filter(|raw| raw.nearest_token.is_some())
+            .count();
+        assert_eq!(
+            repeated_with_suggestions, 0,
+            "project-vocabulary should not suggest one repeated local convention over another repeated convention"
         );
     }
 
