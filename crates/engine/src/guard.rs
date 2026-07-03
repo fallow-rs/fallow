@@ -51,7 +51,7 @@ fn build_file_report(config: &ResolvedConfig, input: &str) -> Result<GuardFileRe
     let rules = config.resolve_rules_for_path(&full_path);
     let zone_name = config.boundaries.classify_zone(&rel_path);
     let zone = zone_name.and_then(|name| guard_zone(&config.boundaries, name));
-    let notes = boundary_notes(&config.boundaries, zone_name);
+    let notes = guard_notes(config, zone_name);
 
     Ok(GuardFileReport {
         exists: full_path.exists(),
@@ -168,10 +168,13 @@ fn guard_boundary(
     }
 }
 
-fn boundary_notes(boundaries: &ResolvedBoundaryConfig, zone_name: Option<&str>) -> Vec<String> {
+fn guard_notes(config: &ResolvedConfig, zone_name: Option<&str>) -> Vec<String> {
     let mut notes = Vec::new();
-    if boundaries_configured(boundaries) && zone_name.is_none() {
+    if boundaries_configured(&config.boundaries) && zone_name.is_none() {
         notes.push("Files outside every zone are unrestricted for boundary checks.".to_string());
+    }
+    if !boundaries_configured(&config.boundaries) && config.rule_packs.is_empty() {
+        notes.push("No boundary zones or rule packs are configured.".to_string());
     }
     if zone_name.is_some() {
         notes.push("Same-zone imports are always allowed.".to_string());
