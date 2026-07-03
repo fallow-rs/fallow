@@ -262,6 +262,7 @@ mod tests {
             ignore_type_only: false,
             files: Vec::new(),
             exclude: Vec::new(),
+            zones: Vec::new(),
             message: None,
             severity: None,
         }

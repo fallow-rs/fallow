@@ -37,7 +37,7 @@
   ],
   "$defs": {
     "RulePackRule": {
-      "description": "One declarative policy rule inside a rule pack.\n\n`callees` applies only to `banned-call` rules; `specifiers` and\n`ignoreTypeOnly` apply only to `banned-import` rules; `effects` applies\nonly to `banned-effect` rules. Setting a field on the wrong kind is a load\nerror (fail loud, never silently ignore policy).",
+      "description": "One declarative policy rule inside a rule pack.\n\n`callees` applies only to `banned-call` rules; `specifiers` and\n`ignoreTypeOnly` apply only to `banned-import` rules; `effects` applies\nonly to `banned-effect` rules. `zones` can scope any rule kind to files\nclassified into one of the named boundary zones. Setting a field on the\nwrong kind is a load error (fail loud, never silently ignore policy).",
       "type": "object",
       "properties": {
         "id": {
@@ -82,6 +82,13 @@
         },
         "exclude": {
           "description": "Optional exclude globs (project-root-relative), applied after `files`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "zones": {
+          "description": "Optional boundary zones this rule applies to. Empty or absent means the\nrule applies regardless of zone; non-empty values require matching\nconfigured boundaries and combine with `files`/`exclude` as AND.",
           "type": "array",
           "items": {
             "type": "string"

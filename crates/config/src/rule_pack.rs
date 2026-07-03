@@ -5,8 +5,8 @@ use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Severity;
 use crate::config::glob_validation::compile_user_glob;
+use crate::config::{BoundaryConfig, ResolvedBoundaryConfig, Severity};
 
 /// Supported rule-pack file extensions. TOML is intentionally not supported:
 /// JSON Schema autocomplete is the headline authoring feature and TOML
@@ -73,8 +73,9 @@ impl EffectKind {
 ///
 /// `callees` applies only to `banned-call` rules; `specifiers` and
 /// `ignoreTypeOnly` apply only to `banned-import` rules; `effects` applies
-/// only to `banned-effect` rules. Setting a field on the wrong kind is a load
-/// error (fail loud, never silently ignore policy).
+/// only to `banned-effect` rules. `zones` can scope any rule kind to files
+/// classified into one of the named boundary zones. Setting a field on the
+/// wrong kind is a load error (fail loud, never silently ignore policy).
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct RulePackRule {
@@ -114,6 +115,11 @@ pub struct RulePackRule {
     /// Optional exclude globs (project-root-relative), applied after `files`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
+    /// Optional boundary zones this rule applies to. Empty or absent means the
+    /// rule applies regardless of zone; non-empty values require matching
+    /// configured boundaries and combine with `files`/`exclude` as AND.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zones: Vec<String>,
     /// Author-provided message naming the sanctioned alternative. Rendered
     /// next to each finding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -240,6 +246,81 @@ pub fn load_rule_packs(
     } else {
         Err(errors)
     }
+}
+
+/// Resolve boundaries in the same shape used by analysis, without loading
+/// rule packs or running discovery.
+#[must_use]
+pub fn resolve_boundaries_for_rule_pack_validation(
+    mut boundaries: BoundaryConfig,
+    root: &Path,
+) -> ResolvedBoundaryConfig {
+    if boundaries.preset.is_some() {
+        let source_root = crate::workspace::parse_tsconfig_root_dir(root)
+            .filter(|r| r != "." && !r.starts_with("..") && !Path::new(r).is_absolute())
+            .unwrap_or_else(|| "src".to_owned());
+        boundaries.expand(&source_root);
+    }
+    let logical_groups = boundaries.expand_auto_discover(root);
+    let mut resolved = boundaries.resolve();
+    resolved.logical_groups = logical_groups;
+    resolved
+}
+
+/// Validate that rule-pack `zones` references point at resolved boundary zones.
+#[must_use]
+pub fn validate_rule_pack_zone_references(
+    root: &Path,
+    pack_paths: &[String],
+    packs: &[RulePackDef],
+    boundaries: &ResolvedBoundaryConfig,
+) -> Vec<RulePackError> {
+    let configured_zones: FxHashSet<&str> = boundaries
+        .zones
+        .iter()
+        .map(|zone| zone.name.as_str())
+        .collect();
+    let configured_zone_list = if configured_zones.is_empty() {
+        "none".to_owned()
+    } else {
+        let mut zones: Vec<&str> = configured_zones.iter().copied().collect();
+        zones.sort_unstable();
+        zones.join(", ")
+    };
+
+    let mut errors = Vec::new();
+    for (pack_index, pack) in packs.iter().enumerate() {
+        let path = pack_paths
+            .get(pack_index)
+            .map_or_else(|| root.to_path_buf(), |path| root.join(path));
+        for rule in &pack.rules {
+            if rule.zones.is_empty() {
+                continue;
+            }
+            if configured_zones.is_empty() {
+                errors.push(RulePackError {
+                    path: path.clone(),
+                    message: format!(
+                        "rule '{}': `zones` requires configured boundary zones, but none are configured",
+                        rule.id
+                    ),
+                });
+                continue;
+            }
+            for zone in &rule.zones {
+                if !configured_zones.contains(zone.as_str()) {
+                    errors.push(RulePackError {
+                        path: path.clone(),
+                        message: format!(
+                            "rule '{}': unknown zone '{}' in `zones`; configured zones: {}",
+                            rule.id, zone, configured_zone_list
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    errors
 }
 
 /// Load, validate, and stage a single listed rule pack, collecting any failure.
@@ -590,6 +671,76 @@ mod tests {
         );
         let packs = load_rule_packs(dir.path(), &[path]).unwrap();
         assert_eq!(packs[0].name, "jsonc-policy");
+    }
+
+    #[test]
+    fn parses_zone_scoped_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_pack(
+            dir.path(),
+            "policy.json",
+            r#"{ "version": 1, "name": "p", "rules": [
+                { "id": "domain-network", "kind": "banned-effect",
+                  "effects": ["network"], "zones": ["domain"] }
+            ] }"#,
+        );
+        let packs = load_rule_packs(dir.path(), &[path]).unwrap();
+        assert_eq!(packs[0].rules[0].zones, vec!["domain"]);
+    }
+
+    #[test]
+    fn validates_rule_pack_zones_against_resolved_boundaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_pack(
+            dir.path(),
+            "policy.json",
+            r#"{ "version": 1, "name": "p", "rules": [
+                { "id": "domain-network", "kind": "banned-effect",
+                  "effects": ["network"], "zones": ["unknown"] }
+            ] }"#,
+        );
+        let packs = load_rule_packs(dir.path(), std::slice::from_ref(&path)).unwrap();
+        let boundaries = BoundaryConfig {
+            zones: vec![crate::config::BoundaryZone {
+                name: "domain".to_owned(),
+                patterns: vec!["src/domain/**".to_owned()],
+                auto_discover: Vec::new(),
+                root: None,
+            }],
+            ..BoundaryConfig::default()
+        }
+        .resolve();
+
+        let errors = validate_rule_pack_zone_references(dir.path(), &[path], &packs, &boundaries);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("unknown zone 'unknown'"));
+        assert!(errors[0].message.contains("configured zones: domain"));
+    }
+
+    #[test]
+    fn rejects_rule_pack_zones_when_boundaries_are_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_pack(
+            dir.path(),
+            "policy.json",
+            r#"{ "version": 1, "name": "p", "rules": [
+                { "id": "domain-network", "kind": "banned-effect",
+                  "effects": ["network"], "zones": ["domain"] }
+            ] }"#,
+        );
+        let packs = load_rule_packs(dir.path(), std::slice::from_ref(&path)).unwrap();
+        let errors = validate_rule_pack_zone_references(
+            dir.path(),
+            &[path],
+            &packs,
+            &ResolvedBoundaryConfig::default(),
+        );
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0]
+                .message
+                .contains("`zones` requires configured boundary zones")
+        );
     }
 
     #[test]

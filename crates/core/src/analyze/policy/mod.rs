@@ -23,14 +23,15 @@ struct CompiledRule<'a> {
     /// Parsed callee patterns (`banned-call` rules only).
     callee_patterns: Vec<CalleePattern>,
     effects: FxHashSet<EffectKind>,
+    zones: FxHashSet<String>,
     files: Vec<globset::GlobMatcher>,
     exclude: Vec<globset::GlobMatcher>,
 }
 
 impl CompiledRule<'_> {
     /// Whether this rule applies to a project-root-relative file path.
-    fn applies_to(&self, relative: &str) -> bool {
-        compiled_scope_applies(&self.files, &self.exclude, relative)
+    fn applies_to(&self, relative: &str, zone: Option<&str>) -> bool {
+        compiled_scope_applies(&self.files, &self.exclude, &self.zones, relative, zone)
     }
 
     /// Per-rule severity overriding the file's effective master severity.
@@ -67,31 +68,36 @@ impl CompiledRule<'_> {
     }
 }
 
-/// Return rule-pack rules whose include/exclude file scope applies to a path.
+/// Return rule-pack rules whose file and zone scope applies to a path.
 #[must_use]
 pub fn rules_applying_to_path<'a>(
     rule_packs: &'a [RulePackDef],
     boundaries: &ResolvedBoundaryConfig,
     rel_path: &str,
 ) -> Vec<(&'a str, &'a RulePackRule)> {
-    // Zone-scoped rule packs are a future extension; Phase 2 only mirrors
-    // current file include/exclude semantics.
-    let _ = boundaries;
+    let zone = boundaries.classify_zone(rel_path);
     rule_packs
         .iter()
         .flat_map(|pack| {
             pack.rules
                 .iter()
-                .filter(move |rule| raw_rule_scope_applies(rule, rel_path))
+                .filter(move |rule| raw_rule_scope_applies(rule, boundaries, rel_path, zone))
                 .map(|rule| (pack.name.as_str(), rule))
         })
         .collect()
 }
 
-fn raw_rule_scope_applies(rule: &RulePackRule, relative: &str) -> bool {
+fn raw_rule_scope_applies(
+    rule: &RulePackRule,
+    boundaries: &ResolvedBoundaryConfig,
+    relative: &str,
+    zone: Option<&str>,
+) -> bool {
     let files = compile_scope_globs(&rule.files);
     let exclude = compile_scope_globs(&rule.exclude);
-    compiled_scope_applies(&files, &exclude, relative)
+    let zones = rule.zones.iter().cloned().collect();
+    let zone = zone.or_else(|| boundaries.classify_zone(relative));
+    compiled_scope_applies(&files, &exclude, &zones, relative, zone)
 }
 
 fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
@@ -107,10 +113,13 @@ fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
 fn compiled_scope_applies(
     files: &[globset::GlobMatcher],
     exclude: &[globset::GlobMatcher],
+    zones: &FxHashSet<String>,
     relative: &str,
+    zone: Option<&str>,
 ) -> bool {
     (files.is_empty() || files.iter().any(|m| m.is_match(relative)))
         && !exclude.iter().any(|m| m.is_match(relative))
+        && (zones.is_empty() || zone.is_some_and(|zone| zones.contains(zone)))
 }
 
 /// Detect banned calls, imports, and catalogue-derived effects declared by the
@@ -163,13 +172,21 @@ pub fn find_policy_violations(
     // whose globs match nothing warns instead of silently reporting zero
     // findings forever (mirrors the boundary zero-zone warn).
     let mut scoped_file_counts: Vec<usize> = vec![0; rules.len()];
+    let mut zones_by_file: FxHashMap<FileId, Option<&str>> = FxHashMap::default();
 
     let mut violations = Vec::new();
     for node in &graph.modules {
+        let zone = *zones_by_file.entry(node.file_id).or_insert_with(|| {
+            node.path.strip_prefix(&config.root).ok().and_then(|path| {
+                let relative = path.to_string_lossy().replace('\\', "/");
+                config.boundaries.classify_zone(&relative)
+            })
+        });
         collect_node_policy_violations(&mut PolicyNodeInput {
             node,
             config,
             rules: &rules,
+            zone,
             modules_by_id: &modules_by_id,
             declared_deps,
             suppressions,
@@ -199,6 +216,7 @@ struct PolicyNodeInput<'a> {
     node: &'a crate::graph::ModuleNode,
     config: &'a ResolvedConfig,
     rules: &'a [CompiledRule<'a>],
+    zone: Option<&'a str>,
     modules_by_id: &'a FxHashMap<FileId, &'a ModuleInfo>,
     declared_deps: &'a FxHashSet<String>,
     suppressions: &'a SuppressionContext<'a>,
@@ -212,9 +230,13 @@ struct PolicyNodeInput<'a> {
 /// findings. Off-master and out-of-scope nodes are skipped.
 fn collect_node_policy_violations(input: &mut PolicyNodeInput<'_>) {
     let node = input.node;
-    let Some(scope) =
-        scoped_policy_rules(node, input.config, input.rules, input.scoped_file_counts)
-    else {
+    let Some(scope) = scoped_policy_rules(
+        node,
+        input.config,
+        input.rules,
+        input.zone,
+        input.scoped_file_counts,
+    ) else {
         return;
     };
 
@@ -263,6 +285,7 @@ fn scoped_policy_rules<'a>(
     node: &crate::graph::ModuleNode,
     config: &ResolvedConfig,
     rules: &'a [CompiledRule<'a>],
+    zone: Option<&str>,
     scoped_file_counts: &mut [usize],
 ) -> Option<ScopedPolicyRules<'a>> {
     if !node.is_reachable() && !node.is_entry_point() {
@@ -281,7 +304,7 @@ fn scoped_policy_rules<'a>(
     let in_scope: Vec<(usize, &CompiledRule<'_>)> = rules
         .iter()
         .enumerate()
-        .filter(|(_, rule)| rule.applies_to(&relative))
+        .filter(|(_, rule)| rule.applies_to(&relative, zone))
         .collect();
     if in_scope.is_empty() {
         return None;
@@ -310,11 +333,13 @@ fn compile_rules(config: &ResolvedConfig) -> Vec<CompiledRule<'_>> {
                 .filter_map(|raw| CalleePattern::parse(raw))
                 .collect();
             let effects = rule.effects.iter().copied().collect();
+            let zones = rule.zones.iter().cloned().collect();
             rules.push(CompiledRule {
                 pack: pack.name.as_str(),
                 rule,
                 callee_patterns,
                 effects,
+                zones,
                 files: compile_scope_globs(&rule.files),
                 exclude: compile_scope_globs(&rule.exclude),
             });

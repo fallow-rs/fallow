@@ -328,10 +328,28 @@ fn validate_config_extensions(
             options.output,
         ));
     }
-    if let Err(errors) = fallow_config::load_rule_packs(root, &config.rule_packs) {
+    let packs = match fallow_config::load_rule_packs(root, &config.rule_packs) {
+        Ok(packs) => packs,
+        Err(errors) => {
+            return Err(emit_joined_config_errors(
+                "invalid rule pack",
+                &errors,
+                options.output,
+            ));
+        }
+    };
+    let boundaries =
+        fallow_config::resolve_boundaries_for_rule_pack_validation(config.boundaries.clone(), root);
+    let zone_errors = fallow_config::validate_rule_pack_zone_references(
+        root,
+        &config.rule_packs,
+        &packs,
+        &boundaries,
+    );
+    if !zone_errors.is_empty() {
         return Err(emit_joined_config_errors(
             "invalid rule pack",
-            &errors,
+            &zone_errors,
             options.output,
         ));
     }

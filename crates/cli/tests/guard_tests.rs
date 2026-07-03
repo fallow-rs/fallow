@@ -14,6 +14,7 @@ fn run_guard(root: &std::path::Path, args: &[&str]) -> CommandOutput {
 }
 
 fn write_base_project(root: &std::path::Path) {
+    std::fs::create_dir_all(root.join("src/app")).expect("create app dir");
     std::fs::create_dir_all(root.join("src/domain")).expect("create domain dir");
     std::fs::create_dir_all(root.join("src/shared")).expect("create shared dir");
     std::fs::write(root.join("package.json"), "{\"name\":\"guard-fixture\"}\n")
@@ -35,6 +36,7 @@ fn write_guard_project(root: &std::path::Path) {
   "boundaries": {
     "zones": [
       { "name": "domain", "patterns": ["src/domain/**"] },
+      { "name": "app", "patterns": ["src/app/**"] },
       { "name": "shared", "patterns": ["src/shared/**"] }
     ],
     "rules": [
@@ -61,7 +63,7 @@ fn write_guard_project(root: &std::path::Path) {
       "id": "pure-domain",
       "kind": "banned-effect",
       "effects": ["network"],
-      "files": ["src/domain/**"],
+      "zones": ["domain"],
       "severity": "error",
       "message": "Domain code must inject network access through ports."
     }
@@ -101,6 +103,23 @@ fn guard_json_reports_zone_boundary_and_policy_rules() {
         file["policy_rules"][0]["suppress_token"],
         "policy-violation:team-policy/pure-domain"
     );
+}
+
+#[test]
+fn guard_json_honors_zone_scoped_policy_rules() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_guard_project(dir.path());
+
+    let output = run_guard(
+        dir.path(),
+        &["src/app/page.ts", "--format", "json", "--quiet"],
+    );
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    let file = &json["files"][0];
+    assert_eq!(file["zone"]["name"], "app");
+    assert_eq!(file["policy_rules"], serde_json::json!([]));
 }
 
 #[test]
