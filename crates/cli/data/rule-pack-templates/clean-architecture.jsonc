@@ -7,8 +7,11 @@
     {
       "id": "domain-no-io-adapters",
       "kind": "banned-import",
+      // Use "@yourorg/ui/*" to ban subpath-only deep imports while allowing the package root.
       "specifiers": ["axios", "node-fetch", "pg", "mysql2", "mongoose", "ioredis", "fs", "node:fs"],
       "files": ["src/domain/**"],
+      // If your project has boundary zones configured, you can scope by zone instead:
+      // "zones": ["domain"],
       "message": "The domain layer depends on ports, not IO adapters.",
       "severity": "error"
     },
@@ -17,6 +20,8 @@
       "kind": "banned-import",
       "specifiers": ["react", "vue", "next", "express", "fastify"],
       "files": ["src/domain/**"],
+      // If your project has boundary zones configured, you can scope by zone instead:
+      // "zones": ["domain"],
       "message": "The domain layer must stay framework-agnostic.",
       "severity": "error"
     }

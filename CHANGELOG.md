@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files that do not exist yet, and is also exposed as the read-only MCP `guard`
   tool so agents can ask which repo-wide rules apply before editing.
 
+- **Rule-pack V2 matchers for architecture policy.** Rule-pack rules can now be
+  scoped to boundary `zones`, ban direct exports via `banned-export`, and use a
+  trailing `/*` banned-import specifier for subpath-only deep-import bans. These
+  all continue to report as `policy-violation`, so existing suppressions and CI
+  integrations keep one stable issue family.
+
 - **Richer PR and MR reporting for GitHub Actions and GitLab CI.** The bundled
   CI integrations now render sticky summary comments from typed Rust output,
   with a gate table, an attention banner, top fixes, and sidecar artifacts for
