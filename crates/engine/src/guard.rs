@@ -195,7 +195,7 @@ fn guard_policy_rules(
         return Vec::new();
     }
 
-    fallow_core::analyze::rules_applying_to_path(&config.rule_packs, &config.boundaries, rel_path)
+    crate::core_backend::rules_applying_to_path(config, rel_path)
         .into_iter()
         .filter_map(|(pack, rule)| guard_policy_rule(pack, rule, master_severity))
         .collect()

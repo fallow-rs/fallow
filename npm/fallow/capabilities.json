@@ -996,6 +996,18 @@
       "flags": []
     },
     {
+      "name": "guard",
+      "description": "Show which architecture rules apply to files before changing them",
+      "flags": [
+        {
+          "name": "files",
+          "type": "string",
+          "required": true,
+          "description": "Files to report on (root-relative or absolute; may not exist yet)"
+        }
+      ]
+    },
+    {
       "name": "config",
       "description": "Show the resolved config and which config file was loaded",
       "flags": [
@@ -5296,6 +5308,17 @@
         "read_only": true
       },
       {
+        "name": "guard",
+        "kind": "introspection",
+        "description": "Report the architecture rules that apply to given files before editing them: boundary zone, allowed import zones, forbidden calls, and rule-pack policies",
+        "key_params": [
+          "files"
+        ],
+        "license": "free",
+        "license_note": null,
+        "read_only": true
+      },
+      {
         "name": "find_dupes",
         "kind": "analysis",
         "description": "Code duplication detection with clone groups and refactoring suggestions",
@@ -5737,6 +5760,11 @@
     {
       "task": "find feature flags",
       "command": "fallow flags",
+      "note": null
+    },
+    {
+      "task": "check which architecture rules apply to a file before changing it",
+      "command": "fallow guard <files>",
       "note": null
     },
     {

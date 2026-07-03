@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   messages in human or JSON form, giving teams a clearer path to project-specific
   guardrails without hand-authoring every file from scratch.
 
+- **Pre-edit architecture guard reports for agents and humans.** `fallow guard`
+  reports the boundary zone, allowed import zones, forbidden call patterns,
+  rule-pack policy rules, effective severities, suppression tokens, and notes
+  for one or more files before code is written. It is config-only, works for
+  files that do not exist yet, and is also exposed as the read-only MCP `guard`
+  tool so agents can ask which repo-wide rules apply before editing.
+
 - **Richer PR and MR reporting for GitHub Actions and GitLab CI.** The bundled
   CI integrations now render sticky summary comments from typed Rust output,
   with a gate table, an attention banner, top fixes, and sidecar artifacts for

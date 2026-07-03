@@ -454,6 +454,13 @@ pub fn refresh_clone_families(report: &mut DuplicationReport, root: &Path) {
     );
 }
 
+pub fn rules_applying_to_path<'a>(
+    config: &'a ResolvedConfig,
+    rel_path: &str,
+) -> Vec<(&'a str, &'a fallow_config::RulePackRule)> {
+    fallow_core::analyze::rules_applying_to_path(&config.rule_packs, &config.boundaries, rel_path)
+}
+
 pub fn source_token_kinds_equivalent(
     path: &Path,
     current: &str,

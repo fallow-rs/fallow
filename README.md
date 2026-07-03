@@ -919,6 +919,29 @@ effective severities, then iterate with `fallow rule-pack test`: test always
 exits 0 when analysis succeeds, lists zero-finding rules, and leaves CI gating
 to `fallow dead-code --policy-violations`.
 
+Before editing or creating files in a zoned repo, run `fallow guard` to see the
+architecture contract that applies to the target path. It only loads config and
+works for files that do not exist yet:
+
+```bash
+fallow guard src/domain/user.ts
+```
+
+```text
+src/domain/user.ts (zone: domain)
+  may import zones: domain (same zone), shared   type-only: none
+  forbidden calls in zone: child_process.*
+  policy rules:
+    error  team-policy/pure-domain  banned-effect: network
+           Domain code must inject network access through ports.
+           suppress: // fallow-ignore-next-line policy-violation:team-policy/pure-domain -- <reason>
+  severities: boundary-violation=error  policy-violation=warn
+```
+
+Agents should call the MCP `guard` tool before writing code in a zoned repo; it
+returns the same per-file zone, allowed imports, forbidden calls, policy rules,
+severities, suppression tokens, and notes as JSON.
+
 ```jsonc
 // rule-packs/team-policy.jsonc
 {
