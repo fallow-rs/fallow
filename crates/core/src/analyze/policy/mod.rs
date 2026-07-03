@@ -691,6 +691,11 @@ fn import_source_matches(source: &str, spec: &str) -> bool {
 /// `/` boundary, so `moment` covers `moment/locale/nl` but never
 /// `moment-timezone`.
 fn specifier_matches(raw: &str, pattern: &str) -> bool {
+    if let Some(prefix) = pattern.strip_suffix("/*") {
+        return raw
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with('/'));
+    }
     raw == pattern
         || raw
             .strip_prefix(pattern)

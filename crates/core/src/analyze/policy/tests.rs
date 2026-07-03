@@ -635,6 +635,43 @@ fn banned_import_matches_segment_aware_specifiers() {
 }
 
 #[test]
+fn banned_import_trailing_star_matches_deep_imports_only() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_import(
+            "no-ui-deep-imports",
+            &["@org/ui/*", "lodash"],
+        )])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/app.ts"]);
+    let modules = vec![module(
+        0,
+        Vec::new(),
+        vec![
+            import("@org/ui", ImportedName::Default, "ui", false),
+            import(
+                "@org/ui/internal/a",
+                ImportedName::Default,
+                "internal",
+                false,
+            ),
+            import("@org/ui-kit", ImportedName::Default, "kit", false),
+            import("lodash", ImportedName::Default, "_", false),
+            import("lodash/fp", ImportedName::Default, "fp", false),
+        ],
+    )];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_policy_violations(&graph, &modules, &config, &suppressions, &line_offsets);
+    let matched: Vec<&str> = violations.iter().map(|v| v.matched.as_str()).collect();
+    assert_eq!(matched, vec!["@org/ui/internal/a", "lodash", "lodash/fp"]);
+}
+
+#[test]
 fn banned_export_flags_default_and_prefix_matches() {
     let root = PathBuf::from("/tmp/policy-test");
     let config = make_config(

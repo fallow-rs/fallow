@@ -56,7 +56,7 @@
           }
         },
         "specifiers": {
-          "description": "Import specifiers to ban (`banned-import` only). Matched segment-aware\nagainst the RAW specifier: `moment` covers `moment` and\n`moment/locale/nl` but not `moment-timezone`. Aliased or rewritten\nspecifiers (e.g. `npm:moment`) are not matched.",
+          "description": "Import specifiers to ban (`banned-import` only). Matched segment-aware\nagainst the RAW specifier: `moment` covers `moment` and\n`moment/locale/nl` but not `moment-timezone`. A trailing `/*` form,\nsuch as `@org/ui/*`, matches subpaths only (`@org/ui/internal`) and\nnot the package root (`@org/ui`). Aliased or rewritten specifiers\n(e.g. `npm:moment`) are not matched.",
           "type": "array",
           "items": {
             "type": "string"

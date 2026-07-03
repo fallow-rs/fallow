@@ -97,8 +97,10 @@ pub struct RulePackRule {
     pub callees: Vec<String>,
     /// Import specifiers to ban (`banned-import` only). Matched segment-aware
     /// against the RAW specifier: `moment` covers `moment` and
-    /// `moment/locale/nl` but not `moment-timezone`. Aliased or rewritten
-    /// specifiers (e.g. `npm:moment`) are not matched.
+    /// `moment/locale/nl` but not `moment-timezone`. A trailing `/*` form,
+    /// such as `@org/ui/*`, matches subpaths only (`@org/ui/internal`) and
+    /// not the package root (`@org/ui`). Aliased or rewritten specifiers
+    /// (e.g. `npm:moment`) are not matched.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub specifiers: Vec<String>,
     /// Effect classes to ban (`banned-effect` only). Effects are derived from
@@ -546,11 +548,18 @@ fn validate_banned_import_rule(
     for specifier in &rule.specifiers {
         if specifier.trim().is_empty() {
             errors.push(err("specifier must not be empty".to_owned()));
+        } else if let Some(prefix) = specifier.strip_suffix("/*") {
+            if prefix.is_empty() || prefix.contains('*') {
+                errors.push(err(format!(
+                    "specifier `{specifier}` contains `*`; specifier matching is segment-aware, \
+                     not glob. Only a single trailing `/*` deep-import form is allowed"
+                )));
+            }
         } else if specifier.contains('*') {
             errors.push(err(format!(
                 "specifier `{specifier}` contains `*`; specifier matching is \
                  segment-aware, not glob. List the package or path prefix; subpaths are \
-                 covered automatically"
+                 covered automatically, or use a single trailing `/*` to match subpaths only"
             )));
         }
     }
@@ -1069,6 +1078,36 @@ mod tests {
         );
         let errors = load_rule_packs(dir.path(), &[path]).unwrap_err();
         assert!(errors[0].message.contains("segment-aware, not glob"));
+    }
+
+    #[test]
+    fn accepts_trailing_star_deep_import_specifier() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_pack(
+            dir.path(),
+            "policy.json",
+            r#"{ "version": 1, "name": "p", "rules": [
+                { "id": "no-ui-deep-imports", "kind": "banned-import",
+                  "specifiers": ["@org/ui/*"] }
+            ] }"#,
+        );
+        let packs = load_rule_packs(dir.path(), &[path]).unwrap();
+        assert_eq!(packs[0].rules[0].specifiers, vec!["@org/ui/*"]);
+    }
+
+    #[test]
+    fn rejects_non_trailing_star_import_specifier() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_pack(
+            dir.path(),
+            "policy.json",
+            r#"{ "version": 1, "name": "p", "rules": [
+                { "id": "bad-deep-imports", "kind": "banned-import",
+                  "specifiers": ["@org/*/x"] }
+            ] }"#,
+        );
+        let errors = load_rule_packs(dir.path(), &[path]).unwrap_err();
+        assert!(errors[0].message.contains("single trailing `/*`"));
     }
 
     #[test]
