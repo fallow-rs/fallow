@@ -1,7 +1,10 @@
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 
-use fallow_config::{EffectKind, ResolvedConfig, RulePackRule, RulePackRuleKind, Severity};
+use fallow_config::{
+    EffectKind, ResolvedBoundaryConfig, ResolvedConfig, RulePackDef, RulePackRule,
+    RulePackRuleKind, Severity,
+};
 use fallow_types::extract::ModuleInfo;
 use fallow_types::results::{PolicyRuleKind, PolicyViolation, PolicyViolationSeverity};
 
@@ -27,8 +30,7 @@ struct CompiledRule<'a> {
 impl CompiledRule<'_> {
     /// Whether this rule applies to a project-root-relative file path.
     fn applies_to(&self, relative: &str) -> bool {
-        (self.files.is_empty() || self.files.iter().any(|m| m.is_match(relative)))
-            && !self.exclude.iter().any(|m| m.is_match(relative))
+        compiled_scope_applies(&self.files, &self.exclude, relative)
     }
 
     /// Per-rule severity overriding the file's effective master severity.
@@ -63,6 +65,52 @@ impl CompiledRule<'_> {
         effect_for_callee(module, callee_path, declared_deps)
             .filter(|effect| self.effects.contains(effect))
     }
+}
+
+/// Return rule-pack rules whose include/exclude file scope applies to a path.
+#[must_use]
+pub fn rules_applying_to_path<'a>(
+    rule_packs: &'a [RulePackDef],
+    boundaries: &ResolvedBoundaryConfig,
+    rel_path: &str,
+) -> Vec<(&'a str, &'a RulePackRule)> {
+    // Zone-scoped rule packs are a future extension; Phase 2 only mirrors
+    // current file include/exclude semantics.
+    let _ = boundaries;
+    rule_packs
+        .iter()
+        .flat_map(|pack| {
+            pack.rules
+                .iter()
+                .filter(move |rule| raw_rule_scope_applies(rule, rel_path))
+                .map(|rule| (pack.name.as_str(), rule))
+        })
+        .collect()
+}
+
+fn raw_rule_scope_applies(rule: &RulePackRule, relative: &str) -> bool {
+    let files = compile_scope_globs(&rule.files);
+    let exclude = compile_scope_globs(&rule.exclude);
+    compiled_scope_applies(&files, &exclude, relative)
+}
+
+fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
+    // Rule-pack loading validates these globs. Dropping an unexpected parse
+    // failure keeps this introspection helper defensive like `compile_rules`.
+    patterns
+        .iter()
+        .filter_map(|pattern| globset::Glob::new(pattern).ok())
+        .map(|glob| glob.compile_matcher())
+        .collect()
+}
+
+fn compiled_scope_applies(
+    files: &[globset::GlobMatcher],
+    exclude: &[globset::GlobMatcher],
+    relative: &str,
+) -> bool {
+    (files.is_empty() || files.iter().any(|m| m.is_match(relative)))
+        && !exclude.iter().any(|m| m.is_match(relative))
 }
 
 /// Detect banned calls, imports, and catalogue-derived effects declared by the
@@ -262,20 +310,13 @@ fn compile_rules(config: &ResolvedConfig) -> Vec<CompiledRule<'_>> {
                 .filter_map(|raw| CalleePattern::parse(raw))
                 .collect();
             let effects = rule.effects.iter().copied().collect();
-            let compile = |patterns: &[String]| {
-                patterns
-                    .iter()
-                    .filter_map(|pattern| globset::Glob::new(pattern).ok())
-                    .map(|glob| glob.compile_matcher())
-                    .collect::<Vec<_>>()
-            };
             rules.push(CompiledRule {
                 pack: pack.name.as_str(),
                 rule,
                 callee_patterns,
                 effects,
-                files: compile(&rule.files),
-                exclude: compile(&rule.exclude),
+                files: compile_scope_globs(&rule.files),
+                exclude: compile_scope_globs(&rule.exclude),
             });
         }
     }

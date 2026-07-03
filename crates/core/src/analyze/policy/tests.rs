@@ -15,7 +15,7 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::suppress::SuppressionContext;
 
-use super::find_policy_violations as find_policy_violations_raw;
+use super::{find_policy_violations as find_policy_violations_raw, rules_applying_to_path};
 
 fn rule(id: &str, kind: RulePackRuleKind) -> RulePackRule {
     RulePackRule {
@@ -61,6 +61,34 @@ fn pack(rules: Vec<RulePackRule>) -> RulePackDef {
         description: None,
         rules,
     }
+}
+
+#[test]
+fn rules_applying_to_path_honors_rule_file_scope() {
+    let mut scoped = banned_call("no-domain-process", &["child_process.*"]);
+    scoped.files = vec!["src/domain/**".to_string()];
+    scoped.exclude = vec!["src/domain/generated/**".to_string()];
+    let global = banned_import("no-moment", &["moment"]);
+    let packs = vec![pack(vec![scoped, global])];
+    let boundaries = fallow_config::ResolvedBoundaryConfig::default();
+
+    let matching = rules_applying_to_path(&packs, &boundaries, "src/domain/user.ts");
+    assert_eq!(
+        matching
+            .iter()
+            .map(|(_, rule)| rule.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["no-domain-process", "no-moment"]
+    );
+
+    let excluded = rules_applying_to_path(&packs, &boundaries, "src/domain/generated/user.ts");
+    assert_eq!(
+        excluded
+            .iter()
+            .map(|(_, rule)| rule.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["no-moment"]
+    );
 }
 
 fn make_config(root: PathBuf, packs: Vec<RulePackDef>, master: Severity) -> ResolvedConfig {
