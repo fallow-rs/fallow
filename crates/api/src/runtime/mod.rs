@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use fallow_config::{FallowConfig, ProductionAnalysis, ProductionConfig};
 use fallow_engine::{dead_code::DeadCodeAnalysisArtifacts, session::AnalysisSession};
 use fallow_output::{HealthGrouping, HealthReport, RootEnvelopeMode};
 use fallow_types::output_format::OutputFormat;
@@ -43,6 +44,74 @@ use crate::{
 };
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct EffectiveProductionModes {
+    pub dead_code: bool,
+    pub health: bool,
+    pub dupes: bool,
+}
+
+pub(super) fn resolve_effective_production_modes(
+    resolved: &ProgrammaticAnalysisContext,
+    dead_code_override: Option<bool>,
+    health_override: Option<bool>,
+    dupes_override: Option<bool>,
+) -> ProgrammaticResult<EffectiveProductionModes> {
+    let config = load_context_production_config(resolved)?;
+    Ok(EffectiveProductionModes {
+        dead_code: effective_production_mode(
+            config,
+            ProductionAnalysis::DeadCode,
+            resolved,
+            dead_code_override,
+        ),
+        health: effective_production_mode(
+            config,
+            ProductionAnalysis::Health,
+            resolved,
+            health_override,
+        ),
+        dupes: effective_production_mode(
+            config,
+            ProductionAnalysis::Dupes,
+            resolved,
+            dupes_override,
+        ),
+    })
+}
+
+fn effective_production_mode(
+    config: ProductionConfig,
+    analysis: ProductionAnalysis,
+    resolved: &ProgrammaticAnalysisContext,
+    analysis_override: Option<bool>,
+) -> bool {
+    analysis_override
+        .or_else(|| resolved.production_override())
+        .unwrap_or_else(|| config.for_analysis(analysis))
+}
+
+fn load_context_production_config(
+    resolved: &ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<ProductionConfig> {
+    let loaded = if let Some(path) = resolved.config_path().as_deref() {
+        FallowConfig::load(path).map(Some).map_err(|err| {
+            ProgrammaticError::new(format!("failed to load config: {err:#}"), 2)
+                .with_code("FALLOW_CONFIG_LOAD_FAILED")
+                .with_context("analysis.configPath")
+        })?
+    } else {
+        FallowConfig::find_and_load(resolved.root())
+            .map(|found| found.map(|(config, _)| config))
+            .map_err(|err| {
+                ProgrammaticError::new(format!("failed to load config: {err}"), 2)
+                    .with_code("FALLOW_CONFIG_LOAD_FAILED")
+                    .with_context("analysis.configPath")
+            })?
+    };
+    Ok(loaded.map_or_else(ProductionConfig::default, |config| config.production))
+}
 
 pub(super) fn health_may_consume_dead_code_artifacts(options: &ComplexityOptions) -> bool {
     let sections = derive_complexity_options(options);

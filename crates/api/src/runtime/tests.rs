@@ -279,12 +279,53 @@ fn audit_reuses_dead_code_artifacts_when_only_health_scope_matches() {
         "programmatic audit must keep dead-code plus health artifact reuse in one helper"
     );
     assert!(
-        source.contains("if options.production_dead_code == options.production_health"),
-        "programmatic audit must reuse dead-code artifacts when health shares the dead-code production scope, even if dupes does not"
+        source.contains("production_modes.dead_code == production_modes.health"),
+        "programmatic audit must reuse dead-code artifacts when effective health scope matches dead-code scope"
+    );
+    assert!(
+        !source.contains("if options.production_dead_code == options.production_health"),
+        "programmatic audit must not compare raw production overrides before config resolution"
     );
     assert!(
         source.contains("duplication: run_duplication(&duplication_options)?"),
         "the mixed-scope audit branch must only isolate duplication instead of isolating health too"
+    );
+}
+
+#[test]
+fn effective_production_modes_resolve_per_analysis_config() {
+    let project = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"name":"production-config","type":"module"}"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        project.path().join(".fallowrc.json"),
+        r#"{"production":{"deadCode":false,"health":true,"dupes":false}}"#,
+    )
+    .expect("config");
+
+    let analysis = analysis_at(project.path());
+    let resolved = resolve_programmatic_analysis_context(&analysis).expect("context resolves");
+    let modes =
+        resolve_effective_production_modes(&resolved, None, None, None).expect("modes resolve");
+
+    assert!(!modes.dead_code);
+    assert!(modes.health);
+    assert!(!modes.dupes);
+}
+
+#[test]
+fn combined_reuse_uses_effective_production_modes() {
+    let source = include_str!("combined.rs");
+    assert!(
+        source.contains("resolve_effective_production_modes(&resolved, None, None, None)"),
+        "programmatic combined must resolve config-derived production modes before sharing sessions"
+    );
+    assert!(
+        source.contains("production_modes.dead_code == production_modes.health"),
+        "programmatic combined must compare effective production modes before sharing health artifacts"
     );
 }
 

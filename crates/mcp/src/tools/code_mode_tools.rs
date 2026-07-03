@@ -455,10 +455,10 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
             max_cyclomatic: params.max_cyclomatic,
             max_cognitive: params.max_cognitive,
             max_crap: params.max_crap,
-            complexity: params.complexity.unwrap_or(false),
-            file_scores: params.file_scores.unwrap_or(false),
-            hotspots: params.hotspots.unwrap_or(false),
-            targets: params.targets.unwrap_or(false),
+            complexity: params.complexity.unwrap_or(true),
+            file_scores: params.file_scores.unwrap_or(true),
+            hotspots: params.hotspots.unwrap_or(true),
+            targets: params.targets.unwrap_or(true),
             score: params.score.unwrap_or(false),
             ..ComplexityOptions::default()
         },
@@ -604,6 +604,18 @@ mod tests {
                 tool.name()
             );
         }
+    }
+
+    #[test]
+    fn combined_params_default_to_cli_combined_health_sections() {
+        let options =
+            combined_options_from_params(&CombinedParams::default()).expect("combined options");
+
+        assert!(options.health_options.complexity);
+        assert!(options.health_options.file_scores);
+        assert!(options.health_options.hotspots);
+        assert!(options.health_options.targets);
+        assert!(!options.health_options.score);
     }
 
     #[test]

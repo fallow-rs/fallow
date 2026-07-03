@@ -18,8 +18,9 @@ use crate::{
 };
 
 use super::{
-    ProgrammaticResult, health_may_consume_dead_code_artifacts, root_envelope_mode, run_dead_code,
-    run_duplication, run_health, run_health_with_session_artifacts,
+    ProgrammaticResult, health_may_consume_dead_code_artifacts, resolve_effective_production_modes,
+    root_envelope_mode, run_dead_code, run_duplication, run_health,
+    run_health_with_session_artifacts,
 };
 
 /// Run changed-code audit through typed programmatic runners.
@@ -235,11 +236,17 @@ fn run_audit_subanalyses(
         coverage_root: options.coverage_root.clone(),
         ..ComplexityOptions::default()
     };
+    let resolved = resolve_programmatic_analysis_context(analysis)?;
+    let production_modes = resolve_effective_production_modes(
+        &resolved,
+        options.production_dead_code,
+        options.production_health,
+        options.production_dupes,
+    )?;
 
-    if options.production_dead_code == options.production_dupes
-        && options.production_dead_code == options.production_health
+    if production_modes.dead_code == production_modes.dupes
+        && production_modes.dead_code == production_modes.health
     {
-        let resolved = resolve_programmatic_analysis_context(&dead_code_options.analysis)?;
         return resolved.install(|| {
             let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
             let (dead_code, complexity) = run_dead_code_and_health_with_session(
@@ -263,8 +270,7 @@ fn run_audit_subanalyses(
         });
     }
 
-    if options.production_dead_code == options.production_health {
-        let resolved = resolve_programmatic_analysis_context(&dead_code_options.analysis)?;
+    if production_modes.dead_code == production_modes.health {
         return resolved.install(|| {
             let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
             let (dead_code, complexity) = run_dead_code_and_health_with_session(
@@ -282,8 +288,7 @@ fn run_audit_subanalyses(
         });
     }
 
-    if options.production_dead_code == options.production_dupes {
-        let resolved = resolve_programmatic_analysis_context(&dead_code_options.analysis)?;
+    if production_modes.dead_code == production_modes.dupes {
         return resolved.install(|| {
             let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
             Ok(AuditSubanalyses {
