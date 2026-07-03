@@ -4,12 +4,64 @@ set -eo pipefail
 # Emit inline PR annotations via workflow commands
 # Required env: FALLOW_COMMAND, MAX_ANNOTATIONS, ACTION_JQ_DIR
 # Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
-#   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE
+#   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE,
+#   FALLOW_PR_DECISION_FILE
 
 MAX="${MAX_ANNOTATIONS:-50}"
 if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
   echo "::warning::max-annotations must be a positive integer, got: ${MAX_ANNOTATIONS}. Using default: 50"
   MAX=50
+fi
+
+emit_typed_annotations_if_available() {
+  local decision_file="${FALLOW_PR_DECISION_FILE:-}"
+  if [ -z "$decision_file" ] || [ ! -f "$decision_file" ]; then
+    return 1
+  fi
+
+  local annotations_file
+  annotations_file=$(mktemp)
+  _FALLOW_TMPS+=("$annotations_file")
+
+  if ! jq -r '
+    def esc:
+      tostring
+      | gsub("%"; "%25")
+      | gsub("\r"; "%0D")
+      | gsub("\n"; "%0A");
+    def prop:
+      esc
+      | gsub(","; "%2C")
+      | gsub(":"; "%3A");
+    def workflow_level:
+      if . == "failure" then "error"
+      elif . == "notice" then "notice"
+      else "warning"
+      end;
+    (.annotations // [])[]
+    | (.line // 1) as $line
+    | "::\(.level | workflow_level) file=\(.path | prop),line=\(if $line < 1 then 1 else $line end),title=\(.title | prop)::\(.message | esc)"
+  ' "$decision_file" > "$annotations_file" 2>/dev/null; then
+    echo "::warning::Failed to read typed annotation decision"
+    return 1
+  fi
+
+  local total
+  total=$(wc -l < "$annotations_file" | tr -d ' ')
+  if [ "$total" -gt 0 ]; then
+    head -n "$MAX" "$annotations_file"
+    if [ "$total" -gt "$MAX" ]; then
+      echo "::notice::Showing ${MAX} of ${total} annotations. Increase max-annotations to see more."
+    fi
+  fi
+  return 0
+}
+
+_FALLOW_TMPS=()
+trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
+
+if emit_typed_annotations_if_available; then
+  exit 0
 fi
 
 # Detect package manager from lock files
@@ -49,6 +101,7 @@ if [ -n "${CHANGED_SINCE:-}" ]; then
 fi
 
 ANNOTATIONS_FILE=$(mktemp)
+_FALLOW_TMPS+=("$ANNOTATIONS_FILE")
 : > "$ANNOTATIONS_FILE"
 
 case "$FALLOW_COMMAND" in
@@ -80,5 +133,3 @@ if [ "$TOTAL" -gt 0 ]; then
     echo "::notice::Showing ${MAX} of ${TOTAL} annotations. Increase max-annotations to see more."
   fi
 fi
-
-rm -f "$ANNOTATIONS_FILE"

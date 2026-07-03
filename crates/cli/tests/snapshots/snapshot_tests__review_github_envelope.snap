@@ -4,10 +4,10 @@ expression: json_str
 ---
 {
   "event": "COMMENT",
-  "body": "### Fallow dead-code report\n\n27 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 581bc9a364403daa -->",
+  "body": "### Fallow dead-code report\n\n**Quality gate failed**\n\n27 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 178550d811bfb16b -->",
   "summary": {
-    "body": "### Fallow dead-code report\n\n27 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 581bc9a364403daa -->",
-    "fingerprint": "581bc9a364403daa"
+    "body": "### Fallow dead-code report\n\n**Quality gate failed**\n\n27 inline findings selected for GitHub review.\n\n<!-- fallow-review -->\n\n<!-- fallow-fingerprint:v2: 178550d811bfb16b -->",
+    "fingerprint": "178550d811bfb16b"
   },
   "comments": [
     {
@@ -112,7 +112,7 @@ expression: json_str
       "path": "src/app.ts",
       "line": 3,
       "side": "RIGHT",
-      "body": "**error** `fallow/unresolved-import`: Import './missing-module' could not be resolved\n\n<!-- fallow-fingerprint:v2: 231a7ed9e16a19a6 -->",
+      "body": "**error** `fallow/unresolved-import`: Import './missing-module' could not be resolved\n\n> Fix intent: Fix the import path or install the missing package.\n\n<!-- fallow-fingerprint:v2: 231a7ed9e16a19a6 -->",
       "fingerprint": "231a7ed9e16a19a6"
     },
     {
@@ -133,7 +133,7 @@ expression: json_str
       "path": "src/dead.ts",
       "line": 1,
       "side": "RIGHT",
-      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n> Run `fallow fix --files` or delete this file.\n\n<!-- fallow-fingerprint:v2: e3912cb6bb9b0212 -->",
+      "body": "**error** `fallow/unused-file`: File is not reachable from any entry point\n\n> Fix intent: Delete the file or add a real entry-point reference.\n\n> Run `fallow fix --files` or delete this file.\n\n<!-- fallow-fingerprint:v2: e3912cb6bb9b0212 -->",
       "fingerprint": "e3912cb6bb9b0212"
     },
     {
@@ -196,7 +196,7 @@ expression: json_str
       "path": "src/utils.ts",
       "line": 10,
       "side": "RIGHT",
-      "body": "**error** `fallow/unused-export`: Export 'helperFn' is never imported by other modules\n\n<!-- fallow-fingerprint:v2: ebe2360218821412 -->",
+      "body": "**error** `fallow/unused-export`: Export 'helperFn' is never imported by other modules\n\n> Fix intent: Remove the export or mark it public if it is part of the API.\n\n<!-- fallow-fingerprint:v2: ebe2360218821412 -->",
       "fingerprint": "ebe2360218821412"
     }
   ],

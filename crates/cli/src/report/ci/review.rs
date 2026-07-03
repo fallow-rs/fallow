@@ -252,6 +252,27 @@ mod tests {
     }
 
     #[test]
+    fn review_summary_body_leads_with_decision() {
+        let issues = vec![issue(
+            "fallow/unused-file",
+            "major",
+            "src/a.ts",
+            1,
+            "abc1234567890def",
+        )];
+        let envelope = to_value(&render_review_envelope(
+            "combined",
+            Provider::Github,
+            &issues,
+        ));
+        let body = envelope["body"].as_str().expect("body is string");
+
+        assert!(body.contains("Quality gate failed"), "{body}");
+        assert!(body.contains("1 inline finding selected"), "{body}");
+        assert!(body.contains("<!-- fallow-review -->"), "{body}");
+    }
+
+    #[test]
     fn github_comments_target_current_state_side() {
         let issue = issue("fallow/unused-file", "minor", "src/a.ts", 1, "abc");
         let comment = comment_to_value(&render_merged_comment(

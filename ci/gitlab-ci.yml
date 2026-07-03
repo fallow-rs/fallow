@@ -94,6 +94,7 @@ variables:
   FALLOW_CODEQUALITY: "true"    # Generate GitLab Code Quality report (inline MR annotations)
   FALLOW_MAX_COMMENTS: "50"     # Maximum number of inline review comments + items in the sticky details table
   FALLOW_COMMENT_ID: ""         # Sticky-comment marker id; auto-suffixed with the workspace name when scoped to one workspace and unset
+  FALLOW_PR_COMMENT_LAYOUT: "default" # Sticky MR comment layout: default, compact, gate-only, or details
   FALLOW_SUMMARY_SCOPE: "all"   # Sticky MR summary scope: 'all' keeps project-level dependency/catalog/override findings outside the diff; 'diff' applies the diff filter to them too. Inline review discussions are unaffected. If the diff cannot be read, fallow reports all findings.
   FALLOW_DIFF_FILTER: "added"   # Diff-aware filter: 'added' | 'diff_context' | 'file' | 'nofilter'
   FALLOW_DIFF_FILE: ""          # Path to a unified-diff file. When unset and CI_MERGE_REQUEST_DIFF_BASE_SHA is set, the comment / review scripts derive it via `git diff` (see the script blocks below). When set OR derived, fallow narrows findings to lines inside an added hunk. Sticky summary comments keep project-level findings by default unless FALLOW_SUMMARY_SCOPE is 'diff'; inline review discussions stay diff-anchored. When both FALLOW_DIFF_FILE and FALLOW_CHANGED_SINCE are set, --diff-file wins for line-level filtering and --changed-since still scopes file discovery; fallow logs a one-line stderr note.
@@ -728,6 +729,14 @@ variables:
     when: always
     paths:
       - fallow-results.json
+      - fallow-analysis-args.sh
+      - fallow-mr-comment.md
+      - fallow-mr-comment-envelope.json
+      - fallow-mr-comment-plan.json
+      - fallow-mr-decision.json
+      - fallow-mr-details.json
+      - fallow-review.json
+      - fallow-review-post.json
       # Sidecar markers written by comment.sh / review.sh on dedup-lookup
       # failure. Downstream jobs gate on these to detect degraded posting
       # state (greppable: `none` vs `pagination_failure` for skip-reason,

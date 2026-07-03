@@ -363,13 +363,8 @@ pub fn render_review_envelope(input: &ReviewEnvelopeRenderInput<'_>) -> ReviewEn
         })
         .collect();
 
-    let summary_text = format!(
-        "### Fallow {}\n\n{} inline finding{} selected for {} review.\n\n<!-- fallow-review -->",
-        command_title(input.command),
-        comments.len(),
-        if comments.len() == 1 { "" } else { "s" },
-        input.provider.name(),
-    );
+    let summary_text =
+        review_summary_text(input.command, input.provider, comments.len(), input.issues);
     let summary_fp = summary_fingerprint(&summary_text);
     let summary_marker = format!("\n\n{MARKER_PREFIX_V2}{summary_fp}{MARKER_SUFFIX_V2}");
     let body = format!("{summary_text}{summary_marker}");
@@ -392,6 +387,31 @@ pub fn render_review_envelope(input: &ReviewEnvelopeRenderInput<'_>) -> ReviewEn
             input.issues,
         ),
         truncation,
+    }
+}
+
+fn review_summary_text(
+    command: &str,
+    provider: CiProvider,
+    comment_count: usize,
+    issues: &[CiIssue],
+) -> String {
+    let verdict = review_summary_verdict(issues);
+    format!(
+        "### Fallow {}\n\n**{}**\n\n{} inline finding{} selected for {} review.\n\n<!-- fallow-review -->",
+        command_title(command),
+        verdict,
+        comment_count,
+        if comment_count == 1 { "" } else { "s" },
+        provider.name(),
+    )
+}
+
+fn review_summary_verdict(issues: &[CiIssue]) -> &'static str {
+    match github_check_conclusion(issues) {
+        ReviewCheckConclusion::Failure => "Quality gate failed",
+        ReviewCheckConclusion::Neutral => "Review needed",
+        ReviewCheckConclusion::Success => "Quality gate passed",
     }
 }
 

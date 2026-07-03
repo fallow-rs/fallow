@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Richer PR and MR reporting for GitHub Actions and GitLab CI.** The bundled
+  CI integrations now render sticky summary comments from typed Rust output,
+  with a gate table, an attention banner, top fixes, and sidecar artifacts for
+  full drilldown. Clean runs no longer create a new sticky comment; if an older
+  Fallow comment already exists, the integration updates it so stale warnings
+  disappear. GitHub Actions also posts a native Fallow Check Run from the same
+  decision artifact when `checks: write` is available, while workflow
+  annotations and job summaries prefer the typed sidecars before falling back to
+  the legacy jq summaries. Inline GitHub review comments and GitLab MR
+  discussions skip clean zero-comment envelopes, so dead-code-only jobs no
+  longer leave "0 inline findings" timeline noise.
+
 ## [2.104.0] - 2026-07-01
 
 ### Added

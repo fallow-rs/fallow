@@ -463,16 +463,15 @@ assert_issuekind_summary_table_contract() {
   pass "$label: summary labels and docs anchors match registry"
 }
 
-# Assert the VS Code extension's DIAGNOSTIC_CATEGORIES (the diagnostic-code
-# catalog that drives the mute filter and seeds the counted / rendered surfaces)
-# carries every canonical dead-code IssueKind. DIAGNOSTIC_CATEGORIES keys on the
-# singular kebab rule-id (e.g. `code: "unused-file"`), which equals the `fallow
-# schema` issue-type id, so the canonical set is checked directly with no key
-# mapping. Same single source as the jq surfaces. This closes the last surface a
-# new kind could silently miss: once a kind is in DIAGNOSTIC_CATEGORIES,
-# deadCodeKindDrift.test.ts forces its count / tree / label and the LSP severity
-# gate forces its diagnostic, so the whole VS Code chain is covered. The catalog
-# is provider-agnostic, so this runs once (from the GitHub runner).
+# Assert the VS Code extension's DIAGNOSTIC_CATEGORIES, the LSP diagnostic-code
+# catalog that drives the mute filter, carries every canonical dead-code
+# IssueKind that actually has an LSP diagnostic. DIAGNOSTIC_CATEGORIES keys on
+# the singular kebab rule-id (e.g. `code: "unused-file"`), which equals the
+# `fallow schema` issue-type id for LSP-visible rows. Same single source as the
+# jq surfaces, with documented skips for rule identities that are SARIF /
+# CodeClimate / audit-only and deliberately have `lsp: false` in IssueKindMeta.
+# This closes the last LSP surface a new diagnostic kind could silently miss.
+# The catalog is provider-agnostic, so this runs once (from the GitHub runner).
 assert_issuekind_vscode_category_coverage() {
   local label="$1" ts_file="$2"
   local ts_src ids id code key wiring_file wiring_src missing=() missing_wiring=() skipped=() unmapped=()
@@ -515,6 +514,10 @@ assert_issuekind_vscode_category_coverage() {
     if ! printf '%s' "$wiring_src" | grep -qE "field: \"${key}\""; then
       missing_wiring+=("$id -> $key")
     fi
+    if [ "$id" = "missing-suppression-reason" ]; then
+      skipped+=("$id")
+      continue
+    fi
     # The catalog carries each kind under its diagnostic CODE (the boundary
     # family collapses to boundary-violation); the quotes bound the match so
     # "unused-file" never matches "unused-files".
@@ -537,7 +540,7 @@ assert_issuekind_vscode_category_coverage() {
 
   if [ "${#missing[@]}" -gt 0 ]; then
     fail "$label: every dead-code IssueKind appears in DIAGNOSTIC_CATEGORIES" \
-      "absent diagnostic code(s): ${missing[*]} (add to editors/vscode/src/diagnosticFilter.ts)"
+      "absent diagnostic code(s): ${missing[*]} (add to editors/vscode/src/generated/issue-types.ts via codegen)"
     return
   fi
 

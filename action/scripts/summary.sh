@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-# Write job summary using the appropriate jq script
+# Write job summary. Prefer the typed PR/MR comment envelope produced by the
+# Rust renderer, then fall back to the jq job-summary renderers for standalone
+# runs that do not post a PR comment.
 # Required env: FALLOW_COMMAND, ACTION_JQ_DIR
 # Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
-#   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE
+#   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE,
+#   FALLOW_PR_COMMENT_ENVELOPE_FILE
 
 select_summary_script() {
   case "$FALLOW_COMMAND" in
@@ -18,6 +21,29 @@ select_summary_script() {
     *)               echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
   esac
 }
+
+append_typed_summary_if_available() {
+  local envelope_file="${FALLOW_PR_COMMENT_ENVELOPE_FILE:-}"
+  if [ -z "$envelope_file" ] || [ ! -f "$envelope_file" ]; then
+    return 1
+  fi
+
+  local body
+  if ! body=$(jq -r '.body // empty' "$envelope_file" 2>/dev/null); then
+    echo "::warning::Failed to read typed job summary envelope"
+    return 1
+  fi
+  if [ -z "$body" ]; then
+    return 1
+  fi
+
+  echo "$body" >> "$GITHUB_STEP_SUMMARY"
+  return 0
+}
+
+if append_typed_summary_if_available; then
+  exit 0
+fi
 
 JQ_FILE=$(select_summary_script)
 if [ ! -f "$JQ_FILE" ]; then

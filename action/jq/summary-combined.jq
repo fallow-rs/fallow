@@ -1,3 +1,6 @@
+# Job-summary renderer only. Sticky PR comments use the typed Rust renderer
+# behind --format pr-comment-github and fallow ci post-pr-comment.
+
 def count(obj; key): obj | if . then .[key] // 0 else 0 end;
 def pct(n): n | . * 10 | round / 10;
 def signed(n): if n > 0 then "+\(pct(n))" elif n < 0 then "\(pct(n))" else "0.0" end;
@@ -84,12 +87,12 @@ else "" end) +
 if $total == 0 then
   "# \ud83c\udf3f Fallow\n\n" +
   (if $prod_advisory > 0 or $hot_paths > 0 then
-    "> [!NOTE]\n> **No blocking issues found**\n\n" +
+    "> [!NOTE]\n> **Quality gate passed**\n\n" +
     ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No blocking health findings" +
     (if $prod_advisory > 0 then " \u00b7 :information_source: **\($prod_advisory)** runtime coverage advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
     (if $hot_paths > 0 then " \u00b7 :eyes: **\($hot_paths)** \(prod_hot_path_label($hot_paths))" else "" end)
   else
-    "> [!NOTE]\n> **No issues found**\n\n" +
+    "> [!NOTE]\n> **Quality gate passed**\n\n" +
     ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No complex functions"
   end) +
   (if $vitals.maintainability_avg then
@@ -98,6 +101,8 @@ if $total == 0 then
   else "" end)
 else
   "# \ud83c\udf3f Fallow\n\n" +
+
+  "> [!WARNING]\n> **Review needed**\n\n" +
 
   # One-line status
   (if $check > 0 then ":warning: **\($check)** code \(if $check == 1 then "issue" else "issues" end)" else ":white_check_mark: No code issues" end) +

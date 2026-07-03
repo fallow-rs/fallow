@@ -1,5 +1,7 @@
 # GitLab variant of summary-combined.jq
 # Differences from GitHub: no > [!NOTE] / > [!TIP] callouts
+# Job-summary renderer only. Sticky MR comments should use typed Rust output
+# behind --format pr-comment-gitlab and the Rust CI posting boundary.
 
 def count(obj; key): obj | if . then .[key] // 0 else 0 end;
 def pct(n): n | . * 10 | round / 10;
@@ -87,12 +89,12 @@ else "" end) +
 if $total == 0 then
   "# :seedling: Fallow\n\n" +
   (if $prod_advisory > 0 or $hot_paths > 0 then
-    "> **No blocking issues found**\n\n" +
+    "> **Quality gate passed**\n\n" +
     ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No blocking health findings" +
     (if $prod_advisory > 0 then " \u00b7 :information_source: **\($prod_advisory)** runtime coverage advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
     (if $hot_paths > 0 then " \u00b7 :eyes: **\($hot_paths)** \(prod_hot_path_label($hot_paths))" else "" end)
   else
-    "> **No issues found**\n\n" +
+    "> **Quality gate passed**\n\n" +
     ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No complex functions"
   end) +
   (if $vitals.maintainability_avg then
@@ -101,6 +103,8 @@ if $total == 0 then
   else "" end)
 else
   "# :seedling: Fallow\n\n" +
+
+  "> **Review needed**\n\n" +
 
   # One-line status
   (if $check > 0 then ":warning: **\($check)** code \(if $check == 1 then "issue" else "issues" end)" else ":white_check_mark: No code issues" end) +

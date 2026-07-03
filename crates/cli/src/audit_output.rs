@@ -7,6 +7,7 @@ use fallow_api::{
     DupesReportPayload,
 };
 use fallow_config::{AuditGate, OutputFormat};
+use fallow_output::PrDecisionConclusion;
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::results::AnalysisResults;
 
@@ -33,18 +34,20 @@ pub fn print_audit_result(result: &AuditResult, quiet: bool, explain: bool) -> E
         OutputFormat::CodeClimate => print_audit_codeclimate(result),
         OutputFormat::PrCommentGithub => {
             let value = build_audit_codeclimate(result);
-            report::ci::pr_comment::print_pr_comment(
+            report::ci::pr_comment::print_pr_comment_with_conclusion(
                 "audit",
                 report::ci::pr_comment::Provider::Github,
                 &value,
+                audit_decision_conclusion(result.verdict),
             )
         }
         OutputFormat::PrCommentGitlab => {
             let value = build_audit_codeclimate(result);
-            report::ci::pr_comment::print_pr_comment(
+            report::ci::pr_comment::print_pr_comment_with_conclusion(
                 "audit",
                 report::ci::pr_comment::Provider::Gitlab,
                 &value,
+                audit_decision_conclusion(result.verdict),
             )
         }
         OutputFormat::ReviewGithub => {
@@ -76,6 +79,14 @@ pub fn print_audit_result(result: &AuditResult, quiet: bool, explain: bool) -> E
     match result.verdict {
         AuditVerdict::Fail => ExitCode::from(1),
         AuditVerdict::Pass | AuditVerdict::Warn => ExitCode::SUCCESS,
+    }
+}
+
+fn audit_decision_conclusion(verdict: AuditVerdict) -> PrDecisionConclusion {
+    match verdict {
+        AuditVerdict::Pass => PrDecisionConclusion::Success,
+        AuditVerdict::Warn => PrDecisionConclusion::Neutral,
+        AuditVerdict::Fail => PrDecisionConclusion::Failure,
     }
 }
 
@@ -579,12 +590,14 @@ mod tests {
     use std::time::Duration;
 
     use fallow_config::{AuditGate, OutputFormat};
+    use fallow_output::PrDecisionConclusion;
 
     use crate::audit::{AuditAttribution, AuditResult, AuditSummary, AuditVerdict};
 
     use super::{
-        build_audit_codeclimate, build_audit_json_output, build_status_parts,
-        build_vital_sign_parts, format_scope_line_parts, print_audit_result, short_base_ref,
+        audit_decision_conclusion, build_audit_codeclimate, build_audit_json_output,
+        build_status_parts, build_vital_sign_parts, format_scope_line_parts, print_audit_result,
+        short_base_ref,
     };
 
     fn audit_result(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {
@@ -750,6 +763,22 @@ mod tests {
         let result = audit_result(AuditVerdict::Fail, OutputFormat::Human);
 
         assert_eq!(print_audit_result(&result, true, false), ExitCode::from(1));
+    }
+
+    #[test]
+    fn audit_verdict_maps_to_pr_decision_conclusion() {
+        assert_eq!(
+            audit_decision_conclusion(AuditVerdict::Pass),
+            PrDecisionConclusion::Success
+        );
+        assert_eq!(
+            audit_decision_conclusion(AuditVerdict::Warn),
+            PrDecisionConclusion::Neutral
+        );
+        assert_eq!(
+            audit_decision_conclusion(AuditVerdict::Fail),
+            PrDecisionConclusion::Failure
+        );
     }
 
     fn audit_result_with_findings(verdict: AuditVerdict, output: OutputFormat) -> AuditResult {

@@ -700,7 +700,7 @@ assert_contains "$OUT" "2 groups · 66 lines" "dupes: header carries group count
 assert_not_contains "$OUT" "| [Duplicated lines]" "dupes: old metric table is gone"
 
 OUT_EMPTY_DUPES_GL=$(jq '.dupes.clone_groups = [] | .dupes.clone_families = [] | .dupes.stats.clone_groups = 2 | .dupes.stats.clone_instances = 5 | .dupes.stats.files_with_clones = 4 | .dupes.stats.duplicated_lines = 59 | .dupes.stats.duplication_percentage = 0.16' "$FIXTURES/combined-clean.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
-assert_contains "$OUT_EMPTY_DUPES_GL" "No issues found" "combined: empty dupes groups keep clean GitLab summary"
+assert_contains "$OUT_EMPTY_DUPES_GL" "Quality gate passed" "combined: empty dupes groups keep clean GitLab summary"
 assert_contains "$OUT_EMPTY_DUPES_GL" "No duplication" "combined: empty dupes groups render no GitLab duplication"
 assert_not_contains "$OUT_EMPTY_DUPES_GL" "2 groups" "combined: nonzero dupes stats do not render GitLab actionable groups"
 
@@ -823,7 +823,7 @@ assert_not_contains "$OUT_NO_FIX" "@public" "tip: no @public tip when no unused 
 
 echo "  summary-combined.jq (clean state, GitLab):"
 OUT_CLEAN=$(jq -r -f "$CI_JQ_DIR/summary-combined.jq" "$FIXTURES/combined-clean.json" 2>&1)
-assert_contains "$OUT_CLEAN" "No issues found" "clean: no issues"
+assert_contains "$OUT_CLEAN" "Quality gate passed" "clean: no issues"
 assert_contains "$OUT_CLEAN" "Maintainability" "clean: shows maintainability"
 
 echo "  summary-combined.jq (delta header with trend, GitLab):"
@@ -1036,6 +1036,9 @@ assert_contains "$(cat "$CI_YAML")" "review.sh" "references review.sh"
 assert_contains "$(cat "$CI_YAML")" "gitlab_common.sh" "references shared GitLab helper script"
 assert_contains "$(cat "$CI_YAML")" "gl-code-quality-report" "generates Code Quality report"
 assert_contains "$(cat "$CI_YAML")" 'type == "array"' "preserves valid Code Quality reports from nonzero audit exits"
+assert_contains "$(cat "$CI_YAML")" "fallow-mr-comment-envelope.json" "keeps typed MR comment envelope artifact"
+assert_contains "$(cat "$CI_YAML")" "fallow-mr-decision.json" "keeps typed MR decision artifact"
+assert_contains "$(cat "$CI_YAML")" "fallow-review-post.json" "keeps typed MR review post artifact"
 assert_contains "$(cat "$CI_YAML")" '.error == true' "fails on structured fallow error JSON"
 assert_contains "$(cat "$CI_YAML")" "does not support FALLOW_BASELINE/FALLOW_SAVE_BASELINE" "audit rejects generic baseline variables"
 assert_contains "$(cat "$CI_YAML")" "suggestion" "mentions suggestion blocks in docs"
@@ -1051,11 +1054,13 @@ SCRIPTS_DIR="$DIR/../scripts"
 GITLAB_COMMON="$(cat "$SCRIPTS_DIR/gitlab_common.sh")"
 
 echo "  comment.sh:"
-assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "PRIVATE-TOKEN" "supports GITLAB_TOKEN"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "GITLAB_TOKEN" "requires GitLab token"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "CI_JOB_TOKEN is read-only" "explains CI_JOB_TOKEN write limitation"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "fallow-results" "uses fallow-results marker"
-assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "PUT" "can update existing comment"
-assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "POST" "can create new comment"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "fallow ci post-pr-comment" "delegates MR comment posting to Rust"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "--provider gitlab" "uses GitLab post provider"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_COMMENT_ENVELOPE_FILE" "comment.sh asks fallow for typed PR comment envelope"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "--envelope" "comment.sh passes typed PR comment envelope when present"
 assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "gitlab_common.sh" "loads shared GitLab API helpers"
 assert_contains "$GITLAB_COMMON" "curl_retry" "wraps GitLab API calls with retry"
 assert_contains "$GITLAB_COMMON" "rate limit response; retrying" "retries GitLab rate-limit responses"
@@ -1063,13 +1068,11 @@ assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "Unsupported FALLOW_SUMMARY_S
 
 echo "  review.sh:"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "review-gitlab" "renders typed GitLab review envelope"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow ci reconcile-review" "reconciles resolved discussions"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "--provider gitlab" "uses GitLab reconcile provider"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "discussions" "uses GitLab Discussions API"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "position" "posts with position for inline comments"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow ci post-review" "delegates GitLab review posting to Rust"
+assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "--provider gitlab" "uses GitLab post provider"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "suggestion" "adds suggestion blocks"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow-review" "uses fallow-review marker"
-assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "fallow-fingerprint" "deduplicates by typed fingerprint"
+assert_contains "$(cat "$DIR/../../crates/cli/src/ci_review_post.rs")" "fingerprint" "Rust review post deduplicates by typed fingerprint"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "gitlab_common.sh" "loads shared GitLab API helpers"
 assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "merge-comments" "does not keep legacy jq merge fallback"
 assert_not_contains "$(cat "$SCRIPTS_DIR/review.sh")" "FALLOW_SHARED_JQ_DIR" "does not use shared jq fallback scripts"
@@ -1092,7 +1095,13 @@ cat > "$CI_TYPED_BIN/fallow" <<'SH'
 printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
 printf 'summary_scope=%s\n' "${FALLOW_SUMMARY_SCOPE:-}" >> "$MOCK_LOG"
 if [ "${1:-}" = "ci" ]; then
-  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  if [ "${2:-}" = "post-pr-comment" ]; then
+    printf '{"action":"update","marker_id":"fallow-results","comment_id":"777","body":"ok"}\n'
+  elif [ "${2:-}" = "post-review" ]; then
+    printf '{"action":"post_review","comments_posted":1,"apply_errors":[],"post_errors":[]}\n'
+  else
+    printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  fi
   exit 0
 fi
 format=""
@@ -1106,6 +1115,12 @@ for arg in "$@"; do
 done
 case "$format" in
   pr-comment-gitlab)
+    if [ -n "${FALLOW_PR_DECISION_FILE:-}" ]; then
+      printf '{"schema":"fallow-pr-decision/v1","title":"Fallow","conclusion":"success","gates":[],"annotations":[],"details":{"summary_markdown":"Clean","full_report_path":null,"details_url":null}}\n' > "$FALLOW_PR_DECISION_FILE"
+    fi
+    if [ -n "${FALLOW_PR_DETAILS_FILE:-}" ]; then
+      printf '{"schema":"fallow-pr-details/v1","title":"Fallow","sections":[]}\n' > "$FALLOW_PR_DETAILS_FILE"
+    fi
     printf '<!-- fallow-id: fallow-results -->\n### Fallow smoke\n\nGenerated by fallow.\n'
     ;;
   review-gitlab)
@@ -1194,18 +1209,20 @@ printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_TYPED_WORK
 CI_TYPED_OUT=$(cat "$CI_TYPED_LOG")
 assert_contains "$CI_TYPED_OUT" "--format pr-comment-gitlab" "comment.sh invokes typed MR comment format"
 assert_contains "$CI_TYPED_OUT" "--format review-gitlab" "review.sh invokes typed GitLab review format"
+assert_contains "$CI_TYPED_OUT" "fallow ci post-pr-comment --provider gitlab" "comment.sh invokes GitLab MR comment post command"
 assert_contains "$CI_TYPED_OUT" "summary_scope=diff" "comment.sh passes FALLOW_SUMMARY_SCOPE to typed MR comment render"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DECISION_FILE" "comment.sh asks fallow for typed MR decision sidecar"
+assert_contains "$(cat "$SCRIPTS_DIR/comment.sh")" "FALLOW_PR_DETAILS_FILE" "comment.sh asks fallow for typed MR details artifact"
+assert_contains "$(cat "$DIR/../../ci/gitlab-ci.yml")" "FALLOW_PR_COMMENT_LAYOUT" "GitLab template exposes sticky MR comment layout"
 CI_BLANK_SUMMARY_SCOPE_COUNT=$(printf '%s\n' "$CI_TYPED_OUT" | grep -c '^summary_scope=$' || true)
 if [ "$CI_BLANK_SUMMARY_SCOPE_COUNT" -ge 1 ]; then
   pass "review.sh does not receive FALLOW_SUMMARY_SCOPE by default"
 else
   fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$CI_TYPED_OUT"
 fi
-assert_contains "$CI_TYPED_OUT" "fallow ci reconcile-review --provider gitlab" "review.sh invokes GitLab reconcile command"
+assert_contains "$CI_TYPED_OUT" "fallow ci post-review --provider gitlab" "review.sh invokes GitLab review post command"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_errors" "review.sh checks reconcile apply errors"
 assert_contains "$(cat "$SCRIPTS_DIR/review.sh")" "apply_hint" "review.sh emits reconcile apply hint"
-assert_contains "$CI_TYPED_OUT" "merge_requests/123/discussions" "review.sh posts discussion payload"
-assert_contains "$CI_TYPED_OUT" "merge_requests/123/notes/777" "review.sh updates existing body-only review note"
 rm -rf "$CI_TYPED_WORK"
 
 # =========================================================================
@@ -1317,17 +1334,22 @@ CI_API_FAIL_BIN="$CI_API_FAIL_WORK/bin"
 mkdir -p "$CI_API_FAIL_BIN"
 SCRIPTS_DIR="$DIR/../scripts"
 
-# Shared fallow + curl mocks. The curl mock fails the /discussions paginate
-# call (review.sh multi-discussion dedup) AND the /notes paginate call
-# (comment.sh + review.sh summary-only dedup) when MOCK_PAGINATE_FAIL is
-# set. Other curl calls (MR diff_refs, POST to /discussions, etc.) succeed.
+# Shared fallow + curl mocks. The curl mock fails review.sh pagination when
+# MOCK_PAGINATE_FAIL is set. comment.sh no longer performs provider lookup in
+# shell; it delegates sticky MR posting to `fallow ci post-pr-comment`.
 
 write_ci_api_fail_mocks() {
   cat > "$CI_API_FAIL_BIN/fallow" <<'SH'
 #!/usr/bin/env bash
 printf 'fallow %s\n' "$*" >> "$MOCK_LOG"
 if [ "${1:-}" = "ci" ]; then
-  printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  if [ "${2:-}" = "post-pr-comment" ]; then
+    printf '{"action":"update","marker_id":"fallow-results","comment_id":"777","body":"ok"}\n'
+  elif [ "${2:-}" = "post-review" ]; then
+    printf '{"action":"post_review","comments_posted":1,"apply_errors":[],"post_errors":[]}\n'
+  else
+    printf '{"schema":"fallow-review-reconcile/v1","stale":[]}\n'
+  fi
   exit 0
 fi
 format=""
@@ -1436,57 +1458,51 @@ ci_api_fail_review_run() {
   printf -v "$stderr_var" '%s' "$_stderr"
 }
 
-# Test 7: review.sh multi-discussion dedup, page-2 5xx -> exit 0, no POST, sidecar set
+# Test 7: review.sh delegates provider posting and dedup to Rust.
 ci_api_fail_review_run "5xx" R7_STATUS R7_STDERR ""
 [ "$R7_STATUS" -eq 0 ] \
-  && pass "review.sh: multi-discussion dedup-lookup 5xx failure exits 0" \
-  || fail "review.sh: multi-discussion dedup-lookup 5xx failure exits 0" "got $R7_STATUS"
+  && pass "review.sh: Rust-delegated review post exits 0" \
+  || fail "review.sh: Rust-delegated review post exits 0" "got $R7_STATUS"
 if [ -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" ] && grep -q '^pagination_failure$' "$CI_API_FAIL_WORK/fallow-skip-reason.txt"; then
-  pass "review.sh: writes pagination_failure to fallow-skip-reason.txt on dedup-lookup failure"
-else
-  fail "review.sh: writes pagination_failure to fallow-skip-reason.txt on dedup-lookup failure" \
+  fail "review.sh: leaves skip reason untouched while Rust owns dedup policy" \
     "got: $(cat "$CI_API_FAIL_WORK/fallow-skip-reason.txt" 2>/dev/null || echo absent)"
-fi
-assert_contains "$R7_STDERR" "skipping inline review to avoid duplicates" \
-  "review.sh: warning surfaces dedup-lookup skip"
-if /usr/bin/grep -q "merge_requests/123/discussions" "$CI_API_FAIL_WORK/mock.log" \
-    && /usr/bin/grep -q -- "--request POST" "$CI_API_FAIL_WORK/mock.log"; then
-  fail "review.sh: no inline discussion POST after dedup-lookup failure" "POST happened"
 else
-  pass "review.sh: no inline discussion POST after dedup-lookup failure"
+  pass "review.sh: leaves skip reason untouched while Rust owns dedup policy"
+fi
+assert_contains "$(cat "$CI_API_FAIL_WORK/mock.log")" "fallow ci post-review --provider gitlab" \
+  "review.sh: delegates provider review posting to Rust"
+if /usr/bin/grep -q -- "--request POST" "$CI_API_FAIL_WORK/mock.log"; then
+  fail "review.sh: does not call curl POST for review posting" "$(cat "$CI_API_FAIL_WORK/mock.log")"
+else
+  pass "review.sh: does not call curl POST for review posting"
 fi
 
-# Test 7b: review.sh summary-only path (MOCK_ZERO_REVIEW=1) posts anyway on
-# dedup-lookup failure (parity with action/scripts/review.sh summary-only).
-# Marker contract: fallow-dedup-lookup-failed.txt = true, fallow-skip-reason.txt
-# stays = none because the post is not actually skipped.
+# Test 7b: summary-only path also delegates provider posting to Rust.
 ci_api_fail_review_run "5xx" R7B_STATUS R7B_STDERR "1"
 [ "$R7B_STATUS" -eq 0 ] \
-  && pass "review.sh: summary-only path exits 0 on dedup-lookup failure" \
-  || fail "review.sh: summary-only path exits 0 on dedup-lookup failure" "got $R7B_STATUS"
-assert_contains "$R7B_STDERR" "posting a new one (may duplicate)" \
-  "review.sh: summary-only path warning explains duplicate-risk fallback"
+  && pass "review.sh: summary-only path delegates and exits 0" \
+  || fail "review.sh: summary-only path delegates and exits 0" "got $R7B_STATUS"
 if [ -f "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" ] && grep -q '^true$' "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"; then
-  pass "review.sh: summary-only path writes true to fallow-dedup-lookup-failed.txt"
-else
-  fail "review.sh: summary-only path writes true to fallow-dedup-lookup-failed.txt" \
+  fail "review.sh: summary-only path leaves dedup marker false while Rust owns dedup policy" \
     "got: $(cat "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null || echo absent)"
+else
+  pass "review.sh: summary-only path leaves dedup marker false while Rust owns dedup policy"
 fi
 if [ -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" ] && grep -q '^none$' "$CI_API_FAIL_WORK/fallow-skip-reason.txt"; then
-  pass "review.sh: summary-only path does NOT flip fallow-skip-reason.txt"
+  pass "review.sh: summary-only path keeps fallow-skip-reason.txt at none"
 else
-  fail "review.sh: summary-only path does NOT flip fallow-skip-reason.txt" \
+  fail "review.sh: summary-only path keeps fallow-skip-reason.txt at none" \
     "got: $(cat "$CI_API_FAIL_WORK/fallow-skip-reason.txt" 2>/dev/null || echo absent)"
 fi
 
-# Test 8: review.sh multi-discussion dedup, page-2 4xx -> exit 1
+# Test 8: provider 4xx policy now lives in Rust; shell wrapper remains non-fatal.
 ci_api_fail_review_run "4xx" R8_STATUS R8_STDERR ""
-[ "$R8_STATUS" -eq 1 ] \
-  && pass "review.sh: multi-discussion dedup-lookup 4xx failure exits 1" \
-  || fail "review.sh: multi-discussion dedup-lookup 4xx failure exits 1" "got $R8_STATUS"
+[ "$R8_STATUS" -eq 0 ] \
+  && pass "review.sh: provider policy is delegated for 4xx path" \
+  || fail "review.sh: provider policy is delegated for 4xx path" "got $R8_STATUS"
 
-# Test 8b: retry-exhausted 429 must exit 0 (not 1). 429 matches the 4xx regex
-# but is the rate-limited variant; transient even after retry exhaustion.
+# Test 8b: retry-exhausted 429 behavior now lives in the Rust post-review
+# command; the shell wrapper should still delegate and stay non-fatal.
 write_ci_api_fail_mocks
 # Override the curl mock with one that returns a 429 error string.
 cat > "$CI_API_FAIL_BIN/curl" <<'SH'
@@ -1531,33 +1547,21 @@ R8B_STDERR=$(cd "$CI_API_FAIL_WORK" \
   bash "$SCRIPTS_DIR/review.sh" 2>&1 1>/dev/null)
 R8B_STATUS=$?
 [ "$R8B_STATUS" -eq 0 ] \
-  && pass "review.sh: retry-exhausted 429 exits 0 (transient, not auth error)" \
-  || fail "review.sh: retry-exhausted 429 exits 0 (transient, not auth error)" "got $R8B_STATUS"
+  && pass "review.sh: retry-exhausted 429 remains non-fatal in shell wrapper" \
+  || fail "review.sh: retry-exhausted 429 remains non-fatal in shell wrapper" "got $R8B_STATUS"
+assert_contains "$(cat "$CI_API_FAIL_WORK/mock.log")" "fallow ci post-review --provider gitlab" \
+  "review.sh: 429 path still delegates review posting to Rust"
 
-# Test 9b: comment.sh runs BEFORE review.sh in the default template. When
-# comment.sh writes `true` to fallow-dedup-lookup-failed.txt on a dedup
-# failure, review.sh's init MUST preserve that value (not unconditionally
-# overwrite back to `false`). Otherwise the degraded-state signal is lost
-# whenever both post paths run.
+# Test 9b: review.sh must preserve an existing dedup marker from an earlier
+# job step. comment.sh no longer writes this marker, but downstream jobs can
+# still create it before review.sh runs.
 write_ci_api_fail_mocks
 printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/fallow-analysis-args.sh"
 : > "$CI_API_FAIL_WORK/mock.log"
-rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"
+printf 'true\n' > "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"
 
-# Step A: run comment.sh with a 5xx on its dedup-lookup (writes true to the marker).
-(cd "$CI_API_FAIL_WORK" \
-  && PATH="$CI_API_FAIL_BIN:$PATH" \
-  MOCK_LOG="$CI_API_FAIL_WORK/mock.log" \
-  MOCK_PAGINATE_FAIL="5xx" \
-  GITLAB_TOKEN=test \
-  CI_API_V4_URL="https://gitlab.example/api/v4" \
-  CI_PROJECT_ID=18 CI_MERGE_REQUEST_IID=123 \
-  FALLOW_COMMAND=check \
-  FALLOW_API_RETRIES=1 FALLOW_API_RETRY_DELAY=0 \
-  bash "$SCRIPTS_DIR/comment.sh" >/dev/null 2>&1) || true
-
-# Step B: run review.sh against the SAME working dir with NO pagination failure
-# (mock returns []). review.sh's init must not reset the marker comment.sh wrote.
+# Run review.sh against the same working dir with no pagination failure. Its
+# init must not reset an existing marker.
 (cd "$CI_API_FAIL_WORK" \
   && PATH="$CI_API_FAIL_BIN:$PATH" \
   MOCK_LOG="$CI_API_FAIL_WORK/mock.log" \
@@ -1570,21 +1574,21 @@ rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" "$CI_API_FAIL_WORK/fallow-dedup
   bash "$SCRIPTS_DIR/review.sh" >/dev/null 2>&1) || true
 
 if [ -f "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" ] && grep -q '^true$' "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"; then
-  pass "review.sh: preserves comment.sh's dedup_lookup_failed=true marker"
+  pass "review.sh: preserves preexisting dedup_lookup_failed=true marker"
 else
-  fail "review.sh: preserves comment.sh's dedup_lookup_failed=true marker" \
+  fail "review.sh: preserves preexisting dedup_lookup_failed=true marker" \
     "got: $(cat "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null || echo absent) (review.sh clobbered comment.sh's value)"
 fi
 
-# Test 9: comment.sh summary-only path POSTs anyway on dedup-lookup failure
+# Test 9: comment.sh delegates sticky MR posting to Rust and leaves the dedup
+# marker false when the Rust post command succeeds.
 write_ci_api_fail_mocks
 printf 'FALLOW_ANALYSIS_ARGS=(check --format json --root .)\n' > "$CI_API_FAIL_WORK/fallow-analysis-args.sh"
 : > "$CI_API_FAIL_WORK/mock.log"
-rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt"
-C9_STDERR=$(cd "$CI_API_FAIL_WORK" \
+rm -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"
+(cd "$CI_API_FAIL_WORK" \
   && PATH="$CI_API_FAIL_BIN:$PATH" \
   MOCK_LOG="$CI_API_FAIL_WORK/mock.log" \
-  MOCK_PAGINATE_FAIL="5xx" \
   GITLAB_TOKEN="test" \
   CI_API_V4_URL="https://gitlab.example/api/v4" \
   CI_PROJECT_ID="18" \
@@ -1592,30 +1596,23 @@ C9_STDERR=$(cd "$CI_API_FAIL_WORK" \
   FALLOW_COMMAND="check" \
   FALLOW_API_RETRIES=1 \
   FALLOW_API_RETRY_DELAY=0 \
-  bash "$SCRIPTS_DIR/comment.sh" 2>&1 1>/dev/null) || true
-if [ -f "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" ] && grep -q '^true$' "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"; then
-  pass "comment.sh: writes true to fallow-dedup-lookup-failed.txt on dedup-lookup failure"
+  bash "$SCRIPTS_DIR/comment.sh" >/dev/null)
+if /usr/bin/grep -q "fallow ci post-pr-comment --provider gitlab" "$CI_API_FAIL_WORK/mock.log"; then
+  pass "comment.sh: delegates MR summary posting to Rust"
 else
-  fail "comment.sh: writes true to fallow-dedup-lookup-failed.txt on dedup-lookup failure" \
-    "got: $(cat "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null || echo absent)"
+  fail "comment.sh: delegates MR summary posting to Rust" "$(cat "$CI_API_FAIL_WORK/mock.log")"
 fi
-# comment.sh always posts (potentially duplicating), so fallow-skip-reason.txt
-# stays `none`. Using `pagination_failure` here would mislead consumers gating
-# on the marker into thinking the summary was not posted.
 if [ -f "$CI_API_FAIL_WORK/fallow-skip-reason.txt" ] && grep -q '^none$' "$CI_API_FAIL_WORK/fallow-skip-reason.txt"; then
-  pass "comment.sh: does NOT flip fallow-skip-reason.txt on dedup-lookup failure"
+  pass "comment.sh: leaves fallow-skip-reason.txt at none after Rust update"
 else
-  fail "comment.sh: does NOT flip fallow-skip-reason.txt on dedup-lookup failure" \
+  fail "comment.sh: leaves fallow-skip-reason.txt at none after Rust update" \
     "got: $(cat "$CI_API_FAIL_WORK/fallow-skip-reason.txt" 2>/dev/null || echo absent)"
 fi
-assert_contains "$C9_STDERR" "posting a new one (may duplicate)" \
-  "comment.sh: warning explains duplicate-risk fallback"
-if /usr/bin/grep -q "merge_requests/123/notes" "$CI_API_FAIL_WORK/mock.log" \
-    && /usr/bin/grep -q -- "--request POST" "$CI_API_FAIL_WORK/mock.log"; then
-  pass "comment.sh: POSTs a new summary despite dedup-lookup failure"
+if [ -f "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" ] && grep -q '^false$' "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt"; then
+  pass "comment.sh: leaves fallow-dedup-lookup-failed.txt false"
 else
-  fail "comment.sh: POSTs a new summary despite dedup-lookup failure" \
-    "no POST to merge_requests/123/notes observed"
+  fail "comment.sh: leaves fallow-dedup-lookup-failed.txt false" \
+    "got: $(cat "$CI_API_FAIL_WORK/fallow-dedup-lookup-failed.txt" 2>/dev/null || echo absent)"
 fi
 
 rm -rf "$CI_API_FAIL_WORK"

@@ -10,11 +10,8 @@ set -euo pipefail
 : "${PR_NUMBER:?PR_NUMBER is required}"
 : "${GH_REPO:?GH_REPO is required}"
 
-# Initialize two markers so downstream gates always see definitive values.
-# `post_skipped_reason` stays `none` here because comment.sh ALWAYS posts a
-# summary (even on dedup-lookup failure, where it may duplicate). The
-# `dedup_lookup_failed` marker captures the degraded state without misleading
-# consumers into thinking the post itself was skipped.
+# Initialize markers so downstream gates always see definitive values. The
+# Rust post adapter may later overwrite `post_skipped_reason` for clean runs.
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "post_skipped_reason=none" >> "$GITHUB_OUTPUT"
   echo "dedup_lookup_failed=false" >> "$GITHUB_OUTPUT"
@@ -33,35 +30,6 @@ artifact_path() {
     mkdir -p "$dir"
     printf '%s/%s\n' "$dir" "$filename"
   fi
-}
-
-gh_api_retry() {
-  local attempts="${FALLOW_API_RETRIES:-3}"
-  local delay="${FALLOW_API_RETRY_DELAY:-2}"
-  local attempt=1
-  local err
-  local out
-  err=$(mktemp)
-  out=$(mktemp)
-  while true; do
-    if gh api "$@" >"$out" 2>"$err"; then
-      cat "$out"
-      rm -f "$err" "$out"
-      return 0
-    fi
-    # Match the Rust `with_rate_limit_retry` decision: 429 + 502/503/504 are
-    # transient and worth retrying; persistent 5xx (500, 501, 505) and all
-    # other 4xx surface immediately so a real bug doesn't burn the budget.
-    if [ "$attempt" -ge "$attempts" ] \
-        || ! grep -Eqi 'HTTP (429|502|503|504)|rate limit|secondary rate limit|Retry-After' "$err"; then
-      cat "$err" >&2
-      rm -f "$err" "$out"
-      return 1
-    fi
-    echo "::warning::GitHub API rate limit response; retrying (${attempt}/${attempts})" >&2
-    sleep "$delay"
-    attempt=$((attempt + 1))
-  done
 }
 
 render_with_fallow() {
@@ -118,52 +86,48 @@ render_with_fallow() {
 }
 
 PR_COMMENT_FILE=$(artifact_path fallow-pr-comment.md)
-if render_with_fallow pr-comment-github "$PR_COMMENT_FILE"; then
-  COMMENT_BODY=$(cat "$PR_COMMENT_FILE")
-  export MARKER="<!-- fallow-id: ${FALLOW_COMMENT_ID:-fallow-results} -->"
-  # Summary-only path: dedup-lookup failure means we cannot find an
-  # existing summary comment. Post a fresh one anyway (duplicate is
-  # collapsible; missing summary is silently broken). The warning + marker
-  # still fire so operators can detect the degraded state.
-  _LOOKUP_TMP=$(mktemp); _LOOKUP_ERR=$(mktemp)
-  _FALLOW_TMPS+=("$_LOOKUP_TMP" "$_LOOKUP_ERR")
-  if gh_api_retry \
-       --paginate \
-       "repos/${GH_REPO}/issues/${PR_NUMBER}/comments?per_page=100" \
-       --jq '.[] | select(.body | contains(env.MARKER)) | .id' \
-       > "$_LOOKUP_TMP" 2> "$_LOOKUP_ERR"; then
-    COMMENT_ID=$(head -1 "$_LOOKUP_TMP")
-  else
-    COMMENT_ID=""
-    _STDERR_HEAD=$(head -3 "$_LOOKUP_ERR" | tr '\n' ' ')
-    echo "::warning::fallow: failed to look up existing PR summary comment; posting a new one (may duplicate). stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, check 'gh auth status' and repo permissions." >&2
-    # Summary-only path: the post proceeds anyway, so do NOT flip
-    # post_skipped_reason. Use dedup_lookup_failed so consumers can detect
-    # the degraded state without misreading it as a skipped post.
-    [ -n "${GITHUB_OUTPUT:-}" ] && echo "dedup_lookup_failed=true" >> "$GITHUB_OUTPUT"
+PR_COMMENT_ENVELOPE_FILE=$(artifact_path fallow-pr-comment-envelope.json)
+PR_DECISION_FILE=$(artifact_path fallow-pr-decision.json)
+PR_DETAILS_FILE=$(artifact_path fallow-pr-details.json)
+if FALLOW_PR_COMMENT_ENVELOPE_FILE="$PR_COMMENT_ENVELOPE_FILE" \
+   FALLOW_PR_DECISION_FILE="$PR_DECISION_FILE" \
+   FALLOW_PR_DETAILS_FILE="$PR_DETAILS_FILE" \
+   render_with_fallow pr-comment-github "$PR_COMMENT_FILE"; then
+  PLAN_FILE=$(artifact_path fallow-pr-comment-plan.json)
+  ENVELOPE_ARGS=()
+  [ -f "$PR_COMMENT_ENVELOPE_FILE" ] && ENVELOPE_ARGS=(--envelope "$PR_COMMENT_ENVELOPE_FILE")
+  if ! fallow ci post-pr-comment \
+      --provider github \
+      --pr "$PR_NUMBER" \
+      --repo "$GH_REPO" \
+      --body "$PR_COMMENT_FILE" \
+      "${ENVELOPE_ARGS[@]}" \
+      --marker-id "${FALLOW_COMMENT_ID:-fallow-results}" \
+      > "$PLAN_FILE"; then
+    echo "::warning::Failed to post PR comment"
+    exit 0
   fi
-
-  if [ -n "$COMMENT_ID" ]; then
-    if ! gh_api_retry \
-      "repos/${GH_REPO}/issues/comments/${COMMENT_ID}" \
-      --method PATCH \
-      --field body="$COMMENT_BODY" \
-      > /dev/null; then
-      echo "::warning::Failed to update PR comment"
-    else
-      echo "Updated existing PR comment"
-    fi
-  else
-    if ! gh_api_retry \
-      "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-      --method POST \
-      --field body="$COMMENT_BODY" \
-      > /dev/null; then
-      echo "::warning::Failed to create PR comment"
-    else
-      echo "Created new PR comment"
+  ACTION=$(jq -r '.action' "$PLAN_FILE")
+  REASON=$(jq -r '.skip_reason // "none"' "$PLAN_FILE")
+  if [ "$ACTION" = "skip" ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
+    echo "post_skipped_reason=${REASON}" >> "$GITHUB_OUTPUT"
+  fi
+  CHECK_HEAD_SHA="${PR_HEAD_SHA:-${GITHUB_SHA:-}}"
+  if [ -f "$PR_DECISION_FILE" ] && [ -n "$CHECK_HEAD_SHA" ]; then
+    CHECK_RUN_ARGS=()
+    [ -n "${GITHUB_API_URL:-}" ] && CHECK_RUN_ARGS+=(--api-url "$GITHUB_API_URL")
+    if ! fallow ci post-check-run \
+        --provider github \
+        --decision "$PR_DECISION_FILE" \
+        --repo "$GH_REPO" \
+        --head-sha "$CHECK_HEAD_SHA" \
+        "${CHECK_RUN_ARGS[@]}" \
+        > "$(artifact_path fallow-check-run.json)" \
+        2> "$(artifact_path fallow-check-run-stderr.log)"; then
+      echo "::warning::Failed to post Fallow check run"
     fi
   fi
+  echo "PR comment action: ${ACTION} (${REASON})"
   exit 0
 fi
 

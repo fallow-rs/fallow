@@ -1,15 +1,19 @@
 use crate::report::sink::outln;
-use fallow_output::CodeClimateIssue;
 use std::process::ExitCode;
 use std::sync::OnceLock;
 
 use serde_json::Value;
 
 pub use fallow_output::{
-    CiIssue, CiProvider as Provider, issues_from_codeclimate, issues_from_codeclimate_issues,
+    CiIssue, CiProvider as Provider, PR_DECISION_SCHEMA, PR_DETAILS_SCHEMA, PrCommentEnvelope,
+    PrCommentLayout, PrCommentTruncation, PrDecisionAnnotation, PrDecisionAnnotationLevel,
+    PrDecisionConclusion, PrDecisionDetails, PrDecisionGate, PrDecisionSurface, PrDetailsArtifact,
+    PrDetailsRow, PrDetailsSection, command_title, issues_from_codeclimate,
 };
 #[cfg(test)]
-use fallow_output::{escape_md, is_project_level_rule};
+use fallow_output::{
+    CodeClimateIssue, escape_md, is_project_level_rule, issues_from_codeclimate_issues,
+};
 
 /// Workspace name, set once by `main()` when the binary is invoked with
 /// `--workspace <name>`. Read by `sticky_marker_id` to auto-suffix the
@@ -88,11 +92,21 @@ pub fn category_for_rule(rule_id: &str) -> &'static str {
     crate::explain::rule_by_id(rule_id).map_or("Dead code", |def| def.category)
 }
 
-fn max_comments() -> usize {
+pub fn max_comments() -> usize {
     std::env::var("FALLOW_MAX_COMMENTS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(50)
+}
+
+#[must_use]
+pub fn pr_comment_layout_from_env() -> PrCommentLayout {
+    match std::env::var("FALLOW_PR_COMMENT_LAYOUT").as_deref() {
+        Ok("compact") => PrCommentLayout::Compact,
+        Ok("gate-only") => PrCommentLayout::GateOnly,
+        Ok("details") => PrCommentLayout::Details,
+        _ => PrCommentLayout::Default,
+    }
 }
 
 /// Compute the sticky-comment marker id. Precedence (highest first):
@@ -107,7 +121,7 @@ fn max_comments() -> usize {
 /// run fallow scoped to one workspace package and post their own sticky.
 /// Without a per-workspace suffix every job edits the same marker, racing
 /// each other's bodies on every CI re-run.
-fn sticky_marker_id() -> String {
+pub fn sticky_marker_id() -> String {
     if let Ok(value) = std::env::var("FALLOW_COMMENT_ID")
         && !value.trim().is_empty()
     {
@@ -147,18 +161,20 @@ fn sanitize_marker_segment(value: &str) -> String {
 pub fn print_pr_comment(command: &str, provider: Provider, codeclimate: &Value) -> ExitCode {
     let issues =
         super::diff_filter::filter_issues_for_summary(issues_from_codeclimate(codeclimate));
-    print_pr_comment_from_ci_issues(command, provider, &issues)
+    let conclusion = issue_decision_conclusion(issues.is_empty());
+    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion)
 }
 
 #[must_use]
-pub fn print_pr_comment_from_codeclimate_issues(
+pub fn print_pr_comment_with_conclusion(
     command: &str,
     provider: Provider,
-    codeclimate: &[CodeClimateIssue],
+    codeclimate: &Value,
+    conclusion: PrDecisionConclusion,
 ) -> ExitCode {
     let issues =
-        super::diff_filter::filter_issues_for_summary(issues_from_codeclimate_issues(codeclimate));
-    print_pr_comment_from_ci_issues(command, provider, &issues)
+        super::diff_filter::filter_issues_for_summary(issues_from_codeclimate(codeclimate));
+    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion)
 }
 
 #[must_use]
@@ -166,9 +182,193 @@ fn print_pr_comment_from_ci_issues(
     command: &str,
     provider: Provider,
     issues: &[CiIssue],
+    conclusion: PrDecisionConclusion,
 ) -> ExitCode {
-    outln!("{}", render_pr_comment(command, provider, issues));
+    let body = render_pr_comment(command, provider, issues);
+    let max_comments = max_comments();
+    let envelope = PrCommentEnvelope {
+        marker_id: sticky_marker_id(),
+        body,
+        is_clean: issues.is_empty(),
+        details_url: None,
+        check_summary: Some(decision_summary_label(conclusion).to_owned()),
+        truncation: PrCommentTruncation {
+            truncated: issues.len() > max_comments,
+            shown_findings: issues.len().min(max_comments),
+            total_findings: issues.len(),
+        },
+    };
+    let decision = build_issue_decision_surface(command, issues, &envelope, conclusion);
+    let details = build_pr_details_artifact(command, issues);
+    write_pr_comment_envelope_sidecar(&envelope);
+    write_pr_decision_sidecar(&decision);
+    write_pr_details_sidecar(&details);
+    outln!("{}", envelope.body());
     ExitCode::SUCCESS
+}
+
+#[must_use]
+pub fn build_issue_decision_surface(
+    command: &str,
+    issues: &[CiIssue],
+    envelope: &PrCommentEnvelope,
+    conclusion: PrDecisionConclusion,
+) -> PrDecisionSurface {
+    let effective_conclusion = if issues.is_empty() {
+        PrDecisionConclusion::Success
+    } else {
+        conclusion
+    };
+    PrDecisionSurface {
+        schema: PR_DECISION_SCHEMA.to_owned(),
+        title: "Fallow".to_owned(),
+        conclusion: effective_conclusion,
+        gates: vec![PrDecisionGate {
+            id: command.to_owned(),
+            label: command_title(command).to_owned(),
+            status: effective_conclusion,
+            observed: count_label(issues.len(), "finding", "findings"),
+            threshold: None,
+            scope: "new code".to_owned(),
+        }],
+        annotations: issues
+            .iter()
+            .take(max_comments())
+            .map(decision_annotation_from_issue)
+            .collect(),
+        details: PrDecisionDetails {
+            summary_markdown: decision_summary_markdown(effective_conclusion, issues.len()),
+            full_report_path: None,
+            details_url: envelope.details_url.clone(),
+        },
+    }
+}
+
+fn issue_decision_conclusion(is_clean: bool) -> PrDecisionConclusion {
+    if is_clean {
+        PrDecisionConclusion::Success
+    } else {
+        PrDecisionConclusion::Neutral
+    }
+}
+
+fn decision_summary_label(conclusion: PrDecisionConclusion) -> &'static str {
+    match conclusion {
+        PrDecisionConclusion::Success => "pass",
+        PrDecisionConclusion::Failure => "fail",
+        PrDecisionConclusion::Neutral => "warn",
+        PrDecisionConclusion::Skipped => "skipped",
+    }
+}
+
+fn decision_summary_markdown(conclusion: PrDecisionConclusion, issue_count: usize) -> String {
+    if issue_count == 0 {
+        return "Fallow found no actionable PR findings.".to_owned();
+    }
+    let findings = count_label(issue_count, "finding", "findings");
+    match conclusion {
+        PrDecisionConclusion::Failure => format!("Fallow quality gates failed with {findings}."),
+        PrDecisionConclusion::Neutral => format!("Fallow found {findings} for review."),
+        PrDecisionConclusion::Success | PrDecisionConclusion::Skipped => {
+            format!("Fallow found {findings}.")
+        }
+    }
+}
+
+#[must_use]
+pub fn build_pr_details_artifact(command: &str, issues: &[CiIssue]) -> PrDetailsArtifact {
+    PrDetailsArtifact {
+        schema: PR_DETAILS_SCHEMA.to_owned(),
+        title: format!("Fallow {}", command_title(command)),
+        sections: vec![PrDetailsSection {
+            id: "findings".to_owned(),
+            title: "Findings".to_owned(),
+            rows: issues.iter().map(pr_details_row_from_issue).collect(),
+        }],
+    }
+}
+
+fn pr_details_row_from_issue(issue: &CiIssue) -> PrDetailsRow {
+    PrDetailsRow {
+        location: format!("{}:{}", issue.path, issue.line),
+        rule: issue.rule_id.clone(),
+        description: issue.description.clone(),
+        fix: super::suggestion::fix_intent(issue).map(str::to_owned),
+        fingerprint: (!issue.fingerprint.trim().is_empty()).then(|| issue.fingerprint.clone()),
+    }
+}
+
+#[must_use]
+pub fn decision_annotation_from_issue(issue: &CiIssue) -> PrDecisionAnnotation {
+    PrDecisionAnnotation {
+        path: issue.path.clone(),
+        line: u32::try_from(issue.line).unwrap_or(u32::MAX),
+        level: decision_level_from_severity(&issue.severity),
+        title: issue.rule_id.clone(),
+        message: issue.description.clone(),
+        raw_details: super::suggestion::fix_intent(issue).map(str::to_owned),
+    }
+}
+
+fn decision_level_from_severity(severity: &str) -> PrDecisionAnnotationLevel {
+    match severity {
+        "blocker" | "critical" | "major" => PrDecisionAnnotationLevel::Failure,
+        "minor" => PrDecisionAnnotationLevel::Warning,
+        _ => PrDecisionAnnotationLevel::Notice,
+    }
+}
+
+fn count_label(count: usize, singular: &str, plural: &str) -> String {
+    let noun = if count == 1 { singular } else { plural };
+    format!("{count} {noun}")
+}
+
+pub fn write_pr_comment_envelope_sidecar(envelope: &PrCommentEnvelope) {
+    let Ok(path) = std::env::var("FALLOW_PR_COMMENT_ENVELOPE_FILE") else {
+        return;
+    };
+    if path.trim().is_empty() {
+        return;
+    }
+    match serde_json::to_string_pretty(envelope)
+        .map_err(|e| e.to_string())
+        .and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string()))
+    {
+        Ok(()) => {}
+        Err(e) => eprintln!("warning: failed to write PR comment envelope '{path}': {e}"),
+    }
+}
+
+pub fn write_pr_decision_sidecar(surface: &PrDecisionSurface) {
+    let Ok(path) = std::env::var("FALLOW_PR_DECISION_FILE") else {
+        return;
+    };
+    if path.trim().is_empty() {
+        return;
+    }
+    match serde_json::to_string_pretty(surface)
+        .map_err(|e| e.to_string())
+        .and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string()))
+    {
+        Ok(()) => {}
+        Err(e) => eprintln!("warning: failed to write PR decision '{path}': {e}"),
+    }
+}
+
+pub fn write_pr_details_sidecar(artifact: &PrDetailsArtifact) {
+    let Ok(path) = std::env::var("FALLOW_PR_DETAILS_FILE") else {
+        return;
+    };
+    if path.trim().is_empty() {
+        return;
+    }
+    match serde_json::to_string_pretty(artifact)
+        .map_err(|e| e.to_string())
+        .and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string()))
+    {
+        Ok(()) => {}
+        Err(e) => eprintln!("warning: failed to write PR details '{path}': {e}"),
+    }
 }
 
 #[cfg(test)]
@@ -364,6 +564,46 @@ mod tests {
                 "{rule_id} must NOT be project-level"
             );
         }
+    }
+
+    #[test]
+    fn decision_surface_preserves_blocking_conclusion_for_issue_output() {
+        let issues = [CiIssue {
+            path: "src/app.ts".to_owned(),
+            line: 12,
+            rule_id: "fallow/high-crap-score".to_owned(),
+            description: "Function is hard to safely change.".to_owned(),
+            severity: "minor".to_owned(),
+            fingerprint: "abc".to_owned(),
+        }];
+        let envelope = PrCommentEnvelope {
+            marker_id: "fallow-results".to_owned(),
+            body: "body".to_owned(),
+            is_clean: false,
+            details_url: None,
+            check_summary: Some("fail".to_owned()),
+            truncation: PrCommentTruncation {
+                truncated: false,
+                shown_findings: 1,
+                total_findings: 1,
+            },
+        };
+
+        let decision = build_issue_decision_surface(
+            "audit",
+            &issues,
+            &envelope,
+            PrDecisionConclusion::Failure,
+        );
+
+        assert_eq!(decision.conclusion, PrDecisionConclusion::Failure);
+        assert_eq!(decision.gates[0].status, PrDecisionConclusion::Failure);
+        assert!(
+            decision
+                .details
+                .summary_markdown
+                .contains("quality gates failed")
+        );
     }
 
     #[test]

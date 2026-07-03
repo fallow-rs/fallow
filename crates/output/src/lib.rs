@@ -49,6 +49,12 @@ mod issue_contract;
 mod json_paths;
 mod list_envelopes;
 mod next_steps;
+mod pr_comment_envelope;
+mod pr_comment_post_plan;
+mod pr_decision;
+mod pr_details;
+mod pr_status;
+mod pr_summary;
 mod report_contract;
 mod review_envelopes;
 mod root_envelopes;
@@ -228,6 +234,23 @@ pub use next_steps::{
     build_audit_next_steps_input, build_combined_next_steps, build_dead_code_next_steps,
     build_dupes_next_steps, build_health_next_steps, build_health_next_steps_input,
     impact_digest_summary, trace_unused_export_input,
+};
+pub use pr_comment_envelope::{PrCommentEnvelope, PrCommentTruncation};
+pub use pr_comment_post_plan::{
+    ExistingPrComment, PrCommentPostAction, PrCommentPostPlan, PrCommentPostPlanInput,
+    PrCommentPostSkipReason, plan_pr_comment_post,
+};
+pub use pr_decision::{
+    PR_DECISION_SCHEMA, PrDecisionAnnotation, PrDecisionAnnotationLevel, PrDecisionConclusion,
+    PrDecisionDetails, PrDecisionGate, PrDecisionSurface,
+};
+pub use pr_details::{PR_DETAILS_SCHEMA, PrDetailsArtifact, PrDetailsRow, PrDetailsSection};
+pub use pr_status::{
+    PrStatusContext, PrStatusMode, pr_status_contexts, pr_status_contexts_with_mode,
+};
+pub use pr_summary::{
+    PrCommentLayout, PrSummaryArea, PrSummaryFinding, PrSummaryInput, PrSummaryScope,
+    PrSummaryStatus, render_pr_summary,
 };
 pub use report_contract::{
     COVERAGE_ANALYZE_DOCS, COVERAGE_SETUP_DOCS, DUPES_DOCS, HEALTH_DOCS, SECURITY_DOCS,

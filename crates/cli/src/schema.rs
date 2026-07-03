@@ -498,6 +498,14 @@ const ENVIRONMENT_VARIABLES: &[(&str, &str)] = &[
         "Summary scope for pr-comment-github/pr-comment-gitlab: all (default) keeps project-level dependency/catalog/override findings outside the diff filter; diff applies the diff filter to them too. Inline review comments are unaffected.",
     ),
     (
+        "FALLOW_PR_COMMENT_LAYOUT",
+        "Sticky PR comment layout: default, compact, gate-only, or details.",
+    ),
+    (
+        "FALLOW_CONSOLIDATED_STATUS",
+        "When split PR gate check runs are enabled, truthy values add one aggregate Fallow check alongside the per-gate checks.",
+    ),
+    (
         "FALLOW_DIFF_CONTEXT",
         "Line radius around changed diff lines when scoping findings to a diff in the review/PR-comment formats (default 3).",
     ),

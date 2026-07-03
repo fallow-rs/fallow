@@ -494,6 +494,7 @@ on:
 
 permissions:
   contents: read
+  checks: write # needed for the Fallow Check Run
   pull-requests: write # needed for comment/review-comments
 
 jobs:
@@ -516,11 +517,17 @@ Useful GitHub Action modes:
 
 ```yaml
 # Rich PR feedback without GitHub Advanced Security
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 - uses: fallow-rs/fallow@v2
   with:
     command: audit
     annotations: true        # default: inline workflow annotations
     comment: true            # sticky PR summary
+    comment-layout: gate-only # default | compact | gate-only | details
     review-comments: true    # inline review comments with suggestions
     review-guidance: false   # set true for collapsed "What to do" blocks
     diff-filter: added       # added | diff_context | file | nofilter
@@ -695,6 +702,7 @@ The GitLab CI template can post rich comments directly on merge requests -- summ
 | `FALLOW_REVIEW` | `"false"` | Post inline MR discussions from the typed `review-gitlab` envelope v2, with stable fingerprints, suggestions, dedupe, and stale-thread reconciliation |
 | `FALLOW_REVIEW_GUIDANCE` | `"false"` | Add collapsed "What to do" guidance blocks to inline review discussions |
 | `FALLOW_MAX_COMMENTS` | `"50"` | Maximum number of inline review comments |
+| `FALLOW_PR_COMMENT_LAYOUT` | `"default"` | Sticky MR comment layout: `default`, `compact`, `gate-only`, or `details` |
 | `FALLOW_SUMMARY_SCOPE` | `"all"` | Sticky MR summary scope. Use `all` to include project-level dependency/catalog/override findings even when their anchor line is outside the diff; use `diff` to apply the diff filter to those findings too. Inline review comments are unaffected |
 | `FALLOW_DIFF_FILTER` | `"added"` | Filter line-level findings to added diff hunks by default; use `diff_context`, `file`, or `nofilter` to widen review scope |
 | `FALLOW_GITLAB_BASE_SHA` / `FALLOW_GITLAB_START_SHA` / `FALLOW_GITLAB_HEAD_SHA` | `""` | Optional overrides for the GitLab MR `diff_refs` used to build inline discussion positions |

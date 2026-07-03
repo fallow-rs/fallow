@@ -8,7 +8,55 @@ use serde_json::Value;
 use crate::api::{ResponseBodyReader, sanitize_network_error, try_api_agent};
 use crate::error::emit_error;
 
+#[path = "ci_check_run.rs"]
+mod check_run;
+#[path = "ci_pr_comment_post.rs"]
+mod pr_comment_post;
+#[path = "ci_review_post.rs"]
+mod review_post;
+
+use check_run::{PostCheckRunInput, post_check_run};
+use pr_comment_post::{PostPrCommentInput, post_pr_comment};
+use review_post::{PostReviewInput, post_review};
+
 pub enum CiCommand {
+    PlanPrComment {
+        body: PathBuf,
+        marker_id: String,
+        clean: bool,
+        existing_comment_id: Option<String>,
+        existing_body: Option<PathBuf>,
+    },
+    PostPrComment {
+        provider: CiProvider,
+        target: Option<String>,
+        body: PathBuf,
+        envelope: Option<PathBuf>,
+        marker_id: String,
+        clean: bool,
+        repo: Option<String>,
+        project_id: Option<String>,
+        api_url: Option<String>,
+        dry_run: bool,
+    },
+    PostReview {
+        provider: CiProvider,
+        target: Option<String>,
+        envelope: PathBuf,
+        repo: Option<String>,
+        project_id: Option<String>,
+        api_url: Option<String>,
+        dry_run: bool,
+    },
+    PostCheckRun {
+        provider: CiProvider,
+        decision: PathBuf,
+        repo: String,
+        head_sha: String,
+        api_url: Option<String>,
+        split_gates: bool,
+        dry_run: bool,
+    },
     ReconcileReview {
         provider: CiProvider,
         target: Option<String>,
@@ -28,6 +76,61 @@ pub enum CiProvider {
 
 pub fn run(command: CiCommand, output: OutputFormat) -> ExitCode {
     match command {
+        CiCommand::PlanPrComment {
+            body,
+            marker_id,
+            clean,
+            existing_comment_id,
+            existing_body,
+        } => plan_pr_comment(
+            &body,
+            marker_id,
+            clean,
+            existing_comment_id,
+            existing_body.as_deref(),
+            output,
+        ),
+        command @ CiCommand::PostPrComment { .. } => run_post_pr_comment(command, output),
+        CiCommand::PostReview {
+            provider,
+            target,
+            envelope,
+            repo,
+            project_id,
+            api_url,
+            dry_run,
+        } => post_review(
+            PostReviewInput {
+                provider,
+                target: target.as_deref(),
+                envelope: &envelope,
+                repo: repo.as_deref(),
+                project_id: project_id.as_deref(),
+                api_url: api_url.as_deref(),
+                dry_run,
+            },
+            output,
+        ),
+        CiCommand::PostCheckRun {
+            provider,
+            decision,
+            repo,
+            head_sha,
+            api_url,
+            split_gates,
+            dry_run,
+        } => run_post_check_run(
+            provider,
+            PostCheckRunInput {
+                decision: &decision,
+                repo: &repo,
+                head_sha: &head_sha,
+                api_url: api_url.as_deref(),
+                split_gates,
+                dry_run,
+            },
+            output,
+        ),
         CiCommand::ReconcileReview {
             provider,
             target,
@@ -48,6 +151,115 @@ pub fn run(command: CiCommand, output: OutputFormat) -> ExitCode {
             },
             output,
         ),
+    }
+}
+
+fn run_post_pr_comment(command: CiCommand, output: OutputFormat) -> ExitCode {
+    let CiCommand::PostPrComment {
+        provider,
+        target,
+        body,
+        envelope,
+        marker_id,
+        clean,
+        repo,
+        project_id,
+        api_url,
+        dry_run,
+    } = command
+    else {
+        unreachable!("run_post_pr_comment only accepts PostPrComment");
+    };
+    post_pr_comment(
+        &PostPrCommentInput {
+            provider,
+            target: target.as_deref(),
+            body: &body,
+            envelope: envelope.as_deref(),
+            marker_id,
+            clean,
+            repo: repo.as_deref(),
+            project_id: project_id.as_deref(),
+            api_url: api_url.as_deref(),
+            dry_run,
+        },
+        output,
+    )
+}
+
+fn run_post_check_run(
+    provider: CiProvider,
+    input: PostCheckRunInput<'_>,
+    output: OutputFormat,
+) -> ExitCode {
+    match provider {
+        CiProvider::Github => post_check_run(&input, output),
+        CiProvider::Gitlab => emit_error("GitLab check runs are not supported", 2, output),
+    }
+}
+
+fn plan_pr_comment(
+    body: &Path,
+    marker_id: String,
+    clean: bool,
+    existing_comment_id: Option<String>,
+    existing_body: Option<&Path>,
+    output: OutputFormat,
+) -> ExitCode {
+    let body = match read_text_file(body, "PR comment body") {
+        Ok(body) => body,
+        Err(e) => return emit_error(&e, 2, output),
+    };
+    let existing = match existing_comment(existing_comment_id, existing_body) {
+        Ok(existing) => existing,
+        Err(e) => return emit_error(&e, 2, output),
+    };
+    let envelope = fallow_output::PrCommentEnvelope {
+        marker_id,
+        body,
+        is_clean: clean,
+        details_url: None,
+        check_summary: None,
+        truncation: fallow_output::PrCommentTruncation::default(),
+    };
+    let plan = fallow_output::plan_pr_comment_post(&fallow_output::PrCommentPostPlanInput {
+        envelope: &envelope,
+        existing: existing.as_ref(),
+    });
+    emit_pr_comment_post_plan(&plan, output)
+}
+
+fn existing_comment(
+    id: Option<String>,
+    body: Option<&Path>,
+) -> Result<Option<fallow_output::ExistingPrComment>, String> {
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    let Some(body_path) = body else {
+        return Ok(Some(fallow_output::ExistingPrComment {
+            id,
+            body: String::new(),
+        }));
+    };
+    Ok(Some(fallow_output::ExistingPrComment {
+        id,
+        body: read_text_file(body_path, "existing PR comment body")?,
+    }))
+}
+
+fn read_text_file(path: &Path, label: &str) -> Result<String, String> {
+    std::fs::read_to_string(path)
+        .map_err(|e| format!("failed to read {label} '{}': {e}", path.display()))
+}
+
+fn emit_pr_comment_post_plan(
+    plan: &fallow_output::PrCommentPostPlan,
+    output: OutputFormat,
+) -> ExitCode {
+    match serde_json::to_value(plan) {
+        Ok(value) => crate::report::emit_json(&value, "PR comment post plan"),
+        Err(e) => emit_error(&format!("JSON serialization error: {e}"), 2, output),
     }
 }
 
@@ -1125,6 +1337,23 @@ fn github_post_json(
     with_rate_limit_retry("GitHub", || {
         agent
             .post(url)
+            .header("Authorization", &format!("Bearer {token}"))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .header("User-Agent", "fallow-cli")
+            .send_json(payload)
+    })
+}
+
+fn github_patch_json(
+    agent: &ureq::Agent,
+    url: &str,
+    token: &str,
+    payload: &Value,
+) -> Result<Value, String> {
+    with_rate_limit_retry("GitHub", || {
+        agent
+            .patch(url)
             .header("Authorization", &format!("Bearer {token}"))
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", "2022-11-28")

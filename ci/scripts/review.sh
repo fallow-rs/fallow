@@ -28,9 +28,6 @@ fi
 : "${CI_MERGE_REQUEST_IID:?CI_MERGE_REQUEST_IID is required}"
 AUTH_HEADER="PRIVATE-TOKEN: ${GITLAB_TOKEN}"
 
-NOTES_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
-DISCUSSIONS_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/discussions"
-
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=gitlab_common.sh
 source "${SCRIPT_DIR}/gitlab_common.sh"
@@ -105,147 +102,22 @@ render_with_fallow() {
 }
 
 if render_with_fallow review-gitlab fallow-review.json; then
-  reconcile_review() {
-    if fallow ci reconcile-review \
+  if fallow ci post-review \
       --provider gitlab \
       --mr "$CI_MERGE_REQUEST_IID" \
       --project-id "$CI_PROJECT_ID" \
       --api-url "$CI_API_V4_URL" \
-      --envelope fallow-review.json > fallow-review-reconcile.json 2> fallow-review-reconcile-stderr.log; then
-      if jq -e '(.apply_errors // []) | length > 0' fallow-review-reconcile.json > /dev/null 2>&1; then
-        HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' fallow-review-reconcile.json)
-        echo "WARNING: fallow reconcile-review apply incomplete: $HINT"
-      fi
-    else
-      echo "WARNING: Failed to reconcile resolved review discussions"
+      --envelope fallow-review.json > fallow-review-post.json 2> fallow-review-post-stderr.log; then
+    if jq -e '(.apply_errors // []) | length > 0 or (.post_errors // []) | length > 0' fallow-review-post.json > /dev/null 2>&1; then
+      HINT=$(jq -r '.apply_hint // "refresh provider state and rerun the job"' fallow-review-post.json)
+      echo "WARNING: fallow post-review incomplete: $HINT"
     fi
-  }
-
-  TOTAL=$(jq '.comments | length' fallow-review.json)
-  if [ "$TOTAL" -eq 0 ]; then
-    BODY=$(jq -r '.body' fallow-review.json)
-    # Summary-only path: dedup-lookup failure means we cannot find an
-    # existing body note. Posting a fresh one (potential duplicate) beats
-    # a missing summary, which is silently broken from the MR author's
-    # view. The WARNING + sidecar artifact still surface the degradation.
-    _NOTE_LOOKUP_TMP=$(mktemp); _NOTE_LOOKUP_ERR=$(mktemp)
-    _FALLOW_TMPS+=("$_NOTE_LOOKUP_TMP" "$_NOTE_LOOKUP_ERR")
-    if curl_paginate --header "${AUTH_HEADER}" "${NOTES_URL}?per_page=100" \
-         > "$_NOTE_LOOKUP_TMP" 2> "$_NOTE_LOOKUP_ERR"; then
-      EXISTING_NOTE_ID=$(jq -r '.[] | select(.body | contains("<!-- fallow-review -->")) | .id' "$_NOTE_LOOKUP_TMP" \
-        | head -1)
-    else
-      EXISTING_NOTE_ID=""
-      _STDERR_HEAD=$(head -3 "$_NOTE_LOOKUP_ERR" | tr '\n' ' ')
-      echo "WARNING: fallow: failed to look up existing MR summary note; posting a new one (may duplicate). stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, verify GITLAB_TOKEN scopes (api, read_api)." >&2
-      # Summary-only path: the post proceeds anyway, so do NOT flip
-      # fallow-skip-reason.txt. Mark dedup-lookup-failed instead.
-      printf 'true\n' > fallow-dedup-lookup-failed.txt
-    fi
-    if [ -n "$EXISTING_NOTE_ID" ]; then
-      curl_retry \
-        --header "${AUTH_HEADER}" \
-        --header "Content-Type: application/json" \
-        --request PUT \
-        --data "$(jq -n --arg body "$BODY" '{body: $body}')" \
-        "${NOTES_URL}/${EXISTING_NOTE_ID}" > /dev/null 2>&1 \
-        && echo "Updated review body" \
-        || echo "WARNING: Failed to update review body"
-    else
-      curl_retry \
-        --header "${AUTH_HEADER}" \
-        --header "Content-Type: application/json" \
-        --request POST \
-        --data "$(jq -n --arg body "$BODY" '{body: $body}')" \
-        "${NOTES_URL}" > /dev/null 2>&1 \
-        && echo "Posted review body" \
-        || echo "WARNING: Failed to post review body"
-    fi
-    reconcile_review
-    exit 0
-  fi
-
-  # Multi-discussion dedup path: a failed lookup here means we cannot
-  # enumerate existing fingerprints, so posting any new inline discussions
-  # risks N duplicate threads. Abort the post step (skip reconcile_review
-  # for the same root-cause reason) and surface the failure as both a
-  # stderr warning and a sidecar artifact. 4xx is a configuration error
-  # and warrants a loud CI failure (exit 1); 5xx / 429 / network blips
-  # warrant exit 0 since a re-run may succeed.
-  _DEDUP_TMP=$(mktemp); _DEDUP_ERR=$(mktemp)
-  _FALLOW_TMPS+=("$_DEDUP_TMP" "$_DEDUP_ERR")
-  if curl_paginate --header "${AUTH_HEADER}" "${DISCUSSIONS_URL}?per_page=100" \
-       > "$_DEDUP_TMP" 2> "$_DEDUP_ERR"; then
-    # Extract fingerprints from both v1 (`<!-- fallow-fingerprint: <fp> -->`)
-    # and v2 (`<!-- fallow-fingerprint:v2: <fp> -->`) marker shapes so dedup
-    # idempotency survives the issue #528 migration. v2 markers use the
-    # `:v2:` namespace; the v1 substring would otherwise capture `v2:` as the
-    # fingerprint instead of the actual hex string. Two sed expressions, sort
-    # -u to dedupe in case a single note carries both markers (impossible by
-    # construction today, defensive).
-    EXISTING_FPS=$(jq -r '.[].notes[].body? // empty' "$_DEDUP_TMP" \
-      | sed -n \
-        -e 's/.*fallow-fingerprint:v2: \([^ ]*\) .*/\1/p' \
-        -e 's/.*fallow-fingerprint: \([^ ]*\) .*/\1/p' \
-      | sort -u \
-      | jq -R -s 'split("\n") | map(select(length > 0))')
+    ACTION=$(jq -r '.action // "unknown"' fallow-review-post.json)
+    POSTED=$(jq -r '.comments_posted // 0' fallow-review-post.json)
+    echo "Review action: ${ACTION} (${POSTED} inline comments posted)"
   else
-    _STDERR_HEAD=$(head -3 "$_DEDUP_ERR" | tr '\n' ' ')
-    echo "WARNING: fallow: failed to fetch existing MR discussions; skipping inline review to avoid duplicates. stderr: ${_STDERR_HEAD} Re-run the job to retry. If persistent, verify GITLAB_TOKEN scopes (api, read_api)." >&2
-    printf 'pagination_failure\n' > fallow-skip-reason.txt
-    printf 'true\n' > fallow-dedup-lookup-failed.txt
-    # 4xx (auth, scope, permission) is a configuration error: a re-run
-    # will not help, so escalate to exit 1 for loud CI failure. Exclude
-    # 429 explicitly: it is the rate-limited variant and is transient
-    # even though curl_retry has already exhausted its budget. 5xx, 429,
-    # and network errors fall through to exit 0 (re-run may help).
-    # Note: ci/gitlab-ci.yml currently calls this script as
-    # `bash review.sh || echo "WARNING: ..."`, which swallows exit 1.
-    # Operators who want strict CI gating on 4xx should remove the
-    # `|| echo` from their gitlab-ci.yml, or gate on
-    # `fallow-skip-reason.txt` and `fallow-dedup-lookup-failed.txt`
-    # in a downstream job.
-    if grep -qE 'HTTP 4[0-9][0-9]|error: 4[0-9][0-9]' "$_DEDUP_ERR" \
-        && ! grep -qE 'HTTP 429|error: 429|rate.limit' "$_DEDUP_ERR"; then
-      exit 1
-    fi
-    exit 0
+    echo "WARNING: Failed to post review comments"
   fi
-  jq --argjson existing "${EXISTING_FPS:-[]}" '
-    .comments |= map(select((.fingerprint as $fp | $existing | index($fp)) | not))
-  ' fallow-review.json > fallow-review-new.json
-  NEW_TOTAL=$(jq '.comments | length' fallow-review-new.json)
-  if [ "$NEW_TOTAL" -eq 0 ]; then
-    reconcile_review
-    echo "No new review comments to post"
-    exit 0
-  fi
-
-  BASE_SHA="${FALLOW_GITLAB_BASE_SHA:-}"
-  START_SHA="${FALLOW_GITLAB_START_SHA:-$BASE_SHA}"
-  HEAD_SHA="${FALLOW_GITLAB_HEAD_SHA:-}"
-
-  POSTED=0
-  SKIPPED=0
-  while IFS= read -r comment; do
-    BODY_VAL=$(echo "$comment" | jq -r '.body')
-    PATH_VAL=$(echo "$comment" | jq -r '.position.new_path')
-    LINE_VAL=$(echo "$comment" | jq -r '.position.new_line')
-    if [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
-      PAYLOAD=$(echo "$comment" | jq --arg body "$BODY_VAL" '{body: $body, position: .position}')
-      curl_retry --header "${AUTH_HEADER}" --header "Content-Type: application/json" \
-        --request POST --data "$PAYLOAD" "${DISCUSSIONS_URL}" > /dev/null 2>&1 \
-        && POSTED=$((POSTED + 1)) || SKIPPED=$((SKIPPED + 1))
-    else
-      FALLBACK_BODY=$(printf "Warning: **%s:%s**\n\n%s" "$PATH_VAL" "$LINE_VAL" "$BODY_VAL")
-      curl_retry --header "${AUTH_HEADER}" --header "Content-Type: application/json" \
-        --request POST --data "$(jq -n --arg body "$FALLBACK_BODY" '{body: $body}')" \
-        "${NOTES_URL}" > /dev/null 2>&1 \
-        && POSTED=$((POSTED + 1)) || SKIPPED=$((SKIPPED + 1))
-    fi
-  done < <(jq -c '.comments[]' fallow-review-new.json)
-  echo "Posted ${POSTED} inline comments, skipped ${SKIPPED}"
-  reconcile_review
   exit 0
 fi
 

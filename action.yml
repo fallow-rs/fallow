@@ -72,7 +72,7 @@ inputs:
     required: false
     default: '.'
   comment:
-    description: 'Post results as a PR comment (requires pull-requests: write permission)'
+    description: 'Post results as a PR comment and Fallow Check Run (requires pull-requests: write for the comment and checks: write for the check)'
     required: false
     default: 'false'
   github-token:
@@ -99,6 +99,10 @@ inputs:
     description: 'Maximum number of inline review comments + items in the sticky details table (default: 50). Mirrors max-annotations for the typed pr-comment / review formats.'
     required: false
     default: '50'
+  comment-layout:
+    description: 'Sticky PR comment layout: default, compact, gate-only, or details. Use gate-only when a native Check Run is the primary PR surface.'
+    required: false
+    default: 'default'
   comment-id:
     description: 'Sticky-comment marker id, embedded in the HTML comment that identifies fallow''s comment for upsert. Defaults to ''fallow-results'', auto-suffixed with the workspace name when running scoped to a single workspace package.'
     required: false
@@ -408,34 +412,6 @@ runs:
         FALLOW_DIFF_FILE: ${{ inputs.diff-file }}
       run: bash ${{ github.action_path }}/action/scripts/analyze.sh
 
-    - name: Job summary
-      if: always() && steps.analyze.outputs.issues != ''
-      shell: bash
-      env:
-        FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
-        ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
-        CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
-        INPUT_ROOT: ${{ inputs.root }}
-      run: bash ${{ github.action_path }}/action/scripts/summary.sh
-
-    - name: Emit inline annotations
-      if: >-
-        always() &&
-        inputs.annotations == 'true' &&
-        inputs.review-comments != 'true' &&
-        inputs.command != 'fix' &&
-        inputs.command != 'security' &&
-        steps.analyze.outputs.issues != '' &&
-        steps.analyze.outputs.issues != '0'
-      shell: bash
-      env:
-        FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
-        MAX_ANNOTATIONS: ${{ inputs.max-annotations }}
-        ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
-        CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
-        INPUT_ROOT: ${{ inputs.root }}
-      run: bash ${{ github.action_path }}/action/scripts/annotate.sh
-
     - name: Check Code Scanning availability
       id: ghas-check
       if: >-
@@ -474,13 +450,16 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         GH_REPO: ${{ github.repository }}
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
         INPUT_ROOT: ${{ inputs.root }}
         FALLOW_COMMENT_ID: ${{ inputs.comment-id }}
         FALLOW_SUMMARY_SCOPE: ${{ inputs.summary-scope }}
+        FALLOW_PR_COMMENT_LAYOUT: ${{ inputs.comment-layout }}
         FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
+        FALLOW_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
         # FALLOW_DIFF_FILE is propagated from the analyze step via
         # $GITHUB_ENV. Declaring it here would override the propagation
         # whenever inputs.diff-file is empty (the default), forcing
@@ -489,6 +468,42 @@ runs:
         FALLOW_API_RETRIES: ${{ inputs.api-retries }}
         FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/comment.sh
+
+    - name: Emit inline annotations
+      if: >-
+        always() &&
+        inputs.annotations == 'true' &&
+        inputs.review-comments != 'true' &&
+        inputs.command != 'fix' &&
+        inputs.command != 'security' &&
+        steps.analyze.outputs.issues != '' &&
+        steps.analyze.outputs.issues != '0'
+      shell: bash
+      env:
+        FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
+        MAX_ANNOTATIONS: ${{ inputs.max-annotations }}
+        ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
+        CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
+        INPUT_ROOT: ${{ inputs.root }}
+        FALLOW_RESULTS_FILE: ${{ steps.analyze.outputs.results }}
+        FALLOW_SCOPED_RESULTS_FILE: ${{ inputs.artifacts-dir }}/fallow-results-scoped.json
+        FALLOW_CHANGED_FILES_FILE: ${{ inputs.artifacts-dir }}/fallow-changed-files.json
+        FALLOW_PR_DECISION_FILE: ${{ inputs.artifacts-dir }}/fallow-pr-decision.json
+      run: bash ${{ github.action_path }}/action/scripts/annotate.sh
+
+    - name: Job summary
+      if: always() && steps.analyze.outputs.issues != ''
+      shell: bash
+      env:
+        FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
+        ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
+        CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
+        INPUT_ROOT: ${{ inputs.root }}
+        FALLOW_RESULTS_FILE: ${{ steps.analyze.outputs.results }}
+        FALLOW_SCOPED_RESULTS_FILE: ${{ inputs.artifacts-dir }}/fallow-results-scoped.json
+        FALLOW_CHANGED_FILES_FILE: ${{ inputs.artifacts-dir }}/fallow-changed-files.json
+        FALLOW_PR_COMMENT_ENVELOPE_FILE: ${{ inputs.artifacts-dir }}/fallow-pr-comment-envelope.json
+      run: bash ${{ github.action_path }}/action/scripts/summary.sh
 
     - name: Post review comments
       id: review
@@ -512,6 +527,7 @@ runs:
         CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
         FALLOW_COMMENT_ID: ${{ inputs.comment-id }}
         FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
+        FALLOW_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
         # FALLOW_DIFF_FILE is propagated from the analyze step via
         # $GITHUB_ENV (see comment on the comment step env block).
         FALLOW_API_RETRIES: ${{ inputs.api-retries }}

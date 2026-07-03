@@ -757,8 +757,8 @@ mod tests {
 
         assert_eq!(
             count_occurrences(CI, ".header(\"Authorization\""),
-            2,
-            "update this guard when GitHub reconciliation auth paths change"
+            3,
+            "update this guard when GitHub CI auth paths change"
         );
         assert_eq!(
             count_occurrences(CI, ".header(\"PRIVATE-TOKEN\""),
