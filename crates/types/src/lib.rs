@@ -30,6 +30,8 @@ pub mod duplicates;
 pub mod envelope;
 /// Module extraction types: exports, imports, re-exports, and member info.
 pub mod extract;
+/// Guard output contracts for pre-edit architecture-rule lookup.
+pub mod guard;
 /// Shared issue-type contract metadata used by CLI, LSP, MCP, and suppression
 /// helpers.
 pub mod issue_meta;
