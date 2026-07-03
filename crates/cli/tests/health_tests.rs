@@ -4517,6 +4517,54 @@ fn health_css_third_party_important_overrides_are_verify_first() {
 }
 
 #[test]
+fn health_css_keeps_tokenless_raw_values_out_of_styling_findings() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-tokenless-raw-style","version":"1.0.0"}"#,
+    );
+    write_file(
+        &root.join("src/app.css"),
+        ".card { color: #123456; font-size: 17px; }\n",
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "export const App = () => null;\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--report-only",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    let json = parse_json(&out);
+    assert!(
+        json["css_analytics"]["raw_style_values"]
+            .as_array()
+            .is_some_and(|raw| !raw.is_empty()),
+        "raw style values should stay available in css analytics: {}",
+        out.stdout
+    );
+    let findings = json["styling_findings"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
+    assert!(
+        !findings
+            .iter()
+            .any(|finding| finding["sub_kind"] == "raw-style-value"),
+        "tokenless raw values should not be promoted to styling findings: {findings:#?}"
+    );
+}
+
+#[test]
 fn health_css_unresolved_class_renders_in_human() {
     let dir = tempdir().unwrap();
     let root = dir.path();

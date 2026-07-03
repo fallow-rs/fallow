@@ -381,7 +381,7 @@ fn audit_css_token_drift_gates_introduced_raw_style_value() {
 
     fs::write(
         root.join("src/styles.css"),
-        ":root { --text-size: 1rem; }\n.title { font-size: var(--text-size); }\n.card { font-size: 13px; }\n",
+        ":root { --text-size: 1rem; }\n.title { font-size: var(--text-size); }\n.card { font-size: 15.75px; }\n",
     )
     .unwrap();
     let output = run_fallow_raw(&[
@@ -396,7 +396,7 @@ fn audit_css_token_drift_gates_introduced_raw_style_value() {
     ]);
     assert_eq!(
         output.code, 1,
-        "introduced raw style value should fail when css-token-drift is error. stdout: {}\nstderr: {}",
+        "introduced raw style value near an existing token should fail when css-token-drift is error. stdout: {}\nstderr: {}",
         output.stdout, output.stderr
     );
     let json = parse_json(&output);
@@ -408,9 +408,10 @@ fn audit_css_token_drift_gates_introduced_raw_style_value() {
         findings.iter().any(|finding| {
             finding["code"] == "css-token-drift"
                 && finding["sub_kind"] == "raw-style-value"
-                && finding["value"] == "font-size font-size: 13px"
+                && finding["value"] == "font-size font-size: 15.75px"
+                && finding["nearest_token"]["name"] == "--text-size"
         }),
-        "raw style value should appear as token drift: {findings:#?}"
+        "raw style value near an existing token should appear as token drift: {findings:#?}"
     );
 }
 
@@ -627,7 +628,7 @@ fn audit_human_splits_styling_by_confidence_budget() {
 
     fs::write(
         root.join("src/styles.css"),
-        "#app .legacy .title { color: red; }\n.card { font-size: 13px; }\n",
+        ":root { --text-size: 1rem; }\n#app .legacy .title { color: red; }\n.card { font-size: 15.75px; }\n",
     )
     .unwrap();
 

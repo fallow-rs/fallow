@@ -253,20 +253,15 @@ fn build_styling_findings(
             });
         }
         for candidate in &css.raw_style_values {
+            let Some(nearest_token) = candidate.nearest_token.as_ref() else {
+                continue;
+            };
             if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
                 continue;
             }
-            let fix_hint = candidate.nearest_token.as_ref().map_or_else(
-                || {
-                    "Verify the raw style value is not an intentional exception, then replace it with an existing design token or CSS custom property."
-                        .to_string()
-                },
-                |token| {
-                    format!(
-                        "Verify the raw style value is not an intentional exception, then reuse {} instead.",
-                        token.name
-                    )
-                },
+            let fix_hint = format!(
+                "Verify the raw style value is not an intentional exception, then reuse {} instead.",
+                nearest_token.name
             );
             findings.push(fallow_output::StylingFinding {
                 code: "css-token-drift".to_string(),
@@ -281,7 +276,7 @@ fn build_styling_findings(
                 blast_radius: None,
                 confidence: Some(fallow_output::StylingFindingConfidence::Low),
                 agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                nearest_token: candidate.nearest_token.clone(),
+                nearest_token: Some(nearest_token.clone()),
                 fix_hint: Some(fix_hint),
                 actions: candidate.actions.clone(),
             });

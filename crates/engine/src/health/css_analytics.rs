@@ -2524,19 +2524,20 @@ fn annotate_raw_style_value_nearest_tokens(
         let Some(metric) = parse_theme_token_metric(namespace, &raw.value) else {
             continue;
         };
+        let raw_value = normalize_theme_token_value(&raw.value);
+        if namespace == "color" && color_value_has_alpha(&raw_value) {
+            continue;
+        }
+        let raw_key = (namespace.to_string(), raw_value.clone());
+        let raw_value_is_repeated = raw_value_counts.get(&raw_key).copied().unwrap_or(0) > 1;
         let nearest = candidates
             .iter()
             .filter(|candidate| candidate.namespace == namespace)
             .filter_map(|candidate| {
-                if candidate.origin == ComparableTokenOrigin::ProjectVocabulary {
-                    let raw_value = normalize_theme_token_value(&raw.value);
-                    let raw_key = (namespace.to_string(), raw_value.clone());
-                    if raw_value == candidate.value
-                        || raw_value_counts.get(&raw_key).copied().unwrap_or(0) > 1
-                        || (namespace == "color" && color_value_has_alpha(&raw_value))
-                    {
-                        return None;
-                    }
+                if candidate.origin == ComparableTokenOrigin::ProjectVocabulary
+                    && (raw_value == candidate.value || raw_value_is_repeated)
+                {
+                    return None;
                 }
                 let distance = metric.distance(&candidate.metric)?;
                 (distance <= metric.threshold()).then_some((candidate, round_distance(distance)))
@@ -5425,6 +5426,31 @@ mod token_consumer_tests {
         assert!(
             feature_value.nearest_token.is_none(),
             "project-vocabulary should not compare alpha raw values through RGB-only distance"
+        );
+    }
+
+    #[test]
+    fn raw_style_value_abstains_when_alpha_color_is_near_explicit_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{}}"#).unwrap();
+        let file = write_file(
+            root,
+            0,
+            "src/styles.css",
+            ":root { --color-black: #000; }\n.feature { background-color: #0000; }\n",
+        );
+
+        let computation = css_computation(root, &[file]).expect("raw CSS keeps report");
+        let feature_value = computation
+            .report
+            .raw_style_values
+            .iter()
+            .find(|raw| raw.path == "src/styles.css" && raw.value == "#0000")
+            .expect("feature alpha raw value is reported");
+        assert!(
+            feature_value.nearest_token.is_none(),
+            "raw alpha colors should not compare to opaque explicit tokens through RGB-only distance"
         );
     }
 
