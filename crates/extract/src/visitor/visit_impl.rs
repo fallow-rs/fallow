@@ -111,6 +111,17 @@ const ITERABLE_ELEMENT_CALLBACK_METHODS: &[&str] = &[
     "every",
 ];
 
+fn is_css_module_import_source(source: &str) -> bool {
+    let path = source.split(['?', '#']).next().unwrap_or(source);
+    let Some(file_name) = path.rsplit('/').next() else {
+        return false;
+    };
+    let Some((stem, ext)) = file_name.rsplit_once('.') else {
+        return false;
+    };
+    stem.ends_with(".module") && matches!(ext, "css" | "scss" | "sass" | "less")
+}
+
 impl ModuleInfoExtractor {
     /// Record a same-file function whose body returns `new Class()` so a later
     /// `const x = <name>()` binding can resolve to that class. Module scope only;
@@ -1006,15 +1017,18 @@ impl<'a> ModuleInfoExtractor {
         is_type_only: bool,
         source_span: Span,
     ) {
-        self.record_dompurify_import_binding(source, s.local.name.as_str(), is_type_only);
+        let local = s.local.name.to_string();
+        self.record_dompurify_import_binding(source, &local, is_type_only);
         if self.is_module_scope() && is_node_path_source(source) {
-            self.node_path_namespace_bindings
-                .insert(s.local.name.to_string());
+            self.node_path_namespace_bindings.insert(local.clone());
+        }
+        if is_css_module_import_source(source) {
+            self.namespace_binding_names.push(local.clone());
         }
         self.imports.push(ImportInfo {
             source: source.to_string(),
             imported_name: ImportedName::Default,
-            local_name: s.local.name.to_string(),
+            local_name: local,
             is_type_only,
             from_style: false,
             span: s.span,

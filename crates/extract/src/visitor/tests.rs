@@ -4066,6 +4066,37 @@ fn import_default() {
 }
 
 #[test]
+fn css_module_default_import_destructure_records_member_accesses() {
+    let info = parse(
+        "import styles from './Card.module.css';\n\
+         const { root, item: itemClass } = styles;\n\
+         const className = clsx(root, itemClass);\n",
+    );
+    let accesses = store_member_accesses(&info);
+    assert!(
+        accesses.contains(&("styles".to_string(), "root".to_string())),
+        "CSS module destructuring should credit styles.root: {accesses:?}"
+    );
+    assert!(
+        accesses.contains(&("styles".to_string(), "item".to_string())),
+        "CSS module renamed destructuring should credit styles.item: {accesses:?}"
+    );
+}
+
+#[test]
+fn css_module_default_import_rest_destructure_records_whole_object_use() {
+    let info = parse(
+        "import styles from './Card.module.css';\n\
+         const { root, ...rest } = styles;\n\
+         console.log(root, rest);\n",
+    );
+    assert!(
+        info.whole_object_uses.iter().any(|name| name == "styles"),
+        "CSS module rest destructuring should conservatively credit the whole object"
+    );
+}
+
+#[test]
 fn import_namespace() {
     let info = parse("import * as utils from './utils';");
     assert_eq!(info.imports.len(), 1);
