@@ -43,6 +43,7 @@ mod dupes;
 mod explain;
 mod fix;
 mod flags;
+mod guard;
 mod health;
 mod impact;
 mod init;
@@ -762,6 +763,13 @@ enum Command {
     RulePack {
         #[command(subcommand)]
         subcommand: RulePackCli,
+    },
+
+    /// Show which architecture rules apply to files before changing them.
+    Guard {
+        /// Files to report on (root-relative or absolute; may not exist yet)
+        #[arg(required = true, num_args = 1..)]
+        files: Vec<String>,
     },
 
     /// Show the resolved config and which config file was loaded
@@ -2714,6 +2722,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::PluginSchema => init::run_plugin_schema(),
         Command::RulePackSchema => init::run_rule_pack_schema(),
         Command::RulePack { subcommand } => dispatch_rule_pack_command(dispatch, subcommand),
+        Command::Guard { files } => dispatch_guard_command(dispatch, &files),
         Command::CiTemplate { subcommand } => dispatch_ci_template_command(subcommand),
         Command::Config { path } => config::run_config(root, cli.config.as_deref(), path, output),
         list @ (Command::Workspaces | Command::List { .. }) => {
@@ -3525,6 +3534,16 @@ fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) ->
         changed_since: cli.changed_since.as_deref(),
         explain: cli.explain,
         top,
+    })
+}
+
+fn dispatch_guard_command(dispatch: &DispatchContext<'_>, files: &[String]) -> ExitCode {
+    guard::run_guard(&guard::GuardOptions {
+        root: dispatch.root,
+        config_path: &dispatch.cli.config,
+        output: dispatch.output,
+        quiet: dispatch.quiet,
+        files,
     })
 }
 

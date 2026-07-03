@@ -238,6 +238,7 @@ pub fn telemetry_workflow_for_command(
         Some(Command::Explain { .. }) => telemetry::Workflow::Explain,
         Some(
             Command::Inspect { .. }
+            | Command::Guard { .. }
             | Command::Trace { .. }
             | Command::List { .. }
             | Command::Workspaces
