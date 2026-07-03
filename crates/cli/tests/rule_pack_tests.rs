@@ -62,6 +62,45 @@ fn write_project_with_rule_pack(root: &std::path::Path) {
     .expect("write rule pack");
 }
 
+fn write_policy_test_project(root: &std::path::Path, banned_specifier: &str) {
+    std::fs::create_dir_all(root.join("src")).expect("create src dir");
+    std::fs::create_dir_all(root.join("packs")).expect("create packs dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "t",
+  "main": "src/index.ts"
+}
+"#,
+    )
+    .expect("write package.json");
+    std::fs::write(root.join(".fallowrc.json"), "{\n  \"rules\": {}\n}\n")
+        .expect("write fallow config");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import value from 'moment';\nconsole.log(value);\n",
+    )
+    .expect("write source");
+    std::fs::write(
+        root.join("packs/p.jsonc"),
+        format!(
+            r#"{{
+  "version": 1,
+  "name": "team-policy",
+  "rules": [
+    {{
+      "id": "no-import",
+      "kind": "banned-import",
+      "specifiers": ["{banned_specifier}"]
+    }}
+  ]
+}}
+"#
+        ),
+    )
+    .expect("write rule pack");
+}
+
 #[test]
 fn rule_pack_schema_matches_legacy_top_level_command() {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -212,4 +251,51 @@ fn rule_pack_list_empty_human_points_to_init() {
     assert_eq!(output.code, 0, "stderr: {}", output.stderr);
     assert!(output.stdout.contains("No rule packs configured."));
     assert!(output.stdout.contains("fallow rule-pack init"));
+}
+
+#[test]
+fn rule_pack_test_explicit_pack_reports_policy_findings() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_policy_test_project(dir.path(), "moment");
+
+    let output = run_rule_pack(dir.path(), &["test", "packs/p.jsonc", "--format", "json"]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["kind"], "rule-pack-test");
+    assert_eq!(json["packs"], serde_json::json!(["team-policy"]));
+    assert_eq!(json["forced_severity"], false);
+    assert_eq!(json["rules"][0]["pack"], "team-policy");
+    assert_eq!(json["rules"][0]["rule_id"], "no-import");
+    assert_eq!(json["rules"][0]["kind"], "banned-import");
+    assert_eq!(json["rules"][0]["findings"], 1);
+    assert_eq!(json["findings"][0]["rule_id"], "no-import");
+}
+
+#[test]
+fn rule_pack_test_lists_zero_finding_rules() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_policy_test_project(dir.path(), "lodash");
+
+    let output = run_rule_pack(dir.path(), &["test", "packs/p.jsonc", "--format", "json"]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["rules"][0]["findings"], 0);
+    assert_eq!(json["findings"], serde_json::json!([]));
+}
+
+#[test]
+fn rule_pack_test_without_pack_requires_configured_packs() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_project(dir.path());
+
+    let output = run_rule_pack(dir.path(), &["test"]);
+
+    assert_eq!(output.code, 2);
+    assert!(
+        output
+            .stderr
+            .contains("no rule packs configured; pass a pack path or run: fallow rule-pack init")
+    );
 }
