@@ -1,6 +1,6 @@
 ---
 name: fallow
-description: Codebase intelligence for JavaScript, TypeScript, and styling. The static layer reports quality, changed-code risk, cleanup opportunities (unused files, exports, types, dependencies), code duplication, circular dependencies, complexity hotspots, architecture boundary violations, design-system styling drift, feature flag patterns, and opt-in security candidates. Runtime coverage merges production execution data into the same health report for hot-path review, cold-path deletion confidence, and stale-flag evidence, with a single local capture available by default and continuous/cloud runtime monitoring available as an optional mode. 123 framework plugins, zero configuration, sub-second static analysis. Use when asked to analyze code health, audit PR risk, find cleanup opportunities or unused code, detect duplicates, check circular dependencies, audit complexity, check styling consistency, check architecture boundaries, detect feature flags, surface security candidates, clean up the codebase, auto-fix issues, merge runtime coverage, or run fallow.
+description: Codebase intelligence for JavaScript, TypeScript, and styling. Static analysis reports changed-code risk, cleanup opportunities, duplication, circular dependencies, complexity hotspots, architecture boundaries, design-system drift, feature flags, and opt-in security candidates. Runtime coverage can merge production execution data for hot-path review, cold-path deletion confidence, and stale-flag evidence. 123 framework plugins, zero configuration, sub-second static analysis. Use when asked to audit PR risk, find unused code or dependencies, detect duplicates, check styling consistency, inspect architecture boundaries, merge runtime coverage, auto-fix supported issues, or run fallow.
 license: MIT
 metadata:
   author: Bart Waardenburg
@@ -13,23 +13,17 @@ metadata:
 Codebase intelligence for JavaScript, TypeScript, and styling. The static layer reports quality, changed-code risk, cleanup opportunities, circular dependencies, code duplication, complexity hotspots, architecture boundary violations, design-system styling drift, feature flag patterns, and opt-in security candidates. Runtime coverage merges production execution data into the same `fallow health` report for hot-path review, cold-path deletion confidence, and stale-flag evidence, with a single local capture available by default and continuous/cloud runtime monitoring available as an optional mode. 123 framework plugins, zero configuration, sub-second static analysis.
 
 ## When to Use
-- Finding cleanup opportunities (unused files, exports, types, enum/class members)
-- Finding unused or unlisted dependencies
-- Detecting code duplication and clones
-- Checking code health and complexity hotspots
-- Checking styling consistency, CSS dead surface, and design-token drift
-- Cleaning up a codebase before a release or refactor
-- Auditing a project for structural issues
-- Setting up CI quality gates or duplication thresholds
-- Auto-fixing unused exports and dependencies
-- Detecting feature flag patterns (environment gates, SDK calls, config objects) with `fallow flags`
-- Investigating why a specific export or file appears unused
-- Surfacing local security candidates for an agent to verify (`fallow security`)
-- Finding untested but runtime-reachable code (`fallow health --coverage-gaps`)
-- Ranking complexity hotspots, code owners, and refactoring targets (`fallow health --hotspots --ownership --targets`)
-- Gating CI on regressions with baselines (`--save-baseline` / `--save-regression-baseline`)
-- Explaining an issue type or why a function scored high (`fallow explain`, `fallow health --complexity-breakdown`)
-- Reviewing what fallow has surfaced over time (`fallow impact`)
+- Find cleanup opportunities: unused files, exports, types, members, dependencies, or stale flags.
+- Detect code duplication, circular dependencies, architecture boundary issues, and complexity hotspots.
+- Check styling consistency, CSS dead surface, and design-token drift.
+- Audit changed code before a commit, PR, release, or refactor.
+- Set up CI quality gates, duplication thresholds, and regression baselines.
+- Auto-fix supported unused exports and dependencies after `--dry-run`.
+- Investigate why a specific export, dependency, file, or issue type was reported.
+- Surface local security candidates for an agent to verify (`fallow security`).
+- Find untested but runtime-reachable code (`fallow health --coverage-gaps`).
+- Rank complexity hotspots, owners, and refactoring targets (`fallow health --hotspots --ownership --targets`).
+- Review what fallow has surfaced over time (`fallow impact`).
 
 ## When NOT to Use
 - Runtime error analysis or debugging
