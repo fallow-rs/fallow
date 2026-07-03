@@ -88,6 +88,7 @@ mod tests {
             "code_mode.rs",
             "code_mode_subprocess.rs",
             "fix.rs",
+            "guard.rs",
             "impact.rs",
             "inspect_target.rs",
             "mod.rs",

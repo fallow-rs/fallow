@@ -26,6 +26,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"check_changed".to_string()));
     assert!(names.contains(&"security_candidates".to_string()));
     assert!(names.contains(&"inspect_target".to_string()));
+    assert!(names.contains(&"guard".to_string()));
     assert!(names.contains(&"find_dupes".to_string()));
     assert!(names.contains(&"fix_preview".to_string()));
     assert!(names.contains(&"fix_apply".to_string()));
@@ -48,7 +49,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"impact".to_string()));
     assert!(names.contains(&"impact_all".to_string()));
     assert!(names.contains(&"decision_surface".to_string()));
-    assert_eq!(tools.len(), 27);
+    assert_eq!(tools.len(), 28);
 }
 
 #[test]
@@ -61,6 +62,7 @@ fn read_only_tools_have_annotations() {
         "check_changed",
         "security_candidates",
         "inspect_target",
+        "guard",
         "find_dupes",
         "fix_preview",
         "project_info",
@@ -179,6 +181,16 @@ fn impact_is_read_only_closed_world() {
 }
 
 #[test]
+fn guard_is_read_only_closed_world() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let guard = tools.iter().find(|t| t.name == "guard").unwrap();
+    let ann = guard.annotations.as_ref().unwrap();
+    assert_eq!(ann.read_only_hint, Some(true));
+    assert_eq!(ann.open_world_hint, Some(false));
+}
+
+#[test]
 fn impact_all_is_read_only_open_world_idempotent() {
     // The load-bearing distinction from single-repo `impact`: the cross-repo
     // roll-up's result set varies with the machine's tracked repos, so it is
@@ -226,6 +238,7 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("check_changed"));
     assert!(instructions.contains("security_candidates"));
     assert!(instructions.contains("inspect_target"));
+    assert!(instructions.contains("guard"));
     assert!(instructions.contains("find_dupes"));
     assert!(instructions.contains("fix_preview"));
     assert!(instructions.contains("fix_apply"));
@@ -463,6 +476,21 @@ fn inspect_target_schema_contains_expected_properties() {
     }
     let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
     assert_required_fields(&schema, &["target"]);
+}
+
+#[test]
+fn guard_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "guard").unwrap();
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+    let props = schema
+        .get("properties")
+        .and_then(|p| p.as_object())
+        .expect("guard schema has a properties object");
+    assert!(props.contains_key("files"), "guard exposes 'files'");
+    assert!(props.contains_key("root"), "guard exposes 'root'");
+    assert_required_fields(&schema, &["files"]);
 }
 
 #[test]

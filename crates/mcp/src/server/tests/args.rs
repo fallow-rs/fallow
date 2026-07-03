@@ -4,10 +4,10 @@ use crate::tools::{
     build_check_changed_args, build_check_runtime_coverage_args, build_explain_args,
     build_feature_flags_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
-    build_get_importance_args, build_get_token_blast_radius_args, build_health_args,
-    build_impact_all_args, build_impact_args, build_list_boundaries_args, build_project_info_args,
-    build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
-    build_trace_export_args, build_trace_file_args,
+    build_get_importance_args, build_get_token_blast_radius_args, build_guard_args,
+    build_health_args, build_impact_all_args, build_impact_args, build_list_boundaries_args,
+    build_project_info_args, build_security_candidates_args, build_trace_clone_args,
+    build_trace_dependency_args, build_trace_export_args, build_trace_file_args,
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
@@ -66,6 +66,13 @@ fn check_changed(since: &str) -> CheckChangedParams {
         include_entry_exports: None,
         no_cache: None,
         threads: None,
+    }
+}
+
+fn guard_params() -> GuardParams {
+    GuardParams {
+        files: vec!["src/domain/user.ts".to_string()],
+        root: None,
     }
 }
 
@@ -1513,6 +1520,45 @@ fn impact_args_empty_root_dropped() {
 }
 
 #[test]
+fn guard_args_emit_json_quiet_and_files() {
+    let args = build_guard_args(&GuardParams {
+        files: vec!["src/domain/user.ts".to_string(), "src/new.ts".to_string()],
+        root: None,
+    });
+    assert_eq!(
+        args,
+        [
+            "guard",
+            "--format",
+            "json",
+            "--quiet",
+            "src/domain/user.ts",
+            "src/new.ts"
+        ]
+    );
+}
+
+#[test]
+fn guard_args_with_root() {
+    let args = build_guard_args(&GuardParams {
+        files: vec!["src/domain/user.ts".to_string()],
+        root: Some("/repo".to_string()),
+    });
+    assert_eq!(
+        args,
+        [
+            "guard",
+            "--format",
+            "json",
+            "--quiet",
+            "--root",
+            "/repo",
+            "src/domain/user.ts"
+        ]
+    );
+}
+
+#[test]
 fn impact_all_args_minimal() {
     let args = build_impact_all_args(&ImpactAllParams::default());
     assert_eq!(args, ["impact", "--all", "--format", "json", "--quiet"]);
@@ -1606,6 +1652,10 @@ fn all_arg_builders_include_format_json_and_quiet() {
     let check_runtime_coverage =
         build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
     let impact = build_impact_args(&ImpactParams::default());
+    let guard = build_guard_args(&GuardParams {
+        files: vec!["src/domain/user.ts".to_string()],
+        root: None,
+    });
     let impact_all = build_impact_all_args(&ImpactAllParams::default());
 
     for (name, args) in [
@@ -1625,6 +1675,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
         ("feature_flags", &feature_flags),
         ("check_runtime_coverage", &check_runtime_coverage),
         ("impact", &impact),
+        ("guard", &guard),
         ("impact_all", &impact_all),
     ] {
         assert!(
@@ -1658,6 +1709,7 @@ fn each_tool_uses_correct_subcommand() {
     );
     assert_eq!(build_health_args(&HealthParams::default())[0], "health");
     assert_eq!(build_impact_args(&ImpactParams::default())[0], "impact");
+    assert_eq!(build_guard_args(&guard_params())[0], "guard");
     let impact_all = build_impact_all_args(&ImpactAllParams::default());
     assert_eq!(impact_all[0], "impact");
     assert_eq!(impact_all[1], "--all");
