@@ -45,6 +45,9 @@ fn apply_base_collection_rules(
     if rules.test_only_dependencies == Severity::Off {
         results.test_only_dependencies.clear();
     }
+    if rules.dev_dependencies_in_production == Severity::Off {
+        results.dev_dependencies_in_production.clear();
+    }
     if rules.circular_dependencies == Severity::Off {
         results.circular_dependencies.clear();
     }
@@ -701,6 +704,8 @@ fn has_project_level_error(
             && !results.type_only_dependencies.is_empty())
         || (rules.test_only_dependencies == Severity::Error
             && !results.test_only_dependencies.is_empty())
+        || (rules.dev_dependencies_in_production == Severity::Error
+            && !results.dev_dependencies_in_production.is_empty())
         || (!has_overrides
             && rules.circular_dependencies == Severity::Error
             && !results.circular_dependencies.is_empty())
@@ -759,6 +764,7 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
         &mut rules.duplicate_exports,
         &mut rules.type_only_dependencies,
         &mut rules.test_only_dependencies,
+        &mut rules.dev_dependencies_in_production,
         &mut rules.circular_dependencies,
         &mut rules.re_export_cycle,
         &mut rules.boundary_violation,
@@ -1043,6 +1049,7 @@ mod tests {
             duplicate_exports: Severity::Off,
             type_only_dependencies: Severity::Off,
             test_only_dependencies: Severity::Off,
+            dev_dependencies_in_production: Severity::Off,
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Off,
             re_export_cycle: Severity::Warn,
@@ -1185,6 +1192,7 @@ mod tests {
             duplicate_exports: Severity::Warn,
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
+            dev_dependencies_in_production: Severity::Warn,
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
@@ -1250,6 +1258,7 @@ mod tests {
             duplicate_exports: Severity::Warn,
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
+            dev_dependencies_in_production: Severity::Warn,
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
@@ -1739,6 +1748,7 @@ mod tests {
             duplicate_exports: Severity::Warn,
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
+            dev_dependencies_in_production: Severity::Warn,
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,
@@ -1817,6 +1827,7 @@ mod tests {
             duplicate_exports: Severity::Off,
             type_only_dependencies: Severity::Off,
             test_only_dependencies: Severity::Off,
+            dev_dependencies_in_production: Severity::Off,
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Off,
             re_export_cycle: Severity::Warn,
@@ -3676,6 +3687,7 @@ mod tests {
             duplicate_exports: Severity::Warn,
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
+            dev_dependencies_in_production: Severity::Warn,
             boundary_violation: Severity::Warn,
             circular_dependencies: Severity::Warn,
             re_export_cycle: Severity::Warn,

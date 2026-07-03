@@ -8,8 +8,8 @@ use crate::discover::FileId;
 use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use crate::results::{
-    DependencyLocation, ImportSite, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
-    UnresolvedImport, UnusedDependency,
+    DependencyLocation, DevDependencyInProduction, ImportSite, TestOnlyDependency,
+    TypeOnlyDependency, UnlistedDependency, UnresolvedImport, UnusedDependency,
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 
@@ -924,6 +924,140 @@ pub fn find_test_only_dependencies(
     }
 
     test_only_deps
+}
+
+/// Return `true` when at least one PRODUCTION (non-test, non-config) file
+/// imports `dep` via a runtime/value import.
+///
+/// `package_usage` records one entry per import statement and
+/// `type_only_package_usage` one entry per `import type` statement, so for a
+/// given file the count of value imports is `total - type_only`. A file with a
+/// value import of `dep` is therefore one whose `total` occurrences exceed its
+/// `type_only` occurrences. This mirrors the per-statement granularity the
+/// `type-only-dependency` / `test-only-dependency` detectors rely on, so a
+/// production file that imports `dep` ONLY via `import type` is not flagged.
+fn dependency_has_prod_value_import(
+    dep: &str,
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+    test_globs: &globset::GlobSet,
+) -> bool {
+    let Some(file_ids) = graph.package_usage.get(dep) else {
+        return false;
+    };
+
+    let mut per_file: FxHashMap<FileId, (u32, u32)> = FxHashMap::default();
+    for id in file_ids {
+        per_file.entry(*id).or_default().0 += 1;
+    }
+    if let Some(type_only_ids) = graph.type_only_package_usage.get(dep) {
+        for id in type_only_ids {
+            per_file.entry(*id).or_default().1 += 1;
+        }
+    }
+
+    per_file.iter().any(|(id, (total, type_only))| {
+        // No value import in this file: every occurrence was `import type`.
+        if total <= type_only {
+            return false;
+        }
+        graph.modules.get(id.0 as usize).is_some_and(|module| {
+            let relative = module
+                .path
+                .strip_prefix(&config.root)
+                .unwrap_or(&module.path);
+            !(test_globs.is_match(relative) || is_config_file(&module.path))
+        })
+    })
+}
+
+/// Find `devDependencies` imported by production code with a runtime/value
+/// import.
+///
+/// The promote-side mirror of [`find_test_only_dependencies`]: where the
+/// test-only rule demotes a production dependency imported only from tests, this
+/// rule promotes a dev dependency imported at runtime from production code.
+/// A production-only install (`pnpm install --prod`) omits `devDependencies`, so
+/// such a package would break at runtime and belongs in `dependencies`.
+///
+/// A dev dependency is NOT flagged when its only production imports are
+/// type-only (types are erased at build time, mirroring the
+/// `type-only-dependency` import-kind analysis), when it is also listed in
+/// `dependencies` / `peerDependencies` / `optionalDependencies` (runtime is
+/// provided by another manifest section), when it is a known tooling package
+/// (`@types/*`, `typescript`, ...), a workspace package, or config-ignored via
+/// `ignoreDependencies`.
+///
+/// Like [`find_test_only_dependencies`], this checks the root `package.json`
+/// against the project-wide import graph; per-workspace `package.json` parity is
+/// a shared follow-up with the sibling dependency-family detectors.
+pub fn find_dev_dependencies_in_production(
+    graph: &ModuleGraph,
+    pkg: &PackageJson,
+    config: &ResolvedConfig,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> Vec<DevDependencyInProduction> {
+    let Some(test_globs) = build_production_exclude_globset() else {
+        return Vec::new();
+    };
+
+    let root_pkg_path = config.root.join("package.json");
+    let root_pkg_content = read_pkg_json_content(&root_pkg_path);
+    let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+    let ignore_deps: FxHashSet<&str> = config
+        .ignore_dependencies
+        .iter()
+        .map(String::as_str)
+        .collect();
+
+    // Packages resolvable at runtime through another manifest section: a
+    // devDependency that is also a prod/peer/optional dependency is legitimately
+    // value-imported in production, so it must not be flagged.
+    let prod_names = pkg.production_dependency_names();
+    let optional_names = pkg.optional_dependency_names();
+    let runtime_provided: FxHashSet<&str> = prod_names
+        .iter()
+        .chain(optional_names.iter())
+        .map(String::as_str)
+        .chain(
+            pkg.peer_dependencies
+                .as_ref()
+                .into_iter()
+                .flat_map(|deps| deps.keys().map(String::as_str)),
+        )
+        .collect();
+
+    let mut findings = Vec::new();
+
+    for dep in pkg.dev_dependency_names() {
+        if workspace_names.contains(dep.as_str()) {
+            continue;
+        }
+        if ignore_deps.contains(dep.as_str()) {
+            continue;
+        }
+        if runtime_provided.contains(dep.as_str()) {
+            continue;
+        }
+        // `@types/*`, `typescript`, `prettier`, ... are genuine dev tooling and
+        // are never promoted, matching the dev category of unused-dep detection.
+        if crate::plugins::is_known_tooling_dependency(&dep) {
+            continue;
+        }
+
+        if dependency_has_prod_value_import(&dep, graph, config, &test_globs) {
+            let line = root_pkg_content
+                .as_deref()
+                .map_or(1, |c| find_dep_line_in_json(c, &dep));
+            findings.push(DevDependencyInProduction {
+                package_name: dep,
+                path: root_pkg_path.clone(),
+                line,
+            });
+        }
+    }
+
+    findings
 }
 
 /// Check whether a package is listed in root deps or in the workspace that owns `file_path`.

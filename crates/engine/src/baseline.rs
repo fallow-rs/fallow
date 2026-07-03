@@ -135,6 +135,9 @@ pub struct BaselineData {
     /// baselines saved by older fallow versions.
     #[serde(default)]
     pub test_only_dependencies: Vec<String>,
+    /// Dev dependencies used in production, keyed by `package.json:package_name`.
+    #[serde(default)]
+    pub dev_dependencies_in_production: Vec<String>,
     /// Boundary violations, keyed by `from_path->to_path`.
     #[serde(default)]
     pub boundary_violations: Vec<String>,
@@ -218,6 +221,7 @@ impl BaselineData {
             duplicate_exports: member_imports.duplicate_exports,
             type_only_dependencies: dependencies.type_only,
             test_only_dependencies: dependencies.test_only,
+            dev_dependencies_in_production: dependencies.dev_in_prod,
             boundary_violations: graph.boundary_violations,
             boundary_coverage_violations: graph.boundary_coverage_violations,
             boundary_call_violations: graph.boundary_call_violations,
@@ -264,6 +268,7 @@ impl BaselineData {
             + self.duplicate_exports.len()
             + self.type_only_dependencies.len()
             + self.test_only_dependencies.len()
+            + self.dev_dependencies_in_production.len()
             + self.boundary_violations.len()
             + self.boundary_coverage_violations.len()
             + self.boundary_call_violations.len()
@@ -705,6 +710,7 @@ struct BaselineDependencyKeys {
     unlisted: Vec<String>,
     type_only: Vec<String>,
     test_only: Vec<String>,
+    dev_in_prod: Vec<String>,
 }
 
 fn baseline_dependency_keys(
@@ -739,6 +745,11 @@ fn baseline_dependency_keys(
             .collect(),
         test_only: results
             .test_only_dependencies
+            .iter()
+            .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
+            .collect(),
+        dev_in_prod: results
+            .dev_dependencies_in_production
             .iter()
             .map(|d| package_json_dependency_key(&d.dep.package_name, &d.dep.path, root))
             .collect(),
@@ -1170,6 +1181,21 @@ impl BaselineFilterContext<'_> {
         results.test_only_dependencies.retain(|dep| {
             let key = package_json_dependency_key(&dep.dep.package_name, &dep.dep.path, self.root);
             !baseline_contains_dependency(&baseline_test_only, &dep.dep.package_name, key.as_str())
+        });
+
+        let baseline_dev_in_prod: FxHashSet<&str> = self
+            .baseline
+            .dev_dependencies_in_production
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.dev_dependencies_in_production.retain(|dep| {
+            let key = package_json_dependency_key(&dep.dep.package_name, &dep.dep.path, self.root);
+            !baseline_contains_dependency(
+                &baseline_dev_in_prod,
+                &dep.dep.package_name,
+                key.as_str(),
+            )
         });
     }
 
@@ -2211,6 +2237,7 @@ mod tests {
             duplicate_exports: vec![],
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
+            dev_dependencies_in_production: vec![],
             boundary_violations: vec![],
             boundary_coverage_violations: vec![],
             boundary_call_violations: vec![],
@@ -2275,6 +2302,7 @@ mod tests {
             duplicate_exports: vec![],
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
+            dev_dependencies_in_production: vec![],
             boundary_violations: vec![],
             boundary_coverage_violations: vec![],
             boundary_call_violations: vec![],
@@ -2326,6 +2354,7 @@ mod tests {
             duplicate_exports: vec![],
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
+            dev_dependencies_in_production: vec![],
             boundary_violations: vec![],
             boundary_coverage_violations: vec![],
             boundary_call_violations: vec![],

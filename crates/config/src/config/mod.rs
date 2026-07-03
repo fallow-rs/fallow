@@ -548,6 +548,8 @@ pub struct RegressionBaseline {
     #[serde(default)]
     pub test_only_dependencies: usize,
     #[serde(default)]
+    pub dev_dependencies_in_production: usize,
+    #[serde(default)]
     pub boundary_violations: usize,
     #[serde(default)]
     pub boundary_coverage_violations: usize,

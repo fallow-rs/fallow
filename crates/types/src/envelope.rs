@@ -146,6 +146,9 @@ pub struct CheckSummary {
     /// Production dependencies only imported by test files (could be
     /// devDependencies).
     pub test_only_dependencies: usize,
+    /// devDependencies imported by production source code with a runtime/value
+    /// import (should be promoted to dependencies).
+    pub dev_dependencies_in_production: usize,
     /// Cycles detected in the import graph.
     pub circular_dependencies: usize,
     /// Cycles or self-loops in the re-export edge subgraph (barrel files

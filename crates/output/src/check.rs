@@ -254,6 +254,9 @@ macro_rules! visit_suppress_line_findings {
         for finding in &results.test_only_dependencies {
             $visit(&finding.dep.path, finding.dep.line, &finding.actions);
         }
+        for finding in &results.dev_dependencies_in_production {
+            $visit(&finding.dep.path, finding.dep.line, &finding.actions);
+        }
         for finding in &results.circular_dependencies {
             if let Some(path) = finding.cycle.files.first() {
                 $visit(path, finding.cycle.line, &finding.actions);
@@ -443,6 +446,9 @@ macro_rules! visit_suppress_line_findings_mut {
             $visit(&finding.dep.path, finding.dep.line, &mut finding.actions);
         }
         for finding in &mut results.test_only_dependencies {
+            $visit(&finding.dep.path, finding.dep.line, &mut finding.actions);
+        }
+        for finding in &mut results.dev_dependencies_in_production {
             $visit(&finding.dep.path, finding.dep.line, &mut finding.actions);
         }
         for finding in &mut results.circular_dependencies {
@@ -869,6 +875,7 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         duplicate_exports: results.duplicate_exports.len(),
         type_only_dependencies: results.type_only_dependencies.len(),
         test_only_dependencies: results.test_only_dependencies.len(),
+        dev_dependencies_in_production: results.dev_dependencies_in_production.len(),
         circular_dependencies: results.circular_dependencies.len(),
         re_export_cycles: results.re_export_cycles.len(),
         boundary_violations: results.boundary_violations.len(),

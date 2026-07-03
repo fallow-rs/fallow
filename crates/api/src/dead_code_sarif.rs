@@ -12,10 +12,11 @@ use fallow_types::{
     output_dead_code::*,
     results::{
         AnalysisResults, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
-        CircularDependency, DuplicatePropShape, DynamicSegmentNameConflict, InvalidClientExport,
-        MisplacedDirective, MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity,
-        PrivateTypeLeak, PropDrillingChain, RouteCollision, StaleSuppression, TestOnlyDependency,
-        ThinWrapper, TypeOnlyDependency, UnprovidedInject, UnrenderedComponent, UnresolvedImport,
+        CircularDependency, DevDependencyInProduction, DuplicatePropShape,
+        DynamicSegmentNameConflict, InvalidClientExport, MisplacedDirective,
+        MixedClientServerBarrel, PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak,
+        PropDrillingChain, RouteCollision, StaleSuppression, TestOnlyDependency, ThinWrapper,
+        TypeOnlyDependency, UnprovidedInject, UnrenderedComponent, UnresolvedImport,
         UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp,
         UnusedDependency, UnusedExport, UnusedFile, UnusedMember, UnusedServerAction,
         UnusedSvelteEvent,
@@ -291,6 +292,29 @@ fn sarif_test_only_dep_fields(
         level,
         message: format!(
             "Package '{}' is only imported by test files (consider moving to devDependencies)",
+            dep.package_name
+        ),
+        uri: relative_uri(&dep.path, root),
+        region: if dep.line > 0 {
+            Some((dep.line, 1))
+        } else {
+            None
+        },
+        source_path: (dep.line > 0).then(|| dep.path.clone()),
+        properties: None,
+    }
+}
+
+fn sarif_dev_dep_in_prod_fields(
+    dep: &DevDependencyInProduction,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/dev-dependency-in-production",
+        level,
+        message: format!(
+            "devDependency '{}' is imported by production code at runtime (consider moving to dependencies)",
             dep.package_name
         ),
         uri: relative_uri(&dep.path, root),
@@ -1061,6 +1085,7 @@ fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Seve
         "unused-optional-dependency" => rules.unused_optional_dependencies,
         "type-only-dependency" => rules.type_only_dependencies,
         "test-only-dependency" => rules.test_only_dependencies,
+        "dev-dependency-in-production" => rules.dev_dependencies_in_production,
         "unused-enum-member" => rules.unused_enum_members,
         "unused-class-member" => rules.unused_class_members,
         "unused-store-member" => rules.unused_store_members,
@@ -1300,6 +1325,18 @@ fn push_classified_dependency_sarif_results(
                 &d.dep,
                 root,
                 severity_to_sarif_level(rules.test_only_dependencies),
+            )
+        },
+    );
+    push_sarif_results(
+        sarif_results,
+        &results.dev_dependencies_in_production,
+        snippets,
+        |d| {
+            sarif_dev_dep_in_prod_fields(
+                &d.dep,
+                root,
+                severity_to_sarif_level(rules.dev_dependencies_in_production),
             )
         },
     );

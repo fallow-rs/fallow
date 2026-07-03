@@ -135,6 +135,7 @@ Run `fallow <command> --help` for the full flag list per command (see also refer
 | `unused-optional-dependency` | `--unused-deps` | yes | - | Packages in `optionalDependencies` never imported (often platform-specific; verify before removing) |
 | `type-only-dependency` | `--unused-deps` | - | - | Production dependency only used via type-only imports; Only reported in --production mode; --unused-deps scopes it together with the other dependency kinds |
 | `test-only-dependency` | `--unused-deps` | - | - | Production deps only imported from test files (should be devDependencies) |
+| `dev-dependency-in-production` | `--unused-deps` | - | - | devDependency imported by production code with a runtime import |
 | `unused-enum-member` | `--unused-enum-members` | yes | `// fallow-ignore-next-line unused-enum-member` | Enum values never referenced |
 | `unused-class-member` | `--unused-class-members` | - | `// fallow-ignore-next-line unused-class-member` | Methods and properties |
 | `unused-store-member` | `--unused-store-members` | - | `// fallow-ignore-next-line unused-store-member` | Pinia store state/getter/action (needs `pinia` dep) |

@@ -545,6 +545,42 @@
       "docs_url": "https://docs.fallow.tools/explanations/dead-code#test-only-dependencies"
     },
     {
+      "id": "dev-dependency-in-production",
+      "rule_id": "fallow/dev-dependency-in-production",
+      "command": "dead-code",
+      "category": "Dependencies",
+      "description": "devDependency imported by production code with a runtime import",
+      "label": "Dev Dependencies Used in Production",
+      "config_key": "dev-dependencies-in-production",
+      "registry_index": 16,
+      "aliases": [
+        "prod-usage-of-dev-dependency"
+      ],
+      "lsp": true,
+      "filter_flag": "--unused-deps",
+      "result_key": "dev_dependencies_in_production",
+      "summary_label": "Dev dependencies used in production",
+      "summary_docs_anchor": "dev-dependencies-in-production",
+      "sarif_rule_ids": [
+        "fallow/dev-dependency-in-production"
+      ],
+      "codeclimate_check_names": [
+        "fallow/dev-dependency-in-production"
+      ],
+      "ts_alias": {
+        "name": "DevDependencyInProduction",
+        "parent": "DevDependencyInProductionFinding"
+      },
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://docs.fallow.tools/explanations/dead-code#dev-dependencies-in-production"
+    },
+    {
       "id": "circular-dependency",
       "rule_id": "fallow/circular-dependency",
       "command": "dead-code",
@@ -552,7 +588,7 @@
       "description": "Circular dependency chain detected",
       "label": "Circular Dependencies",
       "config_key": "circular-dependencies",
-      "registry_index": 16,
+      "registry_index": 17,
       "aliases": [
         "circular-dependencies"
       ],
@@ -588,7 +624,7 @@
       "description": "Two or more barrel files re-export from each other in a loop",
       "label": "Re-Export Cycles",
       "config_key": "re-export-cycle",
-      "registry_index": 17,
+      "registry_index": 18,
       "aliases": [
         "re-export-cycles",
         "reexport-cycle",
@@ -626,7 +662,7 @@
       "description": "Import crosses a configured architecture boundary",
       "label": "Boundary Violations",
       "config_key": "boundary-violation",
-      "registry_index": 18,
+      "registry_index": 19,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--boundary-violations",
@@ -660,7 +696,7 @@
       "description": "Source file matches no configured architecture boundary zone",
       "label": "Boundary Coverage",
       "config_key": "boundary-violation",
-      "registry_index": 19,
+      "registry_index": 20,
       "aliases": [
         "boundary-coverage-violations"
       ],
@@ -693,7 +729,7 @@
       "description": "Zoned file calls a callee its zone forbids",
       "label": "Boundary Call Violations",
       "config_key": "boundary-violation",
-      "registry_index": 20,
+      "registry_index": 21,
       "aliases": [
         "boundary-calls",
         "boundary-call-violations"
@@ -727,7 +763,7 @@
       "description": "Banned usage matched a rule-pack rule",
       "label": "Policy Violations",
       "config_key": "policy-violation",
-      "registry_index": 21,
+      "registry_index": 22,
       "aliases": [
         "policy-violations"
       ],
@@ -760,7 +796,7 @@
       "description": "\"use client\" file exports a server-only / route-config name",
       "label": "Invalid Client Exports",
       "config_key": "invalid-client-export",
-      "registry_index": 22,
+      "registry_index": 23,
       "aliases": [
         "invalid-client-exports"
       ],
@@ -793,7 +829,7 @@
       "description": "Barrel re-exports both a \"use client\" module and a server-only module",
       "label": "Mixed Client/Server Barrels",
       "config_key": "mixed-client-server-barrel",
-      "registry_index": 23,
+      "registry_index": 24,
       "aliases": [
         "mixed-client-server-barrels"
       ],
@@ -826,7 +862,7 @@
       "description": "\"use client\" / \"use server\" directive is not in the leading position and is ignored",
       "label": "Misplaced Directives",
       "config_key": "misplaced-directive",
-      "registry_index": 24,
+      "registry_index": 25,
       "aliases": [
         "misplaced-directives"
       ],
@@ -859,7 +895,7 @@
       "description": "inject() / getContext() reads a key that no provide() / setContext() supplies",
       "label": "Unprovided Injects",
       "config_key": "unprovided-injects",
-      "registry_index": 25,
+      "registry_index": 26,
       "aliases": [
         "unprovided-injects"
       ],
@@ -892,7 +928,7 @@
       "description": "A Vue / Svelte component is reachable through a barrel but rendered nowhere",
       "label": "Unrendered Components",
       "config_key": "unrendered-components",
-      "registry_index": 26,
+      "registry_index": 27,
       "aliases": [
         "unrendered-components"
       ],
@@ -925,7 +961,7 @@
       "description": "A Vue, Svelte, or React component prop is referenced nowhere in its own component",
       "label": "Unused Component Props",
       "config_key": "unused-component-props",
-      "registry_index": 27,
+      "registry_index": 28,
       "aliases": [
         "unused-component-props"
       ],
@@ -958,7 +994,7 @@
       "description": "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
       "label": "Unused Component Emits",
       "config_key": "unused-component-emits",
-      "registry_index": 28,
+      "registry_index": 29,
       "aliases": [
         "unused-component-emits"
       ],
@@ -991,7 +1027,7 @@
       "description": "An Angular @Input() / signal input() / model() input is read nowhere in its own component",
       "label": "Unused Component Inputs",
       "config_key": "unused-component-inputs",
-      "registry_index": 29,
+      "registry_index": 30,
       "aliases": [
         "unused-component-inputs"
       ],
@@ -1024,7 +1060,7 @@
       "description": "An Angular @Output() / signal output() output is emitted nowhere in its own component",
       "label": "Unused Component Outputs",
       "config_key": "unused-component-outputs",
-      "registry_index": 30,
+      "registry_index": 31,
       "aliases": [
         "unused-component-outputs"
       ],
@@ -1057,7 +1093,7 @@
       "description": "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project",
       "label": "Unused Svelte Events",
       "config_key": "unused-svelte-events",
-      "registry_index": 31,
+      "registry_index": 32,
       "aliases": [
         "unused-svelte-events"
       ],
@@ -1090,7 +1126,7 @@
       "description": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
       "label": "Unused Server Actions",
       "config_key": "unused-server-actions",
-      "registry_index": 32,
+      "registry_index": 33,
       "aliases": [
         "unused-server-actions"
       ],
@@ -1123,7 +1159,7 @@
       "description": "A SvelteKit load() return-object key is read by no consumer",
       "label": "Unused Load Data Keys",
       "config_key": "unused-load-data-keys",
-      "registry_index": 33,
+      "registry_index": 34,
       "aliases": [
         "unused-load-data-keys"
       ],
@@ -1156,7 +1192,7 @@
       "description": "Two or more Next.js App Router route files resolve to the same URL",
       "label": "Route Collisions",
       "config_key": "route-collision",
-      "registry_index": 34,
+      "registry_index": 35,
       "aliases": [
         "route-collisions"
       ],
@@ -1189,7 +1225,7 @@
       "description": "Sibling Next.js dynamic route segments use different slug names at the same position",
       "label": "Dynamic Segment Conflicts",
       "config_key": "dynamic-segment-name-conflict",
-      "registry_index": 35,
+      "registry_index": 36,
       "aliases": [
         "dynamic-segment-name-conflicts"
       ],
@@ -1222,7 +1258,7 @@
       "description": "Suppression comment or tag no longer matches any issue",
       "label": "Stale Suppressions",
       "config_key": "stale-suppressions",
-      "registry_index": 36,
+      "registry_index": 37,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--stale-suppressions",
@@ -1255,7 +1291,7 @@
       "description": "Suppression comment omits a required reason",
       "label": "Missing Suppression Reasons",
       "config_key": "require-suppression-reason",
-      "registry_index": 37,
+      "registry_index": 38,
       "aliases": [
         "missing-suppression-reasons"
       ],
@@ -1284,7 +1320,7 @@
       "description": "Catalog entry not referenced by any workspace package",
       "label": "Unused Catalog Entries",
       "config_key": "unused-catalog-entries",
-      "registry_index": 38,
+      "registry_index": 39,
       "aliases": [
         "catalog",
         "unused-catalog-entries"
@@ -1321,7 +1357,7 @@
       "description": "Named catalog group has no entries",
       "label": "Empty Catalog Groups",
       "config_key": "empty-catalog-groups",
-      "registry_index": 39,
+      "registry_index": 40,
       "aliases": [
         "empty-catalog",
         "empty-catalog-groups"
@@ -1358,7 +1394,7 @@
       "description": "package.json references a catalog that does not declare the package",
       "label": "Unresolved Catalog References",
       "config_key": "unresolved-catalog-references",
-      "registry_index": 40,
+      "registry_index": 41,
       "aliases": [
         "unresolved-catalog",
         "unresolved-catalog-references"
@@ -1395,7 +1431,7 @@
       "description": "pnpm.overrides entry targets a package not declared or resolved",
       "label": "Unused Dependency Overrides",
       "config_key": "unused-dependency-overrides",
-      "registry_index": 41,
+      "registry_index": 42,
       "aliases": [
         "unused-dependency-overrides",
         "unused-override",
@@ -1433,7 +1469,7 @@
       "description": "pnpm.overrides entry has an unparsable key or value",
       "label": "Misconfigured Dependency Overrides",
       "config_key": "misconfigured-dependency-overrides",
-      "registry_index": 42,
+      "registry_index": 43,
       "aliases": [
         "misconfigured-dependency-overrides",
         "misconfigured-override",
@@ -1471,7 +1507,7 @@
       "description": "Detected feature flag pattern",
       "label": "Feature Flags",
       "config_key": "feature-flags",
-      "registry_index": 46,
+      "registry_index": 47,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -1498,7 +1534,7 @@
       "description": "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer",
       "label": "Prop Drilling",
       "config_key": "prop-drilling",
-      "registry_index": 48,
+      "registry_index": 49,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -1527,7 +1563,7 @@
       "description": "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
       "label": "Thin Wrappers",
       "config_key": "thin-wrapper",
-      "registry_index": 49,
+      "registry_index": 50,
       "aliases": [
         "thin-wrappers"
       ],
@@ -1558,7 +1594,7 @@
       "description": "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
       "label": "Duplicate Prop Shapes",
       "config_key": "duplicate-prop-shape",
-      "registry_index": 50,
+      "registry_index": 51,
       "aliases": [
         "duplicate-prop-shapes"
       ],

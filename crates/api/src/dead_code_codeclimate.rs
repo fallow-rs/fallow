@@ -240,6 +240,36 @@ fn push_test_only_dep_issues(
     }
 }
 
+fn push_dev_dep_in_prod_issues(
+    issues: &mut Vec<CodeClimateIssue>,
+    deps: &[fallow_types::output_dead_code::DevDependencyInProductionFinding],
+    root: &Path,
+    severity: Severity,
+) {
+    if deps.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for entry in deps {
+        let dep = &entry.dep;
+        let path = cc_path(&dep.path, root);
+        let line = if dep.line > 0 { Some(dep.line) } else { None };
+        let fp = fingerprint_hash(&["fallow/dev-dependency-in-production", &dep.package_name]);
+        issues.push(build_codeclimate_issue(CodeClimateIssueInput {
+            check_name: "fallow/dev-dependency-in-production",
+            description: &format!(
+                "devDependency '{}' is imported by production code at runtime (consider moving to dependencies)",
+                dep.package_name
+            ),
+            severity: level,
+            category: "Bug Risk",
+            path: &path,
+            begin_line: line,
+            fingerprint: &fp,
+        }));
+    }
+}
+
 /// Push CodeClimate issues for unused enum or class members.
 ///
 /// `entity_label` is `"Enum"` or `"Class"` so the rendered description reads
@@ -1453,6 +1483,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.test_only_dependencies,
             self.root,
             self.rules.test_only_dependencies,
+        );
+        push_dev_dep_in_prod_issues(
+            &mut self.issues,
+            &self.results.dev_dependencies_in_production,
+            self.root,
+            self.rules.dev_dependencies_in_production,
         );
     }
 

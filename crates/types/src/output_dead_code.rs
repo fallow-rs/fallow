@@ -38,15 +38,15 @@ use crate::output::{
 };
 use crate::results::{
     BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
-    DependencyOverrideSource, DuplicateExport, DuplicatePropShape, DynamicSegmentNameConflict,
-    EmptyCatalogGroup, InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
-    MixedClientServerBarrel, PolicyViolation, PrivateTypeLeak, PropDrillingChain, ReExportCycle,
-    ReExportCycleKind, RouteCollision, TestOnlyDependency, ThinWrapper, TypeOnlyDependency,
-    UnlistedDependency, UnprovidedInject, UnrenderedComponent, UnresolvedCatalogReference,
-    UnresolvedImport, UnusedCatalogEntry, UnusedComponentEmit, UnusedComponentInput,
-    UnusedComponentOutput, UnusedComponentProp, UnusedDependency, UnusedDependencyOverride,
-    UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember, UnusedServerAction,
-    UnusedSvelteEvent,
+    DependencyOverrideSource, DevDependencyInProduction, DuplicateExport, DuplicatePropShape,
+    DynamicSegmentNameConflict, EmptyCatalogGroup, InvalidClientExport,
+    MisconfiguredDependencyOverride, MisplacedDirective, MixedClientServerBarrel, PolicyViolation,
+    PrivateTypeLeak, PropDrillingChain, ReExportCycle, ReExportCycleKind, RouteCollision,
+    TestOnlyDependency, ThinWrapper, TypeOnlyDependency, UnlistedDependency, UnprovidedInject,
+    UnrenderedComponent, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
+    UnusedComponentEmit, UnusedComponentInput, UnusedComponentOutput, UnusedComponentProp,
+    UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey,
+    UnusedMember, UnusedServerAction, UnusedSvelteEvent,
 };
 
 /// Shared note for the `duplicate-exports` fix action. Mirrors the const used
@@ -1993,6 +1993,55 @@ impl TestOnlyDependencyFinding {
     }
 }
 
+/// Wire-shape envelope for a [`DevDependencyInProduction`] finding. Carries a
+/// `move-to-prod` primary (the promote-side mirror of
+/// [`TestOnlyDependencyFinding`]'s `move-to-dev`) plus the standard
+/// `ignoreDependencies` config suppress.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DevDependencyInProductionFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub dep: DevDependencyInProduction,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+}
+
+impl DevDependencyInProductionFinding {
+    /// Build the wrapper.
+    #[must_use]
+    pub fn with_actions(dep: DevDependencyInProduction) -> Self {
+        let actions = vec![
+            IssueAction::Fix(FixAction {
+                kind: FixActionType::MoveToProd,
+                auto_fixable: false,
+                description: "Move to dependencies (production code imports this at runtime)"
+                    .to_string(),
+                note: Some(
+                    "A production-only install (`pnpm install --prod`) omits devDependencies, so this import would break at runtime"
+                        .to_string(),
+                ),
+                available_in_catalogs: None,
+                suggested_target: None,
+            }),
+            build_ignore_dependencies_suppress_action(
+                &dep.package_name,
+                "dev-dependency-in-production",
+            ),
+        ];
+        Self {
+            dep,
+            actions,
+            introduced: None,
+        }
+    }
+}
+
 // ── Catalog / dep-override family ───────────────────────────────
 //
 // These six wrappers replace the legacy `inject_actions` post-pass in
@@ -2541,6 +2590,7 @@ mod position_0_invariants {
                 FixActionType::InstallDependency => "install-dependency",
                 FixActionType::RemoveDuplicate => "remove-duplicate",
                 FixActionType::MoveToDev => "move-to-dev",
+                FixActionType::MoveToProd => "move-to-prod",
                 FixActionType::RefactorCycle => "refactor-cycle",
                 FixActionType::RefactorReExportCycle => "refactor-re-export-cycle",
                 FixActionType::RefactorBoundary => "refactor-boundary",

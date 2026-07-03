@@ -300,6 +300,19 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         docs_category: "dependency",
     },
     IssueKindMeta {
+        kind: Some(IssueKind::DevDependencyInProduction),
+        code: "dev-dependency-in-production",
+        aliases: &["prod-usage-of-dev-dependency"],
+        label: "Dev Dependencies Used in Production",
+        config_key: Some("dev-dependencies-in-production"),
+        filter_flag: Some("--unused-deps"),
+        mcp_issue_type: None,
+        suppress_token: None,
+        suppress_file_level: false,
+        lsp: true,
+        docs_category: "dependency",
+    },
+    IssueKindMeta {
         kind: Some(IssueKind::CircularDependency),
         code: "circular-dependency",
         aliases: &["circular-dependencies"],
@@ -972,6 +985,13 @@ pub const ISSUE_TS_ALIAS_META: &[IssueTsAliasMeta] = &[
         },
     },
     IssueTsAliasMeta {
+        code: "dev-dependency-in-production",
+        alias: TsAliasMeta {
+            name: "DevDependencyInProduction",
+            parent: "DevDependencyInProductionFinding",
+        },
+    },
+    IssueTsAliasMeta {
         code: "circular-dependency",
         alias: TsAliasMeta {
             name: "CircularDependency",
@@ -1194,6 +1214,17 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         summary_label: "Test-only dependencies",
         docs_anchor: "test-only-dependencies",
         result_key: "test_only_dependencies",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "dev-dependency-in-production",
+        sarif_description: "devDependency imported by production code with a runtime import",
+        meta_description: "devDependencies imported by production source code via a runtime/value import; they should be promoted to dependencies.",
+        meta_docs_path: "explanations/dead-code#dev-dependencies-in-production",
+        meta_name: "Dev Dependencies Used in Production",
+        summary_label: "Dev dependencies used in production",
+        docs_anchor: "dev-dependencies-in-production",
+        result_key: "dev_dependencies_in_production",
         counts_in_total: true,
     },
     IssueResultMeta {
@@ -1973,6 +2004,10 @@ mod tests {
             BTreeSet::from([
                 ("BoundaryViolation", "BoundaryViolationFinding"),
                 ("CircularDependency", "CircularDependencyFinding"),
+                (
+                    "DevDependencyInProduction",
+                    "DevDependencyInProductionFinding",
+                ),
                 ("DuplicateExport", "DuplicateExportFinding"),
                 ("EmptyCatalogGroup", "EmptyCatalogGroupFinding"),
                 (

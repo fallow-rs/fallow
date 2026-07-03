@@ -32,6 +32,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "duplicate_exports": 1,
     "type_only_dependencies": 1,
     "test_only_dependencies": 1,
+    "dev_dependencies_in_production": 0,
     "circular_dependencies": 1,
     "re_export_cycles": 1,
     "boundary_violations": 0,
@@ -410,6 +411,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       ]
     }
   ],
+  "dev_dependencies_in_production": [],
   "circular_dependencies": [
     {
       "files": [

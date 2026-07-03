@@ -349,6 +349,10 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
             "Test-only production dependencies",
             "fallow/test-only-dependency",
         ),
+        (
+            "Dev dependencies used in production",
+            "fallow/dev-dependency-in-production",
+        ),
         ("Unused enum members", "fallow/unused-enum-member"),
         ("Unused class members", "fallow/unused-class-member"),
         ("Unused store members", "fallow/unused-store-member"),
@@ -573,6 +577,15 @@ impl NamedPkgDep for TypeOnlyDependencyFinding {
 }
 
 impl NamedPkgDep for TestOnlyDependencyFinding {
+    fn pkg_name(&self) -> &str {
+        &self.dep.package_name
+    }
+    fn pkg_path(&self) -> &Path {
+        &self.dep.path
+    }
+}
+
+impl NamedPkgDep for DevDependencyInProductionFinding {
     fn pkg_name(&self) -> &str {
         &self.dep.package_name
     }
@@ -855,6 +868,7 @@ fn has_dependency_findings(results: &AnalysisResults) -> bool {
         || !results.unlisted_dependencies.is_empty()
         || !results.type_only_dependencies.is_empty()
         || !results.test_only_dependencies.is_empty()
+        || !results.dev_dependencies_in_production.is_empty()
         || !results.unused_catalog_entries.is_empty()
         || !results.empty_catalog_groups.is_empty()
         || !results.unresolved_catalog_references.is_empty()
@@ -961,6 +975,15 @@ fn push_import_dependency_sections(input: ImportDependencySectionInput<'_>) {
         items: &results.test_only_dependencies,
         title: "Test-only production dependencies (consider moving to devDependencies)",
         severity: rules.test_only_dependencies,
+        max_items,
+        total_issues,
+        root,
+    });
+    push_human_pkg_dep_section(&mut HumanPkgDepSectionInput {
+        lines,
+        items: &results.dev_dependencies_in_production,
+        title: "Dev dependencies used in production (consider moving to dependencies)",
+        severity: rules.dev_dependencies_in_production,
         max_items,
         total_issues,
         root,
@@ -3221,6 +3244,11 @@ fn push_summary_dependency_parts(parts: &mut Vec<String>, results: &AnalysisResu
 fn push_summary_graph_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
     push_summary_part(
         parts,
+        results.dev_dependencies_in_production.len(),
+        "dev dependencies in production",
+    );
+    push_summary_part(
+        parts,
         results.circular_dependencies.len(),
         "circular dependencies",
     );
@@ -3445,6 +3473,11 @@ fn check_summary_dependency_categories(
             "Test-only dependencies",
             results.test_only_dependencies.len(),
             severity_to_level(rules.test_only_dependencies),
+        ),
+        (
+            "Dev dependencies in production",
+            results.dev_dependencies_in_production.len(),
+            severity_to_level(rules.dev_dependencies_in_production),
         ),
         (
             "Circular dependencies",

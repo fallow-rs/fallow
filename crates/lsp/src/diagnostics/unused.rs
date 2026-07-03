@@ -196,6 +196,7 @@ pub fn push_dep_diagnostics(
 
     push_type_only_dependency_diagnostics(map, results);
     push_test_only_dependency_diagnostics(map, results);
+    push_dev_dependency_in_production_diagnostics(map, results);
     push_unused_catalog_entry_diagnostics(map, results, root);
 
     push_empty_catalog_group_diagnostics(map, results, root);
@@ -290,6 +291,31 @@ fn push_test_only_dependency_diagnostics(
                 code_description: doc_link_for_code("test-only-dependency"),
                 message: format!(
                     "Production dependency '{}' is only imported by test files; consider moving to devDependencies",
+                    dep.dep.package_name
+                ),
+                ..Default::default()
+            });
+        }
+    }
+}
+
+fn push_dev_dependency_in_production_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for dep in &results.dev_dependencies_in_production {
+        if let Some(dep_uri) = Uri::from_file_path(&dep.dep.path) {
+            let line = dep.dep.line.saturating_sub(1);
+            map.entry(dep_uri).or_default().push(Diagnostic {
+                range: full_line_range(line),
+                severity: Some(DiagnosticSeverity::INFORMATION),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String(
+                    "dev-dependency-in-production".to_string(),
+                )),
+                code_description: doc_link_for_code("dev-dependency-in-production"),
+                message: format!(
+                    "devDependency '{}' is imported by production code at runtime; consider moving to dependencies",
                     dep.dep.package_name
                 ),
                 ..Default::default()

@@ -592,6 +592,7 @@ fn clear_dead_code_dependency_findings(results: &mut AnalysisResults) {
     results.unused_optional_dependencies.clear();
     results.type_only_dependencies.clear();
     results.test_only_dependencies.clear();
+    results.dev_dependencies_in_production.clear();
 }
 
 fn apply_dead_code_component_filters(filters: &DeadCodeFilters, results: &mut AnalysisResults) {

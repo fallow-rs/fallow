@@ -51,6 +51,7 @@ fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
         IssueKind::ReExportCycle => rules.re_export_cycle,
         IssueKind::TypeOnlyDependency => rules.type_only_dependencies,
         IssueKind::TestOnlyDependency => rules.test_only_dependencies,
+        IssueKind::DevDependencyInProduction => rules.dev_dependencies_in_production,
         IssueKind::BoundaryViolation => rules.boundary_violation,
         IssueKind::CoverageGaps => rules.coverage_gaps,
         IssueKind::FeatureFlag => rules.feature_flags,
@@ -112,6 +113,7 @@ const NON_CORE_KINDS: &[IssueKind] = &[
     IssueKind::UnlistedDependency,
     IssueKind::TypeOnlyDependency,
     IssueKind::TestOnlyDependency,
+    IssueKind::DevDependencyInProduction,
     IssueKind::PnpmCatalogEntry,
     IssueKind::EmptyCatalogGroup,
     IssueKind::UnresolvedCatalogReference,
@@ -653,6 +655,7 @@ mod tests {
             IssueKind::CssSelectorComplexity,
             IssueKind::CssDeadSurface,
             IssueKind::CssBrokenReference,
+            IssueKind::DevDependencyInProduction,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -666,6 +669,7 @@ mod tests {
             .max()
             .unwrap();
         assert_eq!(IssueKind::from_discriminant(max_discriminant + 1), None);
+        assert_eq!(IssueKind::from_discriminant(49), None);
     }
 
     #[test]

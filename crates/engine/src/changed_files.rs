@@ -341,6 +341,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         duplicate_exports: _duplicate_exports,
         type_only_dependencies: _type_only_dependencies,
         test_only_dependencies: _test_only_dependencies,
+        dev_dependencies_in_production: _dev_dependencies_in_production,
         circular_dependencies: _circular_dependencies,
         re_export_cycles: _re_export_cycles,
         boundary_violations: _boundary_violations,

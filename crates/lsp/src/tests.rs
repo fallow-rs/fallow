@@ -3,11 +3,12 @@ use super::*;
 use fallow_api::editor_duplicates::{CloneGroup, CloneInstance, DuplicationStats};
 use fallow_api::editor_results::{
     BoundaryViolation, BoundaryViolationFinding, CircularDependency, CircularDependencyFinding,
-    ExportUsage, SecuritySeverity, TestOnlyDependency, TestOnlyDependencyFinding,
-    TypeOnlyDependency, UnlistedDependency, UnlistedDependencyFinding, UnusedClassMemberFinding,
-    UnusedDependency, UnusedDependencyFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-    UnusedExport, UnusedExportFinding, UnusedFile, UnusedFileFinding, UnusedMember,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    DevDependencyInProduction, DevDependencyInProductionFinding, ExportUsage, SecuritySeverity,
+    TestOnlyDependency, TestOnlyDependencyFinding, TypeOnlyDependency, UnlistedDependency,
+    UnlistedDependencyFinding, UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
+    UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
+    UnusedFile, UnusedFileFinding, UnusedMember, UnusedOptionalDependencyFinding,
+    UnusedStoreMemberFinding, UnusedTypeFinding,
 };
 use serde_json::json;
 use tower::{Service, ServiceExt};
@@ -1200,6 +1201,13 @@ fn merge_test_source_with_all_fields() -> AnalysisResults {
                 package_name: "test-only".to_string(),
                 path: "/pkg.json".into(),
                 line: 11,
+            },
+        )],
+        dev_dependencies_in_production: vec![DevDependencyInProductionFinding::with_actions(
+            DevDependencyInProduction {
+                package_name: "dev-in-prod".to_string(),
+                path: "/pkg.json".into(),
+                line: 12,
             },
         )],
         boundary_violations: vec![BoundaryViolationFinding::with_actions(BoundaryViolation {

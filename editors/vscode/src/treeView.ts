@@ -53,6 +53,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "duplicate-exports": "files",
   "type-only-dependencies": "symbol-interface",
   "test-only-dependencies": "beaker",
+  "dev-dependencies-in-production": "package",
   "circular-dependencies": "sync",
   "re-export-cycles": "sync-ignored",
   "boundary-violation": "symbol-namespace",
@@ -96,6 +97,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "duplicate-exports": "copy",
   "type-only-dependencies": "package",
   "test-only-dependencies": "beaker",
+  "dev-dependencies-in-production": "package",
   "circular-dependencies": "sync",
   "re-export-cycles": "sync-ignored",
   "boundary-violation": "symbol-namespace",
@@ -564,6 +566,16 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
         "test-only-dependencies",
         this.result.test_only_dependencies.map(
           (d) => new IssueItem(d.package_name, d.path, d.line, 0, "test-only-dependencies"),
+        ),
+      );
+    }
+
+    if (this.result.dev_dependencies_in_production) {
+      addCategory(
+        "dev-dependencies-in-production",
+        this.result.dev_dependencies_in_production.map(
+          (d) =>
+            new IssueItem(d.package_name, d.path, d.line, 0, "dev-dependencies-in-production"),
         ),
       );
     }

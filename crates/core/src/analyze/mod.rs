@@ -55,9 +55,9 @@ use crate::graph::ModuleGraph;
 use crate::resolve::ResolvedModule;
 use fallow_types::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
-    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
-    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    CircularDependencyFinding, DevDependencyInProductionFinding, DuplicateExportFinding,
+    DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
     PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
@@ -110,8 +110,9 @@ use unused_component_prop::{find_unused_component_props, find_unused_react_props
     reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
 )]
 use unused_deps::{
-    UnlistedDependencyInput, find_test_only_dependencies, find_type_only_dependencies,
-    find_unlisted_dependencies, find_unresolved_imports, find_unused_dependencies,
+    UnlistedDependencyInput, find_dev_dependencies_in_production, find_test_only_dependencies,
+    find_type_only_dependencies, find_unlisted_dependencies, find_unresolved_imports,
+    find_unused_dependencies,
 };
 #[expect(
     deprecated,
@@ -1817,6 +1818,7 @@ impl ParallelDeadCodeDetectorResults {
             unlisted_dependencies: self.dependency_results.unlisted_dependencies,
             type_only_dependencies: self.dependency_results.type_only_dependencies,
             test_only_dependencies: self.dependency_results.test_only_dependencies,
+            dev_dependencies_in_production: self.dependency_results.dev_dependencies_in_production,
             unresolved_imports: self.unresolved_imports,
             duplicate_exports: self.duplicate_exports,
             boundary_violations: self.boundary_violations,
@@ -2570,6 +2572,7 @@ fn run_dependency_detectors(input: DependencyDetectorInput<'_>) -> AnalysisResul
     populate_unlisted_dependency_findings(input, pkg, &mut results);
     populate_type_only_dependency_findings(input, pkg, &mut results);
     populate_test_only_dependency_findings(input, pkg, &mut results);
+    populate_dev_dependency_in_production_findings(input, pkg, &mut results);
     results
 }
 
@@ -2618,6 +2621,22 @@ fn populate_test_only_dependency_findings(
             find_test_only_dependencies(input.graph, pkg, input.config, input.workspaces)
                 .into_iter()
                 .map(TestOnlyDependencyFinding::with_actions)
+                .collect();
+    }
+}
+
+fn populate_dev_dependency_in_production_findings(
+    input: DependencyDetectorInput<'_>,
+    pkg: &PackageJson,
+    results: &mut AnalysisResults,
+) {
+    if !input.config.production
+        && input.config.rules.dev_dependencies_in_production != Severity::Off
+    {
+        results.dev_dependencies_in_production =
+            find_dev_dependencies_in_production(input.graph, pkg, input.config, input.workspaces)
+                .into_iter()
+                .map(DevDependencyInProductionFinding::with_actions)
                 .collect();
     }
 }
@@ -2954,6 +2973,7 @@ mod tests {
             circular_dependencies: Severity::Off,
             re_export_cycle: Severity::Off,
             test_only_dependencies: Severity::Off,
+            dev_dependencies_in_production: Severity::Off,
             boundary_violation: Severity::Off,
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,

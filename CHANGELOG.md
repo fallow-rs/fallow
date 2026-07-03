@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New `dev-dependency-in-production` rule (promote-side dependency drift).**
+  Fallow already flagged production dependencies that belong in
+  `devDependencies` (`test-only-dependency`, `type-only-dependency`); the new
+  rule is the mirror that catches the opposite drift. A package in
+  `devDependencies` that is imported by production (non-test, non-config) source
+  code via a runtime/value import is flagged so it can be promoted to
+  `dependencies` — a production-only install (`pnpm install --prod`) omits
+  devDependencies, so such an import breaks at runtime. Type-only production
+  imports are not flagged (types are erased at build time), and a package also
+  listed in `dependencies`, `peerDependencies`, or `optionalDependencies` is
+  left alone because another manifest section provides it at runtime. Defaults
+  to `warn`; configure via the `dev-dependencies-in-production` rule key or
+  suppress a package with `ignoreDependencies`. Surfaces in human, JSON, SARIF,
+  Code Climate, compact, and markdown output, in `fallow explain`, and as an LSP
+  diagnostic.
+
 - **`fallow dead-code --trace FILE:MEMBER` now traces class, enum, and store members.** Previously tracing a class member (e.g. `--trace src/foo.ts:createEstimate`) errored `export 'createEstimate' not found`, so a member finding could not be debugged from the trace tool. On an export miss the trace now falls back to a member trace that names the owning class, reports its reachability and usage (the precondition that gates member crediting), lists who imports it, and points at `fallow dead-code --unused-class-members --file <file>` to inspect the finding. Available in human and `--format json`. (Refs [#1744](https://github.com/fallow-rs/fallow/issues/1744))
 
 - **The MCP `trace_export` tool and Code Mode now return the same class-member trace on an export miss.** They call the typed API in-process, which previously returned a hard `FALLOW_TRACE_TARGET_NOT_FOUND` on a member name, so AI agents (the primary consumers of member-crediting debugging) got worse behavior than the CLI. `fallow_api::run_trace_export` now falls back to the member trace, so both surfaces return either an export trace (`export_name`) or a member trace (`member_name` + `owner_export`); the tool description documents both shapes. (Refs [#1744](https://github.com/fallow-rs/fallow/issues/1744))
@@ -18,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`fallow health` no longer exits 1 when the config contains a `rules` key.** A bare `#[serde(default)]` on a rule-severity field resolved to `error` when a `rules` object was present (even `{"rules": {}}`), diverging from the documented default. `coverage-gaps` was promoted to `error`, tripping the standalone-health coverage-gap gate on any untested runtime file, so `fallow health` exited 1 with an otherwise-clean report; eight `warn`-default component / store / inject / server-action rules were likewise promoted to `error`, wrongly gating CI on Vue / Svelte / Angular projects. The nine affected defaults are now pinned to their documented values. Thanks [@lightsound](https://github.com/lightsound) for the report. (Closes [#1745](https://github.com/fallow-rs/fallow/issues/1745))
 
 - **Fixed `unused-class-member` false positives on public methods reached through a return-type-annotated factory.** A factory or hook whose body has no `new` value proof but is explicitly typed `: SomeController` (`function useController(): ReadyAppController { return registry.get() as ReadyAppController }`) now credits member reads on `const c = useController(); c.method()` across the module boundary, for both the function-declaration and arrow forms. A genuinely-unused method on the returned class still reports. Thanks [@prosky](https://github.com/prosky) for the report. (Closes [#1744](https://github.com/fallow-rs/fallow/issues/1744))
+
 
 ## [3.0.0] - 2026-07-04
 

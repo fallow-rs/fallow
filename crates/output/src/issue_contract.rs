@@ -227,6 +227,10 @@ mod tests {
             BTreeSet::from([
                 ("BoundaryViolation", "BoundaryViolationFinding"),
                 ("CircularDependency", "CircularDependencyFinding"),
+                (
+                    "DevDependencyInProduction",
+                    "DevDependencyInProductionFinding",
+                ),
                 ("DuplicateExport", "DuplicateExportFinding"),
                 ("EmptyCatalogGroup", "EmptyCatalogGroupFinding"),
                 (

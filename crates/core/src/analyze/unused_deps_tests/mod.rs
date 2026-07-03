@@ -1,4 +1,5 @@
 mod collect_unused;
+mod dev_dep_in_prod;
 pub(super) mod helpers;
 mod predicates;
 mod skip_dependency;

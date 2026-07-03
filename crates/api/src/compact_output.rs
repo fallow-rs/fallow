@@ -311,6 +311,10 @@ impl<'a> CompactLineBuilder<'a> {
             self.lines
                 .push(format!("test-only-dep:{}", dep.dep.package_name));
         }
+        for dep in &self.results.dev_dependencies_in_production {
+            self.lines
+                .push(format!("dev-dep-in-prod:{}", dep.dep.package_name));
+        }
     }
 
     fn push_graph_lines(&mut self) {

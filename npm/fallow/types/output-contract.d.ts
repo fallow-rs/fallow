@@ -186,7 +186,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "emit-component-event" | "wire-svelte-event" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "emit-component-event" | "wire-svelte-event" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -1108,6 +1108,13 @@ type_only_dependencies: TypeOnlyDependencyFinding[]
  */
 test_only_dependencies?: TestOnlyDependencyFinding[]
 /**
+ * devDependencies imported by production (non-test, non-config) source code
+ * via a runtime/value import; they should be promoted to dependencies.
+ * The promote-side mirror of [`TestOnlyDependencyFinding`]. Wrapped in
+ * [`DevDependencyInProductionFinding`].
+ */
+dev_dependencies_in_production?: DevDependencyInProductionFinding[]
+/**
  * Circular dependency chains detected in the module graph. Wrapped in
  * [`CircularDependencyFinding`] so each entry carries a typed `actions`
  * array natively.
@@ -1465,6 +1472,11 @@ type_only_dependencies: number
  * devDependencies).
  */
 test_only_dependencies: number
+/**
+ * devDependencies imported by production source code with a runtime/value
+ * import (should be promoted to dependencies).
+ */
+dev_dependencies_in_production: number
 /**
  * Cycles detected in the import graph.
  */
@@ -2248,6 +2260,37 @@ export interface TestOnlyDependencyFinding {
 /**
  * Production dependency that is only imported by test files, consider
  * moving to devDependencies.
+ */
+package_name: string
+/**
+ * Path to the package.json where the dependency is listed.
+ */
+path: string
+/**
+ * 1-based line number of the dependency entry in package.json.
+ */
+line: number
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+}
+/**
+ * Wire-shape envelope for a [`DevDependencyInProduction`] finding. Carries a
+ * `move-to-prod` primary (the promote-side mirror of
+ * [`TestOnlyDependencyFinding`]'s `move-to-dev`) plus the standard
+ * `ignoreDependencies` config suppress.
+ */
+export interface DevDependencyInProductionFinding {
+/**
+ * devDependency imported at runtime from production code, consider moving
+ * to dependencies.
  */
 package_name: string
 /**
@@ -7862,6 +7905,13 @@ type_only_dependencies: TypeOnlyDependencyFinding[]
  */
 test_only_dependencies?: TestOnlyDependencyFinding[]
 /**
+ * devDependencies imported by production (non-test, non-config) source code
+ * via a runtime/value import; they should be promoted to dependencies.
+ * The promote-side mirror of [`TestOnlyDependencyFinding`]. Wrapped in
+ * [`DevDependencyInProductionFinding`].
+ */
+dev_dependencies_in_production?: DevDependencyInProductionFinding[]
+/**
  * Circular dependency chains detected in the module graph. Wrapped in
  * [`CircularDependencyFinding`] so each entry carries a typed `actions`
  * array natively.
@@ -9919,6 +9969,16 @@ export type BoundaryViolation = BoundaryViolationFinding;
  * this alias; new code should prefer `CircularDependencyFinding`.
  */
 export type CircularDependency = CircularDependencyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `DevDependencyInProduction` name.
+ * The wire shape is byte-identical: `DevDependencyInProductionFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `DevDependencyInProduction` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `DevDependencyInProductionFinding`.
+ */
+export type DevDependencyInProduction = DevDependencyInProductionFinding;
 
 /**
  * Backwards-compat alias for the pre-#384 bare `DuplicateExport` name.

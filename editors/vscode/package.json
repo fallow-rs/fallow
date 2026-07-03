@@ -236,6 +236,7 @@
             "duplicate-exports": true,
             "type-only-dependencies": true,
             "test-only-dependencies": true,
+            "dev-dependencies-in-production": true,
             "circular-dependencies": true,
             "re-export-cycle": true,
             "boundary-violation": true,
@@ -306,6 +307,9 @@
               "type": "boolean"
             },
             "test-only-dependencies": {
+              "type": "boolean"
+            },
+            "dev-dependencies-in-production": {
               "type": "boolean"
             },
             "circular-dependencies": {

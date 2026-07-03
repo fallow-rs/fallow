@@ -70,6 +70,7 @@ describe("generated/output-contract.d.ts", () => {
         duplicate_exports: 0,
         type_only_dependencies: 0,
         test_only_dependencies: 0,
+        dev_dependencies_in_production: 0,
         circular_dependencies: 0,
         boundary_violations: 0,
         stale_suppressions: 0,

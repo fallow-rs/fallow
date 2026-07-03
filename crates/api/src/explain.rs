@@ -98,6 +98,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#test-only-dependencies",
     },
     RuleDef {
+        id: "fallow/dev-dependency-in-production",
+        category: "Dependencies",
+        name: "Dev Dependencies Used in Production",
+        short: "devDependency imported by production code with a runtime import",
+        full: "A package in `devDependencies` that is imported by production (non-test, non-config) source code via a runtime/value import. It should be promoted to `dependencies`: a production-only install (`pnpm install --prod`) omits devDependencies, so the import would break at runtime. This is the promote-side mirror of `test-only-dependency` and `type-only-dependency`. A dev dependency imported from production code only via `import type` is NOT flagged (types are erased at build time), and a package also listed in `dependencies`, `peerDependencies`, or `optionalDependencies` is left alone because another manifest section provides it at runtime.",
+        docs_path: "explanations/dead-code#dev-dependencies-in-production",
+    },
+    RuleDef {
         id: "fallow/unused-enum-member",
         category: "Dead code",
         name: "Unused Enum Members",
@@ -580,6 +588,10 @@ fn source_dead_code_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/test-only-dependency" => RuleGuide {
             example: "vitest is listed in dependencies, but only test files import it.",
             how_to_fix: "Move the package to devDependencies unless production code imports it at runtime.",
+        },
+        "fallow/dev-dependency-in-production" => RuleGuide {
+            example: "yaml is in devDependencies, but src/config.ts imports { parse } from 'yaml' and runs it at runtime.",
+            how_to_fix: "Move the package to dependencies so a production-only install keeps it. Leave it in devDependencies if the only production imports are `import type` or another manifest section (dependencies / peer / optional) already provides it.",
         },
         _ => return None,
     })
@@ -1902,7 +1914,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 45);
+        assert_eq!(CHECK_RULES.len(), 46);
     }
 
     #[test]

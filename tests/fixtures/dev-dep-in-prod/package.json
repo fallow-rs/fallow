@@ -1,0 +1,12 @@
+{
+  "name": "dev-dep-in-prod",
+  "main": "src/index.ts",
+  "dependencies": {
+    "left-pad": "^1.0.0"
+  },
+  "devDependencies": {
+    "yaml": "^2.0.0",
+    "type-fest": "^4.0.0",
+    "vitest": "^1.0.0"
+  }
+}

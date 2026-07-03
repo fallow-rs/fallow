@@ -36,6 +36,7 @@ const CATEGORY_TO_REGISTRY_CODE = {
   "duplicate-exports": "duplicate-export",
   "type-only-dependencies": "type-only-dependency",
   "test-only-dependencies": "test-only-dependency",
+  "dev-dependencies-in-production": "dev-dependency-in-production",
   "circular-dependencies": "circular-dependency",
   "re-export-cycles": "re-export-cycle",
   "boundary-violation": "boundary-violation",

@@ -122,6 +122,8 @@ mod capability_e_route_exports;
 mod config_file_loading;
 #[path = "integration_test/css_modules_unused.rs"]
 mod css_modules_unused;
+#[path = "integration_test/dev_dep_in_prod.rs"]
+mod dev_dep_in_prod;
 #[path = "integration_test/invalid_client_exports.rs"]
 mod invalid_client_exports;
 #[path = "integration_test/misplaced_directive.rs"]

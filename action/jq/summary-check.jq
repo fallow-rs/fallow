@@ -64,6 +64,7 @@ else
     table_row("Unused load data keys"; "unused_load_data_keys"; "unused-load-data-key"),
     table_row("Type-only dependencies"; "type_only_dependencies"; "type-only-dependencies"),
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
+    table_row("Dev dependencies used in production"; "dev_dependencies_in_production"; "dev-dependencies-in-production"),
     table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
     table_row("Unused catalog entries"; "unused_catalog_entries"; "unused-catalog-entries"),
     table_row("Empty catalog groups"; "empty_catalog_groups"; "empty-catalog-groups"),
@@ -176,6 +177,9 @@ else
     "| `\(.package_name)` |") +
   section("Test-only dependencies"; "test_only_dependencies";
     "Production dependencies only imported by test files \u2014 consider moving to `devDependencies`.\n\n| Package |\n|---------|\n";
+    "| `\(.package_name)` |") +
+  section("Dev dependencies in production"; "dev_dependencies_in_production";
+    "`devDependencies` imported by production code at runtime \u2014 consider moving to `dependencies` so a production-only install does not break.\n\n| Package |\n|---------|\n";
     "| `\(.package_name)` |") +
   section("Stale suppressions"; "stale_suppressions";
     "Suppression comments or JSDoc tags that no longer match any active issue.\n\n| File | Line | Description |\n|------|-----:|-------------|\n";

@@ -250,6 +250,12 @@ fn push_markdown_dependency_detail_sections(
         "Test-only production dependencies (consider moving to devDependencies)",
         |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &[], root),
     );
+    markdown_section(
+        out,
+        &results.dev_dependencies_in_production,
+        "Dev dependencies used in production (consider moving to dependencies)",
+        |dep| format_dependency(&dep.dep.package_name, &dep.dep.path, &[], root),
+    );
 }
 
 fn push_markdown_graph_sections(

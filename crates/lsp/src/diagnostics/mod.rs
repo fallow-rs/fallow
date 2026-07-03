@@ -409,6 +409,7 @@ mod severity_gate {
             duplicate_exports: _,
             type_only_dependencies: _,
             test_only_dependencies: _,
+            dev_dependencies_in_production: _,
             circular_dependencies: _,
             re_export_cycles: _,
             boundary_violations: _,
@@ -777,6 +778,21 @@ mod severity_gate {
                                 package_name: "test-only".to_string(),
                                 path: root.join("package.json"),
                                 line: 10,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "dev-dependency-in-production",
+                S::INFORMATION,
+                Box::new(|root, r| {
+                    r.dev_dependencies_in_production.push(
+                        fallow_api::editor_results::DevDependencyInProductionFinding::with_actions(
+                            fallow_api::editor_results::DevDependencyInProduction {
+                                package_name: "dev-in-prod".to_string(),
+                                path: root.join("package.json"),
+                                line: 11,
                             },
                         ),
                     );

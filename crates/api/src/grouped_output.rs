@@ -159,6 +159,11 @@ where
                 .test_only_dependencies
                 .push(item.clone());
         }
+        for item in &results.dev_dependencies_in_production {
+            self.entry_for_path(&item.dep.path)
+                .dev_dependencies_in_production
+                .push(item.clone());
+        }
 
         for item in &results.unlisted_dependencies {
             let key = item.dep.imported_from.first().map_or_else(

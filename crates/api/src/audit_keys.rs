@@ -419,6 +419,8 @@ struct DependencyFindingSlices<'a> {
     unlisted_dependencies: &'a [fallow_types::output_dead_code::UnlistedDependencyFinding],
     type_only_dependencies: &'a [fallow_types::output_dead_code::TypeOnlyDependencyFinding],
     test_only_dependencies: &'a [fallow_types::output_dead_code::TestOnlyDependencyFinding],
+    dev_dependencies_in_production:
+        &'a [fallow_types::output_dead_code::DevDependencyInProductionFinding],
 }
 
 /// The six framework-specific finding slices, bundled so the framework
@@ -472,6 +474,7 @@ impl DeadCodeKeyCollector<'_> {
             duplicate_exports,
             type_only_dependencies,
             test_only_dependencies,
+            dev_dependencies_in_production,
             circular_dependencies,
             re_export_cycles,
             boundary_violations,
@@ -550,6 +553,7 @@ impl DeadCodeKeyCollector<'_> {
             unlisted_dependencies,
             type_only_dependencies,
             test_only_dependencies,
+            dev_dependencies_in_production,
         });
         self.add_dependency_override_findings(
             unused_dependency_overrides,
@@ -649,6 +653,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
             unlisted_dependencies,
             type_only_dependencies,
             test_only_dependencies,
+            dev_dependencies_in_production,
         } = *deps;
         self.add_unused_dependencies(unused_dependencies);
         self.add_unused_dev_dependencies(unused_dev_dependencies);
@@ -656,6 +661,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         self.add_unlisted_dependencies(unlisted_dependencies);
         self.add_type_only_dependencies(type_only_dependencies);
         self.add_test_only_dependencies(test_only_dependencies);
+        self.add_dev_dependencies_in_production(dev_dependencies_in_production);
     }
 
     fn add_dependency_override_findings(
@@ -1044,6 +1050,19 @@ impl<'a> DeadCodeKeyCollector<'a> {
         }
     }
 
+    fn add_dev_dependencies_in_production(
+        &mut self,
+        items: &[fallow_types::output_dead_code::DevDependencyInProductionFinding],
+    ) {
+        for item in items {
+            self.insert(format!(
+                "dev-dependency-in-production:{}:{}",
+                relative_key_path(&item.dep.path, self.root),
+                item.dep.package_name
+            ));
+        }
+    }
+
     fn add_circular_dependencies(
         &mut self,
         items: &[fallow_types::output_dead_code::CircularDependencyFinding],
@@ -1237,6 +1256,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         duplicate_exports: _duplicate_exports,
         type_only_dependencies: _type_only_dependencies,
         test_only_dependencies: _test_only_dependencies,
+        dev_dependencies_in_production: _dev_dependencies_in_production,
         circular_dependencies: _circular_dependencies,
         re_export_cycles: _re_export_cycles,
         boundary_violations: _boundary_violations,

@@ -221,6 +221,12 @@ pub struct RulesConfig {
     pub type_only_dependencies: Severity,
     #[serde(default = "Severity::default_warn", alias = "test-only-dependency")]
     pub test_only_dependencies: Severity,
+    #[serde(
+        default = "Severity::default_warn",
+        alias = "dev-dependency-in-production",
+        alias = "prod-usage-of-dev-dependency"
+    )]
+    pub dev_dependencies_in_production: Severity,
     #[serde(default, alias = "circular-dependency")]
     pub circular_dependencies: Severity,
     #[serde(
@@ -351,6 +357,7 @@ impl Default for RulesConfig {
             duplicate_exports: Severity::Error,
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
+            dev_dependencies_in_production: Severity::Warn,
             circular_dependencies: Severity::Error,
             re_export_cycle: Severity::Warn,
             boundary_violation: Severity::Error,
@@ -436,6 +443,7 @@ impl RulesConfig {
                 duplicate_exports,
                 type_only_dependencies,
                 test_only_dependencies,
+                dev_dependencies_in_production,
                 circular_dependencies,
                 re_export_cycle,
                 boundary_violation,
@@ -671,6 +679,13 @@ pub struct PartialRulesConfig {
     pub test_only_dependencies: Option<Severity>,
     #[serde(
         default,
+        alias = "dev-dependency-in-production",
+        alias = "prod-usage-of-dev-dependency",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dev_dependencies_in_production: Option<Severity>,
+    #[serde(
+        default,
         alias = "circular-dependency",
         skip_serializing_if = "Option::is_none"
     )]
@@ -828,6 +843,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "duplicate-exports",
     "type-only-dependencies",
     "test-only-dependencies",
+    "dev-dependencies-in-production",
     "circular-dependencies",
     "re-export-cycle",
     "boundary-violation",
@@ -874,6 +890,8 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "duplicate-export",
     "type-only-dependency",
     "test-only-dependency",
+    "dev-dependency-in-production",
+    "prod-usage-of-dev-dependency",
     "circular-dependency",
     "re-export-cycles",
     "reexport-cycle",
@@ -1256,6 +1274,7 @@ mod tests {
             duplicate_exports: Some(Severity::Off),
             type_only_dependencies: Some(Severity::Off),
             test_only_dependencies: Some(Severity::Off),
+            dev_dependencies_in_production: Some(Severity::Off),
             circular_dependencies: Some(Severity::Off),
             re_export_cycle: Some(Severity::Off),
             boundary_violation: Some(Severity::Off),
@@ -1344,7 +1363,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 96);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 99);
     }
 
     #[test]
@@ -1385,8 +1404,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            104,
-            "expected 104 source-level alias attrs (52 per struct); got {}: {:?}",
+            108,
+            "expected 108 source-level alias attrs (54 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

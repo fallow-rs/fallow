@@ -193,6 +193,12 @@ pub enum IssueKind {
     /// surfaced by deep CSS audit mode; defaults to `warn` and is
     /// verdict-neutral.
     CssBrokenReference,
+    /// A `devDependencies` package imported by production (non-test, non-config)
+    /// source code via a runtime/value import. It should be promoted to
+    /// `dependencies` because a production-only install (`pnpm install --prod`)
+    /// would omit it and break at runtime. The promote-side mirror of
+    /// `test-only-dependency` / `type-only-dependency`.
+    DevDependencyInProduction,
 }
 
 impl IssueKind {
@@ -250,6 +256,7 @@ impl IssueKind {
         Self::CssSelectorComplexity,
         Self::CssDeadSurface,
         Self::CssBrokenReference,
+        Self::DevDependencyInProduction,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -314,6 +321,7 @@ impl IssueKind {
             Self::CssSelectorComplexity => 50,
             Self::CssDeadSurface => 51,
             Self::CssBrokenReference => 52,
+            Self::DevDependencyInProduction => 48,
         }
     }
 
@@ -373,6 +381,7 @@ impl IssueKind {
             50 => Some(Self::CssSelectorComplexity),
             51 => Some(Self::CssDeadSurface),
             52 => Some(Self::CssBrokenReference),
+            48 => Some(Self::DevDependencyInProduction),
             _ => None,
         }
     }
@@ -848,6 +857,10 @@ mod tests {
         assert_eq!(
             IssueKind::from_discriminant(47),
             Some(IssueKind::UnusedSvelteEvent)
+        );
+        assert_eq!(
+            IssueKind::from_discriminant(48),
+            Some(IssueKind::DevDependencyInProduction)
         );
         let max_discriminant = IssueKind::ALL
             .iter()

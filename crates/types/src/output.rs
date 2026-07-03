@@ -154,6 +154,10 @@ pub enum FixActionType {
     /// Move a production dependency to `devDependencies`
     /// (used by type-only-dependency and test-only-dependency findings).
     MoveToDev,
+    /// Move a `devDependencies` entry to `dependencies`
+    /// (used by dev-dependency-in-production findings; the promote-side mirror
+    /// of [`FixActionType::MoveToDev`]).
+    MoveToProd,
     /// Break a circular dependency by refactoring imports.
     RefactorCycle,
     /// Break a re-export cycle by removing an `export * from` (or

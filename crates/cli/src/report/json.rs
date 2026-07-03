@@ -1683,6 +1683,7 @@ mod tests {
             "duplicate_exports",
             "type_only_dependencies",
             "test_only_dependencies",
+            "dev_dependencies_in_production",
             "circular_dependencies",
         ];
         for key in &expected_arrays {
@@ -2030,6 +2031,7 @@ mod tests {
             "duplicate_exports",
             "type_only_dependencies",
             "test_only_dependencies",
+            "dev_dependencies_in_production",
             "circular_dependencies",
         ];
 

@@ -131,6 +131,9 @@ fn filter_workspace_dependency_findings(
     results
         .test_only_dependencies
         .retain(|finding| in_pkg_jsons(&finding.dep.path));
+    results
+        .dev_dependencies_in_production
+        .retain(|finding| in_pkg_jsons(&finding.dep.path));
 
     results.unlisted_dependencies.retain(|finding| {
         finding

@@ -225,6 +225,7 @@ pub const PROJECT_LEVEL_RULE_IDS: &[&str] = &[
     "fallow/unused-optional-dependency",
     "fallow/type-only-dependency",
     "fallow/test-only-dependency",
+    "fallow/dev-dependency-in-production",
 ];
 
 #[must_use]

@@ -228,6 +228,11 @@ const DEAD_CODE_WIRING = {
     category: "test-only-dependencies",
     finding: { ...pkg, actions: [] },
   },
+  "dev-dependency-in-production": {
+    field: "dev_dependencies_in_production",
+    category: "dev-dependencies-in-production",
+    finding: { ...pkg, actions: [] },
+  },
   "circular-dependency": {
     field: "circular_dependencies",
     category: "circular-dependencies",

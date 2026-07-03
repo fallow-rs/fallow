@@ -177,6 +177,7 @@
         "duplicate-exports": "error",
         "type-only-dependencies": "warn",
         "test-only-dependencies": "warn",
+        "dev-dependencies-in-production": "warn",
         "circular-dependencies": "error",
         "re-export-cycle": "warn",
         "boundary-violation": "error",
@@ -1149,6 +1150,10 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "dev-dependencies-in-production": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "circular-dependencies": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1982,6 +1987,16 @@
             }
           ]
         },
+        "dev-dependencies-in-production": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "circular-dependencies": {
           "anyOf": [
             {
@@ -2293,6 +2308,12 @@
           "default": 0
         },
         "testOnlyDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "devDependenciesInProduction": {
           "type": "integer",
           "format": "uint",
           "minimum": 0,

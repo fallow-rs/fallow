@@ -209,6 +209,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/dev-dependency-in-production",
+              "shortDescription": {
+                "text": "devDependency imported by production code with a runtime import"
+              },
+              "fullDescription": {
+                "text": "A package in `devDependencies` that is imported by production (non-test, non-config) source code via a runtime/value import. It should be promoted to `dependencies`: a production-only install (`pnpm install --prod`) omits devDependencies, so the import would break at runtime. This is the promote-side mirror of `test-only-dependency` and `type-only-dependency`. A dev dependency imported from production code only via `import type` is NOT flagged (types are erased at build time), and a package also listed in `dependencies`, `peerDependencies`, or `optionalDependencies` is left alone because another manifest section provides it at runtime."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#dev-dependencies-in-production",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/circular-dependency",
               "shortDescription": {
                 "text": "Circular dependency chain detected"

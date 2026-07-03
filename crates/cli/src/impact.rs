@@ -1558,6 +1558,13 @@ fn collect_dependency_findings(
             Some(f.dep.package_name.clone()),
         );
     }
+    for f in &results.dev_dependencies_in_production {
+        push(
+            &f.dep.path,
+            "dev-dependency-in-production",
+            Some(f.dep.package_name.clone()),
+        );
+    }
 }
 
 fn collect_catalog_findings(

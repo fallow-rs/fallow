@@ -307,6 +307,7 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
     result.duplicate_exports.length +
     (result.type_only_dependencies?.length ?? 0) +
     (result.test_only_dependencies?.length ?? 0) +
+    (result.dev_dependencies_in_production?.length ?? 0) +
     (result.circular_dependencies?.length ?? 0) +
     (result.re_export_cycles?.length ?? 0) +
     (result.boundary_violations?.length ?? 0) +

@@ -91,6 +91,8 @@ pub struct CheckCounts {
     #[serde(default)]
     pub test_only_dependencies: usize,
     #[serde(default)]
+    pub dev_dependencies_in_production: usize,
+    #[serde(default)]
     pub boundary_violations: usize,
     #[serde(default)]
     pub boundary_coverage_violations: usize,
@@ -130,6 +132,7 @@ impl CheckCounts {
             re_export_cycles: results.re_export_cycles.len(),
             type_only_dependencies: results.type_only_dependencies.len(),
             test_only_dependencies: results.test_only_dependencies.len(),
+            dev_dependencies_in_production: results.dev_dependencies_in_production.len(),
             boundary_violations: results.boundary_violations.len(),
             boundary_coverage_violations: results.boundary_coverage_violations.len(),
             boundary_call_violations: results.boundary_call_violations.len(),
@@ -187,6 +190,7 @@ impl CheckCounts {
             re_export_cycles: b.re_export_cycles,
             type_only_dependencies: b.type_only_dependencies,
             test_only_dependencies: b.test_only_dependencies,
+            dev_dependencies_in_production: b.dev_dependencies_in_production,
             boundary_violations: b.boundary_violations,
             boundary_coverage_violations: b.boundary_coverage_violations,
             boundary_call_violations: b.boundary_call_violations,
@@ -214,6 +218,7 @@ impl CheckCounts {
             re_export_cycles: self.re_export_cycles,
             type_only_dependencies: self.type_only_dependencies,
             test_only_dependencies: self.test_only_dependencies,
+            dev_dependencies_in_production: self.dev_dependencies_in_production,
             boundary_violations: self.boundary_violations,
             boundary_coverage_violations: self.boundary_coverage_violations,
             boundary_call_violations: self.boundary_call_violations,
@@ -255,6 +260,7 @@ impl CheckCounts {
         push_delta!(re_export_cycles);
         push_delta!(type_only_dependencies);
         push_delta!(test_only_dependencies);
+        push_delta!(dev_dependencies_in_production);
         push_delta!(boundary_violations);
         push_delta!(boundary_coverage_violations);
         push_delta!(boundary_call_violations);
@@ -346,6 +352,7 @@ mod tests {
             re_export_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            dev_dependencies_in_production: 0,
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
@@ -397,6 +404,7 @@ mod tests {
                 re_export_cycles: 0,
                 type_only_dependencies: 0,
                 test_only_dependencies: 0,
+                dev_dependencies_in_production: 0,
                 boundary_violations: 0,
                 boundary_coverage_violations: 0,
                 boundary_call_violations: 0,
@@ -443,6 +451,7 @@ mod tests {
             re_export_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            dev_dependencies_in_production: 0,
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
@@ -496,6 +505,7 @@ mod tests {
             re_export_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            dev_dependencies_in_production: 0,
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
@@ -536,6 +546,7 @@ mod tests {
             re_export_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            dev_dependencies_in_production: 0,
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
@@ -574,6 +585,7 @@ mod tests {
             re_export_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            dev_dependencies_in_production: 0,
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
@@ -606,6 +618,7 @@ mod tests {
             re_export_cycles: 0,
             type_only_dependencies: 1,
             test_only_dependencies: 1,
+            dev_dependencies_in_production: 0,
             boundary_violations: 1,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,
@@ -647,6 +660,7 @@ mod tests {
             re_export_cycles: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            dev_dependencies_in_production: 0,
             boundary_violations: 0,
             boundary_coverage_violations: 0,
             boundary_call_violations: 0,

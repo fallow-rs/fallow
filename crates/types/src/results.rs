@@ -13,9 +13,9 @@ use crate::output::{
 };
 use crate::output_dead_code::{
     BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
-    CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
-    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
-    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    CircularDependencyFinding, DevDependencyInProductionFinding, DuplicateExportFinding,
+    DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
+    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
     PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
@@ -304,6 +304,12 @@ pub struct AnalysisResults {
     /// devDependencies). Wrapped in [`TestOnlyDependencyFinding`].
     #[serde(default)]
     pub test_only_dependencies: Vec<TestOnlyDependencyFinding>,
+    /// devDependencies imported by production (non-test, non-config) source code
+    /// via a runtime/value import; they should be promoted to dependencies.
+    /// The promote-side mirror of [`TestOnlyDependencyFinding`]. Wrapped in
+    /// [`DevDependencyInProductionFinding`].
+    #[serde(default)]
+    pub dev_dependencies_in_production: Vec<DevDependencyInProductionFinding>,
     /// Circular dependency chains detected in the module graph. Wrapped in
     /// [`CircularDependencyFinding`] so each entry carries a typed `actions`
     /// array natively.
@@ -601,6 +607,7 @@ struct AnalysisResultsGraphMergeParts {
     duplicate_exports: Vec<DuplicateExportFinding>,
     type_only_dependencies: Vec<TypeOnlyDependencyFinding>,
     test_only_dependencies: Vec<TestOnlyDependencyFinding>,
+    dev_dependencies_in_production: Vec<DevDependencyInProductionFinding>,
     circular_dependencies: Vec<CircularDependencyFinding>,
     re_export_cycles: Vec<ReExportCycleFinding>,
 }
@@ -684,6 +691,7 @@ fn split_merge_parts(
         duplicate_exports,
         type_only_dependencies,
         test_only_dependencies,
+        dev_dependencies_in_production,
         circular_dependencies,
         re_export_cycles,
         boundary_violations,
@@ -752,6 +760,7 @@ fn split_merge_parts(
             duplicate_exports,
             type_only_dependencies,
             test_only_dependencies,
+            dev_dependencies_in_production,
             circular_dependencies,
             re_export_cycles,
         },
@@ -818,6 +827,7 @@ macro_rules! counted_analysis_result_fields {
             duplicate_exports => "duplicate_exports",
             type_only_dependencies => "type_only_dependencies",
             test_only_dependencies => "test_only_dependencies",
+            dev_dependencies_in_production => "dev_dependencies_in_production",
             circular_dependencies => "circular_dependencies",
             re_export_cycles => "re_export_cycles",
             boundary_violations => "boundary_violations",
@@ -958,6 +968,8 @@ impl AnalysisResults {
             .extend(parts.type_only_dependencies);
         self.test_only_dependencies
             .extend(parts.test_only_dependencies);
+        self.dev_dependencies_in_production
+            .extend(parts.dev_dependencies_in_production);
         self.circular_dependencies
             .extend(parts.circular_dependencies);
         self.re_export_cycles.extend(parts.re_export_cycles);
@@ -1344,6 +1356,14 @@ impl AnalysisResults {
         });
 
         self.test_only_dependencies.sort_by(|a, b| {
+            a.dep
+                .path
+                .cmp(&b.dep.path)
+                .then(a.dep.line.cmp(&b.dep.line))
+                .then(a.dep.package_name.cmp(&b.dep.package_name))
+        });
+
+        self.dev_dependencies_in_production.sort_by(|a, b| {
             a.dep
                 .path
                 .cmp(&b.dep.path)
@@ -2948,6 +2968,24 @@ pub struct MisconfiguredDependencyOverride {
 pub struct TestOnlyDependency {
     /// Production dependency that is only imported by test files, consider
     /// moving to devDependencies.
+    pub package_name: String,
+    /// Path to the package.json where the dependency is listed.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the dependency entry in package.json.
+    pub line: u32,
+}
+
+/// A `devDependencies` package imported by production (non-test, non-config)
+/// source code via a runtime/value import. Because a production-only install
+/// (`pnpm install --prod`) omits devDependencies, it would break at runtime, so
+/// the package should be promoted to `dependencies`. The promote-side mirror of
+/// [`TestOnlyDependency`] / [`TypeOnlyDependency`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct DevDependencyInProduction {
+    /// devDependency imported at runtime from production code, consider moving
+    /// to dependencies.
     pub package_name: String,
     /// Path to the package.json where the dependency is listed.
     #[serde(serialize_with = "serde_path::serialize")]
