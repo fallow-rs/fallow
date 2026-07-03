@@ -34,6 +34,8 @@
 //! - PandaCSS `defineTokens({...})`: binding = the assigned identifier; token
 //!   objects with a `value` field collapse to the token path (`colors.brand`),
 //!   matching `token('colors.brand')` consumers.
+//! - PandaCSS `defineConfig({ theme: { tokens, semanticTokens } })`: binding =
+//!   `pandaConfig`; only static token object literals are read.
 //!
 //! The two CONTRACT-IMPLEMENTATION forms are deliberately NOT definition sites
 //! here, because the contract they fill was already declared by
@@ -56,6 +58,8 @@ use oxc_span::{GetSpan, SourceType};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::object::{Lib, module_library};
+
+const PANDA_CONFIG_BINDING: &str = "pandaConfig";
 
 /// A single defined design token: its dotted LEAF path relative to the access
 /// binding (`color.primary`, or flat `primaryColor` for StyleX), the 1-based
@@ -674,6 +678,9 @@ impl<'a> TokenDefCollector<'a> {
         let Some(Expression::CallExpression(call)) = &decl.init else {
             return;
         };
+        if self.process_panda_config_call(call) {
+            return;
+        }
         let Some((lib, role)) = self.callee_role(&call.callee) else {
             return;
         };
@@ -697,6 +704,25 @@ impl<'a> TokenDefCollector<'a> {
             origin: recognized.origin,
             tokens,
         });
+    }
+
+    fn process_panda_config_call(&mut self, call: &oxc_ast::ast::CallExpression<'a>) -> bool {
+        let Some((Lib::Panda, "defineConfig")) = self.callee_role(&call.callee) else {
+            return false;
+        };
+        let Some(Argument::ObjectExpression(obj)) = call.arguments.first() else {
+            return true;
+        };
+        let mut tokens = Vec::new();
+        collect_panda_config_token_leaves(self.source, obj, &mut tokens);
+        if !tokens.is_empty() {
+            self.defs.push(CssInJsTokenDef {
+                binding: PANDA_CONFIG_BINDING.to_string(),
+                origin: CssInJsTokenOrigin::Panda,
+                tokens,
+            });
+        }
+        true
     }
 }
 
@@ -806,10 +832,53 @@ fn object_has_static_key(obj: &ObjectExpression<'_>, wanted: &str) -> bool {
     })
 }
 
+fn object_static_property_object<'a>(
+    obj: &'a ObjectExpression<'a>,
+    wanted: &str,
+) -> Option<&'a ObjectExpression<'a>> {
+    obj.properties.iter().find_map(|prop| {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            return None;
+        };
+        if prop.key.static_name().as_deref() == Some(wanted)
+            && let Expression::ObjectExpression(value) = &prop.value
+        {
+            Some(&**value)
+        } else {
+            None
+        }
+    })
+}
+
+fn collect_panda_config_token_leaves(
+    source: &str,
+    obj: &ObjectExpression<'_>,
+    out: &mut Vec<CssInJsToken>,
+) {
+    let Some(theme) = object_static_property_object(obj, "theme") else {
+        return;
+    };
+    for key in ["tokens", "semanticTokens"] {
+        if let Some(tokens) = object_static_property_object(theme, key) {
+            collect_token_leaves(source, tokens, "", CssInJsTokenOrigin::Panda, out);
+        }
+    }
+}
+
 impl<'a> Visit<'a> for TokenDefCollector<'a> {
     fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
         self.process_declarator(decl);
         walk::walk_variable_declarator(self, decl);
+    }
+
+    fn visit_export_default_declaration(
+        &mut self,
+        decl: &oxc_ast::ast::ExportDefaultDeclaration<'a>,
+    ) {
+        if let Some(Expression::CallExpression(call)) = decl.declaration.as_expression() {
+            self.process_panda_config_call(call);
+        }
+        walk::walk_export_default_declaration(self, decl);
     }
 }
 
@@ -915,6 +984,51 @@ export const tokens = defineTokens({
         );
         assert_eq!(
             d.iter().find(|d| d.binding == "tokens").unwrap().origin,
+            CssInJsTokenOrigin::Panda
+        );
+    }
+
+    #[test]
+    fn panda_define_config_extracts_tokens_and_semantic_tokens() {
+        let d = defs(
+            r"
+import { defineConfig } from '@pandacss/dev';
+
+export default defineConfig({
+  theme: {
+    tokens: {
+      colors: {
+        brand: { value: '#f05a28' },
+      },
+    },
+    semanticTokens: {
+      colors: {
+        surface: { value: { base: '{colors.brand}', _dark: '#111111' } },
+      },
+    },
+    recipes: {
+      card: { base: { color: 'colors.brand' } },
+    },
+  },
+});
+",
+        );
+        assert_eq!(
+            paths(&d, "pandaConfig"),
+            vec!["colors.brand", "colors.surface"]
+        );
+        assert_eq!(
+            token_values(&d, "pandaConfig"),
+            vec![
+                ("colors.brand".to_string(), Some("#f05a28".to_string())),
+                ("colors.surface".to_string(), None),
+            ]
+        );
+        assert_eq!(
+            d.iter()
+                .find(|d| d.binding == "pandaConfig")
+                .unwrap()
+                .origin,
             CssInJsTokenOrigin::Panda
         );
     }

@@ -699,6 +699,11 @@ fn create_audit_css_deep_fixture() -> TempDir {
     )
     .unwrap();
     fs::write(
+        root.join("panda.config.ts"),
+        "import { defineConfig } from '@pandacss/dev';\nexport default defineConfig({ theme: { tokens: { colors: { config: { value: '#fedcba' } } } } });\n",
+    )
+    .unwrap();
+    fs::write(
         root.join("src/styles.css"),
         "@theme {\n  --color-zbrand: #f05a28;\n  --color-danger: red;\n  --text-body: 14px;\n  --spacing-zcard: 1rem;\n}\n.btn-primary { color: red; font-size: 14px; }\n",
     )
@@ -713,7 +718,7 @@ fn create_audit_css_deep_fixture() -> TempDir {
     .unwrap();
     fs::write(
         root.join("src/styles.css"),
-        "@theme {\n  --color-zbrand: #f05a28;\n  --color-danger: red;\n  --color-abrand: rgb(240 90 41);\n  --color-status-queued-bg: rgb(240 90 42);\n  --color-secondary: hsl(40 6% 93%);\n  --color-muted: hsl(40 6% 93%);\n  --text-body: 14px;\n  --spacing-zcard: 1rem;\n  --spacing-acard: 16.25px;\n  --shadow-glow: 0 0 8px red;\n}\n:root { --color-notice: #00ff00; }\n.btn-primary { color: red; font-size: 14px; }\n.notice { background-color: #00ff00; }\n.stylex-match { color: #123456; }\n.vanilla-match { color: #654321; }\n.panda-match { color: #abcdef; }\n",
+        "@theme {\n  --color-zbrand: #f05a28;\n  --color-danger: red;\n  --color-abrand: rgb(240 90 41);\n  --color-status-queued-bg: rgb(240 90 42);\n  --color-secondary: hsl(40 6% 93%);\n  --color-muted: hsl(40 6% 93%);\n  --text-body: 14px;\n  --spacing-zcard: 1rem;\n  --spacing-acard: 16.25px;\n  --shadow-glow: 0 0 8px red;\n}\n:root { --color-notice: #00ff00; }\n.btn-primary { color: red; font-size: 14px; }\n.notice { background-color: #00ff00; }\n.stylex-match { color: #123456; }\n.vanilla-match { color: #654321; }\n.panda-match { color: #abcdef; }\n.panda-config-match { color: #fedcba; }\n",
     )
     .unwrap();
     dir
@@ -863,6 +868,15 @@ fn assert_has_raw_style_value(findings: &[serde_json::Value]) {
                 && finding["nearest_token"]["name"] == "pandaTokens.colors.info"
         }),
         "audit should include raw color matched to a Panda token: {findings:#?}"
+    );
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-token-drift"
+                && finding["sub_kind"] == "raw-style-value"
+                && finding["value"] == "color color: #fedcba"
+                && finding["nearest_token"]["name"] == "pandaConfig.colors.config"
+        }),
+        "audit should include raw color matched to a Panda config token: {findings:#?}"
     );
 }
 

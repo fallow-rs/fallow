@@ -3063,6 +3063,7 @@ fn source_mentions_token_definer(source: &str) -> bool {
         || source.contains("createGlobalTheme")
         || source.contains("createTheme")
         || source.contains("defineTokens")
+        || source.contains("defineConfig")
 }
 
 fn source_mentions_theme_definer(source: &str) -> bool {
@@ -5158,6 +5159,63 @@ mod token_consumer_tests {
         assert_eq!(
             accent.consumers[0].kind,
             fallow_output::ConsumerKind::JsCall
+        );
+    }
+
+    #[test]
+    fn pandacss_define_config_tokens_feed_blast_radius_and_raw_value_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@pandacss/dev":"0.54.0"}}"#,
+        )
+        .unwrap();
+        let config = write_file(
+            root,
+            0,
+            "panda.config.ts",
+            "import { defineConfig } from '@pandacss/dev';\n\
+             export default defineConfig({\n\
+               theme: {\n\
+                 tokens: { colors: { brand: { value: '#f05a28' } } },\n\
+                 semanticTokens: { colors: { surface: { value: { base: '{colors.brand}', _dark: '#111111' } } } },\n\
+                 recipes: { card: { base: { color: 'colors.brand' } } },\n\
+               },\n\
+             });\n",
+        );
+        let consumer = write_file(
+            root,
+            1,
+            "src/card.ts",
+            "import { css } from '../styled-system/css';\n\
+             export const card = css({ color: 'colors.brand', bg: 'colors.surface' });\n",
+        );
+        let css = write_file(
+            root,
+            2,
+            "src/styles.css",
+            ".panda-match { color: #f05a28; }\n",
+        );
+        let computation = css_computation_3d(root, &[config, consumer, css]);
+
+        let brand =
+            find_token(&computation, "pandaConfig.colors.brand").expect("config token present");
+        assert_eq!(brand.definition_path, "panda.config.ts");
+        assert_eq!(brand.consumer_count, 1);
+        assert_eq!(brand.consumers[0].kind, fallow_output::ConsumerKind::JsCall);
+
+        let surface =
+            find_token(&computation, "pandaConfig.colors.surface").expect("semantic token present");
+        assert_eq!(surface.consumer_count, 1);
+
+        assert!(
+            computation.report.raw_style_values.iter().any(|raw| {
+                raw.nearest_token
+                    .as_ref()
+                    .is_some_and(|token| token.name == "pandaConfig.colors.brand")
+            }),
+            "raw CSS should point at the static Panda config token"
         );
     }
 
