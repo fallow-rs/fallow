@@ -39,6 +39,8 @@ fn clean_report() -> CssAnalyticsReport {
         unreferenced_keyframes: Vec::new(),
         undefined_keyframes: Vec::new(),
         duplicate_declaration_blocks: Vec::new(),
+        cva_duplicate_variant_blocks: Vec::new(),
+        cva_variant_token_drifts: Vec::new(),
         tailwind_arbitrary_values: Vec::new(),
         raw_style_values: Vec::new(),
         unused_at_rules: Vec::new(),

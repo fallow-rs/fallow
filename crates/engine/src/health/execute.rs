@@ -56,6 +56,8 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
         parse_cpu_ms,
         shared_parse,
         pre_computed_analysis,
+        dead_code_results,
+        styling_artifacts,
         pre_computed_duplication,
         workspaces,
         workspace_diagnostics,
@@ -118,6 +120,8 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
         output,
         elapsed: start.elapsed(),
         should_fail_on_coverage_gaps: enforce_coverage_gaps,
+        dead_code_results: dead_code_results.as_ref(),
+        styling_artifacts: styling_artifacts.as_ref(),
         workspace_diagnostics,
     }))
 }

@@ -11,7 +11,7 @@ use fallow_output::{
 use fallow_types::output_format::OutputFormat;
 use fallow_types::path_util::is_absolute_path_any_platform;
 use fallow_types::results::AnalysisResults;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::module_graph::RetainedModuleGraph;
 use crate::results::DeadCodeAnalysisArtifacts;
@@ -60,6 +60,7 @@ mod vital_signs_scope;
 
 pub use crate::results::HealthAnalysisResult;
 pub use churn_file::validate_health_churn_file;
+pub use css_analytics::StylingAnalysisArtifacts;
 use derived_sections::{
     HealthDerivedSectionInput, HealthDerivedSections, prepare_health_derived_sections,
 };
@@ -81,6 +82,13 @@ use vital_signs_scope::{
     compute_vital_signs_and_counts,
 };
 
+pub(crate) fn build_styling_analysis_artifacts(
+    files: &[crate::discover::DiscoveredFile],
+    config: &fallow_config::ResolvedConfig,
+) -> StylingAnalysisArtifacts {
+    css_analytics::build_styling_analysis_artifacts(files, config)
+}
+
 /// Build health shared parse data from retained dead-code artifacts.
 #[must_use]
 pub fn shared_parse_data_from_artifacts(
@@ -94,18 +102,20 @@ pub fn shared_parse_data_from_artifacts(
     let (Some(modules), Some(files)) = (modules, files) else {
         return None;
     };
+    let script_used_packages: FxHashSet<String> = script_used_packages.into_iter().collect();
     let analysis_output = graph.map(|graph| DeadCodeAnalysisArtifacts {
         results: results.clone(),
         timings: None,
         graph: Some(graph),
         modules: None,
         files: None,
-        script_used_packages: script_used_packages.into_iter().collect(),
+        script_used_packages: script_used_packages.clone(),
         file_hashes: FxHashMap::default(),
     });
     Some(HealthSharedParseData {
         files,
         modules,
+        dead_code_results: Some(results.clone()),
         workspaces,
         analysis_output,
     })
@@ -585,6 +595,8 @@ pub struct RuntimeCoverageOptions {
 pub struct HealthSharedParseData {
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
     pub modules: Vec<fallow_types::extract::ModuleInfo>,
+    /// Dead-code results reused by advisory health surfaces that do not need the graph.
+    pub dead_code_results: Option<AnalysisResults>,
     pub workspaces: Vec<WorkspaceInfo>,
     /// Full analysis output (graph + results) for file scoring.
     pub analysis_output: Option<DeadCodeAnalysisArtifacts>,
@@ -771,6 +783,7 @@ mod tests {
                 ownership_emails: None,
                 targets: false,
                 css: false,
+                css_deep: false,
                 force_full: false,
                 score_only_output: false,
                 enforce_coverage_gap_gate: true,

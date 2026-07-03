@@ -10,7 +10,9 @@ use fallow_types::workspace::WorkspaceDiagnostic;
 use crate::results::HealthAnalysisResult;
 
 use super::HealthExecutionOptions;
-use super::css_analytics::{HealthScanCtx, compute_css_analytics_report};
+use super::css_analytics::{
+    HealthScanCtx, StylingAnalysisArtifacts, compute_css_analytics_report_with_artifacts,
+};
 use super::pipeline::HealthScope;
 
 pub(super) struct HealthOutputParts {
@@ -32,6 +34,8 @@ struct HealthReportSideEffectsInput<'a> {
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     ws_roots: Option<&'a [std::path::PathBuf]>,
+    dead_code_results: Option<&'a fallow_types::results::AnalysisResults>,
+    styling_artifacts: Option<&'a StylingAnalysisArtifacts>,
 }
 
 pub(super) struct HealthFinalizeInput<'a, R> {
@@ -43,6 +47,8 @@ pub(super) struct HealthFinalizeInput<'a, R> {
     pub(super) output: HealthOutputParts,
     pub(super) elapsed: Duration,
     pub(super) should_fail_on_coverage_gaps: bool,
+    pub(super) dead_code_results: Option<&'a fallow_types::results::AnalysisResults>,
+    pub(super) styling_artifacts: Option<&'a StylingAnalysisArtifacts>,
     pub(super) workspace_diagnostics: Vec<WorkspaceDiagnostic>,
 }
 
@@ -70,6 +76,8 @@ pub(super) fn finalize_health_result<R>(
         output,
         elapsed,
         should_fail_on_coverage_gaps,
+        dead_code_results,
+        styling_artifacts,
         workspace_diagnostics,
     } = input;
     let HealthOutputParts {
@@ -88,6 +96,8 @@ pub(super) fn finalize_health_result<R>(
         ignore_set: &scope.ignore_set,
         changed_files: scope.changed_files.as_ref(),
         ws_roots: scope.ws_roots.as_deref(),
+        dead_code_results,
+        styling_artifacts,
     });
 
     build_health_result(HealthResultInput {
@@ -111,7 +121,7 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
             input.changed_files
         };
         let output_changed_files = input.opts.css_deep.then_some(input.changed_files).flatten();
-        let computation = compute_css_analytics_report(
+        let computation = compute_css_analytics_report_with_artifacts(
             input.files,
             input.modules,
             HealthScanCtx {
@@ -121,6 +131,7 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
                 output_changed_files,
                 ws_roots: input.ws_roots,
             },
+            input.styling_artifacts,
         );
         input.report.styling_health = computation.as_ref().map(|computation| {
             super::styling_score::compute_styling_health_with_inputs(
@@ -138,6 +149,7 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
             input.files,
             input.config,
             input.opts.css_deep,
+            input.dead_code_results,
         );
     }
 }
@@ -158,6 +170,7 @@ fn build_styling_findings(
     files: &[DiscoveredFile],
     config: &ResolvedConfig,
     include_cross_file_reachability: bool,
+    dead_code_results: Option<&fallow_types::results::AnalysisResults>,
 ) -> Vec<fallow_output::StylingFinding> {
     use fallow_config::Severity;
     use fallow_types::suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
@@ -214,25 +227,62 @@ fn build_styling_findings(
                 actions: candidate.actions.clone(),
             });
         }
-        for candidate in &css.raw_style_values {
+        for candidate in &css.cva_variant_token_drifts {
             if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
                 continue;
             }
             findings.push(fallow_output::StylingFinding {
                 code: "css-token-drift".to_string(),
-                sub_kind: "raw-style-value".to_string(),
+                sub_kind: "cva-variant-token-drift".to_string(),
                 path: candidate.path.clone(),
                 line: candidate.line,
-                value: format!("{} {}: {}", candidate.axis, candidate.property, candidate.value),
+                value: format!(
+                    "{} in CVA variant: {}",
+                    candidate.class_token, candidate.variant_classes
+                ),
                 effective_severity: styling_finding_severity(config.rules.css_token_drift),
                 blast_radius: None,
                 confidence: Some(fallow_output::StylingFindingConfidence::Low),
                 agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                nearest_token: None,
-                fix_hint: Some(
+                nearest_token: Some(candidate.nearest_token.clone()),
+                fix_hint: Some(format!(
+                    "Verify this CVA variant is not an intentional one-off, then reuse {} instead.",
+                    candidate.nearest_token.name
+                )),
+                actions: candidate.actions.clone(),
+            });
+        }
+        for candidate in &css.raw_style_values {
+            if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
+                continue;
+            }
+            let fix_hint = candidate.nearest_token.as_ref().map_or_else(
+                || {
                     "Verify the raw style value is not an intentional exception, then replace it with an existing design token or CSS custom property."
-                        .to_string(),
+                        .to_string()
+                },
+                |token| {
+                    format!(
+                        "Verify the raw style value is not an intentional exception, then reuse {} instead.",
+                        token.name
+                    )
+                },
+            );
+            findings.push(fallow_output::StylingFinding {
+                code: "css-token-drift".to_string(),
+                sub_kind: "raw-style-value".to_string(),
+                path: candidate.path.clone(),
+                line: candidate.line,
+                value: format!(
+                    "{} {}: {}",
+                    candidate.axis, candidate.property, candidate.value
                 ),
+                effective_severity: styling_finding_severity(config.rules.css_token_drift),
+                blast_radius: None,
+                confidence: Some(fallow_output::StylingFindingConfidence::Low),
+                agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+                nearest_token: candidate.nearest_token.clone(),
+                fix_hint: Some(fix_hint),
                 actions: candidate.actions.clone(),
             });
         }
@@ -305,6 +355,34 @@ fn build_styling_findings(
                 actions: block.actions.clone(),
             });
         }
+        for block in &css.cva_duplicate_variant_blocks {
+            let Some(first) = block.occurrences.first() else {
+                continue;
+            };
+            if suppressed(&first.path, first.line, IssueKind::CssDuplicateBlock) {
+                continue;
+            }
+            findings.push(fallow_output::StylingFinding {
+                code: "css-duplicate-block".to_string(),
+                sub_kind: "cva-duplicate-variant-block".to_string(),
+                path: first.path.clone(),
+                line: first.line,
+                value: format!(
+                    "CVA variant class block repeated {} times: {}",
+                    block.occurrence_count, block.value
+                ),
+                effective_severity: styling_finding_severity(config.rules.css_duplicate_block),
+                blast_radius: None,
+                confidence: Some(fallow_output::StylingFindingConfidence::High),
+                agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
+                nearest_token: None,
+                fix_hint: Some(
+                    "Extract the repeated CVA variant classes into a shared base or compound variant after checking variant semantics."
+                        .to_string(),
+                ),
+                actions: block.actions.clone(),
+            });
+        }
     }
 
     // Family css-selector-complexity: parser-bounded notable rules (high
@@ -316,6 +394,21 @@ fn build_styling_findings(
                     continue;
                 }
                 let (sub_kind, value, reason) = selector_complexity_finding(rule);
+                let confidence_kind = selector_complexity_confidence_kind(config, &file.path, rule);
+                let (confidence, agent_disposition, fix_hint) = if let Some(kind) = confidence_kind
+                {
+                    (
+                        fallow_output::StylingFindingConfidence::Low,
+                        fallow_output::StylingAgentDisposition::VerifyFirst,
+                        kind.fix_hint(),
+                    )
+                } else {
+                    (
+                        fallow_output::StylingFindingConfidence::High,
+                        fallow_output::StylingAgentDisposition::FixConfidently,
+                        "Simplify the selector or rule after checking cascade impact.",
+                    )
+                };
                 findings.push(fallow_output::StylingFinding {
                     code: "css-selector-complexity".to_string(),
                     sub_kind: sub_kind.to_string(),
@@ -326,12 +419,10 @@ fn build_styling_findings(
                         config.rules.css_selector_complexity,
                     ),
                     blast_radius: None,
-                    confidence: Some(fallow_output::StylingFindingConfidence::High),
-                    agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
+                    confidence: Some(confidence),
+                    agent_disposition: Some(agent_disposition),
                     nearest_token: None,
-                    fix_hint: Some(
-                        "Simplify the selector or rule after checking cascade impact.".to_string(),
-                    ),
+                    fix_hint: Some(fix_hint.to_string()),
                     actions: vec![fallow_output::CssCandidateAction::simplify_selector(reason)],
                 });
             }
@@ -341,6 +432,7 @@ fn build_styling_findings(
     // Family css-dead-surface: local scoped SFC classes by default, plus
     // cross-file reachability candidates when deep CSS mode produced them.
     if config.rules.css_dead_surface != Severity::Off {
+        append_dead_style_export_findings(&mut findings, dead_code_results, config, &suppressed);
         for candidate in &css.scoped_unused {
             if suppressed(&candidate.path, 1, IssueKind::CssDeadSurface) {
                 continue;
@@ -546,6 +638,131 @@ fn build_styling_findings(
     findings
 }
 
+fn append_dead_style_export_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    dead_code_results: Option<&fallow_types::results::AnalysisResults>,
+    config: &ResolvedConfig,
+    suppressed: &impl Fn(&str, u32, fallow_types::suppress::IssueKind) -> bool,
+) {
+    let Some(results) = dead_code_results else {
+        return;
+    };
+    for finding in &results.unused_exports {
+        let export = &finding.export;
+        if export.is_type_only || export.is_re_export {
+            continue;
+        }
+        let Some(path) = super::runtime_filter::relative_to_root(&export.path, &config.root) else {
+            continue;
+        };
+        if suppressed(
+            &path,
+            export.line,
+            fallow_types::suppress::IssueKind::CssDeadSurface,
+        ) {
+            continue;
+        }
+        let Some(surface) = classify_dead_style_export(export) else {
+            continue;
+        };
+        findings.push(fallow_output::StylingFinding {
+            code: "css-dead-surface".to_string(),
+            sub_kind: surface.sub_kind.to_string(),
+            path,
+            line: export.line,
+            value: format!("{} ({})", export.export_name, surface.family),
+            effective_severity: styling_finding_severity(config.rules.css_dead_surface),
+            blast_radius: Some(0),
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: None,
+            fix_hint: Some(format!(
+                "Verify no dynamic styling consumer imports {} before removing the unused {} binding.",
+                export.export_name, surface.family
+            )),
+            actions: vec![fallow_output::CssCandidateAction {
+                kind: fallow_output::CssCandidateActionType::VerifyUnused,
+                auto_fixable: false,
+                description: format!(
+                    "Confirm no dynamic import, story, test fixture, or external consumer uses the {} styling binding before removing it.",
+                    export.export_name
+                ),
+                command: None,
+            }],
+        });
+    }
+}
+
+struct DeadStyleExportSurface {
+    sub_kind: &'static str,
+    family: &'static str,
+}
+
+fn classify_dead_style_export(
+    export: &fallow_types::results::UnusedExport,
+) -> Option<DeadStyleExportSurface> {
+    let source = std::fs::read_to_string(&export.path).ok()?;
+    let window = source_window(&source, export.line, 5);
+    if window.contains("styled.") || window.contains("styled(") {
+        let family = if source.contains("@emotion/styled") {
+            "Emotion"
+        } else {
+            "styled-components"
+        };
+        return Some(DeadStyleExportSurface {
+            sub_kind: "unused-styled-binding",
+            family,
+        });
+    }
+    if window.contains("stylex.create(") || window.contains("stylex.create({") {
+        return Some(DeadStyleExportSurface {
+            sub_kind: "unused-stylex-binding",
+            family: "StyleX",
+        });
+    }
+    if source.contains("@vanilla-extract/css")
+        && (window.contains("style(") || window.contains("styleVariants("))
+    {
+        return Some(DeadStyleExportSurface {
+            sub_kind: "unused-vanilla-extract-binding",
+            family: "vanilla-extract",
+        });
+    }
+    if source.contains("@emotion/")
+        && (window.contains("css`") || window.contains("css(") || window.contains("styled."))
+    {
+        return Some(DeadStyleExportSurface {
+            sub_kind: "unused-emotion-binding",
+            family: "Emotion",
+        });
+    }
+    if (source.contains("styled-system") || source.contains("@pandacss"))
+        && (window.contains("css(") || window.contains("cva(") || window.contains("recipe("))
+    {
+        return Some(DeadStyleExportSurface {
+            sub_kind: "unused-panda-binding",
+            family: "Panda CSS",
+        });
+    }
+    if source.contains("class-variance-authority") && window.contains("cva(") {
+        return Some(DeadStyleExportSurface {
+            sub_kind: "unused-cva-binding",
+            family: "CVA",
+        });
+    }
+    None
+}
+
+fn source_window(source: &str, line: u32, lines: usize) -> String {
+    let start = line.saturating_sub(1) as usize;
+    source
+        .lines()
+        .skip(start)
+        .take(lines)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn near_duplicate_is_semantic_color_alias(
     candidate: &fallow_output::NearDuplicateThemeToken,
 ) -> bool {
@@ -648,6 +865,90 @@ fn selector_complexity_finding(
         format!("selector complexity {}", rule.complexity),
         "the selector is structurally complex",
     )
+}
+
+#[derive(Clone, Copy)]
+enum SelectorComplexityConfidenceKind {
+    ResetOrAccessibility,
+    ThirdPartyGeneratedSurface,
+}
+
+impl SelectorComplexityConfidenceKind {
+    fn fix_hint(self) -> &'static str {
+        match self {
+            Self::ResetOrAccessibility => {
+                "Verify this reset or accessibility rule is intentional before changing it."
+            }
+            Self::ThirdPartyGeneratedSurface => {
+                "This targets a third-party generated DOM surface, so cleanup is not proven. Verify the override against the library component before changing it."
+            }
+        }
+    }
+}
+
+fn selector_complexity_confidence_kind(
+    config: &ResolvedConfig,
+    path: &str,
+    rule: &fallow_types::extract::CssRuleMetric,
+) -> Option<SelectorComplexityConfidenceKind> {
+    if rule.important_count == 0 {
+        return None;
+    }
+    let full_path = config.root.join(path);
+    let Ok(source) = std::fs::read_to_string(full_path) else {
+        return None;
+    };
+    let target_line = usize::try_from(rule.line).unwrap_or(usize::MAX);
+    let start_line = target_line.saturating_sub(8).max(1);
+    let end_line = target_line.saturating_add(4);
+    let mut window = String::new();
+    for (idx, line) in source.lines().enumerate() {
+        let line_no = idx + 1;
+        if line_no >= start_line && line_no <= end_line {
+            window.push_str(line);
+            window.push('\n');
+        }
+    }
+    let window = window.to_ascii_lowercase();
+    if third_party_override_window(&window) {
+        return Some(SelectorComplexityConfidenceKind::ThirdPartyGeneratedSurface);
+    }
+    if window.contains("prefers-reduced-motion")
+        || window.contains("reduced motion")
+        || window.contains("pointer: coarse")
+        || window.contains("pointer: fine")
+        || window.contains(".touch-only")
+        || window.contains("accessibility")
+    {
+        return Some(SelectorComplexityConfidenceKind::ResetOrAccessibility);
+    }
+    None
+}
+
+fn third_party_override_window(window: &str) -> bool {
+    [
+        "ant-",
+        ".ant-",
+        "data-sonner",
+        "sonner",
+        "toastify",
+        "data-radix",
+        "data-vaul",
+        "cmdk-",
+        "headlessui",
+        "headlessui-",
+        "react-select",
+        "react-datepicker",
+        "maplibre",
+        "mapboxgl",
+        "mapbox-",
+        "recharts",
+        "swiper",
+        "tippy-",
+        "floating-ui",
+    ]
+    .iter()
+    .any(|needle| window.contains(needle))
 }
 
 fn build_health_result<R>(input: HealthResultInput<R>) -> HealthAnalysisResult<R> {

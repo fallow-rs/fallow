@@ -3401,6 +3401,32 @@ fn health_css_unreferenced_class_credits_dynamic_string_and_dependency() {
 }
 
 #[test]
+fn health_css_unreferenced_class_credits_markdown_class_attributes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(&root.join("package.json"), r#"{"name":"slidev-css"}"#);
+    write_file(
+        &root.join("style.css"),
+        ".cover-sub{}\n.prompt-card{}\n.really-dead-class{}\n",
+    );
+    write_file(
+        &root.join("slides.md"),
+        r#"<p class="cover-sub">vibe coding to validate</p>
+
+<div class="prompt-card">
+  <p>Prompt</p>
+</div>
+"#,
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_css_classes", "class"),
+        vec!["really-dead-class".to_string()],
+        "Markdown and Slidev class attributes must credit CSS reachability"
+    );
+}
+
+#[test]
 fn health_css_unreferenced_class_credits_dynamic_status_literals() {
     let dir = tempdir().unwrap();
     let root = dir.path();
@@ -3581,7 +3607,19 @@ fn health_css_unreferenced_abstains_on_preprocessor_dominant() {
         "export const C = () => <div className=\"used\">x</div>;\n",
     );
     // 2 scss vs 1 css -> preprocessor-dominant -> abstain entirely.
+    let css = css_analytics(root);
     assert!(unreferenced_classes(root).is_empty());
+    assert_eq!(css["summary"]["preprocessor_stylesheets"].as_u64(), Some(2));
+    assert_eq!(
+        css["summary"]["preprocessor_reachability_abstained"].as_bool(),
+        Some(true)
+    );
+    let out = run_fallow_in_root("health", root, &["--css", "--max-crap", "10000", "--quiet"]);
+    assert!(
+        out.stdout.contains("Sass/Less reachability skipped"),
+        "human CSS output should explain preprocessor abstain: {}",
+        out.stdout
+    );
 }
 
 #[test]
@@ -4303,6 +4341,179 @@ fn health_css_unresolved_abstains_on_preprocessor_dominant() {
             "preprocessor-dominant project must abstain: {css}"
         );
     }
+}
+
+#[test]
+fn health_css_unreferenced_class_not_credited_by_custom_property_substring() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-custom-property-substring","dependencies":{"tailwindcss":"^4.0.0"}}"#,
+    );
+    write_file(
+        &root.join("src/app.css"),
+        r#"@import "tailwindcss";
+:root {
+  --btn-primary-bg: var(--color-teal-900);
+  --btn-primary-shadow: var(--color-teal-900);
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-teal-900 shadow-[var(--btn-primary-shadow)]/20;
+  }
+
+  .btn-primary-bg {
+    @apply bg-teal-800;
+  }
+
+  .btn-secondary {
+    @apply bg-gold-400;
+  }
+
+  .btn-ghost {
+    @apply bg-white/60;
+  }
+
+  .used-card {
+    @apply rounded-xl;
+  }
+}
+"#,
+    );
+    write_file(
+        &root.join("src/Button.tsx"),
+        r#"const cn = (...parts: Array<string | false>) => parts.filter(Boolean).join(" ");
+
+export const Button = () => (
+  <button className={cn("used-card", "bg-[var(--btn-primary-bg)]", "shadow-[var(--btn-primary-shadow)]/20")}>
+    Pay
+  </button>
+);
+"#,
+    );
+
+    assert_eq!(
+        css_list_names(root, "unreferenced_css_classes", "class"),
+        vec![
+            "btn-ghost".to_string(),
+            "btn-primary".to_string(),
+            "btn-primary-bg".to_string(),
+            "btn-secondary".to_string()
+        ],
+        "custom property names inside arbitrary values must not credit similarly named CSS classes"
+    );
+}
+
+#[test]
+fn health_css_important_reset_findings_are_verify_first() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-important-reset","dependencies":{"tailwindcss":"^4.0.0"}}"#,
+    );
+    write_file(
+        &root.join("src/app.css"),
+        r#"@import "tailwindcss";
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+"#,
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "export const App = () => null;\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--report-only",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    let json = parse_json(&out);
+    let findings = json["styling_findings"]
+        .as_array()
+        .expect("styling findings");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-selector-complexity"
+                && finding["sub_kind"] == "important-density"
+                && finding["confidence"] == "low"
+                && finding["agent_disposition"] == "verify-first"
+        }),
+        "accessibility reset important usage should be verify-first: {findings:#?}"
+    );
+}
+
+#[test]
+fn health_css_third_party_important_overrides_are_verify_first() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"css-third-party-important","dependencies":{"tailwindcss":"^4.0.0"}}"#,
+    );
+    write_file(
+        &root.join("src/app.css"),
+        r#"@import "tailwindcss";
+
+[data-sonner-toast].app-toast {
+  background: rgb(255 255 255 / 0.6) !important;
+  border: 1px solid rgb(231 229 228) !important;
+  font-family: var(--font-sans) !important;
+}
+"#,
+    );
+    write_file(
+        &root.join("src/App.tsx"),
+        "export const App = () => null;\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--report-only",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ],
+    );
+    let json = parse_json(&out);
+    let findings = json["styling_findings"]
+        .as_array()
+        .expect("styling findings");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-selector-complexity"
+                && finding["sub_kind"] == "important-density"
+                && finding["confidence"] == "low"
+                && finding["agent_disposition"] == "verify-first"
+                && finding["fix_hint"]
+                    .as_str()
+                    .is_some_and(|hint| hint.contains("cleanup is not proven"))
+        }),
+        "third-party widget important usage should be verify-first: {findings:#?}"
+    );
 }
 
 #[test]

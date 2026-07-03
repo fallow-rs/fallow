@@ -222,7 +222,8 @@ fn styling_candidate_count(s: &fallow_output::CssAnalyticsSummary) -> u32 {
 /// the A-F styling grade (that stays in `fallow health` for trending, per plan).
 fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
     /// Noise budget: findings shown per the audit view (the rest via `--css`).
-    const TOP_N: usize = 5;
+    const FIX_CONFIDENTLY_TOP_N: usize = 5;
+    const VERIFY_FIRST_TOP_N: usize = 3;
     let Some(ref health) = result.health else {
         return;
     };
@@ -266,25 +267,88 @@ fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
         .iter()
         .filter(|finding| styling_finding_is_error_gated(rules, &finding.code))
         .count();
-    let visible_count = TOP_N.max(gated_count);
-    for finding in sorted.iter().take(visible_count) {
+    let fix_confidently: Vec<_> = sorted
+        .iter()
+        .copied()
+        .filter(|finding| styling_finding_is_fix_confidently(finding))
+        .collect();
+    let verify_first: Vec<_> = sorted
+        .iter()
+        .copied()
+        .filter(|finding| !styling_finding_is_fix_confidently(finding))
+        .collect();
+    let show_group_labels = !fix_confidently.is_empty() && !verify_first.is_empty();
+    print_audit_styling_group(
+        result,
+        rules,
+        "Fix confidently",
+        &fix_confidently,
+        FIX_CONFIDENTLY_TOP_N.max(gated_count),
+        show_group_labels,
+    );
+    print_audit_styling_group(
+        result,
+        rules,
+        "Verify first",
+        &verify_first,
+        VERIFY_FIRST_TOP_N.max(gated_count),
+        show_group_labels,
+    );
+    outln!(
+        "  {}",
+        "(run `fallow audit --format json` for full styling detail)".dimmed()
+    );
+}
+
+fn print_audit_styling_group(
+    result: &AuditResult,
+    rules: &RulesConfig,
+    label: &str,
+    findings: &[&fallow_output::StylingFinding],
+    top_n: usize,
+    show_label: bool,
+) {
+    if findings.is_empty() {
+        return;
+    }
+    if show_label {
+        outln!("  {}", label.bold());
+    }
+    let gated_count = findings
+        .iter()
+        .filter(|finding| styling_finding_is_error_gated(rules, &finding.code))
+        .count();
+    let visible_count = top_n.max(gated_count);
+    let indent = if show_label { "    " } else { "  " };
+    for finding in findings.iter().take(visible_count) {
         outln!(
-            "  {}  {}  {}  {}",
+            "{}{}  {}  {}  {}",
+            indent,
             format!("{}:{}", finding.path, finding.line).dimmed(),
             finding.code,
             finding.value,
             styling_finding_audit_context(result, finding).dimmed()
         );
     }
-    let hidden = sorted.len().saturating_sub(visible_count);
+    let hidden = findings.len().saturating_sub(visible_count);
     if hidden > 0 {
         let noun = if hidden == 1 { "finding" } else { "findings" };
-        outln!("  {}", format!("+ {hidden} more styling {noun}").dimmed());
+        outln!(
+            "{}{}",
+            indent,
+            format!("+ {hidden} more styling {noun}").dimmed()
+        );
     }
-    outln!(
-        "  {}",
-        "(run `fallow audit --format json` for full styling detail)".dimmed()
-    );
+}
+
+fn styling_finding_is_fix_confidently(finding: &fallow_output::StylingFinding) -> bool {
+    matches!(
+        finding.agent_disposition,
+        Some(fallow_output::StylingAgentDisposition::FixConfidently)
+    ) || matches!(
+        finding.confidence,
+        Some(fallow_output::StylingFindingConfidence::High)
+    )
 }
 
 fn styling_finding_is_error_gated(rules: &RulesConfig, code: &str) -> bool {
@@ -316,9 +380,15 @@ fn styling_finding_audit_context(
     let base_state = result.base_snapshot.as_ref().map(|snapshot| {
         let key = styling_finding_key(finding, &health.config.root);
         if snapshot.styling.contains(&key) {
-            format!("inherited from {}", short_base_ref(&result.base_ref))
+            format!(
+                "inherited styling debt from {}",
+                short_base_ref(&result.base_ref)
+            )
         } else {
-            format!("introduced since {}", short_base_ref(&result.base_ref))
+            format!(
+                "introduced design-system drift since {}",
+                short_base_ref(&result.base_ref)
+            )
         }
     });
     styling_finding_audit_context_label(severity, &rule, base_state, result.attribution.gate)
@@ -848,19 +918,19 @@ mod tests {
             styling_finding_audit_context_label(
                 fallow_config::Severity::Error,
                 "rules.css-selector-complexity",
-                Some("introduced since HEAD".to_string()),
+                Some("introduced design-system drift since HEAD".to_string()),
                 AuditGate::NewOnly,
             ),
-            "(gated: rules.css-selector-complexity=error, introduced since HEAD)"
+            "(gated: rules.css-selector-complexity=error, introduced design-system drift since HEAD)"
         );
         assert_eq!(
             styling_finding_audit_context_label(
                 fallow_config::Severity::Error,
                 "rules.css-selector-complexity",
-                Some("inherited from HEAD".to_string()),
+                Some("inherited styling debt from HEAD".to_string()),
                 AuditGate::NewOnly,
             ),
-            "(not gated: rules.css-selector-complexity=error, inherited from HEAD)"
+            "(not gated: rules.css-selector-complexity=error, inherited styling debt from HEAD)"
         );
         assert_eq!(
             styling_finding_audit_context_label(

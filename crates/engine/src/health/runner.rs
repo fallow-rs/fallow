@@ -73,6 +73,7 @@ pub fn run_ungrouped_health(
         shared_parse: false,
         pre_computed_analysis,
         pre_computed_duplication: None,
+        styling_artifacts: None,
     })
 }
 
@@ -124,6 +125,7 @@ pub fn run_ungrouped_health_with_session_artifacts(
     let parts = session.parsed_parts(true);
     let shared_parse = parts.parse_ms == 0.0;
 
+    let styling_artifacts = options.css.then(|| session.styling_analysis_artifacts());
     run_ungrouped_health_from_parts(HealthRunPartsInput {
         options,
         ws_roots,
@@ -133,6 +135,7 @@ pub fn run_ungrouped_health_with_session_artifacts(
         shared_parse,
         pre_computed_analysis,
         pre_computed_duplication,
+        styling_artifacts,
     })
 }
 
@@ -145,6 +148,7 @@ struct HealthRunPartsInput<'a> {
     shared_parse: bool,
     pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
     pre_computed_duplication: Option<DuplicationReport>,
+    styling_artifacts: Option<super::StylingAnalysisArtifacts>,
 }
 
 fn run_ungrouped_health_from_parts(
@@ -159,6 +163,7 @@ fn run_ungrouped_health_from_parts(
         shared_parse,
         pre_computed_analysis,
         pre_computed_duplication,
+        styling_artifacts,
     } = input;
     let config = parts.config;
     let files = parts.files;
@@ -191,6 +196,8 @@ fn run_ungrouped_health_from_parts(
             parse_cpu_ms,
             shared_parse,
             pre_computed_analysis,
+            dead_code_results: None,
+            styling_artifacts,
             pre_computed_duplication,
             workspaces,
             workspace_diagnostics,

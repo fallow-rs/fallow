@@ -13940,6 +13940,20 @@
           },
           "description": "Groups of style rules across the project that share an identical\ndeclaration block (4+ declarations, sorted and `!important`-aware),\ngrouped by content: copy-paste consolidation candidates (fallow's\nduplication signal applied to CSS). Sorted by estimated savings\ndescending."
         },
+        "cva_duplicate_variant_blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CvaDuplicateVariantBlock"
+          },
+          "description": "CVA / shadcn variant class strings that repeat the same normalized class\nblock in several variant values. Kept separate from CSS declaration-block\nduplication because the source is JS config, not parsed CSS rules."
+        },
+        "cva_variant_token_drifts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CvaVariantTokenDrift"
+          },
+          "description": "CVA / shadcn variant class strings that hardcode a Tailwind arbitrary\nvalue even though an existing token has the same or nearest comparable\nvalue. Advisory: variants often encode product semantics, so agents\nshould verify intent before replacing."
+        },
         "tailwind_arbitrary_values": {
           "type": "array",
           "items": {
@@ -14353,6 +14367,14 @@
           "type": "integer",
           "description": "Total Tailwind arbitrary-value occurrences across markup."
         },
+        "preprocessor_stylesheets": {
+          "type": "integer",
+          "description": "Preprocessor stylesheets (`.scss`, `.sass`, `.less`) seen by the styling\nscan. These are parsed textually for local candidates, not compiled."
+        },
+        "preprocessor_reachability_abstained": {
+          "type": "boolean",
+          "description": "True when project-wide class reachability was skipped because\npreprocessor stylesheets outnumber plain CSS, making generated classes\ninvisible without a Sass/Less compiler."
+        },
         "raw_style_values": {
           "type": "integer",
           "description": "Located raw CSS declaration values that bypass token surfaces on\nscale-sensitive axes. Located in `raw_style_values`."
@@ -14418,6 +14440,8 @@
         "duplicate_declarations_total",
         "tailwind_arbitrary_values",
         "tailwind_arbitrary_value_uses",
+        "preprocessor_stylesheets",
+        "preprocessor_reachability_abstained",
         "raw_style_values",
         "unused_property_registrations",
         "unused_layers",
@@ -17986,6 +18010,17 @@
           "type": "integer",
           "description": "1-based line of the containing style rule."
         },
+        "nearest_token": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NearestStylingToken"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Concrete token with the same or nearest comparable value, when resolved."
+        },
         "actions": {
           "type": "array",
           "items": {
@@ -18003,6 +18038,86 @@
         "actions"
       ],
       "description": "A located raw CSS declaration value on a scale-sensitive styling axis."
+    },
+    "CvaDuplicateVariantBlock": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "Normalized class block shared by several variant values."
+        },
+        "occurrence_count": {
+          "type": "integer",
+          "description": "Number of variant values with this class block."
+        },
+        "occurrences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssBlockOccurrence"
+          },
+          "description": "First locations of the duplicate values, sorted by path and line."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only guidance step(s), so consumers can iterate `actions`\nuniformly across every candidate type."
+        }
+      },
+      "required": [
+        "value",
+        "occurrence_count",
+        "occurrences",
+        "actions"
+      ],
+      "description": "A duplicated CVA / shadcn variant class block."
+    },
+    "CvaVariantTokenDrift": {
+      "type": "object",
+      "properties": {
+        "class_token": {
+          "type": "string",
+          "description": "Tailwind arbitrary-value utility inside the variant class string."
+        },
+        "value": {
+          "type": "string",
+          "description": "Normalized value inside the arbitrary utility."
+        },
+        "variant_classes": {
+          "type": "string",
+          "description": "Full normalized variant class block containing the token."
+        },
+        "path": {
+          "type": "string",
+          "description": "Project-root-relative, forward-slash path to the variant definition."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the variant class string."
+        },
+        "nearest_token": {
+          "description": "Existing token candidate to reuse.",
+          "$ref": "#/definitions/NearestStylingToken"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CssCandidateAction"
+          },
+          "description": "Read-only guidance step(s), so consumers can iterate `actions`\nuniformly across every candidate type."
+        }
+      },
+      "required": [
+        "class_token",
+        "value",
+        "variant_classes",
+        "path",
+        "line",
+        "nearest_token",
+        "actions"
+      ],
+      "description": "A CVA / shadcn variant class value that can reuse an existing styling token."
     }
   }
 }

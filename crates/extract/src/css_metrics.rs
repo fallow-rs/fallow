@@ -28,7 +28,9 @@ use lightningcss::values::color::CssColor;
 use lightningcss::visitor::{VisitTypes, Visitor};
 use rustc_hash::FxHashSet;
 
-use fallow_types::extract::{CssAnalytics, CssDeclarationBlock, CssRawStyleValue, CssRuleMetric};
+use fallow_types::extract::{
+    CssAnalytics, CssCustomPropertyDefinition, CssDeclarationBlock, CssRawStyleValue, CssRuleMetric,
+};
 
 /// Selector component count above which a rule is considered over-complex.
 const MAX_PLAIN_COMPLEXITY: u16 = 4;
@@ -365,14 +367,14 @@ fn collect_rule_property_tokens(style: &StyleRule<'_>, acc: &mut Accumulator, ru
         .iter()
         .chain(style.declarations.important_declarations.iter())
     {
-        collect_property_tokens(property, acc);
+        collect_property_tokens(property, acc, rule_line);
         collect_raw_style_value(property, acc, rule_line);
     }
 }
 
 /// Fold a single declaration's design-token value, custom-property definition,
 /// `@keyframes` reference, or font-family reference into `acc`.
-fn collect_property_tokens(property: &Property<'_>, acc: &mut Accumulator) {
+fn collect_property_tokens(property: &Property<'_>, acc: &mut Accumulator, rule_line: u32) {
     match property {
         Property::FontSize(font_size) => {
             insert_rendered_css(font_size, &mut acc.font_sizes);
@@ -391,7 +393,9 @@ fn collect_property_tokens(property: &Property<'_>, acc: &mut Accumulator) {
         Property::LineHeight(line_height) => {
             insert_rendered_css(line_height, &mut acc.line_heights);
         }
-        Property::Custom(custom) => collect_custom_property_tokens(custom, acc),
+        Property::Custom(custom) => {
+            collect_custom_property_tokens(custom, property, acc, rule_line);
+        }
         Property::AnimationName(names, _) => {
             collect_animation_references(names, &mut acc.referenced_keyframes);
         }
@@ -539,9 +543,29 @@ fn collect_font_family_references(families: &[FontFamily<'_>], out: &mut FxHashS
 
 /// Record a custom-property definition and credit any font-family string / ident
 /// values referenced inside its raw token stream.
-fn collect_custom_property_tokens(custom: &CustomProperty<'_>, acc: &mut Accumulator) {
+fn collect_custom_property_tokens(
+    custom: &CustomProperty<'_>,
+    property: &Property<'_>,
+    acc: &mut Accumulator,
+    rule_line: u32,
+) {
     if let CustomPropertyName::Custom(name) = &custom.name {
-        acc.defined_custom_properties.insert(name.0.to_string());
+        let name = name.0.to_string();
+        acc.defined_custom_properties.insert(name.clone());
+        if let Ok(rendered) = property.to_css_string(false, PrinterOptions::default())
+            && let Some((_, value)) = rendered.split_once(':')
+        {
+            let value = value.trim().trim_end_matches(';').trim();
+            if !value.is_empty() {
+                acc.analytics
+                    .custom_property_definitions
+                    .push(CssCustomPropertyDefinition {
+                        name,
+                        value: value.to_string(),
+                        line: rule_line,
+                    });
+            }
+        }
     }
     // A custom-property value can REFERENCE a font family without a
     // `font-family:` declaration: a Tailwind v4 `--font-*` theme token

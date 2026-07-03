@@ -223,6 +223,7 @@ fn render_css_analytics(
     lines.push("CSS health".bold().to_string());
     render_styling_health(lines, report);
     render_css_analytics_summary(lines, &css.summary);
+    render_css_preprocessor_caveat(lines, &css.summary);
     render_css_keyframe_candidates(lines, css);
     render_css_unused_at_rules(lines, css);
     render_css_scoped_unused(lines, css);
@@ -692,6 +693,24 @@ fn render_css_font_size_unit_mix(lines: &mut Vec<String>, css: &fallow_output::C
     lines.push(format!(
         "  font sizes mix {} units ({breakdown}; candidate, standardize unless intentional)",
         mix.notations.len(),
+    ));
+}
+
+fn render_css_preprocessor_caveat(
+    lines: &mut Vec<String>,
+    summary: &fallow_output::CssAnalyticsSummary,
+) {
+    if !summary.preprocessor_reachability_abstained {
+        return;
+    }
+    lines.push(format!(
+        "  {}",
+        format!(
+            "Sass/Less reachability skipped: {} preprocessor stylesheet{} outnumber plain CSS, so generated classes were not treated as dead or broken.",
+            summary.preprocessor_stylesheets,
+            plural(summary.preprocessor_stylesheets as usize)
+        )
+        .dimmed()
     ));
 }
 

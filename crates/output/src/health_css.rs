@@ -31,6 +31,17 @@ pub struct CssAnalyticsReport {
     /// descending.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub duplicate_declaration_blocks: Vec<CssDuplicateBlock>,
+    /// CVA / shadcn variant class strings that repeat the same normalized class
+    /// block in several variant values. Kept separate from CSS declaration-block
+    /// duplication because the source is JS config, not parsed CSS rules.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cva_duplicate_variant_blocks: Vec<CvaDuplicateVariantBlock>,
+    /// CVA / shadcn variant class strings that hardcode a Tailwind arbitrary
+    /// value even though an existing token has the same or nearest comparable
+    /// value. Advisory: variants often encode product semantics, so agents
+    /// should verify intent before replacing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cva_variant_token_drifts: Vec<CvaVariantTokenDrift>,
     /// Tailwind arbitrary-value utilities (`w-[13px]`, `bg-[#abc]`) found in
     /// markup, which hardcode a one-off value instead of a configured scale
     /// token (design-token bypass). Present only when the project uses Tailwind.
@@ -212,6 +223,9 @@ pub struct RawStyleValue {
     pub path: String,
     /// 1-based line of the containing style rule.
     pub line: u32,
+    /// Concrete token with the same or nearest comparable value, when resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nearest_token: Option<NearestStylingToken>,
     /// Read-only guidance step(s). Never auto-fixable.
     pub actions: Vec<CssCandidateAction>,
 }
@@ -246,6 +260,42 @@ pub struct CssBlockOccurrence {
     pub path: String,
     /// 1-based line of the rule's first selector.
     pub line: u32,
+}
+
+/// A duplicated CVA / shadcn variant class block.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CvaDuplicateVariantBlock {
+    /// Normalized class block shared by several variant values.
+    pub value: String,
+    /// Number of variant values with this class block.
+    pub occurrence_count: u32,
+    /// First locations of the duplicate values, sorted by path and line.
+    pub occurrences: Vec<CssBlockOccurrence>,
+    /// Read-only guidance step(s), so consumers can iterate `actions`
+    /// uniformly across every candidate type.
+    pub actions: Vec<CssCandidateAction>,
+}
+
+/// A CVA / shadcn variant class value that can reuse an existing styling token.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct CvaVariantTokenDrift {
+    /// Tailwind arbitrary-value utility inside the variant class string.
+    pub class_token: String,
+    /// Normalized value inside the arbitrary utility.
+    pub value: String,
+    /// Full normalized variant class block containing the token.
+    pub variant_classes: String,
+    /// Project-root-relative, forward-slash path to the variant definition.
+    pub path: String,
+    /// 1-based line of the variant class string.
+    pub line: u32,
+    /// Existing token candidate to reuse.
+    pub nearest_token: NearestStylingToken,
+    /// Read-only guidance step(s), so consumers can iterate `actions`
+    /// uniformly across every candidate type.
+    pub actions: Vec<CssCandidateAction>,
 }
 
 /// A `@keyframes` defined in a stylesheet but referenced by no animation in any
@@ -720,7 +770,7 @@ impl CssCandidateAction {
             kind: CssCandidateActionType::VerifyUnused,
             auto_fixable: false,
             description: format!(
-                "Confirm no HTML email, server-rendered template, CMS content, or Markdown applies the \"{name}\" class before removing it (fallow scanned only in-project JS/TS/HTML/Vue/Svelte/Astro markup)."
+                "Confirm no HTML email, server-rendered template, or CMS content applies the \"{name}\" class before removing it (fallow scanned in-project JS/TS/HTML/Vue/Svelte/Astro/Markdown markup)."
             ),
             command: safe_token_search(name),
         }
@@ -809,6 +859,20 @@ impl CssCandidateAction {
                 "Replace this one-off arbitrary value with a scale token from your Tailwind theme, or confirm it is intentional."
                     .to_string(),
             command,
+        }
+    }
+
+    /// Guidance for a CVA / shadcn variant arbitrary value: replace the
+    /// utility with a token-backed variant class after checking variant intent.
+    #[must_use]
+    pub fn replace_cva_variant_arbitrary_value(class_token: &str, nearest: &str) -> Self {
+        Self {
+            kind: CssCandidateActionType::ReplaceWithToken,
+            auto_fixable: false,
+            description: format!(
+                "Verify this CVA variant value is not an intentional one-off, then replace {class_token} with a class backed by {nearest}."
+            ),
+            command: safe_token_search(class_token),
         }
     }
 
@@ -910,7 +974,7 @@ fn safe_token_search(name: &str) -> Option<String> {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     is_plain.then(|| {
         format!(
-            "grep -rnw '{name}' --include='*.js' --include='*.jsx' --include='*.ts' --include='*.tsx' --include='*.vue' --include='*.svelte' --include='*.html' ."
+            "grep -rnw '{name}' --include='*.js' --include='*.jsx' --include='*.ts' --include='*.tsx' --include='*.vue' --include='*.svelte' --include='*.astro' --include='*.html' --include='*.md' --include='*.mdx' ."
         )
     })
 }
@@ -1003,6 +1067,13 @@ pub struct CssAnalyticsSummary {
     pub tailwind_arbitrary_values: u32,
     /// Total Tailwind arbitrary-value occurrences across markup.
     pub tailwind_arbitrary_value_uses: u32,
+    /// Preprocessor stylesheets (`.scss`, `.sass`, `.less`) seen by the styling
+    /// scan. These are parsed textually for local candidates, not compiled.
+    pub preprocessor_stylesheets: u32,
+    /// True when project-wide class reachability was skipped because
+    /// preprocessor stylesheets outnumber plain CSS, making generated classes
+    /// invisible without a Sass/Less compiler.
+    pub preprocessor_reachability_abstained: bool,
     /// Located raw CSS declaration values that bypass token surfaces on
     /// scale-sensitive axes. Located in `raw_style_values`.
     pub raw_style_values: u32,
@@ -1101,6 +1172,8 @@ mod tests {
             unreferenced_keyframes: Vec::new(),
             undefined_keyframes: Vec::new(),
             duplicate_declaration_blocks: Vec::new(),
+            cva_duplicate_variant_blocks: Vec::new(),
+            cva_variant_token_drifts: Vec::new(),
             tailwind_arbitrary_values: Vec::new(),
             raw_style_values: Vec::new(),
             unused_at_rules: Vec::new(),
@@ -1128,6 +1201,8 @@ mod tests {
             unreferenced_keyframes: Vec::new(),
             undefined_keyframes: Vec::new(),
             duplicate_declaration_blocks: Vec::new(),
+            cva_duplicate_variant_blocks: Vec::new(),
+            cva_variant_token_drifts: Vec::new(),
             tailwind_arbitrary_values: Vec::new(),
             raw_style_values: Vec::new(),
             unused_at_rules: Vec::new(),

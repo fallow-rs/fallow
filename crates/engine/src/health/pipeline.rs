@@ -7,7 +7,12 @@ use fallow_output::DiffIndex;
 use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{duplicates::DuplicationReport, results::DeadCodeAnalysisArtifacts};
+use crate::{
+    duplicates::DuplicationReport,
+    results::{AnalysisResults, DeadCodeAnalysisArtifacts},
+};
+
+use super::StylingAnalysisArtifacts;
 
 /// Discovery / parse inputs the CLI resolves before calling the engine.
 pub struct HealthPipelineInputs {
@@ -22,6 +27,8 @@ pub struct HealthPipelineInputs {
     /// True when discover + parse were reused from the upstream check pass.
     pub shared_parse: bool,
     pub pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
+    pub dead_code_results: Option<AnalysisResults>,
+    pub styling_artifacts: Option<StylingAnalysisArtifacts>,
     pub pre_computed_duplication: Option<DuplicationReport>,
     pub workspaces: Vec<WorkspaceInfo>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,

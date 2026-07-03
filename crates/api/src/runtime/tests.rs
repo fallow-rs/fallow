@@ -330,6 +330,82 @@ fn combined_reuse_uses_effective_production_modes() {
 }
 
 #[test]
+fn run_health_with_session_reuses_styling_reference_surface() {
+    let project = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        project.path().join("package.json"),
+        r#"{"name":"slidev-css"}"#,
+    )
+    .expect("package file");
+    let stylesheet = project.path().join("style.css");
+    std::fs::write(
+        &stylesheet,
+        ".cover-sub { color: red; }\n.really-dead-class{}\n",
+    )
+    .expect("style file");
+    let slides = project.path().join("slides.md");
+    std::fs::write(&slides, r#"<p class="cover-sub">Intro</p>"#).expect("slides file");
+
+    let options = ComplexityOptions {
+        analysis: analysis_at(project.path()),
+        css: true,
+        css_deep: true,
+        ..ComplexityOptions::default()
+    };
+    let resolved = resolve_programmatic_analysis_context(&options.analysis)
+        .expect("programmatic context resolves");
+    let session =
+        fallow_engine::session::AnalysisSession::load(project.path(), None).expect("session loads");
+
+    let first = resolved
+        .install(|| run_health_with_session(&options, &resolved, &session, None))
+        .expect("first health succeeds");
+    assert_eq!(
+        first
+            .report
+            .css_analytics
+            .as_ref()
+            .expect("css analytics")
+            .unreferenced_css_classes
+            .iter()
+            .map(|item| item.class.as_str())
+            .collect::<Vec<_>>(),
+        vec!["really-dead-class"]
+    );
+
+    std::fs::remove_file(slides).expect("remove slides after artifact cache");
+    std::fs::write(&stylesheet, ".cover-sub{}\n").expect("change style after artifact cache");
+
+    let second = resolved
+        .install(|| run_health_with_session(&options, &resolved, &session, None))
+        .expect("second health succeeds");
+    assert_eq!(
+        second
+            .report
+            .css_analytics
+            .as_ref()
+            .expect("css analytics")
+            .unreferenced_css_classes
+            .iter()
+            .map(|item| item.class.as_str())
+            .collect::<Vec<_>>(),
+        vec!["really-dead-class"],
+        "session-backed health should reuse the styling reference surface and CSS class inventory already built for the session"
+    );
+    assert!(
+        second
+            .report
+            .css_analytics
+            .as_ref()
+            .expect("css analytics")
+            .raw_style_values
+            .iter()
+            .any(|item| item.value == "red"),
+        "session-backed health should reuse the parsed CSS walk already built for the session"
+    );
+}
+
+#[test]
 fn run_health_with_session_artifacts_accepts_retained_dead_code_analysis() {
     let project = tempfile::tempdir().expect("temp dir");
     let src = project.path().join("src");

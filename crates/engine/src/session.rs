@@ -35,6 +35,7 @@ pub struct AnalysisSession {
     workspaces: Vec<WorkspaceInfo>,
     workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     parsed_cache: Mutex<Option<ParsedModuleCache>>,
+    styling_cache: Mutex<Option<crate::health::StylingAnalysisArtifacts>>,
 }
 
 #[derive(Debug)]
@@ -147,6 +148,7 @@ impl AnalysisSession {
             workspaces,
             workspace_diagnostics,
             parsed_cache: Mutex::new(None),
+            styling_cache: Mutex::new(None),
         }
     }
 
@@ -226,6 +228,21 @@ impl AnalysisSession {
     #[must_use]
     pub fn workspace_diagnostics(&self) -> &[WorkspaceDiagnostic] {
         &self.workspace_diagnostics
+    }
+
+    pub(crate) fn styling_analysis_artifacts(&self) -> crate::health::StylingAnalysisArtifacts {
+        if let Ok(cache) = self.styling_cache.lock()
+            && let Some(artifacts) = cache.as_ref()
+        {
+            return artifacts.clone();
+        }
+
+        let artifacts =
+            crate::health::build_styling_analysis_artifacts(self.files(), self.config());
+        if let Ok(mut cache) = self.styling_cache.lock() {
+            *cache = Some(artifacts.clone());
+        }
+        artifacts
     }
 
     /// Consume the session and return the resolved config plus discovery data.

@@ -5873,6 +5873,19 @@ undefined_keyframes?: UndefinedKeyframes[]
  */
 duplicate_declaration_blocks?: CssDuplicateBlock[]
 /**
+ * CVA / shadcn variant class strings that repeat the same normalized class
+ * block in several variant values. Kept separate from CSS declaration-block
+ * duplication because the source is JS config, not parsed CSS rules.
+ */
+cva_duplicate_variant_blocks?: CvaDuplicateVariantBlock[]
+/**
+ * CVA / shadcn variant class strings that hardcode a Tailwind arbitrary
+ * value even though an existing token has the same or nearest comparable
+ * value. Advisory: variants often encode product semantics, so agents
+ * should verify intent before replacing.
+ */
+cva_variant_token_drifts?: CvaVariantTokenDrift[]
+/**
  * Tailwind arbitrary-value utilities (`w-[13px]`, `bg-[#abc]`) found in
  * markup, which hardcode a one-off value instead of a configured scale
  * token (design-token bypass). Present only when the project uses Tailwind.
@@ -6261,6 +6274,17 @@ tailwind_arbitrary_values: number
  */
 tailwind_arbitrary_value_uses: number
 /**
+ * Preprocessor stylesheets (`.scss`, `.sass`, `.less`) seen by the styling
+ * scan. These are parsed textually for local candidates, not compiled.
+ */
+preprocessor_stylesheets: number
+/**
+ * True when project-wide class reachability was skipped because
+ * preprocessor stylesheets outnumber plain CSS, making generated classes
+ * invisible without a Sass/Less compiler.
+ */
+preprocessor_reachability_abstained: boolean
+/**
  * Located raw CSS declaration values that bypass token surfaces on
  * scale-sensitive axes. Located in `raw_style_values`.
  */
@@ -6456,6 +6480,85 @@ path: string
 line: number
 }
 /**
+ * A duplicated CVA / shadcn variant class block.
+ */
+export interface CvaDuplicateVariantBlock {
+/**
+ * Normalized class block shared by several variant values.
+ */
+value: string
+/**
+ * Number of variant values with this class block.
+ */
+occurrence_count: number
+/**
+ * First locations of the duplicate values, sorted by path and line.
+ */
+occurrences: CssBlockOccurrence[]
+/**
+ * Read-only guidance step(s), so consumers can iterate `actions`
+ * uniformly across every candidate type.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * A CVA / shadcn variant class value that can reuse an existing styling token.
+ */
+export interface CvaVariantTokenDrift {
+/**
+ * Tailwind arbitrary-value utility inside the variant class string.
+ */
+class_token: string
+/**
+ * Normalized value inside the arbitrary utility.
+ */
+value: string
+/**
+ * Full normalized variant class block containing the token.
+ */
+variant_classes: string
+/**
+ * Project-root-relative, forward-slash path to the variant definition.
+ */
+path: string
+/**
+ * 1-based line of the variant class string.
+ */
+line: number
+nearest_token: NearestStylingToken
+/**
+ * Read-only guidance step(s), so consumers can iterate `actions`
+ * uniformly across every candidate type.
+ */
+actions: CssCandidateAction[]
+}
+/**
+ * A styling token candidate that can replace or explain a finding.
+ */
+export interface NearestStylingToken {
+/**
+ * Token name, e.g. `--color-brand`.
+ */
+name: string
+/**
+ * Normalized token value.
+ */
+value: string
+/**
+ * Project-root-relative, forward-slash definition path.
+ */
+path: string
+/**
+ * 1-based definition line.
+ */
+line: number
+/**
+ * Distance from the finding value. Lower is closer; units depend on the
+ * comparable token namespace.
+ */
+distance: number
+}
+/**
  * A distinct Tailwind arbitrary-value utility token used in markup, with its
  * total use count and first location (a design-token-bypass candidate).
  */
@@ -6508,6 +6611,10 @@ path: string
  * 1-based line of the containing style rule.
  */
 line: number
+/**
+ * Concrete token with the same or nearest comparable value, when resolved.
+ */
+nearest_token?: (NearestStylingToken | null)
 /**
  * Read-only guidance step(s). Never auto-fixable.
  */
@@ -6669,32 +6776,6 @@ nearest_token: NearestStylingToken
  * Read-only guidance step(s) before replacing the token reference.
  */
 actions: CssCandidateAction[]
-}
-/**
- * A styling token candidate that can replace or explain a finding.
- */
-export interface NearestStylingToken {
-/**
- * Token name, e.g. `--color-brand`.
- */
-name: string
-/**
- * Normalized token value.
- */
-value: string
-/**
- * Project-root-relative, forward-slash definition path.
- */
-path: string
-/**
- * 1-based definition line.
- */
-line: number
-/**
- * Distance from the finding value. Lower is closer; units depend on the
- * comparable token namespace.
- */
-distance: number
 }
 /**
  * A location-aware reverse index of where one design token is consumed, so an

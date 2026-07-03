@@ -47,8 +47,8 @@ use std::path::Path;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, BindingPattern, ComputedMemberExpression, Expression, ImportDeclarationSpecifier,
-    ObjectExpression, ObjectPropertyKind, Program, Statement, StaticMemberExpression,
-    VariableDeclarator,
+    NumericLiteral, ObjectExpression, ObjectPropertyKind, Program, Statement,
+    StaticMemberExpression, UnaryOperator, VariableDeclarator,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -58,14 +58,17 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::object::{Lib, module_library};
 
 /// A single defined design token: its dotted LEAF path relative to the access
-/// binding (`color.primary`, or flat `primaryColor` for StyleX), and the 1-based
-/// source line of its key.
+/// binding (`color.primary`, or flat `primaryColor` for StyleX), the 1-based
+/// source line of its key, and the static value when the literal is recoverable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CssInJsToken {
     /// Dotted leaf path relative to the binding (e.g. `color.primary`).
     pub path: String,
     /// 1-based line of the token's key in the defining source.
     pub def_line: u32,
+    /// Static token value for literal definitions. Dynamic expressions and
+    /// contract-only leaves have no value.
+    pub value: Option<String>,
 }
 
 /// A CSS-in-JS token-definition site: the exported access binding consumers read
@@ -654,6 +657,7 @@ fn collect_token_leaves(
                 out.push(CssInJsToken {
                     path,
                     def_line: line_at(source, prop.key.span().start),
+                    value: object_static_property_value(nested, "value"),
                 });
             }
             Expression::ObjectExpression(nested) => {
@@ -663,10 +667,48 @@ fn collect_token_leaves(
             // token group; do not record it as a leaf.
             Expression::Identifier(_) => {}
             _ => out.push(CssInJsToken {
+                value: static_token_value(&prop.value),
                 path,
                 def_line: line_at(source, prop.key.span().start),
             }),
         }
+    }
+}
+
+fn object_static_property_value(obj: &ObjectExpression<'_>, wanted: &str) -> Option<String> {
+    obj.properties.iter().find_map(|prop| {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            return None;
+        };
+        (prop.key.static_name().as_deref() == Some(wanted))
+            .then(|| static_token_value(&prop.value))
+            .flatten()
+    })
+}
+
+fn static_token_value(value: &Expression<'_>) -> Option<String> {
+    match value {
+        Expression::StringLiteral(lit) => {
+            let text = lit.value.as_str().trim();
+            (!text.is_empty()).then(|| text.to_string())
+        }
+        Expression::NumericLiteral(num) => Some(format_numeric_token(num)),
+        Expression::UnaryExpression(unary) if unary.operator == UnaryOperator::UnaryNegation => {
+            if let Expression::NumericLiteral(num) = &unary.argument {
+                Some(format!("-{}", format_numeric_token(num)))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn format_numeric_token(num: &NumericLiteral<'_>) -> String {
+    if num.value.fract() == 0.0 {
+        format!("{:.0}", num.value)
+    } else {
+        num.value.to_string()
     }
 }
 
@@ -717,6 +759,18 @@ mod tests {
             .unwrap_or_default()
     }
 
+    fn token_values(defs: &[CssInJsTokenDef], binding: &str) -> Vec<(String, Option<String>)> {
+        defs.iter()
+            .find(|d| d.binding == binding)
+            .map(|d| {
+                d.tokens
+                    .iter()
+                    .map(|t| (t.path.clone(), t.value.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn theme_defs(source: &str) -> Vec<CssInJsTokenDef> {
         css_in_js_theme_token_defs(source, Path::new("theme.ts"))
     }
@@ -730,6 +784,13 @@ export const vars = stylex.defineVars({ primaryColor: '#3b82f6', spacingSm: '4px
 ",
         );
         assert_eq!(paths(&d, "vars"), vec!["primaryColor", "spacingSm"]);
+        assert_eq!(
+            token_values(&d, "vars"),
+            vec![
+                ("primaryColor".to_string(), Some("#3b82f6".to_string())),
+                ("spacingSm".to_string(), Some("4px".to_string())),
+            ]
+        );
     }
 
     #[test]
@@ -762,6 +823,17 @@ export const tokens = defineTokens({
             vec!["colors.brand", "colors.accent", "spacing.card"]
         );
         assert_eq!(
+            token_values(&d, "tokens"),
+            vec![
+                ("colors.brand".to_string(), Some("#f05a28".to_string())),
+                (
+                    "colors.accent".to_string(),
+                    Some("{colors.brand}".to_string())
+                ),
+                ("spacing.card".to_string(), Some("1rem".to_string())),
+            ]
+        );
+        assert_eq!(
             d.iter().find(|d| d.binding == "tokens").unwrap().origin,
             CssInJsTokenOrigin::Panda
         );
@@ -781,6 +853,14 @@ export const appTheme = {
         assert_eq!(
             paths(&d, "appTheme"),
             vec!["colors.brand", "colors.accent", "space.card"]
+        );
+        assert_eq!(
+            token_values(&d, "appTheme"),
+            vec![
+                ("colors.brand".to_string(), Some("#f05a28".to_string())),
+                ("colors.accent".to_string(), Some("#111".to_string())),
+                ("space.card".to_string(), Some("1rem".to_string())),
+            ]
         );
         assert_eq!(
             d.iter().find(|d| d.binding == "appTheme").unwrap().origin,

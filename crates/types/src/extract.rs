@@ -969,6 +969,18 @@ pub struct CssRawStyleValue {
     pub line: u32,
 }
 
+/// Located CSS custom-property definition with its rendered value. Internal
+/// staging for design-token reuse suggestions in the health layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CssCustomPropertyDefinition {
+    /// Custom property name, including the leading `--`.
+    pub name: String,
+    /// Rendered custom property value.
+    pub value: String,
+    /// 1-based line of the containing style rule.
+    pub line: u32,
+}
+
 /// Stylesheet-level structural CSS analytics, computed from the parsed CSS
 /// syntax tree. Feeds `fallow health` penalty weights and located findings,
 /// never a standalone CSS score.
@@ -1017,6 +1029,11 @@ pub struct CssAnalytics {
     #[serde(skip)]
     #[cfg_attr(feature = "schema", schemars(skip))]
     pub raw_style_values: Vec<CssRawStyleValue>,
+    /// Located custom-property definitions with values. Internal staging
+    /// consumed by the health layer for nearest-token suggestions.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub custom_property_definitions: Vec<CssCustomPropertyDefinition>,
     /// Distinct custom properties (`--x`) DEFINED in the stylesheet, sorted.
     pub defined_custom_properties: Vec<String>,
     /// Distinct custom properties REFERENCED via `var()` in the stylesheet.

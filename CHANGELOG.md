@@ -71,20 +71,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows its blast radius (a `consumer_count` plus located `consumers[]`) the same
   way an `@theme` token does. Because CSS-in-JS tokens are defined in JS objects and
   consumed via cross-module member access (`import { vars } from './tokens';
-  vars.color.primary`, including bracket access `vars.color['gray-100']`), the
-  consumer scan resolves each relative import to its defining file and matches the
-  member-access chain against the defined leaf token paths, so an unrelated
-  same-named binding is never counted. Entries reuse the existing `token_consumers`
-  shape with a new `consumers[].kind` of `js-member`; `token` is the
-  binding-qualified access path (`vars.color.primary`) and `namespace` is the
-  defining binding (`vars`). Dep-gated on a declared CSS-in-JS library
-  (`@stylexjs/stylex` / `@vanilla-extract/css`), descriptive-only (no `actions`, no
-  exit-code effect), no new wire field, and no `CACHE_VERSION` bump; a non-CSS-in-JS
-  project and a plain `fallow health` run (no `--css`) are byte-unchanged, and the
-  Tailwind `token_consumers` output is untouched. `consumer_count` is a static lower
-  bound (path-aliased / bare-package imports are not resolved), and unlike Tailwind
-  there is no corroborating dead-token finding, so a CSS-in-JS `consumer_count` of 0
-  is a weaker signal. Panda (`defineTokens` / `token('...')`) is a planned follow-on.
+  vars.color.primary`, including bracket access `vars.color['gray-100']`) or Panda
+  `token('colors.brand')` calls, the consumer scan resolves relative imports,
+  tsconfig path aliases, and workspace package imports to their defining files and
+  matches the member-access or call chain against the defined leaf token paths, so
+  an unrelated same-named binding is never counted. Entries reuse the existing
+  `token_consumers` shape with `consumers[].kind` set to `js-member` for StyleX /
+  vanilla-extract member access and `js-call` for Panda `token(...)` calls. Dep-gated
+  on a declared CSS-in-JS library (`@stylexjs/stylex`, `@vanilla-extract/css`, or
+  `@pandacss/dev`), descriptive-only (no `actions`, no exit-code effect), no new wire
+  field, and no `CACHE_VERSION` bump; a non-CSS-in-JS project and a plain
+  `fallow health` run (no `--css`) are byte-unchanged, and the Tailwind
+  `token_consumers` output is untouched. `consumer_count` is still a static lower
+  bound for dynamic import strings, unresolved aliases, generated package state, and
+  computed token access, and unlike Tailwind there is no corroborating dead-token
+  finding, so a CSS-in-JS `consumer_count` of 0 is a weaker signal.
 
 - **Fuzzy CSS clones via CSS-aware value canonicalization (CSS program Phase 4).**
   `fallow dupes` already tokenized CSS, but the lexer was character-naive, so
