@@ -17693,7 +17693,7 @@
         {
           "type": "string",
           "const": "js-call",
-          "description": "A CSS-in-JS function call that consumes a token by path, currently\nPandaCSS `token('colors.brand')`."
+          "description": "A CSS-in-JS function call that consumes a token by path, such as\nPandaCSS `token('colors.brand')` or `css({ color: 'colors.brand' })`."
         }
       ],
       "description": "The surface through which a design token is consumed. The `theme-var` /\n`css-var` / `utility` / `apply` kinds are Tailwind v4 `@theme` consumption; the\n`js-member` / `js-call` kinds are CSS-in-JS consumption (member access on an\nimported StyleX/vanilla-extract token binding, or a PandaCSS `token('...')`\ncall). The kind is the disjoint origin signal that distinguishes a Tailwind\ntoken entry from a CSS-in-JS token entry in the shared `token_consumers` list."
