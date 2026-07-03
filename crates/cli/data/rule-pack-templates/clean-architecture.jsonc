@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/rule-pack-schema.json",
+  "version": 1,
+  "name": "__PACK_NAME__",
+  "description": "Clean architecture import hygiene: the domain layer depends on ports, never on IO adapters or frameworks. Pairs well with the boundaries config (see docs on boundaries presets).",
+  "rules": [
+    {
+      "id": "domain-no-io-adapters",
+      "kind": "banned-import",
+      "specifiers": ["axios", "node-fetch", "pg", "mysql2", "mongoose", "ioredis", "fs", "node:fs"],
+      "files": ["src/domain/**"],
+      "message": "The domain layer depends on ports, not IO adapters.",
+      "severity": "error"
+    },
+    {
+      "id": "domain-no-frameworks",
+      "kind": "banned-import",
+      "specifiers": ["react", "vue", "next", "express", "fastify"],
+      "files": ["src/domain/**"],
+      "message": "The domain layer must stay framework-agnostic.",
+      "severity": "error"
+    }
+  ]
+}

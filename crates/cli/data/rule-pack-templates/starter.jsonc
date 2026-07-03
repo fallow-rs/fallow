@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/rule-pack-schema.json",
+  "version": 1,
+  "name": "__PACK_NAME__",
+  "description": "Team policy rules. Edit freely and iterate with: fallow rule-pack test",
+  "rules": [
+    {
+      "id": "no-moment",
+      "kind": "banned-import",
+      "specifiers": ["moment"],
+      "message": "Use date-fns instead of moment (bundle size, maintenance).",
+      "severity": "warn"
+    },
+    {
+      "id": "no-child-process",
+      "kind": "banned-call",
+      "callees": ["child_process.*"],
+      "exclude": ["scripts/**", "**/*.test.*", "**/*.spec.*"],
+      "message": "Shelling out is not allowed in application code."
+    }
+    // banned-effect rules block whole effect categories, for example:
+    // { "id": "pure-domain", "kind": "banned-effect", "effects": ["network"], "files": ["src/domain/**"] }
+  ]
+}

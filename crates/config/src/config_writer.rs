@@ -89,6 +89,41 @@ pub fn add_ignore_exports_rule(path: &Path, entries: &[IgnoreExportRule]) -> Con
     Ok(())
 }
 
+/// Append a rule-pack path to an existing fallow config file.
+pub fn add_rule_pack_path(path: &Path, pack_path: &str) -> ConfigWriteResult<bool> {
+    let content = std::fs::read_to_string(path)?;
+    let (rendered, changed) = add_rule_pack_path_to_string(path, &content, pack_path)?;
+    if changed {
+        atomic_write(path, rendered.as_bytes())?;
+    }
+    Ok(changed)
+}
+
+/// Render the proposed content of a fallow config after appending a `rulePacks` entry.
+pub fn add_rule_pack_path_to_string(
+    path: &Path,
+    content: &str,
+    pack_path: &str,
+) -> ConfigWriteResult<(String, bool)> {
+    let had_bom = content.starts_with(BOM);
+    let body = content.strip_prefix(BOM).unwrap_or(content);
+    let (rendered, changed) = if is_json_config(path) {
+        append_json_rule_pack_path(body, pack_path)?
+    } else {
+        append_toml_rule_pack_path(body, pack_path)?
+    };
+    let with_endings = preserve_line_endings(&rendered, body);
+    let final_content = if had_bom {
+        let mut out = String::with_capacity(with_endings.len() + BOM.len_utf8());
+        out.push(BOM);
+        out.push_str(&with_endings);
+        out
+    } else {
+        with_endings
+    };
+    Ok((final_content, changed))
+}
+
 /// Render the proposed content of a fallow config after appending `ignoreExports` rules.
 pub fn add_ignore_exports_rule_to_string(
     path: &Path,
@@ -172,6 +207,30 @@ fn append_json_ignore_exports(
     Ok(root.to_string())
 }
 
+fn append_json_rule_pack_path(content: &str, pack_path: &str) -> ConfigWriteResult<(String, bool)> {
+    let root = CstRootNode::parse(content, &crate::jsonc::parse_options())
+        .map_err(ConfigWriteError::JsonParse)?;
+    let object = root.object_value_or_create().ok_or_else(|| {
+        ConfigWriteError::InvalidShape("fallow config root must be an object".into())
+    })?;
+    let array = object.array_value_or_create("rulePacks").ok_or_else(|| {
+        ConfigWriteError::InvalidShape("rulePacks must be an array in fallow config".into())
+    })?;
+
+    for element in array.elements() {
+        if element
+            .to_serde_value()
+            .and_then(|value| value.as_str().map(|existing| existing == pack_path))
+            == Some(true)
+        {
+            return Ok((root.to_string(), false));
+        }
+    }
+
+    array.append(CstInputValue::String(pack_path.to_owned()));
+    Ok((root.to_string(), true))
+}
+
 fn append_toml_ignore_exports(
     content: &str,
     entries: &[IgnoreExportRule],
@@ -207,6 +266,31 @@ fn append_toml_ignore_exports(
         }
     }
     Ok(doc.to_string())
+}
+
+fn append_toml_rule_pack_path(content: &str, pack_path: &str) -> ConfigWriteResult<(String, bool)> {
+    let mut doc = content
+        .parse::<DocumentMut>()
+        .map_err(ConfigWriteError::TomlParse)?;
+    match doc.as_table_mut().entry("rulePacks").or_insert(Item::None) {
+        Item::None => {
+            let mut array = Array::new();
+            array.push(pack_path);
+            doc.as_table_mut()
+                .insert("rulePacks", Item::Value(Value::Array(array)));
+            Ok((doc.to_string(), true))
+        }
+        Item::Value(Value::Array(array)) => {
+            if array.iter().any(|value| value.as_str() == Some(pack_path)) {
+                return Ok((doc.to_string(), false));
+            }
+            array.push(pack_path);
+            Ok((doc.to_string(), true))
+        }
+        _ => Err(ConfigWriteError::InvalidShape(
+            "rulePacks must be an array in fallow config".into(),
+        )),
+    }
 }
 
 fn files_from_array_of_tables(tables: &ArrayOfTables, config_dir: &Path) -> FxHashSet<String> {
@@ -330,6 +414,60 @@ mod tests {
         assert!(output.contains("\"ignoreExports\": ["));
         assert!(output.contains("\"file\": \"src/index.ts\""));
         assert!(output.ends_with('\n'));
+    }
+
+    #[test]
+    fn appends_json_rule_pack_path() {
+        let (output, changed) = add_rule_pack_path_to_string(
+            Path::new(".fallowrc.json"),
+            "{\n  \"rules\": {}\n}\n",
+            "rule-packs/team-policy.jsonc",
+        )
+        .unwrap();
+        assert!(changed);
+        assert!(output.contains("\"rules\": {}"));
+        assert!(output.contains("\"rulePacks\": ["));
+        assert!(output.contains("\"rule-packs/team-policy.jsonc\""));
+    }
+
+    #[test]
+    fn appends_jsonc_rule_pack_path_preserving_comments() {
+        let input = "{\n  // keep this\n  \"rules\": {}\n}\n";
+        let (output, changed) = add_rule_pack_path_to_string(
+            Path::new(".fallowrc.jsonc"),
+            input,
+            "rule-packs/team-policy.jsonc",
+        )
+        .unwrap();
+        assert!(changed);
+        assert!(output.contains("// keep this"));
+        assert!(output.contains("\"rule-packs/team-policy.jsonc\""));
+    }
+
+    #[test]
+    fn dedupes_existing_rule_pack_path() {
+        let input = "{\n  \"rulePacks\": [\"rule-packs/team-policy.jsonc\"]\n}\n";
+        let (output, changed) = add_rule_pack_path_to_string(
+            Path::new(".fallowrc.json"),
+            input,
+            "rule-packs/team-policy.jsonc",
+        )
+        .unwrap();
+        assert!(!changed);
+        assert_eq!(output.matches("rule-packs/team-policy.jsonc").count(), 1);
+    }
+
+    #[test]
+    fn appends_toml_rule_pack_path() {
+        let (output, changed) = add_rule_pack_path_to_string(
+            Path::new("fallow.toml"),
+            "production = true\n",
+            "rule-packs/team-policy.jsonc",
+        )
+        .unwrap();
+        assert!(changed);
+        assert!(output.contains("production = true"));
+        assert!(output.contains("rulePacks = [\"rule-packs/team-policy.jsonc\"]"));
     }
 
     #[test]

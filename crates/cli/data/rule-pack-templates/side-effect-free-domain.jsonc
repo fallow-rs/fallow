@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/rule-pack-schema.json",
+  "version": 1,
+  "name": "__PACK_NAME__",
+  "description": "Keep domain and shared utility code free of IO side effects; effects belong behind ports/adapters.",
+  "rules": [
+    {
+      "id": "pure-domain",
+      "kind": "banned-effect",
+      "effects": ["network", "storage", "database", "process", "shell", "dom"],
+      "files": ["src/domain/**", "src/shared/**"],
+      "message": "Domain and shared code must stay side-effect free; inject effects via ports.",
+      "severity": "error"
+    }
+  ]
+}

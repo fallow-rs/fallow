@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/rule-pack-schema.json",
+  "version": 1,
+  "name": "__PACK_NAME__",
+  "description": "Guardrails for repositories where AI agents write code: no dynamic code execution, no shelling out, no raw HTML sinks.",
+  "rules": [
+    {
+      "id": "no-dynamic-code",
+      "kind": "banned-call",
+      "callees": ["eval", "Function"],
+      "message": "Dynamic code execution is banned in this repository.",
+      "severity": "error"
+    },
+    {
+      "id": "no-shell",
+      "kind": "banned-effect",
+      "effects": ["shell", "process"],
+      "exclude": ["scripts/**"],
+      "message": "Spawning processes or shells is banned outside scripts/.",
+      "severity": "error"
+    },
+    {
+      "id": "no-raw-html",
+      "kind": "banned-call",
+      "callees": ["*.insertAdjacentHTML", "document.write"],
+      "message": "Raw HTML injection sinks are banned; use safe rendering APIs.",
+      "severity": "error"
+    }
+  ]
+}

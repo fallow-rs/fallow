@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/rule-pack-schema.json",
+  "version": 1,
+  "name": "__PACK_NAME__",
+  "description": "Next.js App Router hygiene: keep Pages Router APIs out of App Router code.",
+  "rules": [
+    {
+      "id": "no-pages-router",
+      "kind": "banned-import",
+      "specifiers": ["next/router"],
+      "message": "App Router code must use next/navigation, not next/router.",
+      "severity": "error"
+    },
+    {
+      "id": "no-next-head-in-app",
+      "kind": "banned-import",
+      "specifiers": ["next/head"],
+      "files": ["app/**", "src/app/**"],
+      "message": "Use the Metadata API in the App Router instead of next/head."
+    }
+  ]
+}
