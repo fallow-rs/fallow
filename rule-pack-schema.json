@@ -37,7 +37,7 @@
   ],
   "$defs": {
     "RulePackRule": {
-      "description": "One declarative policy rule inside a rule pack.\n\n`callees` applies only to `banned-call` rules; `specifiers` and\n`ignoreTypeOnly` apply only to `banned-import` rules; `effects` applies\nonly to `banned-effect` rules. `zones` can scope any rule kind to files\nclassified into one of the named boundary zones. Setting a field on the\nwrong kind is a load error (fail loud, never silently ignore policy).",
+      "description": "One declarative policy rule inside a rule pack.\n\n`callees` applies only to `banned-call` rules; `specifiers` and\n`ignoreTypeOnly` apply only to `banned-import` rules; `effects` applies\nonly to `banned-effect` rules; `exports` applies only to `banned-export`\nrules. `zones` can scope any rule kind to files classified into one of the\nnamed boundary zones. Setting a field on the wrong kind is a load error\n(fail loud, never silently ignore policy).",
       "type": "object",
       "properties": {
         "id": {
@@ -69,8 +69,15 @@
             "$ref": "#/$defs/EffectKind"
           }
         },
+        "exports": {
+          "description": "Export names to ban (`banned-export` only). `\"default\"` matches the\ndefault export; any other entry matches an exported name exactly; a\nsingle trailing `*` makes it a prefix match (`internal*`). No other\nglob syntax is supported. Re-exports are out of scope for this rule.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "ignoreTypeOnly": {
-          "description": "When `true`, type-only imports (`import type ...` and type-only\nre-exports) are ignored by this `banned-import` rule. Defaults to\n`false`: type-only imports are flagged too.",
+          "description": "When `true`, type-only imports (`import type ...` and type-only\nre-exports) are ignored by `banned-import`; type-only exports are\nignored by `banned-export`. Defaults to `false`: type-only sites are\nflagged too.",
           "type": "boolean"
         },
         "files": {
@@ -136,6 +143,11 @@
           "description": "Ban call sites whose catalogue-derived effect matches one of `effects`.",
           "type": "string",
           "const": "banned-effect"
+        },
+        {
+          "description": "Ban exported names that match one of `exports`.",
+          "type": "string",
+          "const": "banned-export"
         }
       ]
     },

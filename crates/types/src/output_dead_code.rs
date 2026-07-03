@@ -590,6 +590,7 @@ impl PolicyViolationFinding {
             crate::results::PolicyRuleKind::BannedCall => "call",
             crate::results::PolicyRuleKind::BannedImport => "import",
             crate::results::PolicyRuleKind::BannedEffect => "effect",
+            crate::results::PolicyRuleKind::BannedExport => "export",
         };
         let description = match &violation.message {
             Some(message) => format!("Replace the `{}` {what}: {message}", violation.matched),

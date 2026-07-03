@@ -6,7 +6,8 @@ use fallow_config::{
     RulePackDef, RulePackRule, RulePackRuleKind, RulesConfig, Severity,
 };
 use fallow_types::extract::{
-    CalleeUse, ImportInfo, ImportedName, ModuleInfo, ReExportInfo, RequireCallInfo,
+    CalleeUse, ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo, ReExportInfo,
+    RequireCallInfo, VisibilityTag,
 };
 use fallow_types::results::{PolicyRuleKind, PolicyViolationSeverity, SuppressionOrigin};
 
@@ -24,6 +25,7 @@ fn rule(id: &str, kind: RulePackRuleKind) -> RulePackRule {
         callees: Vec::new(),
         specifiers: Vec::new(),
         effects: Vec::new(),
+        exports: Vec::new(),
         ignore_type_only: false,
         files: Vec::new(),
         exclude: Vec::new(),
@@ -51,6 +53,13 @@ fn banned_effect(id: &str, effects: &[EffectKind]) -> RulePackRule {
     RulePackRule {
         effects: effects.to_vec(),
         ..rule(id, RulePackRuleKind::BannedEffect)
+    }
+}
+
+fn banned_export(id: &str, exports: &[&str]) -> RulePackRule {
+    RulePackRule {
+        exports: exports.iter().map(ToString::to_string).collect(),
+        ..rule(id, RulePackRuleKind::BannedExport)
     }
 }
 
@@ -277,6 +286,20 @@ fn callee(path: &str, span_start: u32) -> CalleeUse {
     CalleeUse {
         callee_path: path.to_string(),
         span_start,
+    }
+}
+
+fn export(name: ExportName, is_type_only: bool, span_start: u32) -> ExportInfo {
+    ExportInfo {
+        name,
+        local_name: None,
+        is_type_only,
+        is_side_effect_used: false,
+        visibility: VisibilityTag::None,
+        expected_unused_reason: None,
+        span: oxc_span::Span::new(span_start, span_start + 1),
+        members: Vec::new(),
+        super_class: None,
     }
 }
 
@@ -609,6 +632,63 @@ fn banned_import_matches_segment_aware_specifiers() {
             .iter()
             .all(|v| v.kind == PolicyRuleKind::BannedImport)
     );
+}
+
+#[test]
+fn banned_export_flags_default_and_prefix_matches() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let config = make_config(
+        root.clone(),
+        vec![pack(vec![banned_export(
+            "no-domain-exports",
+            &["default", "internal*"],
+        )])],
+        Severity::Warn,
+    );
+    let graph = build_graph(&root, &["src/domain.ts"]);
+    let mut module = module(0, Vec::new(), Vec::new());
+    module.exports = vec![
+        export(ExportName::Default, false, 0),
+        export(ExportName::Named("internalHelper".to_owned()), false, 12),
+        export(ExportName::Named("publicHelper".to_owned()), false, 24),
+    ];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_policy_violations(&graph, &[module], &config, &suppressions, &line_offsets);
+
+    assert_eq!(violations.len(), 2);
+    assert_eq!(violations[0].kind, PolicyRuleKind::BannedExport);
+    assert_eq!(
+        violations
+            .iter()
+            .map(|violation| violation.matched.as_str())
+            .collect::<Vec<_>>(),
+        vec!["default", "internalHelper"]
+    );
+}
+
+#[test]
+fn banned_export_can_ignore_type_only_exports() {
+    let root = PathBuf::from("/tmp/policy-test");
+    let mut rule = banned_export("no-internal-types", &["Internal*"]);
+    rule.ignore_type_only = true;
+    let config = make_config(root.clone(), vec![pack(vec![rule])], Severity::Warn);
+    let graph = build_graph(&root, &["src/domain.ts"]);
+    let mut module = module(0, Vec::new(), Vec::new());
+    module.exports = vec![
+        export(ExportName::Named("InternalType".to_owned()), true, 0),
+        export(ExportName::Named("InternalValue".to_owned()), false, 12),
+    ];
+    let suppressions = SuppressionContext::empty();
+    let line_offsets = FxHashMap::default();
+
+    let violations =
+        find_policy_violations(&graph, &[module], &config, &suppressions, &line_offsets);
+
+    assert_eq!(violations.len(), 1);
+    assert_eq!(violations[0].matched, "InternalValue");
 }
 
 #[test]

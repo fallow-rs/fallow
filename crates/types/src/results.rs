@@ -3096,6 +3096,8 @@ pub enum PolicyRuleKind {
     BannedImport,
     /// A call site matched a catalogue-derived `banned-effect` rule.
     BannedEffect,
+    /// An exported name matched a `banned-export` rule.
+    BannedExport,
 }
 
 /// Effective severity of a single [`PolicyViolation`]. Per-rule `severity`
@@ -3112,11 +3114,12 @@ pub enum PolicyViolationSeverity {
     Warn,
 }
 
-/// A banned call, banned import, or banned effect matched by a declarative rule
-/// pack (`rulePacks` config). Banned-call and banned-effect findings report
-/// one entry per unique callee path per file (first occurrence wins, matching
-/// `boundary_call_violations`); banned-import findings anchor at each matching
-/// import or re-export declaration.
+/// A banned call, banned import, banned effect, or banned export matched by a
+/// declarative rule pack (`rulePacks` config). Banned-call and banned-effect
+/// findings report one entry per unique callee path per file (first occurrence
+/// wins, matching `boundary_call_violations`); banned-import findings anchor
+/// at each matching import or re-export declaration; banned-export findings
+/// anchor at matching export declarations.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PolicyViolation {
@@ -3136,7 +3139,8 @@ pub struct PolicyViolation {
     pub kind: PolicyRuleKind,
     /// What matched: the written callee path for `banned-call` (e.g.
     /// `cp.exec`), the raw import specifier for `banned-import` (e.g.
-    /// `moment/locale/nl`), or `<effect>: <callee>` for `banned-effect`.
+    /// `moment/locale/nl`), `<effect>: <callee>` for `banned-effect`, or the
+    /// exported name for `banned-export`.
     pub matched: String,
     /// Effective severity for this finding (per-rule `severity`, else the
     /// `rules."policy-violation"` master).

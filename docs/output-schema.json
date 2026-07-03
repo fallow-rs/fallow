@@ -12900,7 +12900,7 @@
         },
         "matched": {
           "type": "string",
-          "description": "What matched: the written callee path for `banned-call` (e.g.\n`cp.exec`), the raw import specifier for `banned-import` (e.g.\n`moment/locale/nl`), or `<effect>: <callee>` for `banned-effect`."
+          "description": "What matched: the written callee path for `banned-call` (e.g.\n`cp.exec`), the raw import specifier for `banned-import` (e.g.\n`moment/locale/nl`), `<effect>: <callee>` for `banned-effect`, or the\nexported name for `banned-export`."
         },
         "severity": {
           "description": "Effective severity for this finding (per-rule `severity`, else the\n`rules.\"policy-violation\"` master).",
@@ -12961,6 +12961,11 @@
           "type": "string",
           "const": "banned-effect",
           "description": "A call site matched a catalogue-derived `banned-effect` rule."
+        },
+        {
+          "type": "string",
+          "const": "banned-export",
+          "description": "An exported name matched a `banned-export` rule."
         }
       ],
       "description": "Which rule-pack rule kind produced a [`PolicyViolation`]."

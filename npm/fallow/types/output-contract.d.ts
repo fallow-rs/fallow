@@ -251,7 +251,7 @@ export type ReExportCycleKind = ("multi-node" | "self-loop")
 /**
  * Which rule-pack rule kind produced a [`PolicyViolation`].
  */
-export type PolicyRuleKind = ("banned-call" | "banned-import" | "banned-effect")
+export type PolicyRuleKind = ("banned-call" | "banned-import" | "banned-effect" | "banned-export")
 /**
  * Effective severity of a single [`PolicyViolation`]. Per-rule `severity`
  * overrides the `rules."policy-violation"` master; `off` rules emit nothing,
@@ -2517,7 +2517,8 @@ kind: PolicyRuleKind
 /**
  * What matched: the written callee path for `banned-call` (e.g.
  * `cp.exec`), the raw import specifier for `banned-import` (e.g.
- * `moment/locale/nl`), or `<effect>: <callee>` for `banned-effect`.
+ * `moment/locale/nl`), `<effect>: <callee>` for `banned-effect`, or the
+ * exported name for `banned-export`.
  */
 matched: string
 severity: PolicyViolationSeverity

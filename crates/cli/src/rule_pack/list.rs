@@ -111,6 +111,7 @@ fn rule_kind(kind: RulePackRuleKind) -> &'static str {
         RulePackRuleKind::BannedCall => "banned-call",
         RulePackRuleKind::BannedImport => "banned-import",
         RulePackRuleKind::BannedEffect => "banned-effect",
+        RulePackRuleKind::BannedExport => "banned-export",
     }
 }
 
@@ -123,6 +124,7 @@ fn rule_patterns(rule: &RulePackRule) -> Vec<String> {
             .iter()
             .map(|effect| effect.as_str().to_string())
             .collect(),
+        RulePackRuleKind::BannedExport => rule.exports.clone(),
     }
 }
 

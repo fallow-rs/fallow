@@ -254,6 +254,16 @@ fn collect_node_policy_violations(input: &mut PolicyNodeInput<'_>) {
         line_offsets_by_file: input.line_offsets_by_file,
         violations: input.violations,
     });
+    collect_banned_exports(&mut PolicyCollectionInput {
+        in_scope: &scope.in_scope,
+        module,
+        node,
+        master: scope.master,
+        declared_deps: input.declared_deps,
+        suppressions: input.suppressions,
+        line_offsets_by_file: input.line_offsets_by_file,
+        violations: input.violations,
+    });
     collect_banned_effects(&mut PolicyCollectionInput {
         in_scope: &scope.in_scope,
         module,
@@ -463,6 +473,56 @@ fn push_banned_import_if_matched(
     });
 }
 
+/// Emit one finding per `banned-export` rule match over the module's direct
+/// exports. Re-exports are intentionally handled by `banned-import`.
+fn collect_banned_exports(input: &mut PolicyCollectionInput<'_>) {
+    for (_, rule) in input.in_scope {
+        if rule.rule.kind != RulePackRuleKind::BannedExport {
+            continue;
+        }
+        let Some(severity) = wire_severity(rule.effective_severity(input.master)) else {
+            continue;
+        };
+        for export in &input.module.exports {
+            if rule.rule.ignore_type_only && export.is_type_only {
+                continue;
+            }
+            if !rule
+                .rule
+                .exports
+                .iter()
+                .any(|pattern| export_pattern_matches(&export.name, pattern))
+            {
+                continue;
+            }
+            let (line, col) = byte_offset_to_line_col(
+                input.line_offsets_by_file,
+                input.node.file_id,
+                export.span.start,
+            );
+            if input.suppressions.is_policy_suppressed(
+                input.node.file_id,
+                line,
+                rule.pack,
+                &rule.rule.id,
+            ) {
+                continue;
+            }
+            input.violations.push(PolicyViolation {
+                path: input.node.path.clone(),
+                line,
+                col,
+                pack: rule.pack.to_owned(),
+                rule_id: rule.rule.id.clone(),
+                kind: PolicyRuleKind::BannedExport,
+                matched: export.name.to_string(),
+                severity,
+                message: rule.rule.message.clone(),
+            });
+        }
+    }
+}
+
 fn collect_banned_effects(input: &mut PolicyCollectionInput<'_>) {
     for callee_use in &input.module.callee_uses {
         let matched = input.in_scope.iter().find_map(|(_, rule)| {
@@ -635,6 +695,13 @@ fn specifier_matches(raw: &str, pattern: &str) -> bool {
         || raw
             .strip_prefix(pattern)
             .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn export_pattern_matches(name: &fallow_types::extract::ExportName, pattern: &str) -> bool {
+    pattern.strip_suffix('*').map_or_else(
+        || name.matches_str(pattern),
+        |prefix| name.to_string().starts_with(prefix),
+    )
 }
 
 /// Map an effective config severity onto the wire enum. `Off` yields `None`

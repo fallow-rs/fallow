@@ -193,6 +193,7 @@ fn rule_kind(kind: RulePackRuleKind) -> &'static str {
         RulePackRuleKind::BannedCall => "banned-call",
         RulePackRuleKind::BannedImport => "banned-import",
         RulePackRuleKind::BannedEffect => "banned-effect",
+        RulePackRuleKind::BannedExport => "banned-export",
     }
 }
 
