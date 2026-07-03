@@ -4633,6 +4633,133 @@ fn health_css_flags_duplicate_declaration_blocks() {
 }
 
 #[test]
+fn health_css_preprocessor_virtual_stylesheets_feed_structural_analytics() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"preprocessor-analytics","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    write_file(
+        &root.join("src/a.scss"),
+        "$brand: #f00;\n\
+         .card {\n\
+           .body {\n\
+             .title {\n\
+               &:hover {\n\
+                 color: $brand;\n\
+                 padding: 8px;\n\
+                 margin: 4px;\n\
+                 border-radius: 4px;\n\
+               }\n\
+             }\n\
+           }\n\
+         }\n",
+    );
+    write_file(
+        &root.join("src/b.less"),
+        "@brand: #f00;\n\
+         .panel {\n\
+           color: @brand;\n\
+           border-radius: 4px;\n\
+           padding: 8px;\n\
+           margin: 4px;\n\
+         }\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    let summary = &css["summary"];
+    assert_eq!(summary["files_analyzed"], 2, "summary: {summary}");
+    assert_eq!(summary["preprocessor_stylesheets"], 2, "summary: {summary}");
+    assert!(
+        summary["max_nesting_depth"].as_u64().unwrap_or(0) >= 3,
+        "nested SCSS should feed structural nesting metrics: {summary}"
+    );
+    assert_eq!(
+        summary["duplicate_declaration_blocks"], 1,
+        "SCSS and Less matching declaration blocks should be grouped: {summary}"
+    );
+
+    let groups = css["duplicate_declaration_blocks"]
+        .as_array()
+        .expect("duplicate_declaration_blocks array");
+    let paths: Vec<_> = groups[0]["occurrences"]
+        .as_array()
+        .expect("occurrences array")
+        .iter()
+        .map(|occ| occ["path"].as_str().unwrap_or_default())
+        .collect();
+    assert!(
+        paths.contains(&"src/a.scss") && paths.contains(&"src/b.less"),
+        "duplicate block should point back to preprocessor sources: {groups:?}"
+    );
+}
+
+#[test]
+fn health_css_sfc_preprocessor_blocks_feed_structural_analytics() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"sfc-preprocessor-analytics","version":"1.0.0"}"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+    write_file(
+        &root.join("src/Component.svelte"),
+        "<script>export let title = '';</script>\n\
+         <h1 class=\"title\">{title}</h1>\n\
+         <style lang=\"scss\">\n\
+         .card {\n\
+           .body {\n\
+             .title {\n\
+               &:hover { color: $brand; }\n\
+             }\n\
+           }\n\
+         }\n\
+         </style>\n",
+    );
+
+    let out = run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--css",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&out);
+    let css = json
+        .get("css_analytics")
+        .expect("css_analytics present with --css");
+    let summary = &css["summary"];
+    assert_eq!(summary["files_analyzed"], 1, "summary: {summary}");
+    assert!(
+        summary["max_nesting_depth"].as_u64().unwrap_or(0) >= 3,
+        "SFC SCSS nesting should feed structural metrics: {summary}"
+    );
+}
+
+#[test]
 fn health_css_counts_shadow_radius_lineheight_sprawl() {
     let dir = tempdir().unwrap();
     let root = dir.path();

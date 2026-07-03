@@ -39,6 +39,22 @@ fn has_scoped_attr(attrs: &str) -> bool {
 /// does not parse, so we skip scoped-deadness analysis for it.
 fn has_non_css_lang(attrs: &str) -> bool {
     let lower = attrs.to_ascii_lowercase();
+    has_preprocessor_lang_value(&lower)
+        || [
+            "lang=\"stylus\"",
+            "lang='stylus'",
+            "lang=\"postcss\"",
+            "lang='postcss'",
+        ]
+        .iter()
+        .any(|needle| lower.contains(needle))
+}
+
+fn has_preprocessor_lang(attrs: &str) -> bool {
+    has_preprocessor_lang_value(&attrs.to_ascii_lowercase())
+}
+
+fn has_preprocessor_lang_value(lower_attrs: &str) -> bool {
     [
         "lang=\"scss\"",
         "lang='scss'",
@@ -46,13 +62,9 @@ fn has_non_css_lang(attrs: &str) -> bool {
         "lang='sass'",
         "lang=\"less\"",
         "lang='less'",
-        "lang=\"stylus\"",
-        "lang='stylus'",
-        "lang=\"postcss\"",
-        "lang='postcss'",
     ]
     .iter()
-    .any(|needle| lower.contains(needle))
+    .any(|needle| lower_attrs.contains(needle))
 }
 
 /// A `<style scoped>` block whose classes escape the component (`:global`,
@@ -119,6 +131,36 @@ pub fn sfc_virtual_stylesheet(source: &str) -> Option<String> {
     for caps in STYLE_BLOCK_RE.captures_iter(source) {
         let attrs = caps.name("attrs").map_or("", |m| m.as_str());
         if has_non_css_lang(attrs) {
+            continue;
+        }
+        let Some(body) = caps.name("body") else {
+            continue;
+        };
+        found = true;
+        let block_line = 1 + source[..body.start()]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count();
+        while current_line < block_line {
+            out.push('\n');
+            current_line += 1;
+        }
+        out.push_str(body.as_str());
+        current_line += body.as_str().bytes().filter(|&b| b == b'\n').count();
+    }
+    found.then_some(out)
+}
+
+/// Build a virtual stylesheet from SFC preprocessor `<style>` blocks that the
+/// health layer can conservatively lower before CSS analytics.
+#[must_use]
+pub fn sfc_preprocessor_virtual_stylesheet(source: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut current_line: usize = 1;
+    let mut found = false;
+    for caps in STYLE_BLOCK_RE.captures_iter(source) {
+        let attrs = caps.name("attrs").map_or("", |m| m.as_str());
+        if !has_preprocessor_lang(attrs) {
             continue;
         }
         let Some(body) = caps.name("body") else {
@@ -281,6 +323,23 @@ mod tests {
             super::sfc_virtual_stylesheet("<style lang=\"scss\">.a { .b {} }</style>").is_none(),
             "scss-only SFC yields no virtual stylesheet"
         );
+    }
+
+    #[test]
+    fn preprocessor_virtual_stylesheet_keeps_sfc_lines() {
+        let source =
+            "<template>\n  <div/>\n</template>\n<style lang=\"scss\">\n.a { .b {} }\n</style>";
+        let vcss = super::sfc_preprocessor_virtual_stylesheet(source)
+            .expect("has a preprocessor style block");
+        let line_of_a = 1 + vcss[..vcss.find(".a").unwrap()]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count();
+        let sfc_line_of_a = 1 + source[..source.find(".a").unwrap()]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count();
+        assert_eq!(line_of_a, sfc_line_of_a, "vcss={vcss:?}");
     }
 
     #[test]

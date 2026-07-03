@@ -86,7 +86,9 @@ pub use sfc::{
     SourceRegion, extract_sfc_scripts, extract_sfc_styles, extract_sfc_template_regions,
     is_sfc_file,
 };
-pub use sfc_css::{scoped_unused_classes, sfc_virtual_stylesheet};
+pub use sfc_css::{
+    scoped_unused_classes, sfc_preprocessor_virtual_stylesheet, sfc_virtual_stylesheet,
+};
 pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
 
 #[expect(

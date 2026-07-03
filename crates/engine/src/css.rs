@@ -85,6 +85,12 @@ pub fn sfc_virtual_stylesheet(source: &str) -> Option<String> {
     fallow_extract::sfc_css::sfc_virtual_stylesheet(source)
 }
 
+/// Build a virtual stylesheet from SFC preprocessor style blocks.
+#[must_use]
+pub fn sfc_preprocessor_virtual_stylesheet(source: &str) -> Option<String> {
+    fallow_extract::sfc_css::sfc_preprocessor_virtual_stylesheet(source)
+}
+
 /// Scan markup source for Tailwind arbitrary-value utilities.
 #[must_use]
 pub fn scan_tailwind_arbitrary_values(source: &str) -> Vec<TailwindArbitraryUse> {
