@@ -573,6 +573,20 @@ fn coverage_inventory_reuses_session_discovery() {
 }
 
 #[test]
+fn decision_surface_reuses_session_workspace_metadata() {
+    let source = read_source_without_line_comments("crates/api/src/runtime/decision_surface.rs")
+        .expect("read decision surface runtime");
+    assert!(
+        source.contains("session.workspaces()"),
+        "decision surface must reuse workspace metadata captured by AnalysisSession"
+    );
+    assert!(
+        !source.contains("discover_workspaces("),
+        "decision surface must not rediscover workspaces after building an AnalysisSession"
+    );
+}
+
+#[test]
 fn engine_session_and_dead_code_route_core_calls_through_backend_adapter() {
     for source_path in [
         "crates/engine/src/session.rs",

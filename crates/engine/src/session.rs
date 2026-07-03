@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use fallow_config::{DuplicatesConfig, ResolvedConfig};
+use fallow_config::{DuplicatesConfig, ResolvedConfig, WorkspaceInfo};
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::ModuleInfo;
 use fallow_types::source_fingerprint::SourceFingerprint;
@@ -32,6 +32,7 @@ pub struct AnalysisSession {
     config: ResolvedConfig,
     config_path: Option<PathBuf>,
     discovery: crate::discover::AnalysisDiscovery,
+    workspaces: Vec<WorkspaceInfo>,
     workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     parsed_cache: Mutex<Option<ParsedModuleCache>>,
 }
@@ -49,6 +50,7 @@ pub struct AnalysisSessionParts {
     pub config: ResolvedConfig,
     pub config_path: Option<PathBuf>,
     pub files: Vec<DiscoveredFile>,
+    pub workspaces: Vec<WorkspaceInfo>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
 }
 
@@ -59,6 +61,7 @@ pub struct ParsedAnalysisSessionParts {
     pub config_path: Option<PathBuf>,
     pub files: Vec<DiscoveredFile>,
     pub modules: Vec<ModuleInfo>,
+    pub workspaces: Vec<WorkspaceInfo>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub parse_ms: f64,
     pub cache_update_ms: f64,
@@ -186,6 +189,7 @@ impl AnalysisSession {
             config: project_config.config,
             config_path: project_config.path,
             discovery,
+            workspaces: project_config.workspaces,
             workspace_diagnostics,
             parsed_cache: Mutex::new(None),
         }
@@ -198,6 +202,7 @@ impl AnalysisSession {
         Self::from_config(ProjectConfig {
             config,
             path: None,
+            workspaces: Vec::new(),
             workspace_diagnostics: Vec::new(),
         })
     }
@@ -224,6 +229,12 @@ impl AnalysisSession {
     #[must_use]
     pub fn files(&self) -> &[DiscoveredFile] {
         self.discovery.files()
+    }
+
+    /// Workspace packages discovered during config/session setup.
+    #[must_use]
+    pub fn workspaces(&self) -> &[WorkspaceInfo] {
+        &self.workspaces
     }
 
     /// Source metadata fingerprints for every discovered source file.
@@ -268,6 +279,7 @@ impl AnalysisSession {
             config: self.config,
             config_path: self.config_path,
             files: self.discovery.into_files(),
+            workspaces: self.workspaces,
             workspace_diagnostics: self.workspace_diagnostics,
         }
     }
@@ -279,6 +291,7 @@ impl AnalysisSession {
             config,
             config_path,
             files,
+            workspaces,
             workspace_diagnostics,
         } = self.into_parts();
         let ParsedModules { modules, metrics } =
@@ -288,6 +301,7 @@ impl AnalysisSession {
             config_path,
             files,
             modules,
+            workspaces,
             workspace_diagnostics,
             parse_ms: metrics.parse_ms,
             cache_update_ms: metrics.cache_ms,
@@ -306,6 +320,7 @@ impl AnalysisSession {
             config_path: self.config_path.clone(),
             files: self.discovery.files().to_vec(),
             modules,
+            workspaces: self.workspaces.clone(),
             workspace_diagnostics: self.workspace_diagnostics.clone(),
             parse_ms: metrics.parse_ms,
             cache_update_ms: metrics.cache_ms,
@@ -841,4 +856,36 @@ pub(crate) fn analyze_dead_code_with_parse_result_from_config(
         retain_modules: false,
         retain_files: false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_retains_workspace_metadata_from_config_load() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"root","workspaces":["packages/*"]}"#,
+        )
+        .expect("write root package");
+        std::fs::create_dir_all(root.join("packages/a")).expect("create workspace");
+        std::fs::write(
+            root.join("packages/a/package.json"),
+            r#"{"name":"pkg-a","type":"module"}"#,
+        )
+        .expect("write workspace package");
+
+        let session = AnalysisSession::load(root, None).expect("session loads");
+
+        assert!(
+            session
+                .workspaces()
+                .iter()
+                .any(|workspace| workspace.name == "pkg-a"),
+            "session must retain workspace metadata discovered during config load"
+        );
+    }
 }

@@ -2,7 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{FallowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic};
+use fallow_config::{
+    FallowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic, WorkspaceInfo,
+};
 use fallow_types::output_format::OutputFormat;
 
 use crate::{EngineError, EngineResult, core_backend};
@@ -12,6 +14,7 @@ use crate::{EngineError, EngineResult, core_backend};
 pub struct ProjectConfig {
     pub config: ResolvedConfig,
     pub path: Option<PathBuf>,
+    pub workspaces: Vec<WorkspaceInfo>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
 }
 
@@ -33,10 +36,14 @@ pub struct ProjectConfigOptions {
 /// Returns an error when an explicit config cannot be loaded or automatic
 /// config discovery finds an invalid config.
 pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResult<ProjectConfig> {
-    core_backend::config_for_project(root, config_path).map(|(config, path)| ProjectConfig {
-        workspace_diagnostics: collect_workspace_diagnostics(&config),
-        config,
-        path,
+    core_backend::config_for_project(root, config_path).map(|(config, path)| {
+        let (workspaces, workspace_diagnostics) = collect_workspace_metadata(&config);
+        ProjectConfig {
+            config,
+            path,
+            workspaces,
+            workspace_diagnostics,
+        }
     })
 }
 
@@ -58,6 +65,7 @@ pub fn default_project_config(root: &Path) -> ProjectConfig {
             None,
         ),
         path: None,
+        workspaces: Vec::new(),
         workspace_diagnostics: Vec::new(),
     }
 }
@@ -105,16 +113,19 @@ pub fn config_for_project_analysis(
         options.quiet,
         None,
     );
+    let (workspaces, workspace_diagnostics) = collect_workspace_metadata(&resolved);
     Ok(ProjectConfig {
-        workspace_diagnostics: collect_workspace_diagnostics(&resolved),
         config: resolved,
         path,
+        workspaces,
+        workspace_diagnostics,
     })
 }
 
-fn collect_workspace_diagnostics(config: &ResolvedConfig) -> Vec<WorkspaceDiagnostic> {
+fn collect_workspace_metadata(
+    config: &ResolvedConfig,
+) -> (Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>) {
     fallow_config::discover_workspaces_with_diagnostics(&config.root, &config.ignore_patterns)
-        .map(|(_, diagnostics)| diagnostics)
         .unwrap_or_default()
 }
 

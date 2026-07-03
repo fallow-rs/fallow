@@ -85,7 +85,6 @@ fn run_decision_analysis(
         resolved,
     )?;
     let root = session.root().to_path_buf();
-    let workspaces = fallow_config::discover_workspaces(&root);
     let root_pkg = fallow_config::PackageJson::load(&root.join("package.json")).ok();
     let artifacts = session
         .analyze_dead_code_with_session_artifacts(false, true, changed_files.cloned())
@@ -116,7 +115,7 @@ fn run_decision_analysis(
                 graph,
                 session.config(),
                 root_pkg.as_ref(),
-                &workspaces,
+                session.workspaces(),
                 &root,
             )
         });
