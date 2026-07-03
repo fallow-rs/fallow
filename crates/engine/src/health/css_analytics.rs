@@ -4527,14 +4527,14 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
         non_atomic_max_nesting_depth: walk.scoring.non_atomic_max_nesting_depth,
         atomic_declarations: walk.scoring.atomic_declarations,
     };
-    let report = assemble_css_report(
+    let report = assemble_css_report(CssReportAssemblyInput {
         walk,
         metrics,
         candidates,
         token_consumers,
         config,
         output_changed_files,
-    )?;
+    })?;
     Some(CssAnalyticsComputation {
         report,
         scoring_inputs,
@@ -4544,69 +4544,38 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
 /// Assemble the final CSS analytics report from the walk accumulator, finalized
 /// token metrics, and markup candidates; returns `None` when nothing notable was
 /// found (no analyzed files and every candidate list empty).
+struct CssReportAssemblyInput<'a> {
+    walk: CssWalkAccum,
+    metrics: CssTokenMetrics,
+    candidates: MarkupCssCandidates,
+    token_consumers: Vec<fallow_output::TokenConsumers>,
+    config: &'a ResolvedConfig,
+    output_changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+}
+
 fn assemble_css_report(
-    mut walk: CssWalkAccum,
-    mut metrics: CssTokenMetrics,
-    mut candidates: MarkupCssCandidates,
-    mut token_consumers: Vec<fallow_output::TokenConsumers>,
-    config: &ResolvedConfig,
-    output_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    input: CssReportAssemblyInput<'_>,
 ) -> Option<fallow_output::CssAnalyticsReport> {
     use fallow_output::CssAnalyticsReport;
 
+    let CssReportAssemblyInput {
+        mut walk,
+        mut metrics,
+        mut candidates,
+        mut token_consumers,
+        config,
+        output_changed_files,
+    } = input;
+
     if let Some(changed) = output_changed_files {
-        let in_scope = |path: &str| css_output_path_in_changed_scope(path, config, changed);
-        walk.file_reports.retain(|file| in_scope(&file.path));
-        walk.scoped_unused.retain(|item| in_scope(&item.path));
-        metrics
-            .unreferenced_keyframes
-            .retain(|item| in_scope(&item.path));
-        metrics
-            .undefined_keyframes
-            .retain(|item| in_scope(&item.path));
-        metrics.duplicate_declaration_blocks.retain_mut(|block| {
-            let has_scoped_occurrence = block.occurrences.iter().any(|item| in_scope(&item.path));
-            if has_scoped_occurrence {
-                block.occurrences.sort_by(|a, b| {
-                    let a_out_of_scope = !in_scope(&a.path);
-                    let b_out_of_scope = !in_scope(&b.path);
-                    a_out_of_scope
-                        .cmp(&b_out_of_scope)
-                        .then_with(|| a.path.cmp(&b.path))
-                        .then_with(|| a.line.cmp(&b.line))
-                });
-            }
-            has_scoped_occurrence
+        retain_css_report_changed_scope(CssReportChangedScopeInput {
+            walk: &mut walk,
+            metrics: &mut metrics,
+            candidates: &mut candidates,
+            token_consumers: &mut token_consumers,
+            config,
+            changed,
         });
-        metrics.unused_at_rules.retain(|item| in_scope(&item.path));
-        metrics
-            .unused_font_faces
-            .retain(|item| in_scope(&item.path));
-        candidates
-            .tailwind_arbitrary_values
-            .retain(|item| in_scope(&item.path));
-        candidates
-            .cva_duplicate_variant_blocks
-            .retain(|item| item.occurrences.iter().any(|occ| in_scope(&occ.path)));
-        candidates
-            .cva_variant_token_drifts
-            .retain(|item| in_scope(&item.path));
-        candidates
-            .unresolved_class_references
-            .retain(|item| in_scope(&item.path));
-        candidates
-            .unreferenced_css_classes
-            .retain(|item| in_scope(&item.path));
-        candidates
-            .unused_theme_tokens
-            .retain(|item| in_scope(&item.path));
-        candidates
-            .near_duplicate_theme_tokens
-            .retain(|item| in_scope(&item.path));
-        walk.tokens
-            .raw_style_values
-            .retain(|item| in_scope(&item.path));
-        token_consumers.retain(|item| in_scope(&item.definition_path));
     }
 
     let candidates_empty = candidates.tailwind_arbitrary_values.is_empty()
@@ -4654,6 +4623,78 @@ fn assemble_css_report(
         token_consumers,
         font_size_unit_mix: metrics.font_size_unit_mix,
     })
+}
+
+struct CssReportChangedScopeInput<'a> {
+    walk: &'a mut CssWalkAccum,
+    metrics: &'a mut CssTokenMetrics,
+    candidates: &'a mut MarkupCssCandidates,
+    token_consumers: &'a mut Vec<fallow_output::TokenConsumers>,
+    config: &'a ResolvedConfig,
+    changed: &'a rustc_hash::FxHashSet<std::path::PathBuf>,
+}
+
+fn retain_css_report_changed_scope(input: CssReportChangedScopeInput<'_>) {
+    let CssReportChangedScopeInput {
+        walk,
+        metrics,
+        candidates,
+        token_consumers,
+        config,
+        changed,
+    } = input;
+    let in_scope = |path: &str| css_output_path_in_changed_scope(path, config, changed);
+    walk.file_reports.retain(|file| in_scope(&file.path));
+    walk.scoped_unused.retain(|item| in_scope(&item.path));
+    metrics
+        .unreferenced_keyframes
+        .retain(|item| in_scope(&item.path));
+    metrics
+        .undefined_keyframes
+        .retain(|item| in_scope(&item.path));
+    metrics.duplicate_declaration_blocks.retain_mut(|block| {
+        let has_scoped_occurrence = block.occurrences.iter().any(|item| in_scope(&item.path));
+        if has_scoped_occurrence {
+            block.occurrences.sort_by(|a, b| {
+                let a_out_of_scope = !in_scope(&a.path);
+                let b_out_of_scope = !in_scope(&b.path);
+                a_out_of_scope
+                    .cmp(&b_out_of_scope)
+                    .then_with(|| a.path.cmp(&b.path))
+                    .then_with(|| a.line.cmp(&b.line))
+            });
+        }
+        has_scoped_occurrence
+    });
+    metrics.unused_at_rules.retain(|item| in_scope(&item.path));
+    metrics
+        .unused_font_faces
+        .retain(|item| in_scope(&item.path));
+    candidates
+        .tailwind_arbitrary_values
+        .retain(|item| in_scope(&item.path));
+    candidates
+        .cva_duplicate_variant_blocks
+        .retain(|item| item.occurrences.iter().any(|occ| in_scope(&occ.path)));
+    candidates
+        .cva_variant_token_drifts
+        .retain(|item| in_scope(&item.path));
+    candidates
+        .unresolved_class_references
+        .retain(|item| in_scope(&item.path));
+    candidates
+        .unreferenced_css_classes
+        .retain(|item| in_scope(&item.path));
+    candidates
+        .unused_theme_tokens
+        .retain(|item| in_scope(&item.path));
+    candidates
+        .near_duplicate_theme_tokens
+        .retain(|item| in_scope(&item.path));
+    walk.tokens
+        .raw_style_values
+        .retain(|item| in_scope(&item.path));
+    token_consumers.retain(|item| in_scope(&item.definition_path));
 }
 
 fn css_output_path_in_changed_scope(
