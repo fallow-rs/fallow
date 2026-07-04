@@ -330,88 +330,122 @@ pub fn restore_resolved_modules(
         return None;
     }
 
-    let key_by_file_id = stable_key_by_file_id(root, files);
-    let id_by_key: rustc_hash::FxHashMap<_, _> = key_by_file_id
-        .iter()
-        .map(|(file_id, key)| (key.clone(), *file_id))
-        .collect();
-    let mut by_key: rustc_hash::FxHashMap<_, _> = modules
-        .iter()
-        .filter_map(|module| {
-            key_by_file_id
-                .get(&module.file_id)
-                .map(|key| (key.clone(), module))
-        })
-        .collect();
-    let path_by_key: rustc_hash::FxHashMap<_, _> = files
-        .iter()
-        .map(|file| {
-            (
-                StableFileKey::from_root_relative(root, &file.path),
-                file.path.clone(),
-            )
-        })
-        .collect();
-
+    let mut indexes = RestoreResolvedModuleIndexes::new(root, modules, files);
     cached
         .iter()
-        .map(|entry| {
-            let module = by_key.remove(&entry.key)?;
-            let path = path_by_key.get(&entry.key)?.clone();
-            if entry.resolved_dynamic_pattern_targets.len() != module.dynamic_import_patterns.len()
-            {
-                return None;
-            }
-            let resolved_dynamic_pattern_targets = entry
-                .resolved_dynamic_pattern_targets
-                .iter()
-                .map(|targets| {
-                    targets
-                        .iter()
-                        .map(|key| id_by_key.get(key).copied())
-                        .collect::<Option<Vec<_>>>()
-                })
-                .collect::<Option<Vec<_>>>()?;
+        .map(|entry| restore_cached_resolved_module(entry, &mut indexes))
+        .collect()
+}
 
-            Some(ResolvedModule {
-                file_id: module.file_id,
-                path,
-                exports: module.exports.clone(),
-                re_exports: entry
-                    .re_exports
-                    .iter()
-                    .cloned()
-                    .map(|re_export| re_export.into_resolved(&id_by_key))
-                    .collect::<Option<Vec<_>>>()?,
-                resolved_imports: entry
-                    .resolved_imports
-                    .iter()
-                    .cloned()
-                    .map(|import| import.into_resolved(&id_by_key))
-                    .collect::<Option<Vec<_>>>()?,
-                resolved_dynamic_imports: entry
-                    .resolved_dynamic_imports
-                    .iter()
-                    .cloned()
-                    .map(|import| import.into_resolved(&id_by_key))
-                    .collect::<Option<Vec<_>>>()?,
-                resolved_dynamic_patterns: module
-                    .dynamic_import_patterns
-                    .iter()
-                    .cloned()
-                    .zip(resolved_dynamic_pattern_targets)
-                    .collect(),
-                member_accesses: module.member_accesses.clone(),
-                semantic_facts: module.semantic_facts.clone(),
-                whole_object_uses: module.whole_object_uses.clone(),
-                has_cjs_exports: module.has_cjs_exports,
-                has_angular_component_template_url: module.has_angular_component_template_url,
-                unused_import_bindings: module.unused_import_bindings.iter().cloned().collect(),
-                type_referenced_import_bindings: module.type_referenced_import_bindings.clone(),
-                value_referenced_import_bindings: module.value_referenced_import_bindings.clone(),
-                namespace_object_aliases: module.namespace_object_aliases.clone(),
-                exported_factory_returns: module.exported_factory_returns.clone(),
+struct RestoreResolvedModuleIndexes<'a> {
+    file_ids: rustc_hash::FxHashMap<StableFileKey, FileId>,
+    modules: rustc_hash::FxHashMap<StableFileKey, &'a fallow_types::extract::ModuleInfo>,
+    paths: rustc_hash::FxHashMap<StableFileKey, std::path::PathBuf>,
+}
+
+impl<'a> RestoreResolvedModuleIndexes<'a> {
+    fn new(
+        root: &Path,
+        modules: &'a [fallow_types::extract::ModuleInfo],
+        files: &[DiscoveredFile],
+    ) -> Self {
+        let key_by_file_id = stable_key_by_file_id(root, files);
+        let id_by_key: rustc_hash::FxHashMap<_, _> = key_by_file_id
+            .iter()
+            .map(|(file_id, key)| (key.clone(), *file_id))
+            .collect();
+        let by_key: rustc_hash::FxHashMap<_, _> = modules
+            .iter()
+            .filter_map(|module| {
+                key_by_file_id
+                    .get(&module.file_id)
+                    .map(|key| (key.clone(), module))
             })
+            .collect();
+        let path_by_key: rustc_hash::FxHashMap<_, _> = files
+            .iter()
+            .map(|file| {
+                (
+                    StableFileKey::from_root_relative(root, &file.path),
+                    file.path.clone(),
+                )
+            })
+            .collect();
+
+        Self {
+            file_ids: id_by_key,
+            modules: by_key,
+            paths: path_by_key,
+        }
+    }
+}
+
+fn restore_cached_resolved_module(
+    entry: &CachedResolvedModule,
+    indexes: &mut RestoreResolvedModuleIndexes<'_>,
+) -> Option<ResolvedModule> {
+    let module = indexes.modules.remove(&entry.key)?;
+    let path = indexes.paths.get(&entry.key)?.clone();
+    let resolved_dynamic_pattern_targets =
+        restore_dynamic_pattern_targets(entry, module, &indexes.file_ids)?;
+
+    Some(ResolvedModule {
+        file_id: module.file_id,
+        path,
+        exports: module.exports.clone(),
+        re_exports: entry
+            .re_exports
+            .iter()
+            .cloned()
+            .map(|re_export| re_export.into_resolved(&indexes.file_ids))
+            .collect::<Option<Vec<_>>>()?,
+        resolved_imports: entry
+            .resolved_imports
+            .iter()
+            .cloned()
+            .map(|import| import.into_resolved(&indexes.file_ids))
+            .collect::<Option<Vec<_>>>()?,
+        resolved_dynamic_imports: entry
+            .resolved_dynamic_imports
+            .iter()
+            .cloned()
+            .map(|import| import.into_resolved(&indexes.file_ids))
+            .collect::<Option<Vec<_>>>()?,
+        resolved_dynamic_patterns: module
+            .dynamic_import_patterns
+            .iter()
+            .cloned()
+            .zip(resolved_dynamic_pattern_targets)
+            .collect(),
+        member_accesses: module.member_accesses.clone(),
+        semantic_facts: module.semantic_facts.clone(),
+        whole_object_uses: module.whole_object_uses.clone(),
+        has_cjs_exports: module.has_cjs_exports,
+        has_angular_component_template_url: module.has_angular_component_template_url,
+        unused_import_bindings: module.unused_import_bindings.iter().cloned().collect(),
+        type_referenced_import_bindings: module.type_referenced_import_bindings.clone(),
+        value_referenced_import_bindings: module.value_referenced_import_bindings.clone(),
+        namespace_object_aliases: module.namespace_object_aliases.clone(),
+        exported_factory_returns: module.exported_factory_returns.clone(),
+    })
+}
+
+fn restore_dynamic_pattern_targets(
+    entry: &CachedResolvedModule,
+    module: &fallow_types::extract::ModuleInfo,
+    id_by_key: &rustc_hash::FxHashMap<StableFileKey, FileId>,
+) -> Option<Vec<Vec<FileId>>> {
+    if entry.resolved_dynamic_pattern_targets.len() != module.dynamic_import_patterns.len() {
+        return None;
+    }
+    entry
+        .resolved_dynamic_pattern_targets
+        .iter()
+        .map(|targets| {
+            targets
+                .iter()
+                .map(|key| id_by_key.get(key).copied())
+                .collect::<Option<Vec<_>>>()
         })
         .collect()
 }

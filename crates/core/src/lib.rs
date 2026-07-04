@@ -1598,28 +1598,8 @@ fn plugin_config_hash(plugin_result: &plugins::AggregatedPluginResult) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();
 
-    let mut active: Vec<&str> = plugin_result
-        .active_plugins
-        .iter()
-        .map(String::as_str)
-        .collect();
-    active.sort_unstable();
-    active.len().hash(&mut hasher);
-    for name in active {
-        name.hash(&mut hasher);
-    }
-
-    let mut aliases: Vec<(&str, &str)> = plugin_result
-        .path_aliases
-        .iter()
-        .map(|(prefix, replacement)| (prefix.as_str(), replacement.as_str()))
-        .collect();
-    aliases.sort_unstable();
-    aliases.len().hash(&mut hasher);
-    for (prefix, replacement) in aliases {
-        prefix.hash(&mut hasher);
-        replacement.hash(&mut hasher);
-    }
+    hash_active_plugins(plugin_result, &mut hasher);
+    hash_path_aliases(plugin_result, &mut hasher);
 
     let mut auto_imports: Vec<(&str, &std::path::Path, fallow_config::AutoImportKind)> =
         plugin_result
@@ -1663,6 +1643,41 @@ fn plugin_config_hash(plugin_result: &plugins::AggregatedPluginResult) -> u64 {
     }
 
     hasher.finish()
+}
+
+fn hash_active_plugins(
+    plugin_result: &plugins::AggregatedPluginResult,
+    hasher: &mut rustc_hash::FxHasher,
+) {
+    use std::hash::Hash;
+    let mut active: Vec<&str> = plugin_result
+        .active_plugins
+        .iter()
+        .map(String::as_str)
+        .collect();
+    active.sort_unstable();
+    active.len().hash(hasher);
+    for name in active {
+        name.hash(hasher);
+    }
+}
+
+fn hash_path_aliases(
+    plugin_result: &plugins::AggregatedPluginResult,
+    hasher: &mut rustc_hash::FxHasher,
+) {
+    use std::hash::Hash;
+    let mut aliases: Vec<(&str, &str)> = plugin_result
+        .path_aliases
+        .iter()
+        .map(|(prefix, replacement)| (prefix.as_str(), replacement.as_str()))
+        .collect();
+    aliases.sort_unstable();
+    aliases.len().hash(hasher);
+    for (prefix, replacement) in aliases {
+        prefix.hash(hasher);
+        replacement.hash(hasher);
+    }
 }
 
 fn auto_import_kind_rank(kind: fallow_config::AutoImportKind) -> u8 {

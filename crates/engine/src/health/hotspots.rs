@@ -180,15 +180,27 @@ pub(super) fn compute_hotspot_score(
     (norm_churn * norm_complexity * 100.0 * 10.0).round() / 10.0
 }
 
+pub(super) struct HotspotComputationInput<'a> {
+    pub(super) opts: &'a HealthOptions<'a>,
+    pub(super) config: &'a fallow_config::ResolvedConfig,
+    pub(super) file_scores: &'a [FileHealthScore],
+    pub(super) ignore_set: &'a globset::GlobSet,
+    pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) churn_fetch: ChurnFetchResult,
+}
+
 /// Compute hotspot entries by combining pre-fetched churn data with file health scores.
 pub(super) fn compute_hotspots(
-    opts: &HealthOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
-    file_scores: &[FileHealthScore],
-    ignore_set: &globset::GlobSet,
-    ws_roots: Option<&[std::path::PathBuf]>,
-    churn_fetch: ChurnFetchResult,
+    input: HotspotComputationInput<'_>,
 ) -> (Vec<HotspotEntry>, Option<HotspotSummary>) {
+    let HotspotComputationInput {
+        opts,
+        config,
+        file_scores,
+        ignore_set,
+        ws_roots,
+        churn_fetch,
+    } = input;
     let churn_result = churn_fetch.result;
     let since = churn_fetch.since;
 

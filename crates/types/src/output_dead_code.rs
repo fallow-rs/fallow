@@ -2283,72 +2283,9 @@ impl UnresolvedCatalogReferenceFinding {
         // pasted into a Windows-authored config. See
         // `build_duplicate_exports_ignore_rules` for the same pattern.
         let consumer_path = reference.path.to_string_lossy().replace('\\', "/");
-        let primary = if reference.available_in_catalogs.is_empty() {
-            IssueAction::Fix(FixAction {
-                kind: FixActionType::AddCatalogEntry,
-                auto_fixable: false,
-                description: format!(
-                    "Add `{}` to the `{}` catalog in pnpm-workspace.yaml",
-                    reference.entry_name, reference.catalog_name
-                ),
-                note: Some(
-                    "Pin a version that satisfies the consumer's import; no other catalog declares this package today"
-                        .to_string(),
-                ),
-                available_in_catalogs: None,
-                suggested_target: None,
-            })
-        } else {
-            let available = reference.available_in_catalogs.clone();
-            let suggested_target = (available.len() == 1).then(|| available[0].clone());
-            IssueAction::Fix(FixAction {
-                kind: FixActionType::UpdateCatalogReference,
-                auto_fixable: false,
-                description: format!(
-                    "Switch the reference from `catalog:{}` to a catalog that declares `{}`",
-                    reference.catalog_name, reference.entry_name
-                ),
-                note: None,
-                available_in_catalogs: Some(available),
-                suggested_target,
-            })
-        };
-
-        let fallback = IssueAction::Fix(FixAction {
-            kind: FixActionType::RemoveCatalogReference,
-            auto_fixable: false,
-            description:
-                "Remove the catalog reference and pin a hardcoded version in package.json"
-                    .to_string(),
-            note: Some(
-                "Use only when neither another catalog declares the package nor the named catalog should grow to include it"
-                    .to_string(),
-            ),
-            available_in_catalogs: None,
-            suggested_target: None,
-        });
-
-        let mut suppress_value = serde_json::Map::new();
-        suppress_value.insert(
-            "package".to_string(),
-            serde_json::Value::String(reference.entry_name.clone()),
-        );
-        suppress_value.insert(
-            "catalog".to_string(),
-            serde_json::Value::String(reference.catalog_name.clone()),
-        );
-        suppress_value.insert(
-            "consumer".to_string(),
-            serde_json::Value::String(consumer_path),
-        );
-        let suppress = IssueAction::AddToConfig(AddToConfigAction {
-            kind: AddToConfigKind::AddToConfig,
-            auto_fixable: false,
-            description: "Suppress this reference via ignoreCatalogReferences in fallow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).".to_string(),
-            config_key: "ignoreCatalogReferences".to_string(),
-            value: AddToConfigValue::RuleObject(suppress_value),
-            value_schema: Some(IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA.to_string()),
-        });
+        let primary = catalog_reference_primary_action(&reference);
+        let fallback = remove_catalog_reference_action();
+        let suppress = suppress_catalog_reference_action(&reference, consumer_path);
 
         Self {
             reference,
@@ -2356,6 +2293,81 @@ impl UnresolvedCatalogReferenceFinding {
             introduced: None,
         }
     }
+}
+
+fn catalog_reference_primary_action(reference: &UnresolvedCatalogReference) -> IssueAction {
+    if reference.available_in_catalogs.is_empty() {
+        return IssueAction::Fix(FixAction {
+            kind: FixActionType::AddCatalogEntry,
+            auto_fixable: false,
+            description: format!(
+                "Add `{}` to the `{}` catalog in pnpm-workspace.yaml",
+                reference.entry_name, reference.catalog_name
+            ),
+            note: Some(
+                "Pin a version that satisfies the consumer's import; no other catalog declares this package today"
+                    .to_string(),
+            ),
+            available_in_catalogs: None,
+            suggested_target: None,
+        });
+    }
+
+    let available = reference.available_in_catalogs.clone();
+    let suggested_target = (available.len() == 1).then(|| available[0].clone());
+    IssueAction::Fix(FixAction {
+        kind: FixActionType::UpdateCatalogReference,
+        auto_fixable: false,
+        description: format!(
+            "Switch the reference from `catalog:{}` to a catalog that declares `{}`",
+            reference.catalog_name, reference.entry_name
+        ),
+        note: None,
+        available_in_catalogs: Some(available),
+        suggested_target,
+    })
+}
+
+fn remove_catalog_reference_action() -> IssueAction {
+    IssueAction::Fix(FixAction {
+        kind: FixActionType::RemoveCatalogReference,
+        auto_fixable: false,
+        description: "Remove the catalog reference and pin a hardcoded version in package.json"
+            .to_string(),
+        note: Some(
+            "Use only when neither another catalog declares the package nor the named catalog should grow to include it"
+                .to_string(),
+        ),
+        available_in_catalogs: None,
+        suggested_target: None,
+    })
+}
+
+fn suppress_catalog_reference_action(
+    reference: &UnresolvedCatalogReference,
+    consumer_path: String,
+) -> IssueAction {
+    let mut suppress_value = serde_json::Map::new();
+    suppress_value.insert(
+        "package".to_string(),
+        serde_json::Value::String(reference.entry_name.clone()),
+    );
+    suppress_value.insert(
+        "catalog".to_string(),
+        serde_json::Value::String(reference.catalog_name.clone()),
+    );
+    suppress_value.insert(
+        "consumer".to_string(),
+        serde_json::Value::String(consumer_path),
+    );
+    IssueAction::AddToConfig(AddToConfigAction {
+        kind: AddToConfigKind::AddToConfig,
+        auto_fixable: false,
+        description: "Suppress this reference via ignoreCatalogReferences in fallow config (use when the catalog edit is intentionally landing in a separate PR or the package is a placeholder).".to_string(),
+        config_key: "ignoreCatalogReferences".to_string(),
+        value: AddToConfigValue::RuleObject(suppress_value),
+        value_schema: Some(IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA.to_string()),
+    })
 }
 
 /// Wire-shape envelope for an [`UnusedDependencyOverride`] finding. Carries

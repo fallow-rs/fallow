@@ -24,55 +24,7 @@ use super::{AuditResult, AuditSummary, AuditVerdict};
 /// Print audit results and return the appropriate exit code.
 #[must_use]
 pub fn print_audit_result(result: &AuditResult, quiet: bool, explain: bool) -> ExitCode {
-    let output = result.output;
-
-    let format_exit = match output {
-        OutputFormat::Json => print_audit_json(result),
-        OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown => {
-            print_audit_human(result, quiet, explain, output);
-            ExitCode::SUCCESS
-        }
-        OutputFormat::Sarif => print_audit_sarif(result),
-        OutputFormat::CodeClimate => print_audit_codeclimate(result),
-        OutputFormat::PrCommentGithub => {
-            let value = build_audit_codeclimate(result);
-            report::ci::pr_comment::print_pr_comment_with_conclusion(
-                "audit",
-                report::ci::pr_comment::Provider::Github,
-                &value,
-                audit_decision_conclusion(result.verdict),
-            )
-        }
-        OutputFormat::PrCommentGitlab => {
-            let value = build_audit_codeclimate(result);
-            report::ci::pr_comment::print_pr_comment_with_conclusion(
-                "audit",
-                report::ci::pr_comment::Provider::Gitlab,
-                &value,
-                audit_decision_conclusion(result.verdict),
-            )
-        }
-        OutputFormat::ReviewGithub => {
-            let value = build_audit_codeclimate(result);
-            report::ci::review::print_review_envelope(
-                "audit",
-                report::ci::pr_comment::Provider::Github,
-                &value,
-            )
-        }
-        OutputFormat::ReviewGitlab => {
-            let value = build_audit_codeclimate(result);
-            report::ci::review::print_review_envelope(
-                "audit",
-                report::ci::pr_comment::Provider::Gitlab,
-                &value,
-            )
-        }
-        OutputFormat::Badge => {
-            eprintln!("Error: badge format is not supported for the audit command");
-            return ExitCode::from(2);
-        }
-    };
+    let format_exit = print_audit_format(result, quiet, explain);
 
     if format_exit != ExitCode::SUCCESS {
         return format_exit;
@@ -90,6 +42,55 @@ fn audit_decision_conclusion(verdict: AuditVerdict) -> PrDecisionConclusion {
         AuditVerdict::Warn => PrDecisionConclusion::Neutral,
         AuditVerdict::Fail => PrDecisionConclusion::Failure,
     }
+}
+
+fn print_audit_format(result: &AuditResult, quiet: bool, explain: bool) -> ExitCode {
+    match result.output {
+        OutputFormat::Json => print_audit_json(result),
+        OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown => {
+            print_audit_human(result, quiet, explain, result.output);
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Sarif => print_audit_sarif(result),
+        OutputFormat::CodeClimate => print_audit_codeclimate(result),
+        OutputFormat::PrCommentGithub => {
+            print_audit_pr_comment(result, report::ci::pr_comment::Provider::Github)
+        }
+        OutputFormat::PrCommentGitlab => {
+            print_audit_pr_comment(result, report::ci::pr_comment::Provider::Gitlab)
+        }
+        OutputFormat::ReviewGithub => {
+            print_audit_review(result, report::ci::pr_comment::Provider::Github)
+        }
+        OutputFormat::ReviewGitlab => {
+            print_audit_review(result, report::ci::pr_comment::Provider::Gitlab)
+        }
+        OutputFormat::Badge => {
+            eprintln!("Error: badge format is not supported for the audit command");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn print_audit_pr_comment(
+    result: &AuditResult,
+    provider: report::ci::pr_comment::Provider,
+) -> ExitCode {
+    let value = build_audit_codeclimate(result);
+    report::ci::pr_comment::print_pr_comment_with_conclusion(
+        "audit",
+        provider,
+        &value,
+        audit_decision_conclusion(result.verdict),
+    )
+}
+
+fn print_audit_review(
+    result: &AuditResult,
+    provider: report::ci::pr_comment::Provider,
+) -> ExitCode {
+    let value = build_audit_codeclimate(result);
+    report::ci::review::print_review_envelope("audit", provider, &value)
 }
 
 fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: OutputFormat) {
@@ -141,58 +142,85 @@ pub fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, sh
     if result.summary.dead_code_issues > 0
         && let Some(ref check) = result.check
     {
-        print_audit_section_header(
-            show_headers,
-            "── Dead Code ──────────────────────────────────────",
-        );
-        crate::check::print_check_result(
-            check,
-            crate::check::PrintCheckOptions {
-                quiet,
-                explain,
-                regression_json: false,
-                group_by: None,
-                top: None,
-                summary: false,
-                summary_heading: true,
-                show_explain_tip: false,
-            },
-        );
+        print_audit_dead_code_section(check, quiet, explain, show_headers);
     }
 
     if result.summary.duplication_clone_groups > 0
         && let Some(ref dupes) = result.dupes
     {
-        print_audit_section_header(
-            show_headers,
-            "── Duplication ────────────────────────────────────",
-        );
-        crate::dupes::print_dupes_result(dupes, quiet, explain, false, true, false);
+        print_audit_duplication_section(dupes, quiet, explain, show_headers);
     }
 
     if result.summary.complexity_findings > 0
         && let Some(ref health) = result.health
     {
-        print_audit_section_header(
-            show_headers,
-            "── Complexity ─────────────────────────────────────",
-        );
-        crate::health::print_health_result(
-            health,
-            crate::health::HealthPrintOptions {
-                quiet,
-                explain,
-                gates: fallow_engine::health::HealthGateOptions::default(),
-                summary: false,
-                summary_heading: true,
-                show_explain_tip: false,
-                skip_score_and_trend: false,
-                css_requested: false,
-            },
-        );
+        print_audit_complexity_section(health, quiet, explain, show_headers);
     }
 
     print_audit_styling_summary(result, show_headers);
+}
+
+fn print_audit_dead_code_section(
+    check: &crate::check::CheckResult,
+    quiet: bool,
+    explain: bool,
+    show_headers: bool,
+) {
+    print_audit_section_header(
+        show_headers,
+        "── Dead Code ──────────────────────────────────────",
+    );
+    crate::check::print_check_result(
+        check,
+        crate::check::PrintCheckOptions {
+            quiet,
+            explain,
+            regression_json: false,
+            group_by: None,
+            top: None,
+            summary: false,
+            summary_heading: true,
+            show_explain_tip: false,
+        },
+    );
+}
+
+fn print_audit_duplication_section(
+    dupes: &crate::dupes::DupesResult,
+    quiet: bool,
+    explain: bool,
+    show_headers: bool,
+) {
+    print_audit_section_header(
+        show_headers,
+        "── Duplication ────────────────────────────────────",
+    );
+    crate::dupes::print_dupes_result(dupes, quiet, explain, false, true, false);
+}
+
+fn print_audit_complexity_section(
+    health: &crate::health::HealthResult,
+    quiet: bool,
+    explain: bool,
+    show_headers: bool,
+) {
+    print_audit_section_header(
+        show_headers,
+        "── Complexity ─────────────────────────────────────",
+    );
+    crate::health::print_health_result(
+        health,
+        crate::health::HealthPrintOptions {
+            quiet,
+            explain,
+            gates: fallow_engine::health::HealthGateOptions::default(),
+            summary: false,
+            summary_heading: true,
+            show_explain_tip: false,
+            skip_score_and_trend: false,
+            css_requested: false,
+        },
+    );
 }
 
 /// Count the styling candidates in a CSS analytics summary (dead surface + token
@@ -254,8 +282,69 @@ fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
         return;
     }
     let rules = &health.config.rules;
+    let groups = build_audit_styling_groups(rules, findings);
+    let show_group_labels = !groups.fix_confidently.is_empty() && !groups.verify_first.is_empty();
+    print_audit_styling_group(
+        result,
+        rules,
+        "Fix confidently",
+        &groups.fix_confidently,
+        FIX_CONFIDENTLY_TOP_N.max(groups.gated_count),
+        show_group_labels,
+    );
+    print_audit_styling_group(
+        result,
+        rules,
+        "Verify first",
+        &groups.verify_first,
+        VERIFY_FIRST_TOP_N.max(groups.gated_count),
+        show_group_labels,
+    );
+    outln!(
+        "  {}",
+        "(run `fallow audit --format json` for full styling detail)".dimmed()
+    );
+}
+
+struct AuditStylingGroups<'a> {
+    gated_count: usize,
+    fix_confidently: Vec<&'a fallow_output::StylingFinding>,
+    verify_first: Vec<&'a fallow_output::StylingFinding>,
+}
+
+fn build_audit_styling_groups<'a>(
+    rules: &RulesConfig,
+    findings: &'a [fallow_output::StylingFinding],
+) -> AuditStylingGroups<'a> {
     let mut sorted: Vec<_> = findings.iter().collect();
-    sorted.sort_by(|a, b| {
+    sort_audit_styling_findings(rules, &mut sorted);
+    let gated_count = sorted
+        .iter()
+        .filter(|finding| styling_finding_is_error_gated(rules, &finding.code))
+        .count();
+    let fix_confidently = sorted
+        .iter()
+        .copied()
+        .filter(|finding| styling_finding_is_fix_confidently(finding))
+        .collect();
+    let verify_first = sorted
+        .iter()
+        .copied()
+        .filter(|finding| !styling_finding_is_fix_confidently(finding))
+        .collect();
+
+    AuditStylingGroups {
+        gated_count,
+        fix_confidently,
+        verify_first,
+    }
+}
+
+fn sort_audit_styling_findings(
+    rules: &RulesConfig,
+    findings: &mut [&fallow_output::StylingFinding],
+) {
+    findings.sort_by(|a, b| {
         styling_finding_is_error_gated(rules, &b.code)
             .cmp(&styling_finding_is_error_gated(rules, &a.code))
             .then_with(|| a.path.cmp(&b.path))
@@ -263,41 +352,6 @@ fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
             .then_with(|| a.code.cmp(&b.code))
             .then_with(|| a.value.cmp(&b.value))
     });
-    let gated_count = sorted
-        .iter()
-        .filter(|finding| styling_finding_is_error_gated(rules, &finding.code))
-        .count();
-    let fix_confidently: Vec<_> = sorted
-        .iter()
-        .copied()
-        .filter(|finding| styling_finding_is_fix_confidently(finding))
-        .collect();
-    let verify_first: Vec<_> = sorted
-        .iter()
-        .copied()
-        .filter(|finding| !styling_finding_is_fix_confidently(finding))
-        .collect();
-    let show_group_labels = !fix_confidently.is_empty() && !verify_first.is_empty();
-    print_audit_styling_group(
-        result,
-        rules,
-        "Fix confidently",
-        &fix_confidently,
-        FIX_CONFIDENTLY_TOP_N.max(gated_count),
-        show_group_labels,
-    );
-    print_audit_styling_group(
-        result,
-        rules,
-        "Verify first",
-        &verify_first,
-        VERIFY_FIRST_TOP_N.max(gated_count),
-        show_group_labels,
-    );
-    outln!(
-        "  {}",
-        "(run `fallow audit --format json` for full styling detail)".dimmed()
-    );
 }
 
 fn print_audit_styling_group(

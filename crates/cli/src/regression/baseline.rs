@@ -308,12 +308,32 @@ fn update_toml_regression(content: &str, baseline: &fallow_config::RegressionBas
 
 /// Render the `[regression.baseline]` TOML section body from the baseline.
 fn render_toml_regression_section(baseline: &fallow_config::RegressionBaseline) -> String {
-    use std::fmt::Write;
     let mut section = String::from("[regression.baseline]\n");
+    render_toml_core_baseline_fields(&mut section, baseline);
+    render_toml_unused_dependency_baseline_fields(&mut section, baseline);
+    render_toml_member_baseline_fields(&mut section, baseline);
+    render_toml_import_dependency_baseline_fields(&mut section, baseline);
+    render_toml_graph_baseline_fields(&mut section, baseline);
+    render_toml_usage_dependency_baseline_fields(&mut section, baseline);
+    section
+}
+
+fn render_toml_core_baseline_fields(
+    section: &mut String,
+    baseline: &fallow_config::RegressionBaseline,
+) {
+    use std::fmt::Write;
     let _ = writeln!(section, "totalIssues = {}", baseline.total_issues);
     let _ = writeln!(section, "unusedFiles = {}", baseline.unused_files);
     let _ = writeln!(section, "unusedExports = {}", baseline.unused_exports);
     let _ = writeln!(section, "unusedTypes = {}", baseline.unused_types);
+}
+
+fn render_toml_unused_dependency_baseline_fields(
+    section: &mut String,
+    baseline: &fallow_config::RegressionBaseline,
+) {
+    use std::fmt::Write;
     let _ = writeln!(
         section,
         "unusedDependencies = {}",
@@ -329,6 +349,13 @@ fn render_toml_regression_section(baseline: &fallow_config::RegressionBaseline) 
         "unusedOptionalDependencies = {}",
         baseline.unused_optional_dependencies
     );
+}
+
+fn render_toml_member_baseline_fields(
+    section: &mut String,
+    baseline: &fallow_config::RegressionBaseline,
+) {
+    use std::fmt::Write;
     let _ = writeln!(
         section,
         "unusedEnumMembers = {}",
@@ -339,6 +366,13 @@ fn render_toml_regression_section(baseline: &fallow_config::RegressionBaseline) 
         "unusedClassMembers = {}",
         baseline.unused_class_members
     );
+}
+
+fn render_toml_import_dependency_baseline_fields(
+    section: &mut String,
+    baseline: &fallow_config::RegressionBaseline,
+) {
+    use std::fmt::Write;
     let _ = writeln!(
         section,
         "unresolvedImports = {}",
@@ -349,12 +383,26 @@ fn render_toml_regression_section(baseline: &fallow_config::RegressionBaseline) 
         "unlistedDependencies = {}",
         baseline.unlisted_dependencies
     );
+}
+
+fn render_toml_graph_baseline_fields(
+    section: &mut String,
+    baseline: &fallow_config::RegressionBaseline,
+) {
+    use std::fmt::Write;
     let _ = writeln!(section, "duplicateExports = {}", baseline.duplicate_exports);
     let _ = writeln!(
         section,
         "circularDependencies = {}",
         baseline.circular_dependencies
     );
+}
+
+fn render_toml_usage_dependency_baseline_fields(
+    section: &mut String,
+    baseline: &fallow_config::RegressionBaseline,
+) {
+    use std::fmt::Write;
     let _ = writeln!(
         section,
         "typeOnlyDependencies = {}",
@@ -365,7 +413,6 @@ fn render_toml_regression_section(baseline: &fallow_config::RegressionBaseline) 
         "testOnlyDependencies = {}",
         baseline.test_only_dependencies
     );
-    section
 }
 
 /// Replace an existing `[regression.baseline]` section in `content`, or append

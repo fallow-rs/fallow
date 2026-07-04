@@ -139,81 +139,110 @@ fn build_inspect_evidence(
     trace_file: &Value,
     trace_export: Option<Value>,
 ) -> InspectEvidence {
-    let target_file = target.file.as_str();
     let optional_threads = parallel_child_threads(opts.threads);
-    let (dead_code, duplication, complexity, security, impact_closure) =
-        std::thread::scope(|scope| {
-            let dead_code = scope.spawn(|| {
-                optional_section(
-                    opts,
-                    dead_code_args(target_file),
-                    InspectEvidenceScope::File,
-                    optional_threads,
-                    |value| value,
-                )
-            });
-            let duplication = scope.spawn(|| {
-                optional_section(
-                    opts,
-                    dupes_args(),
-                    InspectEvidenceScope::ProjectFilteredToFile,
-                    optional_threads,
-                    |value| filter_path_array(&value, target_file, "clone_groups"),
-                )
-            });
-            let complexity = scope.spawn(|| {
-                optional_section(
-                    opts,
-                    health_args(),
-                    InspectEvidenceScope::ProjectFilteredToFile,
-                    optional_threads,
-                    |value| filter_path_array(&value, target_file, "findings"),
-                )
-            });
-            let security = scope.spawn(|| {
-                optional_section(
-                    opts,
-                    security_args(target_file),
-                    InspectEvidenceScope::File,
-                    optional_threads,
-                    |value| value,
-                )
-            });
-            let impact_closure = scope.spawn(|| {
-                optional_section(
-                    opts,
-                    impact_closure_args(target_file),
-                    InspectEvidenceScope::ProjectFilteredToFile,
-                    optional_threads,
-                    |value| value,
-                )
-            });
-
-            (
-                join_inspect_section(dead_code, InspectEvidenceScope::File),
-                join_inspect_section(duplication, InspectEvidenceScope::ProjectFilteredToFile),
-                join_inspect_section(complexity, InspectEvidenceScope::ProjectFilteredToFile),
-                join_inspect_section(security, InspectEvidenceScope::File),
-                join_inspect_section(impact_closure, InspectEvidenceScope::ProjectFilteredToFile),
-            )
-        });
+    let child_evidence = collect_inspect_child_evidence(opts, target, optional_threads);
 
     InspectEvidence {
         trace_file: InspectEvidenceSection::ok(InspectEvidenceScope::File, trace_file.clone()),
         trace_export: trace_export
             .map(|value| InspectEvidenceSection::ok(InspectEvidenceScope::Symbol, value)),
-        dead_code,
-        duplication,
-        complexity,
-        security,
-        impact_closure,
+        dead_code: child_evidence.dead_code,
+        duplication: child_evidence.duplication,
+        complexity: child_evidence.complexity,
+        security: child_evidence.security,
+        impact_closure: child_evidence.impact_closure,
         symbol_chain: build_symbol_chain_section(opts, target, optional_threads),
     }
+}
+
+struct InspectChildEvidence {
+    dead_code: InspectEvidenceSection,
+    duplication: InspectEvidenceSection,
+    complexity: InspectEvidenceSection,
+    security: InspectEvidenceSection,
+    impact_closure: InspectEvidenceSection,
+}
+
+fn collect_inspect_child_evidence(
+    opts: &InspectOptions<'_>,
+    target: &NormalizedTarget,
+    optional_threads: usize,
+) -> InspectChildEvidence {
+    let target_file = target.file.as_str();
+
+    std::thread::scope(|scope| {
+        let dead_code = scope.spawn(|| {
+            optional_section(
+                opts,
+                dead_code_args(target_file),
+                InspectEvidenceScope::File,
+                optional_threads,
+                |value| value,
+            )
+        });
+        let duplication = scope.spawn(|| {
+            optional_section(
+                opts,
+                dupes_args(),
+                InspectEvidenceScope::ProjectFilteredToFile,
+                optional_threads,
+                |value| filter_path_array(&value, target_file, "clone_groups"),
+            )
+        });
+        let complexity = scope.spawn(|| {
+            optional_section(
+                opts,
+                health_args(),
+                InspectEvidenceScope::ProjectFilteredToFile,
+                optional_threads,
+                |value| filter_path_array(&value, target_file, "findings"),
+            )
+        });
+        let security = scope.spawn(|| {
+            optional_section(
+                opts,
+                security_args(target_file),
+                InspectEvidenceScope::File,
+                optional_threads,
+                |value| value,
+            )
+        });
+        let impact_closure = scope.spawn(|| {
+            optional_section(
+                opts,
+                impact_closure_args(target_file),
+                InspectEvidenceScope::ProjectFilteredToFile,
+                optional_threads,
+                |value| value,
+            )
+        });
+
+        join_inspect_child_evidence(dead_code, duplication, complexity, security, impact_closure)
+    })
 }
 
 const fn parallel_child_threads(parent_threads: usize) -> usize {
     let threads = parent_threads / 4;
     if threads == 0 { 1 } else { threads }
+}
+
+fn join_inspect_child_evidence(
+    dead_code: std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>,
+    duplication: std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>,
+    complexity: std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>,
+    security: std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>,
+    impact_closure: std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>,
+) -> InspectChildEvidence {
+    InspectChildEvidence {
+        dead_code: join_inspect_section(dead_code, InspectEvidenceScope::File),
+        duplication: join_inspect_section(duplication, InspectEvidenceScope::ProjectFilteredToFile),
+        complexity: join_inspect_section(complexity, InspectEvidenceScope::ProjectFilteredToFile),
+        security: join_inspect_section(security, InspectEvidenceScope::File),
+        impact_closure: join_inspect_section(
+            impact_closure,
+            InspectEvidenceScope::ProjectFilteredToFile,
+        ),
+    }
 }
 
 fn join_inspect_section(

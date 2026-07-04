@@ -160,10 +160,6 @@ fn finalize_health_report_side_effects(input: &mut HealthReportSideEffectsInput<
 /// the module's parsed suppressions. First family: `css-token-drift` (Tailwind
 /// arbitrary values = hardcoded-instead-of-token). Default severity `warn` is
 /// applied downstream; the finding is verdict-neutral by default.
-#[expect(
-    clippy::too_many_lines,
-    reason = "Styling findings are mapped family-by-family so each output shape stays local."
-)]
 fn build_styling_findings(
     css: Option<&fallow_output::CssAnalyticsReport>,
     modules: &[fallow_types::extract::ModuleInfo],
@@ -172,472 +168,711 @@ fn build_styling_findings(
     include_cross_file_reachability: bool,
     dead_code_results: Option<&fallow_types::results::AnalysisResults>,
 ) -> Vec<fallow_output::StylingFinding> {
-    use fallow_config::Severity;
-    use fallow_types::suppress::{IssueKind, Suppression, is_file_suppressed, is_suppressed};
-
     let Some(css) = css else {
         return Vec::new();
     };
 
-    // Shared: relative-path -> the file's parsed suppressions, so every family
-    // honors inline suppression at production time.
-    let path_by_id: rustc_hash::FxHashMap<_, _> =
-        files.iter().map(|f| (f.id, f.path.as_path())).collect();
-    let mut supp_by_rel: rustc_hash::FxHashMap<String, &[Suppression]> =
-        rustc_hash::FxHashMap::default();
-    for module in modules {
-        if module.suppressions.is_empty() {
-            continue;
-        }
-        if let Some(abs) = path_by_id.get(&module.file_id)
-            && let Some(rel) = super::runtime_filter::relative_to_root(abs, &config.root)
-        {
-            supp_by_rel.insert(rel, module.suppressions.as_slice());
-        }
-    }
-    let suppressed = |path: &str, line: u32, kind: IssueKind| -> bool {
-        supp_by_rel.get(path).is_some_and(|supps| {
-            is_file_suppressed(supps, kind) || is_suppressed(supps, line, kind)
-        })
+    let suppressions = StylingSuppressionIndex::new(modules, files, &config.root);
+    let ctx = StylingFindingContext {
+        css,
+        config,
+        include_cross_file_reachability,
+        suppressions: &suppressions,
     };
-
     let mut findings = Vec::new();
 
-    // Family css-token-drift: Tailwind arbitrary values (hardcoded-instead-of-token).
-    if config.rules.css_token_drift != Severity::Off {
-        for candidate in &css.tailwind_arbitrary_values {
-            if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
-                continue;
-            }
-            findings.push(fallow_output::StylingFinding {
-                code: "css-token-drift".to_string(),
-                sub_kind: "tailwind-arbitrary-value".to_string(),
-                path: candidate.path.clone(),
-                line: candidate.line,
-                value: candidate.value.clone(),
-                effective_severity: styling_finding_severity(config.rules.css_token_drift),
-                blast_radius: None,
-                confidence: Some(fallow_output::StylingFindingConfidence::High),
-                agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
-                nearest_token: None,
-                fix_hint: Some(
-                    "Replace the one-off Tailwind arbitrary value with an existing scale token, or confirm it is intentional."
-                        .to_string(),
-                ),
-                actions: candidate.actions.clone(),
-            });
-        }
-        for candidate in &css.cva_variant_token_drifts {
-            if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
-                continue;
-            }
-            findings.push(fallow_output::StylingFinding {
-                code: "css-token-drift".to_string(),
-                sub_kind: "cva-variant-token-drift".to_string(),
-                path: candidate.path.clone(),
-                line: candidate.line,
-                value: format!(
-                    "{} in CVA variant: {}",
-                    candidate.class_token, candidate.variant_classes
-                ),
-                effective_severity: styling_finding_severity(config.rules.css_token_drift),
-                blast_radius: None,
-                confidence: Some(fallow_output::StylingFindingConfidence::Low),
-                agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                nearest_token: Some(candidate.nearest_token.clone()),
-                fix_hint: Some(format!(
-                    "Verify this CVA variant is not an intentional one-off, then reuse {} instead.",
-                    candidate.nearest_token.name
-                )),
-                actions: candidate.actions.clone(),
-            });
-        }
-        for candidate in &css.raw_style_values {
-            let Some(nearest_token) = candidate.nearest_token.as_ref() else {
-                continue;
-            };
-            if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
-                continue;
-            }
-            let fix_hint = format!(
-                "Verify the raw style value is not an intentional exception, then reuse {} instead.",
-                nearest_token.name
-            );
-            findings.push(fallow_output::StylingFinding {
-                code: "css-token-drift".to_string(),
-                sub_kind: "raw-style-value".to_string(),
-                path: candidate.path.clone(),
-                line: candidate.line,
-                value: format!(
-                    "{} {}: {}",
-                    candidate.axis, candidate.property, candidate.value
-                ),
-                effective_severity: styling_finding_severity(config.rules.css_token_drift),
-                blast_radius: None,
-                confidence: Some(fallow_output::StylingFindingConfidence::Low),
-                agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                nearest_token: Some(nearest_token.clone()),
-                fix_hint: Some(fix_hint),
-                actions: candidate.actions.clone(),
-            });
-        }
-        if include_cross_file_reachability {
-            for candidate in &css.near_duplicate_theme_tokens {
-                if suppressed(&candidate.path, candidate.line, IssueKind::CssTokenDrift) {
-                    continue;
-                }
-                let semantic_color_alias = near_duplicate_is_semantic_color_alias(candidate);
-                let (confidence, agent_disposition) = if semantic_color_alias {
-                    (
-                        fallow_output::StylingFindingConfidence::Low,
-                        fallow_output::StylingAgentDisposition::VerifyFirst,
-                    )
-                } else {
-                    (
-                        fallow_output::StylingFindingConfidence::High,
-                        fallow_output::StylingAgentDisposition::FixConfidently,
-                    )
-                };
-                findings.push(fallow_output::StylingFinding {
-                    code: "css-token-drift".to_string(),
-                    sub_kind: "near-duplicate-theme-token".to_string(),
-                    path: candidate.path.clone(),
-                    line: candidate.line,
-                    value: format!("{}: {}", candidate.token, candidate.value),
-                    effective_severity: styling_finding_severity(config.rules.css_token_drift),
-                    blast_radius: None,
-                    confidence: Some(confidence),
-                    agent_disposition: Some(agent_disposition),
-                    nearest_token: Some(candidate.nearest_token.clone()),
-                    fix_hint: Some(format!(
-                        "Reuse {} instead of adding {} after verifying the semantic intent.",
-                        candidate.nearest_token.name, candidate.token
-                    )),
-                    actions: candidate.actions.clone(),
-                });
-            }
-        }
-    }
-
-    // Family css-duplicate-block: copy-pasted declaration blocks (anchored at the
-    // first occurrence).
-    if config.rules.css_duplicate_block != Severity::Off {
-        for block in &css.duplicate_declaration_blocks {
-            let Some(first) = block.occurrences.first() else {
-                continue;
-            };
-            if suppressed(&first.path, first.line, IssueKind::CssDuplicateBlock) {
-                continue;
-            }
-            findings.push(fallow_output::StylingFinding {
-                code: "css-duplicate-block".to_string(),
-                sub_kind: "duplicate-declaration-block".to_string(),
-                path: first.path.clone(),
-                line: first.line,
-                value: format!(
-                    "{}-declaration block repeated {} times",
-                    block.declaration_count, block.occurrence_count
-                ),
-                effective_severity: styling_finding_severity(config.rules.css_duplicate_block),
-                blast_radius: None,
-                confidence: Some(fallow_output::StylingFindingConfidence::High),
-                agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
-                nearest_token: None,
-                fix_hint: Some(
-                    "Consolidate the repeated declaration block after checking cascade order."
-                        .to_string(),
-                ),
-                actions: block.actions.clone(),
-            });
-        }
-        for block in &css.cva_duplicate_variant_blocks {
-            let Some(first) = block.occurrences.first() else {
-                continue;
-            };
-            if suppressed(&first.path, first.line, IssueKind::CssDuplicateBlock) {
-                continue;
-            }
-            findings.push(fallow_output::StylingFinding {
-                code: "css-duplicate-block".to_string(),
-                sub_kind: "cva-duplicate-variant-block".to_string(),
-                path: first.path.clone(),
-                line: first.line,
-                value: format!(
-                    "CVA variant class block repeated {} times: {}",
-                    block.occurrence_count, block.value
-                ),
-                effective_severity: styling_finding_severity(config.rules.css_duplicate_block),
-                blast_radius: None,
-                confidence: Some(fallow_output::StylingFindingConfidence::High),
-                agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
-                nearest_token: None,
-                fix_hint: Some(
-                    "Extract the repeated CVA variant classes into a shared base or compound variant after checking variant semantics."
-                        .to_string(),
-                ),
-                actions: block.actions.clone(),
-            });
-        }
-    }
-
-    // Family css-selector-complexity: parser-bounded notable rules (high
-    // specificity, deep nesting, or important density), all changed-file-local.
-    if config.rules.css_selector_complexity != Severity::Off {
-        for file in &css.files {
-            for rule in &file.analytics.notable_rules {
-                if suppressed(&file.path, rule.line, IssueKind::CssSelectorComplexity) {
-                    continue;
-                }
-                let (sub_kind, value, reason) = selector_complexity_finding(rule);
-                let confidence_kind = selector_complexity_confidence_kind(config, &file.path, rule);
-                let (confidence, agent_disposition, fix_hint) = if let Some(kind) = confidence_kind
-                {
-                    (
-                        fallow_output::StylingFindingConfidence::Low,
-                        fallow_output::StylingAgentDisposition::VerifyFirst,
-                        kind.fix_hint(),
-                    )
-                } else {
-                    (
-                        fallow_output::StylingFindingConfidence::High,
-                        fallow_output::StylingAgentDisposition::FixConfidently,
-                        "Simplify the selector or rule after checking cascade impact.",
-                    )
-                };
-                findings.push(fallow_output::StylingFinding {
-                    code: "css-selector-complexity".to_string(),
-                    sub_kind: sub_kind.to_string(),
-                    path: file.path.clone(),
-                    line: rule.line,
-                    value,
-                    effective_severity: styling_finding_severity(
-                        config.rules.css_selector_complexity,
-                    ),
-                    blast_radius: None,
-                    confidence: Some(confidence),
-                    agent_disposition: Some(agent_disposition),
-                    nearest_token: None,
-                    fix_hint: Some(fix_hint.to_string()),
-                    actions: vec![fallow_output::CssCandidateAction::simplify_selector(reason)],
-                });
-            }
-        }
-    }
-
-    // Family css-dead-surface: local scoped SFC classes by default, plus
-    // cross-file reachability candidates when deep CSS mode produced them.
-    if config.rules.css_dead_surface != Severity::Off {
-        append_dead_style_export_findings(&mut findings, dead_code_results, config, &suppressed);
-        for candidate in &css.scoped_unused {
-            if suppressed(&candidate.path, 1, IssueKind::CssDeadSurface) {
-                continue;
-            }
-            findings.push(fallow_output::StylingFinding {
-                code: "css-dead-surface".to_string(),
-                sub_kind: "scoped-unused-class".to_string(),
-                path: candidate.path.clone(),
-                line: 1,
-                value: format!(
-                    "{} scoped {} unused: {}",
-                    candidate.classes.len(),
-                    if candidate.classes.len() == 1 {
-                        "class"
-                    } else {
-                        "classes"
-                    },
-                    candidate.classes.join(", ")
-                ),
-                effective_severity: styling_finding_severity(config.rules.css_dead_surface),
-                blast_radius: None,
-                confidence: Some(fallow_output::StylingFindingConfidence::Low),
-                agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                nearest_token: None,
-                fix_hint: Some(
-                    "Verify no dynamic component-local use exists before removing the scoped class."
-                        .to_string(),
-                ),
-                actions: candidate.actions.clone(),
-            });
-        }
-        if include_cross_file_reachability {
-            for candidate in &css.unused_theme_tokens {
-                if suppressed(&candidate.path, candidate.line, IssueKind::CssDeadSurface) {
-                    continue;
-                }
-                findings.push(fallow_output::StylingFinding {
-                    code: "css-dead-surface".to_string(),
-                    sub_kind: "unused-theme-token".to_string(),
-                    path: candidate.path.clone(),
-                    line: candidate.line,
-                    value: candidate.token.clone(),
-                    effective_severity: styling_finding_severity(config.rules.css_dead_surface),
-                    blast_radius: Some(0),
-                    confidence: Some(fallow_output::StylingFindingConfidence::Low),
-                    agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                    nearest_token: None,
-                    fix_hint: Some(
-                        "Verify no external or plugin consumer exists before removing the unused theme token."
-                            .to_string(),
-                    ),
-                    actions: candidate.actions.clone(),
-                });
-            }
-            for candidate in &css.unreferenced_css_classes {
-                if suppressed(&candidate.path, candidate.line, IssueKind::CssDeadSurface) {
-                    continue;
-                }
-                findings.push(fallow_output::StylingFinding {
-                    code: "css-dead-surface".to_string(),
-                    sub_kind: "unreferenced-css-class".to_string(),
-                    path: candidate.path.clone(),
-                    line: candidate.line,
-                    value: candidate.class.clone(),
-                    effective_severity: styling_finding_severity(config.rules.css_dead_surface),
-                    blast_radius: None,
-                    confidence: Some(fallow_output::StylingFindingConfidence::Low),
-                    agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                    nearest_token: None,
-                    fix_hint: Some(
-                        "Verify no dynamic or external markup consumer exists before removing the class."
-                            .to_string(),
-                    ),
-                    actions: candidate.actions.clone(),
-                });
-            }
-            for candidate in &css.unreferenced_keyframes {
-                if suppressed(&candidate.path, 1, IssueKind::CssDeadSurface) {
-                    continue;
-                }
-                findings.push(fallow_output::StylingFinding {
-                    code: "css-dead-surface".to_string(),
-                    sub_kind: "unreferenced-keyframes".to_string(),
-                    path: candidate.path.clone(),
-                    line: 1,
-                    value: candidate.name.clone(),
-                    effective_severity: styling_finding_severity(config.rules.css_dead_surface),
-                    blast_radius: None,
-                    confidence: Some(fallow_output::StylingFindingConfidence::Low),
-                    agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                    nearest_token: None,
-                    fix_hint: Some(
-                        "Verify no JavaScript animation reference exists before removing the keyframes."
-                            .to_string(),
-                    ),
-                    actions: candidate.actions.clone(),
-                });
-            }
-            for candidate in &css.unused_font_faces {
-                if suppressed(&candidate.path, 1, IssueKind::CssDeadSurface) {
-                    continue;
-                }
-                findings.push(fallow_output::StylingFinding {
-                    code: "css-dead-surface".to_string(),
-                    sub_kind: "unused-font-face".to_string(),
-                    path: candidate.path.clone(),
-                    line: 1,
-                    value: candidate.family.clone(),
-                    effective_severity: styling_finding_severity(config.rules.css_dead_surface),
-                    blast_radius: None,
-                    confidence: Some(fallow_output::StylingFindingConfidence::Low),
-                    agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                    nearest_token: None,
-                    fix_hint: Some(
-                        "Verify no inline style or JavaScript font-family use exists before removing the font face."
-                            .to_string(),
-                    ),
-                    actions: candidate.actions.clone(),
-                });
-            }
-            for candidate in &css.unused_at_rules {
-                if suppressed(&candidate.path, 1, IssueKind::CssDeadSurface) {
-                    continue;
-                }
-                findings.push(fallow_output::StylingFinding {
-                    code: "css-dead-surface".to_string(),
-                    sub_kind: match candidate.kind {
-                        fallow_output::UnusedAtRuleKind::PropertyRegistration => {
-                            "unused-property-registration"
-                        }
-                        fallow_output::UnusedAtRuleKind::Layer => "unused-layer",
-                    }
-                    .to_string(),
-                    path: candidate.path.clone(),
-                    line: 1,
-                    value: candidate.name.clone(),
-                    effective_severity: styling_finding_severity(config.rules.css_dead_surface),
-                    blast_radius: None,
-                    confidence: Some(fallow_output::StylingFindingConfidence::Low),
-                    agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                    nearest_token: None,
-                    fix_hint: Some(
-                        "Verify no dynamic stylesheet consumer exists before removing the at-rule."
-                            .to_string(),
-                    ),
-                    actions: candidate.actions.clone(),
-                });
-            }
-        }
-    }
-
-    if include_cross_file_reachability && config.rules.css_broken_reference != Severity::Off {
-        for candidate in &css.unresolved_class_references {
-            if suppressed(
-                &candidate.path,
-                candidate.line,
-                IssueKind::CssBrokenReference,
-            ) {
-                continue;
-            }
-            findings.push(fallow_output::StylingFinding {
-                code: "css-broken-reference".to_string(),
-                sub_kind: "unresolved-class-reference".to_string(),
-                path: candidate.path.clone(),
-                line: candidate.line,
-                value: format!("{} -> {}", candidate.class, candidate.suggestion),
-                effective_severity: styling_finding_severity(config.rules.css_broken_reference),
-                blast_radius: None,
-                confidence: Some(fallow_output::StylingFindingConfidence::Low),
-                agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                nearest_token: None,
-                fix_hint: Some(format!(
-                    "Verify the class is not defined externally, then replace {} with {}.",
-                    candidate.class, candidate.suggestion
-                )),
-                actions: candidate.actions.clone(),
-            });
-        }
-        for candidate in &css.undefined_keyframes {
-            if suppressed(&candidate.path, 1, IssueKind::CssBrokenReference) {
-                continue;
-            }
-            findings.push(fallow_output::StylingFinding {
-                code: "css-broken-reference".to_string(),
-                sub_kind: "undefined-keyframes".to_string(),
-                path: candidate.path.clone(),
-                line: 1,
-                value: candidate.name.clone(),
-                effective_severity: styling_finding_severity(config.rules.css_broken_reference),
-                blast_radius: None,
-                confidence: Some(fallow_output::StylingFindingConfidence::Low),
-                agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
-                nearest_token: None,
-                fix_hint: Some(
-                    "Verify the keyframes are not defined externally before fixing the animation reference."
-                        .to_string(),
-                ),
-                actions: candidate.actions.clone(),
-            });
-        }
-    }
+    append_css_token_drift_findings(&mut findings, &ctx);
+    append_css_duplicate_block_findings(&mut findings, &ctx);
+    append_css_selector_complexity_findings(&mut findings, &ctx);
+    append_css_dead_surface_findings(&mut findings, &ctx, dead_code_results);
+    append_css_broken_reference_findings(&mut findings, &ctx);
 
     findings
+}
+
+struct StylingSuppressionIndex<'a> {
+    by_rel_path: rustc_hash::FxHashMap<String, &'a [fallow_types::suppress::Suppression]>,
+}
+
+impl<'a> StylingSuppressionIndex<'a> {
+    fn new(
+        modules: &'a [fallow_types::extract::ModuleInfo],
+        files: &[DiscoveredFile],
+        root: &std::path::Path,
+    ) -> Self {
+        let path_by_id: rustc_hash::FxHashMap<_, _> =
+            files.iter().map(|f| (f.id, f.path.as_path())).collect();
+        let mut by_rel_path = rustc_hash::FxHashMap::default();
+        for module in modules {
+            if module.suppressions.is_empty() {
+                continue;
+            }
+            if let Some(abs) = path_by_id.get(&module.file_id)
+                && let Some(rel) = super::runtime_filter::relative_to_root(abs, root)
+            {
+                by_rel_path.insert(rel, module.suppressions.as_slice());
+            }
+        }
+        Self { by_rel_path }
+    }
+
+    fn contains(&self, path: &str, line: u32, kind: fallow_types::suppress::IssueKind) -> bool {
+        self.by_rel_path.get(path).is_some_and(|supps| {
+            fallow_types::suppress::is_file_suppressed(supps, kind)
+                || fallow_types::suppress::is_suppressed(supps, line, kind)
+        })
+    }
+}
+
+struct StylingFindingContext<'a, 's> {
+    css: &'a fallow_output::CssAnalyticsReport,
+    config: &'a ResolvedConfig,
+    include_cross_file_reachability: bool,
+    suppressions: &'s StylingSuppressionIndex<'a>,
+}
+
+impl StylingFindingContext<'_, '_> {
+    fn is_suppressed(
+        &self,
+        path: &str,
+        line: u32,
+        kind: fallow_types::suppress::IssueKind,
+    ) -> bool {
+        self.suppressions.contains(path, line, kind)
+    }
+}
+
+fn append_css_token_drift_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    if ctx.config.rules.css_token_drift == fallow_config::Severity::Off {
+        return;
+    }
+
+    append_tailwind_arbitrary_value_findings(findings, ctx);
+    append_cva_variant_token_drift_findings(findings, ctx);
+    append_raw_style_value_findings(findings, ctx);
+    append_near_duplicate_theme_token_findings(findings, ctx);
+}
+
+fn append_tailwind_arbitrary_value_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.tailwind_arbitrary_values {
+        if ctx.is_suppressed(
+            &candidate.path,
+            candidate.line,
+            fallow_types::suppress::IssueKind::CssTokenDrift,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-token-drift".to_string(),
+            sub_kind: "tailwind-arbitrary-value".to_string(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            value: candidate.value.clone(),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_token_drift),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::High),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
+            nearest_token: None,
+            fix_hint: Some(
+                "Replace the one-off Tailwind arbitrary value with an existing scale token, or confirm it is intentional."
+                    .to_string(),
+            ),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_cva_variant_token_drift_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.cva_variant_token_drifts {
+        if ctx.is_suppressed(
+            &candidate.path,
+            candidate.line,
+            fallow_types::suppress::IssueKind::CssTokenDrift,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-token-drift".to_string(),
+            sub_kind: "cva-variant-token-drift".to_string(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            value: format!(
+                "{} in CVA variant: {}",
+                candidate.class_token, candidate.variant_classes
+            ),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_token_drift),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: Some(candidate.nearest_token.clone()),
+            fix_hint: Some(format!(
+                "Verify this CVA variant is not an intentional one-off, then reuse {} instead.",
+                candidate.nearest_token.name
+            )),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_raw_style_value_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.raw_style_values {
+        let Some(nearest_token) = candidate.nearest_token.as_ref() else {
+            continue;
+        };
+        if ctx.is_suppressed(
+            &candidate.path,
+            candidate.line,
+            fallow_types::suppress::IssueKind::CssTokenDrift,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-token-drift".to_string(),
+            sub_kind: "raw-style-value".to_string(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            value: format!(
+                "{} {}: {}",
+                candidate.axis, candidate.property, candidate.value
+            ),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_token_drift),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: Some(nearest_token.clone()),
+            fix_hint: Some(format!(
+                "Verify the raw style value is not an intentional exception, then reuse {} instead.",
+                nearest_token.name
+            )),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_near_duplicate_theme_token_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    if !ctx.include_cross_file_reachability {
+        return;
+    }
+    for candidate in &ctx.css.near_duplicate_theme_tokens {
+        if ctx.is_suppressed(
+            &candidate.path,
+            candidate.line,
+            fallow_types::suppress::IssueKind::CssTokenDrift,
+        ) {
+            continue;
+        }
+        let semantic_color_alias = near_duplicate_is_semantic_color_alias(candidate);
+        let (confidence, agent_disposition) = if semantic_color_alias {
+            (
+                fallow_output::StylingFindingConfidence::Low,
+                fallow_output::StylingAgentDisposition::VerifyFirst,
+            )
+        } else {
+            (
+                fallow_output::StylingFindingConfidence::High,
+                fallow_output::StylingAgentDisposition::FixConfidently,
+            )
+        };
+        findings.push(fallow_output::StylingFinding {
+            code: "css-token-drift".to_string(),
+            sub_kind: "near-duplicate-theme-token".to_string(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            value: format!("{}: {}", candidate.token, candidate.value),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_token_drift),
+            blast_radius: None,
+            confidence: Some(confidence),
+            agent_disposition: Some(agent_disposition),
+            nearest_token: Some(candidate.nearest_token.clone()),
+            fix_hint: Some(format!(
+                "Reuse {} instead of adding {} after verifying the semantic intent.",
+                candidate.nearest_token.name, candidate.token
+            )),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_css_duplicate_block_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    if ctx.config.rules.css_duplicate_block == fallow_config::Severity::Off {
+        return;
+    }
+
+    append_duplicate_declaration_block_findings(findings, ctx);
+    append_cva_duplicate_variant_block_findings(findings, ctx);
+}
+
+fn append_duplicate_declaration_block_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for block in &ctx.css.duplicate_declaration_blocks {
+        let Some(first) = block.occurrences.first() else {
+            continue;
+        };
+        if ctx.is_suppressed(
+            &first.path,
+            first.line,
+            fallow_types::suppress::IssueKind::CssDuplicateBlock,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-duplicate-block".to_string(),
+            sub_kind: "duplicate-declaration-block".to_string(),
+            path: first.path.clone(),
+            line: first.line,
+            value: format!(
+                "{}-declaration block repeated {} times",
+                block.declaration_count, block.occurrence_count
+            ),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_duplicate_block),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::High),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
+            nearest_token: None,
+            fix_hint: Some(
+                "Consolidate the repeated declaration block after checking cascade order."
+                    .to_string(),
+            ),
+            actions: block.actions.clone(),
+        });
+    }
+}
+
+fn append_cva_duplicate_variant_block_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for block in &ctx.css.cva_duplicate_variant_blocks {
+        let Some(first) = block.occurrences.first() else {
+            continue;
+        };
+        if ctx.is_suppressed(
+            &first.path,
+            first.line,
+            fallow_types::suppress::IssueKind::CssDuplicateBlock,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-duplicate-block".to_string(),
+            sub_kind: "cva-duplicate-variant-block".to_string(),
+            path: first.path.clone(),
+            line: first.line,
+            value: format!(
+                "CVA variant class block repeated {} times: {}",
+                block.occurrence_count, block.value
+            ),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_duplicate_block),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::High),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::FixConfidently),
+            nearest_token: None,
+            fix_hint: Some(
+                "Extract the repeated CVA variant classes into a shared base or compound variant after checking variant semantics."
+                    .to_string(),
+            ),
+            actions: block.actions.clone(),
+        });
+    }
+}
+
+fn append_css_selector_complexity_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    if ctx.config.rules.css_selector_complexity == fallow_config::Severity::Off {
+        return;
+    }
+
+    for file in &ctx.css.files {
+        for rule in &file.analytics.notable_rules {
+            append_selector_complexity_finding(findings, ctx, file, rule);
+        }
+    }
+}
+
+fn append_selector_complexity_finding(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+    file: &fallow_output::CssFileAnalytics,
+    rule: &fallow_types::extract::CssRuleMetric,
+) {
+    if ctx.is_suppressed(
+        &file.path,
+        rule.line,
+        fallow_types::suppress::IssueKind::CssSelectorComplexity,
+    ) {
+        return;
+    }
+    let (sub_kind, value, reason) = selector_complexity_finding(rule);
+    let confidence_kind = selector_complexity_confidence_kind(ctx.config, &file.path, rule);
+    let (confidence, agent_disposition, fix_hint) = if let Some(kind) = confidence_kind {
+        (
+            fallow_output::StylingFindingConfidence::Low,
+            fallow_output::StylingAgentDisposition::VerifyFirst,
+            kind.fix_hint(),
+        )
+    } else {
+        (
+            fallow_output::StylingFindingConfidence::High,
+            fallow_output::StylingAgentDisposition::FixConfidently,
+            "Simplify the selector or rule after checking cascade impact.",
+        )
+    };
+    findings.push(fallow_output::StylingFinding {
+        code: "css-selector-complexity".to_string(),
+        sub_kind: sub_kind.to_string(),
+        path: file.path.clone(),
+        line: rule.line,
+        value,
+        effective_severity: styling_finding_severity(ctx.config.rules.css_selector_complexity),
+        blast_radius: None,
+        confidence: Some(confidence),
+        agent_disposition: Some(agent_disposition),
+        nearest_token: None,
+        fix_hint: Some(fix_hint.to_string()),
+        actions: vec![fallow_output::CssCandidateAction::simplify_selector(reason)],
+    });
+}
+
+fn append_css_dead_surface_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+    dead_code_results: Option<&fallow_types::results::AnalysisResults>,
+) {
+    if ctx.config.rules.css_dead_surface == fallow_config::Severity::Off {
+        return;
+    }
+
+    append_dead_style_export_findings(findings, dead_code_results, ctx);
+    append_scoped_unused_findings(findings, ctx);
+    append_cross_file_dead_surface_findings(findings, ctx);
+}
+
+fn append_scoped_unused_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.scoped_unused {
+        if ctx.is_suppressed(
+            &candidate.path,
+            1,
+            fallow_types::suppress::IssueKind::CssDeadSurface,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-dead-surface".to_string(),
+            sub_kind: "scoped-unused-class".to_string(),
+            path: candidate.path.clone(),
+            line: 1,
+            value: format!(
+                "{} scoped {} unused: {}",
+                candidate.classes.len(),
+                if candidate.classes.len() == 1 {
+                    "class"
+                } else {
+                    "classes"
+                },
+                candidate.classes.join(", ")
+            ),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_dead_surface),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: None,
+            fix_hint: Some(
+                "Verify no dynamic component-local use exists before removing the scoped class."
+                    .to_string(),
+            ),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_cross_file_dead_surface_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    if !ctx.include_cross_file_reachability {
+        return;
+    }
+
+    append_unused_theme_token_findings(findings, ctx);
+    append_unreferenced_css_class_findings(findings, ctx);
+    append_unreferenced_keyframe_findings(findings, ctx);
+    append_unused_font_face_findings(findings, ctx);
+    append_unused_at_rule_findings(findings, ctx);
+}
+
+fn append_unused_theme_token_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.unused_theme_tokens {
+        if ctx.is_suppressed(
+            &candidate.path,
+            candidate.line,
+            fallow_types::suppress::IssueKind::CssDeadSurface,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-dead-surface".to_string(),
+            sub_kind: "unused-theme-token".to_string(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            value: candidate.token.clone(),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_dead_surface),
+            blast_radius: Some(0),
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: None,
+            fix_hint: Some(
+                "Verify no external or plugin consumer exists before removing the unused theme token."
+                    .to_string(),
+            ),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_unreferenced_css_class_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.unreferenced_css_classes {
+        if ctx.is_suppressed(
+            &candidate.path,
+            candidate.line,
+            fallow_types::suppress::IssueKind::CssDeadSurface,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-dead-surface".to_string(),
+            sub_kind: "unreferenced-css-class".to_string(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            value: candidate.class.clone(),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_dead_surface),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: None,
+            fix_hint: Some(
+                "Verify no dynamic or external markup consumer exists before removing the class."
+                    .to_string(),
+            ),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_unreferenced_keyframe_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.unreferenced_keyframes {
+        if ctx.is_suppressed(
+            &candidate.path,
+            1,
+            fallow_types::suppress::IssueKind::CssDeadSurface,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-dead-surface".to_string(),
+            sub_kind: "unreferenced-keyframes".to_string(),
+            path: candidate.path.clone(),
+            line: 1,
+            value: candidate.name.clone(),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_dead_surface),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: None,
+            fix_hint: Some(
+                "Verify no JavaScript animation reference exists before removing the keyframes."
+                    .to_string(),
+            ),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_unused_font_face_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.unused_font_faces {
+        if ctx.is_suppressed(
+            &candidate.path,
+            1,
+            fallow_types::suppress::IssueKind::CssDeadSurface,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-dead-surface".to_string(),
+            sub_kind: "unused-font-face".to_string(),
+            path: candidate.path.clone(),
+            line: 1,
+            value: candidate.family.clone(),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_dead_surface),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: None,
+            fix_hint: Some(
+                "Verify no inline style or JavaScript font-family use exists before removing the font face."
+                    .to_string(),
+            ),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_unused_at_rule_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.unused_at_rules {
+        if ctx.is_suppressed(
+            &candidate.path,
+            1,
+            fallow_types::suppress::IssueKind::CssDeadSurface,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-dead-surface".to_string(),
+            sub_kind: match candidate.kind {
+                fallow_output::UnusedAtRuleKind::PropertyRegistration => {
+                    "unused-property-registration"
+                }
+                fallow_output::UnusedAtRuleKind::Layer => "unused-layer",
+            }
+            .to_string(),
+            path: candidate.path.clone(),
+            line: 1,
+            value: candidate.name.clone(),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_dead_surface),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: None,
+            fix_hint: Some(
+                "Verify no dynamic stylesheet consumer exists before removing the at-rule."
+                    .to_string(),
+            ),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_css_broken_reference_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    if !ctx.include_cross_file_reachability
+        || ctx.config.rules.css_broken_reference == fallow_config::Severity::Off
+    {
+        return;
+    }
+
+    append_unresolved_class_reference_findings(findings, ctx);
+    append_undefined_keyframe_findings(findings, ctx);
+}
+
+fn append_unresolved_class_reference_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.unresolved_class_references {
+        if ctx.is_suppressed(
+            &candidate.path,
+            candidate.line,
+            fallow_types::suppress::IssueKind::CssBrokenReference,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-broken-reference".to_string(),
+            sub_kind: "unresolved-class-reference".to_string(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            value: format!("{} -> {}", candidate.class, candidate.suggestion),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_broken_reference),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: None,
+            fix_hint: Some(format!(
+                "Verify the class is not defined externally, then replace {} with {}.",
+                candidate.class, candidate.suggestion
+            )),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_undefined_keyframe_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    for candidate in &ctx.css.undefined_keyframes {
+        if ctx.is_suppressed(
+            &candidate.path,
+            1,
+            fallow_types::suppress::IssueKind::CssBrokenReference,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-broken-reference".to_string(),
+            sub_kind: "undefined-keyframes".to_string(),
+            path: candidate.path.clone(),
+            line: 1,
+            value: candidate.name.clone(),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_broken_reference),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: None,
+            fix_hint: Some(
+                "Verify the keyframes are not defined externally before fixing the animation reference."
+                    .to_string(),
+            ),
+            actions: candidate.actions.clone(),
+        });
+    }
 }
 
 fn append_dead_style_export_findings(
     findings: &mut Vec<fallow_output::StylingFinding>,
     dead_code_results: Option<&fallow_types::results::AnalysisResults>,
-    config: &ResolvedConfig,
-    suppressed: &impl Fn(&str, u32, fallow_types::suppress::IssueKind) -> bool,
+    ctx: &StylingFindingContext<'_, '_>,
 ) {
     let Some(results) = dead_code_results else {
         return;
@@ -647,10 +882,11 @@ fn append_dead_style_export_findings(
         if export.is_type_only || export.is_re_export {
             continue;
         }
-        let Some(path) = super::runtime_filter::relative_to_root(&export.path, &config.root) else {
+        let Some(path) = super::runtime_filter::relative_to_root(&export.path, &ctx.config.root)
+        else {
             continue;
         };
-        if suppressed(
+        if ctx.is_suppressed(
             &path,
             export.line,
             fallow_types::suppress::IssueKind::CssDeadSurface,
@@ -666,7 +902,7 @@ fn append_dead_style_export_findings(
             path,
             line: export.line,
             value: format!("{} ({})", export.export_name, surface.family),
-            effective_severity: styling_finding_severity(config.rules.css_dead_surface),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_dead_surface),
             blast_radius: Some(0),
             confidence: Some(fallow_output::StylingFindingConfidence::Low),
             agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),

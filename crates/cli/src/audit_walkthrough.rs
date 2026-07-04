@@ -33,7 +33,7 @@
 //! surface is the graph, and the untrusted surface is fenced.
 
 pub use fallow_output::{
-    AcceptedJudgment, AgentWalkthrough, ChangeAnchor, DirectionUnit, INJECTION_NOTE,
+    AcceptedJudgment, AgentJudgment, AgentWalkthrough, ChangeAnchor, DirectionUnit, INJECTION_NOTE,
     RejectedJudgment, ReviewDirection, WalkthroughValidation, agent_schema,
 };
 use fallow_output::{FocusMap, RoutingFacts};
@@ -43,9 +43,6 @@ use xxhash_rust::xxh3::xxh3_64;
 use crate::audit_brief::{ReviewBriefOutput, ReviewBriefSchemaVersion, build_brief_output};
 use crate::audit_decision_surface::DecisionSurface;
 use crate::report::ci::diff_filter::parse_new_hunk_start;
-
-#[cfg(test)]
-use fallow_output::AgentJudgment;
 
 /// The standing reason a judgment is rejected for citing a `signal_id` fallow
 /// never emitted (the anti-hallucination gate).
@@ -416,42 +413,9 @@ pub fn validate_walkthrough(
         }
     } else {
         for judgment in &agent.judgments {
-            // A signal_id (graph finding) is the strong anchor; a change_anchor
-            // (changed region) is the weaker fallback. Prefer the signal.
-            if !judgment.signal_id.is_empty() && surface.accept_signal_id(&judgment.signal_id) {
-                accepted.push(AcceptedJudgment {
-                    signal_id: judgment.signal_id.clone(),
-                    change_anchor: String::new(),
-                    anchor_kind: "signal".to_string(),
-                    agent_framing: judgment.framing.clone(),
-                    concern: judgment.concern.clone(),
-                    deterministic: false,
-                });
-            } else if !judgment.change_anchor.is_empty()
-                && change_anchor_ids.contains(&judgment.change_anchor)
-            {
-                accepted.push(AcceptedJudgment {
-                    signal_id: String::new(),
-                    change_anchor: judgment.change_anchor.clone(),
-                    anchor_kind: "change".to_string(),
-                    agent_framing: judgment.framing.clone(),
-                    concern: judgment.concern.clone(),
-                    deterministic: false,
-                });
-            } else {
-                // Cited a change_anchor (but no valid signal_id) and it did not
-                // resolve -> the region-level miss; otherwise the signal-id miss.
-                let reason = if judgment.signal_id.is_empty() && !judgment.change_anchor.is_empty()
-                {
-                    UNKNOWN_CHANGE_ANCHOR_REASON
-                } else {
-                    UNANCHORED_REASON
-                };
-                rejected.push(RejectedJudgment {
-                    signal_id: judgment.signal_id.clone(),
-                    change_anchor: judgment.change_anchor.clone(),
-                    reason: reason.to_string(),
-                });
+            match validate_fresh_judgment(judgment, surface, change_anchor_ids) {
+                Ok(judgment) => accepted.push(judgment),
+                Err(judgment) => rejected.push(judgment),
             }
         }
     }
@@ -475,6 +439,48 @@ pub fn validate_walkthrough(
         rejected_count,
         unanchored_count,
     }
+}
+
+fn validate_fresh_judgment(
+    judgment: &AgentJudgment,
+    surface: &DecisionSurface,
+    change_anchor_ids: &FxHashSet<String>,
+) -> Result<AcceptedJudgment, RejectedJudgment> {
+    // A signal_id (graph finding) is the strong anchor; a change_anchor
+    // (changed region) is the weaker fallback. Prefer the signal.
+    if !judgment.signal_id.is_empty() && surface.accept_signal_id(&judgment.signal_id) {
+        return Ok(AcceptedJudgment {
+            signal_id: judgment.signal_id.clone(),
+            change_anchor: String::new(),
+            anchor_kind: "signal".to_string(),
+            agent_framing: judgment.framing.clone(),
+            concern: judgment.concern.clone(),
+            deterministic: false,
+        });
+    }
+    if !judgment.change_anchor.is_empty() && change_anchor_ids.contains(&judgment.change_anchor) {
+        return Ok(AcceptedJudgment {
+            signal_id: String::new(),
+            change_anchor: judgment.change_anchor.clone(),
+            anchor_kind: "change".to_string(),
+            agent_framing: judgment.framing.clone(),
+            concern: judgment.concern.clone(),
+            deterministic: false,
+        });
+    }
+
+    // Cited a change_anchor (but no valid signal_id) and it did not resolve:
+    // the region-level miss. Otherwise this is the signal-id miss.
+    let reason = if judgment.signal_id.is_empty() && !judgment.change_anchor.is_empty() {
+        UNKNOWN_CHANGE_ANCHOR_REASON
+    } else {
+        UNANCHORED_REASON
+    };
+    Err(RejectedJudgment {
+        signal_id: judgment.signal_id.clone(),
+        change_anchor: judgment.change_anchor.clone(),
+        reason: reason.to_string(),
+    })
 }
 
 /// Parse the agent's judgment JSON from a `--walkthrough-file` path's contents.

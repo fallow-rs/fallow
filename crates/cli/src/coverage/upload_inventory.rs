@@ -208,6 +208,55 @@ impl UploadError {
 }
 
 fn run_inner(args: &UploadInventoryArgs, root: &Path) -> Result<(), UploadError> {
+    let prepared = prepare_inventory_upload(args, root)?;
+    let payload = InventoryRequest {
+        version: prepared.version,
+        git_sha: &prepared.git_sha,
+        functions: &prepared.functions,
+        churn_by_path: prepared.churn_by_path,
+        caller_edges: prepared.caller_edges,
+    };
+
+    if args.dry_run {
+        print_dry_run_summary(
+            &prepared.project_id,
+            &prepared.git_sha,
+            prepared.path_prefix.as_deref(),
+            &prepared.functions,
+            args.api_endpoint.as_deref(),
+        );
+        if args.with_callers {
+            println!(
+                "{LOG_PREFIX}: caller edges resolved for {} functions",
+                format_count(payload.caller_edges.len()),
+            );
+        }
+        return Ok(());
+    }
+
+    let api_key = resolve_api_key(args)?;
+    upload(
+        &prepared.project_id,
+        args.api_endpoint.as_deref(),
+        &api_key,
+        &payload,
+    )
+}
+
+struct PreparedInventory {
+    project_id: String,
+    git_sha: String,
+    path_prefix: Option<String>,
+    functions: Vec<InventoryFunction>,
+    churn_by_path: BTreeMap<String, FileChurnPayload>,
+    caller_edges: BTreeMap<String, Vec<CallerSitePayload>>,
+    version: u8,
+}
+
+fn prepare_inventory_upload(
+    args: &UploadInventoryArgs,
+    root: &Path,
+) -> Result<PreparedInventory, UploadError> {
     let project_id = resolve_project_id(args, root)?;
     let git_sha = resolve_git_sha(args, root)?;
     let path_prefix = normalize_path_prefix(args.path_prefix.as_deref())?;
@@ -252,38 +301,15 @@ fn run_inner(args: &UploadInventoryArgs, root: &Path) -> Result<(), UploadError>
         INVENTORY_BLOB_VERSION_WITH_CALLERS
     };
 
-    let payload = InventoryRequest {
-        version,
-        git_sha: &git_sha,
-        functions: &functions,
+    Ok(PreparedInventory {
+        project_id,
+        git_sha,
+        path_prefix,
+        functions,
         churn_by_path,
         caller_edges,
-    };
-
-    if args.dry_run {
-        print_dry_run_summary(
-            &project_id,
-            &git_sha,
-            path_prefix.as_deref(),
-            &functions,
-            args.api_endpoint.as_deref(),
-        );
-        if args.with_callers {
-            println!(
-                "{LOG_PREFIX}: caller edges resolved for {} functions",
-                format_count(payload.caller_edges.len()),
-            );
-        }
-        return Ok(());
-    }
-
-    let api_key = resolve_api_key(args)?;
-    upload(
-        &project_id,
-        args.api_endpoint.as_deref(),
-        &api_key,
-        &payload,
-    )
+        version,
+    })
 }
 
 fn resolve_project_id(args: &UploadInventoryArgs, root: &Path) -> Result<String, UploadError> {

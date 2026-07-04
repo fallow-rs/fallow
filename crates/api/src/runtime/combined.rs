@@ -2,7 +2,8 @@ use std::{path::PathBuf, time::Instant};
 
 use fallow_config::WorkspaceInfo;
 use fallow_engine::{
-    dead_code::DeadCodeAnalysisArtifacts, project_analysis::ProjectAnalysisArtifactOptions,
+    dead_code::DeadCodeAnalysisArtifacts,
+    project_analysis::{ProjectAnalysisArtifactOptions, ProjectAnalysisArtifacts},
     session::AnalysisSession,
 };
 use fallow_output::{CombinedNextStepsInput, build_combined_next_steps};
@@ -147,14 +148,14 @@ fn run_combined_with_dead_code_session(
 ) -> ProgrammaticResult<CombinedSectionRun> {
     let session = super::dead_code::load_dead_code_session(&prepared.dead_code, resolved)?;
     if share_dupes {
-        return run_combined_with_project_artifacts(
+        return run_combined_with_project_artifacts(CombinedProjectArtifactRun {
             options,
             resolved,
             prepared,
             changed_files,
             share_health,
-            &session,
-        );
+            session: &session,
+        });
     }
     let ctx = DeadCodeSessionRun {
         options,
@@ -176,34 +177,31 @@ fn run_combined_with_dead_code_session(
     })
 }
 
-fn run_combined_with_project_artifacts(
-    options: &CombinedOptions,
-    resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
-    prepared: &PreparedCombinedOptions,
-    changed_files: Option<&FxHashSet<PathBuf>>,
+#[derive(Clone, Copy)]
+struct CombinedProjectArtifactRun<'a> {
+    options: &'a CombinedOptions,
+    resolved: &'a crate::analysis_context::ProgrammaticAnalysisContext,
+    prepared: &'a PreparedCombinedOptions,
+    changed_files: Option<&'a FxHashSet<PathBuf>>,
     share_health: bool,
-    session: &AnalysisSession,
+    session: &'a AnalysisSession,
+}
+
+fn run_combined_with_project_artifacts(
+    run: CombinedProjectArtifactRun<'_>,
 ) -> ProgrammaticResult<CombinedSectionRun> {
+    let CombinedProjectArtifactRun {
+        options,
+        resolved,
+        prepared,
+        changed_files,
+        share_health,
+        session,
+    } = run;
     let retain_dead_code_artifacts =
         share_health && health_may_consume_dead_code_artifacts(&prepared.health, session.config());
-    let dupes_config =
-        super::duplication::build_dupes_config(&prepared.duplication, &session.config().duplicates);
     let section_start = Instant::now();
-    let project = session
-        .analyze_project_with_artifacts(
-            &dupes_config,
-            ProjectAnalysisArtifactOptions {
-                retain_complexity_artifacts: retain_dead_code_artifacts,
-                retain_graph: retain_dead_code_artifacts,
-                changed_files: changed_files.cloned(),
-                collect_source_fingerprints: false,
-            },
-        )
-        .map_err(|err| {
-            ProgrammaticError::new(format!("combined analysis failed: {err}"), 2)
-                .with_code("FALLOW_COMBINED_FAILED")
-                .with_context("combined")
-        })?;
+    let project = analyze_project_artifacts_for_combined(&run, retain_dead_code_artifacts)?;
     let dead_code = super::dead_code::run_dead_code_from_artifacts(
         &prepared.dead_code,
         resolved,
@@ -212,23 +210,17 @@ fn run_combined_with_project_artifacts(
         project.dead_code,
         section_start,
     )?;
-    let pre_computed_duplication_for_health = (options.health
-        && share_health
-        && health_may_consume_duplication_report(&prepared.health)
-        && duplication_options_preserve_health_config(&prepared.duplication))
-    .then(|| project.duplication.clone());
-    let duplication = options
-        .duplication
-        .then(|| {
-            super::duplication::run_duplication_report_with_session(
-                &prepared.duplication,
-                resolved,
-                session,
-                project.duplication,
-                section_start,
-            )
-        })
-        .transpose()?;
+    let pre_computed_duplication_for_health =
+        should_precompute_duplication_for_combined_health(options, prepared, share_health)
+            .then(|| project.duplication.clone());
+    let duplication = run_project_artifact_duplication(
+        options,
+        prepared,
+        resolved,
+        session,
+        project.duplication,
+        section_start,
+    )?;
     let super::dead_code::DeadCodeProgrammaticRunWithArtifacts {
         output: dead_code,
         artifacts,
@@ -254,6 +246,64 @@ fn run_combined_with_project_artifacts(
         root: session.root().to_path_buf(),
         workspaces: Some(session.workspaces().to_vec()),
     })
+}
+
+fn run_project_artifact_duplication(
+    options: &CombinedOptions,
+    prepared: &PreparedCombinedOptions,
+    resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+    duplication: fallow_engine::duplicates::DuplicationReport,
+    section_start: Instant,
+) -> ProgrammaticResult<Option<crate::DuplicationProgrammaticOutput>> {
+    options
+        .duplication
+        .then(|| {
+            super::duplication::run_duplication_report_with_session(
+                &prepared.duplication,
+                resolved,
+                session,
+                duplication,
+                section_start,
+            )
+        })
+        .transpose()
+}
+
+fn should_precompute_duplication_for_combined_health(
+    options: &CombinedOptions,
+    prepared: &PreparedCombinedOptions,
+    share_health: bool,
+) -> bool {
+    options.health
+        && share_health
+        && health_may_consume_duplication_report(&prepared.health)
+        && duplication_options_preserve_health_config(&prepared.duplication)
+}
+
+fn analyze_project_artifacts_for_combined(
+    run: &CombinedProjectArtifactRun<'_>,
+    retain_dead_code_artifacts: bool,
+) -> ProgrammaticResult<ProjectAnalysisArtifacts> {
+    let dupes_config = super::duplication::build_dupes_config(
+        &run.prepared.duplication,
+        &run.session.config().duplicates,
+    );
+    run.session
+        .analyze_project_with_artifacts(
+            &dupes_config,
+            ProjectAnalysisArtifactOptions {
+                retain_complexity_artifacts: retain_dead_code_artifacts,
+                retain_graph: retain_dead_code_artifacts,
+                changed_files: run.changed_files.cloned(),
+                collect_source_fingerprints: false,
+            },
+        )
+        .map_err(|err| {
+            ProgrammaticError::new(format!("combined analysis failed: {err}"), 2)
+                .with_code("FALLOW_COMBINED_FAILED")
+                .with_context("combined")
+        })
 }
 
 fn run_dead_code_with_optional_artifacts(

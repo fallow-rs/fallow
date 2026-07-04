@@ -250,17 +250,27 @@ struct CrapMergeMaps<'a> {
         rustc_hash::FxHashMap<&'a std::path::Path, &'a Vec<crate::suppress::Suppression>>,
 }
 
+struct CrapPathProcessingInput<'a, 'maps, 'b> {
+    path: &'a std::path::Path,
+    per_fn: &'a [scoring::PerFunctionCrap],
+    maps: &'maps CrapMergeMaps<'a>,
+    findings: &'b mut [ComplexityViolation],
+    new_findings: &'b mut Vec<ComplexityViolation>,
+    merge: &'b mut CrapFindingMergeInput<'a>,
+}
+
 /// Process one path's per-function CRAP entries: record threshold state, skip
 /// below-threshold / suppressed frames, then merge into an existing finding or
 /// append a new one to `new_findings`.
-fn process_crap_findings_for_path(
-    path: &std::path::Path,
-    per_fn: &[scoring::PerFunctionCrap],
-    maps: &CrapMergeMaps<'_>,
-    findings: &mut [ComplexityViolation],
-    new_findings: &mut Vec<ComplexityViolation>,
-    input: &mut CrapFindingMergeInput<'_>,
-) {
+fn process_crap_findings_for_path(input: CrapPathProcessingInput<'_, '_, '_>) {
+    let CrapPathProcessingInput {
+        path,
+        per_fn,
+        maps,
+        findings,
+        new_findings,
+        merge,
+    } = input;
     for pf in per_fn {
         let Some(fc) = maps
             .complexity_by_pos
@@ -269,10 +279,10 @@ fn process_crap_findings_for_path(
         else {
             continue;
         };
-        let relative = path.strip_prefix(input.config_root).unwrap_or(path);
+        let relative = path.strip_prefix(merge.config_root).unwrap_or(path);
         let (applied_thresholds, matched_overrides) =
-            input.threshold_resolver.resolve(relative, &fc.name);
-        input.threshold_state_tracker.record_crap(
+            merge.threshold_resolver.resolve(relative, &fc.name);
+        merge.threshold_state_tracker.record_crap(
             path,
             &fc.name,
             MeasuredThresholdMetrics {
@@ -281,7 +291,7 @@ fn process_crap_findings_for_path(
                 crap: pf.crap,
             },
             &matched_overrides,
-            input.threshold_resolver.global,
+            merge.threshold_resolver.global,
         );
         if pf.crap < applied_thresholds.effective.max_crap
             || crap_is_suppressed(path, pf, &maps.suppressions_by_path)
@@ -293,7 +303,7 @@ fn process_crap_findings_for_path(
             .finding_index
             .get(&(path.to_path_buf(), pf.line, pf.col))
         {
-            merge_existing_crap_finding(&mut findings[idx], path, pf, input, applied_thresholds);
+            merge_existing_crap_finding(&mut findings[idx], path, pf, merge, applied_thresholds);
         } else {
             let hook_profile = maps
                 .hook_profiles_by_pos
@@ -304,7 +314,7 @@ fn process_crap_findings_for_path(
                 pf,
                 fc,
                 hook_profile,
-                input,
+                merge,
                 applied_thresholds,
             ));
         }
@@ -333,7 +343,14 @@ pub(super) fn merge_crap_findings(
         if !crap_path_in_scope(path, input) {
             continue;
         }
-        process_crap_findings_for_path(path, per_fn, &maps, findings, &mut new_findings, input);
+        process_crap_findings_for_path(CrapPathProcessingInput {
+            path,
+            per_fn,
+            maps: &maps,
+            findings,
+            new_findings: &mut new_findings,
+            merge: input,
+        });
     }
     findings.extend(new_findings);
 }

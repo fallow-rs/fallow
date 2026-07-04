@@ -1862,40 +1862,10 @@ fn convert_response(
     } else {
         0.0
     };
-
-    // #316 / #319: mirror the cloud runtime-context trust-output contract on the
-    // local report. A capture with no tracked functions carries no usable
-    // runtime evidence, so it is non-actionable (insufficient_evidence) rather
-    // than read as cold. A local capture is fresh (age 0) and origin-unknown.
-    let functions_tracked = response.summary.functions_tracked;
-    let functions_untracked = response.summary.functions_untracked;
-    let denominator = functions_tracked + functions_untracked;
-    let untracked_ratio = if denominator == 0 {
-        0.0
-    } else {
-        functions_untracked as f64 / denominator as f64
-    };
-    let actionable = functions_tracked > 0;
-    let (actionability_reason, actionability_verdict) = if actionable {
-        (None, None)
-    } else {
-        (
-            Some(
-                "No functions were tracked at runtime in this capture, so there is no usable runtime evidence to act on. Treat all functions as do-not-act; this is NOT cold."
-                    .to_owned(),
-            ),
-            Some("insufficient_evidence".to_owned()),
-        )
-    };
-    let provenance = RuntimeCoverageProvenance {
-        data_source: RuntimeCoverageDataSource::Local,
-        is_production: "unknown".to_owned(),
-        freshness_days: Some(0),
-        untracked_ratio,
-        unresolved_ratio: 0.0,
-        stale: false,
-        stale_after_days: RUNTIME_STALE_AFTER_DAYS,
-    };
+    let trust_output = local_runtime_trust_output(
+        response.summary.functions_tracked,
+        response.summary.functions_untracked,
+    );
 
     RuntimeCoverageReport {
         schema_version: RuntimeCoverageSchemaVersion::V1,
@@ -1931,10 +1901,57 @@ fn convert_response(
                 message: warning.message,
             })
             .collect(),
-        actionable,
-        actionability_reason,
-        actionability_verdict,
-        provenance,
+        actionable: trust_output.actionable,
+        actionability_reason: trust_output.actionability_reason,
+        actionability_verdict: trust_output.actionability_verdict,
+        provenance: trust_output.provenance,
+    }
+}
+
+struct RuntimeTrustOutput {
+    actionable: bool,
+    actionability_reason: Option<String>,
+    actionability_verdict: Option<String>,
+    provenance: RuntimeCoverageProvenance,
+}
+
+fn local_runtime_trust_output(
+    functions_tracked: u64,
+    functions_untracked: u64,
+) -> RuntimeTrustOutput {
+    RuntimeTrustOutput {
+        actionable: functions_tracked > 0,
+        actionability_reason: runtime_actionability_reason(functions_tracked),
+        actionability_verdict: runtime_actionability_verdict(functions_tracked),
+        provenance: RuntimeCoverageProvenance {
+            data_source: RuntimeCoverageDataSource::Local,
+            is_production: "unknown".to_owned(),
+            freshness_days: Some(0),
+            untracked_ratio: runtime_untracked_ratio(functions_tracked, functions_untracked),
+            unresolved_ratio: 0.0,
+            stale: false,
+            stale_after_days: RUNTIME_STALE_AFTER_DAYS,
+        },
+    }
+}
+
+fn runtime_actionability_reason(functions_tracked: u64) -> Option<String> {
+    (functions_tracked == 0).then(|| {
+        "No functions were tracked at runtime in this capture, so there is no usable runtime evidence to act on. Treat all functions as do-not-act; this is NOT cold."
+            .to_owned()
+    })
+}
+
+fn runtime_actionability_verdict(functions_tracked: u64) -> Option<String> {
+    (functions_tracked == 0).then(|| "insufficient_evidence".to_owned())
+}
+
+fn runtime_untracked_ratio(functions_tracked: u64, functions_untracked: u64) -> f64 {
+    let denominator = functions_tracked + functions_untracked;
+    if denominator == 0 {
+        0.0
+    } else {
+        functions_untracked as f64 / denominator as f64
     }
 }
 
@@ -1971,53 +1988,13 @@ fn map_runtime_findings(
     let mut findings = findings
         .into_iter()
         .filter_map(|finding| {
-            let verdict = map_verdict(finding.verdict);
-            if matches!(verdict, RuntimeCoverageVerdict::Active) {
-                return None;
-            }
-            let (stable_id, source_hash) = finding.identity.map_or((None, None), |identity| {
-                (Some(identity.stable_id), identity.source_hash)
-            });
-            let discriminators = RuntimeCoverageDiscriminators {
-                tracking_state: tracking_state_label(
-                    &finding.evidence.v8_tracking,
-                    finding.invocations,
-                )
-                .to_owned(),
-                invocation_ratio: finding.invocations.map(|invocations| {
-                    if trace_count == 0 {
-                        0.0
-                    } else {
-                        invocations as f64 / trace_count as f64
-                    }
-                }),
-                low_traffic_threshold,
+            map_runtime_finding(
+                finding,
                 trace_count,
                 min_observation_volume,
+                low_traffic_threshold,
                 meets_observation_volume,
-            };
-            Some(RuntimeCoverageFinding {
-                id: finding.id,
-                stable_id,
-                source_hash,
-                path: PathBuf::from(finding.file),
-                function: finding.function,
-                line: finding.line,
-                verdict,
-                invocations: finding.invocations,
-                confidence: map_confidence(finding.confidence),
-                evidence: map_evidence(finding.evidence),
-                actions: finding
-                    .actions
-                    .into_iter()
-                    .map(|action| RuntimeCoverageAction {
-                        kind: action.kind,
-                        description: action.description,
-                        auto_fixable: action.auto_fixable,
-                    })
-                    .collect(),
-                discriminators: Some(discriminators),
-            })
+            )
         })
         .collect::<Vec<_>>();
     findings.sort_by(|left, right| {
@@ -2027,6 +2004,59 @@ fn map_runtime_findings(
             .then_with(|| left.function.cmp(&right.function))
     });
     findings
+}
+
+fn map_runtime_finding(
+    finding: ProtocolFinding,
+    trace_count: u64,
+    min_observation_volume: u32,
+    low_traffic_threshold: f64,
+    meets_observation_volume: bool,
+) -> Option<RuntimeCoverageFinding> {
+    let verdict = map_verdict(finding.verdict);
+    if matches!(verdict, RuntimeCoverageVerdict::Active) {
+        return None;
+    }
+    let (stable_id, source_hash) = finding.identity.map_or((None, None), |identity| {
+        (Some(identity.stable_id), identity.source_hash)
+    });
+    let discriminators = RuntimeCoverageDiscriminators {
+        tracking_state: tracking_state_label(&finding.evidence.v8_tracking, finding.invocations)
+            .to_owned(),
+        invocation_ratio: finding.invocations.map(|invocations| {
+            if trace_count == 0 {
+                0.0
+            } else {
+                invocations as f64 / trace_count as f64
+            }
+        }),
+        low_traffic_threshold,
+        trace_count,
+        min_observation_volume,
+        meets_observation_volume,
+    };
+    Some(RuntimeCoverageFinding {
+        id: finding.id,
+        stable_id,
+        source_hash,
+        path: PathBuf::from(finding.file),
+        function: finding.function,
+        line: finding.line,
+        verdict,
+        invocations: finding.invocations,
+        confidence: map_confidence(finding.confidence),
+        evidence: map_evidence(finding.evidence),
+        actions: finding
+            .actions
+            .into_iter()
+            .map(|action| RuntimeCoverageAction {
+                kind: action.kind,
+                description: action.description,
+                auto_fixable: action.auto_fixable,
+            })
+            .collect(),
+        discriminators: Some(discriminators),
+    })
 }
 
 fn map_runtime_hot_paths(entries: Vec<ProtocolHotPath>) -> Vec<RuntimeCoverageHotPath> {

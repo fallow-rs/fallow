@@ -1710,6 +1710,20 @@ fn push_framework_boundary_sarif_results(
             )
         },
     );
+    push_framework_render_sarif_results(sarif_results, ctx, snippets);
+}
+
+fn push_framework_render_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    ctx: &SarifCtx<'_>,
+    snippets: &mut SourceSnippetCache,
+) {
+    let SarifCtx {
+        results,
+        root,
+        rules,
+    } = *ctx;
+
     push_sarif_results(sarif_results, &results.unprovided_injects, snippets, |i| {
         sarif_unprovided_inject_fields(
             &i.inject,

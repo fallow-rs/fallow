@@ -217,31 +217,46 @@ struct AuditSubanalyses {
     complexity: crate::HealthProgrammaticOutput,
 }
 
+struct AuditSubanalysisOptions {
+    dead_code: DeadCodeOptions,
+    duplication: DuplicationOptions,
+    complexity: ComplexityOptions,
+}
+
+fn audit_subanalysis_options(
+    options: &AuditOptions,
+    analysis: &AnalysisOptions,
+) -> AuditSubanalysisOptions {
+    AuditSubanalysisOptions {
+        dead_code: DeadCodeOptions {
+            analysis: analysis_with_production(analysis, options.production_dead_code),
+            filters: DeadCodeFilters::default(),
+            files: Vec::new(),
+            include_entry_exports: options.include_entry_exports,
+        },
+        duplication: DuplicationOptions {
+            analysis: analysis_with_production(analysis, options.production_dupes),
+            ..DuplicationOptions::default()
+        },
+        complexity: ComplexityOptions {
+            analysis: analysis_with_production(analysis, options.production_health),
+            max_crap: options.max_crap,
+            complexity: true,
+            css: options.css.unwrap_or(true),
+            css_deep: options.css.unwrap_or(true) && options.css_deep.unwrap_or(true),
+            coverage: options.coverage.clone(),
+            coverage_root: options.coverage_root.clone(),
+            ..ComplexityOptions::default()
+        },
+    }
+}
+
 fn run_audit_subanalyses(
     options: &AuditOptions,
     analysis: &AnalysisOptions,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
-    let dead_code_options = DeadCodeOptions {
-        analysis: analysis_with_production(analysis, options.production_dead_code),
-        filters: DeadCodeFilters::default(),
-        files: Vec::new(),
-        include_entry_exports: options.include_entry_exports,
-    };
-    let duplication_options = DuplicationOptions {
-        analysis: analysis_with_production(analysis, options.production_dupes),
-        ..DuplicationOptions::default()
-    };
-    let complexity_options = ComplexityOptions {
-        analysis: analysis_with_production(analysis, options.production_health),
-        max_crap: options.max_crap,
-        complexity: true,
-        css: options.css.unwrap_or(true),
-        css_deep: options.css.unwrap_or(true) && options.css_deep.unwrap_or(true),
-        coverage: options.coverage.clone(),
-        coverage_root: options.coverage_root.clone(),
-        ..ComplexityOptions::default()
-    };
+    let subanalysis_options = audit_subanalysis_options(options, analysis);
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(analysis)?;
     let production_modes = resolve_effective_production_modes(
         &resolved,
@@ -253,62 +268,101 @@ fn run_audit_subanalyses(
     if production_modes.dead_code == production_modes.dupes
         && production_modes.dead_code == production_modes.health
     {
-        return resolved.install(|| {
-            let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
-            run_all_audit_subanalyses_with_project_artifacts(
-                &dead_code_options,
-                &duplication_options,
-                &complexity_options,
-                &resolved,
-                &session,
-                changed_files,
-            )
-        });
+        return run_shared_project_audit_subanalyses(
+            &subanalysis_options,
+            &resolved,
+            changed_files,
+        );
     }
 
     if production_modes.dead_code == production_modes.health {
-        return resolved.install(|| {
-            let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
-            let (dead_code, complexity) = run_dead_code_and_health_with_session(
-                &dead_code_options,
-                &complexity_options,
-                &resolved,
-                &session,
-                changed_files,
-            )?;
-            Ok(AuditSubanalyses {
-                dead_code,
-                duplication: run_duplication(&duplication_options)?,
-                complexity,
-            })
-        });
+        return run_shared_dead_code_health_audit_subanalyses(
+            &subanalysis_options,
+            &resolved,
+            changed_files,
+        );
     }
 
     if production_modes.dead_code == production_modes.dupes {
-        return resolved.install(|| {
-            let session = super::dead_code::load_dead_code_session(&dead_code_options, &resolved)?;
-            let (dead_code, duplication, _, _) =
-                run_dead_code_and_duplication_with_project_artifacts(ProjectArtifactAuditInput {
-                    dead_code_options: &dead_code_options,
-                    duplication_options: &duplication_options,
-                    resolved: &resolved,
-                    session: &session,
-                    changed_files,
-                    retain_dead_code_artifacts: false,
-                    retain_duplication_artifacts: false,
-                })?;
-            Ok(AuditSubanalyses {
-                dead_code,
-                duplication,
-                complexity: run_health(&complexity_options)?,
-            })
-        });
+        return run_shared_dead_code_dupes_audit_subanalyses(
+            &subanalysis_options,
+            &resolved,
+            changed_files,
+        );
     }
 
     Ok(AuditSubanalyses {
-        dead_code: run_dead_code(&dead_code_options)?,
-        duplication: run_duplication(&duplication_options)?,
-        complexity: run_health(&complexity_options)?,
+        dead_code: run_dead_code(&subanalysis_options.dead_code)?,
+        duplication: run_duplication(&subanalysis_options.duplication)?,
+        complexity: run_health(&subanalysis_options.complexity)?,
+    })
+}
+
+fn run_shared_project_audit_subanalyses(
+    options: &AuditSubanalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    changed_files: Option<&FxHashSet<PathBuf>>,
+) -> ProgrammaticResult<AuditSubanalyses> {
+    resolved.install(|| {
+        let session = super::dead_code::load_dead_code_session(&options.dead_code, resolved)?;
+        run_all_audit_subanalyses_with_project_artifacts(
+            &options.dead_code,
+            &options.duplication,
+            &options.complexity,
+            resolved,
+            &session,
+            changed_files,
+        )
+    })
+}
+
+fn run_shared_dead_code_health_audit_subanalyses(
+    options: &AuditSubanalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    changed_files: Option<&FxHashSet<PathBuf>>,
+) -> ProgrammaticResult<AuditSubanalyses> {
+    resolved.install(|| {
+        let dead_code_options = &options.dead_code;
+        let duplication_options = &options.duplication;
+        let complexity_options = &options.complexity;
+        let session = super::dead_code::load_dead_code_session(dead_code_options, resolved)?;
+        let (dead_code, complexity) = run_dead_code_and_health_with_session(
+            dead_code_options,
+            complexity_options,
+            resolved,
+            &session,
+            changed_files,
+        )?;
+        Ok(AuditSubanalyses {
+            dead_code,
+            duplication: run_duplication(duplication_options)?,
+            complexity,
+        })
+    })
+}
+
+fn run_shared_dead_code_dupes_audit_subanalyses(
+    options: &AuditSubanalysisOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    changed_files: Option<&FxHashSet<PathBuf>>,
+) -> ProgrammaticResult<AuditSubanalyses> {
+    resolved.install(|| {
+        let session = super::dead_code::load_dead_code_session(&options.dead_code, resolved)?;
+        let (dead_code, duplication, _, _) =
+            run_dead_code_and_duplication_with_project_artifacts(ProjectArtifactAuditInput {
+                dead_code_options: &options.dead_code,
+                duplication_options: &options.duplication,
+                resolved,
+                session: &session,
+                changed_files,
+                retain_dead_code_artifacts: false,
+                retain_duplication_artifacts: false,
+            })?;
+        Ok(AuditSubanalyses {
+            dead_code,
+            duplication,
+            complexity: run_health(&options.complexity)?,
+        })
     })
 }
 

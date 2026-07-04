@@ -422,6 +422,13 @@ pub(crate) fn is_astro_file(path: &Path) -> bool {
         .is_some_and(|ext| ext == "astro")
 }
 
+struct AstroFrontmatterAnalysis {
+    extractor: ModuleInfoExtractor,
+    semantic_usage: crate::parse::SemanticUsage,
+    props_harvest: crate::sfc_props::DefinePropsHarvest,
+    complexity: Vec<fallow_types::extract::FunctionComplexity>,
+}
+
 /// Parse an Astro file by extracting the frontmatter section, plus any
 /// `<script src="...">` references and inline `<script>` import statements
 /// in the template body.
@@ -447,57 +454,17 @@ pub(crate) fn parse_astro_to_module(
 
     let frontmatter_offset = frontmatter.as_ref().map_or(0, |script| script.byte_offset);
 
-    let (mut extractor, semantic_usage, props_harvest, frontmatter_complexity) =
-        if let Some(script) = frontmatter.as_ref() {
-            let source_type = SourceType::ts();
-            let allocator = Allocator::default();
-            let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
-            let mut extractor = ModuleInfoExtractor::new();
-            extractor.visit_program(&parser_return.program);
-            let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
-            extractor.remap_spans_with(|span| extraction.remap_span(span));
-            // Run the same `oxc_semantic` unused-binding pass the JS/TS path runs
-            // (`parse.rs::compute_semantic_usage`), crediting template-used names
-            // so a frontmatter import rendered only as `<Header/>` is referenced,
-            // not unused. Astro previously left `unused_import_bindings` empty
-            // (every import treated as referenced), which masked genuinely-dead
-            // frontmatter imports AND prevented `unrendered-component` from ever
-            // firing.
-            let semantic_usage = crate::parse::compute_semantic_usage(
-                &parser_return.program,
-                &extractor.imports,
-                &template_used,
-            );
-            // Harvest the `interface Props { ... }` declaration + `Astro.props`
-            // usage for the `unused-component-prop` Astro arm.
-            let props_harvest = crate::sfc_props::harvest_astro_props(&parser_return.program);
-            // Score the frontmatter's JS functions (the SFC-script analog), so a
-            // complex `.astro` frontmatter contributes to the health complexity
-            // aggregate like a Vue/Svelte `<script>`.
-            let frontmatter_complexity = if need_complexity {
-                compute_astro_frontmatter_complexity(
-                    &parser_return.program,
-                    &script.body,
-                    script.byte_offset,
-                    &line_offsets,
-                )
-            } else {
-                Vec::new()
-            };
-            (
-                extractor,
-                semantic_usage,
-                props_harvest,
-                frontmatter_complexity,
-            )
-        } else {
-            (
-                ModuleInfoExtractor::new(),
-                crate::parse::SemanticUsage::default(),
-                crate::sfc_props::DefinePropsHarvest::default(),
-                Vec::new(),
-            )
-        };
+    let AstroFrontmatterAnalysis {
+        mut extractor,
+        semantic_usage,
+        props_harvest,
+        complexity: frontmatter_complexity,
+    } = analyze_astro_frontmatter(
+        frontmatter.as_ref(),
+        &template_used,
+        need_complexity,
+        &line_offsets,
+    );
 
     extend_imports_from_template(&mut extractor.imports, template, template_offset);
 
@@ -546,6 +513,63 @@ pub(crate) fn parse_astro_to_module(
     }
     info.line_offsets = line_offsets;
     info
+}
+
+fn analyze_astro_frontmatter(
+    frontmatter: Option<&SfcScript>,
+    template_used: &FxHashSet<String>,
+    need_complexity: bool,
+    line_offsets: &[u32],
+) -> AstroFrontmatterAnalysis {
+    let Some(script) = frontmatter else {
+        return empty_astro_frontmatter_analysis();
+    };
+    let source_type = SourceType::ts();
+    let allocator = Allocator::default();
+    let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
+    let extractor = extract_astro_frontmatter_module_info(script, &parser_return.program);
+    let semantic_usage = crate::parse::compute_semantic_usage(
+        &parser_return.program,
+        &extractor.imports,
+        template_used,
+    );
+    let props_harvest = crate::sfc_props::harvest_astro_props(&parser_return.program);
+    let complexity = if need_complexity {
+        compute_astro_frontmatter_complexity(
+            &parser_return.program,
+            &script.body,
+            script.byte_offset,
+            line_offsets,
+        )
+    } else {
+        Vec::new()
+    };
+    AstroFrontmatterAnalysis {
+        extractor,
+        semantic_usage,
+        props_harvest,
+        complexity,
+    }
+}
+
+fn extract_astro_frontmatter_module_info(
+    script: &SfcScript,
+    program: &oxc_ast::ast::Program<'_>,
+) -> ModuleInfoExtractor {
+    let mut extractor = ModuleInfoExtractor::new();
+    extractor.visit_program(program);
+    let extraction = ExtractionResult::contiguous(&script.body, script.byte_offset);
+    extractor.remap_spans_with(|span| extraction.remap_span(span));
+    extractor
+}
+
+fn empty_astro_frontmatter_analysis() -> AstroFrontmatterAnalysis {
+    AstroFrontmatterAnalysis {
+        extractor: ModuleInfoExtractor::new(),
+        semantic_usage: crate::parse::SemanticUsage::default(),
+        props_harvest: crate::sfc_props::DefinePropsHarvest::default(),
+        complexity: Vec::new(),
+    }
 }
 
 /// Score the frontmatter's JS functions (cyclomatic/cognitive), remapping each

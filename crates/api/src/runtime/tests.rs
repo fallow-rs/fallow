@@ -287,7 +287,8 @@ fn audit_reuses_dead_code_artifacts_when_only_health_scope_matches() {
         "programmatic audit must not compare raw production overrides before config resolution"
     );
     assert!(
-        source.contains("duplication: run_duplication(&duplication_options)?"),
+        source.contains("duplication: run_duplication(duplication_options)?")
+            || source.contains("duplication: run_duplication(&duplication_options)?"),
         "the mixed-scope audit branch must only isolate duplication instead of isolating health too"
     );
 }

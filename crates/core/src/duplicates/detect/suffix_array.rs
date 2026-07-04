@@ -68,59 +68,113 @@ fn sais(s: &[usize], alphabet: usize) -> Vec<usize> {
 
     // --- Stage 1: sort the LMS substrings via a first induced-sort pass. ---
     let lms_positions: Vec<usize> = (1..n).filter(|&i| is_lms(&is_s, i)).collect();
-    let mut tails = bucket_ends.clone();
-    for &pos in &lms_positions {
+    sort_lms_substrings(
+        s,
+        &mut sa,
+        &is_s,
+        &lms_positions,
+        &bucket_starts,
+        &bucket_ends,
+    );
+
+    // Collect LMS suffixes in their now-sorted order and assign names by
+    // comparing adjacent LMS substrings.
+    let (names, name_count) = name_lms_substrings(s, &is_s, &sa);
+    let sa1 = reduced_lms_suffix_array(&lms_positions, &names, name_count);
+
+    // --- Stage 3: induce the final suffix array from the sorted LMS order. ---
+    induce_final_suffix_array(
+        s,
+        &mut sa,
+        &SaisInductionCtx {
+            is_s: &is_s,
+            bucket_starts: &bucket_starts,
+            bucket_ends: &bucket_ends,
+        },
+        &lms_positions,
+        &sa1,
+    );
+
+    sa
+}
+
+struct SaisInductionCtx<'a> {
+    is_s: &'a [bool],
+    bucket_starts: &'a [usize],
+    bucket_ends: &'a [usize],
+}
+
+fn sort_lms_substrings(
+    s: &[usize],
+    sa: &mut [usize],
+    is_s: &[bool],
+    lms_positions: &[usize],
+    bucket_starts: &[usize],
+    bucket_ends: &[usize],
+) {
+    let mut tails = bucket_ends.to_vec();
+    for &pos in lms_positions {
         let c = s[pos];
         tails[c] -= 1;
         sa[tails[c]] = pos;
     }
-    induce_l_type(s, &mut sa, &is_s, &bucket_starts);
-    induce_s_type(s, &mut sa, &is_s, &bucket_ends);
+    induce_l_type(s, sa, is_s, bucket_starts);
+    induce_s_type(s, sa, is_s, bucket_ends);
+}
 
-    // Collect LMS suffixes in their now-sorted order and assign names by
-    // comparing adjacent LMS substrings.
-    let mut names = vec![SA_EMPTY; n];
+fn name_lms_substrings(s: &[usize], is_s: &[bool], sa: &[usize]) -> (Vec<usize>, usize) {
+    let mut names = vec![SA_EMPTY; s.len()];
     let mut next_name = 0usize;
     let mut prev: Option<usize> = None;
-    for &pos in &sa {
-        if pos == SA_EMPTY || !is_lms(&is_s, pos) {
+    for &pos in sa {
+        if pos == SA_EMPTY || !is_lms(is_s, pos) {
             continue;
         }
-        if prev.is_some_and(|p| !lms_substrings_equal(s, &is_s, p, pos)) {
+        if prev.is_some_and(|p| !lms_substrings_equal(s, is_s, p, pos)) {
             next_name += 1;
         }
         names[pos] = next_name;
         prev = Some(pos);
     }
-    let name_count = next_name + 1;
+    (names, next_name + 1)
+}
 
+fn reduced_lms_suffix_array(
+    lms_positions: &[usize],
+    names: &[usize],
+    name_count: usize,
+) -> Vec<usize> {
     // Reduced problem: one symbol (its name) per LMS suffix, in original order.
     let s1: Vec<usize> = lms_positions.iter().map(|&p| names[p]).collect();
+    if name_count != s1.len() {
+        return sais(&s1, name_count);
+    }
 
-    let sa1 = if name_count == s1.len() {
-        // All names distinct: the suffix array is the inverse permutation.
-        let mut inv = vec![0usize; s1.len()];
-        for (i, &name) in s1.iter().enumerate() {
-            inv[name] = i;
-        }
-        inv
-    } else {
-        sais(&s1, name_count)
-    };
+    // All names distinct: the suffix array is the inverse permutation.
+    let mut inv = vec![0usize; s1.len()];
+    for (i, &name) in s1.iter().enumerate() {
+        inv[name] = i;
+    }
+    inv
+}
 
-    // --- Stage 3: induce the final suffix array from the sorted LMS order. ---
+fn induce_final_suffix_array(
+    s: &[usize],
+    sa: &mut [usize],
+    ctx: &SaisInductionCtx<'_>,
+    lms_positions: &[usize],
+    sorted_lms_indices: &[usize],
+) {
     sa.fill(SA_EMPTY);
-    let mut tails = bucket_ends.clone();
-    for &idx in sa1.iter().rev() {
+    let mut tails = ctx.bucket_ends.to_vec();
+    for &idx in sorted_lms_indices.iter().rev() {
         let pos = lms_positions[idx];
         let c = s[pos];
         tails[c] -= 1;
         sa[tails[c]] = pos;
     }
-    induce_l_type(s, &mut sa, &is_s, &bucket_starts);
-    induce_s_type(s, &mut sa, &is_s, &bucket_ends);
-
-    sa
+    induce_l_type(s, sa, ctx.is_s, ctx.bucket_starts);
+    induce_s_type(s, sa, ctx.is_s, ctx.bucket_ends);
 }
 
 /// Classify each position as S-type (`true`) or L-type (`false`). The final

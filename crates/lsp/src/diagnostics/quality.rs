@@ -5,16 +5,13 @@ use ls_types::{
     Location, NumberOrString, Position, Range, Uri,
 };
 
+use fallow_api::editor_results::{DuplicateExport, DuplicateLocation};
 use fallow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
 };
 
 use super::doc_link_for_code;
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "export name lengths are bounded by source size"
-)]
 pub fn push_duplicate_export_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -22,58 +19,79 @@ pub fn push_duplicate_export_diagnostics(
     for dup in &results.duplicate_exports {
         let dup = &dup.export;
         for loc in &dup.locations {
-            if let Some(uri) = Uri::from_file_path(&loc.path) {
-                let related_info: Vec<DiagnosticRelatedInformation> = dup
-                    .locations
-                    .iter()
-                    .filter(|l| l.path != loc.path)
-                    .filter_map(|l| {
-                        let other_uri = Uri::from_file_path(&l.path)?;
-                        Some(DiagnosticRelatedInformation {
-                            location: Location {
-                                uri: other_uri,
-                                range: Range {
-                                    start: Position {
-                                        line: l.line.saturating_sub(1),
-                                        character: l.col,
-                                    },
-                                    end: Position {
-                                        line: l.line.saturating_sub(1),
-                                        character: l.col + dup.export_name.len() as u32,
-                                    },
-                                },
-                            },
-                            message: "Also exported here".to_string(),
-                        })
-                    })
-                    .collect();
-                let line = loc.line.saturating_sub(1);
-                map.entry(uri).or_default().push(Diagnostic {
-                    range: Range {
-                        start: Position {
-                            line,
-                            character: loc.col,
-                        },
-                        end: Position {
-                            line,
-                            character: loc.col + dup.export_name.len() as u32,
-                        },
-                    },
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    source: Some("fallow".to_string()),
-                    code: Some(NumberOrString::String("duplicate-export".to_string())),
-                    code_description: doc_link_for_code("duplicate-export"),
-                    message: format!("Duplicate export '{}'", dup.export_name),
-                    related_information: if related_info.is_empty() {
-                        None
-                    } else {
-                        Some(related_info)
-                    },
-                    ..Default::default()
-                });
-            }
+            push_duplicate_export_location_diagnostic(map, dup, loc);
         }
     }
+}
+
+fn push_duplicate_export_location_diagnostic(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    dup: &DuplicateExport,
+    loc: &DuplicateLocation,
+) {
+    let Some(uri) = Uri::from_file_path(&loc.path) else {
+        return;
+    };
+    let related_info = duplicate_export_related_info(dup, loc);
+    let line = loc.line.saturating_sub(1);
+    let export_name_len = duplicate_export_name_len(dup);
+    map.entry(uri).or_default().push(Diagnostic {
+        range: Range {
+            start: Position {
+                line,
+                character: loc.col,
+            },
+            end: Position {
+                line,
+                character: loc.col + export_name_len,
+            },
+        },
+        severity: Some(DiagnosticSeverity::WARNING),
+        source: Some("fallow".to_string()),
+        code: Some(NumberOrString::String("duplicate-export".to_string())),
+        code_description: doc_link_for_code("duplicate-export"),
+        message: format!("Duplicate export '{}'", dup.export_name),
+        related_information: (!related_info.is_empty()).then_some(related_info),
+        ..Default::default()
+    });
+}
+
+fn duplicate_export_related_info(
+    dup: &DuplicateExport,
+    loc: &DuplicateLocation,
+) -> Vec<DiagnosticRelatedInformation> {
+    let export_name_len = duplicate_export_name_len(dup);
+    dup.locations
+        .iter()
+        .filter(|l| l.path != loc.path)
+        .filter_map(|l| {
+            let other_uri = Uri::from_file_path(&l.path)?;
+            Some(DiagnosticRelatedInformation {
+                location: Location {
+                    uri: other_uri,
+                    range: Range {
+                        start: Position {
+                            line: l.line.saturating_sub(1),
+                            character: l.col,
+                        },
+                        end: Position {
+                            line: l.line.saturating_sub(1),
+                            character: l.col + export_name_len,
+                        },
+                    },
+                },
+                message: "Also exported here".to_string(),
+            })
+        })
+        .collect()
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "export name lengths are bounded by source size"
+)]
+fn duplicate_export_name_len(dup: &DuplicateExport) -> u32 {
+    dup.export_name.len() as u32
 }
 
 pub fn push_duplication_diagnostics(

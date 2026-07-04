@@ -76,82 +76,118 @@ pub enum CiProvider {
 
 pub fn run(command: CiCommand, output: OutputFormat) -> ExitCode {
     match command {
-        CiCommand::PlanPrComment {
-            body,
-            marker_id,
-            clean,
-            existing_comment_id,
-            existing_body,
-        } => plan_pr_comment(
-            &body,
-            marker_id,
-            clean,
-            existing_comment_id,
-            existing_body.as_deref(),
-            output,
-        ),
+        command @ CiCommand::PlanPrComment { .. } => run_plan_pr_comment(command, output),
         command @ CiCommand::PostPrComment { .. } => run_post_pr_comment(command, output),
-        CiCommand::PostReview {
+        command @ CiCommand::PostReview { .. } => run_post_review(command, output),
+        command @ CiCommand::PostCheckRun { .. } => run_post_check_run_command(command, output),
+        command @ CiCommand::ReconcileReview { .. } => run_reconcile_review(command, output),
+    }
+}
+
+fn run_plan_pr_comment(command: CiCommand, output: OutputFormat) -> ExitCode {
+    let CiCommand::PlanPrComment {
+        body,
+        marker_id,
+        clean,
+        existing_comment_id,
+        existing_body,
+    } = command
+    else {
+        unreachable!("ci plan-pr-comment runner called with different variant");
+    };
+
+    plan_pr_comment(
+        &body,
+        marker_id,
+        clean,
+        existing_comment_id,
+        existing_body.as_deref(),
+        output,
+    )
+}
+
+fn run_post_review(command: CiCommand, output: OutputFormat) -> ExitCode {
+    let CiCommand::PostReview {
+        provider,
+        target,
+        envelope,
+        repo,
+        project_id,
+        api_url,
+        dry_run,
+    } = command
+    else {
+        unreachable!("ci post-review runner called with different variant");
+    };
+
+    post_review(
+        PostReviewInput {
             provider,
-            target,
-            envelope,
-            repo,
-            project_id,
-            api_url,
+            target: target.as_deref(),
+            envelope: &envelope,
+            repo: repo.as_deref(),
+            project_id: project_id.as_deref(),
+            api_url: api_url.as_deref(),
             dry_run,
-        } => post_review(
-            PostReviewInput {
-                provider,
-                target: target.as_deref(),
-                envelope: &envelope,
-                repo: repo.as_deref(),
-                project_id: project_id.as_deref(),
-                api_url: api_url.as_deref(),
-                dry_run,
-            },
-            output,
-        ),
-        CiCommand::PostCheckRun {
-            provider,
-            decision,
-            repo,
-            head_sha,
-            api_url,
+        },
+        output,
+    )
+}
+
+fn run_post_check_run_command(command: CiCommand, output: OutputFormat) -> ExitCode {
+    let CiCommand::PostCheckRun {
+        provider,
+        decision,
+        repo,
+        head_sha,
+        api_url,
+        split_gates,
+        dry_run,
+    } = command
+    else {
+        unreachable!("ci post-check-run runner called with different variant");
+    };
+
+    run_post_check_run(
+        provider,
+        PostCheckRunInput {
+            decision: &decision,
+            repo: &repo,
+            head_sha: &head_sha,
+            api_url: api_url.as_deref(),
             split_gates,
             dry_run,
-        } => run_post_check_run(
-            provider,
-            PostCheckRunInput {
-                decision: &decision,
-                repo: &repo,
-                head_sha: &head_sha,
-                api_url: api_url.as_deref(),
-                split_gates,
-                dry_run,
-            },
-            output,
-        ),
-        CiCommand::ReconcileReview {
-            provider,
-            target,
-            envelope,
-            repo,
-            project_id,
-            api_url,
+        },
+        output,
+    )
+}
+
+fn run_reconcile_review(command: CiCommand, output: OutputFormat) -> ExitCode {
+    let CiCommand::ReconcileReview {
+        provider,
+        target,
+        envelope,
+        repo,
+        project_id,
+        api_url,
+        dry_run,
+    } = command
+    else {
+        unreachable!("ci reconcile-review runner called with different variant");
+    };
+
+    reconcile_review(
+        provider,
+        target.as_deref(),
+        &envelope,
+        ReconcileOptions {
+            repo: repo.as_deref(),
+            project_id: project_id.as_deref(),
+            api_url: api_url.as_deref(),
             dry_run,
-        } => reconcile_review(
-            provider,
-            target.as_deref(),
-            &envelope,
-            ReconcileOptions {
-                repo: repo.as_deref(),
-                project_id: project_id.as_deref(),
-                api_url: api_url.as_deref(),
-                dry_run,
-            },
-            output,
-        ),
-    }
+        },
+        output,
+    )
 }
 
 fn run_post_pr_comment(command: CiCommand, output: OutputFormat) -> ExitCode {
@@ -541,30 +577,43 @@ fn load_github_state(
             break;
         }
         for comment in comments {
-            let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
-            if let Some(fingerprint) = extract_fallow_fingerprint(body) {
-                state.fingerprints.insert(fingerprint.clone());
-                if let Some(id) = comment.get("id").and_then(Value::as_u64) {
-                    state
-                        .github_comments_by_fingerprint
-                        .entry(fingerprint)
-                        .or_default()
-                        .push(id);
-                }
-            }
-            if is_github_bot_comment(comment)
-                && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
-            {
-                state.github_resolved_markers.insert(fingerprint);
-            }
+            record_github_review_comment(&mut state, comment);
         }
         if comments.len() < 100 {
             break;
         }
     }
 
-    load_github_review_threads(&mut state, &agent, &repo, pr, &token, api)?;
+    load_github_review_threads(
+        &mut state,
+        GithubConnection {
+            agent: &agent,
+            repo: &repo,
+            pr,
+            token: &token,
+            api,
+        },
+    )?;
     Ok(state)
+}
+
+fn record_github_review_comment(state: &mut ProviderState, comment: &Value) {
+    let body = comment.get("body").and_then(Value::as_str).unwrap_or("");
+    if let Some(fingerprint) = extract_fallow_fingerprint(body) {
+        state.fingerprints.insert(fingerprint.clone());
+        if let Some(id) = comment.get("id").and_then(Value::as_u64) {
+            state
+                .github_comments_by_fingerprint
+                .entry(fingerprint)
+                .or_default()
+                .push(id);
+        }
+    }
+    if is_github_bot_comment(comment)
+        && let Some(fingerprint) = extract_marker(body, "fallow-resolved-fingerprint:")
+    {
+        state.github_resolved_markers.insert(fingerprint);
+    }
 }
 
 const GITHUB_REVIEW_THREADS_QUERY: &str = r"
@@ -587,12 +636,15 @@ query($owner:String!, $name:String!, $number:Int!, $cursor:String) {
 
 fn load_github_review_threads(
     state: &mut ProviderState,
-    agent: &ureq::Agent,
-    repo: &str,
-    pr: &str,
-    token: &str,
-    api: &str,
+    conn: GithubConnection<'_>,
 ) -> Result<(), String> {
+    let GithubConnection {
+        agent,
+        repo,
+        pr,
+        token,
+        api,
+    } = conn;
     let (owner, name) = repo
         .split_once('/')
         .ok_or_else(|| format!("GitHub repo must be owner/name, got '{repo}'"))?;

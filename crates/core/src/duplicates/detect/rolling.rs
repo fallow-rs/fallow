@@ -31,6 +31,16 @@ enum SeedBucket {
     Many(Vec<SeedClass>),
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct RollingDetectInput<'a> {
+    pub(super) files: &'a [FileData],
+    pub(super) min_tokens: usize,
+    pub(super) min_lines: usize,
+    pub(super) skip_local: bool,
+    pub(super) totals: CorpusTotals,
+    pub(super) may_have_boundaries: bool,
+}
+
 impl SeedOccurrences {
     fn push(&mut self, occurrence: Occurrence) {
         match self {
@@ -111,25 +121,22 @@ impl SeedBucket {
     }
 }
 
-pub(super) fn detect(
-    files: &[FileData],
-    min_tokens: usize,
-    min_lines: usize,
-    skip_local: bool,
-    totals: CorpusTotals,
-    may_have_boundaries: bool,
-) -> DuplicationReport {
+pub(super) fn detect(input: RollingDetectInput<'_>) -> DuplicationReport {
+    let RollingDetectInput {
+        files,
+        min_tokens,
+        min_lines,
+        skip_local,
+        totals,
+        may_have_boundaries,
+    } = input;
     let t0 = std::time::Instant::now();
     let ranked_files = ranking::rank_reduce(files);
     let rank_time = t0.elapsed();
 
     let t0 = std::time::Instant::now();
-    let boundary_prefixes = if may_have_boundaries {
-        build_boundary_prefixes(files)
-    } else {
-        std::iter::repeat_with(|| None).take(files.len()).collect()
-    };
-    let has_boundaries = may_have_boundaries && boundary_prefixes.iter().any(Option::is_some);
+    let (boundary_prefixes, has_boundaries) =
+        boundary_prefixes_for_detection(files, may_have_boundaries);
     let seed_buckets = build_seed_buckets(
         &ranked_files,
         &boundary_prefixes,
@@ -180,6 +187,19 @@ pub(super) fn detect(
         mirrored_directories: vec![],
         stats,
     }
+}
+
+fn boundary_prefixes_for_detection(
+    files: &[FileData],
+    may_have_boundaries: bool,
+) -> (Vec<Option<Vec<u32>>>, bool) {
+    let boundary_prefixes = if may_have_boundaries {
+        build_boundary_prefixes(files)
+    } else {
+        std::iter::repeat_with(|| None).take(files.len()).collect()
+    };
+    let has_boundaries = may_have_boundaries && boundary_prefixes.iter().any(Option::is_some);
+    (boundary_prefixes, has_boundaries)
 }
 
 fn build_seed_buckets(
@@ -289,6 +309,13 @@ struct SeedClassContext<'a, 'b> {
     groups: &'b mut Vec<RawGroup>,
 }
 
+struct GroupCollectionContext<'a, 'b> {
+    ranked_files: &'a [Vec<u32>],
+    boundary_prefixes: &'a [Option<Vec<u32>>],
+    has_boundaries: bool,
+    groups: &'b mut Vec<RawGroup>,
+}
+
 fn process_seed_class(ctx: &mut SeedClassContext<'_, '_>, class: SeedClass) {
     let Some(occurrences) = class.occurrences.into_many() else {
         return;
@@ -304,14 +331,13 @@ fn process_seed_class(ctx: &mut SeedClassContext<'_, '_>, class: SeedClass) {
     );
 
     if is_left_maximal {
-        collect_extended_groups(
-            ctx.ranked_files,
-            ctx.boundary_prefixes,
-            ctx.has_boundaries,
-            &occurrences,
-            ctx.min_tokens,
-            ctx.groups,
-        );
+        let mut group_ctx = GroupCollectionContext {
+            ranked_files: ctx.ranked_files,
+            boundary_prefixes: ctx.boundary_prefixes,
+            has_boundaries: ctx.has_boundaries,
+            groups: ctx.groups,
+        };
+        collect_extended_groups(&mut group_ctx, &occurrences, ctx.min_tokens);
     }
 }
 
@@ -371,43 +397,40 @@ fn is_left_maximal(
 }
 
 fn collect_extended_groups(
-    ranked_files: &[Vec<u32>],
-    boundary_prefixes: &[Option<Vec<u32>>],
-    has_boundaries: bool,
+    ctx: &mut GroupCollectionContext<'_, '_>,
     occurrences: &[Occurrence],
     mut length: usize,
-    groups: &mut Vec<RawGroup>,
 ) {
     if occurrences.len() == 2 {
         let length = extend_pair_length(
-            ranked_files,
-            boundary_prefixes,
-            has_boundaries,
+            ctx.ranked_files,
+            ctx.boundary_prefixes,
+            ctx.has_boundaries,
             occurrences[0],
             occurrences[1],
             length,
         );
-        push_raw_group(occurrences, length, groups);
+        push_raw_group(occurrences, length, ctx.groups);
         return;
     }
 
     length = extend_uniform_length(
-        ranked_files,
-        boundary_prefixes,
-        has_boundaries,
+        ctx.ranked_files,
+        ctx.boundary_prefixes,
+        ctx.has_boundaries,
         occurrences,
         length,
     );
 
     let children = collect_child_occurrences(
-        ranked_files,
-        boundary_prefixes,
-        has_boundaries,
+        ctx.ranked_files,
+        ctx.boundary_prefixes,
+        ctx.has_boundaries,
         occurrences,
         length,
     );
 
-    push_raw_group(occurrences, length, groups);
+    push_raw_group(occurrences, length, ctx.groups);
 
     let Some(children) = children else {
         return;
@@ -418,20 +441,13 @@ fn collect_extended_groups(
         .filter_map(SeedOccurrences::into_many)
     {
         if is_left_maximal(
-            ranked_files,
-            boundary_prefixes,
-            has_boundaries,
+            ctx.ranked_files,
+            ctx.boundary_prefixes,
+            ctx.has_boundaries,
             &child,
             length + 1,
         ) {
-            collect_extended_groups(
-                ranked_files,
-                boundary_prefixes,
-                has_boundaries,
-                &child,
-                length + 1,
-                groups,
-            );
+            collect_extended_groups(ctx, &child, length + 1);
         }
     }
 }
@@ -837,6 +853,17 @@ mod tests {
         }
     }
 
+    fn detect_files(files: &[FileData], min_tokens: usize) -> DuplicationReport {
+        detect(RollingDetectInput {
+            files,
+            min_tokens,
+            min_lines: 1,
+            skip_local: false,
+            totals: totals(files),
+            may_have_boundaries: false,
+        })
+    }
+
     #[test]
     fn rolling_detects_exact_duplicate_across_files() {
         let files = vec![
@@ -844,7 +871,7 @@ mod tests {
             make_file("b.ts", &[1, 2, 3, 4, 5]),
         ];
 
-        let report = detect(&files, 3, 1, false, totals(&files), false);
+        let report = detect_files(&files, 3);
 
         assert_eq!(report.clone_groups.len(), 1);
         assert_eq!(report.clone_groups[0].instances.len(), 2);
@@ -859,7 +886,7 @@ mod tests {
             make_file("c.ts", &[1, 2, 3, 9, 10, 11]),
         ];
 
-        let report = detect(&files, 3, 1, false, totals(&files), false);
+        let report = detect_files(&files, 3);
 
         assert!(
             report
@@ -874,7 +901,7 @@ mod tests {
     fn rolling_keeps_adjacent_same_file_clone_that_extends_from_seed() {
         let files = vec![make_file("a.ts", &[5, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5])];
 
-        let report = detect(&files, 3, 1, false, totals(&files), false);
+        let report = detect_files(&files, 3);
 
         assert_eq!(report.clone_groups.len(), 1);
         assert_eq!(report.clone_groups[0].instances.len(), 2);
@@ -927,15 +954,15 @@ mod tests {
             },
         ];
         let mut groups = Vec::new();
+        let boundary_prefixes = vec![None, None, None];
+        let mut ctx = GroupCollectionContext {
+            ranked_files: &ranked_files,
+            boundary_prefixes: &boundary_prefixes,
+            has_boundaries: false,
+            groups: &mut groups,
+        };
 
-        collect_extended_groups(
-            &ranked_files,
-            &[None, None, None],
-            false,
-            &occurrences,
-            3,
-            &mut groups,
-        );
+        collect_extended_groups(&mut ctx, &occurrences, 3);
 
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].length, 20_000);

@@ -12,7 +12,7 @@ use super::filters::{
     collect_candidate_paths, filter_files_to_paths, filter_hotspots_by_diff,
     filter_refactoring_targets_by_diff,
 };
-use super::hotspots::{self, compute_hotspots};
+use super::hotspots::{self, HotspotComputationInput, compute_hotspots};
 use super::scoring;
 use super::targets::{self, TargetAuxData, compute_refactoring_targets};
 
@@ -180,14 +180,14 @@ fn compute_filtered_hotspots(
 ) -> (Vec<HotspotEntry>, Option<HotspotSummary>, f64) {
     let t = Instant::now();
     let (mut hotspots, hotspot_summary) = if let Some(churn_data) = input.churn_fetch {
-        compute_hotspots(
-            input.opts,
-            input.config,
-            input.file_scores_slice,
-            input.ignore_set,
-            input.ws_roots,
-            churn_data,
-        )
+        compute_hotspots(HotspotComputationInput {
+            opts: input.opts,
+            config: input.config,
+            file_scores: input.file_scores_slice,
+            ignore_set: input.ignore_set,
+            ws_roots: input.ws_roots,
+            churn_fetch: churn_data,
+        })
     } else {
         (Vec::new(), None)
     };

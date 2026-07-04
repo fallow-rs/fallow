@@ -55,22 +55,32 @@ fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
     lines.push(format!("  File: {reachable}{entry}"));
     lines.push(format!("  Reason: {}", trace.reason));
 
-    if !trace.direct_references.is_empty() {
-        lines.push(String::new());
-        lines.push(format!(
-            "  {} direct reference(s):",
-            trace.direct_references.len()
-        ));
-        for r in &trace.direct_references {
-            lines.push(format!(
-                "    {} {} ({})",
-                "->".dimmed(),
-                r.from_file.display(),
-                r.kind.dimmed()
-            ));
-        }
-    }
+    push_export_trace_direct_references(&mut lines, trace);
+    push_export_trace_re_export_chains(&mut lines, trace);
+    lines.push(String::new());
+    lines
+}
 
+fn push_export_trace_direct_references(lines: &mut Vec<String>, trace: &ExportTrace) {
+    if trace.direct_references.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    lines.push(format!(
+        "  {} direct reference(s):",
+        trace.direct_references.len()
+    ));
+    for r in &trace.direct_references {
+        lines.push(format!(
+            "    {} {} ({})",
+            "->".dimmed(),
+            r.from_file.display(),
+            r.kind.dimmed()
+        ));
+    }
+}
+
+fn push_export_trace_re_export_chains(lines: &mut Vec<String>, trace: &ExportTrace) {
     if !trace.re_export_chains.is_empty() {
         lines.push(String::new());
         lines.push("  Re-exported through:".to_string());
@@ -84,8 +94,6 @@ fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
             ));
         }
     }
-    lines.push(String::new());
-    lines
 }
 
 fn build_file_trace_human_lines(trace: &FileTrace) -> Vec<String> {

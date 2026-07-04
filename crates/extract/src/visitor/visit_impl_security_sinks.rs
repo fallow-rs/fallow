@@ -378,60 +378,72 @@ fn collect_source_paths_into(expr: &Expression<'_>, out: &mut Vec<String>) {
             collect_source_paths_into(&member.object, out);
             collect_source_paths_into(&member.expression, out);
         }
-        Expression::BinaryExpression(bin) => {
-            collect_source_paths_into(&bin.left, out);
-            collect_source_paths_into(&bin.right, out);
-        }
-        Expression::LogicalExpression(logical) => {
-            collect_source_paths_into(&logical.left, out);
-            collect_source_paths_into(&logical.right, out);
-        }
-        Expression::ConditionalExpression(cond) => {
-            collect_source_paths_into(&cond.test, out);
-            collect_source_paths_into(&cond.consequent, out);
-            collect_source_paths_into(&cond.alternate, out);
-        }
-        Expression::SequenceExpression(seq) => {
-            for e in &seq.expressions {
-                collect_source_paths_into(e, out);
-            }
-        }
-        Expression::TemplateLiteral(tpl) => {
-            for e in &tpl.expressions {
-                collect_source_paths_into(e, out);
-            }
-        }
+        Expression::BinaryExpression(bin) => collect_binary_source_paths(bin, out),
+        Expression::LogicalExpression(logical) => collect_logical_source_paths(logical, out),
+        Expression::ConditionalExpression(cond) => collect_conditional_source_paths(cond, out),
+        Expression::SequenceExpression(seq) => collect_sequence_source_paths(seq, out),
+        Expression::TemplateLiteral(tpl) => collect_template_source_paths(tpl, out),
         Expression::AwaitExpression(await_expr) => {
             collect_source_paths_into(&await_expr.argument, out);
         }
         Expression::UnaryExpression(unary) => collect_source_paths_into(&unary.argument, out),
-        Expression::CallExpression(call) => {
-            collect_source_paths_into(&call.callee, out);
-            for arg in &call.arguments {
-                if let Some(arg_expr) = arg.as_expression() {
-                    collect_source_paths_into(arg_expr, out);
-                }
-            }
-        }
-        Expression::ObjectExpression(obj) => {
-            // A direct source read nested in an object literal value
-            // (`{ content: req.body.text }`) still carries taint.
-            for prop in &obj.properties {
-                if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-                    collect_source_paths_into(&prop.value, out);
-                }
-            }
-        }
-        Expression::ArrayExpression(array) => {
-            // A direct source read nested in an array element, including an object
-            // in an array (`messages: [{ content: req.body.text }]`).
-            for element in &array.elements {
-                if let Some(element_expr) = element.as_expression() {
-                    collect_source_paths_into(element_expr, out);
-                }
-            }
-        }
+        Expression::CallExpression(call) => collect_call_source_paths(call, out),
+        Expression::ObjectExpression(obj) => collect_object_source_paths(obj, out),
+        Expression::ArrayExpression(array) => collect_array_source_paths(array, out),
         _ => {}
+    }
+}
+
+fn collect_binary_source_paths(bin: &BinaryExpression<'_>, out: &mut Vec<String>) {
+    collect_source_paths_into(&bin.left, out);
+    collect_source_paths_into(&bin.right, out);
+}
+
+fn collect_logical_source_paths(logical: &LogicalExpression<'_>, out: &mut Vec<String>) {
+    collect_source_paths_into(&logical.left, out);
+    collect_source_paths_into(&logical.right, out);
+}
+
+fn collect_conditional_source_paths(cond: &ConditionalExpression<'_>, out: &mut Vec<String>) {
+    collect_source_paths_into(&cond.test, out);
+    collect_source_paths_into(&cond.consequent, out);
+    collect_source_paths_into(&cond.alternate, out);
+}
+
+fn collect_sequence_source_paths(seq: &SequenceExpression<'_>, out: &mut Vec<String>) {
+    for expr in &seq.expressions {
+        collect_source_paths_into(expr, out);
+    }
+}
+
+fn collect_template_source_paths(tpl: &TemplateLiteral<'_>, out: &mut Vec<String>) {
+    for expr in &tpl.expressions {
+        collect_source_paths_into(expr, out);
+    }
+}
+
+fn collect_call_source_paths(call: &CallExpression<'_>, out: &mut Vec<String>) {
+    collect_source_paths_into(&call.callee, out);
+    for arg in &call.arguments {
+        if let Some(arg_expr) = arg.as_expression() {
+            collect_source_paths_into(arg_expr, out);
+        }
+    }
+}
+
+fn collect_object_source_paths(obj: &ObjectExpression<'_>, out: &mut Vec<String>) {
+    for prop in &obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+            collect_source_paths_into(&prop.value, out);
+        }
+    }
+}
+
+fn collect_array_source_paths(array: &ArrayExpression<'_>, out: &mut Vec<String>) {
+    for element in &array.elements {
+        if let Some(element_expr) = element.as_expression() {
+            collect_source_paths_into(element_expr, out);
+        }
     }
 }
 
@@ -453,59 +465,70 @@ fn collect_idents_into(expr: &Expression<'_>, out: &mut Vec<String>) {
             collect_idents_into(&member.object, out);
             collect_idents_into(&member.expression, out);
         }
-        Expression::BinaryExpression(bin) => {
-            collect_idents_into(&bin.left, out);
-            collect_idents_into(&bin.right, out);
-        }
-        Expression::LogicalExpression(logical) => {
-            collect_idents_into(&logical.left, out);
-            collect_idents_into(&logical.right, out);
-        }
-        Expression::ConditionalExpression(cond) => {
-            collect_idents_into(&cond.test, out);
-            collect_idents_into(&cond.consequent, out);
-            collect_idents_into(&cond.alternate, out);
-        }
-        Expression::SequenceExpression(seq) => {
-            for e in &seq.expressions {
-                collect_idents_into(e, out);
-            }
-        }
-        Expression::TemplateLiteral(tpl) => {
-            for e in &tpl.expressions {
-                collect_idents_into(e, out);
-            }
-        }
+        Expression::BinaryExpression(bin) => collect_binary_idents(bin, out),
+        Expression::LogicalExpression(logical) => collect_logical_idents(logical, out),
+        Expression::ConditionalExpression(cond) => collect_conditional_idents(cond, out),
+        Expression::SequenceExpression(seq) => collect_sequence_idents(seq, out),
+        Expression::TemplateLiteral(tpl) => collect_template_idents(tpl, out),
         Expression::AwaitExpression(await_expr) => collect_idents_into(&await_expr.argument, out),
         Expression::UnaryExpression(unary) => collect_idents_into(&unary.argument, out),
-        Expression::CallExpression(call) => {
-            // The callee can carry the taint (`getId().trim()` -> getId), as can
-            // each argument (`escape(id)` -> id). Bounded one level by recursion.
-            collect_idents_into(&call.callee, out);
-            for arg in &call.arguments {
-                if let Some(arg_expr) = arg.as_expression() {
-                    collect_idents_into(arg_expr, out);
-                }
-            }
-        }
-        Expression::ObjectExpression(obj) => {
-            for prop in &obj.properties {
-                if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-                    collect_idents_into(&prop.value, out);
-                }
-            }
-        }
-        Expression::ArrayExpression(array) => {
-            // Taint can ride an array element, including an object nested in an
-            // array (`messages: [{ content: userInput }]`, the canonical OpenAI /
-            // Anthropic chat shape). Recurse into each element expression.
-            for element in &array.elements {
-                if let Some(element_expr) = element.as_expression() {
-                    collect_idents_into(element_expr, out);
-                }
-            }
-        }
+        Expression::CallExpression(call) => collect_call_idents(call, out),
+        Expression::ObjectExpression(obj) => collect_object_idents(obj, out),
+        Expression::ArrayExpression(array) => collect_array_idents(array, out),
         _ => {}
+    }
+}
+
+fn collect_binary_idents(bin: &BinaryExpression<'_>, out: &mut Vec<String>) {
+    collect_idents_into(&bin.left, out);
+    collect_idents_into(&bin.right, out);
+}
+
+fn collect_logical_idents(logical: &LogicalExpression<'_>, out: &mut Vec<String>) {
+    collect_idents_into(&logical.left, out);
+    collect_idents_into(&logical.right, out);
+}
+
+fn collect_conditional_idents(cond: &ConditionalExpression<'_>, out: &mut Vec<String>) {
+    collect_idents_into(&cond.test, out);
+    collect_idents_into(&cond.consequent, out);
+    collect_idents_into(&cond.alternate, out);
+}
+
+fn collect_sequence_idents(seq: &SequenceExpression<'_>, out: &mut Vec<String>) {
+    for expr in &seq.expressions {
+        collect_idents_into(expr, out);
+    }
+}
+
+fn collect_template_idents(tpl: &TemplateLiteral<'_>, out: &mut Vec<String>) {
+    for expr in &tpl.expressions {
+        collect_idents_into(expr, out);
+    }
+}
+
+fn collect_call_idents(call: &CallExpression<'_>, out: &mut Vec<String>) {
+    collect_idents_into(&call.callee, out);
+    for arg in &call.arguments {
+        if let Some(arg_expr) = arg.as_expression() {
+            collect_idents_into(arg_expr, out);
+        }
+    }
+}
+
+fn collect_object_idents(obj: &ObjectExpression<'_>, out: &mut Vec<String>) {
+    for prop in &obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+            collect_idents_into(&prop.value, out);
+        }
+    }
+}
+
+fn collect_array_idents(array: &ArrayExpression<'_>, out: &mut Vec<String>) {
+    for element in &array.elements {
+        if let Some(element_expr) = element.as_expression() {
+            collect_idents_into(element_expr, out);
+        }
     }
 }
 

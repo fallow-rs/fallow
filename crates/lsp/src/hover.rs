@@ -65,6 +65,30 @@ pub fn build_hover(input: HoverInput<'_>) -> Option<Hover> {
         return Some(hover);
     }
 
+    if let Some(hover) = check_component_hover(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_unresolved_import(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_security(results, file_path, position) {
+        return Some(hover);
+    }
+
+    if let Some(hover) = check_duplication(duplication, file_path, position) {
+        return Some(hover);
+    }
+
+    None
+}
+
+fn check_component_hover(
+    results: &AnalysisResults,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
     if let Some(hover) = check_unrendered_component(results, file_path, position) {
         return Some(hover);
     }
@@ -104,23 +128,7 @@ pub fn build_hover(input: HoverInput<'_>) -> Option<Hover> {
         return Some(hover);
     }
 
-    if let Some(hover) = check_react_component_intel(results, file_path, position) {
-        return Some(hover);
-    }
-
-    if let Some(hover) = check_unresolved_import(results, file_path, position) {
-        return Some(hover);
-    }
-
-    if let Some(hover) = check_security(results, file_path, position) {
-        return Some(hover);
-    }
-
-    if let Some(hover) = check_duplication(duplication, file_path, position) {
-        return Some(hover);
-    }
-
-    None
+    check_react_component_intel(results, file_path, position)
 }
 
 #[cfg(test)]
@@ -432,10 +440,6 @@ fn used_export_hover_markdown(usage: &fallow_api::editor_results::ExportUsage) -
 }
 
 /// Check if the position is on an unused enum or class member.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "member name lengths are bounded by source size"
-)]
 fn check_unused_member(
     results: &AnalysisResults,
     file_path: &Path,
@@ -462,44 +466,58 @@ fn check_unused_member(
         ),
     ] {
         for member in members {
-            if member.path != file_path {
-                continue;
+            if let Some(hover) = unused_member_hover(member, kind_label, file_path, position) {
+                return Some(hover);
             }
-            let member_line = member.line.saturating_sub(1);
-            if member_line != position.line {
-                continue;
-            }
-            let end_col = member.col + member.member_name.len() as u32;
-            if position.character < member.col || position.character >= end_col {
-                continue;
-            }
-
-            let qualified = format!("{}.{}", member.parent_name, member.member_name);
-            let value = format!(
-                "**fallow**: {kind_label} {} is never used outside its declaration.",
-                format_inline_code(&qualified),
-            );
-
-            return Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value,
-                }),
-                range: Some(Range {
-                    start: Position {
-                        line: member_line,
-                        character: member.col,
-                    },
-                    end: Position {
-                        line: member_line,
-                        character: member.col + member.member_name.len() as u32,
-                    },
-                }),
-            });
         }
     }
 
     None
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "member name lengths are bounded by source size"
+)]
+fn unused_member_hover(
+    member: &fallow_api::editor_results::UnusedMember,
+    kind_label: &str,
+    file_path: &Path,
+    position: Position,
+) -> Option<Hover> {
+    if member.path != file_path {
+        return None;
+    }
+    let member_line = member.line.saturating_sub(1);
+    if member_line != position.line {
+        return None;
+    }
+    let end_col = member.col + member.member_name.len() as u32;
+    if position.character < member.col || position.character >= end_col {
+        return None;
+    }
+
+    let qualified = format!("{}.{}", member.parent_name, member.member_name);
+    let value = format!(
+        "**fallow**: {kind_label} {} is never used outside its declaration.",
+        format_inline_code(&qualified),
+    );
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value,
+        }),
+        range: Some(Range {
+            start: Position {
+                line: member_line,
+                character: member.col,
+            },
+            end: Position {
+                line: member_line,
+                character: end_col,
+            },
+        }),
+    })
 }
 
 /// Check if the position is on an unrendered Vue/Svelte component anchor.

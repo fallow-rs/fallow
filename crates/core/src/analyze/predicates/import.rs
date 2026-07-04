@@ -32,6 +32,65 @@ pub fn is_virtual_module(name: &str) -> bool {
     name.starts_with("virtual:")
 }
 
+const NODE_BUILTINS: &[&str] = &[
+    "assert",
+    "assert/strict",
+    "async_hooks",
+    "buffer",
+    "child_process",
+    "cluster",
+    "console",
+    "constants",
+    "crypto",
+    "dgram",
+    "diagnostics_channel",
+    "dns",
+    "dns/promises",
+    "domain",
+    "events",
+    "fs",
+    "fs/promises",
+    "http",
+    "http2",
+    "https",
+    "inspector",
+    "inspector/promises",
+    "module",
+    "net",
+    "os",
+    "path",
+    "path/posix",
+    "path/win32",
+    "perf_hooks",
+    "process",
+    "punycode",
+    "querystring",
+    "readline",
+    "readline/promises",
+    "repl",
+    "stream",
+    "stream/consumers",
+    "stream/promises",
+    "stream/web",
+    "string_decoder",
+    "sys",
+    "timers",
+    "timers/promises",
+    "tls",
+    "trace_events",
+    "tty",
+    "url",
+    "util",
+    "util/types",
+    "v8",
+    "vm",
+    "wasi",
+    "worker_threads",
+    "zlib",
+];
+
+const NODE_PREFIX_ONLY_BUILTINS: &[&str] = &["sea", "sqlite", "test", "test/reporters"];
+
 /// Check if a package name is a platform built-in module (Node.js, Bun, Deno, Cloudflare Workers).
 pub fn is_builtin_module(name: &str) -> bool {
     if name == "bun" || name.starts_with("bun:") {
@@ -49,68 +108,10 @@ pub fn is_builtin_module(name: &str) -> bool {
     if name == "k6" || name.starts_with("k6/") {
         return true;
     }
-    let builtins = [
-        "assert",
-        "assert/strict",
-        "async_hooks",
-        "buffer",
-        "child_process",
-        "cluster",
-        "console",
-        "constants",
-        "crypto",
-        "dgram",
-        "diagnostics_channel",
-        "dns",
-        "dns/promises",
-        "domain",
-        "events",
-        "fs",
-        "fs/promises",
-        "http",
-        "http2",
-        "https",
-        "inspector",
-        "inspector/promises",
-        "module",
-        "net",
-        "os",
-        "path",
-        "path/posix",
-        "path/win32",
-        "perf_hooks",
-        "process",
-        "punycode",
-        "querystring",
-        "readline",
-        "readline/promises",
-        "repl",
-        "stream",
-        "stream/consumers",
-        "stream/promises",
-        "stream/web",
-        "string_decoder",
-        "sys",
-        "timers",
-        "timers/promises",
-        "tls",
-        "trace_events",
-        "tty",
-        "url",
-        "util",
-        "util/types",
-        "v8",
-        "vm",
-        "wasi",
-        "worker_threads",
-        "zlib",
-    ];
-    const NODE_PREFIX_ONLY_BUILTINS: &[&str] = &["sea", "sqlite", "test", "test/reporters"];
-
     if let Some(stripped) = name.strip_prefix("node:") {
-        return builtins.contains(&stripped) || NODE_PREFIX_ONLY_BUILTINS.contains(&stripped);
+        return NODE_BUILTINS.contains(&stripped) || NODE_PREFIX_ONLY_BUILTINS.contains(&stripped);
     }
-    builtins.contains(&name)
+    NODE_BUILTINS.contains(&name)
 }
 
 /// Dependencies that are used implicitly (not via imports).

@@ -962,6 +962,10 @@ impl TrendBuilder<'_> {
             });
         }
 
+        self.add_duplication_metric();
+    }
+
+    fn add_duplication_metric(&mut self) {
         if let (Some(prev_val), Some(cur_val)) = (
             self.prev.vital_signs.duplication_pct,
             self.current_vs.duplication_pct,

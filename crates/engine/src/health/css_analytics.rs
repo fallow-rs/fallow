@@ -183,6 +183,15 @@ impl CssTokenSets {
     /// Fold one stylesheet's analytics into the project-wide token sets,
     /// recording the first-defining file (`rel`) per located name.
     fn record(&mut self, analytics: &fallow_types::extract::CssAnalytics, rel: &str) {
+        self.record_design_tokens(analytics);
+        self.record_custom_properties(analytics, rel);
+        self.record_keyframes(analytics, rel);
+        self.record_declaration_blocks(analytics, rel);
+        self.record_font_faces_and_layers(analytics, rel);
+        self.record_raw_style_values(analytics, rel);
+    }
+
+    fn record_design_tokens(&mut self, analytics: &fallow_types::extract::CssAnalytics) {
         self.colors.extend(analytics.colors.iter().cloned());
         self.font_sizes.extend(analytics.font_sizes.iter().cloned());
         self.z_indexes.extend(analytics.z_indexes.iter().cloned());
@@ -192,6 +201,13 @@ impl CssTokenSets {
             .extend(analytics.border_radii.iter().cloned());
         self.line_heights
             .extend(analytics.line_heights.iter().cloned());
+    }
+
+    fn record_custom_properties(
+        &mut self,
+        analytics: &fallow_types::extract::CssAnalytics,
+        rel: &str,
+    ) {
         self.defined_custom_props
             .extend(analytics.defined_custom_properties.iter().cloned());
         for token in &analytics.custom_property_definitions {
@@ -205,6 +221,15 @@ impl CssTokenSets {
         }
         self.referenced_custom_props
             .extend(analytics.referenced_custom_properties.iter().cloned());
+        for name in &analytics.registered_custom_properties {
+            self.registered_custom_props.insert(name.clone());
+            self.property_registrars
+                .entry(name.clone())
+                .or_insert_with(|| rel.to_owned());
+        }
+    }
+
+    fn record_keyframes(&mut self, analytics: &fallow_types::extract::CssAnalytics, rel: &str) {
         for keyframes in &analytics.referenced_keyframes {
             self.referenced_keyframes.insert(keyframes.clone());
             self.keyframe_referencers
@@ -217,6 +242,13 @@ impl CssTokenSets {
                 .entry(keyframes.clone())
                 .or_insert_with(|| rel.to_owned());
         }
+    }
+
+    fn record_declaration_blocks(
+        &mut self,
+        analytics: &fallow_types::extract::CssAnalytics,
+        rel: &str,
+    ) {
         for block in &analytics.declaration_blocks {
             self.declaration_blocks
                 .entry(block.fingerprint)
@@ -224,12 +256,13 @@ impl CssTokenSets {
                 .1
                 .push((rel.to_owned(), block.line));
         }
-        for name in &analytics.registered_custom_properties {
-            self.registered_custom_props.insert(name.clone());
-            self.property_registrars
-                .entry(name.clone())
-                .or_insert_with(|| rel.to_owned());
-        }
+    }
+
+    fn record_font_faces_and_layers(
+        &mut self,
+        analytics: &fallow_types::extract::CssAnalytics,
+        rel: &str,
+    ) {
         for family in &analytics.referenced_font_families {
             self.referenced_font_families.insert(family.clone());
         }
@@ -248,6 +281,13 @@ impl CssTokenSets {
                 .entry(name.clone())
                 .or_insert_with(|| rel.to_owned());
         }
+    }
+
+    fn record_raw_style_values(
+        &mut self,
+        analytics: &fallow_types::extract::CssAnalytics,
+        rel: &str,
+    ) {
         for raw in &analytics.raw_style_values {
             if self.raw_style_values.len() >= MAX_REPORTED_RAW_STYLE_VALUES {
                 break;
@@ -754,48 +794,7 @@ fn scan_cva_variant_token_drifts(
         if !source_contains_cva_variants(&source) {
             continue;
         }
-        for (variant_classes, line) in collect_cva_class_blocks(&source) {
-            for arbitrary in crate::css::scan_tailwind_arbitrary_values(&variant_classes) {
-                let Some((namespace, value, metric)) = cva_arbitrary_value_metric(&arbitrary.value)
-                else {
-                    continue;
-                };
-                let Some((nearest, distance)) =
-                    nearest_styling_token(namespace, &metric, token_candidates)
-                else {
-                    continue;
-                };
-                let key = (
-                    rel.clone(),
-                    line,
-                    arbitrary.value.clone(),
-                    nearest.token.clone(),
-                );
-                if !seen.insert(key) {
-                    continue;
-                }
-                out.push(fallow_output::CvaVariantTokenDrift {
-                    class_token: arbitrary.value.clone(),
-                    value: value.clone(),
-                    variant_classes: variant_classes.clone(),
-                    path: rel.clone(),
-                    line,
-                    nearest_token: fallow_output::NearestStylingToken {
-                        name: nearest.token.clone(),
-                        value: nearest.value.clone(),
-                        path: nearest.path.clone(),
-                        line: nearest.line,
-                        distance: round_distance(distance),
-                    },
-                    actions: vec![
-                        fallow_output::CssCandidateAction::replace_cva_variant_arbitrary_value(
-                            &arbitrary.value,
-                            &nearest.token,
-                        ),
-                    ],
-                });
-            }
-        }
+        collect_cva_file_token_drifts(&mut out, &mut seen, &rel, &source, token_candidates);
     }
     out.sort_by(|a, b| {
         a.path
@@ -805,6 +804,57 @@ fn scan_cva_variant_token_drifts(
             .then_with(|| a.nearest_token.name.cmp(&b.nearest_token.name))
     });
     out
+}
+
+fn collect_cva_file_token_drifts(
+    out: &mut Vec<fallow_output::CvaVariantTokenDrift>,
+    seen: &mut rustc_hash::FxHashSet<(String, u32, String, String)>,
+    rel: &str,
+    source: &str,
+    token_candidates: &[ComparableThemeTokenCandidate],
+) {
+    for (variant_classes, line) in collect_cva_class_blocks(source) {
+        for arbitrary in crate::css::scan_tailwind_arbitrary_values(&variant_classes) {
+            let Some((namespace, value, metric)) = cva_arbitrary_value_metric(&arbitrary.value)
+            else {
+                continue;
+            };
+            let Some((nearest, distance)) =
+                nearest_styling_token(namespace, &metric, token_candidates)
+            else {
+                continue;
+            };
+            let key = (
+                rel.to_owned(),
+                line,
+                arbitrary.value.clone(),
+                nearest.token.clone(),
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+            out.push(fallow_output::CvaVariantTokenDrift {
+                class_token: arbitrary.value.clone(),
+                value: value.clone(),
+                variant_classes: variant_classes.clone(),
+                path: rel.to_owned(),
+                line,
+                nearest_token: fallow_output::NearestStylingToken {
+                    name: nearest.token.clone(),
+                    value: nearest.value.clone(),
+                    path: nearest.path.clone(),
+                    line: nearest.line,
+                    distance: round_distance(distance),
+                },
+                actions: vec![
+                    fallow_output::CssCandidateAction::replace_cva_variant_arbitrary_value(
+                        &arbitrary.value,
+                        &nearest.token,
+                    ),
+                ],
+            });
+        }
+    }
 }
 
 fn cva_arbitrary_value_metric(
@@ -3041,22 +3091,39 @@ fn collect_located_utility_consumers(
 }
 
 fn build_token_consumers(input: &TokenConsumersInput<'_>) -> Vec<fallow_output::TokenConsumers> {
-    use fallow_output::{
-        ConsumerKind, TOKEN_CONSUMER_SAMPLE_CAP, TokenConsumerLocation, TokenConsumers,
-    };
-
-    if input.changed_files.is_some() || input.ws_roots.is_some() {
+    if !should_build_token_consumers(input) {
         return Vec::new();
+    }
+
+    let candidates = token_consumer_candidates(input);
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    let utility_located = collect_located_utility_consumers(input);
+
+    let mut out: Vec<fallow_output::TokenConsumers> = candidates
+        .into_iter()
+        .map(|candidate| build_token_consumer(input, candidate, &utility_located))
+        .collect();
+
+    out.sort_by(|a, b| a.token.cmp(&b.token));
+    out
+}
+
+fn should_build_token_consumers(input: &TokenConsumersInput<'_>) -> bool {
+    if input.changed_files.is_some() || input.ws_roots.is_some() {
+        return false;
     }
     if input.tokens.theme_token_definers.is_empty() || !project_uses_tailwind(&input.config.root) {
-        return Vec::new();
+        return false;
     }
-    if project_uses_tailwind_plugin(input.tokens.any_plugin_directive, &input.config.root) {
-        return Vec::new();
-    }
+    !project_uses_tailwind_plugin(input.tokens.any_plugin_directive, &input.config.root)
+}
 
+fn token_consumer_candidates(input: &TokenConsumersInput<'_>) -> Vec<ThemeTokenCandidate> {
     let mut summary = fallow_output::CssAnalyticsSummary::default();
-    let candidates = classify_theme_token_candidates(&UnusedThemeTokenScanInput {
+    classify_theme_token_candidates(&UnusedThemeTokenScanInput {
         tokens: input.tokens,
         files: input.files,
         config: input.config,
@@ -3065,79 +3132,108 @@ fn build_token_consumers(input: &TokenConsumersInput<'_>) -> Vec<fallow_output::
         output_changed_files: None,
         ws_roots: input.ws_roots,
         summary: &mut summary,
-    });
-    if candidates.is_empty() {
-        return Vec::new();
+    })
+}
+
+fn build_token_consumer(
+    input: &TokenConsumersInput<'_>,
+    candidate: ThemeTokenCandidate,
+    utility_located: &[(String, String, u32)],
+) -> fallow_output::TokenConsumers {
+    use fallow_output::TOKEN_CONSUMER_SAMPLE_CAP;
+
+    let mut consumers = token_consumer_locations(input, &candidate, utility_located);
+    let consumer_count = saturate_len(consumers.len());
+    consumers.truncate(TOKEN_CONSUMER_SAMPLE_CAP);
+
+    fallow_output::TokenConsumers {
+        token: candidate.token,
+        namespace: candidate.namespace,
+        definition_path: candidate.path,
+        definition_line: candidate.line,
+        consumer_count,
+        consumers,
     }
+}
 
-    let utility_located = collect_located_utility_consumers(input);
+fn token_consumer_locations(
+    input: &TokenConsumersInput<'_>,
+    candidate: &ThemeTokenCandidate,
+    utility_located: &[(String, String, u32)],
+) -> Vec<fallow_output::TokenConsumerLocation> {
+    let dash_name = format!("-{}", candidate.name);
+    let raw = candidate.token.trim_start_matches('-');
+    let mut consumers = Vec::new();
 
-    let mut out: Vec<TokenConsumers> = candidates
-        .into_iter()
-        .map(|candidate| {
-            let dash_name = format!("-{}", candidate.name);
-            let raw = candidate.token.trim_start_matches('-').to_owned();
-            let mut consumers: Vec<TokenConsumerLocation> = Vec::new();
+    append_exact_token_consumers(
+        &mut consumers,
+        &input.tokens.theme_var_reads_located,
+        raw,
+        fallow_output::ConsumerKind::ThemeVar,
+    );
+    append_exact_token_consumers(
+        &mut consumers,
+        &input.tokens.css_var_reads_located,
+        raw,
+        fallow_output::ConsumerKind::CssVar,
+    );
+    append_suffix_token_consumers(
+        &mut consumers,
+        &input.tokens.apply_uses_located,
+        &dash_name,
+        fallow_output::ConsumerKind::Apply,
+    );
+    append_suffix_token_consumers(
+        &mut consumers,
+        utility_located,
+        &dash_name,
+        fallow_output::ConsumerKind::Utility,
+    );
+    sort_token_consumer_locations(&mut consumers);
+    consumers
+}
 
-            for (name, path, line) in &input.tokens.theme_var_reads_located {
-                if *name == raw {
-                    consumers.push(TokenConsumerLocation {
-                        path: path.clone(),
-                        line: *line,
-                        kind: ConsumerKind::ThemeVar,
-                    });
-                }
-            }
-            for (name, path, line) in &input.tokens.css_var_reads_located {
-                if *name == raw {
-                    consumers.push(TokenConsumerLocation {
-                        path: path.clone(),
-                        line: *line,
-                        kind: ConsumerKind::CssVar,
-                    });
-                }
-            }
-            for (token, path, line) in &input.tokens.apply_uses_located {
-                if token.len() > dash_name.len() && token.ends_with(&dash_name) {
-                    consumers.push(TokenConsumerLocation {
-                        path: path.clone(),
-                        line: *line,
-                        kind: ConsumerKind::Apply,
-                    });
-                }
-            }
-            for (token, path, line) in &utility_located {
-                if token.len() > dash_name.len() && token.ends_with(&dash_name) {
-                    consumers.push(TokenConsumerLocation {
-                        path: path.clone(),
-                        line: *line,
-                        kind: ConsumerKind::Utility,
-                    });
-                }
-            }
-
-            consumers.sort_by(|a, b| {
-                a.path
-                    .cmp(&b.path)
-                    .then_with(|| a.line.cmp(&b.line))
-                    .then_with(|| consumer_kind_rank(a.kind).cmp(&consumer_kind_rank(b.kind)))
+fn append_exact_token_consumers(
+    consumers: &mut Vec<fallow_output::TokenConsumerLocation>,
+    located: &[(String, String, u32)],
+    expected: &str,
+    kind: fallow_output::ConsumerKind,
+) {
+    for (name, path, line) in located {
+        if name == expected {
+            consumers.push(fallow_output::TokenConsumerLocation {
+                path: path.clone(),
+                line: *line,
+                kind,
             });
-            let consumer_count = saturate_len(consumers.len());
-            consumers.truncate(TOKEN_CONSUMER_SAMPLE_CAP);
+        }
+    }
+}
 
-            TokenConsumers {
-                token: candidate.token,
-                namespace: candidate.namespace,
-                definition_path: candidate.path,
-                definition_line: candidate.line,
-                consumer_count,
-                consumers,
-            }
-        })
-        .collect();
+fn append_suffix_token_consumers(
+    consumers: &mut Vec<fallow_output::TokenConsumerLocation>,
+    located: &[(String, String, u32)],
+    suffix: &str,
+    kind: fallow_output::ConsumerKind,
+) {
+    for (token, path, line) in located {
+        if token.len() > suffix.len() && token.ends_with(suffix) {
+            consumers.push(fallow_output::TokenConsumerLocation {
+                path: path.clone(),
+                line: *line,
+                kind,
+            });
+        }
+    }
+}
 
-    out.sort_by(|a, b| a.token.cmp(&b.token));
-    out
+fn sort_token_consumer_locations(consumers: &mut [fallow_output::TokenConsumerLocation]) {
+    consumers.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| consumer_kind_rank(a.kind).cmp(&consumer_kind_rank(b.kind)))
+    });
 }
 
 /// A CSS-in-JS token-definition site discovered during the definer pass: the
@@ -3433,7 +3529,6 @@ fn collect_css_in_js_consumers(
     resolved_targets: &ResolvedCssInJsImportTargets,
 ) -> CssInJsConsumerHits {
     use fallow_output::ConsumerKind;
-    use fallow_types::extract::ImportedName;
     let mut hits: CssInJsConsumerHits = rustc_hash::FxHashMap::default();
     let has_theme_definers = definers
         .entries
@@ -3444,31 +3539,9 @@ fn collect_css_in_js_consumers(
         let Some(consumer_abs) = path_by_id.get(&module.file_id).copied() else {
             continue;
         };
-        // (definer index, local alias the file imported the binding under).
-        let mut matches: Vec<(usize, &str)> = Vec::new();
-        for import in &module.imports {
-            if import.is_type_only {
-                continue;
-            }
-            if !matches!(&import.imported_name, ImportedName::Named(_)) {
-                continue;
-            }
-            if let Some(idx) = resolve_css_in_js_definer_import(
-                module.file_id,
-                consumer_abs,
-                import,
-                definers,
-                path_by_id,
-                resolved_targets,
-            ) {
-                matches.push((idx, import.local_name.as_str()));
-            }
-        }
-        let has_panda_generated_alias = module.imports.iter().any(|import| {
-            !import.is_type_only
-                && is_panda_generated_specifier(&import.source)
-                && matches!(&import.imported_name, ImportedName::Named(name) if name == "token" || is_panda_style_function(name))
-        });
+        let matches =
+            css_in_js_definer_matches(module, consumer_abs, definers, path_by_id, resolved_targets);
+        let has_panda_generated_alias = has_panda_generated_alias(module);
         if matches.is_empty() && !has_panda_generated_alias && !has_theme_definers {
             continue;
         }
@@ -3505,6 +3578,47 @@ fn collect_css_in_js_consumers(
         collect_theme_member_consumers(&source, consumer_abs, &consumer_rel, definers, &mut hits);
     }
     hits
+}
+
+fn css_in_js_definer_matches<'a>(
+    module: &'a fallow_types::extract::ModuleInfo,
+    consumer_abs: &std::path::Path,
+    definers: &CssInJsDefiners,
+    path_by_id: &rustc_hash::FxHashMap<fallow_types::discover::FileId, &std::path::Path>,
+    resolved_targets: &ResolvedCssInJsImportTargets,
+) -> Vec<(usize, &'a str)> {
+    use fallow_types::extract::ImportedName;
+
+    let mut matches: Vec<(usize, &str)> = Vec::new();
+    for import in &module.imports {
+        if import.is_type_only || !matches!(&import.imported_name, ImportedName::Named(_)) {
+            continue;
+        }
+        if let Some(idx) = resolve_css_in_js_definer_import(
+            module.file_id,
+            consumer_abs,
+            import,
+            definers,
+            path_by_id,
+            resolved_targets,
+        ) {
+            matches.push((idx, import.local_name.as_str()));
+        }
+    }
+    matches
+}
+
+fn has_panda_generated_alias(module: &fallow_types::extract::ModuleInfo) -> bool {
+    use fallow_types::extract::ImportedName;
+
+    module.imports.iter().any(|import| {
+        !import.is_type_only
+            && is_panda_generated_specifier(&import.source)
+            && matches!(
+                &import.imported_name,
+                ImportedName::Named(name) if name == "token" || is_panda_style_function(name)
+            )
+    })
 }
 
 fn collect_theme_member_consumers(
@@ -3688,6 +3802,22 @@ struct MarkupCssCandidates {
     near_duplicate_theme_tokens: Vec<fallow_output::NearDuplicateThemeToken>,
 }
 
+struct MarkupTokenCandidates {
+    tailwind_arbitrary_values: Vec<fallow_output::TailwindArbitraryValue>,
+    cva_duplicate_variant_blocks: Vec<fallow_output::CvaDuplicateVariantBlock>,
+    cva_variant_token_drifts: Vec<fallow_output::CvaVariantTokenDrift>,
+}
+
+struct MarkupReferenceCandidates {
+    unresolved_class_references: Vec<fallow_output::UnresolvedClassReference>,
+    unreferenced_css_classes: Vec<fallow_output::UnreferencedCssClass>,
+}
+
+struct ThemeTokenCandidates {
+    unused_theme_tokens: Vec<fallow_output::UnusedThemeToken>,
+    near_duplicate_theme_tokens: Vec<fallow_output::NearDuplicateThemeToken>,
+}
+
 /// Run the markup / source-scanning CSS candidates (Tailwind arbitrary values,
 /// likely class typos, unreferenced global classes, unused `@theme` tokens),
 /// each honoring the same ignore / changed / workspace filters and setting its
@@ -3707,62 +3837,51 @@ struct MarkupCssCandidateInput<'a> {
 }
 
 fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> MarkupCssCandidates {
+    let markup = scan_markup_token_candidates(input);
+    let references = scan_markup_reference_candidates(input);
+    let theme = scan_theme_token_candidates(input);
+
     MarkupCssCandidates {
-        // Markup arbitrary-value scan (gated on the project using Tailwind).
+        tailwind_arbitrary_values: markup.tailwind_arbitrary_values,
+        cva_duplicate_variant_blocks: markup.cva_duplicate_variant_blocks,
+        cva_variant_token_drifts: markup.cva_variant_token_drifts,
+        unresolved_class_references: references.unresolved_class_references,
+        unreferenced_css_classes: references.unreferenced_css_classes,
+        unused_theme_tokens: theme.unused_theme_tokens,
+        near_duplicate_theme_tokens: theme.near_duplicate_theme_tokens,
+    }
+}
+
+fn scan_markup_token_candidates(input: &mut MarkupCssCandidateInput<'_>) -> MarkupTokenCandidates {
+    let ctx = markup_scan_ctx(input);
+    MarkupTokenCandidates {
         tailwind_arbitrary_values: scan_markup_tailwind_arbitrary_values(
             input.files,
-            HealthScanCtx {
-                config: input.config,
-                ignore_set: input.ignore_set,
-                changed_files: input.changed_files,
-                output_changed_files: None,
-                ws_roots: input.ws_roots,
-            },
+            ctx,
             input.summary,
         ),
-        cva_duplicate_variant_blocks: scan_cva_duplicate_variant_blocks(
-            input.files,
-            HealthScanCtx {
-                config: input.config,
-                ignore_set: input.ignore_set,
-                changed_files: input.changed_files,
-                output_changed_files: None,
-                ws_roots: input.ws_roots,
-            },
-        ),
+        cva_duplicate_variant_blocks: scan_cva_duplicate_variant_blocks(input.files, ctx),
         cva_variant_token_drifts: scan_cva_variant_token_drifts(
             input.files,
-            HealthScanCtx {
-                config: input.config,
-                ignore_set: input.ignore_set,
-                changed_files: input.changed_files,
-                output_changed_files: None,
-                ws_roots: input.ws_roots,
-            },
+            ctx,
             input.token_candidates,
         ),
-        // Static markup class tokens one edit from a defined class (likely typos).
+    }
+}
+
+fn scan_markup_reference_candidates(
+    input: &mut MarkupCssCandidateInput<'_>,
+) -> MarkupReferenceCandidates {
+    let ctx = markup_scan_ctx(input);
+    MarkupReferenceCandidates {
         unresolved_class_references: scan_unresolved_class_references(
             input.files,
-            HealthScanCtx {
-                config: input.config,
-                ignore_set: input.ignore_set,
-                changed_files: input.changed_files,
-                output_changed_files: None,
-                ws_roots: input.ws_roots,
-            },
+            ctx,
             input.summary,
         ),
-        // Global classes referenced by no in-project markup (heavily gated).
         unreferenced_css_classes: scan_unreferenced_css_classes(
             input.files,
-            HealthScanCtx {
-                config: input.config,
-                ignore_set: input.ignore_set,
-                changed_files: input.changed_files,
-                output_changed_files: None,
-                ws_roots: input.ws_roots,
-            },
+            ctx,
             input.summary,
             input
                 .styling_artifacts
@@ -3771,9 +3890,22 @@ fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Markup
                 .styling_artifacts
                 .map(|artifacts| &artifacts.class_inventory),
         ),
-        // Tailwind v4 @theme design tokens used by no utility / var() / @apply
-        // anywhere (heavily gated: v4 + non-plugin + non-published + whole-scope).
-        unused_theme_tokens: scan_unused_theme_tokens(&mut UnusedThemeTokenScanInput {
+    }
+}
+
+fn scan_theme_token_candidates(input: &mut MarkupCssCandidateInput<'_>) -> ThemeTokenCandidates {
+    let unused_theme_tokens = scan_unused_theme_tokens(&mut UnusedThemeTokenScanInput {
+        tokens: input.tokens,
+        files: input.files,
+        config: input.config,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        output_changed_files: input.output_changed_files,
+        ws_roots: input.ws_roots,
+        summary: input.summary,
+    });
+    let near_duplicate_theme_tokens = if input.css_deep {
+        scan_near_duplicate_theme_tokens(&mut UnusedThemeTokenScanInput {
             tokens: input.tokens,
             files: input.files,
             config: input.config,
@@ -3782,22 +3914,24 @@ fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Markup
             output_changed_files: input.output_changed_files,
             ws_roots: input.ws_roots,
             summary: input.summary,
-        }),
-        // Perceptually-close Tailwind v4 color tokens, whole-scope only.
-        near_duplicate_theme_tokens: if input.css_deep {
-            scan_near_duplicate_theme_tokens(&mut UnusedThemeTokenScanInput {
-                tokens: input.tokens,
-                files: input.files,
-                config: input.config,
-                ignore_set: input.ignore_set,
-                changed_files: input.changed_files,
-                output_changed_files: input.output_changed_files,
-                ws_roots: input.ws_roots,
-                summary: input.summary,
-            })
-        } else {
-            Vec::new()
-        },
+        })
+    } else {
+        Vec::new()
+    };
+
+    ThemeTokenCandidates {
+        unused_theme_tokens,
+        near_duplicate_theme_tokens,
+    }
+}
+
+fn markup_scan_ctx<'a>(input: &MarkupCssCandidateInput<'a>) -> HealthScanCtx<'a> {
+    HealthScanCtx {
+        config: input.config,
+        ignore_set: input.ignore_set,
+        changed_files: input.changed_files,
+        output_changed_files: None,
+        ws_roots: input.ws_roots,
     }
 }
 
@@ -3933,61 +4067,68 @@ fn css_report_scan_items<'a>(
                 }]
             })
             .unwrap_or_default(),
-        CssScanKind::Sfc => {
-            let mut items = Vec::new();
-            if let Some(virtual_css) = crate::css::sfc_virtual_stylesheet(source) {
-                items.push(CssScanItem {
-                    source: Cow::Owned(virtual_css),
-                    policy: GradePolicy::Structural,
-                    report_notable: true,
-                });
-            }
-            if let Some(preprocessor_source) =
-                crate::css::sfc_preprocessor_virtual_stylesheet(source)
-                && let Some(virtual_css) = preprocessor_virtual_stylesheet(&preprocessor_source)
-            {
-                items.push(CssScanItem {
-                    source: Cow::Owned(virtual_css),
-                    policy: GradePolicy::Structural,
-                    report_notable: true,
-                });
-            }
-            items
-        }
-        CssScanKind::CssInJs => {
-            let mut items = Vec::new();
-            if let Some(virtual_css) = crate::css::css_in_js_virtual_stylesheet(source) {
-                items.push(CssScanItem {
-                    source: Cow::Owned(virtual_css),
-                    policy: GradePolicy::Structural,
-                    report_notable: true,
-                });
-            }
-            let sheets = crate::css::css_in_js_object_sheets(source, path);
-            if let Some(structural) = sheets.structural {
-                items.push(CssScanItem {
-                    source: Cow::Owned(structural),
-                    policy: GradePolicy::Structural,
-                    report_notable: false,
-                });
-            }
-            if let Some(partial) = sheets.structural_partial {
-                items.push(CssScanItem {
-                    source: Cow::Owned(partial),
-                    policy: GradePolicy::StructuralNoDedup,
-                    report_notable: false,
-                });
-            }
-            if let Some(atomic) = sheets.atomic {
-                items.push(CssScanItem {
-                    source: Cow::Owned(atomic),
-                    policy: GradePolicy::Atomic,
-                    report_notable: false,
-                });
-            }
-            items
-        }
+        CssScanKind::Sfc => sfc_css_scan_items(source),
+        CssScanKind::CssInJs => css_in_js_scan_items(source, path),
     }
+}
+
+fn sfc_css_scan_items(source: &str) -> Vec<CssScanItem<'_>> {
+    use std::borrow::Cow;
+
+    let mut items = Vec::new();
+    if let Some(virtual_css) = crate::css::sfc_virtual_stylesheet(source) {
+        items.push(CssScanItem {
+            source: Cow::Owned(virtual_css),
+            policy: GradePolicy::Structural,
+            report_notable: true,
+        });
+    }
+    if let Some(preprocessor_source) = crate::css::sfc_preprocessor_virtual_stylesheet(source)
+        && let Some(virtual_css) = preprocessor_virtual_stylesheet(&preprocessor_source)
+    {
+        items.push(CssScanItem {
+            source: Cow::Owned(virtual_css),
+            policy: GradePolicy::Structural,
+            report_notable: true,
+        });
+    }
+    items
+}
+
+fn css_in_js_scan_items<'a>(source: &'a str, path: &std::path::Path) -> Vec<CssScanItem<'a>> {
+    use std::borrow::Cow;
+
+    let mut items = Vec::new();
+    if let Some(virtual_css) = crate::css::css_in_js_virtual_stylesheet(source) {
+        items.push(CssScanItem {
+            source: Cow::Owned(virtual_css),
+            policy: GradePolicy::Structural,
+            report_notable: true,
+        });
+    }
+    let sheets = crate::css::css_in_js_object_sheets(source, path);
+    if let Some(structural) = sheets.structural {
+        items.push(CssScanItem {
+            source: Cow::Owned(structural),
+            policy: GradePolicy::Structural,
+            report_notable: false,
+        });
+    }
+    if let Some(partial) = sheets.structural_partial {
+        items.push(CssScanItem {
+            source: Cow::Owned(partial),
+            policy: GradePolicy::StructuralNoDedup,
+            report_notable: false,
+        });
+    }
+    if let Some(atomic) = sheets.atomic {
+        items.push(CssScanItem {
+            source: Cow::Owned(atomic),
+            policy: GradePolicy::Atomic,
+            report_notable: false,
+        });
+    }
+    items
 }
 
 fn preprocessor_virtual_stylesheet(source: &str) -> Option<String> {
@@ -4323,7 +4464,7 @@ fn walk_css_files(
     files: &[fallow_types::discover::DiscoveredFile],
     ctx: HealthScanCtx<'_>,
 ) -> CssWalkAccum {
-    use fallow_output::{CssAnalyticsSummary, CssFileAnalytics, ScopedUnusedClasses};
+    use fallow_output::{CssAnalyticsSummary, ScopedUnusedClasses};
 
     let mut file_reports = Vec::new();
     let mut summary = CssAnalyticsSummary::default();
@@ -4350,36 +4491,14 @@ fn walk_css_files(
         let rel = relative.to_string_lossy().replace('\\', "/");
         let mut file_had_sheet = false;
         for item in css_report_scan_items(&source, &file.path, kind) {
-            let Some(mut analytics) = crate::css::compute_css_analytics(&item.source) else {
-                continue;
-            };
-            file_had_sheet = true;
-            record_css_analytics_summary(&mut summary, &analytics);
-            tokens.record_theme(item.source.as_ref(), &rel);
-
-            match item.policy {
-                GradePolicy::Atomic => {
-                    analytics.declaration_blocks.clear();
-                    analytics.raw_style_values.clear();
-                    tokens.record(&analytics, &rel);
-                    scoring.atomic_declarations = scoring
-                        .atomic_declarations
-                        .saturating_add(analytics.total_declarations);
-                }
-                GradePolicy::Structural | GradePolicy::StructuralNoDedup => {
-                    if item.policy == GradePolicy::StructuralNoDedup {
-                        analytics.declaration_blocks.clear();
-                    }
-                    tokens.record(&analytics, &rel);
-                    scoring.add_non_atomic(&analytics);
-                    if item.report_notable && !analytics.notable_rules.is_empty() {
-                        file_reports.push(CssFileAnalytics {
-                            path: rel.clone(),
-                            analytics,
-                        });
-                    }
-                }
-            }
+            file_had_sheet |= record_css_scan_item(
+                &item,
+                &rel,
+                &mut file_reports,
+                &mut summary,
+                &mut tokens,
+                &mut scoring,
+            );
         }
         if file_had_sheet {
             summary.files_analyzed = summary.files_analyzed.saturating_add(1);
@@ -4393,6 +4512,47 @@ fn walk_css_files(
         tokens,
         scoring,
     }
+}
+
+fn record_css_scan_item(
+    item: &CssScanItem<'_>,
+    rel: &str,
+    file_reports: &mut Vec<fallow_output::CssFileAnalytics>,
+    summary: &mut fallow_output::CssAnalyticsSummary,
+    tokens: &mut CssTokenSets,
+    scoring: &mut CssGradeScoring,
+) -> bool {
+    let Some(mut analytics) = crate::css::compute_css_analytics(&item.source) else {
+        return false;
+    };
+    record_css_analytics_summary(summary, &analytics);
+    tokens.record_theme(item.source.as_ref(), rel);
+
+    match item.policy {
+        GradePolicy::Atomic => {
+            analytics.declaration_blocks.clear();
+            analytics.raw_style_values.clear();
+            tokens.record(&analytics, rel);
+            scoring.atomic_declarations = scoring
+                .atomic_declarations
+                .saturating_add(analytics.total_declarations);
+        }
+        GradePolicy::Structural | GradePolicy::StructuralNoDedup => {
+            if item.policy == GradePolicy::StructuralNoDedup {
+                analytics.declaration_blocks.clear();
+            }
+            tokens.record(&analytics, rel);
+            scoring.add_non_atomic(&analytics);
+            if item.report_notable && !analytics.notable_rules.is_empty() {
+                file_reports.push(fallow_output::CssFileAnalytics {
+                    path: rel.to_owned(),
+                    analytics,
+                });
+            }
+        }
+    }
+
+    true
 }
 
 /// Credit Tailwind-markup-applied keyframes, then finalize the whole-project
@@ -4465,19 +4625,9 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
     } = ctx;
     let css_deep = output_changed_files.is_some();
 
-    let mut walk = styling_artifacts
-        .filter(|_| changed_files.is_none() && output_changed_files.is_none() && ws_roots.is_none())
-        .map_or_else(
-            || walk_css_files(files, ctx),
-            |artifacts| artifacts.whole_scope_walk.clone(),
-        );
-    let mut styling_token_candidates = comparable_theme_token_candidates(&walk.tokens, config);
-    styling_token_candidates.extend(comparable_custom_property_token_candidates(&walk.tokens));
-    styling_token_candidates.extend(comparable_css_in_js_token_candidates(
-        files, modules, config,
-    ));
-    styling_token_candidates.extend(comparable_project_vocabulary_candidates(&walk.tokens));
-    styling_token_candidates.sort_by(|a, b| theme_token_sort_key(a).cmp(&theme_token_sort_key(b)));
+    let mut walk = css_report_walk(files, ctx, styling_artifacts);
+    let styling_token_candidates =
+        css_report_token_candidates(&walk.tokens, files, modules, config);
     annotate_raw_style_value_nearest_tokens(&mut walk.tokens, &styling_token_candidates);
     let metrics = finalize_css_token_metrics(
         &mut walk.tokens,
@@ -4499,34 +4649,18 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
         token_candidates: &styling_token_candidates,
         summary: &mut walk.summary,
     });
-    let mut token_consumers = build_token_consumers(&TokenConsumersInput {
-        tokens: &walk.tokens,
-        files,
-        config,
-        ignore_set,
-        changed_files,
-        ws_roots,
-    });
-    // Phase 3d: additively append the CSS-in-JS design-token blast-radius (StyleX
-    // `defineVars` / vanilla-extract `createTheme` family), derived from the
-    // graph-independent `ModuleInfo` imports + a bounded re-parse, gated on the same
-    // `project_uses_css_in_js` dep gate the CSS-in-JS walk uses (a non-CSS-in-JS
-    // project appends nothing, so Tailwind output is byte-identical). The combined
-    // list is then sorted globally by `(token, definition_path)` so the contract is
-    // a single ordered list, not a Tailwind block then a CSS-in-JS block.
-    token_consumers.extend(build_css_in_js_token_consumers(files, modules, config));
-    token_consumers.sort_by(|a, b| {
-        a.token
-            .cmp(&b.token)
-            .then_with(|| a.definition_path.cmp(&b.definition_path))
-    });
-    let scoring_inputs = super::styling_score::StylingScoringInputs {
-        theme_tokens_defined: saturate_len(walk.tokens.theme_token_definers.len()),
-        non_atomic_declarations: walk.scoring.non_atomic_declarations,
-        non_atomic_important_declarations: walk.scoring.non_atomic_important_declarations,
-        non_atomic_max_nesting_depth: walk.scoring.non_atomic_max_nesting_depth,
-        atomic_declarations: walk.scoring.atomic_declarations,
-    };
+    let token_consumers = css_report_token_consumers(
+        &TokenConsumersInput {
+            tokens: &walk.tokens,
+            files,
+            config,
+            ignore_set,
+            changed_files,
+            ws_roots,
+        },
+        modules,
+    );
+    let scoring_inputs = css_report_scoring_inputs(&walk);
     let report = assemble_css_report(CssReportAssemblyInput {
         walk,
         metrics,
@@ -4539,6 +4673,70 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
         report,
         scoring_inputs,
     })
+}
+
+fn css_report_walk(
+    files: &[fallow_types::discover::DiscoveredFile],
+    ctx: HealthScanCtx<'_>,
+    styling_artifacts: Option<&StylingAnalysisArtifacts>,
+) -> CssWalkAccum {
+    let HealthScanCtx {
+        changed_files,
+        output_changed_files,
+        ws_roots,
+        ..
+    } = ctx;
+
+    styling_artifacts
+        .filter(|_| changed_files.is_none() && output_changed_files.is_none() && ws_roots.is_none())
+        .map_or_else(
+            || walk_css_files(files, ctx),
+            |artifacts| artifacts.whole_scope_walk.clone(),
+        )
+}
+
+fn css_report_scoring_inputs(walk: &CssWalkAccum) -> super::styling_score::StylingScoringInputs {
+    super::styling_score::StylingScoringInputs {
+        theme_tokens_defined: saturate_len(walk.tokens.theme_token_definers.len()),
+        non_atomic_declarations: walk.scoring.non_atomic_declarations,
+        non_atomic_important_declarations: walk.scoring.non_atomic_important_declarations,
+        non_atomic_max_nesting_depth: walk.scoring.non_atomic_max_nesting_depth,
+        atomic_declarations: walk.scoring.atomic_declarations,
+    }
+}
+
+fn css_report_token_candidates(
+    tokens: &CssTokenSets,
+    files: &[fallow_types::discover::DiscoveredFile],
+    modules: &[fallow_types::extract::ModuleInfo],
+    config: &ResolvedConfig,
+) -> Vec<ComparableThemeTokenCandidate> {
+    let mut candidates = comparable_theme_token_candidates(tokens, config);
+    candidates.extend(comparable_custom_property_token_candidates(tokens));
+    candidates.extend(comparable_css_in_js_token_candidates(
+        files, modules, config,
+    ));
+    candidates.extend(comparable_project_vocabulary_candidates(tokens));
+    candidates.sort_by(|a, b| theme_token_sort_key(a).cmp(&theme_token_sort_key(b)));
+    candidates
+}
+
+fn css_report_token_consumers(
+    input: &TokenConsumersInput<'_>,
+    modules: &[fallow_types::extract::ModuleInfo],
+) -> Vec<fallow_output::TokenConsumers> {
+    let mut consumers = build_token_consumers(input);
+    consumers.extend(build_css_in_js_token_consumers(
+        input.files,
+        modules,
+        input.config,
+    ));
+    consumers.sort_by(|a, b| {
+        a.token
+            .cmp(&b.token)
+            .then_with(|| a.definition_path.cmp(&b.definition_path))
+    });
+    consumers
 }
 
 /// Assemble the final CSS analytics report from the walk accumulator, finalized
@@ -4578,30 +4776,13 @@ fn assemble_css_report(
         });
     }
 
-    let candidates_empty = candidates.tailwind_arbitrary_values.is_empty()
-        && candidates.cva_duplicate_variant_blocks.is_empty()
-        && candidates.cva_variant_token_drifts.is_empty()
-        && candidates.unresolved_class_references.is_empty()
-        && candidates.unreferenced_css_classes.is_empty()
-        && metrics.unused_font_faces.is_empty()
-        && candidates.unused_theme_tokens.is_empty()
-        && candidates.near_duplicate_theme_tokens.is_empty()
-        && token_consumers.is_empty();
-    if walk.summary.files_analyzed == 0 && walk.scoped_unused.is_empty() && candidates_empty {
+    if css_report_is_empty(&walk, &metrics, &candidates, &token_consumers) {
         return None;
     }
     let mut scoped_unused = walk.scoped_unused;
     scoped_unused.sort_by(|a, b| a.path.cmp(&b.path));
     let mut raw_style_values = walk.tokens.raw_style_values;
-    raw_style_values.sort_by(|a, b| {
-        (&a.path, a.line, &a.axis, &a.property, &a.value).cmp(&(
-            &b.path,
-            b.line,
-            &b.axis,
-            &b.property,
-            &b.value,
-        ))
-    });
+    sort_raw_style_values(&mut raw_style_values);
     walk.summary.raw_style_values = saturate_len(raw_style_values.len());
     Some(CssAnalyticsReport {
         files: walk.file_reports,
@@ -4625,6 +4806,37 @@ fn assemble_css_report(
     })
 }
 
+fn css_report_is_empty(
+    walk: &CssWalkAccum,
+    metrics: &CssTokenMetrics,
+    candidates: &MarkupCssCandidates,
+    token_consumers: &[fallow_output::TokenConsumers],
+) -> bool {
+    walk.summary.files_analyzed == 0
+        && walk.scoped_unused.is_empty()
+        && candidates.tailwind_arbitrary_values.is_empty()
+        && candidates.cva_duplicate_variant_blocks.is_empty()
+        && candidates.cva_variant_token_drifts.is_empty()
+        && candidates.unresolved_class_references.is_empty()
+        && candidates.unreferenced_css_classes.is_empty()
+        && metrics.unused_font_faces.is_empty()
+        && candidates.unused_theme_tokens.is_empty()
+        && candidates.near_duplicate_theme_tokens.is_empty()
+        && token_consumers.is_empty()
+}
+
+fn sort_raw_style_values(values: &mut [fallow_output::RawStyleValue]) {
+    values.sort_by(|a, b| {
+        (&a.path, a.line, &a.axis, &a.property, &a.value).cmp(&(
+            &b.path,
+            b.line,
+            &b.axis,
+            &b.property,
+            &b.value,
+        ))
+    });
+}
+
 struct CssReportChangedScopeInput<'a> {
     walk: &'a mut CssWalkAccum,
     metrics: &'a mut CssTokenMetrics,
@@ -4646,6 +4858,18 @@ fn retain_css_report_changed_scope(input: CssReportChangedScopeInput<'_>) {
     let in_scope = |path: &str| css_output_path_in_changed_scope(path, config, changed);
     walk.file_reports.retain(|file| in_scope(&file.path));
     walk.scoped_unused.retain(|item| in_scope(&item.path));
+    retain_css_metrics_changed_scope(metrics, &in_scope);
+    retain_markup_candidates_changed_scope(candidates, &in_scope);
+    walk.tokens
+        .raw_style_values
+        .retain(|item| in_scope(&item.path));
+    token_consumers.retain(|item| in_scope(&item.definition_path));
+}
+
+fn retain_css_metrics_changed_scope(
+    metrics: &mut CssTokenMetrics,
+    in_scope: &impl Fn(&str) -> bool,
+) {
     metrics
         .unreferenced_keyframes
         .retain(|item| in_scope(&item.path));
@@ -4670,6 +4894,12 @@ fn retain_css_report_changed_scope(input: CssReportChangedScopeInput<'_>) {
     metrics
         .unused_font_faces
         .retain(|item| in_scope(&item.path));
+}
+
+fn retain_markup_candidates_changed_scope(
+    candidates: &mut MarkupCssCandidates,
+    in_scope: &impl Fn(&str) -> bool,
+) {
     candidates
         .tailwind_arbitrary_values
         .retain(|item| in_scope(&item.path));
@@ -4691,10 +4921,6 @@ fn retain_css_report_changed_scope(input: CssReportChangedScopeInput<'_>) {
     candidates
         .near_duplicate_theme_tokens
         .retain(|item| in_scope(&item.path));
-    walk.tokens
-        .raw_style_values
-        .retain(|item| in_scope(&item.path));
-    token_consumers.retain(|item| in_scope(&item.definition_path));
 }
 
 fn css_output_path_in_changed_scope(

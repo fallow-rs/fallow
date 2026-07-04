@@ -202,6 +202,38 @@ pub(super) fn run_api_tool(
     }
 
     match tool {
+        CodeModeTool::Analyze
+        | CodeModeTool::Combined
+        | CodeModeTool::CheckChanged
+        | CodeModeTool::FindDupes
+        | CodeModeTool::ProjectInfo => run_analysis_api_tool(tool, params),
+        CodeModeTool::TraceExport
+        | CodeModeTool::TraceFile
+        | CodeModeTool::TraceDependency
+        | CodeModeTool::TraceClone => run_trace_api_tool(tool, params),
+        CodeModeTool::CheckHealth
+        | CodeModeTool::Audit
+        | CodeModeTool::FallowExplain
+        | CodeModeTool::FeatureFlags
+        | CodeModeTool::ListBoundaries => run_report_api_tool(tool, params),
+        CodeModeTool::SecurityCandidates
+        | CodeModeTool::Impact
+        | CodeModeTool::CheckRuntimeCoverage
+        | CodeModeTool::GetHotPaths
+        | CodeModeTool::GetBlastRadius
+        | CodeModeTool::GetImportance
+        | CodeModeTool::GetCleanupCandidates => unreachable!(
+            "{} is not API-backed and should have returned before dispatch",
+            tool.name()
+        ),
+    }
+}
+
+fn run_analysis_api_tool(
+    tool: CodeModeTool,
+    params: serde_json::Value,
+) -> Result<Option<serde_json::Value>, String> {
+    match tool {
         CodeModeTool::Analyze => {
             let params: AnalyzeParams = parse_params(params)?;
             run_analyze_api_value(&params)
@@ -222,6 +254,15 @@ pub(super) fn run_api_tool(
             let params: ProjectInfoParams = parse_params(params)?;
             run_project_info_api_value(&params)
         }
+        _ => unreachable!("analysis API helper called with {}", tool.name()),
+    }
+}
+
+fn run_trace_api_tool(
+    tool: CodeModeTool,
+    params: serde_json::Value,
+) -> Result<Option<serde_json::Value>, String> {
+    match tool {
         CodeModeTool::TraceExport => {
             let params: TraceExportParams = parse_params(params)?;
             run_trace_export_api_value(&params).map(Some)
@@ -238,6 +279,15 @@ pub(super) fn run_api_tool(
             let params: TraceCloneParams = parse_params(params)?;
             run_trace_clone_api_value(&params).map(Some)
         }
+        _ => unreachable!("trace API helper called with {}", tool.name()),
+    }
+}
+
+fn run_report_api_tool(
+    tool: CodeModeTool,
+    params: serde_json::Value,
+) -> Result<Option<serde_json::Value>, String> {
+    match tool {
         CodeModeTool::CheckHealth => {
             let params: HealthParams = parse_params(params)?;
             run_health_api_value(&params)
@@ -260,16 +310,7 @@ pub(super) fn run_api_tool(
             let params: ListBoundariesParams = parse_params(params)?;
             run_list_boundaries_api_value(&params)
         }
-        CodeModeTool::SecurityCandidates
-        | CodeModeTool::Impact
-        | CodeModeTool::CheckRuntimeCoverage
-        | CodeModeTool::GetHotPaths
-        | CodeModeTool::GetBlastRadius
-        | CodeModeTool::GetImportance
-        | CodeModeTool::GetCleanupCandidates => unreachable!(
-            "{} is not API-backed and should have returned before dispatch",
-            tool.name()
-        ),
+        _ => unreachable!("report API helper called with {}", tool.name()),
     }
 }
 
@@ -513,9 +554,17 @@ fn build_combined_args(params: &CombinedParams) -> Vec<String> {
     if params.include_entry_exports == Some(true) {
         args.push("--include-entry-exports".to_string());
     }
-    push_opt_arg(&mut args, "--dupes-mode", params.dupes_mode.as_deref());
+    push_combined_duplication_args(&mut args, params);
+    if params.score == Some(true) {
+        args.push("--score".to_string());
+    }
+    args
+}
+
+fn push_combined_duplication_args(args: &mut Vec<String>, params: &CombinedParams) {
+    push_opt_arg(args, "--dupes-mode", params.dupes_mode.as_deref());
     push_opt_arg(
-        &mut args,
+        args,
         "--dupes-min-tokens",
         params
             .dupes_min_tokens
@@ -523,7 +572,7 @@ fn build_combined_args(params: &CombinedParams) -> Vec<String> {
             .as_deref(),
     );
     push_opt_arg(
-        &mut args,
+        args,
         "--dupes-min-lines",
         params
             .dupes_min_lines
@@ -531,7 +580,7 @@ fn build_combined_args(params: &CombinedParams) -> Vec<String> {
             .as_deref(),
     );
     push_opt_arg(
-        &mut args,
+        args,
         "--dupes-min-occurrences",
         params
             .dupes_min_occurrences
@@ -539,7 +588,7 @@ fn build_combined_args(params: &CombinedParams) -> Vec<String> {
             .as_deref(),
     );
     push_opt_arg(
-        &mut args,
+        args,
         "--dupes-threshold",
         params
             .dupes_threshold
@@ -557,10 +606,6 @@ fn build_combined_args(params: &CombinedParams) -> Vec<String> {
         Some(false) => args.push("--dupes-no-ignore-imports".to_string()),
         None => {}
     }
-    if params.score == Some(true) {
-        args.push("--score".to_string());
-    }
-    args
 }
 
 fn push_opt_arg(args: &mut Vec<String>, flag: &str, value: Option<&str>) {

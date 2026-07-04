@@ -412,6 +412,36 @@ struct CheckAnalysisData {
     script_used_packages: rustc_hash::FxHashSet<String>,
 }
 
+fn check_data_from_artifacts(
+    output: fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
+    workspaces: &[WorkspaceInfo],
+) -> CheckAnalysisData {
+    CheckAnalysisData {
+        results: output.results,
+        trace_graph: output.graph,
+        trace_timings: output.timings,
+        retained_modules: output.modules,
+        retained_files: output.files,
+        workspaces: workspaces.to_vec(),
+        script_used_packages: output.script_used_packages,
+    }
+}
+
+fn check_data_from_plain_artifacts(
+    output: fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
+    workspaces: &[WorkspaceInfo],
+) -> CheckAnalysisData {
+    CheckAnalysisData {
+        results: output.results,
+        trace_graph: None,
+        trace_timings: None,
+        retained_modules: None,
+        retained_files: None,
+        workspaces: workspaces.to_vec(),
+        script_used_packages: output.script_used_packages,
+    }
+}
+
 fn run_check_analysis(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
@@ -421,29 +451,16 @@ fn run_check_analysis(
     if opts.retain_modules_for_health {
         return session
             .analyze_dead_code_with_artifacts(true, true)
-            .map(|output| CheckAnalysisData {
-                results: output.results,
-                trace_graph: output.graph,
-                trace_timings: output.timings,
-                retained_modules: output.modules,
-                retained_files: output.files,
-                workspaces: session.workspaces().to_vec(),
-                script_used_packages: output.script_used_packages,
-            })
+            .map(|output| check_data_from_artifacts(output, session.workspaces()))
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
     if opts.include_dupes {
         return session
             .analyze_dead_code_retaining_files(false, opts.trace_opts.any_active())
-            .map(|output| CheckAnalysisData {
-                results: output.results,
-                trace_graph: output.graph,
-                trace_timings: output.timings,
-                retained_modules: None,
-                retained_files: output.files,
-                workspaces: session.workspaces().to_vec(),
-                script_used_packages: output.script_used_packages,
+            .map(|mut output| {
+                output.modules = None;
+                check_data_from_artifacts(output, session.workspaces())
             })
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
@@ -451,29 +468,17 @@ fn run_check_analysis(
     if opts.trace_opts.any_active() {
         return session
             .analyze_dead_code_with_artifacts(false, true)
-            .map(|output| CheckAnalysisData {
-                results: output.results,
-                trace_graph: output.graph,
-                trace_timings: output.timings,
-                retained_modules: None,
-                retained_files: None,
-                workspaces: session.workspaces().to_vec(),
-                script_used_packages: output.script_used_packages,
+            .map(|mut output| {
+                output.modules = None;
+                output.files = None;
+                check_data_from_artifacts(output, session.workspaces())
             })
             .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output));
     }
 
     session
         .analyze_dead_code_with_artifacts(false, false)
-        .map(|output| CheckAnalysisData {
-            results: output.results,
-            trace_graph: None,
-            trace_timings: None,
-            retained_modules: None,
-            retained_files: None,
-            workspaces: session.workspaces().to_vec(),
-            script_used_packages: output.script_used_packages,
-        })
+        .map(|output| check_data_from_plain_artifacts(output, session.workspaces()))
         .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))
 }
 
@@ -684,14 +689,24 @@ fn resolve_check_regression(
     regression::compare_check_regression(results, &opts.regression_opts, config_baseline)
 }
 
-fn complete_check_execution(
-    opts: &CheckOptions<'_>,
+struct CheckCompletionInput<'a> {
+    opts: &'a CheckOptions<'a>,
     config: ResolvedConfig,
     data: CheckAnalysisData,
     elapsed: Duration,
     regression_outcome: Option<RegressionOutcome>,
     baseline_matched: Option<(usize, usize)>,
-) -> CheckResult {
+}
+
+fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
+    let CheckCompletionInput {
+        opts,
+        config,
+        data,
+        elapsed,
+        regression_outcome,
+        baseline_matched,
+    } = input;
     let CheckAnalysisData {
         results,
         trace_graph,
@@ -811,14 +826,14 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 
     let regression_outcome = resolve_check_regression(opts, &config, &data.results)?;
 
-    Ok(complete_check_execution(
+    Ok(complete_check_execution(CheckCompletionInput {
         opts,
         config,
         data,
         elapsed,
         regression_outcome,
         baseline_matched,
-    ))
+    }))
 }
 
 pub struct PrintCheckOptions {

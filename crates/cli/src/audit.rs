@@ -1005,6 +1005,28 @@ struct AuditResultParts {
     change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
 }
 
+#[derive(Default)]
+struct AuditBriefData {
+    review_deltas: Option<crate::audit_brief::ReviewDeltas>,
+    weakening_signals: Vec<weakening::WeakeningSignal>,
+    routing: Option<routing::RoutingFacts>,
+    decision_surface: Option<crate::audit_decision_surface::DecisionSurface>,
+    graph_snapshot_hash: Option<String>,
+    change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
+}
+
+#[derive(Clone, Copy)]
+struct AuditBriefDataInput<'a> {
+    opts: &'a AuditOptions<'a>,
+    check: Option<&'a CheckResult>,
+    dupes: Option<&'a DupesResult>,
+    health: Option<&'a HealthResult>,
+    base_snapshot: Option<&'a AuditKeySnapshot>,
+    changed_files: &'a FxHashSet<PathBuf>,
+    base_ref: &'a str,
+    head_sha: Option<&'a str>,
+}
+
 /// Run the three HEAD-side analyses with intra-pipeline sharing intact:
 /// check first (so its parsed modules are available), then dupes (which can
 /// reuse check's discovered file list when production settings match), then
@@ -1270,9 +1292,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
             health: health_result.as_ref(),
         },
     )?;
-    if let Some(ref mut check) = check_result {
-        check.shared_parse = None;
-    }
+    drop_check_shared_parse(&mut check_result);
     let (attribution, verdict, summary) = compute_audit_outcome(
         opts.gate,
         check_result.as_ref(),
@@ -1281,62 +1301,17 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         base_snapshot.as_ref(),
     );
 
-    // Review-brief data: deltas (head-vs-base sets), weakening (base-vs-head
-    // diff scan over the changed files), and ownership routing. Brief-path only.
-    let (review_deltas, weakening_signals, routing) = if opts.brief {
-        compute_brief_e3_data(
-            opts,
-            check_result.as_ref(),
-            base_snapshot.as_ref(),
-            &input.changed_files,
-            &input.base_ref,
-        )
-    } else {
-        (None, Vec::new(), None)
-    };
-
-    // Decision surface (the apex): classify the SOLID-3 candidates from the
-    // deltas + coordination gaps, anchor each `signal_id`, rank, cap, and pair
-    // the routed expert. Brief-path only.
-    let decision_surface = if opts.brief {
-        Some(compute_decision_surface(
-            opts,
-            check_result.as_ref(),
-            review_deltas.as_ref(),
-            routing.as_ref(),
-        ))
-    } else {
-        None
-    };
-
-    // Per-hunk change anchors (the region-level anchor set): derived from the
-    // SAME diff source the run used (an opt-in `--diff-stdin`/`--diff-file` diff,
-    // else the committed `base...HEAD`), so emission and validation anchor to one
-    // changed set. Brief-path only.
-    let change_anchors = if opts.brief {
-        compute_change_anchors(opts.root, &input.base_ref)
-    } else {
-        Vec::new()
-    };
-
-    // Graph-snapshot hash (the staleness pin): a deterministic hash of the
-    // HEAD-side key sets plus the resolved base ref + head sha + the change-anchor
-    // id set. Brief-path only. The verifier is the graph: a mutated tree changes a
-    // key set OR a changed region, changes this hash, and refuses a stale agent
-    // walkthrough on reentry (so a cited change_anchor that moved is refused too).
     let head_sha = get_head_sha(opts.root);
-    let graph_snapshot_hash = if opts.brief {
-        Some(compute_graph_snapshot_hash(
-            check_result.as_ref(),
-            dupes_result.as_ref(),
-            health_result.as_ref(),
-            &input.base_ref,
-            head_sha.as_deref(),
-            &change_anchors,
-        ))
-    } else {
-        None
-    };
+    let brief = compute_audit_brief_data(AuditBriefDataInput {
+        opts,
+        check: check_result.as_ref(),
+        dupes: dupes_result.as_ref(),
+        health: health_result.as_ref(),
+        base_snapshot: base_snapshot.as_ref(),
+        changed_files: &input.changed_files,
+        base_ref: &input.base_ref,
+        head_sha: head_sha.as_deref(),
+    });
 
     Ok(build_audit_result(AuditResultParts {
         verdict,
@@ -1355,13 +1330,64 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         dupes: dupes_result,
         health: health_result,
         elapsed: input.start.elapsed(),
+        review_deltas: brief.review_deltas,
+        weakening_signals: brief.weakening_signals,
+        routing: brief.routing,
+        decision_surface: brief.decision_surface,
+        graph_snapshot_hash: brief.graph_snapshot_hash,
+        change_anchors: brief.change_anchors,
+    }))
+}
+
+fn drop_check_shared_parse(check_result: &mut Option<CheckResult>) {
+    if let Some(check) = check_result {
+        check.shared_parse = None;
+    }
+}
+
+fn compute_audit_brief_data(input: AuditBriefDataInput<'_>) -> AuditBriefData {
+    if !input.opts.brief {
+        return AuditBriefData::default();
+    }
+
+    // Review-brief data: deltas, weakening, and ownership routing.
+    let (review_deltas, weakening_signals, routing) = compute_brief_e3_data(
+        input.opts,
+        input.check,
+        input.base_snapshot,
+        input.changed_files,
+        input.base_ref,
+    );
+
+    // Decision surface: classify the SOLID-3 candidates, rank, cap, and route.
+    let decision_surface = Some(compute_decision_surface(
+        input.opts,
+        input.check,
+        review_deltas.as_ref(),
+        routing.as_ref(),
+    ));
+
+    // Per-hunk change anchors come from the same diff source as the audit run.
+    let change_anchors = compute_change_anchors(input.opts.root, input.base_ref);
+
+    // Graph-snapshot hash pins key sets, resolved base, head sha, and anchors.
+    let graph_snapshot_hash = Some(compute_graph_snapshot_hash(
+        input.check,
+        input.dupes,
+        input.health,
+        input.base_ref,
+        input.head_sha,
+        &change_anchors,
+    ));
+
+    AuditBriefData {
         review_deltas,
         weakening_signals,
         routing,
         decision_surface,
         graph_snapshot_hash,
         change_anchors,
-    }))
+    }
 }
 
 /// Compute the deterministic graph-snapshot hash from the HEAD-side analysis
@@ -1455,7 +1481,7 @@ fn compute_decision_surface(
     routing: Option<&routing::RoutingFacts>,
 ) -> crate::audit_decision_surface::DecisionSurface {
     use crate::audit_decision_surface::{
-        BoundaryAnchor, CoordinationAnchor, DecisionInputs, extract_decision_surface,
+        CoordinationAnchor, DecisionInputs, extract_decision_surface,
     };
 
     let (Some(check), Some(deltas)) = (check, review_deltas) else {
@@ -1463,24 +1489,7 @@ fn compute_decision_surface(
     };
     let root = &check.config.root;
 
-    // One representative boundary anchor per introduced zone-pair: pick the first
-    // violation whose zone-pair key matches an introduced edge, for the file +
-    // line suppression/routing anchor.
-    let mut boundary_anchors: Vec<BoundaryAnchor> = Vec::new();
-    let mut seen_pairs: FxHashSet<String> = FxHashSet::default();
-    for finding in &check.results.boundary_violations {
-        let key = review_deltas::boundary_edge_key(finding);
-        if !deltas.boundary_introduced.contains(&key) || !seen_pairs.insert(key.clone()) {
-            continue;
-        }
-        boundary_anchors.push(BoundaryAnchor {
-            zone_pair_key: key,
-            from_file: keys::relative_key_path(&finding.violation.from_path, root),
-            from_zone: finding.violation.from_zone.clone(),
-            to_zone: finding.violation.to_zone.clone(),
-            line: finding.violation.line,
-        });
-    }
+    let boundary_anchors = decision_boundary_anchors(check, deltas, root);
 
     // Coordination gaps projected to the public-API/contract decision shape.
     // Aggregate per changed file: ONE contract decision per changed file (R1
@@ -1504,25 +1513,18 @@ fn compute_decision_surface(
     // export-line map precomputed on the brief path (the graph is already dropped
     // by health here, so we cannot re-derive it now). Lets coordination /
     // public-API decisions deep-link to the exact export instead of the file head.
-    let export_lines = check.export_lines.as_ref();
-    let resolve_line = |rel: &str, symbols: &[String]| -> u32 {
-        let Some(exports) = export_lines.and_then(|map| map.get(rel)) else {
-            return 0;
-        };
-        exports
-            .iter()
-            .find(|(name, _)| symbols.iter().any(|s| name == s))
-            .or_else(|| exports.first())
-            .map_or(0, |(_, line)| *line)
-    };
     for anchor in &mut coordination {
-        anchor.line = resolve_line(&anchor.changed_file, &anchor.consumed_symbols);
+        anchor.line = resolve_export_line(
+            check.export_lines.as_ref(),
+            &anchor.changed_file,
+            &anchor.consumed_symbols,
+        );
     }
     let public_api_anchor_line = deltas.public_api_added.first().map_or(0, |key| {
         let mut parts = key.splitn(2, "::");
         let path = parts.next().unwrap_or_default();
         let name = parts.next().unwrap_or_default();
-        resolve_line(path, &[name.to_string()])
+        resolve_export_line(check.export_lines.as_ref(), path, &[name.to_string()])
     });
 
     // Rename resolver: a head (post-rename) root-relative path -> its pre-rename
@@ -1556,6 +1558,46 @@ fn compute_decision_surface(
         internal_consumers: &internal_consumers,
         cap: opts.max_decisions,
     })
+}
+
+fn decision_boundary_anchors(
+    check: &CheckResult,
+    deltas: &crate::audit_brief::ReviewDeltas,
+    root: &std::path::Path,
+) -> Vec<crate::audit_decision_surface::BoundaryAnchor> {
+    use crate::audit_decision_surface::BoundaryAnchor;
+
+    let mut boundary_anchors: Vec<BoundaryAnchor> = Vec::new();
+    let mut seen_pairs: FxHashSet<String> = FxHashSet::default();
+    for finding in &check.results.boundary_violations {
+        let key = review_deltas::boundary_edge_key(finding);
+        if !deltas.boundary_introduced.contains(&key) || !seen_pairs.insert(key.clone()) {
+            continue;
+        }
+        boundary_anchors.push(BoundaryAnchor {
+            zone_pair_key: key,
+            from_file: keys::relative_key_path(&finding.violation.from_path, root),
+            from_zone: finding.violation.from_zone.clone(),
+            to_zone: finding.violation.to_zone.clone(),
+            line: finding.violation.line,
+        });
+    }
+    boundary_anchors
+}
+
+fn resolve_export_line(
+    export_lines: Option<&FxHashMap<String, Vec<(String, u32)>>>,
+    rel: &str,
+    symbols: &[String],
+) -> u32 {
+    let Some(exports) = export_lines.and_then(|map| map.get(rel)) else {
+        return 0;
+    };
+    exports
+        .iter()
+        .find(|(name, _)| symbols.iter().any(|s| name == s))
+        .or_else(|| exports.first())
+        .map_or(0, |(_, line)| *line)
 }
 
 /// Aggregate per-(changed, consumer) coordination gaps into ONE contract anchor
@@ -1645,8 +1687,6 @@ fn compute_weakening_signals(
     base_ref: &str,
     changed_files: &FxHashSet<PathBuf>,
 ) -> Vec<weakening::WeakeningSignal> {
-    use weakening::{WeakeningKind, WeakeningSignal};
-
     let Some(git_root) = git_toplevel(root) else {
         return Vec::new();
     };
@@ -1654,7 +1694,7 @@ fn compute_weakening_signals(
         return Vec::new();
     };
 
-    let mut signals: Vec<WeakeningSignal> = Vec::new();
+    let mut signals = Vec::new();
     // Sort the changed files for deterministic signal ordering.
     let mut files: Vec<&PathBuf> = changed_files.iter().collect();
     files.sort();
@@ -1669,47 +1709,73 @@ fn compute_weakening_signals(
         // A net-new file (no base) or a non-source file still gets the scan; the
         // detectors are no-ops on irrelevant content.
 
-        if weakening::is_test_file(&rel_str) {
-            for token in weakening::detect_test_weakening(&base, &head) {
-                signals.push(WeakeningSignal {
-                    kind: WeakeningKind::TestWeakened,
-                    file: rel_str.clone(),
-                    evidence: format!("{token} added"),
-                });
-            }
-            for ev in weakening::detect_removed_tests(&base, &head) {
-                signals.push(WeakeningSignal {
-                    kind: WeakeningKind::TestWeakened,
-                    file: rel_str.clone(),
-                    evidence: ev,
-                });
-            }
-        }
-        for ev in weakening::detect_added_suppressions(&base, &head) {
-            signals.push(WeakeningSignal {
-                kind: WeakeningKind::SuppressionAdded,
-                file: rel_str.clone(),
-                evidence: ev,
-            });
-        }
-        for ev in weakening::detect_lowered_thresholds(&base, &head) {
-            signals.push(WeakeningSignal {
-                kind: WeakeningKind::ThresholdLowered,
-                file: rel_str.clone(),
-                evidence: ev,
-            });
-        }
-        if weakening::is_ci_file(&rel_str) {
-            for ev in weakening::detect_removed_security_steps(&base, &head) {
-                signals.push(WeakeningSignal {
-                    kind: WeakeningKind::SecurityCheckRemoved,
-                    file: rel_str.clone(),
-                    evidence: ev,
-                });
-            }
-        }
+        signals.extend(weakening_signals_for_file(&rel_str, &base, &head));
     }
     signals
+}
+
+fn weakening_signals_for_file(
+    rel_str: &str,
+    base: &str,
+    head: &str,
+) -> Vec<weakening::WeakeningSignal> {
+    use weakening::WeakeningKind;
+
+    let mut signals = Vec::new();
+    if weakening::is_test_file(rel_str) {
+        extend_weakening_signals(
+            &mut signals,
+            WeakeningKind::TestWeakened,
+            rel_str,
+            weakening::detect_test_weakening(base, head)
+                .into_iter()
+                .map(|token| format!("{token} added")),
+        );
+        extend_weakening_signals(
+            &mut signals,
+            WeakeningKind::TestWeakened,
+            rel_str,
+            weakening::detect_removed_tests(base, head),
+        );
+    }
+    extend_weakening_signals(
+        &mut signals,
+        WeakeningKind::SuppressionAdded,
+        rel_str,
+        weakening::detect_added_suppressions(base, head),
+    );
+    extend_weakening_signals(
+        &mut signals,
+        WeakeningKind::ThresholdLowered,
+        rel_str,
+        weakening::detect_lowered_thresholds(base, head),
+    );
+    if weakening::is_ci_file(rel_str) {
+        extend_weakening_signals(
+            &mut signals,
+            WeakeningKind::SecurityCheckRemoved,
+            rel_str,
+            weakening::detect_removed_security_steps(base, head),
+        );
+    }
+    signals
+}
+
+fn extend_weakening_signals(
+    signals: &mut Vec<weakening::WeakeningSignal>,
+    kind: weakening::WeakeningKind,
+    file: &str,
+    evidences: impl IntoIterator<Item = String>,
+) {
+    signals.extend(
+        evidences
+            .into_iter()
+            .map(|evidence| weakening::WeakeningSignal {
+                kind,
+                file: file.to_owned(),
+                evidence,
+            }),
+    );
 }
 
 /// Attribution, verdict, and summary computed together from the HEAD analyses and
@@ -2152,73 +2218,78 @@ pub fn run_audit(opts: &AuditOptions<'_>, gate_marker: Option<&str>) -> ExitCode
     };
     match execute_audit(&resolved_opts) {
         Ok(result) => {
-            let mut findings = result
-                .check
-                .as_ref()
-                .map(|c| crate::impact::collect_dead_code_findings(&c.results))
-                .unwrap_or_default();
-            if let Some(health) = result.health.as_ref() {
-                findings.extend(crate::impact::collect_complexity_findings(&health.report));
-            }
-            let clones = result
-                .dupes
-                .as_ref()
-                .map(|d| crate::impact::collect_clone_findings(&d.report))
-                .unwrap_or_default();
-            let empty_supps: Vec<fallow_types::results::ActiveSuppression> = Vec::new();
-            let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
-                c.results.active_suppressions.as_slice()
-            });
-            let attribution = crate::impact::AttributionInput {
-                root: opts.root,
-                scope: crate::impact::Scope::ChangedFiles(&result.changed_files),
-                findings,
-                clones,
-                suppressions,
-            };
-            crate::impact::record_audit_run(
-                opts.root,
-                &result.summary,
-                &crate::impact::AuditRunRecord {
-                    verdict: result.verdict,
-                    gate: gate_marker.is_some(),
-                    git_sha: result.head_sha.as_deref(),
-                    version: env!("CARGO_PKG_VERSION"),
-                    timestamp: &crate::vital_signs::chrono_timestamp(),
-                    attribution: Some(&attribution),
-                },
-            );
-            // Walkthrough surfaces take priority over the brief body when
-            // requested. Both always exit 0.
-            if opts.walkthrough_guide {
-                crate::audit_brief::print_walkthrough_guide_result(&result)
-            } else if opts.walkthrough {
-                crate::audit_brief::print_walkthrough_human_result(
-                    &result,
-                    opts.root,
-                    opts.cache_dir,
-                    opts.mark_viewed,
-                    opts.show_cleared,
-                    opts.quiet,
-                )
-            } else if let Some(path) = opts.walkthrough_file {
-                crate::audit_brief::print_walkthrough_file_result(&result, path)
-            } else if opts.brief {
-                // Exit-0 seam: the brief renders the same analysis but never
-                // gates on the verdict. `print_brief_result` always returns
-                // SUCCESS.
-                crate::audit_brief::print_brief_result(
-                    &result,
-                    opts.quiet,
-                    opts.explain,
-                    opts.show_deprioritized,
-                )
-            } else {
-                print_audit_result(&result, opts.quiet, opts.explain)
-            }
+            record_audit_impact(opts, gate_marker, &result);
+            print_audit_command_result(opts, &result)
         }
         Err(code) => code,
     }
+}
+
+fn record_audit_impact(opts: &AuditOptions<'_>, gate_marker: Option<&str>, result: &AuditResult) {
+    let mut findings = result
+        .check
+        .as_ref()
+        .map(|c| crate::impact::collect_dead_code_findings(&c.results))
+        .unwrap_or_default();
+    if let Some(health) = result.health.as_ref() {
+        findings.extend(crate::impact::collect_complexity_findings(&health.report));
+    }
+    let clones = result
+        .dupes
+        .as_ref()
+        .map(|d| crate::impact::collect_clone_findings(&d.report))
+        .unwrap_or_default();
+    let empty_supps: Vec<fallow_types::results::ActiveSuppression> = Vec::new();
+    let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
+        c.results.active_suppressions.as_slice()
+    });
+    let attribution = crate::impact::AttributionInput {
+        root: opts.root,
+        scope: crate::impact::Scope::ChangedFiles(&result.changed_files),
+        findings,
+        clones,
+        suppressions,
+    };
+    crate::impact::record_audit_run(
+        opts.root,
+        &result.summary,
+        &crate::impact::AuditRunRecord {
+            verdict: result.verdict,
+            gate: gate_marker.is_some(),
+            git_sha: result.head_sha.as_deref(),
+            version: env!("CARGO_PKG_VERSION"),
+            timestamp: &crate::vital_signs::chrono_timestamp(),
+            attribution: Some(&attribution),
+        },
+    );
+}
+
+fn print_audit_command_result(opts: &AuditOptions<'_>, result: &AuditResult) -> ExitCode {
+    if opts.walkthrough_guide {
+        return crate::audit_brief::print_walkthrough_guide_result(result);
+    }
+    if opts.walkthrough {
+        return crate::audit_brief::print_walkthrough_human_result(
+            result,
+            opts.root,
+            opts.cache_dir,
+            opts.mark_viewed,
+            opts.show_cleared,
+            opts.quiet,
+        );
+    }
+    if let Some(path) = opts.walkthrough_file {
+        return crate::audit_brief::print_walkthrough_file_result(result, path);
+    }
+    if opts.brief {
+        return crate::audit_brief::print_brief_result(
+            result,
+            opts.quiet,
+            opts.explain,
+            opts.show_deprioritized,
+        );
+    }
+    print_audit_result(result, opts.quiet, opts.explain)
 }
 
 /// Run the standalone `fallow decision-surface` command: the separable, cheap

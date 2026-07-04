@@ -7,11 +7,20 @@ pub(super) fn scan_curly_section(
     debug_assert!(opening_len == 1 || opening_len == 2);
     debug_assert!(closing_len == 1 || closing_len == 2);
 
-    scan_delimited_section(source, start, opening_len, closing_len, b'{', b'}')
+    scan_delimited_section(
+        source,
+        start,
+        DelimitedSectionSpec {
+            opening_len,
+            closing_len,
+            open_byte: b'{',
+            close_byte: b'}',
+        },
+    )
 }
 
 pub(super) fn scan_bracket_section(source: &str, start: usize) -> Option<(&str, usize)> {
-    scan_delimited_section(source, start, 1, 1, b'[', b']')
+    scan_delimited_section(source, start, DelimitedSectionSpec::single(b'[', b']'))
 }
 
 /// Scan a parenthesized section `(...)` starting at the `(` at `start`, returning
@@ -19,21 +28,37 @@ pub(super) fn scan_bracket_section(source: &str, start: usize) -> Option<(&str, 
 /// nesting-aware, so a `)` inside a string or a nested `(...)` does not close
 /// early. Used for Vue SFC `<style>` `v-bind(expr)` extraction.
 pub(super) fn scan_paren_section(source: &str, start: usize) -> Option<(&str, usize)> {
-    scan_delimited_section(source, start, 1, 1, b'(', b')')
+    scan_delimited_section(source, start, DelimitedSectionSpec::single(b'(', b')'))
+}
+
+#[derive(Clone, Copy)]
+struct DelimitedSectionSpec {
+    opening_len: usize,
+    closing_len: usize,
+    open_byte: u8,
+    close_byte: u8,
+}
+
+impl DelimitedSectionSpec {
+    const fn single(open_byte: u8, close_byte: u8) -> Self {
+        Self {
+            opening_len: 1,
+            closing_len: 1,
+            open_byte,
+            close_byte,
+        }
+    }
 }
 
 fn scan_delimited_section(
     source: &str,
     start: usize,
-    opening_len: usize,
-    closing_len: usize,
-    open_byte: u8,
-    close_byte: u8,
+    spec: DelimitedSectionSpec,
 ) -> Option<(&str, usize)> {
-    debug_assert_eq!(source.as_bytes().get(start), Some(&open_byte));
+    debug_assert_eq!(source.as_bytes().get(start), Some(&spec.open_byte));
 
     let bytes = source.as_bytes();
-    let mut index = start + opening_len;
+    let mut index = start + spec.opening_len;
     let mut nested_delimiters = 0_u32;
     let mut state = DelimitedScanState::default();
 
@@ -60,14 +85,14 @@ fn scan_delimited_section(
             b'`' => {
                 state.in_backtick = true;
             }
-            b if b == open_byte => nested_delimiters += 1,
-            b if b == close_byte => {
+            b if b == spec.open_byte => nested_delimiters += 1,
+            b if b == spec.close_byte => {
                 if nested_delimiters == 0 {
-                    if closing_len == 1 {
-                        return Some((&source[start + opening_len..index], index + 1));
+                    if spec.closing_len == 1 {
+                        return Some((&source[start + spec.opening_len..index], index + 1));
                     }
-                    if bytes.get(index + 1) == Some(&close_byte) {
-                        return Some((&source[start + opening_len..index], index + 2));
+                    if bytes.get(index + 1) == Some(&spec.close_byte) {
+                        return Some((&source[start + spec.opening_len..index], index + 2));
                     }
                 } else {
                     nested_delimiters -= 1;

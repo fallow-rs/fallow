@@ -77,6 +77,13 @@ struct DecisionAnalysis {
     routing: fallow_output::RoutingFacts,
 }
 
+struct DecisionGraphSignals {
+    public_api: FxHashSet<String>,
+    impact_closure: Option<fallow_engine::module_graph::ImpactClosurePaths>,
+    export_lines: Option<FxHashMap<String, Vec<(String, u32)>>>,
+    internal_consumers: Option<FxHashMap<String, u64>>,
+}
+
 fn run_decision_analysis(
     resolved: &ProgrammaticAnalysisContext,
     changed_files: Option<&FxHashSet<PathBuf>>,
@@ -102,40 +109,19 @@ fn run_decision_analysis(
     let changed_files = changed_files.as_ref();
 
     let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
-    if let Some(workspace_roots) = workspace_roots.as_ref() {
-        fallow_engine::dead_code::filter_to_workspaces(&mut output.results, workspace_roots);
-    }
-    if let Some(changed_files) = changed_files {
-        fallow_engine::dead_code::filter_by_changed_files(&mut output.results, changed_files);
-    }
+    filter_decision_results(
+        &mut output.results,
+        workspace_roots.as_deref(),
+        changed_files,
+    );
 
-    let public_api = output
-        .graph
-        .as_ref()
-        .map_or_else(FxHashSet::default, |graph| {
-            crate::review_deltas::public_export_keys_for(
-                graph,
-                session.config(),
-                root_pkg.as_ref(),
-                session.workspaces(),
-                &root,
-            )
-        });
-    let impact_closure = output.graph.as_ref().and_then(|graph| {
-        changed_files.and_then(|files| {
-            fallow_engine::module_graph::impact_closure_for_changed_paths(graph, &root, files)
-        })
-    });
-    let export_lines = output.graph.as_ref().and_then(|graph| {
-        changed_files.and_then(|files| {
-            fallow_engine::module_graph::export_lines_for_changed_paths(graph, &root, files)
-        })
-    });
-    let internal_consumers = output.graph.as_ref().and_then(|graph| {
-        changed_files.and_then(|files| {
-            fallow_engine::module_graph::internal_consumers_for_changed_paths(graph, &root, files)
-        })
-    });
+    let graph_signals = decision_graph_signals(
+        output.graph.as_ref(),
+        &session,
+        root_pkg.as_ref(),
+        &root,
+        changed_files,
+    );
     let routing = changed_files.map_or_else(fallow_output::RoutingFacts::default, |files| {
         crate::routing::compute_routing(&root, session.config(), files)
     });
@@ -143,12 +129,65 @@ fn run_decision_analysis(
     Ok(DecisionAnalysis {
         root,
         results: output.results,
+        public_api: graph_signals.public_api,
+        impact_closure: graph_signals.impact_closure,
+        export_lines: graph_signals.export_lines,
+        internal_consumers: graph_signals.internal_consumers,
+        routing,
+    })
+}
+
+fn decision_graph_signals(
+    graph: Option<&fallow_engine::module_graph::RetainedModuleGraph>,
+    session: &fallow_engine::session::AnalysisSession,
+    root_pkg: Option<&fallow_config::PackageJson>,
+    root: &Path,
+    changed_files: Option<&FxHashSet<PathBuf>>,
+) -> DecisionGraphSignals {
+    let public_api = graph.map_or_else(FxHashSet::default, |graph| {
+        crate::review_deltas::public_export_keys_for(
+            graph,
+            session.config(),
+            root_pkg,
+            session.workspaces(),
+            root,
+        )
+    });
+    let impact_closure = graph.and_then(|graph| {
+        changed_files.and_then(|files| {
+            fallow_engine::module_graph::impact_closure_for_changed_paths(graph, root, files)
+        })
+    });
+    let export_lines = graph.and_then(|graph| {
+        changed_files.and_then(|files| {
+            fallow_engine::module_graph::export_lines_for_changed_paths(graph, root, files)
+        })
+    });
+    let internal_consumers = graph.and_then(|graph| {
+        changed_files.and_then(|files| {
+            fallow_engine::module_graph::internal_consumers_for_changed_paths(graph, root, files)
+        })
+    });
+
+    DecisionGraphSignals {
         public_api,
         impact_closure,
         export_lines,
         internal_consumers,
-        routing,
-    })
+    }
+}
+
+fn filter_decision_results(
+    results: &mut fallow_types::results::AnalysisResults,
+    workspace_roots: Option<&[PathBuf]>,
+    changed_files: Option<&FxHashSet<PathBuf>>,
+) {
+    if let Some(workspace_roots) = workspace_roots {
+        fallow_engine::dead_code::filter_to_workspaces(results, workspace_roots);
+    }
+    if let Some(changed_files) = changed_files {
+        fallow_engine::dead_code::filter_by_changed_files(results, changed_files);
+    }
 }
 
 fn compute_base_decision_snapshot(

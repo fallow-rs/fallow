@@ -316,14 +316,7 @@ fn apply_tag(input: &mut SvelteTagInput<'_>) {
         return;
     }
 
-    if apply_svelte_block_tag(
-        input.tag,
-        input.imported_bindings,
-        input.bound_targets,
-        input.iterable_types,
-        input.scopes,
-        input.usage,
-    ) {
+    if apply_svelte_block_tag(input) {
         return;
     }
 
@@ -348,79 +341,85 @@ fn apply_tag(input: &mut SvelteTagInput<'_>) {
     );
 }
 
-fn apply_svelte_block_tag(
-    tag: &str,
-    imported_bindings: &FxHashSet<String>,
-    bound_targets: &FxHashMap<String, String>,
-    iterable_types: &FxHashMap<String, String>,
-    scopes: &mut Vec<SvelteScopeFrame>,
-    usage: &mut TemplateUsage,
-) -> bool {
-    if let Some(rest) = tag.strip_prefix('/') {
-        pop_scope(scopes, rest.trim());
+fn apply_svelte_block_tag(input: &mut SvelteTagInput<'_>) -> bool {
+    if let Some(rest) = input.tag.strip_prefix('/') {
+        pop_scope(input.scopes, rest.trim());
         return true;
     }
 
-    if let Some(expr) = tag.strip_prefix("#if") {
+    if let Some(expr) = input.tag.strip_prefix("#if") {
         merge_expr_and_open_block(
             expr,
             SvelteBlockKind::If,
-            imported_bindings,
-            bound_targets,
-            scopes,
-            usage,
+            input.imported_bindings,
+            input.bound_targets,
+            input.scopes,
+            input.usage,
         );
         return true;
     }
 
-    if let Some(captures) = SVELTE_EACH_RE.captures(tag) {
+    if let Some(captures) = SVELTE_EACH_RE.captures(input.tag) {
         apply_each_tag(
             &captures,
-            imported_bindings,
-            bound_targets,
-            iterable_types,
-            scopes,
-            usage,
+            input.imported_bindings,
+            input.bound_targets,
+            input.iterable_types,
+            input.scopes,
+            input.usage,
         );
         return true;
     }
 
-    if let Some(captures) = SVELTE_AWAIT_RE.captures(tag) {
-        apply_await_tag(&captures, imported_bindings, bound_targets, scopes, usage);
+    if let Some(captures) = SVELTE_AWAIT_RE.captures(input.tag) {
+        apply_await_tag(
+            &captures,
+            input.imported_bindings,
+            input.bound_targets,
+            input.scopes,
+            input.usage,
+        );
         return true;
     }
 
     // `{:then binding}` / `{:catch binding}` both rebind the await frame's locals.
     if let Some(captures) = SVELTE_THEN_RE
-        .captures(tag)
-        .or_else(|| SVELTE_CATCH_RE.captures(tag))
+        .captures(input.tag)
+        .or_else(|| SVELTE_CATCH_RE.captures(input.tag))
     {
-        update_await_branch_locals(&captures, scopes);
+        update_await_branch_locals(&captures, input.scopes);
         return true;
     }
 
-    if let Some(expr) = tag.strip_prefix("#key") {
+    if let Some(expr) = input.tag.strip_prefix("#key") {
         merge_expr_and_open_block(
             expr,
             SvelteBlockKind::Key,
-            imported_bindings,
-            bound_targets,
-            scopes,
-            usage,
+            input.imported_bindings,
+            input.bound_targets,
+            input.scopes,
+            input.usage,
         );
         return true;
     }
 
-    if let Some(captures) = SVELTE_SNIPPET_RE.captures(tag) {
-        let params = captures.name("params").map_or("", |m| m.as_str());
-        scopes.push(SvelteScopeFrame {
-            kind: SvelteBlockKind::Snippet,
-            locals: extract_pattern_binding_names(params),
-        });
+    if apply_svelte_snippet_tag(input) {
         return true;
     }
 
     false
+}
+
+fn apply_svelte_snippet_tag(input: &mut SvelteTagInput<'_>) -> bool {
+    let Some(captures) = SVELTE_SNIPPET_RE.captures(input.tag) else {
+        return false;
+    };
+    let params = captures.name("params").map_or("", |m| m.as_str());
+    input.scopes.push(SvelteScopeFrame {
+        kind: SvelteBlockKind::Snippet,
+        locals: extract_pattern_binding_names(params),
+    });
+    true
 }
 
 /// Merge a block opener's condition expression, then push a new scope frame of

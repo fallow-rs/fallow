@@ -198,45 +198,50 @@ pub(in crate::report) fn print_human(input: &PrintHumanInput<'_>) {
     }
 
     if !input.quiet {
-        if total == 0 {
-            eprintln!(
-                "{}",
-                format!(
-                    "\u{2713} No issues found ({:.2}s)",
-                    input.elapsed.as_secs_f64()
-                )
-                .green()
-                .bold()
-            );
-        } else {
-            let unused_file_set: FxHashSet<&std::path::Path> = input
-                .results
-                .unused_files
-                .iter()
-                .map(|f| f.file.path.as_path())
-                .collect();
-            let suppressed_exports = input
-                .results
-                .unused_exports
-                .iter()
-                .filter(|e| unused_file_set.contains(e.export.path.as_path()))
-                .count();
-            let suppressed_types = input
-                .results
-                .unused_types
-                .iter()
-                .filter(|e| unused_file_set.contains(e.export.path.as_path()))
-                .count();
-            let summary = build_summary_footer(input.results, suppressed_exports, suppressed_types);
-            eprintln!(
-                "{}",
-                format!("\u{2717} {summary} ({:.2}s)", input.elapsed.as_secs_f64())
-                    .red()
-                    .bold()
-            );
-            print_suppression_footer(input.results);
-        }
+        print_human_footer(input, total);
     }
+}
+
+fn print_human_footer(input: &PrintHumanInput<'_>, total: usize) {
+    if total == 0 {
+        eprintln!(
+            "{}",
+            format!(
+                "\u{2713} No issues found ({:.2}s)",
+                input.elapsed.as_secs_f64()
+            )
+            .green()
+            .bold()
+        );
+        return;
+    }
+
+    let unused_file_set: FxHashSet<&std::path::Path> = input
+        .results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.as_path())
+        .collect();
+    let suppressed_exports = input
+        .results
+        .unused_exports
+        .iter()
+        .filter(|e| unused_file_set.contains(e.export.path.as_path()))
+        .count();
+    let suppressed_types = input
+        .results
+        .unused_types
+        .iter()
+        .filter(|e| unused_file_set.contains(e.export.path.as_path()))
+        .count();
+    let summary = build_summary_footer(input.results, suppressed_exports, suppressed_types);
+    eprintln!(
+        "{}",
+        format!("\u{2717} {summary} ({:.2}s)", input.elapsed.as_secs_f64())
+            .red()
+            .bold()
+    );
+    print_suppression_footer(input.results);
 }
 
 fn print_suppression_footer(results: &AnalysisResults) {
@@ -970,30 +975,34 @@ fn push_catalog_dependency_sections(
     max_items: usize,
     total_issues: usize,
 ) {
-    push_unused_catalog_entries_section(
+    let mut ctx = CatalogSectionContext {
         lines,
+        root,
+        max_items,
+        total_issues,
+    };
+    push_unused_catalog_entries_section(
+        &mut ctx,
         &results.unused_catalog_entries,
         rules.unused_catalog_entries,
-        max_items,
-        total_issues,
-        root,
     );
     push_empty_catalog_groups_section(
-        lines,
+        &mut ctx,
         &results.empty_catalog_groups,
         rules.empty_catalog_groups,
-        max_items,
-        total_issues,
-        root,
     );
     push_unresolved_catalog_references_section(
-        lines,
+        &mut ctx,
         &results.unresolved_catalog_references,
         rules.unresolved_catalog_references,
-        max_items,
-        total_issues,
-        root,
     );
+}
+
+struct CatalogSectionContext<'a> {
+    lines: &'a mut Vec<String>,
+    root: &'a Path,
+    max_items: usize,
+    total_issues: usize,
 }
 
 fn push_dependency_override_sections(
@@ -1026,12 +1035,9 @@ fn push_dependency_override_sections(
 /// shape): `entry_name  catalog_name  path:line`. Skipped when the list is
 /// empty or the rule is `Off` (which already removed entries upstream).
 fn push_unused_catalog_entries_section(
-    lines: &mut Vec<String>,
+    ctx: &mut CatalogSectionContext<'_>,
     entries: &[fallow_types::output_dead_code::UnusedCatalogEntryFinding],
     severity: fallow_config::Severity,
-    max_items: usize,
-    total_issues: usize,
-    root: &Path,
 ) {
     if entries.is_empty() {
         return;
@@ -1039,16 +1045,16 @@ fn push_unused_catalog_entries_section(
     let level = severity_to_level(severity);
     build_human_section_ex(
         HumanSectionInput {
-            lines,
+            lines: &mut *ctx.lines,
             items: entries,
             title: "Unused catalog entries",
             level,
-            max: max_items,
-            total_issues,
+            max: ctx.max_items,
+            total_issues: ctx.total_issues,
         },
         |entry| {
             let entry = &entry.entry;
-            let path_display = root.join(&entry.path);
+            let path_display = ctx.root.join(&entry.path);
             let mut row = format!(
                 "  {entry_name}  {catalog}  {loc}",
                 entry_name = entry.entry_name.bold(),
@@ -1056,7 +1062,7 @@ fn push_unused_catalog_entries_section(
                 loc = format!(
                     "{}:{}",
                     path_display
-                        .strip_prefix(root)
+                        .strip_prefix(ctx.root)
                         .unwrap_or(&path_display)
                         .display(),
                     entry.line
@@ -1068,7 +1074,7 @@ fn push_unused_catalog_entries_section(
                 let consumers = entry
                     .hardcoded_consumers
                     .iter()
-                    .map(|p| p.strip_prefix(root).unwrap_or(p).display().to_string())
+                    .map(|p| p.strip_prefix(ctx.root).unwrap_or(p).display().to_string())
                     .collect::<Vec<_>>()
                     .join(", ");
                 row = format!("    {}: {consumers}", "hardcoded in".dimmed());
@@ -1080,12 +1086,9 @@ fn push_unused_catalog_entries_section(
 }
 
 fn push_empty_catalog_groups_section(
-    lines: &mut Vec<String>,
+    ctx: &mut CatalogSectionContext<'_>,
     groups: &[fallow_types::output_dead_code::EmptyCatalogGroupFinding],
     severity: fallow_config::Severity,
-    max_items: usize,
-    total_issues: usize,
-    root: &Path,
 ) {
     if groups.is_empty() {
         return;
@@ -1093,23 +1096,23 @@ fn push_empty_catalog_groups_section(
     let level = severity_to_level(severity);
     build_human_section_ex(
         HumanSectionInput {
-            lines,
+            lines: &mut *ctx.lines,
             items: groups,
             title: "Empty catalog groups",
             level,
-            max: max_items,
-            total_issues,
+            max: ctx.max_items,
+            total_issues: ctx.total_issues,
         },
         |group| {
             let group = &group.group;
-            let path_display = root.join(&group.path);
+            let path_display = ctx.root.join(&group.path);
             vec![format!(
                 "  {catalog}  {loc}",
                 catalog = group.catalog_name.bold(),
                 loc = format!(
                     "{}:{}",
                     path_display
-                        .strip_prefix(root)
+                        .strip_prefix(ctx.root)
                         .unwrap_or(&path_display)
                         .display(),
                     group.line
@@ -1127,12 +1130,9 @@ fn push_empty_catalog_groups_section(
 /// default catalog" instead of "not in catalog 'default'" because users who
 /// write bare `catalog:` think of it as "the catalog", not as a named one.
 fn push_unresolved_catalog_references_section(
-    lines: &mut Vec<String>,
+    ctx: &mut CatalogSectionContext<'_>,
     findings: &[fallow_types::output_dead_code::UnresolvedCatalogReferenceFinding],
     severity: fallow_config::Severity,
-    max_items: usize,
-    total_issues: usize,
-    root: &Path,
 ) {
     if findings.is_empty() {
         return;
@@ -1140,14 +1140,14 @@ fn push_unresolved_catalog_references_section(
     let level = severity_to_level(severity);
     build_human_section_ex(
         HumanSectionInput {
-            lines,
+            lines: &mut *ctx.lines,
             items: findings,
             title: "Unresolved catalog references",
             level,
-            max: max_items,
-            total_issues,
+            max: ctx.max_items,
+            total_issues: ctx.total_issues,
         },
-        |finding| format_unresolved_catalog_reference(finding, root),
+        |finding| format_unresolved_catalog_reference(finding, ctx.root),
     );
 }
 
@@ -3169,6 +3169,18 @@ fn push_summary_core_parts(
         results.unused_types.len().saturating_sub(suppressed_types),
         "type",
     );
+    push_summary_member_parts(parts, results);
+    push_summary_dependency_parts(parts, results);
+    push_summary_graph_parts(parts, results);
+}
+
+fn push_summary_member_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
+    push_summary_part(parts, results.unused_enum_members.len(), "enum members");
+    push_summary_part(parts, results.unused_class_members.len(), "class members");
+    push_summary_part(parts, results.unused_store_members.len(), "store members");
+}
+
+fn push_summary_dependency_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
     push_summary_part(
         parts,
         results.unused_dependencies.len(),
@@ -3179,9 +3191,6 @@ fn push_summary_core_parts(
         results.unused_dev_dependencies.len() + results.unused_optional_dependencies.len(),
         "dev/optional dependencies",
     );
-    push_summary_part(parts, results.unused_enum_members.len(), "enum members");
-    push_summary_part(parts, results.unused_class_members.len(), "class members");
-    push_summary_part(parts, results.unused_store_members.len(), "store members");
     push_summary_part(
         parts,
         results.unresolved_imports.len(),
@@ -3207,6 +3216,9 @@ fn push_summary_core_parts(
         results.test_only_dependencies.len(),
         "test-only dependencies",
     );
+}
+
+fn push_summary_graph_parts(parts: &mut Vec<String>, results: &AnalysisResults) {
     push_summary_part(
         parts,
         results.circular_dependencies.len(),

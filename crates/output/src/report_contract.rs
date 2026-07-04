@@ -70,64 +70,68 @@ pub fn dupes_meta() -> Meta {
     Meta {
         docs: Some(DUPES_DOCS.to_string()),
         field_definitions: action_field_definitions(),
-        metrics: BTreeMap::from([
-            (
-                "duplication_percentage".to_string(),
-                metric(
-                    "Duplication Percentage",
-                    "Fraction of total source tokens that appear in at least one clone group. Computed over the full analyzed file set.",
-                    Some("[0, 100]"),
-                    "lower is better",
-                ),
-            ),
-            (
-                "token_count".to_string(),
-                metric(
-                    "Token Count",
-                    "Number of normalized source tokens in the clone group. Tokens are language-aware (keywords, identifiers, operators, punctuation). Higher token count = larger duplicate.",
-                    Some("[1, ∞)"),
-                    "larger clones have higher refactoring value",
-                ),
-            ),
-            (
-                "line_count".to_string(),
-                metric(
-                    "Line Count",
-                    "Number of source lines spanned by the clone instance. Approximation of clone size for human readability.",
-                    Some("[1, ∞)"),
-                    "larger clones are more impactful to deduplicate",
-                ),
-            ),
-            (
-                "clone_groups".to_string(),
-                metric(
-                    "Clone Groups",
-                    "A set of code fragments with identical or near-identical normalized token sequences. Each group has 2+ instances across different locations.",
-                    None,
-                    "each group is a single refactoring opportunity",
-                ),
-            ),
-            (
-                "clone_groups_below_min_occurrences".to_string(),
-                metric(
-                    "Clone Groups Below minOccurrences",
-                    "Number of clone groups detected but hidden by the `duplicates.minOccurrences` filter. Always 0 (or absent) when the filter is at its default of 2. Pre-filter group count = `clone_groups + clone_groups_below_min_occurrences`.",
-                    Some("[0, ∞)"),
-                    "high values suggest noisy pair-only duplication; lower `minOccurrences` to inspect",
-                ),
-            ),
-            (
-                "clone_families".to_string(),
-                metric(
-                    "Clone Families",
-                    "Groups of clone groups that share the same set of files. Indicates systematic duplication patterns (e.g., mirrored directory structures).",
-                    None,
-                    "families suggest extract-module refactoring opportunities",
-                ),
-            ),
-        ]),
+        metrics: dupes_metrics(),
         ..Meta::default()
     }
+}
+
+fn dupes_metrics() -> BTreeMap<String, MetaMetric> {
+    BTreeMap::from([
+        (
+            "duplication_percentage".to_string(),
+            metric(
+                "Duplication Percentage",
+                "Fraction of total source tokens that appear in at least one clone group. Computed over the full analyzed file set.",
+                Some("[0, 100]"),
+                "lower is better",
+            ),
+        ),
+        (
+            "token_count".to_string(),
+            metric(
+                "Token Count",
+                "Number of normalized source tokens in the clone group. Tokens are language-aware (keywords, identifiers, operators, punctuation). Higher token count = larger duplicate.",
+                Some("[1, ∞)"),
+                "larger clones have higher refactoring value",
+            ),
+        ),
+        (
+            "line_count".to_string(),
+            metric(
+                "Line Count",
+                "Number of source lines spanned by the clone instance. Approximation of clone size for human readability.",
+                Some("[1, ∞)"),
+                "larger clones are more impactful to deduplicate",
+            ),
+        ),
+        (
+            "clone_groups".to_string(),
+            metric(
+                "Clone Groups",
+                "A set of code fragments with identical or near-identical normalized token sequences. Each group has 2+ instances across different locations.",
+                None,
+                "each group is a single refactoring opportunity",
+            ),
+        ),
+        (
+            "clone_groups_below_min_occurrences".to_string(),
+            metric(
+                "Clone Groups Below minOccurrences",
+                "Number of clone groups detected but hidden by the `duplicates.minOccurrences` filter. Always 0 (or absent) when the filter is at its default of 2. Pre-filter group count = `clone_groups + clone_groups_below_min_occurrences`.",
+                Some("[0, ∞)"),
+                "high values suggest noisy pair-only duplication; lower `minOccurrences` to inspect",
+            ),
+        ),
+        (
+            "clone_families".to_string(),
+            metric(
+                "Clone Families",
+                "Groups of clone groups that share the same set of files. Indicates systematic duplication patterns (e.g., mirrored directory structures).",
+                None,
+                "families suggest extract-module refactoring opportunities",
+            ),
+        ),
+    ])
 }
 
 /// Build the `_meta` object for `fallow coverage setup --json --explain`.

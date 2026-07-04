@@ -81,6 +81,11 @@ pub fn compute_react_component_intel(
         root,
         line_offsets_by_file,
     );
+    let ctx = ReactIntelContext {
+        render: &render,
+        drills: &drills,
+        line_offsets_by_file,
+    };
 
     let mut intel = Vec::new();
     for node in &graph.modules {
@@ -93,15 +98,7 @@ pub fn compute_react_component_intel(
         if module.component_functions.is_empty() {
             continue;
         }
-        collect_module_intel(
-            node.file_id,
-            node.path.as_path(),
-            module,
-            &render,
-            &drills,
-            line_offsets_by_file,
-            &mut intel,
-        );
+        collect_module_intel(node.file_id, node.path.as_path(), module, &ctx, &mut intel);
     }
 
     // Deterministic ordering (path, component) so the carrier is stable across
@@ -185,17 +182,17 @@ fn aggregate_render_edges(
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "all lookup tables are needed to assemble one component's intel"
-)]
+struct ReactIntelContext<'ctx, 'offsets> {
+    render: &'ctx RenderAggregate,
+    drills: &'ctx DrillMap,
+    line_offsets_by_file: &'ctx LineOffsetsMap<'offsets>,
+}
+
 fn collect_module_intel(
     file_id: FileId,
     path: &Path,
     module: &ModuleInfo,
-    render: &RenderAggregate,
-    drills: &DrillMap,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
+    ctx: &ReactIntelContext<'_, '_>,
     intel: &mut Vec<ReactComponentIntel>,
 ) {
     for component in &module.component_functions {
@@ -204,27 +201,18 @@ fn collect_module_intel(
             name: component.name.clone(),
         };
         let (render_sites, distinct_parents) =
-            render.per_component.get(&key).map_or((0, 0), |accum| {
+            ctx.render.per_component.get(&key).map_or((0, 0), |accum| {
                 (
                     accum.render_sites,
                     u32::try_from(accum.parents.len()).unwrap_or(u32::MAX),
                 )
             });
 
-        let props = collect_component_props(
-            &key,
-            component.name.as_str(),
-            module,
-            render,
-            drills,
-            path,
-            file_id,
-            line_offsets_by_file,
-        );
+        let props = collect_component_props(&key, module, path, ctx);
 
         let hooks = summarize_hooks(component.name.as_str(), module);
         let (anchor_line, anchor_col) =
-            byte_offset_to_line_col(line_offsets_by_file, file_id, component.span_start);
+            byte_offset_to_line_col(ctx.line_offsets_by_file, file_id, component.span_start);
 
         intel.push(ReactComponentIntel {
             path: path.to_path_buf(),
@@ -247,40 +235,30 @@ fn collect_module_intel(
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "all lookup tables are needed to assemble each prop's intel"
-)]
 fn collect_component_props(
     key: &CompKey,
-    component_name: &str,
     module: &ModuleInfo,
-    render: &RenderAggregate,
-    drills: &DrillMap,
     path: &Path,
-    file_id: FileId,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
+    ctx: &ReactIntelContext<'_, '_>,
 ) -> Vec<ReactPropIntel> {
     module
         .react_props
         .iter()
-        .filter(|p| p.component == component_name)
+        .filter(|p| p.component == key.name)
         .map(|prop| {
-            let passed_from_sites = render
+            let passed_from_sites = ctx
+                .render
                 .prop_passes
                 .get(&(key.clone(), prop.name.clone()))
                 .copied()
                 .unwrap_or(0);
             let (anchor_line, anchor_col) =
-                byte_offset_to_line_col(line_offsets_by_file, file_id, prop.span_start);
+                byte_offset_to_line_col(ctx.line_offsets_by_file, key.file, prop.span_start);
             // A drill trace is keyed by the chain SOURCE: this component's path +
             // name + the prop's declared name.
-            let drill = drills
-                .get(&(
-                    path.to_path_buf(),
-                    component_name.to_string(),
-                    prop.name.clone(),
-                ))
+            let drill = ctx
+                .drills
+                .get(&(path.to_path_buf(), key.name.clone(), prop.name.clone()))
                 .cloned();
             ReactPropIntel {
                 name: prop.name.clone(),

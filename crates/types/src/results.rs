@@ -1189,6 +1189,13 @@ impl AnalysisResults {
     }
 
     fn sort_core_route_and_load_findings(&mut self) {
+        self.sort_core_route_findings();
+        self.sort_core_component_prop_and_emit_findings();
+        self.sort_core_component_io_findings();
+        self.sort_core_server_load_findings();
+    }
+
+    fn sort_core_route_findings(&mut self) {
         self.route_collisions.sort_by(|a, b| {
             a.collision
                 .path
@@ -1202,7 +1209,9 @@ impl AnalysisResults {
                 .cmp(&b.conflict.path)
                 .then(a.conflict.position.cmp(&b.conflict.position))
         });
+    }
 
+    fn sort_core_component_prop_and_emit_findings(&mut self) {
         self.unused_component_props.sort_by(|a, b| {
             a.prop
                 .path
@@ -1219,6 +1228,16 @@ impl AnalysisResults {
                 .then(a.emit.emit_name.cmp(&b.emit.emit_name))
         });
 
+        self.unused_svelte_events.sort_by(|a, b| {
+            a.event
+                .path
+                .cmp(&b.event.path)
+                .then(a.event.line.cmp(&b.event.line))
+                .then(a.event.event_name.cmp(&b.event.event_name))
+        });
+    }
+
+    fn sort_core_component_io_findings(&mut self) {
         self.unused_component_inputs.sort_by(|a, b| {
             a.input
                 .path
@@ -1234,15 +1253,9 @@ impl AnalysisResults {
                 .then(a.output.line.cmp(&b.output.line))
                 .then(a.output.output_name.cmp(&b.output.output_name))
         });
+    }
 
-        self.unused_svelte_events.sort_by(|a, b| {
-            a.event
-                .path
-                .cmp(&b.event.path)
-                .then(a.event.line.cmp(&b.event.line))
-                .then(a.event.event_name.cmp(&b.event.event_name))
-        });
-
+    fn sort_core_server_load_findings(&mut self) {
         self.unused_server_actions.sort_by(|a, b| {
             a.action
                 .path
@@ -1387,13 +1400,23 @@ impl AnalysisResults {
     }
 
     fn sort_catalog_findings(&mut self) {
+        self.sort_stale_suppressions();
+        self.sort_unused_catalog_entries();
+        self.sort_empty_catalog_groups();
+        self.sort_unresolved_catalog_references();
+        self.sort_unused_dependency_overrides();
+    }
+
+    fn sort_stale_suppressions(&mut self) {
         self.stale_suppressions.sort_by(|a, b| {
             a.path
                 .cmp(&b.path)
                 .then(a.line.cmp(&b.line))
                 .then(a.col.cmp(&b.col))
         });
+    }
 
+    fn sort_unused_catalog_entries(&mut self) {
         self.unused_catalog_entries.sort_by(|a, b| {
             a.entry
                 .path
@@ -1409,7 +1432,9 @@ impl AnalysisResults {
             finding.entry.hardcoded_consumers.sort();
             finding.entry.hardcoded_consumers.dedup();
         }
+    }
 
+    fn sort_empty_catalog_groups(&mut self) {
         self.empty_catalog_groups.sort_by(|a, b| {
             a.group
                 .path
@@ -1421,7 +1446,9 @@ impl AnalysisResults {
                 .then(a.group.catalog_name.cmp(&b.group.catalog_name))
                 .then(a.group.line.cmp(&b.group.line))
         });
+    }
 
+    fn sort_unresolved_catalog_references(&mut self) {
         self.unresolved_catalog_references.sort_by(|a, b| {
             a.reference
                 .path
@@ -1438,7 +1465,9 @@ impl AnalysisResults {
             finding.reference.available_in_catalogs.sort();
             finding.reference.available_in_catalogs.dedup();
         }
+    }
 
+    fn sort_unused_dependency_overrides(&mut self) {
         self.unused_dependency_overrides.sort_by(|a, b| {
             a.entry
                 .path

@@ -357,8 +357,13 @@ fn remap_key_paths(key: &str, rename_old_path: &dyn Fn(&str) -> Option<String>) 
 /// Classify the candidate signals into framed decisions (pre-rank, pre-cap).
 fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
     let mut decisions: Vec<Decision> = Vec::new();
+    append_boundary_decisions(&mut decisions, inputs);
+    append_public_api_decision(&mut decisions, inputs);
+    append_coordination_decisions(&mut decisions, inputs);
+    decisions
+}
 
-    // (1) Coupling/boundary: one decision per introduced zone-pair edge (R2).
+fn append_boundary_decisions(decisions: &mut Vec<Decision>, inputs: &DecisionInputs<'_>) {
     for key in &inputs.deltas.boundary_introduced {
         let anchor = inputs
             .boundary_anchors
@@ -390,8 +395,9 @@ fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
             inputs,
         ));
     }
+}
 
-    // (2a) Public-API surface: R1 batch-consolidate to ONE decision per change.
+fn append_public_api_decision(decisions: &mut Vec<Decision>, inputs: &DecisionInputs<'_>) {
     if !inputs.deltas.public_api_added.is_empty() {
         // The candidate key is the full sorted added-key set joined: one stable
         // id per change, never one-per-symbol (kills the 111-export noise).
@@ -421,9 +427,9 @@ fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
             inputs,
         ));
     }
+}
 
-    // (2b) Coordination gaps: a changed contract consumed outside the diff. One
-    // decision per (changed file) contract, keyed on the changed file path.
+fn append_coordination_decisions(decisions: &mut Vec<Decision>, inputs: &DecisionInputs<'_>) {
     for gap in inputs.coordination {
         let key = format!("contract:{}", gap.changed_file);
         decisions.push(build_decision(
@@ -446,8 +452,6 @@ fn classify_candidates(inputs: &DecisionInputs<'_>) -> Vec<Decision> {
             inputs,
         ));
     }
-
-    decisions
 }
 
 /// Extract the full decision surface from the assembled brief inputs: classify

@@ -159,6 +159,14 @@ impl ModuleInfoExtractor {
             return;
         }
 
+        self.record_pinia_object_pattern_store_members(obj_pat, init);
+    }
+
+    fn record_pinia_object_pattern_store_members(
+        &mut self,
+        obj_pat: &ObjectPattern<'_>,
+        init: &Expression<'_>,
+    ) {
         match init {
             Expression::CallExpression(call) => {
                 let Expression::Identifier(callee) = &call.callee else {

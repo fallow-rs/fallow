@@ -17,69 +17,90 @@ pub(super) fn handle_trace_output(
     output: OutputFormat,
     script_used_packages: &FxHashSet<String>,
 ) -> Option<ExitCode> {
-    if let Some(ref trace_spec) = trace_opts.trace_export {
-        let Some((file_path, export_name)) = parse_trace_spec(trace_spec) else {
-            return Some(emit_error(
-                "--trace requires FILE:EXPORT_NAME format (e.g., src/utils.ts:foo)",
-                2,
-                output,
-            ));
-        };
-        match fallow_engine::trace::trace_export(graph, root, file_path, export_name) {
-            Some(trace) => {
-                report::print_export_trace(&trace, output);
-                return Some(ExitCode::SUCCESS);
-            }
-            None => {
-                return Some(emit_error(
-                    &format!("export '{export_name}' not found in '{file_path}'"),
-                    2,
-                    output,
-                ));
-            }
+    handle_trace_export(graph, trace_opts, root, output)
+        .or_else(|| handle_trace_file(graph, trace_opts, root, output))
+        .or_else(|| handle_trace_dependency(graph, trace_opts, root, output, script_used_packages))
+        .or_else(|| handle_impact_closure_trace(graph, trace_opts, root, output))
+}
+
+fn handle_trace_export(
+    graph: &RetainedModuleGraph,
+    trace_opts: &TraceOptions,
+    root: &std::path::Path,
+    output: OutputFormat,
+) -> Option<ExitCode> {
+    let trace_spec = trace_opts.trace_export.as_ref()?;
+    let Some((file_path, export_name)) = parse_trace_spec(trace_spec) else {
+        return Some(emit_error(
+            "--trace requires FILE:EXPORT_NAME format (e.g., src/utils.ts:foo)",
+            2,
+            output,
+        ));
+    };
+    match fallow_engine::trace::trace_export(graph, root, file_path, export_name) {
+        Some(trace) => {
+            report::print_export_trace(&trace, output);
+            Some(ExitCode::SUCCESS)
         }
+        None => Some(emit_error(
+            &format!("export '{export_name}' not found in '{file_path}'"),
+            2,
+            output,
+        )),
     }
+}
 
-    if let Some(ref file_path) = trace_opts.trace_file {
-        match fallow_engine::trace::trace_file(graph, root, file_path) {
-            Some(trace) => {
-                report::print_file_trace(&trace, output);
-                return Some(ExitCode::SUCCESS);
-            }
-            None => {
-                return Some(emit_error(
-                    &format!("file '{file_path}' not found in module graph"),
-                    2,
-                    output,
-                ));
-            }
+fn handle_trace_file(
+    graph: &RetainedModuleGraph,
+    trace_opts: &TraceOptions,
+    root: &std::path::Path,
+    output: OutputFormat,
+) -> Option<ExitCode> {
+    let file_path = trace_opts.trace_file.as_ref()?;
+    match fallow_engine::trace::trace_file(graph, root, file_path) {
+        Some(trace) => {
+            report::print_file_trace(&trace, output);
+            Some(ExitCode::SUCCESS)
         }
+        None => Some(emit_error(
+            &format!("file '{file_path}' not found in module graph"),
+            2,
+            output,
+        )),
     }
+}
 
-    if let Some(ref pkg_name) = trace_opts.trace_dependency {
-        let trace =
-            fallow_engine::trace::trace_dependency(graph, root, pkg_name, script_used_packages);
-        report::print_dependency_trace(&trace, output);
-        return Some(ExitCode::SUCCESS);
-    }
+fn handle_trace_dependency(
+    graph: &RetainedModuleGraph,
+    trace_opts: &TraceOptions,
+    root: &std::path::Path,
+    output: OutputFormat,
+    script_used_packages: &FxHashSet<String>,
+) -> Option<ExitCode> {
+    let pkg_name = trace_opts.trace_dependency.as_ref()?;
+    let trace = fallow_engine::trace::trace_dependency(graph, root, pkg_name, script_used_packages);
+    report::print_dependency_trace(&trace, output);
+    Some(ExitCode::SUCCESS)
+}
 
-    if let Some(ref file_path) = trace_opts.impact_closure {
-        match fallow_engine::trace::trace_impact_closure(graph, root, file_path) {
-            Some(trace) => {
-                report::print_impact_closure_trace(&trace, output);
-                return Some(ExitCode::SUCCESS);
-            }
-            None => {
-                return Some(emit_error(
-                    &format!("file '{file_path}' not found in module graph"),
-                    2,
-                    output,
-                ));
-            }
+fn handle_impact_closure_trace(
+    graph: &RetainedModuleGraph,
+    trace_opts: &TraceOptions,
+    root: &std::path::Path,
+    output: OutputFormat,
+) -> Option<ExitCode> {
+    let file_path = trace_opts.impact_closure.as_ref()?;
+    match fallow_engine::trace::trace_impact_closure(graph, root, file_path) {
+        Some(trace) => {
+            report::print_impact_closure_trace(&trace, output);
+            Some(ExitCode::SUCCESS)
         }
+        None => Some(emit_error(
+            &format!("file '{file_path}' not found in module graph"),
+            2,
+            output,
+        )),
     }
-
-    None
 }
 
 /// Write SARIF output to a file if `--sarif-file` was specified.

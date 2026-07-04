@@ -759,20 +759,7 @@ fn run_engine_owned_dead_code_pipeline(
     let prelude = core_backend::prepare_dead_code_backend_prelude(config, discovery)?;
     let prelude_timings = prelude.timings();
     let entry_points = core_backend::discover_dead_code_entry_points(&prelude);
-    let (resolved, graph) = if let Some((resolved, graph)) =
-        core_backend::try_load_dead_code_graph_cache(&prelude, &entry_points, &modules)
-    {
-        (resolved, graph)
-    } else {
-        let resolved = core_backend::resolve_dead_code_imports(&prelude, &modules);
-        let graph = core_backend::build_dead_code_graph(
-            &prelude,
-            &resolved.resolved,
-            &entry_points,
-            &modules,
-        );
-        (resolved, graph)
-    };
+    let (resolved, graph) = resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
 
     for module in &mut modules {
         module.release_resolution_payload();
@@ -786,19 +773,20 @@ fn run_engine_owned_dead_code_pipeline(
         collect_usages,
         &entry_points,
     );
-    let profile = core_backend::dead_code_pipeline_profile(
-        retain_graph,
-        &prelude,
-        prelude_timings,
-        metrics,
-        modules.len(),
-        &entry_points,
-        &resolved,
-        &graph,
-        &detector,
-        discovery.files().len(),
-        discovery.workspaces().len(),
-    );
+    let profile =
+        core_backend::dead_code_pipeline_profile(core_backend::DeadCodePipelineProfileInput {
+            retain_timings: retain_graph,
+            prelude: &prelude,
+            prelude_timings,
+            parse_metrics: metrics,
+            module_count: modules.len(),
+            entry_points: &entry_points,
+            resolved: &resolved,
+            graph: &graph,
+            detector: &detector,
+            file_count: discovery.files().len(),
+            workspace_count: discovery.workspaces().len(),
+        });
     let script_used_packages = prelude.script_used_packages();
     prelude.finish();
     let file_hashes = collect_file_hashes(&modules, discovery.files());
@@ -812,6 +800,26 @@ fn run_engine_owned_dead_code_pipeline(
         script_used_packages,
         file_hashes,
     })
+}
+
+fn resolve_or_build_dead_code_graph(
+    prelude: &core_backend::DeadCodeBackendPrelude,
+    entry_points: &core_backend::DeadCodeEntryPoints,
+    modules: &[ModuleInfo],
+) -> (
+    core_backend::DeadCodeResolvedModules,
+    core_backend::DeadCodeGraphRun,
+) {
+    if let Some((resolved, graph)) =
+        core_backend::try_load_dead_code_graph_cache(prelude, entry_points, modules)
+    {
+        return (resolved, graph);
+    }
+
+    let resolved = core_backend::resolve_dead_code_imports(prelude, modules);
+    let graph =
+        core_backend::build_dead_code_graph(prelude, &resolved.resolved, entry_points, modules);
+    (resolved, graph)
 }
 
 fn collect_file_hashes(

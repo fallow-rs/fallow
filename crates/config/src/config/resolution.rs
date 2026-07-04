@@ -570,6 +570,20 @@ fn resolve_path_policy_settings(
     }
 }
 
+fn compile_unused_component_props_ignore(pattern: Option<&str>) -> Option<regex::Regex> {
+    pattern.and_then(|pattern| match regex::Regex::new(pattern) {
+        Ok(re) => Some(re),
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                "ignoring invalid unusedComponentProps.ignorePattern; this config was \
+                 not validated through FallowConfig::load"
+            );
+            None
+        }
+    })
+}
+
 impl FallowConfig {
     /// Resolve into a fully resolved config with compiled globs.
     #[expect(
@@ -603,26 +617,9 @@ impl FallowConfig {
 
         let path_policy = resolve_path_policy_settings(self.boundaries, self.overrides, &root);
 
-        // Compile the validated pattern defensively. `FallowConfig::load`
-        // already proved it compiles, so the error arm is unreachable on the
-        // load path; programmatic / napi / LSP callers that construct a config
-        // without going through `load` fail open to "no exemption" (default
-        // behavior) rather than panicking.
-        let unused_component_props_ignore = self
-            .unused_component_props
-            .ignore_pattern
-            .as_deref()
-            .and_then(|pattern| match regex::Regex::new(pattern) {
-                Ok(re) => Some(re),
-                Err(error) => {
-                    tracing::warn!(
-                        %error,
-                        "ignoring invalid unusedComponentProps.ignorePattern; this config was \
-                         not validated through FallowConfig::load"
-                    );
-                    None
-                }
-            });
+        let unused_component_props_ignore = compile_unused_component_props_ignore(
+            self.unused_component_props.ignore_pattern.as_deref(),
+        );
 
         ResolvedConfig {
             root,

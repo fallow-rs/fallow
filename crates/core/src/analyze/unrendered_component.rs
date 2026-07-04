@@ -557,28 +557,16 @@ pub fn find_unrendered_lit_elements(input: &LitUnrenderedInput<'_>) -> Vec<Unren
     let suppressions = input.suppressions;
     let root = input.root;
 
-    let lit = declared_deps.contains("lit")
-        || declared_deps.contains("lit-element")
-        || declared_deps.contains("@lit/reactive-element");
-    if !lit {
+    if !has_lit_dependency(declared_deps) {
         return Vec::new();
     }
 
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
 
-    // Pass 1: project-wide rendered-tag union, built LIBERALLY. A dynamic-render
-    // fact abstains on the whole project. Older parse-cache payloads stay
-    // conservative through the member-access fallback.
-    let mut rendered_tags: FxHashSet<&str> = FxHashSet::default();
-    for module in modules {
-        if has_dynamic_custom_element_render(module) {
-            return Vec::new();
-        }
-        for tag in &module.used_custom_element_tags {
-            rendered_tags.insert(tag.as_str());
-        }
-    }
+    let Some(rendered_tags) = rendered_custom_element_tags(modules) else {
+        return Vec::new();
+    };
 
     // Public-API abstain: a published element is rendered by a downstream
     // consumer. Reuses the same sets as the SFC / Angular arms.
@@ -632,6 +620,28 @@ pub fn find_unrendered_lit_elements(input: &LitUnrenderedInput<'_>) -> Vec<Unren
         }
     }
     findings
+}
+
+fn has_lit_dependency(declared_deps: &FxHashSet<String>) -> bool {
+    declared_deps.contains("lit")
+        || declared_deps.contains("lit-element")
+        || declared_deps.contains("@lit/reactive-element")
+}
+
+fn rendered_custom_element_tags(modules: &[ModuleInfo]) -> Option<FxHashSet<&str>> {
+    // Project-wide rendered-tag union, built LIBERALLY. A dynamic-render fact
+    // abstains on the whole project. Older parse-cache payloads stay
+    // conservative through the member-access fallback.
+    let mut rendered_tags = FxHashSet::default();
+    for module in modules {
+        if has_dynamic_custom_element_render(module) {
+            return None;
+        }
+        for tag in &module.used_custom_element_tags {
+            rendered_tags.insert(tag.as_str());
+        }
+    }
+    Some(rendered_tags)
 }
 
 /// Whether a workspace-relative path lives under a directory that a docs / dev /

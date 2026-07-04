@@ -165,7 +165,31 @@ fn first_subcommand_token<I>(args: I) -> Option<String>
 where
     I: IntoIterator<Item = String>,
 {
-    let value_options = [
+    let mut skip_next = false;
+    for arg in args.into_iter().skip(1) {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with('-') {
+            skip_next = global_flag_consumes_next(&arg);
+            continue;
+        }
+        return Some(arg);
+    }
+    None
+}
+
+fn global_flag_consumes_next(arg: &str) -> bool {
+    let option_name = arg.split_once('=').map_or(arg, |(name, _)| name);
+    !arg.contains('=') && global_value_options().contains(&option_name)
+}
+
+fn global_value_options() -> &'static [&'static str] {
+    &[
         "-r",
         "--root",
         "-c",
@@ -200,26 +224,7 @@ where
         "--regression-baseline",
         "--tolerance",
         "--save-regression-baseline",
-    ];
-    let mut skip_next = false;
-    for arg in args.into_iter().skip(1) {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if arg == "--" {
-            break;
-        }
-        if arg.starts_with('-') {
-            let option_name = arg.split_once('=').map_or(arg.as_str(), |(name, _)| name);
-            if !arg.contains('=') && value_options.contains(&option_name) {
-                skip_next = true;
-            }
-            continue;
-        }
-        return Some(arg);
-    }
-    None
+    ]
 }
 
 fn args_use_legacy_check_alias<I>(args: I) -> bool

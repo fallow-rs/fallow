@@ -80,8 +80,14 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     let mut fixes: Vec<serde_json::Value> = Vec::new();
     let mut plan = FixPlan::new();
 
-    let (had_write_error, catalog_totals) =
-        apply_all_fixes(opts, &config, &results, &file_hashes, &mut plan, &mut fixes);
+    let (had_write_error, catalog_totals) = apply_all_fixes(ApplyAllFixesInput {
+        opts,
+        config: &config,
+        results: &results,
+        file_hashes: &file_hashes,
+        plan: &mut plan,
+        fixes: &mut fixes,
+    });
 
     finalize_fix_run(opts, plan, &mut fixes, had_write_error, &catalog_totals)
 }
@@ -137,14 +143,24 @@ fn finalize_fix_run(
 }
 
 /// Run every per-issue-type fixer, returning `(had_write_error, catalog_totals)`.
-fn apply_all_fixes(
-    opts: &FixOptions<'_>,
-    config: &fallow_config::ResolvedConfig,
-    results: &fallow_types::results::AnalysisResults,
-    file_hashes: &CapturedHashes,
-    plan: &mut FixPlan,
-    fixes: &mut Vec<serde_json::Value>,
-) -> (bool, CatalogFixTotals) {
+struct ApplyAllFixesInput<'a> {
+    opts: &'a FixOptions<'a>,
+    config: &'a fallow_config::ResolvedConfig,
+    results: &'a fallow_types::results::AnalysisResults,
+    file_hashes: &'a CapturedHashes,
+    plan: &'a mut FixPlan,
+    fixes: &'a mut Vec<serde_json::Value>,
+}
+
+fn apply_all_fixes(input: ApplyAllFixesInput<'_>) -> (bool, CatalogFixTotals) {
+    let ApplyAllFixesInput {
+        opts,
+        config,
+        results,
+        file_hashes,
+        plan,
+        fixes,
+    } = input;
     apply_unused_export_fixes(&mut FixApplicationInput {
         root: opts.root,
         results,

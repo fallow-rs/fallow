@@ -238,23 +238,37 @@ pub struct EngineDeadCodePipelineProfile {
     pub timings: Option<PipelineTimings>,
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "pipeline timing assembly mirrors the explicit backend phases"
-)]
+#[derive(Clone, Copy)]
+pub struct DeadCodePipelineProfileInput<'a> {
+    pub retain_timings: bool,
+    pub prelude: &'a DeadCodeBackendPrelude<'a>,
+    pub prelude_timings: DeadCodePreludeTimings,
+    pub parse_metrics: ParseMetrics,
+    pub module_count: usize,
+    pub entry_points: &'a DeadCodeEntryPoints,
+    pub resolved: &'a DeadCodeResolvedModules,
+    pub graph: &'a DeadCodeGraphRun,
+    pub detector: &'a DeadCodeDetectorRun,
+    pub file_count: usize,
+    pub workspace_count: usize,
+}
+
 pub fn dead_code_pipeline_profile(
-    retain_timings: bool,
-    prelude: &DeadCodeBackendPrelude<'_>,
-    prelude_timings: DeadCodePreludeTimings,
-    parse_metrics: ParseMetrics,
-    module_count: usize,
-    entry_points: &DeadCodeEntryPoints,
-    resolved: &DeadCodeResolvedModules,
-    graph: &DeadCodeGraphRun,
-    detector: &DeadCodeDetectorRun,
-    file_count: usize,
-    workspace_count: usize,
+    input: DeadCodePipelineProfileInput<'_>,
 ) -> EngineDeadCodePipelineProfile {
+    let DeadCodePipelineProfileInput {
+        retain_timings,
+        prelude,
+        prelude_timings,
+        parse_metrics,
+        module_count,
+        entry_points,
+        resolved,
+        graph,
+        detector,
+        file_count,
+        workspace_count,
+    } = input;
     EngineDeadCodePipelineProfile {
         timings: retain_timings.then_some(PipelineTimings {
             discover_files_ms: prelude_timings.discover_ms,

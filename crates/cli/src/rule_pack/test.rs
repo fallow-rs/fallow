@@ -8,48 +8,10 @@ use super::{RulePackContext, TestArgs};
 use crate::runtime_support::{LoadConfigArgs, load_config};
 
 pub fn run(args: &TestArgs, ctx: &RulePackContext<'_>) -> ExitCode {
-    let mut config = match load_config(
-        ctx.root,
-        ctx.config_path,
-        LoadConfigArgs {
-            output: ctx.output,
-            no_cache: ctx.no_cache,
-            threads: ctx.threads.unwrap_or_else(default_threads),
-            production: false,
-            quiet: ctx.quiet,
-        },
-    ) {
+    let mut config = match load_test_config(args, ctx) {
         Ok(config) => config,
         Err(code) => return code,
     };
-
-    if let Some(pack) = &args.pack {
-        let pack_path = pack_arg_to_config_path(ctx.root, pack);
-        let loaded =
-            match fallow_config::load_rule_packs(ctx.root, std::slice::from_ref(&pack_path)) {
-                Ok(packs) => packs,
-                Err(errors) => {
-                    let message = errors
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join("\n  - ");
-                    return crate::error::emit_error(
-                        &format!("invalid rule pack:\n  - {message}"),
-                        2,
-                        ctx.output,
-                    );
-                }
-            };
-        config.rule_packs = loaded;
-        config.rule_pack_sources = vec![std::path::PathBuf::from(pack_path)];
-    } else if config.rule_packs.is_empty() {
-        return crate::error::emit_error(
-            "no rule packs configured; pass a pack path or run: fallow rule-pack init",
-            2,
-            ctx.output,
-        );
-    }
 
     let forced_severity = if config.rules.policy_violation == Severity::Off {
         config.rules.policy_violation = Severity::Warn;
@@ -74,6 +36,53 @@ pub fn run(args: &TestArgs, ctx: &RulePackContext<'_>) -> ExitCode {
     }
 
     emit_human(&summaries, &findings, ctx.root, forced_severity)
+}
+
+fn load_test_config(
+    args: &TestArgs,
+    ctx: &RulePackContext<'_>,
+) -> Result<ResolvedConfig, ExitCode> {
+    let mut config = load_config(
+        ctx.root,
+        ctx.config_path,
+        LoadConfigArgs {
+            output: ctx.output,
+            no_cache: ctx.no_cache,
+            threads: ctx.threads.unwrap_or_else(default_threads),
+            production: false,
+            quiet: ctx.quiet,
+        },
+    )?;
+
+    if let Some(pack) = &args.pack {
+        let pack_path = pack_arg_to_config_path(ctx.root, pack);
+        let loaded =
+            match fallow_config::load_rule_packs(ctx.root, std::slice::from_ref(&pack_path)) {
+                Ok(packs) => packs,
+                Err(errors) => {
+                    let message = errors
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("\n  - ");
+                    return Err(crate::error::emit_error(
+                        &format!("invalid rule pack:\n  - {message}"),
+                        2,
+                        ctx.output,
+                    ));
+                }
+            };
+        config.rule_packs = loaded;
+        config.rule_pack_sources = vec![std::path::PathBuf::from(pack_path)];
+    } else if config.rule_packs.is_empty() {
+        return Err(crate::error::emit_error(
+            "no rule packs configured; pass a pack path or run: fallow rule-pack init",
+            2,
+            ctx.output,
+        ));
+    }
+
+    Ok(config)
 }
 
 #[derive(Debug)]

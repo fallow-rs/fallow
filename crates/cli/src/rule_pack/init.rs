@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use fallow_config::{ConfigWriteError, OutputFormat};
@@ -8,88 +9,24 @@ use super::{InitArgs, RulePackContext};
 use crate::error::emit_error;
 
 pub fn run(args: &InitArgs, ctx: &RulePackContext<'_>) -> ExitCode {
-    let Some(template) = super::templates::by_name(&args.template) else {
-        return emit_error(
-            &format!(
-                "unknown rule-pack template '{}'; available templates: {}",
-                args.template,
-                available_template_names()
-            ),
-            2,
-            ctx.output,
-        );
+    let selected = match select_template(args, ctx.output) {
+        Ok(selected) => selected,
+        Err(code) => return code,
     };
 
-    let pack_name = args.name.as_deref().unwrap_or_else(|| {
-        if args.template == "starter" {
-            "team-policy"
-        } else {
-            template.name
-        }
-    });
-    if !is_valid_policy_identifier(pack_name) {
-        return emit_error(
-            &format!(
-                "invalid rule-pack name '{pack_name}'; use only ASCII letters, digits, '.', '_', and '-'"
-            ),
-            2,
-            ctx.output,
-        );
-    }
-
-    let rel_path = match pack_relative_path(&args.dir, pack_name) {
+    let rel_path = match available_pack_path(args, ctx, &selected.pack_name) {
         Ok(path) => path,
-        Err(message) => return emit_error(&message, 2, ctx.output),
+        Err(code) => return code,
     };
-    let abs_path = ctx.root.join(&rel_path);
-    if abs_path.exists() {
-        return emit_error(
-            &format!("rule-pack file already exists: {}", rel_path.display()),
-            2,
-            ctx.output,
-        );
-    }
 
-    if let Some(parent) = abs_path.parent()
-        && let Err(err) = std::fs::create_dir_all(parent)
-    {
-        return emit_error(
-            &format!(
-                "failed to create rule-pack directory '{}': {err}",
-                parent.display()
-            ),
-            2,
-            ctx.output,
-        );
-    }
-
-    let rendered = super::templates::render(template, pack_name);
-    if let Err(err) = std::fs::write(&abs_path, rendered) {
-        return emit_error(
-            &format!(
-                "failed to write rule-pack file '{}': {err}",
-                rel_path.display()
-            ),
-            2,
-            ctx.output,
-        );
+    if let Err(code) = write_rule_pack_file(ctx, &rel_path, &selected) {
+        return code;
     }
 
     let rel_string = path_to_config_string(&rel_path);
-    let rules = match fallow_config::load_rule_packs(ctx.root, std::slice::from_ref(&rel_string)) {
-        Ok(packs) => packs.first().map_or(0, |pack| pack.rules.len()),
-        Err(errors) => {
-            let message = errors
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("\n  - ");
-            return emit_error(
-                &format!("generated rule pack failed validation:\n  - {message}"),
-                2,
-                ctx.output,
-            );
-        }
+    let rules = match validate_generated_pack(ctx, &rel_string) {
+        Ok(rules) => rules,
+        Err(code) => return code,
     };
 
     let config_result = if args.no_config {
@@ -107,6 +44,121 @@ pub fn run(args: &InitArgs, ctx: &RulePackContext<'_>) -> ExitCode {
             config: config_result,
         },
     )
+}
+
+struct SelectedTemplate {
+    template: &'static super::templates::Template,
+    pack_name: String,
+}
+
+fn select_template(args: &InitArgs, output: OutputFormat) -> Result<SelectedTemplate, ExitCode> {
+    let Some(template) = super::templates::by_name(&args.template) else {
+        return Err(emit_error(
+            &format!(
+                "unknown rule-pack template '{}'; available templates: {}",
+                args.template,
+                available_template_names()
+            ),
+            2,
+            output,
+        ));
+    };
+
+    let pack_name = default_pack_name(args, template).to_string();
+    if !is_valid_policy_identifier(&pack_name) {
+        return Err(emit_error(
+            &format!(
+                "invalid rule-pack name '{pack_name}'; use only ASCII letters, digits, '.', '_', and '-'"
+            ),
+            2,
+            output,
+        ));
+    }
+
+    Ok(SelectedTemplate {
+        template,
+        pack_name,
+    })
+}
+
+fn default_pack_name<'a>(
+    args: &'a InitArgs,
+    template: &'static super::templates::Template,
+) -> &'a str {
+    args.name.as_deref().unwrap_or_else(|| {
+        if args.template == "starter" {
+            "team-policy"
+        } else {
+            template.name
+        }
+    })
+}
+
+fn available_pack_path(
+    args: &InitArgs,
+    ctx: &RulePackContext<'_>,
+    pack_name: &str,
+) -> Result<PathBuf, ExitCode> {
+    let rel_path = pack_relative_path(&args.dir, pack_name)
+        .map_err(|message| emit_error(&message, 2, ctx.output))?;
+    let abs_path = ctx.root.join(&rel_path);
+    if abs_path.exists() {
+        return Err(emit_error(
+            &format!("rule-pack file already exists: {}", rel_path.display()),
+            2,
+            ctx.output,
+        ));
+    }
+    Ok(rel_path)
+}
+
+fn write_rule_pack_file(
+    ctx: &RulePackContext<'_>,
+    rel_path: &std::path::Path,
+    selected: &SelectedTemplate,
+) -> Result<(), ExitCode> {
+    let abs_path = ctx.root.join(rel_path);
+    if let Some(parent) = abs_path.parent()
+        && let Err(err) = std::fs::create_dir_all(parent)
+    {
+        return Err(emit_error(
+            &format!(
+                "failed to create rule-pack directory '{}': {err}",
+                parent.display()
+            ),
+            2,
+            ctx.output,
+        ));
+    }
+
+    let rendered = super::templates::render(selected.template, &selected.pack_name);
+    std::fs::write(&abs_path, rendered).map_err(|err| {
+        emit_error(
+            &format!(
+                "failed to write rule-pack file '{}': {err}",
+                rel_path.display()
+            ),
+            2,
+            ctx.output,
+        )
+    })
+}
+
+fn validate_generated_pack(ctx: &RulePackContext<'_>, rel_path: &str) -> Result<usize, ExitCode> {
+    fallow_config::load_rule_packs(ctx.root, std::slice::from_ref(&rel_path.to_string()))
+        .map(|packs| packs.first().map_or(0, |pack| pack.rules.len()))
+        .map_err(|errors| {
+            let message = errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n  - ");
+            emit_error(
+                &format!("generated rule pack failed validation:\n  - {message}"),
+                2,
+                ctx.output,
+            )
+        })
 }
 
 struct InitResult {
@@ -163,29 +215,38 @@ fn emit_result(ctx: &RulePackContext<'_>, result: &InitResult) -> ExitCode {
     }
 
     if matches!(ctx.output, OutputFormat::Json) {
-        let (config_updated, config_path) = match &result.config {
-            ConfigUpdateResult::Updated(path) => (true, Some(path.as_str())),
-            ConfigUpdateResult::AlreadyPresent(path)
-            | ConfigUpdateResult::ManualSnippet {
-                config_path: path, ..
-            } => (false, Some(path.as_str())),
-            ConfigUpdateResult::Skipped
-            | ConfigUpdateResult::Missing
-            | ConfigUpdateResult::Error(_) => (false, None),
-        };
-        return crate::report::emit_json(
-            &json!({
-                "kind": "rule-pack-init",
-                "pack_path": result.pack_path,
-                "template": result.template,
-                "rules": result.rules,
-                "config_updated": config_updated,
-                "config_path": config_path,
-            }),
-            "rule-pack-init",
-        );
+        return emit_json_result(result);
     }
 
+    emit_human_result(result);
+    ExitCode::SUCCESS
+}
+
+fn emit_json_result(result: &InitResult) -> ExitCode {
+    let (config_updated, config_path) = match &result.config {
+        ConfigUpdateResult::Updated(path) => (true, Some(path.as_str())),
+        ConfigUpdateResult::AlreadyPresent(path)
+        | ConfigUpdateResult::ManualSnippet {
+            config_path: path, ..
+        } => (false, Some(path.as_str())),
+        ConfigUpdateResult::Skipped
+        | ConfigUpdateResult::Missing
+        | ConfigUpdateResult::Error(_) => (false, None),
+    };
+    crate::report::emit_json(
+        &json!({
+            "kind": "rule-pack-init",
+            "pack_path": result.pack_path,
+            "template": result.template,
+            "rules": result.rules,
+            "config_updated": config_updated,
+            "config_path": config_path,
+        }),
+        "rule-pack-init",
+    )
+}
+
+fn emit_human_result(result: &InitResult) {
     println!(
         "Created {} (template: {}, {} {})",
         result.pack_path,
@@ -221,7 +282,6 @@ fn emit_result(ctx: &RulePackContext<'_>, result: &InitResult) -> ExitCode {
         ConfigUpdateResult::Error(_) => unreachable!("handled above"),
     }
     println!("Next: fallow rule-pack test {}", result.pack_path);
-    ExitCode::SUCCESS
 }
 
 fn print_snippet(rel_path: &str) {

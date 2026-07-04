@@ -340,14 +340,14 @@ pub fn scan_theme_blocks(source: &str) -> ThemeScan {
     for open in CSS_THEME_OPEN_RE.find_iter(&masked) {
         let body_start = open.end();
         let body_end = find_theme_body_end(&masked, body_start);
-        collect_theme_declarations(
+        collect_theme_declarations(&mut ThemeDeclarationScan {
             source,
-            &masked,
-            body_start,
-            body_end,
-            &mut out.tokens,
-            &mut seen,
-        );
+            masked: &masked,
+            start: body_start,
+            end: body_end,
+            out: &mut out.tokens,
+            seen: &mut seen,
+        });
         collect_theme_var_reads(
             source,
             &masked,
@@ -460,19 +460,12 @@ fn line_at_offset(source: &str, offset: usize) -> u32 {
 /// `@keyframes` for `--animate-*`) are skipped, and statement position so only a
 /// `--ident` at a declaration start counts. The `*`-reset form (`--color-*`) is
 /// excluded because the `*` breaks the ident scan before the `:`.
-fn collect_theme_declarations(
-    source: &str,
-    masked: &str,
-    start: usize,
-    end: usize,
-    out: &mut Vec<ThemeTokenDef>,
-    seen: &mut FxHashSet<String>,
-) {
-    let bytes = masked.as_bytes();
+fn collect_theme_declarations(scan: &mut ThemeDeclarationScan<'_, '_>) {
+    let bytes = scan.masked.as_bytes();
     let mut depth = 0usize;
     let mut expect_decl = true;
-    let mut i = start;
-    while i < end {
+    let mut i = scan.start;
+    while i < scan.end {
         let b = bytes[i];
         match b {
             b'{' => {
@@ -497,17 +490,7 @@ fn collect_theme_declarations(
             _ => {
                 if depth == 0 && expect_decl {
                     expect_decl = false;
-                    i = scan_theme_declaration(
-                        &mut ThemeDeclarationScan {
-                            source,
-                            masked,
-                            end,
-                            out,
-                            seen,
-                        },
-                        b,
-                        i,
-                    );
+                    i = scan_theme_declaration(scan, b, i);
                 } else {
                     i += 1;
                 }
@@ -519,6 +502,7 @@ fn collect_theme_declarations(
 struct ThemeDeclarationScan<'a, 'b> {
     source: &'a str,
     masked: &'a str,
+    start: usize,
     end: usize,
     out: &'b mut Vec<ThemeTokenDef>,
     seen: &'b mut FxHashSet<String>,

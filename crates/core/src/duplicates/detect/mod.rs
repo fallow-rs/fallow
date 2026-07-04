@@ -135,14 +135,14 @@ impl CloneDetector {
         if std::env::var_os(ROLLING_DETECTOR_ENV).is_some() {
             let boundary_summary = summarize_boundaries(files);
             if !boundary_summary.is_component_heavy {
-                return rolling::detect(
+                return rolling::detect(rolling::RollingDetectInput {
                     files,
-                    self.min_tokens,
-                    self.min_lines,
-                    self.skip_local,
+                    min_tokens: self.min_tokens,
+                    min_lines: self.min_lines,
+                    skip_local: self.skip_local,
                     totals,
-                    boundary_summary.has_any_boundary,
-                );
+                    may_have_boundaries: boundary_summary.has_any_boundary,
+                });
             }
         }
 

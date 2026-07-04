@@ -100,6 +100,12 @@ struct PlannedWarning {
     message: String,
 }
 
+struct WarningGroups<'a> {
+    plans: Vec<PlannedWarning>,
+    glob_groups: Vec<(&'a str, Vec<&'a WorkspaceDiagnostic>)>,
+    tsconfig_ref_misses: Vec<&'a WorkspaceDiagnostic>,
+}
+
 /// Turn a batch of workspace diagnostics into the bounded set of stderr
 /// warnings to emit, collapsing the two kinds that fan out on large monorepos
 /// (issue #637):
@@ -116,35 +122,15 @@ struct PlannedWarning {
 /// not affect correctness since these are independent stderr lines.
 fn plan_warnings(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<PlannedWarning> {
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let per_instance = |diag: &WorkspaceDiagnostic| PlannedWarning {
-        dedupe_key: format!(
-            "{}::{}::{}",
-            canonical.display(),
-            diag.kind.id(),
-            diag.path.display()
-        ),
-        message: diag.message.clone(),
-    };
-
-    let mut plans: Vec<PlannedWarning> = Vec::new();
-    let mut glob_groups: Vec<(&str, Vec<&WorkspaceDiagnostic>)> = Vec::new();
-    let mut tsconfig_ref_misses: Vec<&WorkspaceDiagnostic> = Vec::new();
-    for diag in diagnostics {
-        match &diag.kind {
-            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } => {
-                match glob_groups.iter_mut().find(|(p, _)| *p == pattern.as_str()) {
-                    Some((_, group)) => group.push(diag),
-                    None => glob_groups.push((pattern.as_str(), vec![diag])),
-                }
-            }
-            WorkspaceDiagnosticKind::TsconfigReferenceDirMissing => tsconfig_ref_misses.push(diag),
-            _ => plans.push(per_instance(diag)),
-        }
-    }
+    let WarningGroups {
+        mut plans,
+        glob_groups,
+        tsconfig_ref_misses,
+    } = group_warning_diagnostics(diagnostics, &canonical);
 
     for (pattern, group) in glob_groups {
         if let [only] = group.as_slice() {
-            plans.push(per_instance(only));
+            plans.push(per_instance_warning(&canonical, only));
             continue;
         }
         let paths: Vec<&Path> = group.iter().map(|d| d.path.as_path()).collect();
@@ -158,7 +144,7 @@ fn plan_warnings(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<Planne
     }
 
     if let [only] = tsconfig_ref_misses.as_slice() {
-        plans.push(per_instance(only));
+        plans.push(per_instance_warning(&canonical, only));
     } else if !tsconfig_ref_misses.is_empty() {
         let paths: Vec<&Path> = tsconfig_ref_misses
             .iter()
@@ -174,6 +160,44 @@ fn plan_warnings(root: &Path, diagnostics: &[WorkspaceDiagnostic]) -> Vec<Planne
     }
 
     plans
+}
+
+fn group_warning_diagnostics<'a>(
+    diagnostics: &'a [WorkspaceDiagnostic],
+    canonical: &Path,
+) -> WarningGroups<'a> {
+    let mut plans: Vec<PlannedWarning> = Vec::new();
+    let mut glob_groups: Vec<(&str, Vec<&WorkspaceDiagnostic>)> = Vec::new();
+    let mut tsconfig_ref_misses: Vec<&WorkspaceDiagnostic> = Vec::new();
+    for diag in diagnostics {
+        match &diag.kind {
+            WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } => {
+                match glob_groups.iter_mut().find(|(p, _)| *p == pattern.as_str()) {
+                    Some((_, group)) => group.push(diag),
+                    None => glob_groups.push((pattern.as_str(), vec![diag])),
+                }
+            }
+            WorkspaceDiagnosticKind::TsconfigReferenceDirMissing => tsconfig_ref_misses.push(diag),
+            _ => plans.push(per_instance_warning(canonical, diag)),
+        }
+    }
+    WarningGroups {
+        plans,
+        glob_groups,
+        tsconfig_ref_misses,
+    }
+}
+
+fn per_instance_warning(canonical: &Path, diag: &WorkspaceDiagnostic) -> PlannedWarning {
+    PlannedWarning {
+        dedupe_key: format!(
+            "{}::{}::{}",
+            canonical.display(),
+            diag.kind.id(),
+            diag.path.display()
+        ),
+        message: diag.message.clone(),
+    }
 }
 
 /// Emit `tracing::warn!` lines for a batch of workspace diagnostics.

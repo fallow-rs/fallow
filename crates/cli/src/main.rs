@@ -3633,96 +3633,141 @@ fn map_telemetry_subcommand(sub: TelemetryCli) -> telemetry::TelemetryCommand {
 
 fn map_ci_subcommand(sub: CiCli) -> ci::CiCommand {
     match sub {
-        CiCli::PlanPrComment {
-            body,
-            marker_id,
-            clean,
-            existing_comment_id,
-            existing_body,
-        } => ci::CiCommand::PlanPrComment {
-            body,
-            marker_id,
-            clean,
-            existing_comment_id,
-            existing_body,
-        },
-        CiCli::PostPrComment {
-            provider,
-            pr,
-            mr,
-            body,
-            envelope,
-            marker_id,
-            clean,
-            repo,
-            project_id,
-            api_url,
-            dry_run,
-        } => ci::CiCommand::PostPrComment {
-            provider: map_ci_provider(provider),
-            target: pr.or(mr),
-            body,
-            envelope,
-            marker_id,
-            clean,
-            repo,
-            project_id,
-            api_url,
-            dry_run,
-        },
-        CiCli::PostReview {
-            provider,
-            pr,
-            mr,
-            envelope,
-            repo,
-            project_id,
-            api_url,
-            dry_run,
-        } => ci::CiCommand::PostReview {
-            provider: map_ci_provider(provider),
-            target: pr.or(mr),
-            envelope,
-            repo,
-            project_id,
-            api_url,
-            dry_run,
-        },
-        CiCli::PostCheckRun {
-            provider,
-            decision,
-            repo,
-            head_sha,
-            api_url,
-            split_gates,
-            dry_run,
-        } => ci::CiCommand::PostCheckRun {
-            provider: map_ci_provider(provider),
-            decision,
-            repo,
-            head_sha,
-            api_url,
-            split_gates,
-            dry_run,
-        },
-        CiCli::ReconcileReview {
-            provider,
-            pr,
-            mr,
-            envelope,
-            repo,
-            project_id,
-            api_url,
-            dry_run,
-        } => ci::CiCommand::ReconcileReview {
-            provider: map_ci_provider(provider),
-            target: pr.or(mr),
-            envelope,
-            repo,
-            project_id,
-            api_url,
-            dry_run,
-        },
+        command @ CiCli::PlanPrComment { .. } => map_ci_plan_pr_comment(command),
+        command @ CiCli::PostPrComment { .. } => map_ci_post_pr_comment(command),
+        command @ CiCli::PostReview { .. } => map_ci_post_review(command),
+        command @ CiCli::PostCheckRun { .. } => map_ci_post_check_run(command),
+        command @ CiCli::ReconcileReview { .. } => map_ci_reconcile_review(command),
+    }
+}
+
+fn map_ci_plan_pr_comment(command: CiCli) -> ci::CiCommand {
+    let CiCli::PlanPrComment {
+        body,
+        marker_id,
+        clean,
+        existing_comment_id,
+        existing_body,
+    } = command
+    else {
+        unreachable!("ci plan-pr-comment mapper called with different variant");
+    };
+
+    ci::CiCommand::PlanPrComment {
+        body,
+        marker_id,
+        clean,
+        existing_comment_id,
+        existing_body,
+    }
+}
+
+fn map_ci_post_pr_comment(command: CiCli) -> ci::CiCommand {
+    let CiCli::PostPrComment {
+        provider,
+        pr,
+        mr,
+        body,
+        envelope,
+        marker_id,
+        clean,
+        repo,
+        project_id,
+        api_url,
+        dry_run,
+    } = command
+    else {
+        unreachable!("ci post-pr-comment mapper called with different variant");
+    };
+
+    ci::CiCommand::PostPrComment {
+        provider: map_ci_provider(provider),
+        target: pr.or(mr),
+        body,
+        envelope,
+        marker_id,
+        clean,
+        repo,
+        project_id,
+        api_url,
+        dry_run,
+    }
+}
+
+fn map_ci_post_review(command: CiCli) -> ci::CiCommand {
+    let CiCli::PostReview {
+        provider,
+        pr,
+        mr,
+        envelope,
+        repo,
+        project_id,
+        api_url,
+        dry_run,
+    } = command
+    else {
+        unreachable!("ci post-review mapper called with different variant");
+    };
+
+    ci::CiCommand::PostReview {
+        provider: map_ci_provider(provider),
+        target: pr.or(mr),
+        envelope,
+        repo,
+        project_id,
+        api_url,
+        dry_run,
+    }
+}
+
+fn map_ci_post_check_run(command: CiCli) -> ci::CiCommand {
+    let CiCli::PostCheckRun {
+        provider,
+        decision,
+        repo,
+        head_sha,
+        api_url,
+        split_gates,
+        dry_run,
+    } = command
+    else {
+        unreachable!("ci post-check-run mapper called with different variant");
+    };
+
+    ci::CiCommand::PostCheckRun {
+        provider: map_ci_provider(provider),
+        decision,
+        repo,
+        head_sha,
+        api_url,
+        split_gates,
+        dry_run,
+    }
+}
+
+fn map_ci_reconcile_review(command: CiCli) -> ci::CiCommand {
+    let CiCli::ReconcileReview {
+        provider,
+        pr,
+        mr,
+        envelope,
+        repo,
+        project_id,
+        api_url,
+        dry_run,
+    } = command
+    else {
+        unreachable!("ci reconcile-review mapper called with different variant");
+    };
+
+    ci::CiCommand::ReconcileReview {
+        provider: map_ci_provider(provider),
+        target: pr.or(mr),
+        envelope,
+        repo,
+        project_id,
+        api_url,
+        dry_run,
     }
 }
 
@@ -4291,10 +4336,20 @@ fn run_resolved_audit(
 /// input resolution in brief mode (changed-code scope) with all gating /
 /// coverage / baseline knobs defaulted, then renders ONLY the decision surface.
 fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usize) -> ExitCode {
-    let cli = dispatch.cli;
-    // A defaulted audit-args bag: the decision surface takes only the global
-    // diff-scope flags (`--base`/`--changed-since`/`--workspace`) plus the cap.
-    let args = AuditDispatchArgs {
+    let args = decision_surface_audit_args(max_decisions);
+    let inputs = match resolve_audit_inputs(dispatch, &args) {
+        Ok(inputs) => inputs,
+        Err(code) => return code,
+    };
+    audit::run_decision_surface(&decision_surface_audit_options(
+        dispatch,
+        &inputs,
+        max_decisions,
+    ))
+}
+
+fn decision_surface_audit_args(max_decisions: usize) -> AuditDispatchArgs {
+    AuditDispatchArgs {
         production_dead_code: false,
         production_health: false,
         production_dupes: false,
@@ -4319,12 +4374,16 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
         mark_viewed: Vec::new(),
         show_cleared: false,
         show_deprioritized: false,
-    };
-    let inputs = match resolve_audit_inputs(dispatch, &args) {
-        Ok(inputs) => inputs,
-        Err(code) => return code,
-    };
-    audit::run_decision_surface(&audit::AuditOptions {
+    }
+}
+
+fn decision_surface_audit_options<'a>(
+    dispatch: &'a DispatchContext<'a>,
+    inputs: &'a ResolvedAuditInputs,
+    max_decisions: usize,
+) -> audit::AuditOptions<'a> {
+    let cli = dispatch.cli;
+    audit::AuditOptions {
         root: dispatch.root,
         config_path: &cli.config,
         cache_dir: &inputs.cache_dir,
@@ -4364,7 +4423,7 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
         show_cleared: false,
         walkthrough_file: None,
         show_deprioritized: false,
-    })
+    }
 }
 
 struct HealthDispatchArgs<'a> {
@@ -4529,43 +4588,66 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
             Ok(inputs) => inputs,
             Err(code) => return code,
         };
-    let run = fallow_engine::health::derive_health_run_options(
-        fallow_engine::health::HealthRunOptionsInput {
-            output,
-            thresholds: fallow_engine::health::HealthThresholdOverrides {
-                max_cyclomatic: args.max_cyclomatic,
-                max_cognitive: args.max_cognitive,
-                max_crap: args.max_crap,
-            },
-            top: args.top,
-            sort: args.sort.clone().into(),
-            complexity: args.complexity,
-            file_scores: args.file_scores,
-            coverage_gaps: args.coverage_gaps,
-            hotspots: args.hotspots,
-            ownership: args.ownership,
-            ownership_emails: args.ownership_emails,
-            targets: args.targets,
-            css: args.css,
-            effort: args.effort.map(EffortFilter::to_estimate),
-            score: args.score,
-            gates: fallow_engine::health::HealthGateOptions {
-                min_score: args.min_score,
-                min_severity: args.min_severity,
-                report_only: args.report_only,
-            },
-            snapshot_requested: args.save_snapshot.is_some(),
-            trend: args.trend,
-            since: args.since,
-            min_commits: args.min_commits,
-            coverage_inputs: fallow_engine::health::HealthCoverageInputs {
-                coverage: coverage_inputs.coverage.as_deref(),
-                coverage_root: coverage_inputs.coverage_root.as_deref(),
-            },
-            runtime_coverage,
-        },
-    );
+    let run = derive_health_dispatch_run(args, output, &coverage_inputs, runtime_coverage);
     run_health_dispatch(dispatch, args, ResolvedHealthDispatch { run, production })
+}
+
+fn derive_health_dispatch_run<'a>(
+    args: &'a HealthDispatchArgs<'a>,
+    output: fallow_config::OutputFormat,
+    coverage_inputs: &'a ResolvedHealthCoverageInputs,
+    runtime_coverage: Option<fallow_engine::health::RuntimeCoverageOptions>,
+) -> fallow_engine::health::HealthRunOptions<'a> {
+    fallow_engine::health::derive_health_run_options(fallow_engine::health::HealthRunOptionsInput {
+        output,
+        thresholds: health_threshold_overrides(args),
+        top: args.top,
+        sort: args.sort.clone().into(),
+        complexity: args.complexity,
+        file_scores: args.file_scores,
+        coverage_gaps: args.coverage_gaps,
+        hotspots: args.hotspots,
+        ownership: args.ownership,
+        ownership_emails: args.ownership_emails,
+        targets: args.targets,
+        css: args.css,
+        effort: args.effort.map(EffortFilter::to_estimate),
+        score: args.score,
+        gates: health_gate_options(args),
+        snapshot_requested: args.save_snapshot.is_some(),
+        trend: args.trend,
+        since: args.since,
+        min_commits: args.min_commits,
+        coverage_inputs: health_coverage_inputs(coverage_inputs),
+        runtime_coverage,
+    })
+}
+
+fn health_threshold_overrides(
+    args: &HealthDispatchArgs<'_>,
+) -> fallow_engine::health::HealthThresholdOverrides {
+    fallow_engine::health::HealthThresholdOverrides {
+        max_cyclomatic: args.max_cyclomatic,
+        max_cognitive: args.max_cognitive,
+        max_crap: args.max_crap,
+    }
+}
+
+fn health_gate_options(args: &HealthDispatchArgs<'_>) -> fallow_engine::health::HealthGateOptions {
+    fallow_engine::health::HealthGateOptions {
+        min_score: args.min_score,
+        min_severity: args.min_severity,
+        report_only: args.report_only,
+    }
+}
+
+fn health_coverage_inputs(
+    coverage_inputs: &ResolvedHealthCoverageInputs,
+) -> fallow_engine::health::HealthCoverageInputs<'_> {
+    fallow_engine::health::HealthCoverageInputs {
+        coverage: coverage_inputs.coverage.as_deref(),
+        coverage_root: coverage_inputs.coverage_root.as_deref(),
+    }
 }
 
 /// Resolved inputs threaded from `dispatch_health` into the `HealthOptions`

@@ -188,17 +188,9 @@ pub fn run_project_info(
         let config = session.config();
         let workspaces = session.workspaces();
         let show_all = project_info_should_show_all(options);
-        let need_plugin_result = options.plugins || options.entry_points || show_all;
-        let need_files = options.files || options.entry_points || options.boundaries || show_all;
         let changed_files = changed_files_for_run(&resolved)?;
-        let discovered = if need_files || need_plugin_result {
-            Some(scoped_discovered_files(
-                session.files(),
-                changed_files.as_ref(),
-            ))
-        } else {
-            None
-        };
+        let discovered =
+            project_info_discovered_files(options, show_all, &session, changed_files.as_ref());
         let discovered_ref = discovered.as_deref();
 
         let plugin_result = collect_plugin_result(
@@ -246,6 +238,17 @@ pub fn run_project_info(
             envelope_mode: RootEnvelopeMode::Tagged,
         })
     })
+}
+
+fn project_info_discovered_files(
+    options: &ProjectInfoOptions,
+    show_all: bool,
+    session: &fallow_engine::session::AnalysisSession,
+    changed_files: Option<&rustc_hash::FxHashSet<PathBuf>>,
+) -> Option<Vec<DiscoveredFile>> {
+    let needs_discovery =
+        options.files || options.entry_points || options.boundaries || options.plugins || show_all;
+    needs_discovery.then(|| scoped_discovered_files(session.files(), changed_files))
 }
 
 fn scoped_discovered_files(

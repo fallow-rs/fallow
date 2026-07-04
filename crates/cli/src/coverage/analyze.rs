@@ -547,6 +547,38 @@ fn merge_cloud_snapshot(
         unmatched_cloud_functions,
     } = collect_cloud_merge_entries(snapshot, static_index, min_invocations_hot);
 
+    sort_cloud_runtime_entries(&mut findings, &mut hot_paths);
+    let blast_radius = cloud_blast_radius_entries(snapshot, synthesized_blast_radius);
+    let importance = cloud_importance_entries(snapshot, synthesized_importance);
+
+    let warnings = cloud_warnings(snapshot, unmatched_cloud_functions);
+    let trust_output = cloud_runtime_trust_output(
+        snapshot.summary.functions_tracked,
+        snapshot.summary.functions_untracked,
+    );
+
+    RuntimeCoverageReport {
+        schema_version: RuntimeCoverageSchemaVersion::V1,
+        verdict: cloud_report_verdict(&findings),
+        signals: Vec::new(),
+        summary: cloud_report_summary(snapshot),
+        findings,
+        hot_paths,
+        blast_radius,
+        importance,
+        watermark: None,
+        warnings,
+        actionable: trust_output.actionable,
+        actionability_reason: trust_output.actionability_reason,
+        actionability_verdict: trust_output.actionability_verdict,
+        provenance: trust_output.provenance,
+    }
+}
+
+fn sort_cloud_runtime_entries(
+    findings: &mut [RuntimeCoverageFinding],
+    hot_paths: &mut [RuntimeCoverageHotPath],
+) {
     findings.sort_by(|left, right| {
         runtime_verdict_rank(left.verdict)
             .cmp(&runtime_verdict_rank(right.verdict))
@@ -560,74 +592,76 @@ fn merge_cloud_snapshot(
             .then_with(|| left.path.cmp(&right.path))
             .then_with(|| left.function.cmp(&right.function))
     });
-    let blast_radius = cloud_blast_radius_entries(snapshot, synthesized_blast_radius);
-    let importance = cloud_importance_entries(snapshot, synthesized_importance);
+}
 
-    let warnings = cloud_warnings(snapshot, unmatched_cloud_functions);
+fn cloud_report_verdict(findings: &[RuntimeCoverageFinding]) -> RuntimeCoverageReportVerdict {
+    if findings.is_empty() {
+        RuntimeCoverageReportVerdict::Clean
+    } else {
+        RuntimeCoverageReportVerdict::ColdCodeDetected
+    }
+}
 
-    // #316 / #319 (cloud-join surface): same trust-output shape as the local
-    // path. The cloud snapshot's own actionable/freshness pass-through is #328
-    // territory, so freshness is left unknown here; the gate (no tracked
-    // functions => non-actionable) and origin-unknown default still hold.
-    let denominator = snapshot.summary.functions_tracked + snapshot.summary.functions_untracked;
-    let untracked_ratio = if denominator == 0 {
+fn cloud_report_summary(snapshot: &CloudRuntimeContext) -> RuntimeCoverageSummary {
+    RuntimeCoverageSummary {
+        data_source: RuntimeCoverageDataSource::Cloud,
+        last_received_at: snapshot.summary.last_received_at.clone(),
+        functions_tracked: snapshot.summary.functions_tracked,
+        functions_hit: snapshot.summary.functions_hit,
+        functions_unhit: snapshot.summary.functions_unhit,
+        functions_untracked: snapshot.summary.functions_untracked,
+        coverage_percent: snapshot.summary.coverage_percent,
+        trace_count: snapshot.summary.trace_count,
+        period_days: snapshot.window.period_days,
+        deployments_seen: snapshot.summary.deployments_seen,
+        capture_quality: cloud_capture_quality(snapshot),
+    }
+}
+
+struct RuntimeTrustOutput {
+    actionable: bool,
+    actionability_reason: Option<String>,
+    actionability_verdict: Option<String>,
+    provenance: RuntimeCoverageProvenance,
+}
+
+fn cloud_runtime_trust_output(
+    functions_tracked: usize,
+    functions_untracked: usize,
+) -> RuntimeTrustOutput {
+    RuntimeTrustOutput {
+        actionable: functions_tracked > 0,
+        actionability_reason: runtime_actionability_reason(functions_tracked),
+        actionability_verdict: runtime_actionability_verdict(functions_tracked),
+        provenance: RuntimeCoverageProvenance {
+            data_source: RuntimeCoverageDataSource::Cloud,
+            is_production: "unknown".to_owned(),
+            freshness_days: None,
+            untracked_ratio: runtime_untracked_ratio(functions_tracked, functions_untracked),
+            unresolved_ratio: 0.0,
+            stale: false,
+            stale_after_days: RUNTIME_STALE_AFTER_DAYS,
+        },
+    }
+}
+
+fn runtime_actionability_reason(functions_tracked: usize) -> Option<String> {
+    (functions_tracked == 0).then(|| {
+        "No functions were tracked at runtime in this capture, so there is no usable runtime evidence to act on. Treat all functions as do-not-act; this is NOT cold."
+            .to_owned()
+    })
+}
+
+fn runtime_actionability_verdict(functions_tracked: usize) -> Option<String> {
+    (functions_tracked == 0).then(|| "insufficient_evidence".to_owned())
+}
+
+fn runtime_untracked_ratio(functions_tracked: usize, functions_untracked: usize) -> f64 {
+    let denominator = functions_tracked + functions_untracked;
+    if denominator == 0 {
         0.0
     } else {
-        snapshot.summary.functions_untracked as f64 / denominator as f64
-    };
-    let actionable = snapshot.summary.functions_tracked > 0;
-    let (actionability_reason, actionability_verdict) = if actionable {
-        (None, None)
-    } else {
-        (
-            Some(
-                "No functions were tracked at runtime in this capture, so there is no usable runtime evidence to act on. Treat all functions as do-not-act; this is NOT cold."
-                    .to_owned(),
-            ),
-            Some("insufficient_evidence".to_owned()),
-        )
-    };
-    let provenance = RuntimeCoverageProvenance {
-        data_source: RuntimeCoverageDataSource::Cloud,
-        is_production: "unknown".to_owned(),
-        freshness_days: None,
-        untracked_ratio,
-        unresolved_ratio: 0.0,
-        stale: false,
-        stale_after_days: RUNTIME_STALE_AFTER_DAYS,
-    };
-
-    RuntimeCoverageReport {
-        schema_version: RuntimeCoverageSchemaVersion::V1,
-        verdict: if findings.is_empty() {
-            RuntimeCoverageReportVerdict::Clean
-        } else {
-            RuntimeCoverageReportVerdict::ColdCodeDetected
-        },
-        signals: Vec::new(),
-        summary: RuntimeCoverageSummary {
-            data_source: RuntimeCoverageDataSource::Cloud,
-            last_received_at: snapshot.summary.last_received_at.clone(),
-            functions_tracked: snapshot.summary.functions_tracked,
-            functions_hit: snapshot.summary.functions_hit,
-            functions_unhit: snapshot.summary.functions_unhit,
-            functions_untracked: snapshot.summary.functions_untracked,
-            coverage_percent: snapshot.summary.coverage_percent,
-            trace_count: snapshot.summary.trace_count,
-            period_days: snapshot.window.period_days,
-            deployments_seen: snapshot.summary.deployments_seen,
-            capture_quality: cloud_capture_quality(snapshot),
-        },
-        findings,
-        hot_paths,
-        blast_radius,
-        importance,
-        watermark: None,
-        warnings,
-        actionable,
-        actionability_reason,
-        actionability_verdict,
-        provenance,
+        functions_untracked as f64 / denominator as f64
     }
 }
 
