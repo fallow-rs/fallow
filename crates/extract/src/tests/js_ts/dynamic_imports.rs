@@ -288,6 +288,136 @@ fn dynamic_import_no_duplicate_entries() {
 }
 
 #[test]
+fn conditional_dynamic_import_namespace_credits_both_branches() {
+    let info = parse_source(
+        "async function f() { const backend = await import(target === 'mobile' ? './android.mjs' : './web.mjs'); }",
+    );
+    let mut sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(sources, vec!["./android.mjs", "./web.mjs"]);
+    assert!(
+        info.dynamic_imports
+            .iter()
+            .all(|imp| imp.local_name.as_deref() == Some("backend")),
+        "both branches should carry the namespace binding, got {:?}",
+        info.dynamic_imports
+    );
+}
+
+#[test]
+fn conditional_dynamic_import_destructure_credits_names_on_both_branches() {
+    let info = parse_source(
+        "async function f() { const { run } = await import(cond ? './x.mjs' : './y.mjs'); }",
+    );
+    assert_eq!(info.dynamic_imports.len(), 2);
+    for imp in &info.dynamic_imports {
+        assert!(imp.local_name.is_none());
+        assert_eq!(imp.destructured_names, vec!["run"]);
+    }
+    let mut sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(sources, vec!["./x.mjs", "./y.mjs"]);
+}
+
+#[test]
+fn bare_conditional_dynamic_import_is_side_effect_on_both_branches() {
+    let info = parse_source("async function f() { await import(cond ? './a.mjs' : './b.mjs'); }");
+    assert_eq!(info.dynamic_imports.len(), 2);
+    assert!(
+        info.dynamic_imports
+            .iter()
+            .all(|imp| imp.local_name.is_none() && imp.destructured_names.is_empty()),
+    );
+}
+
+#[test]
+fn logical_fallback_dynamic_import_credits_literal_branch() {
+    let info =
+        parse_source("async function f() { const m = await import(override || './default.mjs'); }");
+    let sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    assert_eq!(sources, vec!["./default.mjs"]);
+    assert_eq!(info.dynamic_imports[0].local_name, Some("m".to_string()));
+}
+
+#[test]
+fn conditional_dynamic_import_with_runtime_branch_credits_only_literal() {
+    let info = parse_source(
+        "async function f() { const m = await import(cond ? './real.mjs' : runtimeVar); }",
+    );
+    let sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    assert_eq!(
+        sources,
+        vec!["./real.mjs"],
+        "the runtime branch is unresolvable and must be skipped, not guessed"
+    );
+}
+
+#[test]
+fn fully_runtime_conditional_dynamic_import_records_nothing() {
+    let info = parse_source("async function f() { const m = await import(cond ? a : b); }");
+    assert!(
+        info.dynamic_imports.is_empty() && info.dynamic_import_patterns.is_empty(),
+        "a conditional of two runtime values stays unresolvable"
+    );
+}
+
+#[test]
+fn conditional_arrow_wrapped_import_credits_default_on_both_branches() {
+    let info = parse_source("const C = React.lazy(() => import(flag ? './A.jsx' : './B.jsx'));");
+    assert_eq!(info.dynamic_imports.len(), 2);
+    for imp in &info.dynamic_imports {
+        assert_eq!(
+            imp.destructured_names,
+            vec!["default"],
+            "a lazy wrapper consumes the default export, which must be credited on every branch"
+        );
+    }
+    let mut sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(sources, vec!["./A.jsx", "./B.jsx"]);
+}
+
+#[test]
+fn conditional_then_callback_credits_member_on_both_branches() {
+    let info = parse_source("import(cond ? './a.mjs' : './b.mjs').then(m => m.Widget);");
+    assert_eq!(info.dynamic_imports.len(), 2);
+    for imp in &info.dynamic_imports {
+        assert_eq!(imp.destructured_names, vec!["Widget"]);
+    }
+}
+
+#[test]
+fn conditional_route_property_callback_credits_default_on_both_branches() {
+    let info = parse_source(
+        "const route = { loadComponent: () => import(mobile ? './m.component.mjs' : './w.component.mjs') };",
+    );
+    assert_eq!(info.dynamic_imports.len(), 2);
+    for imp in &info.dynamic_imports {
+        assert_eq!(imp.destructured_names, vec!["default"]);
+    }
+}
+
+#[test]
 fn require_context_with_json_regex() {
     let info = parse_source(r"const ctx = require.context('./locale', false, /\.json$/);");
     assert_eq!(info.dynamic_import_patterns.len(), 1);

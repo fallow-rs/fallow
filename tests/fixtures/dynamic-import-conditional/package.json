@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-import-conditional",
+  "type": "module",
+  "main": "main.mjs"
+}

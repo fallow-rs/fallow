@@ -1925,19 +1925,42 @@ fn try_extract_require<'a, 'b>(
     Some((call, &lit.value))
 }
 
-fn try_extract_dynamic_import<'a, 'b>(
-    init: &'b Expression<'a>,
-) -> Option<(&'b ImportExpression<'a>, &'b str)> {
-    let import_expr = extract_import_expression(init)?;
-    let Expression::StringLiteral(lit) = &import_expr.source else {
-        return None;
-    };
-    Some((import_expr, &lit.value))
+/// Collect every statically-resolvable module specifier from a dynamic
+/// `import()` source expression, following conditional and logical branches so
+/// `import(cond ? './a' : './b')` yields both `./a` and `./b`. String literals
+/// and no-substitution template literals resolve; genuinely runtime branches (a
+/// bare identifier, a call) are skipped, so a mixed
+/// `import(cond ? './a' : runtimeVar)` still credits the literal branch while
+/// `import(runtimeVar)` yields nothing (correctly left unresolvable).
+pub fn collect_static_import_specifiers(source: &Expression<'_>, out: &mut Vec<String>) {
+    match source {
+        Expression::StringLiteral(lit) => out.push(lit.value.to_string()),
+        Expression::TemplateLiteral(tpl)
+            if tpl.expressions.is_empty() && !tpl.quasis.is_empty() =>
+        {
+            let value = tpl.quasis[0].value.raw.to_string();
+            if !value.is_empty() {
+                out.push(value);
+            }
+        }
+        Expression::ParenthesizedExpression(paren) => {
+            collect_static_import_specifiers(&paren.expression, out);
+        }
+        Expression::ConditionalExpression(cond) => {
+            collect_static_import_specifiers(&cond.consequent, out);
+            collect_static_import_specifiers(&cond.alternate, out);
+        }
+        Expression::LogicalExpression(logical) => {
+            collect_static_import_specifiers(&logical.left, out);
+            collect_static_import_specifiers(&logical.right, out);
+        }
+        _ => {}
+    }
 }
 
 fn try_extract_property_callback_import<'a, 'b>(
     prop: &'b ObjectProperty<'a>,
-) -> Option<(&'b ImportExpression<'a>, &'b str)> {
+) -> Option<(&'b ImportExpression<'a>, Vec<String>)> {
     let property_name = prop.key.static_name()?;
     if !matches!(
         property_name.as_ref(),
@@ -1947,10 +1970,12 @@ fn try_extract_property_callback_import<'a, 'b>(
     }
 
     let import_expr = extract_import_from_callable(&prop.value)?;
-    let Expression::StringLiteral(lit) = &import_expr.source else {
+    let mut sources = Vec::new();
+    collect_static_import_specifiers(&import_expr.source, &mut sources);
+    if sources.is_empty() {
         return None;
-    };
-    Some((import_expr, &lit.value))
+    }
+    Some((import_expr, sources))
 }
 
 #[must_use]
@@ -1968,7 +1993,7 @@ pub fn extract_import_expression<'a, 'b>(
 
 fn try_extract_arrow_wrapped_import<'a, 'b>(
     arguments: &'b [Argument<'a>],
-) -> Option<(&'b ImportExpression<'a>, &'b str)> {
+) -> Option<(&'b ImportExpression<'a>, Vec<String>)> {
     for arg in arguments {
         let Some(expr) = arg.as_expression() else {
             continue;
@@ -1976,10 +2001,11 @@ fn try_extract_arrow_wrapped_import<'a, 'b>(
         let Some(import_expr) = extract_import_from_callable(expr) else {
             continue;
         };
-        let Expression::StringLiteral(lit) = &import_expr.source else {
-            continue;
-        };
-        return Some((import_expr, &lit.value));
+        let mut sources = Vec::new();
+        collect_static_import_specifiers(&import_expr.source, &mut sources);
+        if !sources.is_empty() {
+            return Some((import_expr, sources));
+        }
     }
     None
 }
@@ -2026,7 +2052,7 @@ pub fn extract_import_from_callable<'a, 'b>(
 }
 
 struct ImportThenCallback {
-    source: String,
+    sources: Vec<String>,
     import_span: oxc_span::Span,
     destructured_names: Vec<String>,
     local_name: Option<String>,
@@ -2043,17 +2069,20 @@ fn try_extract_import_then_callback(expr: &CallExpression<'_>) -> Option<ImportT
     let Expression::ImportExpression(import_expr) = &member.object else {
         return None;
     };
-    let Expression::StringLiteral(lit) = &import_expr.source else {
+    let mut sources = Vec::new();
+    collect_static_import_specifiers(&import_expr.source, &mut sources);
+    if sources.is_empty() {
         return None;
-    };
-    let source = lit.value.to_string();
+    }
     let import_span = import_expr.span;
 
     match expr.arguments.first()? {
-        Argument::ArrowFunctionExpression(arrow) => arrow_then_callback(arrow, source, import_span),
+        Argument::ArrowFunctionExpression(arrow) => {
+            arrow_then_callback(arrow, sources, import_span)
+        }
         Argument::FunctionExpression(func) => {
             let param = func.params.items.first()?;
-            then_callback_from_pattern(&param.pattern, source, import_span)
+            then_callback_from_pattern(&param.pattern, sources, import_span)
         }
         _ => None,
     }
@@ -2063,7 +2092,7 @@ fn try_extract_import_then_callback(expr: &CallExpression<'_>) -> Option<ImportT
 /// expression-body member-access shape before falling back to the bare param.
 fn arrow_then_callback(
     arrow: &oxc_ast::ast::ArrowFunctionExpression<'_>,
-    source: String,
+    sources: Vec<String>,
     import_span: Span,
 ) -> Option<ImportThenCallback> {
     let param = arrow.params.items.first()?;
@@ -2074,38 +2103,38 @@ fn arrow_then_callback(
             && let Some(names) = extract_member_names_from_expr(&expr_stmt.expression, &param_name)
         {
             return Some(ImportThenCallback {
-                source,
+                sources,
                 import_span,
                 destructured_names: names,
                 local_name: None,
             });
         }
         return Some(ImportThenCallback {
-            source,
+            sources,
             import_span,
             destructured_names: Vec::new(),
             local_name: Some(param_name),
         });
     }
-    then_callback_from_pattern(&param.pattern, source, import_span)
+    then_callback_from_pattern(&param.pattern, sources, import_span)
 }
 
 /// Build an `ImportThenCallback` from a callback param pattern: object pattern
 /// yields destructured names, a bare identifier yields a namespace local.
 fn then_callback_from_pattern(
     pattern: &BindingPattern<'_>,
-    source: String,
+    sources: Vec<String>,
     import_span: Span,
 ) -> Option<ImportThenCallback> {
     match pattern {
         BindingPattern::ObjectPattern(obj_pat) => Some(ImportThenCallback {
-            source,
+            sources,
             import_span,
             destructured_names: extract_destructured_names(obj_pat),
             local_name: None,
         }),
         BindingPattern::BindingIdentifier(id) => Some(ImportThenCallback {
-            source,
+            sources,
             import_span,
             destructured_names: Vec::new(),
             local_name: Some(id.name.to_string()),

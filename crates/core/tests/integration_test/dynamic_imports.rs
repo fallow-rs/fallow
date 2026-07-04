@@ -289,6 +289,86 @@ fn dynamic_import_pattern_makes_files_reachable() {
 }
 
 #[test]
+fn conditional_dynamic_import_reaches_both_branches() {
+    let root = fixture_path("dynamic-import-conditional");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect();
+
+    for reachable in ["m.mjs", "x.mjs", "y.mjs"] {
+        assert!(
+            !unused_file_names.contains(&reachable.to_string()),
+            "{reachable} should be reachable through the dynamic import, unused: {unused_file_names:?}"
+        );
+    }
+    assert!(
+        unused_file_names.contains(&"orphan.mjs".to_string()),
+        "a genuinely-unreferenced file should still be reported, found: {unused_file_names:?}"
+    );
+
+    // The destructured `a` and the conditional-branch `run` (via `backend.run()`)
+    // are consumed, so only the orphan's export remains dead.
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.export
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string(),
+                e.export.export_name.clone(),
+            )
+        })
+        .collect();
+    assert!(
+        !unused_exports
+            .iter()
+            .any(|(file, _)| matches!(file.as_str(), "m.mjs" | "x.mjs" | "y.mjs")),
+        "exports of dynamically-imported modules should be credited, unused: {unused_exports:?}"
+    );
+}
+
+#[test]
+fn fully_dynamic_import_does_not_fabricate_reachability() {
+    let root = fixture_path("dynamic-import-runtime-var");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| {
+            f.file
+                .path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect();
+
+    assert!(
+        unused_file_names.contains(&"real.mjs".to_string()),
+        "a runtime-variable import (import(someVar)) must not reach arbitrary files, unused: {unused_file_names:?}"
+    );
+}
+
+#[test]
 fn vite_glob_makes_files_reachable() {
     let root = fixture_path("vite-glob");
     let config = create_config(root);

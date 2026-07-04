@@ -33,8 +33,8 @@ use super::helpers::{
 };
 use super::{
     BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, SideEffectRegistrationTarget,
-    try_extract_arrow_wrapped_import, try_extract_dynamic_import, try_extract_import_then_callback,
-    try_extract_property_callback_import, try_extract_require,
+    collect_static_import_specifiers, extract_import_expression, try_extract_arrow_wrapped_import,
+    try_extract_import_then_callback, try_extract_property_callback_import, try_extract_require,
 };
 
 #[path = "visit_impl_di.rs"]
@@ -1341,10 +1341,15 @@ impl<'a> ModuleInfoExtractor {
             return;
         }
 
-        let Some((import_expr, source)) = try_extract_dynamic_import(init) else {
+        let Some(import_expr) = extract_import_expression(init) else {
             return;
         };
-        self.handle_dynamic_import_declaration(declarator, import_expr, source);
+        let mut sources = Vec::new();
+        collect_static_import_specifiers(&import_expr.source, &mut sources);
+        if sources.is_empty() {
+            return;
+        }
+        self.handle_dynamic_import_declaration(declarator, import_expr, &sources);
     }
 
     /// Record a CommonJS named export (`module.exports.X = ...` /
@@ -1951,6 +1956,19 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     });
                 }
             }
+            Expression::ConditionalExpression(_) | Expression::LogicalExpression(_) => {
+                let mut sources = Vec::new();
+                collect_static_import_specifiers(&expr.source, &mut sources);
+                for source in sources {
+                    self.dynamic_imports.push(DynamicImportInfo {
+                        source,
+                        span: expr.span,
+                        destructured_names: Vec::new(),
+                        local_name: None,
+                        is_speculative: false,
+                    });
+                }
+            }
             _ => {}
         }
 
@@ -1971,14 +1989,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_object_property(&mut self, prop: &ObjectProperty<'a>) {
         self.record_graphql_resolver_args_source(&prop.value);
 
-        if let Some((import_expr, source)) = try_extract_property_callback_import(prop) {
-            self.dynamic_imports.push(DynamicImportInfo {
-                source: source.to_string(),
-                span: import_expr.span,
-                destructured_names: vec!["default".to_string()],
-                local_name: None,
-                is_speculative: false,
-            });
+        if let Some((import_expr, sources)) = try_extract_property_callback_import(prop) {
+            for source in sources {
+                self.dynamic_imports.push(DynamicImportInfo {
+                    source,
+                    span: import_expr.span,
+                    destructured_names: vec!["default".to_string()],
+                    local_name: None,
+                    is_speculative: false,
+                });
+            }
             self.handled_import_spans.insert(import_expr.span);
         }
 

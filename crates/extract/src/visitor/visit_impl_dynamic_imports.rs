@@ -75,25 +75,29 @@ impl<'a> ModuleInfoExtractor {
                 self.namespace_binding_names.push(local.clone());
             }
             self.handled_import_spans.insert(then_cb.import_span);
-            self.dynamic_imports.push(DynamicImportInfo {
-                source: then_cb.source,
-                span: then_cb.import_span,
-                destructured_names: then_cb.destructured_names,
-                local_name: then_cb.local_name,
-                is_speculative: false,
-            });
+            for source in then_cb.sources {
+                self.dynamic_imports.push(DynamicImportInfo {
+                    source,
+                    span: then_cb.import_span,
+                    destructured_names: then_cb.destructured_names.clone(),
+                    local_name: then_cb.local_name.clone(),
+                    is_speculative: false,
+                });
+            }
         }
     }
 
     pub(super) fn record_arrow_wrapped_dynamic_import(&mut self, expr: &CallExpression<'_>) {
-        if let Some((import_expr, source)) = try_extract_arrow_wrapped_import(&expr.arguments) {
-            self.dynamic_imports.push(DynamicImportInfo {
-                source: source.to_string(),
-                span: import_expr.span,
-                destructured_names: vec!["default".to_string()],
-                local_name: None,
-                is_speculative: false,
-            });
+        if let Some((import_expr, sources)) = try_extract_arrow_wrapped_import(&expr.arguments) {
+            for source in sources {
+                self.dynamic_imports.push(DynamicImportInfo {
+                    source,
+                    span: import_expr.span,
+                    destructured_names: vec!["default".to_string()],
+                    local_name: None,
+                    is_speculative: false,
+                });
+            }
             self.handled_import_spans.insert(import_expr.span);
 
             // Record the `import()` span when this is a

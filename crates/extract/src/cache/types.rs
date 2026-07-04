@@ -725,7 +725,13 @@ use crate::MemberKind;
 /// records a strict factory-return entry, so its `exported_factory_returns`
 /// output credits `const c = useController(); c.method()` across the module
 /// boundary; a warm 220 cache lacks that entry.
-pub(super) const CACHE_VERSION: u32 = 221;
+///
+/// Bumped to 222 (#1742): conditional and logical dynamic `import()` arguments
+/// (`import(c ? './a' : './b')`, `import(x || './b')`) are now traced, emitting one
+/// `DynamicImportInfo` edge per statically-resolvable branch (plus the wrapper
+/// families: `.then`, `React.lazy`/`next/dynamic`, route `loadComponent`). A warm
+/// cache from 221 lacks the added per-branch dynamic-import entries.
+pub(super) const CACHE_VERSION: u32 = 222;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

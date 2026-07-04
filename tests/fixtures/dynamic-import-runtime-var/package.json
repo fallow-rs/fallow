@@ -1,0 +1,5 @@
+{
+  "name": "dynamic-import-runtime-var",
+  "type": "module",
+  "main": "main.mjs"
+}
