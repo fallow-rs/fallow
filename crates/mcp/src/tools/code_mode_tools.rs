@@ -126,7 +126,7 @@ impl CodeModeTool {
         self.is_api_backed()
             && !matches!(
                 self,
-                Self::Analyze | Self::Combined | Self::FindDupes | Self::CheckHealth | Self::Audit
+                Self::Analyze | Self::FindDupes | Self::CheckHealth | Self::Audit
             )
     }
 }
@@ -620,7 +620,6 @@ mod tests {
     fn heavy_code_mode_tools_keep_cancellable_cli_path() {
         for tool in [
             CodeModeTool::Analyze,
-            CodeModeTool::Combined,
             CodeModeTool::FindDupes,
             CodeModeTool::CheckHealth,
             CodeModeTool::Audit,

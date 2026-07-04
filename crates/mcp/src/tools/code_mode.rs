@@ -556,39 +556,6 @@ mod tests {
     }
 
     #[test]
-    fn heavy_code_mode_combined_uses_cancellable_subprocess_path() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        fs::create_dir(temp.path().join("src")).expect("src dir");
-        fs::write(
-            temp.path().join("package.json"),
-            r#"{"name":"code-mode-combined-test","type":"module","main":"src/index.ts"}"#,
-        )
-        .expect("package json");
-        fs::write(
-            temp.path().join("src/index.ts"),
-            "export const unused = 1;\n",
-        )
-        .expect("source");
-
-        let output = execute_code_mode(
-            "/definitely/not/fallow".to_string(),
-            CodeExecuteParams {
-                code: "return fallow.combined({ no_cache: true, score: true });".to_string(),
-                root: Some(temp.path().display().to_string()),
-                timeout_ms: Some(5_000),
-                max_output_bytes: Some(200_000),
-            },
-        )
-        .expect_err("heavy combined should use the cancellable subprocess path");
-
-        let json: serde_json::Value = serde_json::from_str(&output).expect("code mode json");
-        assert_eq!(json["ok"].as_bool(), Some(false));
-        assert_eq!(json["calls"][0]["tool"].as_str(), Some("combined"));
-        assert_eq!(json["calls"][0]["ok"].as_bool(), Some(false));
-        assert_eq!(json["calls"][0]["error_kind"].as_str(), Some("subprocess"));
-    }
-
-    #[test]
     fn api_backed_combined_does_not_spawn_binary() {
         let temp = tempfile::tempdir().expect("tempdir");
         fs::create_dir(temp.path().join("src")).expect("src dir");
