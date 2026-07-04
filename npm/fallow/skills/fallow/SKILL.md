@@ -9,9 +9,7 @@ metadata:
 ---
 
 # Fallow: codebase intelligence for JavaScript and TypeScript
-
 Codebase intelligence for JavaScript and TypeScript. The free static layer reports quality, changed-code risk, cleanup opportunities, circular dependencies, code duplication, complexity hotspots, architecture boundary violations, feature flag patterns, and opt-in security candidates. Runtime coverage merges production execution data into the same `fallow health` report for hot-path review, cold-path deletion confidence, and stale-flag evidence, with a single local capture available by default and continuous/cloud runtime monitoring available as an optional mode. 123 framework plugins, zero configuration, sub-second static analysis.
-
 ## When to Use
 - Finding cleanup opportunities (unused files, exports, types, enum/class members)
 - Finding unused or unlisted dependencies
@@ -39,7 +37,6 @@ Codebase intelligence for JavaScript and TypeScript. The free static layer repor
 - Projects that are not JavaScript or TypeScript
 
 ## Prerequisites
-
 Fallow must be installed. If not available, install it:
 
 ```bash
@@ -51,7 +48,6 @@ cargo install fallow-cli        # build from source
 ```
 
 ## Agent Rules
-
 1. **Always use `--format json --quiet 2>/dev/null`** for machine-readable output. The `2>/dev/null` discards stderr so progress messages and threshold warnings don't corrupt the JSON on stdout. Never use `2>&1`
 2. **Always append `|| true`** to every fallow command. Exit code 1 means "issues found" (normal), not a runtime error. Without `|| true`, the Bash tool treats exit 1 as failure and cancels parallel commands. Only exit code 2 is a real error (invalid config, parse failure)
 3. **Use `--explain`** to include a `_meta` object in JSON output with metric definitions, ranges, and interpretation hints. In human format, `--explain` prints a `Description:` line under each section header.
@@ -64,7 +60,7 @@ cargo install fallow-cli        # build from source
 10. **Type the JSON in TypeScript**. When a project has `fallow` installed as a dev-dependency and the agent is consuming `--format json` output from TypeScript code, `import type { CheckOutput, HealthOutput, DupesOutput, AuditOutput, FallowJsonOutput } from "fallow/types"` exposes the full output contract. `SchemaVersion` is pinned to a literal at codegen time, so a major schema bump fails to compile at call sites that gate on the version.
 11. **Never enable telemetry on the user's behalf**. Fallow's product telemetry is opt-in and off by default; only the user may run `fallow telemetry enable`. You MAY set `FALLOW_AGENT_SOURCE=<allowlisted-value>` (for example `claude_code`, `codex`, `cursor`, `windsurf`, `gemini`, `cline`) so that, IF the user has already enabled telemetry, your integration is correctly attributed. Setting `FALLOW_AGENT_SOURCE` never enables telemetry by itself and uploads no codebase content.
 ## Onboarding And Insight
-Offer setup only after a human-requested analysis shows findings and all signals match: `fallow config --path` exits 3, not CI, not a pipeline format, `fallow impact --format json --quiet` has `onboarding_declined: false`, and no offer happened this session. Ask after showing value. Choices: guard commits and PRs, baseline the existing backlog and clean by category, add AGENTS.md guidance, or keep as-is. On decline, run `fallow init --decline --quiet` and stay silent for this project. Mutate only after consent. For guards, inspect `fallow hooks status --format json --quiet`, then use `fallow hooks install --target agent` and `fallow hooks install --target git`; for large backlogs, pair the gate with `--save-baseline` / new-only guidance. Offer `fallow impact enable` as local-only value tracking, never as telemetry; also offer it once on already-configured projects when `fallow impact status --format json` has `enabled: false` and `explicit_decision: false`, and record a no with `fallow impact disable --quiet`. Surface value on clear events: if the agent gate blocked a commit or push and a later retry succeeded, mention what was contained; when `next_steps` carries id `impact-report`, run its command and relay the non-zero numbers to the user in one line. On request, summarize non-zero Impact counts. Ask about telemetry only after such a win, only if `fallow telemetry status --format json` has `explicit_decision: false`, and never run `fallow telemetry enable`.
+Offer setup only after a human-requested analysis finds issues and all signals match: `fallow config --path` exits 3, not CI, not a pipeline format, `fallow impact --format json --quiet` has `onboarding_declined: false`, and no offer happened this session. Ask after showing value, mutate only after consent, and on decline run `fallow init --decline --quiet`. For guards, inspect `fallow hooks status --format json --quiet`, then install agent and git hooks; for large backlogs, pair the gate with `--save-baseline` / new-only guidance. Offer `fallow impact enable` only as local value tracking, never as telemetry. Ask about telemetry only after a clear win and never enable it yourself.
 ## Task Cheat Sheet
 Route by intent before reaching for the big analysis commands. Same matrix as `fallow schema` (`task_matrix`) and the generated AGENTS.md section.
 
