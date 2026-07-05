@@ -15,11 +15,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Conditional and logical dynamic imports are now traced.** (#1742, contributed
+  by @Jerc92) `import(cond ? './a' : './b')` and `import(x || './b')` previously
+  produced no module-graph edge, so every file reachable only through such an
+  import (and its whole transitive subtree) was falsely reported as
+  `unused-files` / `unused-exports`. Extraction now emits one edge per
+  statically-resolvable branch, including parenthesized and no-substitution
+  template forms, across all dynamic-import shapes: bare expressions,
+  `const x = await import(...)` declarations, `.then()` callbacks,
+  `React.lazy` / `next/dynamic` arrow wrappers, and Angular/Vue route
+  `loadComponent` / `component` callbacks. Genuinely runtime arguments
+  (`import(someVar)`) still yield no edge, and repeated literals across branches
+  deduplicate to a single edge. Note: branches that were previously invisible are
+  now resolved like plain literal imports, so a conditional branch pointing at a
+  missing relative file surfaces as `unresolved-imports` (silence it via a
+  plugin's generated-file patterns, as with plain imports). A conditional that
+  mixes a literal with a pattern branch (a substitution template or path
+  concatenation) credits only the literal branch for now.
+
 - **`fallow health` no longer exits 1 when the config contains a `rules` key.** A bare `#[serde(default)]` on a rule-severity field resolved to `error` when a `rules` object was present (even `{"rules": {}}`), diverging from the documented default. `coverage-gaps` was promoted to `error`, tripping the standalone-health coverage-gap gate on any untested runtime file, so `fallow health` exited 1 with an otherwise-clean report; eight `warn`-default component / store / inject / server-action rules were likewise promoted to `error`, wrongly gating CI on Vue / Svelte / Angular projects. The nine affected defaults are now pinned to their documented values. Thanks [@lightsound](https://github.com/lightsound) for the report. (Closes [#1745](https://github.com/fallow-rs/fallow/issues/1745))
 
 - **Fixed `unused-class-member` false positives on public methods reached through a return-type-annotated factory.** A factory or hook whose body has no `new` value proof but is explicitly typed `: SomeController` (`function useController(): ReadyAppController { return registry.get() as ReadyAppController }`) now credits member reads on `const c = useController(); c.method()` across the module boundary, for both the function-declaration and arrow forms. A genuinely-unused method on the returned class still reports. Thanks [@prosky](https://github.com/prosky) for the report. (Closes [#1744](https://github.com/fallow-rs/fallow/issues/1744))
 
 ## [3.0.0] - 2026-07-04
+
 
 ### Added
 

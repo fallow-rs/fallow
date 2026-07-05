@@ -8,10 +8,7 @@ use oxc_ast::ast::{
     TSEnumMemberName, TSModuleDeclarationName, VariableDeclarator,
 };
 
-use crate::{
-    DynamicImportInfo, ExportInfo, ExportName, MemberInfo, MemberKind, RequireCallInfo,
-    VisibilityTag,
-};
+use crate::{ExportInfo, ExportName, MemberInfo, MemberKind, RequireCallInfo, VisibilityTag};
 use fallow_types::extract::ClassHeritageInfo;
 
 use super::helpers::{
@@ -375,8 +372,6 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Handle `const x = await import('./y')` and `const x = import('./y')` patterns,
-    /// recording the dynamic import and tracking namespace bindings.
     /// Record dynamic-import edges for a `const {..}/x = await import(...)`
     /// declaration. `sources` carries one specifier per statically-resolvable
     /// branch (a conditional/logical `import()` yields several), so each branch
@@ -396,29 +391,13 @@ impl ModuleInfoExtractor {
         match &declarator.id {
             BindingPattern::ObjectPattern(obj_pat) => {
                 let names = extract_destructured_names(obj_pat);
-                for source in sources {
-                    self.dynamic_imports.push(DynamicImportInfo {
-                        source: source.clone(),
-                        span: import_expr.span,
-                        destructured_names: names.clone(),
-                        local_name: None,
-                        is_speculative: false,
-                    });
-                }
+                self.push_dynamic_import_branches(sources, import_expr.span, &names, None);
                 self.handled_import_spans.insert(import_expr.span);
             }
             BindingPattern::BindingIdentifier(id) => {
                 let local = id.name.to_string();
                 self.namespace_binding_names.push(local.clone());
-                for source in sources {
-                    self.dynamic_imports.push(DynamicImportInfo {
-                        source: source.clone(),
-                        span: import_expr.span,
-                        destructured_names: Vec::new(),
-                        local_name: Some(local.clone()),
-                        is_speculative: false,
-                    });
-                }
+                self.push_dynamic_import_branches(sources, import_expr.span, &[], Some(&local));
                 self.handled_import_spans.insert(import_expr.span);
             }
             _ => {}

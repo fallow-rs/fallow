@@ -69,35 +69,51 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
+    /// Push one `DynamicImportInfo` edge per statically-resolvable branch of a
+    /// dynamic `import()`, every branch sharing the same span and bindings.
+    /// Single choke point for the branch fan-out used by the declaration,
+    /// bare-expression, `.then`, arrow-wrapped, and route-property paths.
+    pub(in crate::visitor) fn push_dynamic_import_branches(
+        &mut self,
+        sources: &[String],
+        span: Span,
+        destructured_names: &[String],
+        local_name: Option<&str>,
+    ) {
+        for source in sources {
+            self.dynamic_imports.push(DynamicImportInfo {
+                source: source.clone(),
+                span,
+                destructured_names: destructured_names.to_vec(),
+                local_name: local_name.map(str::to_string),
+                is_speculative: false,
+            });
+        }
+    }
+
     pub(super) fn record_import_callback_dynamic_imports(&mut self, expr: &CallExpression<'_>) {
         if let Some(then_cb) = try_extract_import_then_callback(expr) {
             if let Some(local) = &then_cb.local_name {
                 self.namespace_binding_names.push(local.clone());
             }
             self.handled_import_spans.insert(then_cb.import_span);
-            for source in then_cb.sources {
-                self.dynamic_imports.push(DynamicImportInfo {
-                    source,
-                    span: then_cb.import_span,
-                    destructured_names: then_cb.destructured_names.clone(),
-                    local_name: then_cb.local_name.clone(),
-                    is_speculative: false,
-                });
-            }
+            self.push_dynamic_import_branches(
+                &then_cb.sources,
+                then_cb.import_span,
+                &then_cb.destructured_names,
+                then_cb.local_name.as_deref(),
+            );
         }
     }
 
     pub(super) fn record_arrow_wrapped_dynamic_import(&mut self, expr: &CallExpression<'_>) {
         if let Some((import_expr, sources)) = try_extract_arrow_wrapped_import(&expr.arguments) {
-            for source in sources {
-                self.dynamic_imports.push(DynamicImportInfo {
-                    source,
-                    span: import_expr.span,
-                    destructured_names: vec!["default".to_string()],
-                    local_name: None,
-                    is_speculative: false,
-                });
-            }
+            self.push_dynamic_import_branches(
+                &sources,
+                import_expr.span,
+                &["default".to_string()],
+                None,
+            );
             self.handled_import_spans.insert(import_expr.span);
 
             // Record the `import()` span when this is a

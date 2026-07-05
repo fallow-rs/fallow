@@ -1931,15 +1931,22 @@ fn try_extract_require<'a, 'b>(
 /// and no-substitution template literals resolve; genuinely runtime branches (a
 /// bare identifier, a call) are skipped, so a mixed
 /// `import(cond ? './a' : runtimeVar)` still credits the literal branch while
-/// `import(runtimeVar)` yields nothing (correctly left unresolvable).
-pub fn collect_static_import_specifiers(source: &Expression<'_>, out: &mut Vec<String>) {
+/// `import(runtimeVar)` yields nothing (correctly left unresolvable). Repeated
+/// literals across branches are deduplicated so one call site never yields two
+/// identical edges (and thus duplicate unresolved-import findings).
+fn collect_static_import_specifiers(source: &Expression<'_>, out: &mut Vec<String>) {
     match source {
-        Expression::StringLiteral(lit) => out.push(lit.value.to_string()),
+        Expression::StringLiteral(lit) => {
+            let value = lit.value.to_string();
+            if !out.contains(&value) {
+                out.push(value);
+            }
+        }
         Expression::TemplateLiteral(tpl)
             if tpl.expressions.is_empty() && !tpl.quasis.is_empty() =>
         {
             let value = tpl.quasis[0].value.raw.to_string();
-            if !value.is_empty() {
+            if !value.is_empty() && !out.contains(&value) {
                 out.push(value);
             }
         }

@@ -418,6 +418,40 @@ fn conditional_route_property_callback_credits_default_on_both_branches() {
 }
 
 #[test]
+fn parenthesized_bare_conditional_dynamic_import_credits_both_branches() {
+    let info = parse_source("async function f() { await import((cond ? './a.mjs' : './b.mjs')); }");
+    let mut sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(
+        sources,
+        vec!["./a.mjs", "./b.mjs"],
+        "a paren-wrapped conditional source must trace exactly like the bare form"
+    );
+}
+
+#[test]
+fn repeated_branch_literal_dedupes_to_one_edge() {
+    let info = parse_source(
+        "async function f() { await import(a ? './x.mjs' : b ? './x.mjs' : './y.mjs'); }",
+    );
+    let mut sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    sources.sort_unstable();
+    assert_eq!(
+        sources,
+        vec!["./x.mjs", "./y.mjs"],
+        "a literal repeated across branches must yield one edge, not duplicates"
+    );
+}
+
+#[test]
 fn require_context_with_json_regex() {
     let info = parse_source(r"const ctx = require.context('./locale', false, /\.json$/);");
     assert_eq!(info.dynamic_import_patterns.len(), 1);
