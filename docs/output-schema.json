@@ -2675,6 +2675,10 @@
         "max_crap_threshold": {
           "type": "number"
         },
+        "max_unit_size_threshold": {
+          "type": "integer",
+          "description": "Effective global unit-size ceiling (`health.maxUnitSize`, maximum\nfunction length in lines) for this run. Sits alongside the other three\n`max_*_threshold` siblings so a consumer reading the summary sees every\nconfigured threshold. Per-file `thresholdOverrides` are not reflected\nhere; this is the global default."
+        },
         "files_scored": {
           "type": [
             "integer",
@@ -2736,6 +2740,7 @@
         "max_cyclomatic_threshold",
         "max_cognitive_threshold",
         "max_crap_threshold",
+        "max_unit_size_threshold",
         "severity_critical_count",
         "severity_high_count",
         "severity_moderate_count"

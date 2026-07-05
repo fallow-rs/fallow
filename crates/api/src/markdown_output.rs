@@ -1713,10 +1713,10 @@ fn write_findings_row(
                 max_cyclomatic: report.summary.max_cyclomatic_threshold,
                 max_cognitive: report.summary.max_cognitive_threshold,
                 max_crap: report.summary.max_crap_threshold,
-                // Inert here: only the cyclomatic/cognitive/CRAP markers are
-                // rendered from this fallback; the unit-size ceiling is not, so
-                // the default is a placeholder for the now-required field.
-                max_unit_size: fallow_output::DEFAULT_MAX_UNIT_SIZE,
+                // Not rendered on complexity findings today, but carry the run's
+                // configured global unit-size ceiling (not the static default)
+                // so the fallback stays consistent with the other thresholds.
+                max_unit_size: report.summary.max_unit_size_threshold,
             });
     let cyc_marker = if finding.cyclomatic > thresholds.max_cyclomatic {
         " **!**"

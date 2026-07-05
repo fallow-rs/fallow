@@ -4346,6 +4346,14 @@ functions_above_threshold: number
 max_cyclomatic_threshold: number
 max_cognitive_threshold: number
 max_crap_threshold: number
+/**
+ * Effective global unit-size ceiling (`health.maxUnitSize`, maximum
+ * function length in lines) for this run. Sits alongside the other three
+ * `max_*_threshold` siblings so a consumer reading the summary sees every
+ * configured threshold. Per-file `thresholdOverrides` are not reflected
+ * here; this is the global default.
+ */
+max_unit_size_threshold: number
 files_scored?: (number | null)
 average_maintainability?: (number | null)
 coverage_model?: (CoverageModel | null)

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The `fallow health` JSON summary now reports the effective unit-size
+  threshold.** `summary` on `fallow health --format json` already carried
+  `max_cyclomatic_threshold`, `max_cognitive_threshold`, and
+  `max_crap_threshold`, but not a unit-size sibling, so a consumer reading the
+  summary to learn which thresholds a run uses saw only three of the four. It
+  now also carries `max_unit_size_threshold` (the effective global
+  `health.maxUnitSize`, default 60), and the human report's "Large functions"
+  section reflects the configured global instead of a static "60" when
+  `health.maxUnitSize` is raised project-wide. Additive-required field matching
+  the existing `max*Threshold` siblings; no change to the unit-size check
+  itself. (Closes
+  [#1750](https://github.com/fallow-rs/fallow/issues/1750))
+
 - **New `health.maxUnitSize` threshold for the "function too big" (unit-size)
   check, configurable globally and per file.** Previously the line-count at
   which a function is reported as an oversized "large function" was hardcoded to

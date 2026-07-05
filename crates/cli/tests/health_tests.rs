@@ -426,6 +426,49 @@ fn health_max_unit_size_override_filters_large_function_list() {
     );
 }
 
+/// The JSON summary exposes the effective global unit-size ceiling alongside the
+/// other three `max_*_threshold` siblings (#1750). It defaults to 60 and echoes
+/// a config-raised `health.maxUnitSize`. Reverting the config-source wiring
+/// (`build.config.health.max_unit_size`) to a hardcoded default fails the second
+/// assertion.
+#[test]
+fn health_summary_exposes_max_unit_size_threshold() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"unit-size-summary-fixture","type":"module","main":"src/big.ts"}"#,
+    );
+    write_file(&root.join("src/big.ts"), &large_unit_source(80));
+
+    let default_run = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--format", "json", "--quiet"],
+    ));
+    assert_eq!(
+        default_run["summary"]["max_unit_size_threshold"].as_u64(),
+        Some(60),
+        "summary should default max_unit_size_threshold to 60"
+    );
+
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{"health":{"maxUnitSize":200}}"#,
+    );
+    let _ = std::fs::remove_dir_all(root.join(".fallow"));
+    let raised = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--format", "json", "--quiet"],
+    ));
+    assert_eq!(
+        raised["summary"]["max_unit_size_threshold"].as_u64(),
+        Some(200),
+        "summary must echo the configured global health.maxUnitSize"
+    );
+}
+
 #[test]
 fn health_threshold_override_reports_stale_when_under_global_threshold() {
     let dir = tempdir().expect("create temp dir");

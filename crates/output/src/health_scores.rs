@@ -645,6 +645,12 @@ pub struct HealthSummary {
     pub max_cyclomatic_threshold: u16,
     pub max_cognitive_threshold: u16,
     pub max_crap_threshold: f64,
+    /// Effective global unit-size ceiling (`health.maxUnitSize`, maximum
+    /// function length in lines) for this run. Sits alongside the other three
+    /// `max_*_threshold` siblings so a consumer reading the summary sees every
+    /// configured threshold. Per-file `thresholdOverrides` are not reflected
+    /// here; this is the global default.
+    pub max_unit_size_threshold: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files_scored: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -671,6 +677,7 @@ impl Default for HealthSummary {
             max_cyclomatic_threshold: 20,
             max_cognitive_threshold: 15,
             max_crap_threshold: 30.0,
+            max_unit_size_threshold: DEFAULT_MAX_UNIT_SIZE,
             files_scored: None,
             average_maintainability: None,
             coverage_model: None,

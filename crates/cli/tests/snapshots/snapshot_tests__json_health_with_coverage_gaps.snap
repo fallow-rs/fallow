@@ -43,6 +43,7 @@ expression: redact_version(&json_str)
     "max_cyclomatic_threshold": 20,
     "max_cognitive_threshold": 15,
     "max_crap_threshold": 30.0,
+    "max_unit_size_threshold": 60,
     "severity_critical_count": 0,
     "severity_high_count": 1,
     "severity_moderate_count": 0
