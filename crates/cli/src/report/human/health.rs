@@ -1460,11 +1460,12 @@ fn render_large_functions(
             format!("{:>3}", entry.line_count).red().bold(),
         ));
     }
+    let unit_ceiling = report.summary.max_unit_size_threshold;
+    let unit_word = if unit_ceiling == 1 { "line" } else { "lines" };
     lines.push(format!(
         "  {}",
         format!(
-            "Functions exceeding {} lines of code (very high risk): {DOCS_HEALTH}#unit-size",
-            report.summary.max_unit_size_threshold
+            "Functions exceeding {unit_ceiling} {unit_word} of code (very high risk): {DOCS_HEALTH}#unit-size"
         )
         .dimmed()
     ));
