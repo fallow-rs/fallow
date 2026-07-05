@@ -392,7 +392,7 @@ fallow health --changed-since main        # Only changed files
 Use `health.thresholdOverrides` for intentional local ceilings on legacy files
 or generated adapters while keeping global thresholds strict. Each override
 matches `files` globs, optionally narrows to exact `functions`, and can set any
-of `maxCyclomatic`, `maxCognitive`, or `maxCrap`. JSON, compact, markdown, and
+of `maxCyclomatic`, `maxCognitive`, `maxCrap`, or `maxUnitSize`. JSON, compact, markdown, and
 human output report active, stale, and full-run no-match override state so
 temporary exceptions stay visible.
 
