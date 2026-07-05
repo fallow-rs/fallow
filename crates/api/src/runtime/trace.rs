@@ -57,6 +57,11 @@ pub fn run_trace_export(
                 2,
             )
             .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
+            .with_help(
+                "The name is neither a top-level export nor a class / enum / store member of this \
+                 file. Run trace_file on the file to list its exports, or project_info for the \
+                 project symbol set; confirm the file path is project-relative.",
+            )
             .with_context("trace_export"));
         };
         Ok(TraceExportProgrammaticOutput { output })
@@ -85,6 +90,11 @@ pub fn run_trace_file(
                         2,
                     )
                     .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
+                    .with_help(
+                        "The file is not in the analyzed module graph. Run project_info to list \
+                         discovered files; the path must be project-relative and not excluded by \
+                         ignore patterns or outside the analyzed roots.",
+                    )
                     .with_context("trace_file")
                 })?;
         Ok(TraceFileProgrammaticOutput { output })
@@ -151,6 +161,11 @@ pub fn run_trace_clone(
         if trace.matched_instance.is_none() {
             return Err(ProgrammaticError::new(not_found, 2)
                 .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
+                .with_help(
+                    "No clone matched. Run find_dupes to list clone groups and their fingerprints; \
+                     a location must fall inside a reported clone instance, and a fingerprint must \
+                     be a find_dupes clone_groups[].fingerprint (a dup:<id> value).",
+                )
                 .with_context("trace_clone"));
         }
         Ok(TraceCloneProgrammaticOutput { output: trace })

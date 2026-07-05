@@ -12,7 +12,9 @@ use std::fs;
 use std::path::Path;
 
 use fallow_api::{
-    AnalysisOptions, TraceExportOptions, run_trace_export, serialize_trace_export_programmatic_json,
+    AnalysisOptions, DuplicationOptions, TraceCloneOptions, TraceCloneTarget, TraceExportOptions,
+    TraceFileOptions, run_trace_clone, run_trace_export, run_trace_file,
+    serialize_trace_export_programmatic_json,
 };
 
 fn write_fixture() -> tempfile::TempDir {
@@ -107,5 +109,65 @@ fn run_trace_export_absent_name_errors_with_export_or_member() {
         err.message.contains("export or member"),
         "error should name both shapes: {}",
         err.message
+    );
+    // The not-found error carries an actionable next-step pointer for agents.
+    let help = err
+        .help
+        .as_deref()
+        .expect("not-found error should carry help");
+    assert!(
+        help.contains("trace_file") && help.contains("project_info"),
+        "help should point at discovery tools: {help}"
+    );
+}
+
+#[test]
+fn run_trace_file_missing_file_errors_with_help() {
+    let dir = write_fixture();
+    let options = TraceFileOptions {
+        analysis: AnalysisOptions {
+            root: Some(dir.path().to_path_buf()),
+            no_cache: true,
+            ..AnalysisOptions::default()
+        },
+        file: "src/does-not-exist.ts".to_string(),
+    };
+
+    let err = run_trace_file(&options).expect_err("a file not in the graph must error");
+    assert_eq!(err.code.as_deref(), Some("FALLOW_TRACE_TARGET_NOT_FOUND"));
+    let help = err
+        .help
+        .as_deref()
+        .expect("not-found error should carry help");
+    assert!(
+        help.contains("project_info"),
+        "help should point at project_info: {help}"
+    );
+}
+
+#[test]
+fn run_trace_clone_missing_fingerprint_errors_with_help() {
+    let dir = write_fixture();
+    let options = TraceCloneOptions {
+        duplication: DuplicationOptions {
+            analysis: AnalysisOptions {
+                root: Some(dir.path().to_path_buf()),
+                no_cache: true,
+                ..AnalysisOptions::default()
+            },
+            ..DuplicationOptions::default()
+        },
+        target: TraceCloneTarget::Fingerprint("dup:deadbeef".to_string()),
+    };
+
+    let err = run_trace_clone(&options).expect_err("an unknown fingerprint must error");
+    assert_eq!(err.code.as_deref(), Some("FALLOW_TRACE_TARGET_NOT_FOUND"));
+    let help = err
+        .help
+        .as_deref()
+        .expect("not-found error should carry help");
+    assert!(
+        help.contains("find_dupes"),
+        "help should point at find_dupes: {help}"
     );
 }
