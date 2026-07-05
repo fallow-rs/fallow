@@ -25,10 +25,10 @@ pub use crate::runtime_output::{
     CircularDependenciesProgrammaticOutput, CombinedProgrammaticOutput, DeadCodeOutput,
     DeadCodeProgrammaticOutput, DecisionSurfaceProgrammaticOutput, DuplicationOutput,
     DuplicationProgrammaticOutput, FeatureFlagsOutput, FeatureFlagsProgrammaticOutput,
-    HealthJsonReportInput, HealthProgrammaticOutput, TraceCloneOutput,
+    HealthJsonReportInput, HealthProgrammaticOutput, TraceClassMemberOutput, TraceCloneOutput,
     TraceCloneProgrammaticOutput, TraceDependencyOutput, TraceDependencyProgrammaticOutput,
-    TraceExportOutput, TraceExportProgrammaticOutput, TraceFileOutput, TraceFileProgrammaticOutput,
-    serialize_health_report_json,
+    TraceExportOutput, TraceExportProgrammaticOutput, TraceExportTargetOutput, TraceFileOutput,
+    TraceFileProgrammaticOutput, serialize_health_report_json,
 };
 pub use audit::run_audit;
 pub use combined::run_combined;

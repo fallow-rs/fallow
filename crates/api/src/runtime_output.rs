@@ -39,6 +39,25 @@ pub type FeatureFlagsOutput = FeatureFlagsOutputContract;
 /// Concrete export trace output returned by typed programmatic runs.
 pub type TraceExportOutput = fallow_types::trace::ExportTrace;
 
+/// Concrete class / enum / store member trace output (the `trace_export`
+/// fallback when the name is a member rather than a top-level export). See
+/// issue #1744.
+pub type TraceClassMemberOutput = fallow_types::trace::ClassMemberTrace;
+
+/// The `trace_export` target: either a top-level export or (fallback) a class /
+/// enum / store member declared on one. Serialized untagged so the export shape
+/// stays byte-identical to the historical contract and the member shape matches
+/// the CLI's member trace; consumers distinguish by the presence of
+/// `export_name` (export) vs `member_name` / `owner_export` (member).
+#[derive(Debug, serde::Serialize)]
+#[serde(untagged)]
+pub enum TraceExportTargetOutput {
+    /// A top-level export trace.
+    Export(TraceExportOutput),
+    /// A class / enum / store member trace.
+    Member(TraceClassMemberOutput),
+}
+
 /// Concrete file trace output returned by typed programmatic runs.
 pub type TraceFileOutput = fallow_types::trace::FileTrace;
 
@@ -249,17 +268,37 @@ impl FeatureFlagsProgrammaticOutput {
     }
 }
 
-/// Typed programmatic export-trace output before JSON serialization.
+/// Typed programmatic export-trace output before JSON serialization. Carries
+/// either an export trace or (fallback) a class / enum / store member trace.
 #[derive(Debug)]
 pub struct TraceExportProgrammaticOutput {
-    pub output: TraceExportOutput,
+    pub output: TraceExportTargetOutput,
 }
 
 impl TraceExportProgrammaticOutput {
-    /// Typed export trace retained by this run.
+    /// Typed export-or-member trace retained by this run.
     #[must_use]
-    pub const fn trace(&self) -> &TraceExportOutput {
+    pub const fn trace(&self) -> &TraceExportTargetOutput {
         &self.output
+    }
+
+    /// The export trace, when the target resolved to a top-level export.
+    #[must_use]
+    pub const fn as_export(&self) -> Option<&TraceExportOutput> {
+        match &self.output {
+            TraceExportTargetOutput::Export(export) => Some(export),
+            TraceExportTargetOutput::Member(_) => None,
+        }
+    }
+
+    /// The member trace, when the target resolved to a class / enum / store
+    /// member (the `trace_export` fallback, issue #1744).
+    #[must_use]
+    pub const fn as_member(&self) -> Option<&TraceClassMemberOutput> {
+        match &self.output {
+            TraceExportTargetOutput::Member(member) => Some(member),
+            TraceExportTargetOutput::Export(_) => None,
+        }
     }
 }
 

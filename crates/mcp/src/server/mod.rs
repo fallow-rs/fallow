@@ -174,7 +174,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Trace why an export is considered used or unused. Returns file reachability, entry-point status, direct references, re-export chains, and a concise reason string. Use this when an agent needs evidence before deleting or rewriting a supposedly unused export.",
+        description = "Trace why an export is considered used or unused. Returns file reachability, entry-point status, direct references, re-export chains, and a concise reason string. If export_name is a class / enum / store MEMBER rather than a top-level export, returns a member trace instead (carrying member_name, member_kind, owner_export, owner_is_used) that reports the owning class's reachability and usage plus a pointer to the matching --unused-<kind>-members command, so a class-member finding can be debugged too. Use this when an agent needs evidence before deleting or rewriting a supposedly unused export or class member.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn trace_export(

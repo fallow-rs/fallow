@@ -5,7 +5,7 @@ use crate::{
     ProgrammaticAnalysisContext, ProgrammaticError, TraceCloneOptions,
     TraceCloneProgrammaticOutput, TraceCloneTarget, TraceDependencyOptions,
     TraceDependencyProgrammaticOutput, TraceExportOptions, TraceExportProgrammaticOutput,
-    TraceFileOptions, TraceFileProgrammaticOutput,
+    TraceExportTargetOutput, TraceFileOptions, TraceFileProgrammaticOutput,
 };
 
 use super::{ProgrammaticResult, duplication, resolve_programmatic_analysis_context};
@@ -30,23 +30,35 @@ pub fn run_trace_export(
     resolved.install(|| {
         let session = load_trace_session(&resolved)?;
         let artifacts = trace_artifacts(&session)?;
-        let output = fallow_engine::trace::trace_export(
+        // Resolve a top-level export first; on a miss fall back to a class /
+        // enum / store member trace so the MCP tool and Code Mode match the
+        // CLI's `--trace FILE:MEMBER` behavior instead of a hard not-found
+        // (issue #1744).
+        let output = if let Some(export) = fallow_engine::trace::trace_export(
             &artifacts.graph,
             session.root(),
             &options.file,
             &options.export_name,
-        )
-        .ok_or_else(|| {
-            ProgrammaticError::new(
+        ) {
+            TraceExportTargetOutput::Export(export)
+        } else if let Some(member) = fallow_engine::trace::trace_class_member(
+            &artifacts.graph,
+            session.root(),
+            &options.file,
+            &options.export_name,
+        ) {
+            TraceExportTargetOutput::Member(member)
+        } else {
+            return Err(ProgrammaticError::new(
                 format!(
-                    "export '{}' not found in '{}'",
+                    "export or member '{}' not found in '{}'",
                     options.export_name, options.file
                 ),
                 2,
             )
             .with_code("FALLOW_TRACE_TARGET_NOT_FOUND")
-            .with_context("trace_export")
-        })?;
+            .with_context("trace_export"));
+        };
         Ok(TraceExportProgrammaticOutput { output })
     })
 }
