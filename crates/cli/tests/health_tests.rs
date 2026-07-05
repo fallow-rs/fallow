@@ -360,6 +360,60 @@ fn health_threshold_override_uses_local_ceiling() {
     assert_eq!(state["reason"].as_str(), Some("legacy migration"));
 }
 
+/// A single low-complexity function whose body spans `body_lines` lines, so it
+/// trips the unit-size (large-function) check but not the complexity check.
+fn large_unit_source(body_lines: usize) -> String {
+    let mut src = String::from("export function bigUnit(): number {\n  let total = 0;\n");
+    for i in 0..body_lines {
+        src.push_str("  total += ");
+        src.push_str(&i.to_string());
+        src.push_str(";\n");
+    }
+    src.push_str("  return total;\n}\n");
+    src
+}
+
+#[test]
+fn health_max_unit_size_override_filters_large_function_list() {
+    let dir = tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_file(
+        &root.join("package.json"),
+        r#"{"name":"unit-size-fixture","type":"module","main":"src/big.ts"}"#,
+    );
+    write_file(&root.join("src/big.ts"), &large_unit_source(80));
+
+    // Baseline: the oversized function is reported in the large-functions list.
+    let baseline = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--format", "json", "--quiet"],
+    ));
+    let base_count = baseline["large_functions"].as_array().map_or(0, Vec::len);
+    assert!(
+        base_count >= 1,
+        "expected the oversized function listed by default: {base_count}"
+    );
+
+    // With a maxUnitSize override for the file, it drops out of the list while
+    // the descriptive very-high-risk profile is unchanged (list-only).
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{"health":{"thresholdOverrides":[{"files":["src/big.ts"],"maxUnitSize":500}]}}"#,
+    );
+    let _ = std::fs::remove_dir_all(root.join(".fallow"));
+    let overridden = parse_json(&run_fallow_in_root(
+        "health",
+        root,
+        &["--format", "json", "--quiet"],
+    ));
+    let over_count = overridden["large_functions"].as_array().map_or(0, Vec::len);
+    assert_eq!(
+        over_count, 0,
+        "maxUnitSize override should remove the oversized function from the list"
+    );
+}
+
 #[test]
 fn health_threshold_override_reports_stale_when_under_global_threshold() {
     let dir = tempdir().expect("create temp dir");

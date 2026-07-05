@@ -4267,6 +4267,12 @@ export interface HealthEffectiveThresholds {
 max_cyclomatic: number
 max_cognitive: number
 max_crap: number
+/**
+ * Effective unit-size ceiling (maximum function length in lines) for the
+ * matched file, after applying any `thresholdOverrides` on top of the
+ * global `health.maxUnitSize` default.
+ */
+max_unit_size: number
 }
 /**
  * Suggested action attached to a [`ComplexityViolation`].
@@ -4371,6 +4377,7 @@ export interface HealthConfiguredThresholds {
 max_cyclomatic?: (number | null)
 max_cognitive?: (number | null)
 max_crap?: (number | null)
+max_unit_size?: (number | null)
 }
 /**
  * Current complexity metrics for a matched threshold override entry.

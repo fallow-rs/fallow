@@ -13050,12 +13050,17 @@
         },
         "max_crap": {
           "type": "number"
+        },
+        "max_unit_size": {
+          "type": "integer",
+          "description": "Effective unit-size ceiling (maximum function length in lines) for the\nmatched file, after applying any `thresholdOverrides` on top of the\nglobal `health.maxUnitSize` default."
         }
       },
       "required": [
         "max_cyclomatic",
         "max_cognitive",
-        "max_crap"
+        "max_crap",
+        "max_unit_size"
       ],
       "description": "Resolved thresholds used to evaluate a health finding."
     },
@@ -13145,6 +13150,12 @@
         "max_crap": {
           "type": [
             "number",
+            "null"
+          ]
+        },
+        "max_unit_size": {
+          "type": [
+            "integer",
             "null"
           ]
         }

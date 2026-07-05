@@ -125,6 +125,7 @@
         "maxCognitive": 15,
         "maxCrap": 30.0,
         "crapRefactorBand": 5,
+        "maxUnitSize": 60,
         "coverage": null,
         "coverageRoot": null,
         "ignore": [],
@@ -836,6 +837,13 @@
           "maximum": 65535,
           "default": 5
         },
+        "maxUnitSize": {
+          "description": "Maximum function length in lines of code before it is reported as an\noversized \"large function\" (default: 60). Functions exceeding this\nthreshold are listed under the unit-size check and feed the unit-size\nhealth score. Raise it globally, or per file via\n`thresholdOverrides[].maxUnitSize`, to relax the bar for generated or\ntest files (where a `describe()` block spans hundreds of lines) without\ndisabling complexity checks on those files.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 60
+        },
         "coverage": {
           "description": "Path to Istanbul-format coverage data for accurate per-function CRAP\nscores. Relative paths resolve against the project root. The CLI\n`--coverage` flag and `FALLOW_COVERAGE` environment variable override\nthis value.",
           "type": [
@@ -935,6 +943,15 @@
             "null"
           ],
           "format": "double"
+        },
+        "maxUnitSize": {
+          "description": "Local unit-size ceiling: maximum function length in lines of code before\nit is reported as an oversized \"large function\". Leave `functions` empty\nto relax the bar for every function in the matching files (which covers\nboth the `describe()` wrapper and the individual `it()` blocks in a test\nsuite).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
         },
         "reason": {
           "description": "Human-readable rationale for the exception.",

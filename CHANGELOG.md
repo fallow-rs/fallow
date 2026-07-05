@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **New `health.maxUnitSize` threshold for the "function too big" (unit-size)
+  check, configurable globally and per file.** Previously the line-count at
+  which a function is reported as an oversized "large function" was hardcoded to
+  60 LOC with no way to change it, so test suites reported many large functions:
+  a `describe()` block's callback spans hundreds of lines, and each big `it()`
+  body trips the threshold too. The only workaround was `health.ignore`, which
+  drops every health signal (complexity, CRAP, hotspots) for those files, so you
+  also lost complexity checking on your test code. You can now raise the bar
+  instead of switching it off: set a global `health.maxUnitSize` (default 60),
+  or scope it to a glob with a per-file `thresholdOverrides` entry, e.g.
+  `{ "files": ["**/*.test.*"], "maxUnitSize": 500 }`. Leave `functions` empty so
+  the override covers both the `describe()` wrapper and the individual `it()`
+  blocks. Complexity, cognitive, and CRAP findings on those files are unchanged.
+  Like the existing `maxCyclomatic` / `maxCognitive` / `maxCrap` overrides, this
+  filters the reported "large functions" list; the descriptive unit-size profile
+  and the health score still reflect raw sizes (use `health.ignore` to remove a
+  file from the score entirely). The effective ceiling is surfaced on the
+  `effective_thresholds` block in JSON output. (Closes
+  [#1731](https://github.com/fallow-rs/fallow/issues/1731))
+
 ## [3.1.0] - 2026-07-05
 
 ### Added
