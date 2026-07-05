@@ -78,7 +78,6 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "mixed-client-server-barrels": "mixed-client-server-barrel",
   "policy-violations": "policy-violation",
   "private-type-leak": "private-type-leaks",
-  "prod-usage-of-dev-dependency": "dev-dependencies-in-production",
   "re-export-cycles": "re-export-cycle",
   "reexport-cycle": "re-export-cycle",
   "reexport-cycles": "re-export-cycle",

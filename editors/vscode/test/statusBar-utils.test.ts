@@ -28,6 +28,7 @@ const baseParams = (
   duplicateExports: 0,
   typeOnlyDependencies: 0,
   testOnlyDependencies: 0,
+  devDependenciesInProduction: 0,
   circularDependencies: 0,
   reExportCycles: 0,
   boundaryViolations: 0,
@@ -392,6 +393,7 @@ describe("buildParamsFromCli", () => {
     expect(params.privateTypeLeaks).toBe(0);
     expect(params.typeOnlyDependencies).toBe(0);
     expect(params.testOnlyDependencies).toBe(0);
+    expect(params.devDependenciesInProduction).toBe(0);
     expect(params.circularDependencies).toBe(0);
     expect(params.boundaryViolations).toBe(0);
     expect(params.staleSuppressions).toBe(0);

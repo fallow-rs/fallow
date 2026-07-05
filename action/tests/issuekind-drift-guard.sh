@@ -164,6 +164,7 @@ issuekind_json_key_fallback() {
     unused-optional-dependency) echo "unused_optional_dependencies" ;;
     type-only-dependency) echo "type_only_dependencies" ;;
     test-only-dependency) echo "test_only_dependencies" ;;
+    dev-dependency-in-production) echo "dev_dependencies_in_production" ;;
     unused-enum-member) echo "unused_enum_members" ;;
     unused-class-member) echo "unused_class_members" ;;
     unused-store-member) echo "unused_store_members" ;;

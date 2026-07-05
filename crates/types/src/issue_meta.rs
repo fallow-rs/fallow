@@ -302,7 +302,7 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
     IssueKindMeta {
         kind: Some(IssueKind::DevDependencyInProduction),
         code: "dev-dependency-in-production",
-        aliases: &["prod-usage-of-dev-dependency"],
+        aliases: &[],
         label: "Dev Dependencies Used in Production",
         config_key: Some("dev-dependencies-in-production"),
         filter_flag: Some("--unused-deps"),

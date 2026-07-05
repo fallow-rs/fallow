@@ -179,6 +179,7 @@ impl IssueFilters {
             results.unused_optional_dependencies.clear();
             results.type_only_dependencies.clear();
             results.test_only_dependencies.clear();
+            results.dev_dependencies_in_production.clear();
         }
         if !self.unused_enum_members {
             results.unused_enum_members.clear();
@@ -596,6 +597,7 @@ fn apply_file_filter(opts: &CheckOptions<'_>, results: &mut AnalysisResults) {
     results.unused_optional_dependencies.clear();
     results.type_only_dependencies.clear();
     results.test_only_dependencies.clear();
+    results.dev_dependencies_in_production.clear();
 }
 
 fn warn_scoped_regression_save(opts: &CheckOptions<'_>) {

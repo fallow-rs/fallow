@@ -223,8 +223,7 @@ pub struct RulesConfig {
     pub test_only_dependencies: Severity,
     #[serde(
         default = "Severity::default_warn",
-        alias = "dev-dependency-in-production",
-        alias = "prod-usage-of-dev-dependency"
+        alias = "dev-dependency-in-production"
     )]
     pub dev_dependencies_in_production: Severity,
     #[serde(default, alias = "circular-dependency")]
@@ -680,7 +679,6 @@ pub struct PartialRulesConfig {
     #[serde(
         default,
         alias = "dev-dependency-in-production",
-        alias = "prod-usage-of-dev-dependency",
         skip_serializing_if = "Option::is_none"
     )]
     pub dev_dependencies_in_production: Option<Severity>,
@@ -891,7 +889,6 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "type-only-dependency",
     "test-only-dependency",
     "dev-dependency-in-production",
-    "prod-usage-of-dev-dependency",
     "circular-dependency",
     "re-export-cycles",
     "reexport-cycle",
@@ -1363,7 +1360,7 @@ mod tests {
 
     #[test]
     fn known_rule_names_count_matches_struct() {
-        assert_eq!(KNOWN_RULE_NAMES.len(), 99);
+        assert_eq!(KNOWN_RULE_NAMES.len(), 98);
     }
 
     #[test]
@@ -1404,8 +1401,8 @@ mod tests {
 
         assert_eq!(
             aliases_found.len(),
-            108,
-            "expected 108 source-level alias attrs (54 per struct); got {}: {:?}",
+            106,
+            "expected 106 source-level alias attrs (53 per struct); got {}: {:?}",
             aliases_found.len(),
             aliases_found
         );

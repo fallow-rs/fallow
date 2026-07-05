@@ -936,11 +936,26 @@ pub fn find_test_only_dependencies(
 /// `type_only` occurrences. This mirrors the per-statement granularity the
 /// `type-only-dependency` / `test-only-dependency` detectors rely on, so a
 /// production file that imports `dep` ONLY via `import type` is not flagged.
+///
+/// Files owned by a workspace package are skipped: this rule reasons about the
+/// ROOT manifest only, and a workspace file's runtime resolution is governed by
+/// the workspace's own `package.json` (a package hoisted into root
+/// `devDependencies` but declared in the workspace's `dependencies` would
+/// otherwise be a false positive). Per-workspace detection is the shared
+/// follow-up with the sibling dependency-family detectors.
+///
+/// Only files reachable from a RUNTIME entry point count as production
+/// evidence (`is_runtime_reachable`, the graph's production scope). Repo
+/// tooling the test globs do not cover (`scripts/`, `benchmarks/`, `.github/`,
+/// playgrounds, and anything reachable only through a config-file support
+/// entry such as a rollup config chain) is not part of the shipped artifact,
+/// so a devDependency imported only there must not be promoted.
 fn dependency_has_prod_value_import(
     dep: &str,
     graph: &ModuleGraph,
     config: &ResolvedConfig,
     test_globs: &globset::GlobSet,
+    workspaces: &[fallow_config::WorkspaceInfo],
 ) -> bool {
     let Some(file_ids) = graph.package_usage.get(dep) else {
         return false;
@@ -962,11 +977,18 @@ fn dependency_has_prod_value_import(
             return false;
         }
         graph.modules.get(id.0 as usize).is_some_and(|module| {
+            if !module.is_runtime_reachable() {
+                return false;
+            }
             let relative = module
                 .path
                 .strip_prefix(&config.root)
                 .unwrap_or(&module.path);
-            !(test_globs.is_match(relative) || is_config_file(&module.path))
+            !(test_globs.is_match(relative)
+                || is_config_file(&module.path)
+                || workspaces
+                    .iter()
+                    .any(|ws| module.path.starts_with(&ws.root)))
         })
     })
 }
@@ -1045,7 +1067,7 @@ pub fn find_dev_dependencies_in_production(
             continue;
         }
 
-        if dependency_has_prod_value_import(&dep, graph, config, &test_globs) {
+        if dependency_has_prod_value_import(&dep, graph, config, &test_globs, workspaces) {
             let line = root_pkg_content
                 .as_deref()
                 .map_or(1, |c| find_dep_line_in_json(c, &dep));

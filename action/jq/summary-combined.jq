@@ -159,7 +159,7 @@ else
       (if ((.check.unused_load_data_keys // []) | length) > 0 then "| [Unused load data keys](\(docs("unused-load-data-key"))) | \(.check.unused_load_data_keys | length) |" else null end),
       (if (.check.type_only_dependencies | length) > 0 then "| [Type-only dependencies](\(docs("type-only-dependencies"))) | \(.check.type_only_dependencies | length) |" else null end),
       (if (.check.test_only_dependencies | length) > 0 then "| [Test-only dependencies](\(docs("test-only-dependencies"))) | \(.check.test_only_dependencies | length) |" else null end),
-      (if ((.check.dev_dependencies_in_production // []) | length) > 0 then "| [Dev dependencies in production](\(docs("dev-dependencies-in-production"))) | \(.check.dev_dependencies_in_production | length) |" else null end),
+      (if ((.check.dev_dependencies_in_production // []) | length) > 0 then "| [Dev dependencies used in production](\(docs("dev-dependencies-in-production"))) | \(.check.dev_dependencies_in_production | length) |" else null end),
       (if (.check.stale_suppressions | length) > 0 then "| [Stale suppressions](\(docs("stale-suppressions"))) | \(.check.stale_suppressions | length) |" else null end),
       (if ((.check.unused_catalog_entries // []) | length) > 0 then "| [Unused catalog entries](\(docs("unused-catalog-entries"))) | \(.check.unused_catalog_entries | length) |" else null end),
       (if ((.check.empty_catalog_groups // []) | length) > 0 then "| [Empty catalog groups](\(docs("empty-catalog-groups"))) | \(.check.empty_catalog_groups | length) |" else null end),

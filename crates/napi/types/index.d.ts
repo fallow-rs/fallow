@@ -117,6 +117,7 @@ export interface DeadCodeSummary {
   duplicate_exports: number;
   type_only_dependencies: number;
   test_only_dependencies: number;
+  dev_dependencies_in_production: number;
   circular_dependencies: number;
   boundary_violations: number;
   stale_suppressions: number;
@@ -214,6 +215,14 @@ export interface TestOnlyDependencyFinding {
   [key: string]: unknown;
 }
 
+export interface DevDependencyInProductionFinding {
+  path: string;
+  package_name: string;
+  line: number;
+  actions?: AnalysisAction[];
+  [key: string]: unknown;
+}
+
 export interface CircularDependencyFinding {
   files: string[];
   length: number;
@@ -262,6 +271,7 @@ export interface DeadCodeReport {
   duplicate_exports: DuplicateExportFinding[];
   type_only_dependencies: TypeOnlyDependencyFinding[];
   test_only_dependencies: TestOnlyDependencyFinding[];
+  dev_dependencies_in_production: DevDependencyInProductionFinding[];
   circular_dependencies: CircularDependencyFinding[];
   boundary_violations: BoundaryViolationFinding[];
   stale_suppressions: StaleSuppressionFinding[];

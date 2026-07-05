@@ -669,7 +669,6 @@ mod tests {
             .max()
             .unwrap();
         assert_eq!(IssueKind::from_discriminant(max_discriminant + 1), None);
-        assert_eq!(IssueKind::from_discriminant(49), None);
     }
 
     #[test]

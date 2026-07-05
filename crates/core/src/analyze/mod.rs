@@ -2630,9 +2630,12 @@ fn populate_dev_dependency_in_production_findings(
     pkg: &PackageJson,
     results: &mut AnalysisResults,
 ) {
-    if !input.config.production
-        && input.config.rules.dev_dependencies_in_production != Severity::Off
-    {
+    // Unlike the test-only sibling, this rule stays ON in production mode:
+    // test files being undiscovered makes the question unanswerable for
+    // test-only, but for dev-in-prod it only makes the signal cleaner (every
+    // discovered file is production), and production CI is exactly where a
+    // `pnpm install --prod` breakage matters.
+    if input.config.rules.dev_dependencies_in_production != Severity::Off {
         results.dev_dependencies_in_production =
             find_dev_dependencies_in_production(input.graph, pkg, input.config, input.workspaces)
                 .into_iter()

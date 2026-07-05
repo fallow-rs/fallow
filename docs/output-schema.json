@@ -545,6 +545,13 @@
           },
           "description": "Production dependencies only imported by test files (could be\ndevDependencies). Wrapped in [`TestOnlyDependencyFinding`]."
         },
+        "dev_dependencies_in_production": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DevDependencyInProductionFinding"
+          },
+          "description": "devDependencies imported by production (non-test, non-config) source code\nvia a runtime/value import; they should be promoted to dependencies.\nThe promote-side mirror of [`TestOnlyDependencyFinding`]. Wrapped in\n[`DevDependencyInProductionFinding`]."
+        },
         "circular_dependencies": {
           "type": "array",
           "items": {
@@ -1005,6 +1012,13 @@
             "$ref": "#/definitions/TestOnlyDependencyFinding"
           },
           "description": "Production dependencies only imported by test files (could be\ndevDependencies). Wrapped in [`TestOnlyDependencyFinding`]."
+        },
+        "dev_dependencies_in_production": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DevDependencyInProductionFinding"
+          },
+          "description": "devDependencies imported by production (non-test, non-config) source code\nvia a runtime/value import; they should be promoted to dependencies.\nThe promote-side mirror of [`TestOnlyDependencyFinding`]. Wrapped in\n[`DevDependencyInProductionFinding`]."
         },
         "circular_dependencies": {
           "type": "array",
@@ -5186,6 +5200,10 @@
           "type": "integer",
           "description": "Production dependencies only imported by test files (could be\ndevDependencies)."
         },
+        "dev_dependencies_in_production": {
+          "type": "integer",
+          "description": "devDependencies imported by production source code with a runtime/value\nimport (should be promoted to dependencies)."
+        },
         "circular_dependencies": {
           "type": "integer",
           "description": "Cycles detected in the import graph."
@@ -5269,6 +5287,7 @@
         "duplicate_exports",
         "type_only_dependencies",
         "test_only_dependencies",
+        "dev_dependencies_in_production",
         "circular_dependencies",
         "boundary_violations",
         "stale_suppressions",
@@ -5873,6 +5892,13 @@
             "$ref": "#/definitions/TestOnlyDependencyFinding"
           },
           "description": "Production dependencies only imported by test files (could be\ndevDependencies). Wrapped in [`TestOnlyDependencyFinding`]."
+        },
+        "dev_dependencies_in_production": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DevDependencyInProductionFinding"
+          },
+          "description": "devDependencies imported by production (non-test, non-config) source code\nvia a runtime/value import; they should be promoted to dependencies.\nThe promote-side mirror of [`TestOnlyDependencyFinding`]. Wrapped in\n[`DevDependencyInProductionFinding`]."
         },
         "circular_dependencies": {
           "type": "array",
@@ -6499,6 +6525,11 @@
           "type": "string",
           "const": "move-to-dev",
           "description": "Move a production dependency to `devDependencies`\n(used by type-only-dependency and test-only-dependency findings)."
+        },
+        {
+          "type": "string",
+          "const": "move-to-prod",
+          "description": "Move a `devDependencies` entry to `dependencies`\n(used by dev-dependency-in-production findings; the promote-side mirror\nof [`FixActionType::MoveToDev`])."
         },
         {
           "type": "string",
@@ -18123,6 +18154,48 @@
         "actions"
       ],
       "description": "A CVA / shadcn variant class value that can reuse an existing styling token."
+    },
+    "DevDependencyInProductionFinding": {
+      "type": "object",
+      "properties": {
+        "package_name": {
+          "type": "string",
+          "description": "devDependency imported at runtime from production code, consider moving\nto dependencies."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the package.json where the dependency is listed."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the dependency entry in package.json."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        }
+      },
+      "required": [
+        "package_name",
+        "path",
+        "line",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`DevDependencyInProduction`] finding. Carries a\n`move-to-prod` primary (the promote-side mirror of\n[`TestOnlyDependencyFinding`]'s `move-to-dev`) plus the standard\n`ignoreDependencies` config suppress."
     }
   }
 }

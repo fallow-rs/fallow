@@ -574,8 +574,7 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       addCategory(
         "dev-dependencies-in-production",
         this.result.dev_dependencies_in_production.map(
-          (d) =>
-            new IssueItem(d.package_name, d.path, d.line, 0, "dev-dependencies-in-production"),
+          (d) => new IssueItem(d.package_name, d.path, d.line, 0, "dev-dependencies-in-production"),
         ),
       );
     }

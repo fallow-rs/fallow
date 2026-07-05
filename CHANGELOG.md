@@ -15,13 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule is the mirror that catches the opposite drift. A package in
   `devDependencies` that is imported by production (non-test, non-config) source
   code via a runtime/value import is flagged so it can be promoted to
-  `dependencies` — a production-only install (`pnpm install --prod`) omits
+  `dependencies`: a production-only install (`pnpm install --prod`) omits
   devDependencies, so such an import breaks at runtime. Type-only production
   imports are not flagged (types are erased at build time), and a package also
   listed in `dependencies`, `peerDependencies`, or `optionalDependencies` is
-  left alone because another manifest section provides it at runtime. Defaults
-  to `warn`; configure via the `dev-dependencies-in-production` rule key or
-  suppress a package with `ignoreDependencies`. Surfaces in human, JSON, SARIF,
+  left alone because another manifest section provides it at runtime. Only
+  imports from files reachable from a runtime entry point count as production
+  evidence, so repo tooling (`scripts/`, benchmarks, rollup-config chains) does
+  not trigger the rule, and imports from workspace-owned files are governed by
+  the workspace's own manifest and skipped (per-workspace detection is a
+  follow-up). Known limitation: a file referenced from a package.json `scripts`
+  command counts as a runtime entry, so a dev-only helper script value-importing
+  a devDependency can still be flagged; suppress via `ignoreDependencies`.
+  Defaults to `warn`; configure via the `dev-dependencies-in-production` rule
+  key or suppress a package with `ignoreDependencies`. Surfaces in human, JSON, SARIF,
   Code Climate, compact, and markdown output, in `fallow explain`, and as an LSP
   diagnostic.
 

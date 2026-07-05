@@ -321,7 +321,7 @@ impl IssueKind {
             Self::CssSelectorComplexity => 50,
             Self::CssDeadSurface => 51,
             Self::CssBrokenReference => 52,
-            Self::DevDependencyInProduction => 48,
+            Self::DevDependencyInProduction => 53,
         }
     }
 
@@ -381,7 +381,7 @@ impl IssueKind {
             50 => Some(Self::CssSelectorComplexity),
             51 => Some(Self::CssDeadSurface),
             52 => Some(Self::CssBrokenReference),
-            48 => Some(Self::DevDependencyInProduction),
+            53 => Some(Self::DevDependencyInProduction),
             _ => None,
         }
     }
@@ -781,87 +781,41 @@ mod tests {
 
     #[test]
     fn discriminant_out_of_range() {
+        // Pin exact discriminants so an inserted or reordered variant that
+        // shifts wire values is caught. `ALL` is not discriminant-ordered, so
+        // the mapping is spelled out explicitly.
+        let cases: &[(u8, IssueKind)] = &[
+            (29, IssueKind::PolicyViolation),
+            (30, IssueKind::InvalidClientExport),
+            (31, IssueKind::MixedClientServerBarrel),
+            (32, IssueKind::MisplacedDirective),
+            (33, IssueKind::UnusedStoreMember),
+            (34, IssueKind::UnprovidedInject),
+            (35, IssueKind::RouteCollision),
+            (36, IssueKind::DynamicSegmentNameConflict),
+            (37, IssueKind::UnrenderedComponent),
+            (38, IssueKind::UnusedComponentProp),
+            (39, IssueKind::UnusedComponentEmit),
+            (40, IssueKind::UnusedServerAction),
+            (41, IssueKind::UnusedLoadDataKey),
+            (42, IssueKind::PropDrilling),
+            (43, IssueKind::ThinWrapper),
+            (44, IssueKind::DuplicatePropShape),
+            (45, IssueKind::UnusedComponentInput),
+            (46, IssueKind::UnusedComponentOutput),
+            (47, IssueKind::UnusedSvelteEvent),
+            (48, IssueKind::CssTokenDrift),
+            (49, IssueKind::CssDuplicateBlock),
+            (50, IssueKind::CssSelectorComplexity),
+            (51, IssueKind::CssDeadSurface),
+            (52, IssueKind::CssBrokenReference),
+            (53, IssueKind::DevDependencyInProduction),
+        ];
+        for &(discriminant, kind) in cases {
+            assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");
+            assert_eq!(IssueKind::from_discriminant(discriminant), Some(kind));
+        }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(
-            IssueKind::from_discriminant(29),
-            Some(IssueKind::PolicyViolation)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(30),
-            Some(IssueKind::InvalidClientExport)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(31),
-            Some(IssueKind::MixedClientServerBarrel)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(32),
-            Some(IssueKind::MisplacedDirective)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(33),
-            Some(IssueKind::UnusedStoreMember)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(34),
-            Some(IssueKind::UnprovidedInject)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(35),
-            Some(IssueKind::RouteCollision)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(36),
-            Some(IssueKind::DynamicSegmentNameConflict)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(37),
-            Some(IssueKind::UnrenderedComponent)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(38),
-            Some(IssueKind::UnusedComponentProp)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(39),
-            Some(IssueKind::UnusedComponentEmit)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(40),
-            Some(IssueKind::UnusedServerAction)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(41),
-            Some(IssueKind::UnusedLoadDataKey)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(42),
-            Some(IssueKind::PropDrilling)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(43),
-            Some(IssueKind::ThinWrapper)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(44),
-            Some(IssueKind::DuplicatePropShape)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(45),
-            Some(IssueKind::UnusedComponentInput)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(46),
-            Some(IssueKind::UnusedComponentOutput)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(47),
-            Some(IssueKind::UnusedSvelteEvent)
-        );
-        assert_eq!(
-            IssueKind::from_discriminant(48),
-            Some(IssueKind::DevDependencyInProduction)
-        );
         let max_discriminant = IssueKind::ALL
             .iter()
             .map(|kind| kind.to_discriminant())

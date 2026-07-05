@@ -208,3 +208,86 @@ fn dev_dep_not_flagged_when_also_peer_dependency() {
         "a dev+peer dependency is provided at runtime by the peer and must not be flagged"
     );
 }
+
+/// An import from a file OWNED BY a workspace package does not flag a root
+/// devDependency: the workspace's own manifest governs that file's runtime
+/// resolution (a package hoisted into root devDependencies but declared in the
+/// workspace's dependencies would otherwise be a false positive).
+#[test]
+fn dev_dep_not_flagged_when_import_is_from_workspace_owned_file() {
+    let (graph, _) = graph_with_import_from("/project/packages/app/src/index.ts", "lodash", false);
+    let pkg = make_pkg(&[], &["lodash"], &[]);
+    let config = test_config(PathBuf::from("/project"));
+    let workspaces = vec![WorkspaceInfo {
+        root: PathBuf::from("/project/packages/app"),
+        name: "@myorg/app".to_string(),
+        is_internal_dependency: false,
+    }];
+
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &workspaces);
+
+    assert!(
+        flagged.is_empty(),
+        "imports from workspace-owned files must not flag a root devDependency"
+    );
+}
+
+/// An import from a file that is NOT reachable from any entry point (repo
+/// tooling like `scripts/`, `benchmarks/`, or an orphaned module) is not
+/// production evidence: the file is not part of the shipped artifact, and a
+/// file fallow itself reports as unused cannot prove a dependency is needed at
+/// runtime.
+#[test]
+fn dev_dep_not_flagged_when_importing_file_is_unreachable() {
+    let (graph, _) = {
+        let file_path = "/project/scripts/release.ts";
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from(file_path),
+            size_bytes: 100,
+        }];
+        // No entry points: nothing is reachable.
+        let entry_points = vec![];
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from(file_path),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "enquirer".to_string(),
+                    imported_name: ImportedName::Named("prompt".to_string()),
+                    local_name: "prompt".to_string(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 20),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::NpmPackage("enquirer".to_string()),
+            }],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            semantic_facts: Box::default(),
+            whole_object_uses: Box::default(),
+            has_cjs_exports: false,
+            has_angular_component_template_url: false,
+            unused_import_bindings: FxHashSet::default(),
+            type_referenced_import_bindings: vec![],
+            value_referenced_import_bindings: vec![],
+            namespace_object_aliases: vec![],
+            exported_factory_returns: Box::default(),
+        }];
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        (graph, resolved_modules)
+    };
+    let pkg = make_pkg(&[], &["enquirer"], &[]);
+    let config = test_config(PathBuf::from("/project"));
+
+    let flagged = find_dev_dependencies_in_production(&graph, &pkg, &config, &[]);
+
+    assert!(
+        flagged.is_empty(),
+        "imports from runtime-unreachable files must not flag a devDependency"
+    );
+}

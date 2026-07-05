@@ -178,7 +178,7 @@ else
   section("Test-only dependencies"; "test_only_dependencies";
     "Production dependencies only imported by test files \u2014 consider moving to `devDependencies`.\n\n| Package |\n|---------|\n";
     "| `\(.package_name)` |") +
-  section("Dev dependencies in production"; "dev_dependencies_in_production";
+  section("Dev dependencies used in production"; "dev_dependencies_in_production";
     "`devDependencies` imported by production code at runtime \u2014 consider moving to `dependencies` so a production-only install does not break.\n\n| Package |\n|---------|\n";
     "| `\(.package_name)` |") +
   section("Stale suppressions"; "stale_suppressions";
