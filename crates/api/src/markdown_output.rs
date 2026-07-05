@@ -1713,6 +1713,7 @@ fn write_findings_row(
                 max_cyclomatic: report.summary.max_cyclomatic_threshold,
                 max_cognitive: report.summary.max_cognitive_threshold,
                 max_crap: report.summary.max_crap_threshold,
+                max_unit_size: fallow_output::DEFAULT_MAX_UNIT_SIZE,
             });
     let cyc_marker = if finding.cyclomatic > thresholds.max_cyclomatic {
         " **!**"

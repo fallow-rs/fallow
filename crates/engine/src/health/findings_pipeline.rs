@@ -66,6 +66,7 @@ pub(super) fn prepare_health_findings(
         cyclomatic: input.max_cyclomatic,
         cognitive: input.max_cognitive,
         crap: input.max_crap,
+        unit_size: input.config.health.max_unit_size,
     };
     let threshold_resolver =
         ThresholdOverrideResolver::new(&input.config.health.threshold_overrides, global_thresholds);

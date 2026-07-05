@@ -38,6 +38,7 @@ pub(super) fn collect_findings(
         cyclomatic: max_cyclomatic,
         cognitive: max_cognitive,
         crap: 30.0,
+        unit_size: 60,
     };
     let resolver = ThresholdOverrideResolver::new(&[], global);
     let mut tracker = ThresholdOverrideStateTracker::default();

@@ -1,9 +1,13 @@
 //! Large-function collection for health reports.
 
-/// Collect functions exceeding 60 LOC when the unit size risk profile warrants it.
+/// Collect functions exceeding their effective unit-size ceiling when the unit
+/// size risk profile warrants it.
 ///
-/// Only populated when `very_high_risk >= 3%` in the unit size profile. Sorted
-/// by line count descending.
+/// The ceiling defaults to 60 LOC (`health.maxUnitSize`) and can be raised per
+/// file via `health.thresholdOverrides[].maxUnitSize`, so functions in relaxed
+/// files (e.g. test suites) drop out of the list. Only populated when
+/// `very_high_risk >= 3%` in the unit size profile. Sorted by line count
+/// descending.
 pub(super) struct LargeFunctionInput<'a> {
     pub(super) vital_signs: &'a fallow_output::VitalSigns,
     pub(super) modules: &'a [crate::source::ModuleInfo],
@@ -13,6 +17,7 @@ pub(super) struct LargeFunctionInput<'a> {
     pub(super) ignore_set: &'a globset::GlobSet,
     pub(super) changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub(super) ws_roots: Option<&'a [std::path::PathBuf]>,
+    pub(super) thresholds: &'a super::threshold_overrides::ThresholdOverrideResolver,
 }
 
 pub(super) fn collect_large_functions(
@@ -47,7 +52,10 @@ pub(super) fn collect_large_functions(
             continue;
         }
         for func in &module.complexity {
-            if func.line_count > 60 {
+            let max_unit_size = input
+                .thresholds
+                .effective_max_unit_size(relative, func.name.as_str());
+            if func.line_count > max_unit_size {
                 entries.push(fallow_output::LargeFunctionEntry {
                     path: path.clone(),
                     name: func.name.clone(),

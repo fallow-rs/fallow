@@ -378,6 +378,11 @@ pub struct ComplexityViolation {
     pub threshold_source: Option<ThresholdSource>,
 }
 
+/// Default unit-size ceiling (`health.maxUnitSize`): functions over 60 lines of
+/// code are reported as oversized. Mirrors the config crate's default so
+/// renderers can fill an effective-thresholds fallback without a config handle.
+pub const DEFAULT_MAX_UNIT_SIZE: u32 = 60;
+
 /// Resolved thresholds used to evaluate a health finding.
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -389,6 +394,10 @@ pub struct HealthEffectiveThresholds {
     pub max_cyclomatic: u16,
     pub max_cognitive: u16,
     pub max_crap: f64,
+    /// Effective unit-size ceiling (maximum function length in lines) for the
+    /// matched file, after applying any `thresholdOverrides` on top of the
+    /// global `health.maxUnitSize` default.
+    pub max_unit_size: u32,
 }
 
 /// Threshold values configured by a single override entry.
@@ -405,6 +414,8 @@ pub struct HealthConfiguredThresholds {
     pub max_cognitive: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_crap: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_unit_size: Option<u32>,
 }
 
 /// Source for a finding's effective thresholds.

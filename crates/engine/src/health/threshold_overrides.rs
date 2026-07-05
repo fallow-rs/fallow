@@ -9,6 +9,7 @@ pub(super) struct GlobalHealthThresholds {
     pub(super) cyclomatic: u16,
     pub(super) cognitive: u16,
     pub(super) crap: f64,
+    pub(super) unit_size: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -61,6 +62,7 @@ impl ThresholdOverrideResolver {
                         max_cyclomatic: override_entry.max_cyclomatic,
                         max_cognitive: override_entry.max_cognitive,
                         max_crap: override_entry.max_crap,
+                        max_unit_size: override_entry.max_unit_size,
                     },
                     reason: override_entry.reason.clone(),
                 }
@@ -79,6 +81,7 @@ impl ThresholdOverrideResolver {
             max_cyclomatic: self.global.cyclomatic,
             max_cognitive: self.global.cognitive,
             max_crap: self.global.crap,
+            max_unit_size: self.global.unit_size,
         };
         let mut override_index = None;
         let mut matches = Vec::new();
@@ -102,6 +105,13 @@ impl ThresholdOverrideResolver {
                 effective.max_crap = max_crap;
                 override_index = Some(entry.index);
             }
+            // The unit-size dimension gates the large-function list, not the
+            // complexity findings, so it fills in the effective value without
+            // flipping `override_index` (which controls whether a *complexity*
+            // finding attaches an effective-thresholds block).
+            if let Some(max_unit_size) = entry.configured.max_unit_size {
+                effective.max_unit_size = max_unit_size;
+            }
             matches.push(ThresholdOverrideMatch { entry, effective });
         }
 
@@ -112,6 +122,27 @@ impl ThresholdOverrideResolver {
             },
             matches,
         )
+    }
+
+    /// Resolve the effective unit-size (large-function line-count) ceiling for a
+    /// single function, applying the last matching override on top of the global
+    /// `health.maxUnitSize` default. Cheaper than [`resolve`](Self::resolve): it
+    /// allocates nothing, so it is safe to call in the large-function hot loop.
+    #[must_use]
+    pub(super) fn effective_max_unit_size(&self, relative: &Path, function: &str) -> u32 {
+        let mut effective = self.global.unit_size;
+        for entry in &self.entries {
+            if !entry.matchers.is_match(relative) {
+                continue;
+            }
+            if !entry.functions.is_empty() && !entry.functions.iter().any(|f| f == function) {
+                continue;
+            }
+            if let Some(max_unit_size) = entry.configured.max_unit_size {
+                effective = max_unit_size;
+            }
+        }
+        effective
     }
 
     fn entries(&self) -> &[CompiledThresholdOverride] {
@@ -272,6 +303,10 @@ impl ThresholdOverrideStateTracker {
                         .max_cognitive
                         .unwrap_or(resolver.global.cognitive),
                     max_crap: entry.configured.max_crap.unwrap_or(resolver.global.crap),
+                    max_unit_size: entry
+                        .configured
+                        .max_unit_size
+                        .unwrap_or(resolver.global.unit_size),
                 },
                 metrics: None,
                 reason: entry.reason.clone(),

@@ -8,6 +8,7 @@ use super::super::findings::{
     merge_crap_findings,
 };
 use super::super::ignore::build_ignore_set;
+use super::super::large_functions::{LargeFunctionInput, collect_large_functions};
 use super::super::runtime_filter::{RuntimeCoverageFilterContext, apply_runtime_coverage_filters};
 use super::super::scoring;
 use super::super::sort_findings;
@@ -198,6 +199,7 @@ fn threshold_resolver(
             cyclomatic: 20,
             cognitive: 15,
             crap: 30.0,
+            unit_size: 60,
         },
     )
 }
@@ -217,6 +219,7 @@ fn collect_findings_uses_threshold_override_as_local_ceiling() {
         max_cyclomatic: Some(30),
         max_cognitive: Some(25),
         max_crap: None,
+        max_unit_size: None,
         reason: Some("approved assembly".to_string()),
     }]);
     let mut tracker = ThresholdOverrideStateTracker::default();
@@ -258,6 +261,7 @@ fn collect_findings_reports_when_local_ceiling_is_exceeded() {
         max_cyclomatic: Some(30),
         max_cognitive: Some(25),
         max_crap: None,
+        max_unit_size: None,
         reason: None,
     }]);
     let mut tracker = ThresholdOverrideStateTracker::default();
@@ -298,6 +302,7 @@ fn collect_findings_reports_stale_override_when_under_global_thresholds() {
         max_cyclomatic: Some(30),
         max_cognitive: None,
         max_crap: None,
+        max_unit_size: None,
         reason: None,
     }]);
     let mut tracker = ThresholdOverrideStateTracker::default();
@@ -332,6 +337,7 @@ fn threshold_override_tracker_reports_no_match_only_when_requested() {
         max_cyclomatic: Some(30),
         max_cognitive: None,
         max_crap: None,
+        max_unit_size: None,
         reason: None,
     }]);
     let mut tracker = ThresholdOverrideStateTracker::default();
@@ -841,6 +847,92 @@ fn filter_large_functions_by_diff_uses_range_overlap() {
     filter_large_functions_by_diff(&mut entries, &diff, Path::new("/project"));
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "kept");
+}
+
+fn dominant_unit_size_vital_signs() -> fallow_output::VitalSigns {
+    fallow_output::VitalSigns {
+        unit_size_profile: Some(fallow_output::RiskProfile {
+            low_risk: 0.0,
+            medium_risk: 0.0,
+            high_risk: 0.0,
+            very_high_risk: 100.0,
+        }),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn collect_large_functions_respects_max_unit_size_override() {
+    // Two identical 218-line functions: one in a test file covered by a
+    // `maxUnitSize: 500` override, one in a plain src file on the default 60.
+    let test_path = PathBuf::from("/project/src/math.test.ts");
+    let src_path = PathBuf::from("/project/src/math.ts");
+    let modules = vec![
+        make_module(FileId(0), vec![make_fc("<arrow>", 1, 1, 218)]),
+        make_module(FileId(1), vec![make_fc("bigHelper", 1, 1, 218)]),
+    ];
+    let mut file_paths = FxHashMap::default();
+    file_paths.insert(FileId(0), &test_path);
+    file_paths.insert(FileId(1), &src_path);
+
+    let resolver = threshold_resolver(&[fallow_config::HealthThresholdOverride {
+        files: vec!["**/*.test.*".to_string()],
+        functions: Vec::new(),
+        max_cyclomatic: None,
+        max_cognitive: None,
+        max_crap: None,
+        max_unit_size: Some(500),
+        reason: None,
+    }]);
+    let vital_signs = dominant_unit_size_vital_signs();
+    let input = LargeFunctionInput {
+        vital_signs: &vital_signs,
+        modules: &modules,
+        file_paths: &file_paths,
+        config_root: Path::new("/project"),
+        ignore_set: &globset::GlobSet::empty(),
+        changed_files: None,
+        ws_roots: None,
+        thresholds: &resolver,
+    };
+
+    let entries = collect_large_functions(&input);
+    // The overridden test-file function drops out (218 <= 500); the src-file
+    // function stays listed (218 > 60). Neuter check: reverting the effective
+    // gate to `> 60` re-lists the test-file `<arrow>` and fails this assertion.
+    let listed: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(listed, vec!["bigHelper"]);
+    assert!(entries.iter().all(|entry| entry.path == src_path));
+}
+
+#[test]
+fn collect_large_functions_default_lists_every_oversized_function() {
+    // Control: with no override, the default 60-LOC ceiling lists both.
+    let test_path = PathBuf::from("/project/src/math.test.ts");
+    let src_path = PathBuf::from("/project/src/math.ts");
+    let modules = vec![
+        make_module(FileId(0), vec![make_fc("<arrow>", 1, 1, 218)]),
+        make_module(FileId(1), vec![make_fc("bigHelper", 1, 1, 218)]),
+    ];
+    let mut file_paths = FxHashMap::default();
+    file_paths.insert(FileId(0), &test_path);
+    file_paths.insert(FileId(1), &src_path);
+
+    let resolver = threshold_resolver(&[]);
+    let vital_signs = dominant_unit_size_vital_signs();
+    let input = LargeFunctionInput {
+        vital_signs: &vital_signs,
+        modules: &modules,
+        file_paths: &file_paths,
+        config_root: Path::new("/project"),
+        ignore_set: &globset::GlobSet::empty(),
+        changed_files: None,
+        ws_roots: None,
+        thresholds: &resolver,
+    };
+
+    let entries = collect_large_functions(&input);
+    assert_eq!(entries.len(), 2);
 }
 
 #[test]

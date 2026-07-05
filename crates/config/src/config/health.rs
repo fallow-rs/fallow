@@ -22,6 +22,13 @@ const fn default_crap_refactor_band() -> u16 {
     5
 }
 
+/// SIG unit-size "very high risk" boundary: functions over 60 lines of code.
+/// This is the default line-count threshold above which a function is reported
+/// as an oversized "large function".
+const fn default_max_unit_size() -> u32 {
+    60
+}
+
 /// Default for `suggest_inline_suppression`: emit `suppress-line` actions
 /// alongside health findings unless a baseline is active or the team has
 /// opted out via config.
@@ -137,6 +144,16 @@ pub struct HealthConfig {
     #[serde(default = "default_crap_refactor_band")]
     pub crap_refactor_band: u16,
 
+    /// Maximum function length in lines of code before it is reported as an
+    /// oversized "large function" (default: 60). Functions exceeding this
+    /// threshold are listed under the unit-size check and feed the unit-size
+    /// health score. Raise it globally, or per file via
+    /// `thresholdOverrides[].maxUnitSize`, to relax the bar for generated or
+    /// test files (where a `describe()` block spans hundreds of lines) without
+    /// disabling complexity checks on those files.
+    #[serde(default = "default_max_unit_size")]
+    pub max_unit_size: u32,
+
     /// Path to Istanbul-format coverage data for accurate per-function CRAP
     /// scores. Relative paths resolve against the project root. The CLI
     /// `--coverage` flag and `FALLOW_COVERAGE` environment variable override
@@ -185,6 +202,7 @@ impl Default for HealthConfig {
             max_cognitive: default_max_cognitive(),
             max_crap: default_max_crap(),
             crap_refactor_band: default_crap_refactor_band(),
+            max_unit_size: default_max_unit_size(),
             coverage: None,
             coverage_root: None,
             ignore: vec![],
@@ -214,6 +232,13 @@ pub struct HealthThresholdOverride {
     /// Local CRAP ceiling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_crap: Option<f64>,
+    /// Local unit-size ceiling: maximum function length in lines of code before
+    /// it is reported as an oversized "large function". Leave `functions` empty
+    /// to relax the bar for every function in the matching files (which covers
+    /// both the `describe()` wrapper and the individual `it()` blocks in a test
+    /// suite).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_unit_size: Option<u32>,
     /// Human-readable rationale for the exception.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -223,7 +248,10 @@ impl HealthThresholdOverride {
     /// Return true when the override configures at least one local ceiling.
     #[must_use]
     pub const fn has_any_threshold(&self) -> bool {
-        self.max_cyclomatic.is_some() || self.max_cognitive.is_some() || self.max_crap.is_some()
+        self.max_cyclomatic.is_some()
+            || self.max_cognitive.is_some()
+            || self.max_crap.is_some()
+            || self.max_unit_size.is_some()
     }
 }
 
@@ -240,7 +268,7 @@ impl HealthConfig {
             }
             if !override_entry.has_any_threshold() {
                 errors.push(format!(
-                    "health.thresholdOverrides[{index}] must set at least one of maxCyclomatic, maxCognitive, or maxCrap"
+                    "health.thresholdOverrides[{index}] must set at least one of maxCyclomatic, maxCognitive, maxCrap, or maxUnitSize"
                 ));
             }
         }
@@ -259,6 +287,7 @@ mod tests {
         assert_eq!(config.max_cognitive, 15);
         assert!((config.max_crap - 30.0).abs() < f64::EPSILON);
         assert_eq!(config.crap_refactor_band, 5);
+        assert_eq!(config.max_unit_size, 60);
         assert!(config.coverage.is_none());
         assert!(config.coverage_root.is_none());
         assert!(config.ignore.is_empty());
@@ -382,6 +411,7 @@ maxCognitive = 25
             max_cognitive: 40,
             max_crap: 75.0,
             crap_refactor_band: 4,
+            max_unit_size: 120,
             ignore: vec!["test/**".to_string()],
             threshold_overrides: vec![HealthThresholdOverride {
                 files: vec!["src/auth.ts".to_string()],
@@ -389,6 +419,7 @@ maxCognitive = 25
                 max_cyclomatic: Some(30),
                 max_cognitive: None,
                 max_crap: Some(45.0),
+                max_unit_size: None,
                 reason: Some("framework assembly".to_string()),
             }],
             coverage: None,
@@ -402,6 +433,7 @@ maxCognitive = 25
         assert_eq!(restored.max_cognitive, 40);
         assert!((restored.max_crap - 75.0).abs() < f64::EPSILON);
         assert_eq!(restored.crap_refactor_band, 4);
+        assert_eq!(restored.max_unit_size, 120);
         assert_eq!(restored.ignore, vec!["test/**"]);
         assert_eq!(restored.threshold_overrides.len(), 1);
         assert_eq!(restored.threshold_overrides[0].max_cyclomatic, Some(30));
@@ -451,9 +483,34 @@ maxCognitive = 25
         assert_eq!(
             config.threshold_override_errors(),
             vec![
-                "health.thresholdOverrides[0] must set at least one of maxCyclomatic, maxCognitive, or maxCrap"
+                "health.thresholdOverrides[0] must set at least one of maxCyclomatic, maxCognitive, maxCrap, or maxUnitSize"
             ]
         );
+    }
+
+    #[test]
+    fn health_config_threshold_override_max_unit_size_only_is_valid() {
+        let json = r#"{
+            "thresholdOverrides": [{
+                "files": ["**/*.test.*"],
+                "maxUnitSize": 500
+            }]
+        }"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        let override_entry = &config.threshold_overrides[0];
+        assert_eq!(override_entry.max_unit_size, Some(500));
+        assert!(override_entry.max_cyclomatic.is_none());
+        assert!(override_entry.has_any_threshold());
+        assert!(config.threshold_override_errors().is_empty());
+    }
+
+    #[test]
+    fn health_config_json_only_max_unit_size() {
+        let json = r#"{"maxUnitSize": 100}"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.max_unit_size, 100);
+        assert_eq!(config.max_cyclomatic, 20); // default
+        assert!(config.threshold_overrides.is_empty());
     }
 
     #[test]
