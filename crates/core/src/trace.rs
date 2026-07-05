@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
 pub use fallow_types::trace::{
-    CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ImpactClosureGap,
-    ImpactClosureTrace, PipelineTimings, ReExportChain, TracedCloneGroup, TracedExport,
-    TracedReExport,
+    ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
+    ImpactClosureGap, ImpactClosureTrace, PipelineTimings, ReExportChain, TracedCloneGroup,
+    TracedExport, TracedReExport,
 };
 use rustc_hash::FxHashSet;
 
@@ -163,6 +163,119 @@ pub fn trace_export(
         re_export_chains,
         reason,
     })
+}
+
+/// Trace a class / enum / store MEMBER when `--trace FILE:NAME`'s `NAME` is not
+/// a top-level export but a member declared on one (issue #1744). Runs on the
+/// graph only, so it reports the OWNING export's reachability and usage (the
+/// gating precondition for member crediting) plus a pointer to the right
+/// `--unused-*-members` command, not per-member crediting provenance.
+#[must_use]
+pub fn trace_class_member(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    member_name: &str,
+) -> Option<ClassMemberTrace> {
+    use fallow_types::extract::MemberKind;
+
+    let module = graph
+        .modules
+        .iter()
+        .find(|m| path_matches(&m.path, root, file_path))?;
+
+    // Find the export that declares this member. When several declare a member
+    // of the same name (rare), prefer a used, non-type-only owner so the trace
+    // reports the reachable one.
+    let (owner, member_kind) = module
+        .exports
+        .iter()
+        .filter_map(|export| {
+            export
+                .members
+                .iter()
+                .find(|member| member.name == member_name)
+                .map(|member| (export, member.kind))
+        })
+        .max_by_key(|(export, _)| (!export.references.is_empty(), !export.is_type_only))?;
+
+    let owner_name = owner.name.to_string();
+    // Reuse the export trace to compute the owner's reachability / usage /
+    // references consistently with a plain `--trace FILE:OWNER`. The `?` here is
+    // a belt-and-suspenders guard: `owner` was just located in this module's
+    // `exports`, so `trace_export` resolves it in practice; the fallthrough to
+    // `None` (and the caller's "not found" error) is unreachable barring a graph
+    // inconsistency.
+    let owner_trace = trace_export(graph, root, file_path, &owner_name)?;
+
+    let (kind_str, filter_flag) = match member_kind {
+        MemberKind::ClassMethod => ("class-method", Some("--unused-class-members")),
+        MemberKind::ClassProperty => ("class-property", Some("--unused-class-members")),
+        MemberKind::EnumMember => ("enum-member", Some("--unused-enum-members")),
+        MemberKind::StoreMember => ("store-member", Some("--unused-store-members")),
+        MemberKind::NamespaceMember => ("namespace-member", None),
+    };
+
+    let reason = class_member_trace_reason(
+        member_name,
+        &owner_name,
+        kind_str,
+        filter_flag,
+        file_path,
+        &owner_trace,
+    );
+
+    Some(ClassMemberTrace {
+        file: owner_trace.file,
+        member_name: member_name.to_string(),
+        member_kind: kind_str.to_string(),
+        owner_export: owner_name,
+        owner_is_used: owner_trace.is_used,
+        owner_file_reachable: owner_trace.file_reachable,
+        owner_is_entry_point: owner_trace.is_entry_point,
+        owner_direct_references: owner_trace.direct_references,
+        owner_re_export_chains: owner_trace.re_export_chains,
+        reason,
+    })
+}
+
+/// Build the human-readable reason for a class-member trace, keyed on the
+/// owner's reachability / usage (the precondition that gates member crediting).
+fn class_member_trace_reason(
+    member_name: &str,
+    owner_name: &str,
+    kind_str: &str,
+    filter_flag: Option<&str>,
+    file_path: &str,
+    owner_trace: &ExportTrace,
+) -> String {
+    let head =
+        format!("'{member_name}' is a {kind_str} of '{owner_name}', not a top-level export. ");
+    let body = if !owner_trace.file_reachable {
+        format!(
+            "The file is not reachable from any entry point, so '{owner_name}' and all its \
+             members are dead (see the unused-file finding)."
+        )
+    } else if !owner_trace.is_used {
+        format!(
+            "'{owner_name}' is reachable but referenced by no file, so it is reported as an \
+             unused export and its members are not judged individually."
+        )
+    } else {
+        let refs = owner_trace.direct_references.len();
+        match filter_flag {
+            Some(flag) => format!(
+                "'{owner_name}' is used by {refs} file(s); whether '{member_name}' itself is \
+                 flagged depends on cross-file member-access resolution. Run \
+                 `fallow dead-code {flag} --file {file_path}` to see the member finding."
+            ),
+            None => format!(
+                "'{owner_name}' is used by {refs} file(s); '{member_name}' is credited through \
+                 its namespace export."
+            ),
+        }
+    };
+    format!("{head}{body}")
 }
 
 fn export_name_matches(export: &crate::graph::ExportSymbol, export_name: &str) -> bool {
@@ -653,6 +766,271 @@ mod tests {
 
         let trace = trace_export(&graph, root, "src/utils.ts", "nonexistent");
         assert!(trace.is_none());
+    }
+
+    fn build_class_member_graph() -> ModuleGraph {
+        use fallow_types::extract::{MemberInfo, MemberKind};
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/controller.ts"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/src/entry.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let method = |name: &str| MemberInfo {
+            name: name.to_string(),
+            kind: MemberKind::ClassMethod,
+            span: oxc_span::Span::new(0, 4),
+            has_decorator: false,
+            decorator_names: vec![],
+            is_instance_returning_static: false,
+            is_self_returning: false,
+        };
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./controller".to_string(),
+                        imported_name: ImportedName::Named("Ctrl".to_string()),
+                        local_name: "Ctrl".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/src/controller.ts"),
+                exports: vec![ExportInfo {
+                    name: ExportName::Named("Ctrl".to_string()),
+                    local_name: Some("Ctrl".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![method("used"), method("dead")],
+                    is_side_effect_used: false,
+                    super_class: None,
+                }],
+                ..Default::default()
+            },
+        ];
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    #[test]
+    fn trace_class_member_reports_owner_class() {
+        // #1744: `--trace FILE:MEMBER` on a class member reports the owning
+        // class instead of erroring "export not found".
+        let graph = build_class_member_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_class_member(&graph, root, "src/controller.ts", "dead").unwrap();
+        assert_eq!(trace.owner_export, "Ctrl");
+        assert_eq!(trace.member_name, "dead");
+        assert_eq!(trace.member_kind, "class-method");
+        assert!(trace.owner_is_used);
+        assert!(trace.owner_file_reachable);
+        assert_eq!(trace.owner_direct_references.len(), 1);
+        assert!(
+            trace.reason.contains("--unused-class-members"),
+            "reason should point at the member command: {}",
+            trace.reason
+        );
+    }
+
+    #[test]
+    fn trace_class_member_absent_name_is_none() {
+        // A name that is neither a top-level export nor a declared member falls
+        // through so the caller emits the "not found" error.
+        let graph = build_class_member_graph();
+        let root = Path::new("/project");
+        assert!(trace_class_member(&graph, root, "src/controller.ts", "nope").is_none());
+    }
+
+    /// Build a graph where the controller declaring `Ctrl` is NOT imported by
+    /// the entry, so its file is unreachable and every member is dead.
+    fn build_unreachable_class_member_graph() -> ModuleGraph {
+        use fallow_types::extract::{MemberInfo, MemberKind};
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/controller.ts"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/src/entry.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let method = |name: &str| MemberInfo {
+            name: name.to_string(),
+            kind: MemberKind::ClassMethod,
+            span: oxc_span::Span::new(0, 4),
+            has_decorator: false,
+            decorator_names: vec![],
+            is_instance_returning_static: false,
+            is_self_returning: false,
+        };
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                // Entry imports nothing, so controller.ts is unreachable.
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/src/controller.ts"),
+                exports: vec![ExportInfo {
+                    name: ExportName::Named("Ctrl".to_string()),
+                    local_name: Some("Ctrl".to_string()),
+                    is_type_only: false,
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
+                    span: oxc_span::Span::new(0, 20),
+                    members: vec![method("dead")],
+                    is_side_effect_used: false,
+                    super_class: None,
+                }],
+                ..Default::default()
+            },
+        ];
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    #[test]
+    fn trace_class_member_unreachable_owner_reports_dead_reason() {
+        // `!file_reachable` branch: the owning file is not reachable from any
+        // entry point, so the reason states the class and its members are dead.
+        let graph = build_unreachable_class_member_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_class_member(&graph, root, "src/controller.ts", "dead").unwrap();
+        assert!(!trace.owner_file_reachable);
+        assert!(
+            trace.reason.contains("not reachable"),
+            "unreachable owner reason should say so: {}",
+            trace.reason
+        );
+        // The unreachable branch does not point at a member command (the file is
+        // dead wholesale via the unused-file finding).
+        assert!(!trace.reason.contains("--unused-class-members"));
+    }
+
+    #[test]
+    fn trace_class_member_prefers_used_owner_on_name_collision() {
+        // Two exports declare a member of the same name; the tie-break in
+        // `max_by_key` must prefer the used, non-type-only owner so the trace
+        // reports the reachable class rather than a type-only shadow.
+        use fallow_types::extract::{MemberInfo, MemberKind};
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/controller.ts"),
+                size_bytes: 50,
+            },
+        ];
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/src/entry.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let method = |name: &str| MemberInfo {
+            name: name.to_string(),
+            kind: MemberKind::ClassMethod,
+            span: oxc_span::Span::new(0, 4),
+            has_decorator: false,
+            decorator_names: vec![],
+            is_instance_returning_static: false,
+            is_self_returning: false,
+        };
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./controller".to_string(),
+                        imported_name: ImportedName::Named("UsedCtrl".to_string()),
+                        local_name: "UsedCtrl".to_string(),
+                        is_type_only: false,
+                        from_style: false,
+                        span: oxc_span::Span::new(0, 10),
+                        source_span: oxc_span::Span::default(),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                ..Default::default()
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/src/controller.ts"),
+                exports: vec![
+                    // Type-only, unreferenced owner declared FIRST: must lose the
+                    // tie-break to the used, non-type-only owner below.
+                    ExportInfo {
+                        name: ExportName::Named("TypeCtrl".to_string()),
+                        local_name: Some("TypeCtrl".to_string()),
+                        is_type_only: true,
+                        visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
+                        span: oxc_span::Span::new(0, 20),
+                        members: vec![method("shared")],
+                        is_side_effect_used: false,
+                        super_class: None,
+                    },
+                    ExportInfo {
+                        name: ExportName::Named("UsedCtrl".to_string()),
+                        local_name: Some("UsedCtrl".to_string()),
+                        is_type_only: false,
+                        visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
+                        span: oxc_span::Span::new(0, 20),
+                        members: vec![method("shared")],
+                        is_side_effect_used: false,
+                        super_class: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        ];
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        let root = Path::new("/project");
+
+        let trace = trace_class_member(&graph, root, "src/controller.ts", "shared").unwrap();
+        assert_eq!(
+            trace.owner_export, "UsedCtrl",
+            "tie-break must prefer the used, non-type-only owner"
+        );
+        assert!(trace.owner_is_used);
     }
 
     #[test]

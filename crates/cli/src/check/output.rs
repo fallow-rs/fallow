@@ -37,17 +37,24 @@ fn handle_trace_export(
             output,
         ));
     };
-    match fallow_engine::trace::trace_export(graph, root, file_path, export_name) {
-        Some(trace) => {
-            report::print_export_trace(&trace, output);
-            Some(ExitCode::SUCCESS)
-        }
-        None => Some(emit_error(
-            &format!("export '{export_name}' not found in '{file_path}'"),
-            2,
-            output,
-        )),
+    if let Some(trace) = fallow_engine::trace::trace_export(graph, root, file_path, export_name) {
+        report::print_export_trace(&trace, output);
+        return Some(ExitCode::SUCCESS);
     }
+    // #1744: the name is not a top-level export. It may be a class / enum / store
+    // MEMBER declared on one; fall back to a member trace so a class-member
+    // finding can be debugged instead of erroring "export not found".
+    if let Some(trace) =
+        fallow_engine::trace::trace_class_member(graph, root, file_path, export_name)
+    {
+        report::print_class_member_trace(&trace, output);
+        return Some(ExitCode::SUCCESS);
+    }
+    Some(emit_error(
+        &format!("export or member '{export_name}' not found in '{file_path}'"),
+        2,
+        output,
+    ))
 }
 
 fn handle_trace_file(

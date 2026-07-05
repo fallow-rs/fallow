@@ -648,6 +648,17 @@ pub fn print_export_trace(trace: &ExportTrace, format: OutputFormat) {
     }
 }
 
+/// Print class-member trace results (the `--trace FILE:MEMBER` fallback).
+pub fn print_class_member_trace(
+    trace: &fallow_engine::trace::ClassMemberTrace,
+    format: OutputFormat,
+) {
+    match format {
+        OutputFormat::Json => json::print_trace_json(trace),
+        _ => human::print_class_member_trace_human(trace),
+    }
+}
+
 /// Print file trace results.
 pub fn print_file_trace(trace: &FileTrace, format: OutputFormat) {
     match format {

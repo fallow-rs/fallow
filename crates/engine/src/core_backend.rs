@@ -361,6 +361,15 @@ pub fn trace_export(
     fallow_core::trace::trace_export(graph, root, file_path, export_name)
 }
 
+pub fn trace_class_member(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    member_name: &str,
+) -> Option<fallow_types::trace::ClassMemberTrace> {
+    fallow_core::trace::trace_class_member(graph, root, file_path, member_name)
+}
+
 pub fn trace_file(
     graph: &ModuleGraph,
     root: &Path,

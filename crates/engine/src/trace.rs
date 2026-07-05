@@ -8,6 +8,7 @@ use crate::core_backend;
 use crate::duplicates::DuplicationReport;
 use crate::module_graph::RetainedModuleGraph;
 
+pub type ClassMemberTrace = fallow_types::trace::ClassMemberTrace;
 pub type CloneTrace = fallow_types::trace::CloneTrace;
 pub type DependencyTrace = fallow_types::trace::DependencyTrace;
 pub type ExportReference = fallow_types::trace::ExportReference;
@@ -30,6 +31,18 @@ pub fn trace_export(
     export_name: &str,
 ) -> Option<ExportTrace> {
     core_backend::trace_export(graph.as_graph(), root, file_path, export_name)
+}
+
+/// Trace a class / enum / store member (the `--trace FILE:MEMBER` fallback when
+/// `MEMBER` is not a top-level export). See issue #1744.
+#[must_use]
+pub fn trace_class_member(
+    graph: &RetainedModuleGraph,
+    root: &Path,
+    file_path: &str,
+    member_name: &str,
+) -> Option<ClassMemberTrace> {
+    core_backend::trace_class_member(graph.as_graph(), root, file_path, member_name)
 }
 
 /// Trace all graph edges for a file.

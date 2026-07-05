@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow dead-code --trace FILE:MEMBER` now traces class, enum, and store members.** Previously tracing a class member (e.g. `--trace src/foo.ts:createEstimate`) errored `export 'createEstimate' not found`, so a member finding could not be debugged from the trace tool. On an export miss the trace now falls back to a member trace that names the owning class, reports its reachability and usage (the precondition that gates member crediting), lists who imports it, and points at `fallow dead-code --unused-class-members --file <file>` to inspect the finding. Available in human and `--format json`. (Refs [#1744](https://github.com/fallow-rs/fallow/issues/1744))
+
+### Fixed
+
+- **`fallow health` no longer exits 1 when the config contains a `rules` key.** A bare `#[serde(default)]` on a rule-severity field resolved to `error` when a `rules` object was present (even `{"rules": {}}`), diverging from the documented default. `coverage-gaps` was promoted to `error`, tripping the standalone-health coverage-gap gate on any untested runtime file, so `fallow health` exited 1 with an otherwise-clean report; eight `warn`-default component / store / inject / server-action rules were likewise promoted to `error`, wrongly gating CI on Vue / Svelte / Angular projects. The nine affected defaults are now pinned to their documented values. Thanks [@lightsound](https://github.com/lightsound) for the report. (Closes [#1745](https://github.com/fallow-rs/fallow/issues/1745))
+
+- **Fixed `unused-class-member` false positives on public methods reached through a return-type-annotated factory.** A factory or hook whose body has no `new` value proof but is explicitly typed `: SomeController` (`function useController(): ReadyAppController { return registry.get() as ReadyAppController }`) now credits member reads on `const c = useController(); c.method()` across the module boundary, for both the function-declaration and arrow forms. A genuinely-unused method on the returned class still reports. Thanks [@prosky](https://github.com/prosky) for the report. (Closes [#1744](https://github.com/fallow-rs/fallow/issues/1744))
+
 ## [3.0.0] - 2026-07-04
 
 ### Added

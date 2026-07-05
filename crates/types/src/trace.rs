@@ -29,6 +29,41 @@ pub struct ExportTrace {
     pub reason: String,
 }
 
+/// Result of tracing a class / enum / store MEMBER: the `--trace FILE:NAME`
+/// fallback when `NAME` is not a top-level export but a member declared on one
+/// (issue #1744). The trace runs on the module graph only, so it reports the
+/// OWNING export's reachability and usage (the gating precondition for
+/// member-level crediting) plus a pointer to the right `--unused-*-members`
+/// command, rather than per-member crediting provenance.
+#[derive(Debug, Serialize)]
+pub struct ClassMemberTrace {
+    /// The file containing the member.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub file: PathBuf,
+    /// The member name being traced.
+    pub member_name: String,
+    /// The member kind: `class-method`, `class-property`, `enum-member`,
+    /// `store-member`, or `namespace-member`.
+    pub member_kind: String,
+    /// The export that declares this member (the class / enum / store name).
+    pub owner_export: String,
+    /// Whether the owning export is considered used.
+    pub owner_is_used: bool,
+    /// Whether the file is reachable from an entry point.
+    pub owner_file_reachable: bool,
+    /// Whether the file is an entry point.
+    pub owner_is_entry_point: bool,
+    /// Files that reference the owning export directly.
+    pub owner_direct_references: Vec<ExportReference>,
+    /// Re-export chains through which the owning export is reachable. Populated
+    /// so a machine consumer can tell "used via a barrel" (empty direct refs but
+    /// non-empty chains) from "genuinely unreferenced".
+    pub owner_re_export_chains: Vec<ReExportChain>,
+    /// Human-readable reason summary plus the follow-up command to inspect the
+    /// member finding.
+    pub reason: String,
+}
+
 /// A direct reference to an export.
 #[derive(Debug, Serialize)]
 pub struct ExportReference {

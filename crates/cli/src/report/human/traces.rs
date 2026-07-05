@@ -1,12 +1,19 @@
 use std::path::Path;
 
 use colored::Colorize;
-use fallow_types::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, TracedCloneGroup};
+use fallow_types::trace::{
+    ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
+    ReExportChain, TracedCloneGroup,
+};
 
 use super::{plural, relative_path};
 
 pub(in crate::report) fn print_export_trace_human(trace: &ExportTrace) {
     print_lines(&build_export_trace_human_lines(trace));
+}
+
+pub(in crate::report) fn print_class_member_trace_human(trace: &ClassMemberTrace) {
+    print_lines(&build_class_member_trace_human_lines(trace));
 }
 
 pub(in crate::report) fn print_file_trace_human(trace: &FileTrace) {
@@ -62,15 +69,16 @@ fn build_export_trace_human_lines(trace: &ExportTrace) -> Vec<String> {
 }
 
 fn push_export_trace_direct_references(lines: &mut Vec<String>, trace: &ExportTrace) {
-    if trace.direct_references.is_empty() {
+    push_direct_references(lines, &trace.direct_references);
+}
+
+fn push_direct_references(lines: &mut Vec<String>, refs: &[ExportReference]) {
+    if refs.is_empty() {
         return;
     }
     lines.push(String::new());
-    lines.push(format!(
-        "  {} direct reference(s):",
-        trace.direct_references.len()
-    ));
-    for r in &trace.direct_references {
+    lines.push(format!("  {} direct reference(s):", refs.len()));
+    for r in refs {
         lines.push(format!(
             "    {} {} ({})",
             "->".dimmed(),
@@ -80,19 +88,64 @@ fn push_export_trace_direct_references(lines: &mut Vec<String>, trace: &ExportTr
     }
 }
 
+fn build_class_member_trace_human_lines(trace: &ClassMemberTrace) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push(String::new());
+    lines.push(format!(
+        "  {} {} ({}) of {} in {}",
+        "MEMBER".cyan().bold(),
+        trace.member_name.bold(),
+        trace.member_kind.dimmed(),
+        trace.owner_export.bold(),
+        trace.file.display().to_string().dimmed()
+    ));
+    lines.push(String::new());
+
+    let owner_status = if trace.owner_is_used {
+        "USED".green().bold()
+    } else {
+        "UNUSED".red().bold()
+    };
+    let reachable = if trace.owner_file_reachable {
+        "reachable".green()
+    } else {
+        "unreachable".red()
+    };
+    let entry = if trace.owner_is_entry_point {
+        " (entry point)".cyan().to_string()
+    } else {
+        String::new()
+    };
+    lines.push(format!(
+        "  Owner: {owner_status} {} ({reachable}{entry})",
+        trace.owner_export.bold()
+    ));
+    lines.push(format!("  Reason: {}", trace.reason));
+
+    push_direct_references(&mut lines, &trace.owner_direct_references);
+    push_re_export_chains(&mut lines, &trace.owner_re_export_chains);
+    lines.push(String::new());
+    lines
+}
+
 fn push_export_trace_re_export_chains(lines: &mut Vec<String>, trace: &ExportTrace) {
-    if !trace.re_export_chains.is_empty() {
-        lines.push(String::new());
-        lines.push("  Re-exported through:".to_string());
-        for chain in &trace.re_export_chains {
-            lines.push(format!(
-                "    {} {} as '{}' ({} ref(s))",
-                "->".dimmed(),
-                chain.barrel_file.display(),
-                chain.exported_as,
-                chain.reference_count
-            ));
-        }
+    push_re_export_chains(lines, &trace.re_export_chains);
+}
+
+fn push_re_export_chains(lines: &mut Vec<String>, chains: &[ReExportChain]) {
+    if chains.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    lines.push("  Re-exported through:".to_string());
+    for chain in chains {
+        lines.push(format!(
+            "    {} {} as '{}' ({} ref(s))",
+            "->".dimmed(),
+            chain.barrel_file.display(),
+            chain.exported_as,
+            chain.reference_count
+        ));
     }
 }
 
@@ -334,8 +387,8 @@ mod tests {
     use std::path::PathBuf;
 
     use fallow_engine::trace::{
-        CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,
-        TracedCloneGroup, TracedExport, TracedReExport,
+        ClassMemberTrace, CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace,
+        ReExportChain, TracedCloneGroup, TracedExport, TracedReExport,
     };
     use fallow_types::duplicates::{CloneInstance, RefactoringKind, RefactoringSuggestion};
 
@@ -378,6 +431,41 @@ mod tests {
         assert!(rendered.contains("-> src/app.ts (value)"));
         assert!(rendered.contains("Re-exported through:"));
         assert!(rendered.contains("-> src/index.ts as 'formatUser' (2 ref(s))"));
+    }
+
+    #[test]
+    fn class_member_trace_renders_owner_status_references_and_barrels() {
+        let trace = ClassMemberTrace {
+            file: PathBuf::from("src/controller.ts"),
+            member_name: "createEstimate".to_string(),
+            member_kind: "class-method".to_string(),
+            owner_export: "Ctrl".to_string(),
+            owner_is_used: true,
+            owner_file_reachable: true,
+            owner_is_entry_point: false,
+            owner_direct_references: vec![ExportReference {
+                from_file: PathBuf::from("src/consumer.ts"),
+                kind: "named import".to_string(),
+            }],
+            owner_re_export_chains: vec![ReExportChain {
+                barrel_file: PathBuf::from("src/index.ts"),
+                exported_as: "Ctrl".to_string(),
+                reference_count: 1,
+            }],
+            reason: "member reason text".to_string(),
+        };
+
+        let rendered = plain(&build_class_member_trace_human_lines(&trace));
+
+        assert!(
+            rendered.contains("MEMBER createEstimate (class-method) of Ctrl in src/controller.ts")
+        );
+        assert!(rendered.contains("Owner: USED Ctrl (reachable)"));
+        assert!(rendered.contains("Reason: member reason text"));
+        assert!(rendered.contains("1 direct reference(s):"));
+        assert!(rendered.contains("-> src/consumer.ts (named import)"));
+        assert!(rendered.contains("Re-exported through:"));
+        assert!(rendered.contains("-> src/index.ts as 'Ctrl' (1 ref(s))"));
     }
 
     #[test]
