@@ -1796,6 +1796,9 @@ fn finding_thresholds(
             max_cyclomatic: report.summary.max_cyclomatic_threshold,
             max_cognitive: report.summary.max_cognitive_threshold,
             max_crap: report.summary.max_crap_threshold,
+            // Inert here: this fallback only drives the cyclomatic/cognitive/CRAP
+            // markers on a complexity finding; the unit-size ceiling is not
+            // rendered on complexity findings, so the default is a placeholder.
             max_unit_size: fallow_output::DEFAULT_MAX_UNIT_SIZE,
         })
 }

@@ -25,8 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Like the existing `maxCyclomatic` / `maxCognitive` / `maxCrap` overrides, this
   filters the reported "large functions" list; the descriptive unit-size profile
   and the health score still reflect raw sizes (use `health.ignore` to remove a
-  file from the score entirely). The effective ceiling is surfaced on the
-  `effective_thresholds` block in JSON output. (Closes
+  file from the score entirely). Functions within their effective ceiling are
+  simply omitted from the `large_functions` JSON array; the resolved thresholds
+  are inspectable via `fallow config`. (Closes
   [#1731](https://github.com/fallow-rs/fallow/issues/1731))
 
 ## [3.1.0] - 2026-07-05

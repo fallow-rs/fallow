@@ -145,12 +145,13 @@ pub struct HealthConfig {
     pub crap_refactor_band: u16,
 
     /// Maximum function length in lines of code before it is reported as an
-    /// oversized "large function" (default: 60). Functions exceeding this
-    /// threshold are listed under the unit-size check and feed the unit-size
-    /// health score. Raise it globally, or per file via
-    /// `thresholdOverrides[].maxUnitSize`, to relax the bar for generated or
+    /// oversized "large function" (default: 60). Raise it globally, or per file
+    /// via `thresholdOverrides[].maxUnitSize`, to relax the bar for generated or
     /// test files (where a `describe()` block spans hundreds of lines) without
-    /// disabling complexity checks on those files.
+    /// disabling complexity checks on those files. This filters the reported
+    /// large-functions list only; the descriptive unit-size profile and the
+    /// health score still reflect raw sizes (use `health.ignore` to remove a
+    /// file from the score entirely).
     #[serde(default = "default_max_unit_size")]
     pub max_unit_size: u32,
 

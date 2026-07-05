@@ -412,6 +412,18 @@ fn health_max_unit_size_override_filters_large_function_list() {
         over_count, 0,
         "maxUnitSize override should remove the oversized function from the list"
     );
+
+    // List-only contract: suppressing the finding must NOT change the health
+    // score or the unit-size penalty, which reflect raw sizes regardless of the
+    // override. Locks the design at the end-to-end level.
+    assert!(
+        !baseline["health_score"].is_null(),
+        "baseline health run should carry a health score"
+    );
+    assert_eq!(
+        baseline["health_score"], overridden["health_score"],
+        "maxUnitSize override must not change the health score (list-only)"
+    );
 }
 
 #[test]

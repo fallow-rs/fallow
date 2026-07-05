@@ -838,7 +838,7 @@
           "default": 5
         },
         "maxUnitSize": {
-          "description": "Maximum function length in lines of code before it is reported as an\noversized \"large function\" (default: 60). Functions exceeding this\nthreshold are listed under the unit-size check and feed the unit-size\nhealth score. Raise it globally, or per file via\n`thresholdOverrides[].maxUnitSize`, to relax the bar for generated or\ntest files (where a `describe()` block spans hundreds of lines) without\ndisabling complexity checks on those files.",
+          "description": "Maximum function length in lines of code before it is reported as an\noversized \"large function\" (default: 60). Raise it globally, or per file\nvia `thresholdOverrides[].maxUnitSize`, to relax the bar for generated or\ntest files (where a `describe()` block spans hundreds of lines) without\ndisabling complexity checks on those files. This filters the reported\nlarge-functions list only; the descriptive unit-size profile and the\nhealth score still reflect raw sizes (use `health.ignore` to remove a\nfile from the score entirely).",
           "type": "integer",
           "format": "uint32",
           "minimum": 0,
