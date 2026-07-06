@@ -22,6 +22,7 @@ fallow-graph = { workspace = true }
 fallow-output = { workspace = true }
 fallow-security = { workspace = true }
 fallow-types = { workspace = true }
+bitcode = { workspace = true }
 colored = { workspace = true }
 dunce = { workspace = true }
 globset = { workspace = true }

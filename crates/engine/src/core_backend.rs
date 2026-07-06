@@ -15,7 +15,6 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     EngineResult,
-    churn::{AuthorContribution, ChurnResult, ChurnSpawnHook, FileChurn, SinceDuration},
     discover::{AnalysisDiscovery, HiddenDirScope},
     engine_error,
     module_graph::RetainedModuleGraph,
@@ -376,85 +375,6 @@ pub fn find_duplicates_touching_files_with_defaults(
         report,
         default_ignore_skips,
     }
-}
-
-fn core_since_duration(duration: &SinceDuration) -> fallow_core::churn::SinceDuration {
-    fallow_core::churn::SinceDuration {
-        git_after: duration.git_after.clone(),
-        display: duration.display.clone(),
-    }
-}
-
-fn author_contribution(author: fallow_core::churn::AuthorContribution) -> AuthorContribution {
-    AuthorContribution {
-        commits: author.commits,
-        weighted_commits: author.weighted_commits,
-        first_commit_ts: author.first_commit_ts,
-        last_commit_ts: author.last_commit_ts,
-    }
-}
-
-fn file_churn(file: fallow_core::churn::FileChurn) -> FileChurn {
-    FileChurn {
-        path: file.path,
-        commits: file.commits,
-        weighted_commits: file.weighted_commits,
-        lines_added: file.lines_added,
-        lines_deleted: file.lines_deleted,
-        trend: file.trend,
-        authors: file
-            .authors
-            .into_iter()
-            .map(|(index, author)| (index, author_contribution(author)))
-            .collect(),
-    }
-}
-
-fn churn_result(result: fallow_core::churn::ChurnResult) -> ChurnResult {
-    ChurnResult {
-        files: result
-            .files
-            .into_iter()
-            .map(|(path, file)| (path, file_churn(file)))
-            .collect(),
-        shallow_clone: result.shallow_clone,
-        author_pool: result.author_pool,
-    }
-}
-
-pub fn set_churn_spawn_hook(hook: ChurnSpawnHook) {
-    fallow_core::churn::set_spawn_hook(hook);
-}
-
-pub fn parse_since(input: &str) -> Result<SinceDuration, String> {
-    fallow_core::churn::parse_since(input).map(|duration| SinceDuration {
-        git_after: duration.git_after,
-        display: duration.display,
-    })
-}
-
-pub fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> {
-    let since = core_since_duration(since);
-    fallow_core::churn::analyze_churn(root, &since).map(churn_result)
-}
-
-pub fn analyze_churn_from_file(path: &Path, root: &Path) -> Result<ChurnResult, String> {
-    fallow_core::churn::analyze_churn_from_file(path, root).map(churn_result)
-}
-
-pub fn is_git_repo(root: &Path) -> bool {
-    fallow_core::churn::is_git_repo(root)
-}
-
-pub fn analyze_churn_cached(
-    root: &Path,
-    since: &SinceDuration,
-    cache_dir: &Path,
-    no_cache: bool,
-) -> Option<(ChurnResult, bool)> {
-    let since = core_since_duration(since);
-    fallow_core::churn::analyze_churn_cached(root, &since, cache_dir, no_cache)
-        .map(|(result, cache_hit)| (churn_result(result), cache_hit))
 }
 
 fn hidden_dir_scope(value: &fallow_core::discover::HiddenDirScope) -> HiddenDirScope {

@@ -1135,6 +1135,7 @@ dependencies = [
 name = "fallow-engine"
 version = "3.2.0"
 dependencies = [
+ "bitcode",
  "colored 3.1.1",
  "dunce",
  "fallow-config",

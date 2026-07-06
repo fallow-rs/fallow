@@ -1338,6 +1338,29 @@ fn engine_owns_duplication_pure_helpers_without_core_adapter() {
     }
 }
 
+#[test]
+fn engine_owns_churn_without_core_adapter() {
+    let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
+        .expect("read engine core backend source");
+    assert!(
+        !core_backend.contains("fallow_core::churn"),
+        "engine churn must stay owned by crates/engine/src/churn.rs"
+    );
+
+    let churn =
+        read_source_without_line_comments("crates/engine/src/churn.rs").expect("read churn source");
+    for forbidden in ["core_backend::", "crate::spawn::git", "fallow_core::churn"] {
+        assert!(
+            !churn.contains(forbidden),
+            "engine churn must not route through legacy backend path {forbidden}"
+        );
+    }
+    assert!(
+        churn.contains("crate::git_env::clear_ambient_git_env"),
+        "engine churn git subprocesses must clear ambient git environment"
+    );
+}
+
 fn assert_engine_discovery_exposes_session_oriented_surface() {
     let engine_discover = read_source_without_line_comments("crates/engine/src/discover.rs")
         .expect("read engine discover");
