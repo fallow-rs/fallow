@@ -501,20 +501,117 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     discover_files_with_additional_hidden_dirs(config, &[])
 }
 
-/// The set of config-file basenames (last path component of every built-in
-/// plugin `config_patterns()` entry, brace forms preserved) that the walk should
-/// additionally admit so non-source configs (`tsconfig.json`, `bunfig.toml`,
-/// `.eslintrc.json`, ...) can be captured in one traversal instead of being
-/// re-discovered by a filesystem re-walk in `discover_config_files`.
-///
-/// Derived live from the built-in plugin list, so it can never drift behind a
-/// new plugin's config patterns. Source-extension config basenames
-/// (`vite.config.{ts,js}`) are admitted too, but the walk visitor routes them
-/// back to the source channel by extension, so the config channel only ever
-/// collects genuinely non-source files.
-fn config_candidate_basename_globs() -> &'static [String] {
-    static GLOBS: OnceLock<Vec<String>> = OnceLock::new();
-    GLOBS.get_or_init(crate::core_backend::builtin_plugin_config_candidate_basenames)
+const BUILTIN_PLUGIN_CONFIG_CANDIDATE_BASENAMES: &[&str] = &[
+    "*.prisma",
+    ".adonisrc.json",
+    ".angular.json",
+    ".babelrc",
+    ".babelrc.{js,cjs,mjs,json}",
+    ".commitlintrc.{js,cjs}",
+    ".env.schema",
+    ".eslintrc.{js,cjs,mjs,json,yaml,yml}",
+    ".lintstagedrc.{js,cjs,mjs,ts}",
+    ".oxlintrc.json",
+    ".prettierrc",
+    ".prettierrc.{json,json5,yml,yaml,toml,js,cjs,mjs,ts,cts}",
+    ".releaserc.{js,cjs}",
+    ".remarkrc.{js,cjs,mjs}",
+    ".stryker.conf.{json,js,mjs,cjs,jsonc,ts}",
+    ".stryker.config.{json,js,mjs,cjs,jsonc,ts}",
+    ".stylelintrc.{js,cjs}",
+    ".taprc",
+    ".taprc.{json,yml,yaml}",
+    ".versionrc",
+    ".versionrc.{json,js,cjs}",
+    "adonisrc.js",
+    "adonisrc.ts",
+    "angular.json",
+    "app.config.{ts,js,mjs,cjs}",
+    "app.json",
+    "astro.config.{ts,js,mjs}",
+    "babel.config.{js,cjs,mjs,ts,cts}",
+    "bunfig.toml",
+    "codegen.{ts,js}",
+    "commitlint.config.{js,cjs,mjs,ts}",
+    "config.{ts,js}",
+    "contentlayer.config.{ts,js,mts,mjs}",
+    "cypress.config.{ts,js,mjs,cjs}",
+    "docs.json",
+    "docusaurus.config.{js,ts,mjs}",
+    "drizzle.config.{ts,js,mjs}",
+    "electron.vite.config.{ts,js,mjs}",
+    "eslint.config.{js,mjs,cjs,ts,mts,cts}",
+    "gatsby-browser.{ts,tsx,js,jsx}",
+    "gatsby-config.{ts,js,mjs}",
+    "gatsby-node.{ts,js,mjs}",
+    "gatsby-ssr.{ts,tsx,js,jsx}",
+    "graphql.config.{ts,js}",
+    "hardhat.config.{ts,js,cjs,mjs}",
+    "ionic.config.json",
+    "jest.config.json",
+    "jest.config.{ts,js,mjs,cjs}",
+    "lint-staged.config.{js,cjs,mjs,ts}",
+    "main.{ts,js,mjs,cjs}",
+    "manifest.json",
+    "mint.json",
+    "module.{ts,js}",
+    "next.config.{ts,js,mjs,cjs}",
+    "ng-package.json",
+    "ng-package.prod.json",
+    "nuxt.config.{ts,js}",
+    "open-next.config.{ts,js,mjs,cjs}",
+    "opencode.json",
+    "oxlint.config.ts",
+    "oxlint.json",
+    "panda.config.{ts,js,mjs,cjs}",
+    "playwright.config.{ts,js}",
+    "postcss.config.{ts,js,cjs,mjs}",
+    "prettier.config.{js,cjs,mjs,ts,cts}",
+    "prisma.config.{ts,mts,cts,js,mjs,cjs}",
+    "prisma.{ts,mts,cts,js,mjs,cjs}",
+    "project.json",
+    "react-router.config.{ts,js,mjs,cjs}",
+    "release.config.{js,cjs,mjs}",
+    "rolldown.config.{js,cjs,mjs,ts,mts,cts}",
+    "rollup.config.{js,ts,mjs,cjs}",
+    "routes.{ts,js,mts,mjs}",
+    "rsbuild.config.{ts,js,mjs,cjs}",
+    "rsbuild.config.{ts,js,mts,mjs}",
+    "rspack.*.config.{ts,js,mjs,cjs}",
+    "rspack.config.{ts,js,mjs,cjs}",
+    "rspack.config.{ts,js,mts,mjs}",
+    "schema.prisma",
+    "source.config.{ts,tsx,js,jsx,mts,mjs,cts,cjs}",
+    "stryker.conf.{json,js,mjs,cjs,jsonc,ts}",
+    "stryker.config.{json,js,mjs,cjs,jsonc,ts}",
+    "stylelint.config.{js,cjs,mjs}",
+    "svelte.config.{js,cjs,mjs,ts}",
+    "tailwind.config.{ts,js,cjs,mjs}",
+    "taprc",
+    "tsconfig.*.json",
+    "tsconfig.json",
+    "tsdown.config.{ts,mts,cts,js,cjs,mjs}",
+    "tsr.config.json",
+    "tsup.config.{ts,js,cjs,mjs}",
+    "uno.config.{ts,js,mjs,cjs}",
+    "unocss.config.{ts,js,mjs,cjs}",
+    "velite.config.{ts,mts,cts,js,mjs,cjs}",
+    "vercel.{ts,js,mjs,cjs,mts}",
+    "vite.config.{ts,js,mts,mjs}",
+    "vitest.config.{ts,js,mts,mjs}",
+    "vitest.workspace.{ts,js}",
+    "webpack.*.config.{ts,js,mjs,cjs}",
+    "webpack.config.{ts,js,mjs,cjs}",
+    "webpack.config.{ts,js,mts,mjs,cjs}",
+    "wrangler.{toml,json,jsonc}",
+    "wuchale.config.js",
+    "wxt.config.{ts,js,mts,mjs,cjs,cts}",
+];
+
+/// Config-file basenames, with brace forms preserved, that source discovery
+/// admits so non-source configs can be captured in the same traversal.
+fn config_candidate_basename_globs() -> &'static [&'static str] {
+    BUILTIN_PLUGIN_CONFIG_CANDIDATE_BASENAMES
 }
 
 /// True when `path`'s extension is one of the known source extensions, i.e. the
@@ -709,6 +806,18 @@ mod tests {
                 size_bytes,
             })
             .collect()
+    }
+
+    #[test]
+    fn config_candidate_basenames_are_stable_and_cover_key_configs() {
+        let basenames = config_candidate_basename_globs();
+
+        assert!(!basenames.is_empty());
+        assert!(basenames.windows(2).all(|window| window[0] <= window[1]));
+        assert!(basenames.contains(&"tsconfig.json"));
+        assert!(basenames.contains(&"bunfig.toml"));
+        assert!(basenames.contains(&"eslint.config.{js,mjs,cjs,ts,mts,cts}"));
+        assert!(basenames.contains(&"next.config.{ts,js,mjs,cjs}"));
     }
 
     /// ADR-004: an identical file set must yield identical FileIds regardless of

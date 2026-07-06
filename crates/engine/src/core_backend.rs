@@ -250,10 +250,6 @@ pub fn dead_code_pipeline_profile(
     }
 }
 
-pub fn builtin_plugin_config_candidate_basenames() -> Vec<String> {
-    fallow_core::plugins::registry::builtin_plugin_config_candidate_basenames()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendPluginRegexValidationError {
     inner: fallow_core::plugins::registry::PluginRegexValidationError,

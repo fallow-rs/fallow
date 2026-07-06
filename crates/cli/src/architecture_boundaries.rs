@@ -1375,7 +1375,6 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::build_dead_code_graph",
         "fallow_core::run_dead_code_detectors",
         "fallow_core::discover::HiddenDirScope",
-        "fallow_core::plugins::registry::builtin_plugin_config_candidate_basenames",
         "fallow_core::plugins::registry::PluginRegexValidationError",
         "fallow_core::plugins::AggregatedPluginResult",
         "fallow_core::plugins::PluginRegistry",
