@@ -853,7 +853,7 @@ pub fn discover_files_and_config_candidates(
 /// Discover configured and inferred entry points.
 #[must_use]
 pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
-    core_backend::discover_entry_points(config, files)
+    crate::entry_points::discover_entry_points(config, files)
 }
 
 /// Discover entry points for a workspace package.
@@ -863,7 +863,7 @@ pub fn discover_workspace_entry_points(
     config: &ResolvedConfig,
     all_files: &[DiscoveredFile],
 ) -> Vec<EntryPoint> {
-    core_backend::discover_workspace_entry_points(ws_root, config, all_files)
+    crate::entry_points::discover_workspace_entry_points(ws_root, config, all_files)
 }
 
 /// Discover entry points from plugin results.

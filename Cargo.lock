@@ -1145,6 +1145,7 @@ dependencies = [
  "fallow-output",
  "fallow-security",
  "fallow-types",
+ "glob",
  "globset",
  "ignore",
  "oxc_allocator",

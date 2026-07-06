@@ -5,7 +5,7 @@
 //! contained while the engine-owned contracts continue to stabilize.
 
 use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceInfo};
-use fallow_types::discover::{DiscoveredFile, EntryPoint};
+use fallow_types::discover::DiscoveredFile;
 use fallow_types::trace::PipelineTimings;
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
@@ -281,20 +281,8 @@ pub fn dead_code_pipeline_profile(
     }
 }
 
-pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
-    fallow_core::discover::discover_entry_points(config, files)
-}
-
 pub fn builtin_plugin_config_candidate_basenames() -> Vec<String> {
     fallow_core::plugins::registry::builtin_plugin_config_candidate_basenames()
-}
-
-pub fn discover_workspace_entry_points(
-    ws_root: &Path,
-    config: &ResolvedConfig,
-    all_files: &[DiscoveredFile],
-) -> Vec<EntryPoint> {
-    fallow_core::discover::discover_workspace_entry_points(ws_root, config, all_files)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
