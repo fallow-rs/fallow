@@ -1361,6 +1361,23 @@ fn engine_owns_churn_without_core_adapter() {
     );
 }
 
+#[test]
+fn engine_guard_owns_policy_scope_matching() {
+    let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
+        .expect("read engine core backend source");
+    assert!(
+        !core_backend.contains("fallow_core::analyze::rules_applying_to_path"),
+        "guard policy scope matching must stay owned by fallow-engine"
+    );
+
+    let guard =
+        read_source_without_line_comments("crates/engine/src/guard.rs").expect("read guard source");
+    assert!(
+        !guard.contains("core_backend::rules_applying_to_path"),
+        "guard report assembly must not call core_backend for policy scope matching"
+    );
+}
+
 fn assert_engine_discovery_exposes_session_oriented_surface() {
     let engine_discover = read_source_without_line_comments("crates/engine/src/discover.rs")
         .expect("read engine discover");

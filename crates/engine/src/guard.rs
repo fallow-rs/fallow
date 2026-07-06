@@ -7,6 +7,7 @@ use fallow_config::{ResolvedBoundaryConfig, ResolvedConfig, RulePackRule, RulePa
 use fallow_types::guard::{
     GuardBoundary, GuardFileReport, GuardPolicyRule, GuardReport, GuardSeverities, GuardZone,
 };
+use rustc_hash::FxHashSet;
 
 /// Error returned when a guard target cannot be represented safely.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,10 +196,62 @@ fn guard_policy_rules(
         return Vec::new();
     }
 
-    crate::core_backend::rules_applying_to_path(config, rel_path)
+    rules_applying_to_path(config, rel_path)
         .into_iter()
         .filter_map(|(pack, rule)| guard_policy_rule(pack, rule, master_severity))
         .collect()
+}
+
+fn rules_applying_to_path<'a>(
+    config: &'a ResolvedConfig,
+    rel_path: &str,
+) -> Vec<(&'a str, &'a RulePackRule)> {
+    let zone = config.boundaries.classify_zone(rel_path);
+    config
+        .rule_packs
+        .iter()
+        .flat_map(|pack| {
+            pack.rules
+                .iter()
+                .filter(move |rule| {
+                    raw_rule_scope_applies(rule, &config.boundaries, rel_path, zone)
+                })
+                .map(|rule| (pack.name.as_str(), rule))
+        })
+        .collect()
+}
+
+fn raw_rule_scope_applies(
+    rule: &RulePackRule,
+    boundaries: &ResolvedBoundaryConfig,
+    relative: &str,
+    zone: Option<&str>,
+) -> bool {
+    let files = compile_scope_globs(&rule.files);
+    let exclude = compile_scope_globs(&rule.exclude);
+    let zones = rule.zones.iter().cloned().collect();
+    let zone = zone.or_else(|| boundaries.classify_zone(relative));
+    compiled_scope_applies(&files, &exclude, &zones, relative, zone)
+}
+
+fn compile_scope_globs(patterns: &[String]) -> Vec<globset::GlobMatcher> {
+    patterns
+        .iter()
+        .filter_map(|pattern| globset::Glob::new(pattern).ok())
+        .map(|glob| glob.compile_matcher())
+        .collect()
+}
+
+fn compiled_scope_applies(
+    files: &[globset::GlobMatcher],
+    exclude: &[globset::GlobMatcher],
+    zones: &FxHashSet<String>,
+    relative: &str,
+    zone: Option<&str>,
+) -> bool {
+    (files.is_empty() || files.iter().any(|matcher| matcher.is_match(relative)))
+        && !exclude.iter().any(|matcher| matcher.is_match(relative))
+        && (zones.is_empty() || zone.is_some_and(|zone| zones.contains(zone)))
 }
 
 fn guard_policy_rule(
