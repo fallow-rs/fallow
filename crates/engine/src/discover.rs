@@ -11,7 +11,7 @@ use fallow_config::{
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 use rustc_hash::FxHashSet;
 
-use crate::{EngineError, EngineResult, core_backend, plugins::PluginRegistry};
+use crate::{EngineError, EngineResult, plugins::PluginRegistry};
 
 const UNDECLARED_WORKSPACE_WARNING_PREVIEW: usize = 5;
 
@@ -176,14 +176,15 @@ impl HiddenDirScope {
 /// Reusable engine discovery prelude for one resolved project.
 #[derive(Debug, Clone)]
 pub struct AnalysisDiscovery {
-    inner: core_backend::BackendAnalysisDiscovery,
+    files: Vec<DiscoveredFile>,
+    workspaces: Vec<WorkspaceInfo>,
+    root_pkg: Option<PackageJson>,
+    config_candidates: Vec<PathBuf>,
+    discover_ms: f64,
+    workspaces_ms: f64,
 }
 
 impl AnalysisDiscovery {
-    pub(crate) const fn as_backend(&self) -> &core_backend::BackendAnalysisDiscovery {
-        &self.inner
-    }
-
     fn from_parts(
         files: Vec<DiscoveredFile>,
         workspaces: Vec<WorkspaceInfo>,
@@ -193,33 +194,47 @@ impl AnalysisDiscovery {
         workspaces_ms: f64,
     ) -> Self {
         Self {
-            inner: core_backend::BackendAnalysisDiscovery::from_parts(
-                files,
-                workspaces,
-                root_pkg,
-                config_candidates,
-                discover_ms,
-                workspaces_ms,
-            ),
+            files,
+            workspaces,
+            root_pkg,
+            config_candidates,
+            discover_ms,
+            workspaces_ms,
         }
     }
 
     /// Discovered source files, indexed by stable `FileId` for this session.
     #[must_use]
     pub fn files(&self) -> &[DiscoveredFile] {
-        self.inner.files()
+        &self.files
     }
 
     /// Discovered workspace packages for this session.
     #[must_use]
     pub fn workspaces(&self) -> &[WorkspaceInfo] {
-        self.inner.workspaces()
+        &self.workspaces
+    }
+
+    pub(crate) fn root_pkg(&self) -> Option<&PackageJson> {
+        self.root_pkg.as_ref()
+    }
+
+    pub(crate) fn config_candidates(&self) -> &[PathBuf] {
+        &self.config_candidates
+    }
+
+    pub(crate) fn discover_ms(&self) -> f64 {
+        self.discover_ms
+    }
+
+    pub(crate) fn workspaces_ms(&self) -> f64 {
+        self.workspaces_ms
     }
 
     /// Consume this discovery prelude and return its source file registry.
     #[must_use]
     pub fn into_files(self) -> Vec<DiscoveredFile> {
-        self.inner.into_files()
+        self.files
     }
 }
 

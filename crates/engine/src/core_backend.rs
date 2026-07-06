@@ -4,8 +4,7 @@
 //! `fallow-core` directly. The goal is to keep core-backed orchestration
 //! contained while the engine-owned contracts continue to stabilize.
 
-use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceInfo};
-use fallow_types::discover::DiscoveredFile;
+use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig};
 use fallow_types::trace::PipelineTimings;
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
@@ -19,49 +18,6 @@ use crate::{
     results::AnalysisResults,
     source::ModuleInfo,
 };
-
-#[derive(Debug, Clone)]
-pub struct BackendAnalysisDiscovery {
-    inner: fallow_core::AnalysisDiscovery,
-}
-
-impl BackendAnalysisDiscovery {
-    pub fn from_parts(
-        files: Vec<DiscoveredFile>,
-        workspaces: Vec<WorkspaceInfo>,
-        root_pkg: Option<PackageJson>,
-        config_candidates: Vec<PathBuf>,
-        discover_ms: f64,
-        workspaces_ms: f64,
-    ) -> Self {
-        Self {
-            inner: fallow_core::AnalysisDiscovery::from_parts(
-                files,
-                workspaces,
-                root_pkg,
-                config_candidates,
-                discover_ms,
-                workspaces_ms,
-            ),
-        }
-    }
-
-    fn as_core(&self) -> &fallow_core::AnalysisDiscovery {
-        &self.inner
-    }
-
-    pub fn files(&self) -> &[DiscoveredFile] {
-        self.inner.files()
-    }
-
-    pub fn workspaces(&self) -> &[WorkspaceInfo] {
-        self.inner.workspaces()
-    }
-
-    pub fn into_files(self) -> Vec<DiscoveredFile> {
-        self.inner.into_files()
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParseMetrics {
@@ -145,7 +101,15 @@ pub fn prepare_dead_code_backend_prelude<'a>(
     config: &'a ResolvedConfig,
     discovery: &'a AnalysisDiscovery,
 ) -> EngineResult<DeadCodeBackendPrelude<'a>> {
-    fallow_core::prepare_dead_code_backend_prelude(config, discovery.as_backend().as_core())
+    let core_discovery = fallow_core::AnalysisDiscovery::from_parts(
+        discovery.files().to_vec(),
+        discovery.workspaces().to_vec(),
+        discovery.root_pkg().cloned(),
+        discovery.config_candidates().to_vec(),
+        discovery.discover_ms(),
+        discovery.workspaces_ms(),
+    );
+    fallow_core::prepare_dead_code_backend_prelude(config, core_discovery)
         .map(|inner| DeadCodeBackendPrelude { inner })
         .map_err(engine_error)
 }

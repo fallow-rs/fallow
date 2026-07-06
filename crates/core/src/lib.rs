@@ -58,7 +58,7 @@ use rustc_hash::FxHashSet;
 use trace::PipelineTimings;
 
 const UNDECLARED_WORKSPACE_WARNING_PREVIEW: usize = 5;
-type LoadedWorkspacePackage<'a> = (&'a fallow_config::WorkspaceInfo, PackageJson);
+type LoadedWorkspacePackage = (fallow_config::WorkspaceInfo, PackageJson);
 
 fn record_graph_package_usage(
     graph: &mut graph::ModuleGraph,
@@ -549,13 +549,13 @@ impl<'a> AnalysisSession<'a> {
         self.project.workspaces()
     }
 
-    fn load_workspace_packages(&self) -> Vec<LoadedWorkspacePackage<'_>> {
+    fn load_workspace_packages(&self) -> Vec<LoadedWorkspacePackage> {
         load_workspace_packages(self.workspaces())
     }
 
     fn run_plugins_and_scripts(
         &self,
-        workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+        workspace_pkgs: &[LoadedWorkspacePackage],
     ) -> Result<(plugins::AggregatedPluginResult, f64, f64), FallowError> {
         run_plugins_and_scripts(&PluginScriptInput {
             config: self.config,
@@ -586,7 +586,7 @@ impl<'a> AnalysisSession<'a> {
 
     fn run_owned_core(
         &self,
-        workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+        workspace_pkgs: &[LoadedWorkspacePackage],
         plugin_result: &plugins::AggregatedPluginResult,
         mut modules: Vec<extract::ModuleInfo>,
         collect_usages: bool,
@@ -715,7 +715,7 @@ struct PluginScriptInput<'a> {
     files: &'a [discover::DiscoveredFile],
     workspaces: &'a [fallow_config::WorkspaceInfo],
     root_pkg: Option<&'a PackageJson>,
-    workspace_pkgs: &'a [LoadedWorkspacePackage<'a>],
+    workspace_pkgs: &'a [LoadedWorkspacePackage],
     config_candidates: &'a [std::path::PathBuf],
 }
 
@@ -768,8 +768,8 @@ pub struct DeadCodeBackendPrelude<'a> {
     config: &'a ResolvedConfig,
     pipeline_start: Instant,
     progress: progress::AnalysisProgress,
-    discovery: &'a AnalysisDiscovery,
-    workspace_pkgs: Vec<LoadedWorkspacePackage<'a>>,
+    discovery: AnalysisDiscovery,
+    workspace_pkgs: Vec<LoadedWorkspacePackage>,
     plugin_result: plugins::AggregatedPluginResult,
     plugins_ms: f64,
     scripts_ms: f64,
@@ -845,10 +845,10 @@ pub struct DeadCodeDetectorRun {
 /// # Errors
 ///
 /// Returns an error if plugin detection fails.
-pub fn prepare_dead_code_backend_prelude<'a>(
-    config: &'a ResolvedConfig,
-    discovery: &'a AnalysisDiscovery,
-) -> Result<DeadCodeBackendPrelude<'a>, FallowError> {
+pub fn prepare_dead_code_backend_prelude(
+    config: &ResolvedConfig,
+    discovery: AnalysisDiscovery,
+) -> Result<DeadCodeBackendPrelude<'_>, FallowError> {
     let progress = new_analysis_progress(config);
     let pipeline_start = Instant::now();
     let workspace_pkgs = load_workspace_packages(&discovery.workspaces);
@@ -1028,7 +1028,7 @@ struct AnalysisCoreSharedInput<'a> {
     files: &'a [discover::DiscoveredFile],
     workspaces: &'a [fallow_config::WorkspaceInfo],
     root_pkg: Option<&'a PackageJson>,
-    workspace_pkgs: &'a [LoadedWorkspacePackage<'a>],
+    workspace_pkgs: &'a [LoadedWorkspacePackage],
     plugin_result: &'a plugins::AggregatedPluginResult,
 }
 
@@ -1771,13 +1771,13 @@ fn load_root_package_json(config: &ResolvedConfig) -> Option<PackageJson> {
 
 fn load_workspace_packages(
     workspaces: &[fallow_config::WorkspaceInfo],
-) -> Vec<LoadedWorkspacePackage<'_>> {
+) -> Vec<LoadedWorkspacePackage> {
     workspaces
         .iter()
         .filter_map(|ws| {
             PackageJson::load(&ws.root.join("package.json"))
                 .ok()
-                .map(|pkg| (ws, pkg))
+                .map(|pkg| (ws.clone(), pkg))
         })
         .collect()
 }
@@ -1786,7 +1786,7 @@ fn analyze_all_scripts(
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
     root_pkg: Option<&PackageJson>,
-    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+    workspace_pkgs: &[LoadedWorkspacePackage],
     plugin_result: &mut plugins::AggregatedPluginResult,
 ) {
     let all_dep_names = collect_all_dependency_names(root_pkg, workspace_pkgs);
@@ -1821,7 +1821,7 @@ fn analyze_all_scripts(
 /// Gather sorted, deduped dependency names across the root and workspace packages.
 fn collect_all_dependency_names(
     root_pkg: Option<&PackageJson>,
-    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+    workspace_pkgs: &[LoadedWorkspacePackage],
 ) -> Vec<String> {
     let mut all_dep_names: Vec<String> = Vec::new();
     if let Some(pkg) = root_pkg {
@@ -1838,7 +1838,7 @@ fn collect_all_dependency_names(
 /// Gather the union of script names declared in the root and workspace packages.
 fn collect_all_script_names(
     root_pkg: Option<&PackageJson>,
-    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+    workspace_pkgs: &[LoadedWorkspacePackage],
 ) -> FxHashSet<String> {
     let mut all_script_names: FxHashSet<String> = FxHashSet::default();
     if let Some(pkg) = root_pkg
@@ -1923,7 +1923,7 @@ type WsScriptOut = (
 
 fn analyze_workspace_scripts(
     config: &ResolvedConfig,
-    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+    workspace_pkgs: &[LoadedWorkspacePackage],
     bin_map: &rustc_hash::FxHashMap<String, String>,
     all_dep_set: &FxHashSet<String>,
     plugin_result: &mut plugins::AggregatedPluginResult,
@@ -2015,7 +2015,7 @@ fn discover_all_entry_points(
     files: &[discover::DiscoveredFile],
     workspaces: &[fallow_config::WorkspaceInfo],
     root_pkg: Option<&PackageJson>,
-    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+    workspace_pkgs: &[LoadedWorkspacePackage],
     plugin_result: &plugins::AggregatedPluginResult,
 ) -> discover::CategorizedEntryPoints {
     let mut entry_points = discover::CategorizedEntryPoints::default();
@@ -2116,7 +2116,7 @@ fn append_package_file_asset_patterns(
 fn append_workspace_package_file_asset_patterns(
     result: &mut plugins::AggregatedPluginResult,
     config: &ResolvedConfig,
-    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+    workspace_pkgs: &[LoadedWorkspacePackage],
 ) {
     for (ws, ws_pkg) in workspace_pkgs {
         let ws_prefix = ws
@@ -2135,7 +2135,7 @@ fn run_plugins(
     files: &[discover::DiscoveredFile],
     workspaces: &[fallow_config::WorkspaceInfo],
     root_pkg: Option<&PackageJson>,
-    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+    workspace_pkgs: &[LoadedWorkspacePackage],
     config_candidates: &[std::path::PathBuf],
 ) -> Result<plugins::AggregatedPluginResult, FallowError> {
     let registry = plugins::PluginRegistry::new(config.external_plugins.clone());
@@ -2230,7 +2230,7 @@ fn run_root_plugins(
 fn run_workspace_plugins(
     registry: &plugins::PluginRegistry,
     config: &ResolvedConfig,
-    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+    workspace_pkgs: &[LoadedWorkspacePackage],
     file_paths: &[std::path::PathBuf],
     root_active_plugins: &[String],
     candidate_index: Option<&plugins::registry::ConfigCandidateIndex>,
@@ -2338,7 +2338,7 @@ fn gate_auto_import_entry_patterns(
 }
 
 fn bucket_files_by_workspace(
-    workspace_pkgs: &[LoadedWorkspacePackage<'_>],
+    workspace_pkgs: &[LoadedWorkspacePackage],
     file_paths: &[std::path::PathBuf],
 ) -> Vec<Vec<(std::path::PathBuf, String)>> {
     use rayon::prelude::*;
@@ -2779,14 +2779,14 @@ mod tests {
         };
         let workspace_pkgs = vec![
             (
-                &ui,
+                ui,
                 fallow_config::PackageJson {
                     name: Some("ui".to_string()),
                     ..Default::default()
                 },
             ),
             (
-                &api,
+                api,
                 fallow_config::PackageJson {
                     name: Some("api".to_string()),
                     ..Default::default()
