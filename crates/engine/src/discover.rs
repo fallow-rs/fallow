@@ -121,6 +121,20 @@ pub struct CategorizedEntryPoints {
 }
 
 impl CategorizedEntryPoints {
+    pub fn push_runtime(&mut self, entry: EntryPoint) {
+        self.runtime.push(entry.clone());
+        self.all.push(entry);
+    }
+
+    pub fn push_test(&mut self, entry: EntryPoint) {
+        self.test.push(entry.clone());
+        self.all.push(entry);
+    }
+
+    pub fn push_support(&mut self, entry: EntryPoint) {
+        self.all.push(entry);
+    }
+
     #[must_use]
     pub fn dedup(mut self) -> Self {
         dedup_entry_paths(&mut self.all);
@@ -873,7 +887,7 @@ pub fn discover_plugin_entry_points(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
 ) -> Vec<EntryPoint> {
-    core_backend::discover_plugin_entry_points(plugin_result.as_backend(), config, files)
+    crate::entry_points::discover_plugin_entry_points(plugin_result, config, files)
 }
 
 #[cfg(test)]

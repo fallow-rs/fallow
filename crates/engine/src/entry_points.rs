@@ -1,7 +1,9 @@
 use std::path::{Component, Path, PathBuf};
 
-use fallow_config::{PackageJson, ResolvedConfig};
+use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+use fallow_types::path_util::is_absolute_path_any_platform;
+use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::discover_walk::SOURCE_EXTENSIONS;
@@ -873,6 +875,295 @@ pub fn discover_workspace_entry_points(
     let discovery = discover_workspace_entry_points_with_warnings(ws_root, config, all_files);
     warn_skipped_entry_summary(&discovery.skipped_entries);
     discovery.entries
+}
+
+/// Converts plugin-discovered patterns and setup files into concrete entry points.
+#[must_use]
+pub fn discover_plugin_entry_points(
+    plugin_result: &crate::plugins::AggregatedPluginResult,
+    config: &ResolvedConfig,
+    files: &[DiscoveredFile],
+) -> Vec<EntryPoint> {
+    let mut entries = crate::discover::CategorizedEntryPoints::default();
+
+    let relative_paths = relative_paths_for(files, &config.root);
+    let (glob_set, glob_meta) = build_plugin_glob_meta(plugin_result);
+    if let Some(glob_set) = glob_set.filter(|set| !set.is_empty()) {
+        match_plugin_entry_files(&mut entries, &glob_set, &glob_meta, &relative_paths, files);
+    }
+
+    push_plugin_setup_files(&mut entries, &config.root, plugin_result);
+
+    entries.dedup().all
+}
+
+fn build_plugin_glob_meta(
+    plugin_result: &crate::plugins::AggregatedPluginResult,
+) -> (Option<globset::GlobSet>, Vec<CompiledEntryRule>) {
+    let mut builder = globset::GlobSetBuilder::new();
+    let mut glob_meta = Vec::new();
+    for entry_pattern in plugin_result.entry_patterns() {
+        if let Some((include, compiled)) = compile_plugin_entry_rule(&entry_pattern, plugin_result)
+        {
+            builder.add(include);
+            glob_meta.push(compiled);
+        }
+    }
+    for support_pattern in plugin_result.support_patterns() {
+        let Ok(glob) = globset::GlobBuilder::new(&support_pattern.pattern)
+            .literal_separator(true)
+            .build()
+        else {
+            continue;
+        };
+        builder.add(glob);
+        let rule = crate::plugins::PluginPathRule {
+            pattern: support_pattern.pattern,
+            exclude_globs: Vec::new(),
+            exclude_regexes: Vec::new(),
+            exclude_segment_regexes: Vec::new(),
+        };
+        if let Some(path) = CompiledPathRule::for_entry_rule(&rule, "support entry pattern") {
+            glob_meta.push(CompiledEntryRule {
+                path,
+                plugin_name: support_pattern.plugin_name,
+                role: EntryPointRole::Support,
+            });
+        }
+    }
+    (builder.build().ok(), glob_meta)
+}
+
+fn match_plugin_entry_files(
+    entries: &mut crate::discover::CategorizedEntryPoints,
+    glob_set: &globset::GlobSet,
+    glob_meta: &[CompiledEntryRule],
+    relative_paths: &[String],
+    files: &[DiscoveredFile],
+) {
+    for (idx, rel) in relative_paths.iter().enumerate() {
+        let matches = glob_set
+            .matches(rel)
+            .into_iter()
+            .filter(|match_idx| glob_meta[*match_idx].matches(rel))
+            .collect::<Vec<_>>();
+        if matches.is_empty() {
+            continue;
+        }
+        let name = glob_meta[matches[0]].plugin_name.clone();
+        let entry = EntryPoint {
+            path: files[idx].path.clone(),
+            source: EntryPointSource::Plugin { name },
+        };
+        categorize_plugin_match(entries, entry, glob_meta, &matches);
+    }
+}
+
+fn categorize_plugin_match(
+    entries: &mut crate::discover::CategorizedEntryPoints,
+    entry: EntryPoint,
+    glob_meta: &[CompiledEntryRule],
+    matches: &[usize],
+) {
+    let mut has_runtime = false;
+    let mut has_test = false;
+    let mut has_support = false;
+    for &match_idx in matches {
+        match glob_meta[match_idx].role {
+            EntryPointRole::Runtime => has_runtime = true,
+            EntryPointRole::Test => has_test = true,
+            EntryPointRole::Support => has_support = true,
+        }
+    }
+
+    if has_runtime {
+        entries.push_runtime(entry.clone());
+    }
+    if has_test {
+        entries.push_test(entry.clone());
+    }
+    if has_support || (!has_runtime && !has_test) {
+        entries.push_support(entry);
+    }
+}
+
+fn push_plugin_setup_files(
+    entries: &mut crate::discover::CategorizedEntryPoints,
+    root: &Path,
+    plugin_result: &crate::plugins::AggregatedPluginResult,
+) {
+    for setup_file in plugin_result.setup_files() {
+        let resolved = resolve_plugin_setup_file(root, &setup_file.path);
+        if resolved.exists() {
+            entries.push_support(EntryPoint {
+                path: resolved,
+                source: EntryPointSource::Plugin {
+                    name: setup_file.plugin_name,
+                },
+            });
+            continue;
+        }
+        for ext in SOURCE_EXTENSIONS {
+            let with_ext = resolved.with_extension(ext);
+            if with_ext.exists() {
+                entries.push_support(EntryPoint {
+                    path: with_ext,
+                    source: EntryPointSource::Plugin {
+                        name: setup_file.plugin_name.clone(),
+                    },
+                });
+                break;
+            }
+        }
+    }
+}
+
+fn resolve_plugin_setup_file(root: &Path, setup_file: &Path) -> PathBuf {
+    if is_absolute_path_any_platform(setup_file) {
+        setup_file.to_path_buf()
+    } else {
+        root.join(setup_file)
+    }
+}
+
+struct CompiledEntryRule {
+    path: CompiledPathRule,
+    plugin_name: String,
+    role: EntryPointRole,
+}
+
+impl CompiledEntryRule {
+    fn matches(&self, path: &str) -> bool {
+        self.path.matches(path)
+    }
+}
+
+fn compile_plugin_entry_rule(
+    entry_pattern: &crate::plugins::PluginEntryPattern,
+    plugin_result: &crate::plugins::AggregatedPluginResult,
+) -> Option<(globset::Glob, CompiledEntryRule)> {
+    let include = match globset::GlobBuilder::new(&entry_pattern.rule.pattern)
+        .literal_separator(true)
+        .build()
+    {
+        Ok(glob) => glob,
+        Err(err) => {
+            tracing::warn!(
+                "invalid entry pattern '{}': {err}",
+                entry_pattern.rule.pattern
+            );
+            return None;
+        }
+    };
+    let role = plugin_result.entry_point_role(&entry_pattern.plugin_name);
+    Some((
+        include,
+        CompiledEntryRule {
+            path: CompiledPathRule::for_entry_rule(&entry_pattern.rule, "entry pattern")?,
+            plugin_name: entry_pattern.plugin_name.clone(),
+            role,
+        },
+    ))
+}
+
+#[derive(Debug, Clone)]
+struct CompiledPathRule {
+    include: globset::GlobMatcher,
+    exclude_globs: Vec<globset::GlobMatcher>,
+    exclude_regexes: Vec<Regex>,
+    exclude_segment_regexes: Vec<Regex>,
+}
+
+impl CompiledPathRule {
+    fn for_entry_rule(rule: &crate::plugins::PluginPathRule, rule_kind: &str) -> Option<Self> {
+        let include = match globset::GlobBuilder::new(&rule.pattern)
+            .literal_separator(true)
+            .build()
+        {
+            Ok(glob) => glob.compile_matcher(),
+            Err(err) => {
+                tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
+                return None;
+            }
+        };
+        Some(Self {
+            include,
+            exclude_globs: compile_excluded_globs(&rule.exclude_globs, rule_kind, &rule.pattern),
+            exclude_regexes: compile_excluded_regexes(
+                &rule.exclude_regexes,
+                rule_kind,
+                &rule.pattern,
+            ),
+            exclude_segment_regexes: compile_excluded_regexes(
+                &rule.exclude_segment_regexes,
+                rule_kind,
+                &rule.pattern,
+            ),
+        })
+    }
+
+    fn matches(&self, path: &str) -> bool {
+        self.include.is_match(path)
+            && !self.exclude_globs.iter().any(|glob| glob.is_match(path))
+            && !self
+                .exclude_regexes
+                .iter()
+                .any(|regex| regex.is_match(path))
+            && !path.split('/').any(|segment| {
+                self.exclude_segment_regexes
+                    .iter()
+                    .any(|regex| regex.is_match(segment))
+            })
+    }
+}
+
+fn compile_excluded_globs(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Vec<globset::GlobMatcher> {
+    patterns
+        .iter()
+        .filter_map(|pattern| {
+            match globset::GlobBuilder::new(pattern)
+                .literal_separator(true)
+                .build()
+            {
+                Ok(glob) => Some(glob.compile_matcher()),
+                Err(err) => {
+                    tracing::warn!(
+                        "skipping invalid excluded glob '{}' for {} '{}': {err}",
+                        pattern,
+                        rule_kind,
+                        rule_pattern
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn compile_excluded_regexes(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Vec<Regex> {
+    patterns
+        .iter()
+        .filter_map(|pattern| match Regex::new(pattern) {
+            Ok(regex) => Some(regex),
+            Err(err) => {
+                tracing::warn!(
+                    "skipping invalid excluded regex '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                None
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -36,6 +36,7 @@ oxc_span = { workspace = true }
 oxc_syntax = { workspace = true }
 oxc_coverage_instrument = { workspace = true }
 rayon = { workspace = true }
+regex = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

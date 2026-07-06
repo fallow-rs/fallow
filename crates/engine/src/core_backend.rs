@@ -11,8 +11,13 @@ use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    EngineResult, discover::AnalysisDiscovery, engine_error, module_graph::RetainedModuleGraph,
-    results::AnalysisResults, source::ModuleInfo,
+    EngineResult,
+    discover::AnalysisDiscovery,
+    engine_error,
+    module_graph::RetainedModuleGraph,
+    plugins::{PluginEntryPattern, PluginNamedPattern, PluginPathRule, PluginSetupFile},
+    results::AnalysisResults,
+    source::ModuleInfo,
 };
 
 #[derive(Debug, Clone)]
@@ -322,6 +327,54 @@ impl BackendAggregatedPluginResult {
         }
     }
 
+    pub(crate) fn entry_patterns(&self) -> Vec<PluginEntryPattern> {
+        self.inner
+            .entry_patterns
+            .iter()
+            .map(|(rule, plugin_name)| PluginEntryPattern {
+                rule: PluginPathRule {
+                    pattern: rule.pattern.clone(),
+                    exclude_globs: rule.exclude_globs.clone(),
+                    exclude_regexes: rule.exclude_regexes.clone(),
+                    exclude_segment_regexes: rule.exclude_segment_regexes.clone(),
+                },
+                plugin_name: plugin_name.clone(),
+            })
+            .collect()
+    }
+
+    pub(crate) fn support_patterns(&self) -> Vec<PluginNamedPattern> {
+        self.inner
+            .discovered_always_used
+            .iter()
+            .chain(self.inner.always_used.iter())
+            .chain(self.inner.fixture_patterns.iter())
+            .map(|(pattern, plugin_name)| PluginNamedPattern {
+                pattern: pattern.clone(),
+                plugin_name: plugin_name.clone(),
+            })
+            .collect()
+    }
+
+    pub(crate) fn setup_files(&self) -> Vec<PluginSetupFile> {
+        self.inner
+            .setup_files
+            .iter()
+            .map(|(path, plugin_name)| PluginSetupFile {
+                path: path.clone(),
+                plugin_name: plugin_name.clone(),
+            })
+            .collect()
+    }
+
+    pub(crate) fn entry_point_role(&self, plugin_name: &str) -> fallow_config::EntryPointRole {
+        self.inner
+            .entry_point_roles
+            .get(plugin_name)
+            .copied()
+            .unwrap_or(fallow_config::EntryPointRole::Support)
+    }
+
     #[cfg(test)]
     pub fn push_active_plugin_for_test(&mut self, plugin_name: impl Into<String>) {
         self.inner.active_plugins.push(plugin_name.into());
@@ -360,12 +413,4 @@ impl BackendPluginRegistry {
             .map(Into::into)
             .map_err(|errors| errors.into_iter().map(Into::into).collect())
     }
-}
-
-pub fn discover_plugin_entry_points(
-    plugin_result: &BackendAggregatedPluginResult,
-    config: &ResolvedConfig,
-    files: &[fallow_types::discover::DiscoveredFile],
-) -> Vec<fallow_types::discover::EntryPoint> {
-    fallow_core::discover::discover_plugin_entry_points(&plugin_result.inner, config, files)
 }
