@@ -11,7 +11,7 @@ use fallow_config::{
 pub use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 use rustc_hash::FxHashSet;
 
-use crate::{EngineError, EngineResult, core_backend};
+use crate::{EngineError, EngineResult, core_backend, plugins::PluginRegistry};
 
 const UNDECLARED_WORKSPACE_WARNING_PREVIEW: usize = 5;
 
@@ -364,7 +364,32 @@ pub fn collect_plugin_hidden_dir_scopes(
     root_pkg: Option<&PackageJson>,
     workspaces: &[WorkspaceInfo],
 ) -> Vec<HiddenDirScope> {
-    core_backend::collect_plugin_hidden_dir_scopes(config, root_pkg, workspaces)
+    let registry = PluginRegistry::new(config.external_plugins.clone());
+    let mut scopes = Vec::new();
+
+    if let Some(pkg) = root_pkg {
+        push_plugin_hidden_dir_scope(&mut scopes, &registry, pkg, &config.root);
+    }
+
+    for ws in workspaces {
+        if let Ok(pkg) = PackageJson::load(&ws.root.join("package.json")) {
+            push_plugin_hidden_dir_scope(&mut scopes, &registry, &pkg, &ws.root);
+        }
+    }
+
+    scopes
+}
+
+fn push_plugin_hidden_dir_scope(
+    scopes: &mut Vec<HiddenDirScope>,
+    registry: &PluginRegistry,
+    pkg: &PackageJson,
+    root: &Path,
+) {
+    let dirs = registry.discovery_hidden_dirs(pkg, root);
+    if !dirs.is_empty() {
+        scopes.push(HiddenDirScope::new(root.to_path_buf(), dirs));
+    }
 }
 
 /// Collect plugin and script-derived hidden directory scopes.
@@ -416,9 +441,11 @@ pub fn discover_plugin_entry_points(
 mod tests {
     use std::path::PathBuf;
 
+    use fallow_config::PackageJson;
+
     use super::{
         ALLOWED_HIDDEN_DIRS, CategorizedEntryPoints, EntryPoint, EntryPointSource, HiddenDirScope,
-        is_allowed_hidden_dir,
+        collect_plugin_hidden_dir_scopes, is_allowed_hidden_dir,
     };
 
     #[test]
@@ -435,6 +462,31 @@ mod tests {
             assert!(is_allowed_hidden_dir(std::ffi::OsStr::new(dir)));
         }
         assert!(!is_allowed_hidden_dir(std::ffi::OsStr::new(".git")));
+    }
+
+    #[test]
+    fn plugin_hidden_dir_scopes_are_engine_owned() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = fallow_config::FallowConfig::default().resolve(
+            dir.path().to_path_buf(),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
+        );
+        let pkg: PackageJson = serde_json::from_value(serde_json::json!({
+            "devDependencies": {
+                "@react-router/dev": "^7.0.0"
+            }
+        }))
+        .expect("valid package fixture");
+
+        let scopes = collect_plugin_hidden_dir_scopes(&config, Some(&pkg), &[]);
+
+        assert_eq!(scopes.len(), 1);
+        assert_eq!(scopes[0].root(), dir.path());
+        assert_eq!(scopes[0].dirs(), [".client", ".server"]);
     }
 
     #[test]

@@ -297,17 +297,6 @@ fn core_hidden_dir_scopes(scopes: &[HiddenDirScope]) -> Vec<fallow_core::discove
     scopes.iter().map(core_hidden_dir_scope).collect()
 }
 
-pub fn collect_plugin_hidden_dir_scopes(
-    config: &ResolvedConfig,
-    root_pkg: Option<&PackageJson>,
-    workspaces: &[WorkspaceInfo],
-) -> Vec<HiddenDirScope> {
-    fallow_core::discover::collect_plugin_hidden_dir_scopes(config, root_pkg, workspaces)
-        .iter()
-        .map(hidden_dir_scope)
-        .collect()
-}
-
 pub fn collect_hidden_dir_scopes(
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
