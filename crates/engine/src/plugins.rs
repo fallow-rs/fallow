@@ -9,32 +9,163 @@ use crate::core_backend;
 pub mod registry {
     use crate::core_backend;
 
+    const BUILTIN_PLUGIN_NAMES: &[&str] = &[
+        "nextjs",
+        "nuxt",
+        "pinia",
+        "remix",
+        "astro",
+        "browser-extension",
+        "wxt",
+        "angular",
+        "react-router",
+        "redwoodsdk",
+        "tanstack-router",
+        "react-native",
+        "expo",
+        "expo-router",
+        "firebase",
+        "nestjs",
+        "adonis",
+        "docusaurus",
+        "gatsby",
+        "sveltekit",
+        "nitro",
+        "capacitor",
+        "ionic",
+        "sanity",
+        "supabase",
+        "vitepress",
+        "rspress",
+        "next-intl",
+        "relay",
+        "electron",
+        "i18next",
+        "qwik",
+        "convex",
+        "lit",
+        "lexical",
+        "obsidian",
+        "content-collections",
+        "contentlayer",
+        "fumadocs",
+        "mintlify",
+        "velite",
+        "ember",
+        "vite",
+        "vscode",
+        "webpack",
+        "rollup",
+        "rolldown",
+        "rspack",
+        "rsbuild",
+        "tsup",
+        "tsdown",
+        "pkg-utils",
+        "parcel",
+        "vitest",
+        "jest",
+        "playwright",
+        "cypress",
+        "mocha",
+        "ava",
+        "tap",
+        "tsd",
+        "k6",
+        "storybook",
+        "stryker",
+        "karma",
+        "cucumber",
+        "webdriverio",
+        "eslint",
+        "biome",
+        "stylelint",
+        "prettier",
+        "oxlint",
+        "markdownlint",
+        "cspell",
+        "remark",
+        "typescript",
+        "babel",
+        "swc",
+        "tailwind",
+        "postcss",
+        "unocss",
+        "pandacss",
+        "prisma",
+        "drizzle",
+        "knex",
+        "typeorm",
+        "kysely",
+        "turborepo",
+        "nx",
+        "changesets",
+        "syncpack",
+        "commitlint",
+        "commitizen",
+        "commit-and-tag-version",
+        "semantic-release",
+        "danger",
+        "hardhat",
+        "vercel",
+        "wrangler",
+        "opennext-cloudflare",
+        "sentry",
+        "husky",
+        "lint-staged",
+        "lefthook",
+        "simple-git-hooks",
+        "svgo",
+        "svgr",
+        "graphql-codegen",
+        "typedoc",
+        "openapi-ts",
+        "plop",
+        "c8",
+        "nyc",
+        "msw",
+        "napi-rs",
+        "opencode",
+        "nodemon",
+        "pm2",
+        "dependency-cruiser",
+        "wuchale",
+        "varlock",
+        "pnpm",
+        "bun",
+    ];
+
     /// Invalid user-authored regex extracted from a plugin config file.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct PluginRegexValidationError {
-        pub(super) inner: core_backend::BackendPluginRegexValidationError,
+        message: String,
     }
 
     impl From<core_backend::BackendPluginRegexValidationError> for PluginRegexValidationError {
         fn from(inner: core_backend::BackendPluginRegexValidationError) -> Self {
-            Self { inner }
+            Self {
+                message: inner.message(),
+            }
         }
     }
 
     /// Names of every built-in framework plugin in registry order.
     #[must_use]
     pub fn builtin_plugin_names() -> Vec<&'static str> {
-        core_backend::builtin_plugin_names()
+        BUILTIN_PLUGIN_NAMES.to_vec()
     }
 
     /// Format plugin regex validation errors for user-facing diagnostics.
     #[must_use]
     pub fn format_plugin_regex_errors(errors: &[PluginRegexValidationError]) -> String {
-        let backend_errors = errors
+        let joined = errors
             .iter()
-            .map(|error| error.inner.clone())
+            .map(|error| error.message.as_str())
             .collect::<Vec<_>>();
-        core_backend::format_plugin_regex_errors(&backend_errors)
+        format!(
+            "invalid plugin regex configuration:\n  - {}\n\nRewrite the plugin config with Rust-compatible regex syntax, or remove unsupported constructs such as JavaScript lookahead and lookbehind.",
+            joined.join("\n  - ")
+        )
     }
 }
 

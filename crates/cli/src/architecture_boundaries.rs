@@ -1382,8 +1382,6 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::discover::discover_workspace_entry_points",
         "fallow_core::discover::discover_plugin_entry_points",
         "fallow_core::plugins::registry::PluginRegexValidationError",
-        "fallow_core::plugins::registry::builtin_plugin_names",
-        "fallow_core::plugins::registry::format_plugin_regex_errors",
         "fallow_core::plugins::AggregatedPluginResult",
         "fallow_core::plugins::PluginRegistry",
     ];

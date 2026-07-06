@@ -352,16 +352,10 @@ impl From<fallow_core::plugins::registry::PluginRegexValidationError>
     }
 }
 
-pub fn builtin_plugin_names() -> Vec<&'static str> {
-    fallow_core::plugins::registry::builtin_plugin_names()
-}
-
-pub fn format_plugin_regex_errors(errors: &[BackendPluginRegexValidationError]) -> String {
-    let core_errors = errors
-        .iter()
-        .map(|error| error.inner.clone())
-        .collect::<Vec<_>>();
-    fallow_core::plugins::registry::format_plugin_regex_errors(&core_errors)
+impl BackendPluginRegexValidationError {
+    pub fn message(&self) -> String {
+        self.inner.to_string()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
