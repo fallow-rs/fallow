@@ -6,12 +6,14 @@ use fallow_config::DuplicatesConfig;
 use fallow_types::discover::DiscoveredFile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{core_backend, results::DuplicationAnalysis};
+use crate::results::DuplicationAnalysis;
 
-#[path = "duplicates_deepdive.rs"]
-mod deepdive;
-#[path = "duplicates_families.rs"]
-mod families;
+#[path = "duplication_detector/mod.rs"]
+mod detector;
+
+#[cfg(test)]
+pub(crate) use detector::{normalize, token_types};
+pub(crate) use detector::{tokenize, types};
 
 pub type CloneGroup = fallow_types::duplicates::CloneGroup;
 pub type CloneInstance = fallow_types::duplicates::CloneInstance;
@@ -21,16 +23,16 @@ pub type DuplicationStats = fallow_types::duplicates::DuplicationStats;
 pub type RefactoringKind = fallow_types::duplicates::RefactoringKind;
 pub type RefactoringSuggestion = fallow_types::duplicates::RefactoringSuggestion;
 
-pub use deepdive::{
+pub use detector::{
     CloneFingerprintKey, CloneFingerprintSet, FINGERPRINT_PREFIX, clone_fingerprint,
     dominant_identifier, fingerprint_for_fragment, group_refactoring_suggestion,
 };
 
 /// Refresh clone-family and mirrored-directory fields after clone groups change.
 pub fn refresh_clone_families(report: &mut DuplicationReport, root: &Path) {
-    report.clone_families = families::group_into_families(&report.clone_groups, root);
+    report.clone_families = detector::families::group_into_families(&report.clone_groups, root);
     report.mirrored_directories =
-        families::detect_mirrored_directories(&report.clone_families, root);
+        detector::families::detect_mirrored_directories(&report.clone_families, root);
 }
 
 /// Recompute duplication statistics after clone groups have been filtered.
@@ -87,7 +89,13 @@ pub fn source_token_kinds_equivalent(
     base: &str,
     cross_language: bool,
 ) -> bool {
-    core_backend::source_token_kinds_equivalent(path, current, base, cross_language)
+    let current_tokens = detector::tokenize::tokenize_file(path, current, cross_language);
+    let base_tokens = detector::tokenize::tokenize_file(path, base, cross_language);
+    current_tokens
+        .tokens
+        .iter()
+        .map(|token| &token.kind)
+        .eq(base_tokens.tokens.iter().map(|token| &token.kind))
 }
 
 /// Run duplication detection on a discovered file set.
@@ -97,7 +105,7 @@ pub fn find_duplicates(
     files: &[DiscoveredFile],
     config: &DuplicatesConfig,
 ) -> DuplicationReport {
-    core_backend::find_duplicates(root, files, config)
+    detector::find_duplicates(root, files, config)
 }
 
 /// Run cached duplication detection inside the engine boundary.
@@ -108,7 +116,7 @@ pub fn find_duplicates_cached(
     config: &DuplicatesConfig,
     cache_dir: &Path,
 ) -> DuplicationReport {
-    core_backend::find_duplicates_cached(root, files, config, cache_dir)
+    detector::find_duplicates_cached(root, files, config, cache_dir)
 }
 
 /// Run duplication detection and include metadata about built-in ignored files.
@@ -119,7 +127,15 @@ pub fn find_duplicates_with_defaults(
     config: &DuplicatesConfig,
     cache_dir: Option<&Path>,
 ) -> DuplicationAnalysis {
-    core_backend::find_duplicates_with_defaults(root, files, config, cache_dir)
+    let (report, default_ignore_skips) = if let Some(cache_dir) = cache_dir {
+        detector::find_duplicates_cached_with_default_ignore_skips(root, files, config, cache_dir)
+    } else {
+        detector::find_duplicates_with_default_ignore_skips(root, files, config)
+    };
+    DuplicationAnalysis {
+        report,
+        default_ignore_skips,
+    }
 }
 
 /// Run focused duplication detection and include metadata about built-in ignored files.
@@ -131,13 +147,27 @@ pub fn find_duplicates_touching_files_with_defaults(
     changed_files: &[PathBuf],
     cache_dir: Option<&Path>,
 ) -> DuplicationAnalysis {
-    core_backend::find_duplicates_touching_files_with_defaults(
-        root,
-        files,
-        config,
-        changed_files,
-        cache_dir,
-    )
+    let changed_files = changed_files.iter().cloned().collect::<FxHashSet<_>>();
+    let (report, default_ignore_skips) = if let Some(cache_dir) = cache_dir {
+        detector::find_duplicates_touching_files_cached_with_default_ignore_skips(
+            root,
+            files,
+            config,
+            &changed_files,
+            cache_dir,
+        )
+    } else {
+        detector::find_duplicates_touching_files_with_default_ignore_skips(
+            root,
+            files,
+            config,
+            &changed_files,
+        )
+    };
+    DuplicationAnalysis {
+        report,
+        default_ignore_skips,
+    }
 }
 
 #[cfg(test)]

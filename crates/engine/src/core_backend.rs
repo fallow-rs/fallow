@@ -4,11 +4,8 @@
 //! `fallow-core` directly. The goal is to keep core-backed orchestration
 //! contained while the engine-owned contracts continue to stabilize.
 
-use fallow_config::{
-    DuplicatesConfig, ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceInfo,
-};
+use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceInfo};
 use fallow_types::discover::{DiscoveredFile, EntryPoint};
-use fallow_types::duplicates::DuplicationReport;
 use fallow_types::trace::PipelineTimings;
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
@@ -18,7 +15,7 @@ use crate::{
     discover::{AnalysisDiscovery, HiddenDirScope},
     engine_error,
     module_graph::RetainedModuleGraph,
-    results::{AnalysisResults, DuplicationAnalysis},
+    results::AnalysisResults,
     source::ModuleInfo,
 };
 
@@ -285,88 +282,6 @@ pub fn dead_code_pipeline_profile(
             duplication_ms: None,
             total_ms: prelude.elapsed_ms(),
         }),
-    }
-}
-
-pub fn source_token_kinds_equivalent(
-    path: &Path,
-    current: &str,
-    base: &str,
-    cross_language: bool,
-) -> bool {
-    let current_tokens =
-        fallow_core::duplicates::tokenize::tokenize_file(path, current, cross_language);
-    let base_tokens = fallow_core::duplicates::tokenize::tokenize_file(path, base, cross_language);
-    current_tokens
-        .tokens
-        .iter()
-        .map(|token| &token.kind)
-        .eq(base_tokens.tokens.iter().map(|token| &token.kind))
-}
-
-pub fn find_duplicates(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-) -> DuplicationReport {
-    fallow_core::duplicates::find_duplicates(root, files, config)
-}
-
-pub fn find_duplicates_cached(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-    cache_dir: &Path,
-) -> DuplicationReport {
-    fallow_core::duplicates::find_duplicates_cached(root, files, config, cache_dir)
-}
-
-pub fn find_duplicates_with_defaults(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-    cache_dir: Option<&Path>,
-) -> DuplicationAnalysis {
-    let (report, default_ignore_skips) = if let Some(cache_dir) = cache_dir {
-        fallow_core::duplicates::find_duplicates_cached_with_default_ignore_skips(
-            root, files, config, cache_dir,
-        )
-    } else {
-        fallow_core::duplicates::find_duplicates_with_default_ignore_skips(root, files, config)
-    };
-    DuplicationAnalysis {
-        report,
-        default_ignore_skips,
-    }
-}
-
-pub fn find_duplicates_touching_files_with_defaults(
-    root: &Path,
-    files: &[DiscoveredFile],
-    config: &DuplicatesConfig,
-    changed_files: &[PathBuf],
-    cache_dir: Option<&Path>,
-) -> DuplicationAnalysis {
-    let changed_files = changed_files.iter().cloned().collect::<FxHashSet<_>>();
-    let (report, default_ignore_skips) = if let Some(cache_dir) = cache_dir {
-        fallow_core::duplicates::find_duplicates_touching_files_cached_with_default_ignore_skips(
-            root,
-            files,
-            config,
-            &changed_files,
-            cache_dir,
-        )
-    } else {
-        fallow_core::duplicates::find_duplicates_touching_files_with_default_ignore_skips(
-            root,
-            files,
-            config,
-            &changed_files,
-        )
-    };
-    DuplicationAnalysis {
-        report,
-        default_ignore_skips,
     }
 }
 

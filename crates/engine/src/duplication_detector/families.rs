@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use fallow_types::duplicates::{
+use super::types::{
     CloneFamily, CloneGroup, MirroredDirectory, RefactoringKind, RefactoringSuggestion,
 };
 
@@ -239,7 +239,7 @@ pub fn detect_mirrored_directories(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::duplicates::CloneInstance;
+    use crate::duplicates::types::CloneInstance;
 
     fn instance(file: &str, start: usize, end: usize) -> CloneInstance {
         CloneInstance {

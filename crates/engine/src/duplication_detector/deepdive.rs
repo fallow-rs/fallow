@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
-use fallow_types::duplicates::{CloneGroup, CloneInstance, RefactoringKind, RefactoringSuggestion};
+use super::types::{CloneGroup, CloneInstance, RefactoringKind, RefactoringSuggestion};
 
 /// Prefix marking a clone-group fingerprint addressable via `--trace`.
 pub const FINGERPRINT_PREFIX: &str = "dup:";
@@ -183,7 +183,7 @@ impl CloneFingerprintSet {
 /// instances.
 ///
 /// The fingerprint is derived from the representative instance's raw source
-/// fragment (the first instance after the report sort step,
+/// fragment (the first instance after [`super::types::DuplicationReport::sort`],
 /// which orders instances by `(file, line)`), so it is:
 ///
 /// - content-derived, not line-derived (moving a clone down a file does not

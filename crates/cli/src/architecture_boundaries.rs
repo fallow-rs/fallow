@@ -1315,11 +1315,18 @@ fn engine_owns_duplication_pure_helpers_without_core_adapter() {
         "fallow_core::duplicates::fingerprint_for_fragment",
         "fallow_core::duplicates::dominant_identifier",
         "fallow_core::duplicates::families::",
+        "fallow_core::duplicates::tokenize::tokenize_file",
+        "fallow_core::duplicates::find_duplicates",
+        "fallow_core::duplicates::find_duplicates_cached",
+        "fallow_core::duplicates::find_duplicates_cached_with_default_ignore_skips",
+        "fallow_core::duplicates::find_duplicates_with_default_ignore_skips",
+        "fallow_core::duplicates::find_duplicates_touching_files_cached_with_default_ignore_skips",
+        "fallow_core::duplicates::find_duplicates_touching_files_with_default_ignore_skips",
         "pub struct BackendCloneFingerprintSet",
     ] {
         assert!(
             !core_backend.contains(forbidden),
-            "pure duplication helpers must stay engine-owned instead of core_backend adapter: {forbidden}"
+            "duplication detector code must stay engine-owned instead of core_backend adapter: {forbidden}"
         );
     }
 
@@ -1330,12 +1337,27 @@ fn engine_owns_duplication_pure_helpers_without_core_adapter() {
         "core_backend::fingerprint_for_fragment",
         "core_backend::dominant_identifier",
         "core_backend::refresh_clone_families",
+        "core_backend::source_token_kinds_equivalent",
+        "core_backend::find_duplicates",
+        "core_backend::find_duplicates_cached",
+        "core_backend::find_duplicates_with_defaults",
+        "core_backend::find_duplicates_touching_files_with_defaults",
     ] {
         assert!(
             !duplicates.contains(forbidden),
-            "engine duplicates helpers must not route pure helper behavior through {forbidden}"
+            "engine duplicates module must not route detector behavior through {forbidden}"
         );
     }
+
+    let detector =
+        read_source_without_line_comments("crates/engine/src/duplication_detector/mod.rs")
+            .expect("read engine duplication detector source");
+    assert!(
+        detector.contains("fn tokenize_corpus_for_duplicates")
+            && detector.contains("fn detect_and_postprocess")
+            && detector.contains("pub fn find_duplicates"),
+        "engine duplication detector must own tokenization and clone detection entry points"
+    );
 }
 
 #[test]
@@ -1352,13 +1374,6 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::resolve_dead_code_imports",
         "fallow_core::build_dead_code_graph",
         "fallow_core::run_dead_code_detectors",
-        "fallow_core::duplicates::tokenize::tokenize_file",
-        "fallow_core::duplicates::find_duplicates",
-        "fallow_core::duplicates::find_duplicates_cached",
-        "fallow_core::duplicates::find_duplicates_cached_with_default_ignore_skips",
-        "fallow_core::duplicates::find_duplicates_with_default_ignore_skips",
-        "fallow_core::duplicates::find_duplicates_touching_files_cached_with_default_ignore_skips",
-        "fallow_core::duplicates::find_duplicates_touching_files_with_default_ignore_skips",
         "fallow_core::discover::HiddenDirScope",
         "fallow_core::discover::is_allowed_hidden_dir",
         "fallow_core::discover::collect_plugin_hidden_dir_scopes",
