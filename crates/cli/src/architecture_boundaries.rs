@@ -15,6 +15,7 @@ fn repo_architecture_north_star_stays_documented() {
         "Session reuse before broad persistence",
         "Repo-policy as code",
         "Core stays backend-only",
+        "adapter boundary over the internal `fallow-core` backend",
     ] {
         assert!(
             migration_doc.contains(required),
@@ -25,6 +26,16 @@ fn repo_architecture_north_star_stays_documented() {
         !migration_doc.contains("ADR-008"),
         "public core migration doc must stay self-contained instead of requiring private ADR context"
     );
+    for forbidden in [
+        "while engine migration is in progress",
+        "while `fallow-engine` still builds on it",
+        "owns the migration boundary",
+    ] {
+        assert!(
+            !migration_doc.contains(forbidden),
+            "core migration doc must describe final backend boundaries, not migration leftovers: {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -37,6 +48,8 @@ fn architecture_invariants_doc_tracks_guarded_boundaries() {
         "manifest/docs drift",
         "drift-tested against `docs/output-schema.json`",
         "SARIF builders",
+        "Boundary Policy",
+        "`fallow-core` is a backend implementation crate",
     ] {
         assert!(
             doc.contains(required),
@@ -47,6 +60,18 @@ fn architecture_invariants_doc_tracks_guarded_boundaries() {
         !doc.contains("Broader layering rules still need human review"),
         "architecture invariants doc must not describe guarded boundaries as manual-only review"
     );
+    for forbidden in [
+        "Current Exceptions",
+        "while engine migration continues",
+        "known migration states",
+        "still owns some CI",
+        "move toward `fallow-output`",
+    ] {
+        assert!(
+            !doc.contains(forbidden),
+            "architecture invariants doc must describe final boundaries, not known leftovers: {forbidden}"
+        );
+    }
 }
 
 #[test]

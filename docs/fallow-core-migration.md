@@ -2,10 +2,10 @@
 
 `fallow-core` is an internal implementation crate. Starting with 2.76.0, the
 top-level `fallow_core::analyze*` entry points plus the detector helpers under
-`fallow_core::analyze::*` emit deprecation warnings. `fallow-core` remains a
-published implementation dependency while `fallow-engine` still builds on it,
-but it is no longer the supported Rust embedder surface. Use the published
-`fallow-api` facade or the typed `fallow-engine` layer instead.
+`fallow_core::analyze::*` emit deprecation warnings. `fallow-core` is published
+only because `fallow-engine` uses it as a private detector backend; it is not
+the supported Rust embedder surface. Use the published `fallow-api` facade or
+the typed `fallow-engine` layer instead.
 
 Use the supported embedder API in `fallow_api`. New Rust consumers should call
 the typed `run_*` functions (`run_dead_code`, `run_duplication`,
@@ -14,9 +14,9 @@ the typed `run_*` functions (`run_dead_code`, `run_duplication`,
 via the matching `serialize_*_programmatic_json` function.
 
 Use `fallow_engine` for in-process consumers that need typed analysis results.
-It owns the migration boundary over the internal `fallow-core` backend and is
-where editor, API, and embedding surfaces should move before depending on
-typed `AnalysisResults`.
+It owns the adapter boundary over the internal `fallow-core` backend and is
+where editor, API, and embedding surfaces should depend before using typed
+`AnalysisResults`.
 
 ## Architecture north star
 
@@ -51,8 +51,8 @@ Use these boundaries when adding new product flows:
 - **Repo-policy as code**: project-specific boundaries, zones, banned imports,
   banned exports, banned calls, and framework-aware facts are the preferred
   extension path before a general arbitrary-code plugin runtime.
-- **Core stays backend-only**: `fallow-core` may keep detector implementation
-  details while engine migration is in progress, but new public or product
+- **Core stays backend-only**: `fallow-core` may keep private detector
+  implementation details and compatibility shims, but public or product
   surfaces should depend on `fallow-engine` or `fallow-api`, not `fallow-core`.
 
 ## Function mapping

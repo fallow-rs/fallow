@@ -22,7 +22,7 @@ The core crates are:
 | `fallow-extract` | Parser-facing facts from source files. |
 | `fallow-graph` | Module graph, dependency traversal, cycles, and impact facts. |
 | `fallow-security` | Security matcher catalogue and candidate helpers. |
-| `fallow-core` | Internal detector backend while engine migration continues. |
+| `fallow-core` | Internal detector backend used by `fallow-engine` for private detector phases. |
 | `fallow-engine` | Session, discovery, parsing, graph construction, and typed analysis orchestration. |
 | `fallow-output` | Shared output contracts, action builders, summaries, SARIF builders, and reusable formatter pieces. |
 | `fallow-api` | Supported Rust facade and programmatic workflow adapters. |
@@ -34,6 +34,9 @@ The protocol adapters are `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
 ## Dependency Rules
 
 - Foundation and analysis crates must not depend on protocol adapters.
+- `fallow-core` is a backend implementation crate, not a supported embedder
+  surface. `fallow-engine` owns the adapter boundary and is the only product
+  crate that may depend on it directly.
 - Protocol adapters must not call `fallow-core` directly. Use `fallow-api` or
   `fallow-engine`.
 - `fallow-output` must not start analysis by depending on `fallow-core`,
@@ -106,18 +109,18 @@ Protocol work should cover:
 Release and claim work needs real-project smoke evidence before it is described
 as user-visible behavior.
 
-## Current Exceptions
+## Boundary Policy
 
-These are known migration states, not patterns to copy:
+These are final ownership rules, not migration exceptions:
 
-- `fallow-core` remains a published implementation dependency because
-  `fallow-engine` still builds on it. New public surfaces should not depend on
-  it directly.
-- Several protocol adapters still contain hand-written guidance text where the
-  audience needs nuance. Shared contract facts should come from manifests, but
-  surface prose can remain local when it is intentionally different.
-- `fallow-cli` still owns some CI and human-report rendering while shared
-  formatter pieces move toward `fallow-output`.
+- `fallow-core` can contain private detector mechanics and compatibility
+  shims, but public Rust consumers should use `fallow-api` or typed
+  `fallow-engine` contracts.
+- Protocol-specific prose can remain local when it is intentionally
+  audience-specific. Factual inventories must come from manifests, schemas, or
+  drift-tested registries.
+- CLI owns terminal interaction and command dispatch. Shared CI and formatter
+  facts belong in `fallow-output` once findings are normalized.
 
-When a change needs to cross one of these exceptions, name that in the PR or
-design note and add a narrow test that protects the intended behavior.
+When a change crosses a boundary, add or update a narrow guard that protects the
+intended ownership rule.
