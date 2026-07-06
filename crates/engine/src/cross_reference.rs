@@ -1,9 +1,10 @@
 //! Cross-reference helpers exposed through the engine boundary.
 
+use std::path::PathBuf;
+
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 
-use crate::core_backend;
 use crate::duplicates::{CloneInstance, DuplicationReport};
 use crate::results::AnalysisResults;
 
@@ -69,7 +70,79 @@ pub fn cross_reference(
     duplication: &DuplicationReport,
     dead_code: &AnalysisResults,
 ) -> CrossReferenceResult {
-    core_backend::cross_reference(duplication, dead_code)
+    let unused_files: FxHashSet<&PathBuf> = dead_code
+        .unused_files
+        .iter()
+        .map(|finding| &finding.file.path)
+        .collect();
+
+    let mut combined_findings = Vec::new();
+    let mut clones_in_unused_files = 0usize;
+    let mut clones_with_unused_exports = 0usize;
+
+    for (group_index, group) in duplication.clone_groups.iter().enumerate() {
+        for instance in &group.instances {
+            if unused_files.contains(&instance.file) {
+                combined_findings.push(CombinedFinding {
+                    clone_instance: instance.clone(),
+                    dead_code_kind: DeadCodeKind::UnusedFile,
+                    group_index,
+                });
+                clones_in_unused_files += 1;
+                continue;
+            }
+
+            if let Some(finding) = find_overlapping_unused_export(instance, group_index, dead_code)
+            {
+                clones_with_unused_exports += 1;
+                combined_findings.push(finding);
+            }
+        }
+    }
+
+    CrossReferenceResult {
+        combined_findings,
+        clones_in_unused_files,
+        clones_with_unused_exports,
+    }
+}
+
+fn find_overlapping_unused_export(
+    instance: &CloneInstance,
+    group_index: usize,
+    dead_code: &AnalysisResults,
+) -> Option<CombinedFinding> {
+    for export in &dead_code.unused_exports {
+        if export.export.path == instance.file
+            && (export.export.line as usize) >= instance.start_line
+            && (export.export.line as usize) <= instance.end_line
+        {
+            return Some(CombinedFinding {
+                clone_instance: instance.clone(),
+                dead_code_kind: DeadCodeKind::UnusedExport {
+                    export_name: export.export.export_name.clone(),
+                },
+                group_index,
+            });
+        }
+    }
+
+    for type_export in &dead_code.unused_types {
+        if type_export.export.path == instance.file
+            && (type_export.export.line as usize) >= instance.start_line
+            && (type_export.export.line as usize) <= instance.end_line
+        {
+            return Some(CombinedFinding {
+                clone_instance: instance.clone(),
+                dead_code_kind: DeadCodeKind::UnusedType {
+                    type_name: type_export.export.export_name.clone(),
+                },
+                group_index,
+            });
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -77,6 +150,11 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::duplicates::{CloneGroup, DuplicationStats};
+    use fallow_types::{
+        output_dead_code::{UnusedExportFinding, UnusedFileFinding, UnusedTypeFinding},
+        results::{UnusedExport, UnusedFile},
+    };
 
     fn clone_instance(file: &str, start_line: usize, end_line: usize) -> CloneInstance {
         CloneInstance {
@@ -86,6 +164,19 @@ mod tests {
             start_col: 0,
             end_col: 0,
             fragment: String::new(),
+        }
+    }
+
+    fn duplicate_report(instances: Vec<CloneInstance>) -> DuplicationReport {
+        DuplicationReport {
+            clone_groups: vec![CloneGroup {
+                instances,
+                token_count: 50,
+                line_count: 10,
+            }],
+            clone_families: Vec::new(),
+            mirrored_directories: Vec::new(),
+            stats: DuplicationStats::default(),
         }
     }
 
@@ -114,5 +205,72 @@ mod tests {
         assert!(result.has_findings());
         assert!(result.affected_group_indices().contains(&2));
         assert!(result.affected_group_indices().contains(&4));
+    }
+
+    #[test]
+    fn cross_reference_prioritizes_unused_file_overlap() {
+        let duplication = duplicate_report(vec![
+            clone_instance("src/a.ts", 1, 3),
+            clone_instance("src/b.ts", 4, 8),
+        ]);
+        let mut dead_code = AnalysisResults::default();
+        dead_code
+            .unused_files
+            .push(UnusedFileFinding::with_actions(UnusedFile {
+                path: PathBuf::from("src/a.ts"),
+            }));
+
+        let result = cross_reference(&duplication, &dead_code);
+
+        assert_eq!(result.clones_in_unused_files, 1);
+        assert_eq!(result.clones_with_unused_exports, 0);
+        assert!(matches!(
+            result.combined_findings[0].dead_code_kind,
+            DeadCodeKind::UnusedFile
+        ));
+    }
+
+    #[test]
+    fn cross_reference_detects_unused_export_and_type_overlap() {
+        let duplication = duplicate_report(vec![
+            clone_instance("src/a.ts", 10, 20),
+            clone_instance("src/b.ts", 30, 40),
+        ]);
+        let mut dead_code = AnalysisResults::default();
+        dead_code
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: PathBuf::from("src/a.ts"),
+                export_name: "deadValue".to_string(),
+                line: 12,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+                is_type_only: false,
+            }));
+        dead_code
+            .unused_types
+            .push(UnusedTypeFinding::with_actions(UnusedExport {
+                path: PathBuf::from("src/b.ts"),
+                export_name: "DeadType".to_string(),
+                line: 35,
+                col: 0,
+                span_start: 0,
+                is_re_export: false,
+                is_type_only: true,
+            }));
+
+        let result = cross_reference(&duplication, &dead_code);
+
+        assert_eq!(result.clones_in_unused_files, 0);
+        assert_eq!(result.clones_with_unused_exports, 2);
+        assert!(matches!(
+            result.combined_findings[0].dead_code_kind,
+            DeadCodeKind::UnusedExport { ref export_name } if export_name == "deadValue"
+        ));
+        assert!(matches!(
+            result.combined_findings[1].dead_code_kind,
+            DeadCodeKind::UnusedType { ref type_name } if type_name == "DeadType"
+        ));
     }
 }
