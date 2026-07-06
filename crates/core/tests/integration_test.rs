@@ -354,6 +354,15 @@ mod issue_1707_vue_vfor_class_member;
 #[path = "integration_test/issue_1711_vue_props_vfor.rs"]
 mod issue_1711_vue_props_vfor;
 
+#[path = "integration_test/issue_1716_vue_ref_store_vfor.rs"]
+mod issue_1716_vue_ref_store_vfor;
+
+#[path = "integration_test/issue_1717_angular_template_url_class_member.rs"]
+mod issue_1717_angular_template_url_class_member;
+
+#[path = "integration_test/issue_1718_function_local_iteration.rs"]
+mod issue_1718_function_local_iteration;
+
 #[path = "integration_test/iteration_binding_element_types.rs"]
 mod iteration_binding_element_types;
 

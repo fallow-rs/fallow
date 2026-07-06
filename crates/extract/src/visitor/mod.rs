@@ -12,13 +12,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::suppress::ParsedSuppressions;
 use crate::{
-    AngularTemplateMemberAccessFact, AngularThisSpreadFact, DynamicCustomElementRenderFact,
-    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, FactoryCallMemberAccessFact,
-    FactoryFnMemberAccessFact, FluentChainMemberAccessFact, FluentChainNewMemberAccessFact,
-    ImportInfo, ImportedName, InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind,
-    ModuleInfo, PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact,
-    PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo,
-    SemanticFact, VisibilityTag,
+    AngularComponentFieldArrayTypeFact, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
+    DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
+    ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact,
+    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
+    InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
+    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
+    PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
@@ -218,6 +218,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// (`{{ util.getter }}`) credit the class. Transient extractor state, not a
     /// cached `ModuleInfo` field (mirrors `binding_target_names`).
     array_binding_element_types: FxHashMap<String, String>,
+    /// Block/function-scoped array element types for local iteration receivers.
+    /// This lets `const utils: Util[]` inside a function type `.map((util) => …)`
+    /// and `for (const util of utils)` in the same lexical scope without leaking
+    /// the binding to sibling functions.
+    scoped_array_binding_element_types: Vec<FxHashMap<String, String>>,
     object_binding_candidates: Vec<ObjectBindingCandidate>,
     local_declaration_names: FxHashSet<String>,
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
@@ -695,6 +700,20 @@ impl ModuleInfoExtractor {
         self.semantic_facts
             .push(SemanticFact::AngularTemplateMemberAccess(
                 AngularTemplateMemberAccessFact { member },
+            ));
+    }
+
+    pub(crate) fn record_angular_component_field_array_type_fact(
+        &mut self,
+        field: String,
+        element_class: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::AngularComponentFieldArrayType(
+                AngularComponentFieldArrayTypeFact {
+                    field,
+                    element_class,
+                },
             ));
     }
 

@@ -731,7 +731,12 @@ use crate::MemberKind;
 /// `DynamicImportInfo` edge per statically-resolvable branch (plus the wrapper
 /// families: `.then`, `React.lazy`/`next/dynamic`, route `loadComponent`). A warm
 /// cache from 221 lacks the added per-branch dynamic-import entries.
-pub(super) const CACHE_VERSION: u32 = 222;
+///
+/// Bumped to 223 for issues #1716, #1717, and #1718: iterable element-type
+/// crediting now includes Vue `ref.value` / object-member `v-for` sources,
+/// function-local JS array receivers, and Angular external `templateUrl`
+/// loop-item remapping through component field array facts.
+pub(super) const CACHE_VERSION: u32 = 223;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

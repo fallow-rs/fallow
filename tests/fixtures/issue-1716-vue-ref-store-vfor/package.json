@@ -1,0 +1,8 @@
+{
+  "name": "issue-1716-vue-ref-store-vfor",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "vue": "^3.5.0"
+  }
+}

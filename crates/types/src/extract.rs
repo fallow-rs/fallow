@@ -1434,6 +1434,8 @@ pub enum SemanticFact {
     /// A class member referenced from an Angular template, host binding, or
     /// component metadata entry.
     AngularTemplateMemberAccess(AngularTemplateMemberAccessFact),
+    /// An Angular component field whose value is an array of a class.
+    AngularComponentFieldArrayType(AngularComponentFieldArrayTypeFact),
     /// An Angular component spreads `this` into an object literal, so component
     /// input/output usage is opaque.
     AngularThisSpread(AngularThisSpreadFact),
@@ -1543,6 +1545,13 @@ impl<'a> SemanticFactView<'a> {
         angular_template_member_names_from_parts(self.semantic_facts)
     }
 
+    /// Collect Angular component field array-type facts.
+    pub fn angular_component_field_array_types(self) -> Vec<AngularComponentFieldArrayTypeFact> {
+        angular_component_field_array_type_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
     /// Return true when any Angular template member reference exists.
     #[must_use]
     pub fn has_angular_template_members(self) -> bool {
@@ -1637,6 +1646,18 @@ fn instance_export_binding_facts(
 ) -> impl Iterator<Item = &InstanceExportBindingFact> {
     semantic_facts.iter().filter_map(|fact| {
         if let SemanticFact::InstanceExportBinding(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+fn angular_component_field_array_type_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &AngularComponentFieldArrayTypeFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::AngularComponentFieldArrayType(access) = fact {
             Some(access)
         } else {
             None
@@ -1754,6 +1775,16 @@ fn playwright_fixture_type_facts(
 pub struct AngularTemplateMemberAccessFact {
     /// Referenced class member name.
     pub member: String,
+}
+
+/// A typed Angular component field that exposes array elements to templates.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct AngularComponentFieldArrayTypeFact {
+    /// Component field name used as the template iterable.
+    pub field: String,
+    /// Array element class name.
+    pub element_class: String,
 }
 
 /// Opaque Angular `{ ...this }` forwarding marker.

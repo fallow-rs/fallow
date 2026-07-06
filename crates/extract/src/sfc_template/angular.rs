@@ -134,7 +134,7 @@ static CONTROL_FOR_RE: LazyLock<regex::Regex> =
 /// `obj.member` chains where `obj` is an unresolved identifier. Together these
 /// represent potential component class member references.
 pub fn collect_angular_template_refs(source: &str) -> AngularTemplateRefs {
-    collect_angular_template_refs_with_field_types(source, &FxHashMap::default())
+    collect_angular_template_refs_inner(source, &FxHashMap::default(), true)
 }
 
 /// As [`collect_angular_template_refs`], additionally typing each `@for` /
@@ -147,8 +147,21 @@ pub fn collect_angular_template_refs_with_field_types(
     source: &str,
     component_field_array_types: &FxHashMap<String, String>,
 ) -> AngularTemplateRefs {
+    collect_angular_template_refs_inner(source, component_field_array_types, false)
+}
+
+fn collect_angular_template_refs_inner(
+    source: &str,
+    component_field_array_types: &FxHashMap<String, String>,
+    preserve_untyped_iteration_sources: bool,
+) -> AngularTemplateRefs {
     let source = strip_html_comments_preserve_offsets(source);
-    AngularTemplateScanner::new(&source, component_field_array_types).scan()
+    AngularTemplateScanner::new(
+        &source,
+        component_field_array_types,
+        preserve_untyped_iteration_sources,
+    )
+    .scan()
 }
 
 struct AngularTemplateScanner<'a> {
@@ -163,16 +176,28 @@ struct AngularTemplateScanner<'a> {
     /// blocks are entered. A member access on such a loop variable is remapped
     /// onto the element class in the finalize pass.
     iteration_element_types: FxHashMap<String, String>,
+    /// Loop variable name -> iterable field name for external templates that do
+    /// not know component field types during scanning. A member access on the
+    /// item is remapped onto the iterable field (`util.getName` -> `utils.getName`)
+    /// so core can resolve `utils -> Util` from the owning component.
+    iteration_iterable_sources: FxHashMap<String, String>,
+    preserve_untyped_iteration_sources: bool,
 }
 
 impl<'a> AngularTemplateScanner<'a> {
-    fn new(source: &'a str, component_field_array_types: &'a FxHashMap<String, String>) -> Self {
+    fn new(
+        source: &'a str,
+        component_field_array_types: &'a FxHashMap<String, String>,
+        preserve_untyped_iteration_sources: bool,
+    ) -> Self {
         Self {
             source,
             refs: AngularTemplateRefs::default(),
             scopes: vec![Vec::new()],
             component_field_array_types,
             iteration_element_types: FxHashMap::default(),
+            iteration_iterable_sources: FxHashMap::default(),
+            preserve_untyped_iteration_sources,
         }
     }
 
@@ -181,7 +206,11 @@ impl<'a> AngularTemplateScanner<'a> {
         while index < self.source.len() {
             index = self.scan_next(index);
         }
-        remap_iteration_member_accesses(&mut self.refs, &self.iteration_element_types);
+        remap_iteration_member_accesses(
+            &mut self.refs,
+            &self.iteration_element_types,
+            &self.iteration_iterable_sources,
+        );
         self.refs
     }
 
@@ -211,6 +240,8 @@ impl<'a> AngularTemplateScanner<'a> {
         let mut iter_ctx = IterationTypingCtx {
             component_field_array_types: self.component_field_array_types,
             iteration_element_types: &mut self.iteration_element_types,
+            iteration_iterable_sources: &mut self.iteration_iterable_sources,
+            preserve_untyped_iteration_sources: self.preserve_untyped_iteration_sources,
         };
         handle_control_flow(
             self.source,
@@ -236,6 +267,8 @@ impl<'a> AngularTemplateScanner<'a> {
         let mut iter_ctx = IterationTypingCtx {
             component_field_array_types: self.component_field_array_types,
             iteration_element_types: &mut self.iteration_element_types,
+            iteration_iterable_sources: &mut self.iteration_iterable_sources,
+            preserve_untyped_iteration_sources: self.preserve_untyped_iteration_sources,
         };
         process_tag(tag, index, &mut self.scopes, &mut self.refs, &mut iter_ctx);
         next_index
@@ -249,9 +282,15 @@ impl<'a> AngularTemplateScanner<'a> {
 struct IterationTypingCtx<'a> {
     component_field_array_types: &'a FxHashMap<String, String>,
     iteration_element_types: &'a mut FxHashMap<String, String>,
+    iteration_iterable_sources: &'a mut FxHashMap<String, String>,
+    preserve_untyped_iteration_sources: bool,
 }
 
 impl IterationTypingCtx<'_> {
+    fn preserves_untyped_iteration_sources(&self) -> bool {
+        self.preserve_untyped_iteration_sources
+    }
+
     /// If `iterable` is a bare-identifier component field with a known element
     /// class, record `binding -> class` and return `true` so the caller can keep
     /// the loop variable OUT of the block locals (its member accesses then
@@ -265,6 +304,11 @@ impl IterationTypingCtx<'_> {
             return false;
         }
         let Some(class) = self.component_field_array_types.get(iterable) else {
+            if self.preserve_untyped_iteration_sources {
+                self.iteration_iterable_sources
+                    .entry(binding.to_string())
+                    .or_insert_with(|| iterable.to_string());
+            }
             return false;
         };
         self.iteration_element_types
@@ -294,17 +338,23 @@ fn is_bare_identifier(name: &str) -> bool {
 fn remap_iteration_member_accesses(
     refs: &mut AngularTemplateRefs,
     iteration_element_types: &FxHashMap<String, String>,
+    iteration_iterable_sources: &FxHashMap<String, String>,
 ) {
-    if iteration_element_types.is_empty() {
+    if iteration_element_types.is_empty() && iteration_iterable_sources.is_empty() {
         return;
     }
     for access in &mut refs.member_accesses {
         if let Some(class) = iteration_element_types.get(&access.object) {
             access.object = class.clone();
+        } else if let Some(iterable) = iteration_iterable_sources.get(&access.object) {
+            access.object = iterable.clone();
         }
     }
     dedup_member_accesses(&mut refs.member_accesses);
     for name in iteration_element_types.keys() {
+        refs.identifiers.remove(name);
+    }
+    for name in iteration_iterable_sources.keys() {
         refs.identifiers.remove(name);
     }
 }
@@ -555,7 +605,11 @@ fn handle_for_control_flow(
         // #1712), keep it OUT of the block locals so `util.getName` survives as a
         // member access and remaps onto `Util` in the finalize pass; otherwise it
         // is a normal local shadowing any same-named component member.
-        if !iter_ctx.try_type_loop_variable(binding, iterable) {
+        let typed = iter_ctx.try_type_loop_variable(binding, iterable);
+        if !typed
+            && (!is_bare_identifier(binding.trim())
+                || !iter_ctx.preserves_untyped_iteration_sources())
+        {
             locals_for_scope.push(binding.to_string());
         }
         for implicit in &["$index", "$first", "$last", "$even", "$odd", "$count"] {
@@ -801,7 +855,10 @@ fn handle_ng_for(
             // `ng_for_locals` so `items` (not `item`) is the credited reference.
             let typed = iter_ctx.try_type_loop_variable(binding, iterable);
             ng_for_locals.push(binding.to_string());
-            if !typed {
+            if !typed
+                && (!is_bare_identifier(binding.trim())
+                    || !iter_ctx.preserves_untyped_iteration_sources())
+            {
                 new_scope_locals.push(binding.to_string());
             }
             collect_expression_refs(iterable, &ng_for_locals, refs);

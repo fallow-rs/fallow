@@ -22,9 +22,9 @@ use crate::asset_url::normalize_asset_url;
 use crate::html::is_remote_url;
 
 use super::helpers::{
-    extract_angular_component_metadata, extract_angular_inputs_outputs,
-    extract_angular_signal_query, extract_class_members, extract_concat_parts,
-    extract_custom_element_tag_reference, extract_custom_elements_define,
+    array_element_type_from_type, extract_angular_component_metadata,
+    extract_angular_inputs_outputs, extract_angular_signal_query, extract_class_members,
+    extract_concat_parts, extract_custom_element_tag_reference, extract_custom_elements_define,
     extract_implemented_interface_names, extract_nested_type_bindings,
     extract_query_list_element_type, extract_super_class_name, extract_type_annotation_name,
     has_angular_class_decorator, has_angular_plural_query_decorator,
@@ -444,7 +444,66 @@ impl ModuleInfoExtractor {
         self.iterable_element_types
             .get(receiver_name)
             .or_else(|| self.array_binding_element_types.get(receiver_name))
+            .or_else(|| {
+                self.scoped_array_binding_element_types
+                    .iter()
+                    .rev()
+                    .find_map(|scope| scope.get(receiver_name))
+            })
             .cloned()
+    }
+
+    fn record_array_binding_element_type(&mut self, binding: String, element: String) {
+        if self.is_module_scope() {
+            self.array_binding_element_types.insert(binding, element);
+        } else if let Some(scope) = self.scoped_array_binding_element_types.last_mut() {
+            scope.insert(binding, element);
+        }
+    }
+
+    fn record_vue_ref_value_array_binding_type(
+        &mut self,
+        binding: &str,
+        init: &Expression<'_>,
+        element: &str,
+    ) {
+        let Expression::CallExpression(call) = init else {
+            return;
+        };
+        let Expression::Identifier(callee) = &call.callee else {
+            return;
+        };
+        if matches!(callee.name.as_str(), "ref" | "shallowRef" | "computed") {
+            self.record_array_binding_element_type(format!("{binding}.value"), element.to_string());
+        }
+    }
+
+    fn record_object_array_member_binding_types(
+        &mut self,
+        binding: &str,
+        type_annotation: Option<&TSTypeAnnotation<'_>>,
+    ) {
+        let Some(type_annotation) = type_annotation else {
+            return;
+        };
+        let TSType::TSTypeLiteral(literal) = &type_annotation.type_annotation else {
+            return;
+        };
+        for member in &literal.members {
+            let TSSignature::TSPropertySignature(prop) = member else {
+                continue;
+            };
+            let Some(property_name) = prop.key.static_name() else {
+                continue;
+            };
+            let Some(property_type) = prop.type_annotation.as_deref() else {
+                continue;
+            };
+            let Some(element) = array_element_type_from_type(&property_type.type_annotation) else {
+                continue;
+            };
+            self.record_array_binding_element_type(format!("{binding}.{property_name}"), element);
+        }
     }
 
     /// Bind a `for (const util of utils)` loop variable to the element class of
@@ -1276,18 +1335,26 @@ impl<'a> ModuleInfoExtractor {
                 .entry(id.name.to_string())
                 .or_default()
                 .push(classify_factory_assigned_value(init));
+        }
 
-            // Type a module-scope array / reactive-array binding to its element
-            // class so the Vue SFC template scanner can credit `v-for`
-            // loop-variable member accesses (`{{ util.getter }}`). Over-credit
-            // only (never adds a finding); consumed solely by the Vue template
-            // scan. See issue #1707.
-            if let Some(element) =
+        // Type array / reactive-array bindings to their element class so
+        // iteration callbacks and `for...of` loops can credit item member
+        // accesses. Module-scope entries remain visible to template scanners;
+        // function/block locals stay scoped to the active visitor stack.
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Some(element) =
                 infer_array_binding_element_type(declarator.type_annotation.as_deref(), Some(init))
-            {
-                self.array_binding_element_types
-                    .insert(id.name.to_string(), element);
-            }
+        {
+            let binding = id.name.to_string();
+            self.record_vue_ref_value_array_binding_type(&binding, init, &element);
+            self.record_array_binding_element_type(binding, element);
+        }
+
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+            self.record_object_array_member_binding_types(
+                id.name.as_str(),
+                declarator.type_annotation.as_deref(),
+            );
         }
 
         // FP-1 (unused-load-data-key): `const X = data` passes the whole
@@ -1586,6 +1653,12 @@ impl<'a> ModuleInfoExtractor {
             });
     }
 
+    fn record_angular_component_field_array_types(&mut self, class: &Class<'_>) {
+        for (field, element_class) in super::helpers::collect_component_field_array_types(class) {
+            self.record_angular_component_field_array_type_fact(field, element_class);
+        }
+    }
+
     /// Record Angular `host:` binding and `inputs:` / `outputs:` member refs as
     /// typed template member facts.
     fn record_angular_template_members(&mut self, meta: &super::helpers::AngularComponentMetadata) {
@@ -1691,6 +1764,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.block_depth += 1;
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.push(FxHashSet::default());
+            self.scoped_array_binding_element_types
+                .push(FxHashMap::default());
             self.sanitizer_binding_stack.push(FxHashMap::default());
             self.literal_allowlist_binding_stack
                 .push(FxHashMap::default());
@@ -1706,6 +1781,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
+            self.scoped_array_binding_element_types.pop();
             self.sanitizer_binding_stack.pop();
             self.literal_allowlist_binding_stack.pop();
             self.risky_regex_binding_stack.pop();
@@ -1748,11 +1824,18 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_function_body(&mut self, body: &FunctionBody<'a>) {
+        if self.namespace_depth == 0 {
+            self.scoped_array_binding_element_types
+                .push(FxHashMap::default());
+        }
         for statement in &body.statements {
             self.visit_statement(statement);
             if self.namespace_depth == 0 {
                 self.record_fail_closed_guard_after_statement(statement);
             }
+        }
+        if self.namespace_depth == 0 {
+            self.scoped_array_binding_element_types.pop();
         }
     }
 
@@ -2347,6 +2430,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
         if let Some(meta) = extract_angular_component_metadata(class) {
             self.record_angular_selector(class, &meta);
+            self.record_angular_component_field_array_types(class);
             self.record_angular_template_assets(&meta);
             self.record_angular_inline_template(class, &meta);
             self.record_angular_template_members(&meta);

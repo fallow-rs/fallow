@@ -1,0 +1,8 @@
+{
+  "name": "issue-1718-function-local-iteration",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "typescript": "^5.8.0"
+  }
+}

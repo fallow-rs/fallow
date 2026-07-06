@@ -1,0 +1,9 @@
+{
+  "name": "issue-1717-angular-template-url-class-member",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@angular/core": "^20.0.0",
+    "typescript": "^5.8.0"
+  }
+}

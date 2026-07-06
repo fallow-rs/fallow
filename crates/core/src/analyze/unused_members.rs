@@ -692,18 +692,25 @@ impl AngularTemplateRefContext<'_, '_> {
     }
 }
 
-fn component_instance_bindings(
+fn component_bindings(
+    resolved: &ResolvedModule,
     class_heritage: &[fallow_types::extract::ClassHeritageInfo],
-) -> FxHashMap<&str, &str> {
-    class_heritage
+) -> FxHashMap<String, String> {
+    let mut bindings: FxHashMap<String, String> = class_heritage
         .iter()
         .flat_map(|heritage| {
             heritage
                 .instance_bindings
                 .iter()
-                .map(|(local, ty)| (local.as_str(), ty.as_str()))
+                .map(|(local, ty)| (local.clone(), ty.clone()))
         })
-        .collect()
+        .collect();
+    for field in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
+        .angular_component_field_array_types()
+    {
+        bindings.entry(field.field).or_insert(field.element_class);
+    }
+    bindings
 }
 
 struct MemberHeritageContext<'a> {
@@ -824,8 +831,8 @@ struct AngularTemplateChainContext<'a, 'b> {
     accessed_members: &'b mut FxHashMap<ExportKey, FxHashSet<String>>,
 }
 
-struct AngularTemplateComponentContext<'a, 'b> {
-    component_bindings: FxHashMap<&'a str, &'a str>,
+struct AngularTemplateComponentContext<'b> {
+    component_bindings: FxHashMap<String, String>,
     local_to_export_keys: FxHashMap<&'b str, Vec<ExportKey>>,
 }
 
@@ -833,10 +840,10 @@ impl<'a> AngularTemplateChainContext<'a, '_> {
     fn credit_members(
         &mut self,
         chains: &[(&str, &str)],
-        component: &AngularTemplateComponentContext<'a, '_>,
+        component: &AngularTemplateComponentContext<'_>,
     ) {
         for (object, member) in chains {
-            let Some(type_name) = component.component_bindings.get(object) else {
+            let Some(type_name) = component.component_bindings.get(*object) else {
                 continue;
             };
             credit_angular_token_chain_member(&mut AngularTokenChainCreditInput {
@@ -860,11 +867,8 @@ impl<'a> AngularTemplateChainContext<'a, '_> {
             let Some(class_heritage) = self.class_heritage_by_file.get(&resolved.file_id) else {
                 continue;
             };
-            if class_heritage.is_empty() {
-                continue;
-            }
             let component = AngularTemplateComponentContext {
-                component_bindings: component_instance_bindings(class_heritage),
+                component_bindings: component_bindings(resolved, class_heritage),
                 local_to_export_keys: build_local_to_export_keys(resolved),
             };
             if component.component_bindings.is_empty() {
