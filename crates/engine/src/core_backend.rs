@@ -285,27 +285,12 @@ pub fn dead_code_pipeline_profile(
     }
 }
 
-fn hidden_dir_scope(value: &fallow_core::discover::HiddenDirScope) -> HiddenDirScope {
-    HiddenDirScope::new(value.root().to_path_buf(), value.dirs().to_vec())
-}
-
 fn core_hidden_dir_scope(value: &HiddenDirScope) -> fallow_core::discover::HiddenDirScope {
     fallow_core::discover::HiddenDirScope::new(value.root().to_path_buf(), value.dirs().to_vec())
 }
 
 fn core_hidden_dir_scopes(scopes: &[HiddenDirScope]) -> Vec<fallow_core::discover::HiddenDirScope> {
     scopes.iter().map(core_hidden_dir_scope).collect()
-}
-
-pub fn collect_hidden_dir_scopes(
-    config: &ResolvedConfig,
-    root_pkg: Option<&PackageJson>,
-    workspaces: &[WorkspaceInfo],
-) -> Vec<HiddenDirScope> {
-    fallow_core::discover::collect_hidden_dir_scopes(config, root_pkg, workspaces)
-        .iter()
-        .map(hidden_dir_scope)
-        .collect()
 }
 
 pub fn discover_files_and_config_candidates(
