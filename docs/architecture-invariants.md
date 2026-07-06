@@ -24,7 +24,7 @@ The core crates are:
 | `fallow-security` | Security matcher catalogue and candidate helpers. |
 | `fallow-core` | Internal detector backend while engine migration continues. |
 | `fallow-engine` | Session, discovery, parsing, graph construction, and typed analysis orchestration. |
-| `fallow-output` | Shared output contracts, action builders, summaries, and reusable formatter pieces. |
+| `fallow-output` | Shared output contracts, action builders, summaries, SARIF builders, and reusable formatter pieces. |
 | `fallow-api` | Supported Rust facade and programmatic workflow adapters. |
 
 The protocol adapters are `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
@@ -110,8 +110,6 @@ as user-visible behavior.
 
 These are known migration states, not patterns to copy:
 
-- SARIF rule-specific assembly still lives in `fallow-api`; reusable result,
-  snippet, and property assembly belongs in `fallow-output`.
 - `fallow-core` remains a published implementation dependency because
   `fallow-engine` still builds on it. New public surfaces should not depend on
   it directly.

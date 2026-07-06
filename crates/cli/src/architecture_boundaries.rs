@@ -36,8 +36,7 @@ fn architecture_invariants_doc_tracks_guarded_boundaries() {
         "shared output-helper ownership",
         "manifest/docs drift",
         "drift-tested against `docs/output-schema.json`",
-        "reusable result,",
-        "snippet, and property assembly belongs in `fallow-output`",
+        "SARIF builders",
     ] {
         assert!(
             doc.contains(required),
@@ -518,6 +517,66 @@ fn cli_audit_styling_rendering_uses_output_contract_helpers() {
         assert!(
             !source.contains(forbidden),
             "{source_path} must not re-own shared audit styling render fact `{forbidden}`"
+        );
+    }
+}
+
+#[test]
+fn api_does_not_own_sarif_family_assembly() {
+    for source_path in [
+        "crates/api/src/dead_code_sarif.rs",
+        "crates/api/src/sarif_output.rs",
+    ] {
+        let source = read_source_without_line_comments(source_path)
+            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+        for forbidden in [
+            "SarifFindingFields",
+            "SarifSourceSnippetCache",
+            "SarifDocumentInput",
+            "build_sarif_document",
+            "build_sarif_result_with_snippet",
+            "append_sarif_findings",
+            "struct SarifCtx",
+            "type SarifRuleBuilder",
+            "fn sarif_",
+            "fn push_",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{source_path} must delegate SARIF-family assembly to fallow-output instead of owning `{forbidden}`"
+            );
+        }
+    }
+}
+
+#[test]
+fn output_owns_sarif_family_assembly() {
+    let dead_code = read_source_without_line_comments("crates/output/src/dead_code_sarif.rs")
+        .expect("read output dead-code SARIF module");
+    for required in [
+        "pub fn build_dead_code_sarif",
+        "SarifFindingFields",
+        "SarifSourceSnippetCache",
+        "append_sarif_findings",
+        "build_sarif_document",
+    ] {
+        assert!(
+            dead_code.contains(required),
+            "fallow-output must own dead-code SARIF assembly: {required}"
+        );
+    }
+
+    let analysis = read_source_without_line_comments("crates/output/src/analysis_sarif.rs")
+        .expect("read output analysis SARIF module");
+    for required in [
+        "pub fn build_duplication_sarif",
+        "pub fn build_grouped_duplication_sarif",
+        "pub fn build_health_sarif",
+        "pub fn annotate_sarif_results",
+    ] {
+        assert!(
+            analysis.contains(required),
+            "fallow-output must own analysis SARIF assembly: {required}"
         );
     }
 }

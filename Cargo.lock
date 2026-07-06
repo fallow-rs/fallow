@@ -1263,6 +1263,7 @@ dependencies = [
 name = "fallow-output"
 version = "3.2.0"
 dependencies = [
+ "fallow-config",
  "fallow-types",
  "rustc-hash 2.1.2",
  "schemars",

@@ -14,6 +14,7 @@
     )
 )]
 
+mod analysis_sarif;
 mod audit_brief;
 mod audit_decision_surface;
 mod audit_focus;
@@ -25,6 +26,7 @@ mod check;
 mod ci_output;
 mod codeclimate;
 mod coverage_envelopes;
+mod dead_code_sarif;
 mod diff;
 mod dupes;
 mod feature_flags;
@@ -64,6 +66,10 @@ mod security;
 mod trace_envelopes;
 mod walkthrough_render;
 
+pub use analysis_sarif::{
+    annotate_sarif_results, build_duplication_sarif, build_grouped_duplication_sarif,
+    build_health_sarif,
+};
 pub use audit_brief::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
     REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefOutput, ReviewBriefSchemaVersion,
@@ -120,6 +126,7 @@ pub use coverage_envelopes::{
     build_coverage_analyze_output, serialize_coverage_analyze_json_output,
     serialize_coverage_setup_json_output,
 };
+pub use dead_code_sarif::build_dead_code_sarif;
 pub use diff::{
     DiffIndex, MAX_ADDED_LINES, MAX_DIFF_BYTES, parse_new_hunk_start, relative_to_diff_path,
 };
