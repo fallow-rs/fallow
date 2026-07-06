@@ -13,11 +13,11 @@ use fallow_api::{
     AnalysisOptions, CombinedOptions, ComplexityOptions, DuplicationMode, DuplicationOptions,
     EditorAnalysisSession, EngineHealthRunner, run_combined, run_health_with_runner,
 };
-use fallow_core::{
+use fallow_extract::{
     cache::{CacheStore, module_to_cached},
-    discover::{DiscoveredFile, FileId},
-    extract::{parse_all_files, parse_single_file},
+    parse_all_files, parse_single_file,
 };
+use fallow_types::discover::{DiscoveredFile, FileId};
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;

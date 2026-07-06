@@ -17,6 +17,7 @@
 mod audit_brief;
 mod audit_decision_surface;
 mod audit_focus;
+mod audit_render;
 mod audit_routing;
 mod audit_walkthrough;
 mod audit_weakening;
@@ -78,6 +79,10 @@ pub use audit_decision_surface::{
     suppress_comment,
 };
 pub use audit_focus::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
+pub use audit_render::{
+    AuditDisplayGate, AuditDisplaySeverity, AuditStylingContextLabelInput,
+    styling_audit_context_label, styling_candidate_count,
+};
 pub use audit_routing::{RoutingFacts, RoutingUnit};
 pub use audit_walkthrough::{
     AcceptedJudgment, AgentJudgment, AgentSchema, AgentWalkthrough, ChangeAnchor, DirectionUnit,
@@ -273,9 +278,11 @@ pub use root_envelopes::{
     serialize_combined_json_output, serialize_json_root_output, serialize_named_json_output,
 };
 pub use sarif::{
-    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifFindingInput,
-    SarifResultInput, SarifRuleInput, build_sarif_document, build_sarif_finding,
-    build_sarif_result, build_sarif_rule, normalize_sarif_snippet, sarif_finding_fingerprint,
+    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifFindingFields,
+    SarifFindingInput, SarifResultInput, SarifRuleInput, SarifSourceSnippetCache,
+    append_sarif_findings, build_sarif_document, build_sarif_finding, build_sarif_result,
+    build_sarif_result_with_snippet, build_sarif_rule, normalize_sarif_snippet,
+    sarif_finding_fingerprint,
 };
 pub use security::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,

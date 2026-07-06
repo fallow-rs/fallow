@@ -28,6 +28,29 @@ fn repo_architecture_north_star_stays_documented() {
 }
 
 #[test]
+fn architecture_invariants_doc_tracks_guarded_boundaries() {
+    let doc = std::fs::read_to_string(workspace_root().join("docs/architecture-invariants.md"))
+        .expect("read architecture invariants doc");
+    for required in [
+        "backend adapter containment",
+        "shared output-helper ownership",
+        "manifest/docs drift",
+        "drift-tested against `docs/output-schema.json`",
+        "reusable result,",
+        "snippet, and property assembly belongs in `fallow-output`",
+    ] {
+        assert!(
+            doc.contains(required),
+            "architecture invariants doc must describe guarded boundary: {required}"
+        );
+    }
+    assert!(
+        !doc.contains("Broader layering rules still need human review"),
+        "architecture invariants doc must not describe guarded boundaries as manual-only review"
+    );
+}
+
+#[test]
 fn api_consumers_depend_on_api_not_engine_cli_or_core() {
     for manifest in [
         "crates/lsp/Cargo.toml",
@@ -49,6 +72,17 @@ fn cli_does_not_depend_on_core() {
         !section_has_dep(&manifest, "dev-dependencies", "fallow-core"),
         "fallow-cli tests must use public contract crates instead of fallow-core"
     );
+}
+
+#[test]
+fn only_engine_depends_on_core_as_backend_adapter() {
+    let allowed = ["crates/engine/Cargo.toml"];
+    for manifest_path in workspace_crate_manifests() {
+        if manifest_path == "crates/core/Cargo.toml" || allowed.contains(&manifest_path.as_str()) {
+            continue;
+        }
+        assert_no_deps(&manifest_path, &["fallow-core"]);
+    }
 }
 
 #[test]
@@ -462,6 +496,28 @@ fn cli_json_root_outputs_use_runtime_envelope_mode() {
         assert!(
             !source.contains(forbidden),
             "{source_path} must use output_runtime::current_root_envelope_mode() for root JSON output"
+        );
+    }
+}
+
+#[test]
+fn cli_audit_styling_rendering_uses_output_contract_helpers() {
+    let source_path = "crates/cli/src/audit_output.rs";
+    let source = read_source_without_line_comments(source_path)
+        .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+    for required in [
+        "fallow_output::styling_candidate_count",
+        "fallow_output::styling_audit_context_label",
+    ] {
+        assert!(
+            source.contains(required),
+            "{source_path} must use shared fallow-output audit styling render helpers"
+        );
+    }
+    for forbidden in ["fn styling_candidate_count", "let severity_label"] {
+        assert!(
+            !source.contains(forbidden),
+            "{source_path} must not re-own shared audit styling render fact `{forbidden}`"
         );
     }
 }
@@ -1603,6 +1659,22 @@ fn assert_no_deps(manifest_path: &str, forbidden: &[&str]) {
             );
         }
     }
+}
+
+fn workspace_crate_manifests() -> Vec<String> {
+    let crates_dir = workspace_root().join("crates");
+    let mut manifests = Vec::new();
+    for entry in std::fs::read_dir(&crates_dir).expect("read crates directory") {
+        let entry = entry.expect("read crates directory entry");
+        let path = entry.path();
+        if !path.is_dir() || !path.join("Cargo.toml").is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        manifests.push(format!("crates/{}/Cargo.toml", name.to_string_lossy()));
+    }
+    manifests.sort();
+    manifests
 }
 
 fn rust_sources_under<const N: usize>(roots: [&str; N]) -> Vec<String> {

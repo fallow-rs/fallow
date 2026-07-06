@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
@@ -8106,6 +8106,26 @@
           ]
         },
         {
+          "description": "`fallow trace <symbol> --format json`. Symbol-level caller/callee\ntrace rooted at the requested file and symbol.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SymbolChainTrace"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "trace"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
           "description": "`fallow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
           "allOf": [
             {
@@ -8433,6 +8453,26 @@
           ]
         },
         {
+          "description": "`fallow flags --format json`. Required `findings`, `summary`, and\n`meta` for feature-flag discovery.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FeatureFlagsOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "feature-flags"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
           "description": "`fallow audit --brief --format json` (alias `fallow review`). Required\n`schema_version`, `version`, `command: \"audit-brief\"`, `triage`, and\n`graph_facts`. Independently versioned via `ReviewBriefSchemaVersion`;\nalways emitted with exit 0.",
           "allOf": [
             {
@@ -8444,6 +8484,26 @@
                 "kind": {
                   "type": "string",
                   "const": "audit-brief"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            }
+          ]
+        },
+        {
+          "description": "`fallow decision-surface --format json`. Required `schema_version`\nand `decisions`, derived from deterministic review signals.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DecisionSurfaceOutput"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "decision-surface"
                 }
               },
               "required": [

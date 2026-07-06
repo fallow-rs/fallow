@@ -21,6 +21,9 @@ serde_json = { workspace = true }
 rustc-hash = { workspace = true }
 schemars = { workspace = true, optional = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [features]
 schema = ["dep:schemars", "fallow-types/schema"]
 

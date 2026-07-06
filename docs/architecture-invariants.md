@@ -49,8 +49,10 @@ Run the cheap crate-edge gate while changing workspace dependencies:
 npm run check:crate-boundaries
 ```
 
-The check uses `cargo metadata --no-deps` and currently enforces the clearest
-crate dependency rules. Broader layering rules still need human review.
+The check uses `cargo metadata --no-deps` for crate dependency rules. The
+`architecture_boundaries` Rust tests also guard source-level invariants such as
+backend adapter containment, shared output-helper ownership, and protocol
+manifest/docs drift.
 
 ## IO And Cache Rules
 
@@ -79,6 +81,10 @@ serialization, keep stable fingerprints stable, and document additive vs
 breaking schema changes in `docs/backwards-compatibility.md` when behavior
 changes.
 
+Root `kind` lists and other factual protocol inventories must be generated from
+or drift-tested against `docs/output-schema.json`. Do not copy a stale list into
+prose without a schema-backed test.
+
 ## Testing Rules
 
 Analyzer work should cover:
@@ -104,8 +110,8 @@ as user-visible behavior.
 
 These are known migration states, not patterns to copy:
 
-- Some SARIF-family assembly still lives in `fallow-api` while shared result
-  construction is moving into `fallow-output`.
+- SARIF rule-specific assembly still lives in `fallow-api`; reusable result,
+  snippet, and property assembly belongs in `fallow-output`.
 - `fallow-core` remains a published implementation dependency because
   `fallow-engine` still builds on it. New public surfaces should not depend on
   it directly.

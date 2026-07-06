@@ -24,7 +24,7 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator (for example `dead-code`, `dead-code-grouped`, `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.
  */
 export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
 /**
@@ -50,6 +50,8 @@ kind: "audit"
 kind: "explain"
 }) | (InspectOutput & {
 kind: "inspect_target"
+}) | (SymbolChainTrace & {
+kind: "trace"
 }) | (ReviewEnvelopeOutput & {
 kind: "review-envelope"
 }) | (ReviewReconcileOutput & {
@@ -82,8 +84,12 @@ kind: "security-blind-spots"
 kind: "dead-code"
 }) | (CombinedOutput & {
 kind: "combined"
+}) | (FeatureFlagsOutput & {
+kind: "feature-flags"
 }) | (ReviewBriefOutput & {
 kind: "audit-brief"
+}) | (DecisionSurfaceOutput & {
+kind: "decision-surface"
 }) | (WalkthroughGuide & {
 kind: "review-walkthrough-guide"
 }) | (WalkthroughValidation & {
@@ -640,6 +646,10 @@ export type InspectIdentity = (InspectFileIdentity | InspectSymbolIdentity)
 export type InspectSectionStatus = ("ok" | "error")
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
+ * Best-effort classification of why a callee did not resolve to an edge.
+ */
+export type UnresolvedReason = ("local-or-global" | "member-or-dynamic")
+/**
  * Singleton GitHub review-event marker.
  */
 export type ReviewEnvelopeEvent = "COMMENT"
@@ -801,6 +811,18 @@ export type SecurityVerifierVerdictStatus = ("survivor" | "dismissed" | "needs-h
  */
 export type SecurityBlindSpotsSchemaVersion = "1"
 /**
+ * Feature flag kind values emitted in JSON.
+ */
+export type FeatureFlagKind = ("environment_variable" | "sdk_call" | "config_object")
+/**
+ * Feature flag confidence values emitted in JSON.
+ */
+export type FeatureFlagConfidence = ("high" | "medium" | "low")
+/**
+ * Feature flag action discriminants.
+ */
+export type FeatureFlagActionType = ("investigate-flag" | "suppress-line")
+/**
  * Independently-versioned wire-version newtype for the brief envelope.
  * Serializes as the integer `REVIEW_BRIEF_SCHEMA_VERSION`.
  */
@@ -840,6 +862,15 @@ export type WeakeningKind = ("test-weakened" | "threshold-lowered" | "suppressio
  * enum is the structural guarantee that confirmed-noise categories never ship.
  */
 export type DecisionCategory = ("coupling-boundary" | "public-api-contract" | "dependency")
+/**
+ * Independently-versioned wire-version newtype. Serializes as the integer
+ * [`DECISION_SURFACE_SCHEMA_VERSION`].
+ */
+export type DecisionSurfaceSchemaVersion = number
+/**
+ * The discriminated action kinds a decision can carry.
+ */
+export type DecisionActionType = ("ask-expert" | "suppress")
 /**
  * Discriminator value for [`CodeClimateIssue::kind`].
  */
@@ -7168,6 +7199,93 @@ message?: (string | null)
 data?: unknown
 }
 /**
+ * The result of a symbol-level call-chain trace. Its own surface (`kind:
+ * "trace"`), NOT folded into the ranked brief.
+ */
+export interface SymbolChainTrace {
+/**
+ * The file containing the traced symbol (project-root-relative).
+ */
+file: string
+/**
+ * The traced symbol name.
+ */
+symbol: string
+/**
+ * Whether the symbol's defining export was found in the graph. When
+ * `false`, the chains are empty and `reason` explains why.
+ */
+symbol_found: boolean
+/**
+ * The chain depth applied to both directions.
+ */
+depth: number
+/**
+ * Whether this trace is best-effort (always `true`: symbol-level chains are
+ * labeled best-effort, syntactic per ADR-001).
+ */
+best_effort: boolean
+/**
+ * Caller chain hops (UP). Present only when `--callers` was requested.
+ */
+callers?: (ChainHop[] | null)
+/**
+ * Callee chain hops (DOWN) resolved to an import-symbol edge. Present only
+ * when `--callees` was requested.
+ */
+callees?: (ChainHop[] | null)
+/**
+ * Callees referenced at a call site in the symbol's module that the
+ * syntactic walk could NOT resolve to an import-symbol edge (locals,
+ * globals, dynamic dispatch, re-bound callees). Reported, never dropped.
+ * Present only when `--callees` was requested.
+ */
+unresolved_callees?: (UnresolvedCallee[] | null)
+/**
+ * A human-readable summary of the trace outcome.
+ */
+reason: string
+}
+/**
+ * One hop in a caller / callee chain.
+ */
+export interface ChainHop {
+/**
+ * The file at this hop (project-root-relative). For a caller hop this is
+ * the importing module; for a callee hop the imported module.
+ */
+file: string
+/**
+ * The symbol name as imported across the edge (`default`, `*` for namespace,
+ * the imported name otherwise).
+ */
+imported_as: string
+/**
+ * The local binding name in the file at this hop.
+ */
+local_name: string
+/**
+ * Whether the import edge is type-only (`import type { ... }`).
+ */
+type_only: boolean
+/**
+ * The hop's depth (1 = direct caller/callee of the symbol).
+ */
+depth: number
+}
+/**
+ * A callee referenced at a call site that did not resolve to an import-symbol
+ * edge. Surfaced so a missing callee is never silently dropped.
+ */
+export interface UnresolvedCallee {
+/**
+ * The callee path as written at the call site (e.g. `helper`,
+ * `obj.method`).
+ */
+callee: string
+reason: UnresolvedReason
+}
+/**
  * Envelope emitted by `fallow --format review-github` / `review-gitlab`.
  */
 export interface ReviewEnvelopeOutput {
@@ -9160,6 +9278,79 @@ health?: (Meta | null)
 telemetry?: (TelemetryMeta | null)
 }
 /**
+ * Envelope emitted by `fallow flags --format json`.
+ */
+export interface FeatureFlagsOutput {
+schema_version: SchemaVersion
+version: ToolVersion
+elapsed_ms: ElapsedMs
+feature_flags: FeatureFlagFinding[]
+total_flags: number
+_meta?: (FeatureFlagsMeta | null)
+}
+/**
+ * One feature flag finding in JSON output.
+ */
+export interface FeatureFlagFinding {
+path: string
+flag_name: string
+kind: FeatureFlagKind
+confidence: FeatureFlagConfidence
+line: number
+col: number
+actions: FeatureFlagAction[]
+sdk_name?: (string | null)
+dead_code_overlap?: (FeatureFlagDeadCodeOverlap | null)
+}
+/**
+ * Per-finding action emitted for feature flag findings.
+ */
+export interface FeatureFlagAction {
+type: FeatureFlagActionType
+auto_fixable: boolean
+description: string
+comment?: (string | null)
+}
+/**
+ * Dead-code overlap block attached when a flag guards unused exports.
+ */
+export interface FeatureFlagDeadCodeOverlap {
+guarded_lines: number
+dead_export_count: number
+dead_exports: string[]
+}
+/**
+ * `_meta.feature_flags` details emitted with `--explain`.
+ */
+export interface FeatureFlagsMeta {
+feature_flags: FeatureFlagsMetaDetails
+}
+/**
+ * Feature flag explanatory metadata.
+ */
+export interface FeatureFlagsMetaDetails {
+description: string
+kinds: FeatureFlagsKindMeta
+confidence: FeatureFlagsConfidenceMeta
+docs: string
+}
+/**
+ * Feature flag kind explanations.
+ */
+export interface FeatureFlagsKindMeta {
+environment_variable: string
+sdk_call: string
+config_object: string
+}
+/**
+ * Feature flag confidence explanations.
+ */
+export interface FeatureFlagsConfidenceMeta {
+high: string
+medium: string
+low: string
+}
+/**
  * The full `fallow audit --brief --format json` envelope. Carries the
  * informational verdict, the triage and graph-facts orientation stages, plus
  * the reused "subtract" section (the same dead-code / duplication / complexity
@@ -9579,6 +9770,127 @@ collapsed: number
  * Human-readable collapse reason.
  */
 reason: string
+}
+/**
+ * The separable `decision-surface` envelope: the single call that puts taste-
+ * decisions in front of a human, callable WITHOUT the full pipeline (the
+ * `decision_surface` MCP tool's output). Carries `kind`/`schema_version` plus
+ * structured `actions[]` per decision.
+ */
+export interface DecisionSurfaceOutput {
+schema_version: DecisionSurfaceSchemaVersion
+/**
+ * Fallow CLI version that produced this output.
+ */
+version: string
+/**
+ * Command discriminator singleton: always `"decision-surface"`.
+ */
+command: string
+/**
+ * The ranked, capped decisions, each with structured actions.
+ */
+decisions: DecisionWithActions[]
+/**
+ * Present when more than the cap were extracted.
+ */
+truncated?: (TruncationNote | null)
+/**
+ * Count of fallow-emitted signal_ids (the anti-hallucination allowlist size).
+ */
+signal_count: number
+}
+/**
+ * One decision plus its structured `actions[]`.
+ */
+export interface DecisionWithActions {
+/**
+ * Deterministic anchor to the fallow-emitted candidate this decision frames.
+ * `accept_signal_id` rejects any id not in the emitted set.
+ */
+signal_id: string
+category: DecisionCategory
+/**
+ * The decision framed as a judgment question for the human.
+ */
+question: string
+/**
+ * Root-relative file the decision is anchored at.
+ */
+anchor_file: string
+/**
+ * 1-based anchor line, when the underlying signal carries one (0 = file head).
+ */
+anchor_line: number
+/**
+ * The raw fallow-emitted candidate key the `signal_id` hashes.
+ */
+signal_key: string
+/**
+ * The `signal_id` this decision WOULD have had before any rename in this
+ * change (the anchor file's pre-rename path). Present only when the anchor was
+ * renamed. A review-memory layer carries a dismissal across a `git mv`: if
+ * `previous_signal_id` was dismissed in an earlier PR, treat this decision as
+ * dismissed too. Keeps `signal_id` itself exact + deterministic.
+ */
+previous_signal_id?: (string | null)
+/**
+ * Blast radius: count of modules affected beyond the diff by this decision.
+ */
+blast: number
+/**
+ * `blast * reversibility_weight`: the rank key (sorted descending).
+ */
+consequence: number
+/**
+ * The routed expert(s) to ask, from ownership routing. Empty when no
+ * ownership signal is available for the anchor file.
+ */
+expert: string[]
+/**
+ * Whether the anchor file's only qualified owner is one person.
+ */
+bus_factor_one?: boolean
+/**
+ * Honest per-decision count: in-repo modules OUTSIDE the diff that already
+ * depend on this decision's anchor. This is the DISPLAY number (taste
+ * ownership: the human reads reversibility from the count itself), distinct
+ * from `blast` (the project-wide proxy used only for ranking). Never a door
+ * label. Internal-only by construction, so it cannot see a published library's
+ * external consumers; the public-API trade-off clause names that risk in prose.
+ */
+internal_consumer_count: number
+/**
+ * The named structural sacrifice this change makes, stated as a fact, never a
+ * recommendation (e.g. "Couples `app` to `infra`; 4 in-repo modules already
+ * depend on this anchor."). A sibling fact to `question`; it never tells the
+ * human what to choose.
+ */
+tradeoff: string
+/**
+ * Structured actions: route to the expert, or suppress.
+ */
+actions: DecisionAction[]
+}
+/**
+ * A structured action attached to a surfaced decision (the agent-actionable
+ * surface). Mirrors the typed-action shape the rest of fallow emits.
+ */
+export interface DecisionAction {
+type: DecisionActionType
+/**
+ * Human-readable description of the action.
+ */
+description: string
+/**
+ * Runnable command or paste-ready suppression comment.
+ */
+command?: (string | null)
+/**
+ * Whether fallow can carry the action out automatically. Always `false`:
+ * a decision is a human judgment, never auto-applied.
+ */
+auto_fixable: boolean
 }
 /**
  * The `fallow review --walkthrough-guide` envelope: the current digest + schema

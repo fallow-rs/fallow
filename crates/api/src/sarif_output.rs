@@ -1,41 +1,17 @@
 //! Shared SARIF output assembly for health and duplication reports.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use fallow_output::{
     CoverageIntelligenceRecommendation, CoverageIntelligenceReport, CoverageIntelligenceVerdict,
     ExceededThreshold, FindingSeverity, HealthReport, RuntimeCoverageReport,
-    RuntimeCoverageVerdict, SarifDocumentInput, SarifResultInput, StylingFindingSeverity,
-    build_sarif_document, build_sarif_result, normalize_uri,
+    RuntimeCoverageVerdict, SarifDocumentInput, SarifSourceSnippetCache as SourceSnippetCache,
+    StylingFindingSeverity, build_sarif_document,
+    build_sarif_result_with_snippet as sarif_result_with_snippet, normalize_uri,
 };
 use fallow_types::duplicates::{CloneGroup, DuplicationReport};
-use rustc_hash::FxHashMap;
 
 type SarifRuleBuilder<'a> = dyn Fn(&str, &str, &str) -> serde_json::Value + 'a;
-
-#[derive(Default)]
-struct SourceSnippetCache {
-    files: FxHashMap<PathBuf, Vec<String>>,
-}
-
-impl SourceSnippetCache {
-    fn line(&mut self, path: &Path, line: u32) -> Option<String> {
-        if line == 0 {
-            return None;
-        }
-        if !self.files.contains_key(path) {
-            let lines = std::fs::read_to_string(path)
-                .ok()
-                .map(|source| source.lines().map(str::to_owned).collect())
-                .unwrap_or_default();
-            self.files.insert(path.to_path_buf(), lines);
-        }
-        self.files
-            .get(path)
-            .and_then(|lines| lines.get(line.saturating_sub(1) as usize))
-            .cloned()
-    }
-}
 
 /// Build SARIF output from duplication analysis results.
 #[must_use]
@@ -645,24 +621,6 @@ fn sarif_result(
     region: Option<(u32, u32)>,
 ) -> serde_json::Value {
     sarif_result_with_snippet(rule_id, level, message, uri, region, None)
-}
-
-fn sarif_result_with_snippet(
-    rule_id: &str,
-    level: &str,
-    message: &str,
-    uri: &str,
-    region: Option<(u32, u32)>,
-    snippet: Option<&str>,
-) -> serde_json::Value {
-    build_sarif_result(SarifResultInput {
-        rule_id,
-        level,
-        message,
-        uri,
-        region,
-        snippet,
-    })
 }
 
 fn relative_uri(path: &Path, root: &Path) -> String {

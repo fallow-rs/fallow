@@ -1,10 +1,12 @@
 //! Shared dead-code SARIF output assembly.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use fallow_config::{RulesConfig, Severity};
 use fallow_output::{
-    SarifDocumentInput, SarifFindingInput, build_sarif_document, build_sarif_finding,
+    SarifDocumentInput, SarifFindingFields as SarifFields,
+    SarifSourceSnippetCache as SourceSnippetCache, append_sarif_findings as push_sarif_results,
+    build_sarif_document, build_sarif_result_with_snippet as sarif_result_with_snippet,
     issue_output_contracts, normalize_uri,
 };
 use fallow_types::{
@@ -22,7 +24,6 @@ use fallow_types::{
         UnusedSvelteEvent,
     },
 };
-use rustc_hash::FxHashMap;
 
 fn relative_uri(path: &Path, root: &Path) -> String {
     normalize_uri(
@@ -32,41 +33,6 @@ fn relative_uri(path: &Path, root: &Path) -> String {
             .display()
             .to_string(),
     )
-}
-
-/// Intermediate fields extracted from an issue for SARIF result construction.
-struct SarifFields {
-    rule_id: &'static str,
-    level: &'static str,
-    message: String,
-    uri: String,
-    region: Option<(u32, u32)>,
-    source_path: Option<PathBuf>,
-    properties: Option<serde_json::Value>,
-}
-
-#[derive(Default)]
-struct SourceSnippetCache {
-    files: FxHashMap<PathBuf, Vec<String>>,
-}
-
-impl SourceSnippetCache {
-    fn line(&mut self, path: &Path, line: u32) -> Option<String> {
-        if line == 0 {
-            return None;
-        }
-        if !self.files.contains_key(path) {
-            let lines = std::fs::read_to_string(path)
-                .ok()
-                .map(|source| source.lines().map(str::to_owned).collect())
-                .unwrap_or_default();
-            self.files.insert(path.to_path_buf(), lines);
-        }
-        self.files
-            .get(path)
-            .and_then(|lines| lines.get(line.saturating_sub(1) as usize))
-            .cloned()
-    }
 }
 
 /// Read-only context threaded through the SARIF result builders: the
@@ -91,58 +57,6 @@ fn configured_sarif_level(s: Severity) -> &'static str {
     match s {
         Severity::Error | Severity::Warn => severity_to_sarif_level(s),
         Severity::Off => "none",
-    }
-}
-
-fn issue_code_from_rule_id(rule_id: &str) -> &str {
-    rule_id.strip_prefix("fallow/").unwrap_or(rule_id)
-}
-
-fn sarif_result_with_snippet(
-    rule_id: &str,
-    level: &str,
-    message: &str,
-    uri: &str,
-    region: Option<(u32, u32)>,
-    snippet: Option<&str>,
-) -> serde_json::Value {
-    build_sarif_finding(SarifFindingInput {
-        issue_code: issue_code_from_rule_id(rule_id),
-        rule_id,
-        level,
-        message,
-        uri,
-        region,
-        snippet,
-        properties: None,
-    })
-}
-
-/// Append SARIF results for a slice of items using a closure to extract fields.
-fn push_sarif_results<T>(
-    sarif_results: &mut Vec<serde_json::Value>,
-    items: &[T],
-    snippets: &mut SourceSnippetCache,
-    mut extract: impl FnMut(&T) -> SarifFields,
-) {
-    for item in items {
-        let fields = extract(item);
-        let source_snippet = fields
-            .source_path
-            .as_deref()
-            .zip(fields.region)
-            .and_then(|(path, (line, _))| snippets.line(path, line));
-        let result = build_sarif_finding(SarifFindingInput {
-            issue_code: issue_code_from_rule_id(fields.rule_id),
-            rule_id: fields.rule_id,
-            level: fields.level,
-            message: &fields.message,
-            uri: &fields.uri,
-            region: fields.region,
-            snippet: source_snippet.as_deref(),
-            properties: fields.properties,
-        });
-        sarif_results.push(result);
     }
 }
 

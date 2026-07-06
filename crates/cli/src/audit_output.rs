@@ -7,7 +7,9 @@ use fallow_api::{
     DupesReportPayload,
 };
 use fallow_config::{AuditGate, OutputFormat, RulesConfig, Severity};
-use fallow_output::PrDecisionConclusion;
+use fallow_output::{
+    AuditDisplayGate, AuditDisplaySeverity, AuditStylingContextLabelInput, PrDecisionConclusion,
+};
 use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
 use fallow_types::results::AnalysisResults;
 
@@ -113,7 +115,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
             || h.report
                 .css_analytics
                 .as_ref()
-                .is_some_and(|c| styling_candidate_count(&c.summary) > 0)
+                .is_some_and(|c| fallow_output::styling_candidate_count(&c.summary) > 0)
     });
 
     if has_check_issues || has_health_findings || has_dupe_groups || has_styling {
@@ -223,27 +225,6 @@ fn print_audit_complexity_section(
     );
 }
 
-/// Count the styling candidates in a CSS analytics summary (dead surface + token
-/// drift + broken references). Saturating, matching the CSS-analytics
-/// accumulation convention (`css_analytics.rs` uses `saturating_add` throughout).
-fn styling_candidate_count(s: &fallow_output::CssAnalyticsSummary) -> u32 {
-    [
-        s.tailwind_arbitrary_values,
-        s.duplicate_declaration_blocks,
-        s.unreferenced_css_classes,
-        s.unused_theme_tokens,
-        s.unused_font_faces,
-        s.unused_property_registrations,
-        s.unused_layers,
-        s.scoped_unused_classes,
-        s.keyframes_unreferenced,
-        s.keyframes_undefined,
-        s.unresolved_class_references,
-    ]
-    .into_iter()
-    .fold(0u32, u32::saturating_add)
-}
-
 /// Styling section in the audit view: the graduated, agent-actionable styling
 /// FINDINGS (top-N per the noise budget), falling back to a candidate count for
 /// the not-yet-graduated descriptive candidates. Verdict-neutral; deliberately NOT
@@ -256,11 +237,9 @@ fn print_audit_styling_summary(result: &AuditResult, show_headers: bool) {
         return;
     };
     let findings = &health.report.styling_findings;
-    let descriptive = health
-        .report
-        .css_analytics
-        .as_ref()
-        .map_or(0, |css| styling_candidate_count(&css.summary));
+    let descriptive = health.report.css_analytics.as_ref().map_or(0, |css| {
+        fallow_output::styling_candidate_count(&css.summary)
+    });
     if findings.is_empty() && descriptive == 0 {
         return;
     }
@@ -445,30 +424,40 @@ fn styling_finding_audit_context(
             )
         }
     });
-    styling_finding_audit_context_label(severity, &rule, base_state, result.attribution.gate)
+    styling_finding_audit_context_label(
+        severity,
+        &rule,
+        base_state.as_deref(),
+        result.attribution.gate,
+    )
 }
 
 fn styling_finding_audit_context_label(
     severity: Severity,
     rule: &str,
-    base_state: Option<String>,
+    base_state: Option<&str>,
     gate: AuditGate,
 ) -> String {
-    let severity_label = match severity {
-        Severity::Off => "off",
-        Severity::Warn => "warn",
-        Severity::Error => "error",
-    };
-    let prefix = match (severity, gate, base_state.as_deref()) {
-        (Severity::Error, AuditGate::NewOnly, Some(state)) if state.starts_with("inherited") => {
-            "not gated"
-        }
-        (Severity::Error, _, _) => "gated",
-        _ => "advisory",
-    };
-    match base_state {
-        Some(state) => format!("({prefix}: {rule}={severity_label}, {state})"),
-        None => format!("({prefix}: {rule}={severity_label})"),
+    fallow_output::styling_audit_context_label(AuditStylingContextLabelInput {
+        severity: audit_display_severity(severity),
+        rule,
+        base_state,
+        gate: audit_display_gate(gate),
+    })
+}
+
+fn audit_display_severity(severity: Severity) -> AuditDisplaySeverity {
+    match severity {
+        Severity::Off => AuditDisplaySeverity::Off,
+        Severity::Warn => AuditDisplaySeverity::Warn,
+        Severity::Error => AuditDisplaySeverity::Error,
+    }
+}
+
+fn audit_display_gate(gate: AuditGate) -> AuditDisplayGate {
+    match gate {
+        AuditGate::NewOnly => AuditDisplayGate::NewOnly,
+        AuditGate::All => AuditDisplayGate::All,
     }
 }
 
@@ -972,7 +961,7 @@ mod tests {
             styling_finding_audit_context_label(
                 fallow_config::Severity::Error,
                 "rules.css-selector-complexity",
-                Some("introduced design-system drift since HEAD".to_string()),
+                Some("introduced design-system drift since HEAD"),
                 AuditGate::NewOnly,
             ),
             "(gated: rules.css-selector-complexity=error, introduced design-system drift since HEAD)"
@@ -981,7 +970,7 @@ mod tests {
             styling_finding_audit_context_label(
                 fallow_config::Severity::Error,
                 "rules.css-selector-complexity",
-                Some("inherited styling debt from HEAD".to_string()),
+                Some("inherited styling debt from HEAD"),
                 AuditGate::NewOnly,
             ),
             "(not gated: rules.css-selector-complexity=error, inherited styling debt from HEAD)"

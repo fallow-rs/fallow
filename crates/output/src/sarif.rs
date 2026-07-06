@@ -1,3 +1,6 @@
+use std::path::{Path, PathBuf};
+
+use rustc_hash::FxHashMap;
 use serde_json::Value;
 
 use crate::codeclimate::codeclimate_fingerprint_hash;
@@ -29,6 +32,18 @@ pub struct SarifFindingInput<'a> {
     pub uri: &'a str,
     pub region: Option<(u32, u32)>,
     pub snippet: Option<&'a str>,
+    pub properties: Option<Value>,
+}
+
+/// Intermediate fields extracted from one issue for SARIF result construction.
+#[derive(Debug, Clone)]
+pub struct SarifFindingFields {
+    pub rule_id: &'static str,
+    pub level: &'static str,
+    pub message: String,
+    pub uri: String,
+    pub region: Option<(u32, u32)>,
+    pub source_path: Option<PathBuf>,
     pub properties: Option<Value>,
 }
 
@@ -66,6 +81,32 @@ pub fn normalize_sarif_snippet(snippet: &str) -> String {
 pub fn sarif_finding_fingerprint(rule_id: &str, path: &str, snippet: &str) -> String {
     let normalized = normalize_sarif_snippet(snippet);
     codeclimate_fingerprint_hash(&[rule_id, path, &normalized])
+}
+
+/// Lazily reads source files so SARIF result builders can attach stable line snippets.
+#[derive(Debug, Default)]
+pub struct SarifSourceSnippetCache {
+    files: FxHashMap<PathBuf, Vec<String>>,
+}
+
+impl SarifSourceSnippetCache {
+    /// Return the 1-based source line from a file, caching the file contents.
+    pub fn line(&mut self, path: &Path, line: u32) -> Option<String> {
+        if line == 0 {
+            return None;
+        }
+        if !self.files.contains_key(path) {
+            let lines = std::fs::read_to_string(path)
+                .ok()
+                .map(|source| source.lines().map(str::to_owned).collect())
+                .unwrap_or_default();
+            self.files.insert(path.to_path_buf(), lines);
+        }
+        self.files
+            .get(path)
+            .and_then(|lines| lines.get(line.saturating_sub(1) as usize))
+            .cloned()
+    }
 }
 
 /// Build a single SARIF result object.
@@ -127,6 +168,54 @@ pub fn build_sarif_finding(input: SarifFindingInput<'_>) -> Value {
     result
 }
 
+/// Build a single SARIF result object with optional source snippet evidence.
+#[must_use]
+pub fn build_sarif_result_with_snippet(
+    rule_id: &str,
+    level: &str,
+    message: &str,
+    uri: &str,
+    region: Option<(u32, u32)>,
+    snippet: Option<&str>,
+) -> Value {
+    build_sarif_result(SarifResultInput {
+        rule_id,
+        level,
+        message,
+        uri,
+        region,
+        snippet,
+    })
+}
+
+/// Append SARIF findings by extracting normalized fields from typed issues.
+pub fn append_sarif_findings<T>(
+    sarif_results: &mut Vec<Value>,
+    items: &[T],
+    snippets: &mut SarifSourceSnippetCache,
+    mut extract: impl FnMut(&T) -> SarifFindingFields,
+) {
+    for item in items {
+        let fields = extract(item);
+        let source_snippet = fields
+            .source_path
+            .as_deref()
+            .zip(fields.region)
+            .and_then(|(path, (line, _))| snippets.line(path, line));
+        let result = build_sarif_finding(SarifFindingInput {
+            issue_code: issue_code_from_rule_id(fields.rule_id),
+            rule_id: fields.rule_id,
+            level: fields.level,
+            message: &fields.message,
+            uri: &fields.uri,
+            region: fields.region,
+            snippet: source_snippet.as_deref(),
+            properties: fields.properties,
+        });
+        sarif_results.push(result);
+    }
+}
+
 /// Build a SARIF rule object.
 #[must_use]
 pub fn build_sarif_rule(input: SarifRuleInput<'_>) -> Value {
@@ -150,6 +239,10 @@ pub fn build_sarif_rule(input: SarifRuleInput<'_>) -> Value {
         serde_json::json!({ "level": input.level }),
     );
     Value::Object(rule)
+}
+
+fn issue_code_from_rule_id(rule_id: &str) -> &str {
+    rule_id.strip_prefix("fallow/").unwrap_or(rule_id)
 }
 
 /// Build a SARIF 2.1.0 document envelope.
@@ -228,6 +321,35 @@ mod tests {
         });
 
         assert!(finding.get("properties").is_none());
+    }
+
+    #[test]
+    fn append_sarif_findings_attaches_snippet_and_properties() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let source = temp.path().join("src.ts");
+        std::fs::write(&source, "\nexport const unused = 1;\n").expect("write source");
+        let mut snippets = SarifSourceSnippetCache::default();
+        let mut results = Vec::new();
+
+        append_sarif_findings(
+            &mut results,
+            std::slice::from_ref(&source),
+            &mut snippets,
+            |path| SarifFindingFields {
+                rule_id: "fallow/unused-export",
+                level: "warning",
+                message: "Export is never imported".to_string(),
+                uri: "src.ts".to_string(),
+                region: Some((2, 1)),
+                source_path: Some(path.clone()),
+                properties: Some(serde_json::json!({ "is_re_export": true })),
+            },
+        );
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["ruleId"], "fallow/unused-export");
+        assert_eq!(results[0]["properties"]["is_re_export"], true);
+        assert!(results[0]["partialFingerprints"][SARIF_FINGERPRINT_KEY].is_string());
     }
 
     #[test]

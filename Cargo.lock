@@ -995,8 +995,8 @@ dependencies = [
  "criterion2",
  "fallow-api",
  "fallow-config",
- "fallow-core",
  "fallow-engine",
+ "fallow-extract",
  "fallow-graph",
  "fallow-output",
  "fallow-types",
@@ -1268,6 +1268,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

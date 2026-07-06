@@ -8,10 +8,8 @@ use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_api::{AnalysisOptions, DeadCodeOptions, run_dead_code};
-use fallow_core::{
-    discover::{DiscoveredFile, FileId},
-    extract::parse_single_file,
-};
+use fallow_extract::parse_single_file;
+use fallow_types::discover::{DiscoveredFile, FileId};
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;

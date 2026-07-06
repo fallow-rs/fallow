@@ -900,6 +900,11 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "`fallow inspect --format json`. Required `target`, `identity`,\n`evidence`, and `warnings`; no `schema_version`.",
     ),
     (
+        "trace",
+        &["SymbolChainTrace"],
+        "`fallow trace <symbol> --format json`. Symbol-level caller/callee\ntrace rooted at the requested file and symbol.",
+    ),
+    (
         "review-envelope",
         &["ReviewEnvelopeOutput"],
         "`fallow --format review-github` / `--format review-gitlab`. Required\n`body`, `comments`, `meta`; no `schema_version`.",
@@ -976,9 +981,19 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
         "Bare `fallow --format json` (combined dead-code + dupes + health).\nRequired `schema_version`, `version`, and `elapsed_ms`, with optional\n`check`, `dupes`, and `health` subreports.",
     ),
     (
+        "feature-flags",
+        &["FeatureFlagsOutput"],
+        "`fallow flags --format json`. Required `findings`, `summary`, and\n`meta` for feature-flag discovery.",
+    ),
+    (
         "audit-brief",
         &["ReviewBriefOutput"],
         "`fallow audit --brief --format json` (alias `fallow review`). Required\n`schema_version`, `version`, `command: \"audit-brief\"`, `triage`, and\n`graph_facts`. Independently versioned via `ReviewBriefSchemaVersion`;\nalways emitted with exit 0.",
+    ),
+    (
+        "decision-surface",
+        &["DecisionSurfaceOutput"],
+        "`fallow decision-surface --format json`. Required `schema_version`\nand `decisions`, derived from deterministic review signals.",
     ),
     (
         "review-walkthrough-guide",
@@ -1046,6 +1061,14 @@ fn fallow_output_payload_schema(definitions: &[&str]) -> Value {
     }
 }
 
+fn fallow_output_kind_list() -> String {
+    FALLOW_OUTPUT_VARIANTS
+        .iter()
+        .map(|(kind, _, _)| format!("`{kind}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Drive the document-root `oneOf` from the typed `FallowOutput` enum.
 fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
     let root = document
@@ -1062,19 +1085,16 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
 
     root.insert(
         "description".to_string(),
-        Value::String(
+        Value::String(format!(
             "Schemas for the JSON output of fallow commands. Object-shaped \
              envelopes covered by the `FallowOutput` contract carry a top-level \
-             `kind` discriminator (for example `dead-code`, `dead-code-grouped`, \
-             `health`, `dupes`, `combined`, `audit`, `explain`, `inspect_target`, \
-             `impact`, `security`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, \
-             `review-envelope`, and `review-reconcile`). Consumers should branch on `kind` instead of \
-             probing for unique field presence. \
+             `kind` discriminator. Current kind values: {}. Consumers should \
+             branch on `kind` instead of probing for unique field presence. \
              `CodeClimateOutput` is a bare JSON array (per the Code Climate / \
              GitLab Code Quality spec) and stays a sibling root branch \
-             discriminated by checking whether the document root is an array."
-                .to_string(),
-        ),
+             discriminated by checking whether the document root is an array.",
+            fallow_output_kind_list()
+        )),
     );
 
     Ok(())
@@ -1182,6 +1202,9 @@ mod drift_tests {
     //! The drift gate compares normalized derived schemas to the committed file.
 
     use super::*;
+
+    const BACKWARDS_COMPATIBILITY_DOC: &str =
+        include_str!("../../../../docs/backwards-compatibility.md");
 
     /// Recursively normalize a JSON value for drift comparison.
     fn canonicalize(mut value: Value) -> Value {
@@ -1305,6 +1328,8 @@ mod drift_tests {
         const VARIANTS: &[(&str, &str)] = &[
             ("Audit", "AuditOutput"),
             ("Explain", "ExplainOutput"),
+            ("Inspect", "InspectOutput"),
+            ("Trace", "SymbolChainTrace"),
             ("ReviewEnvelope", "ReviewEnvelopeOutput"),
             ("ReviewReconcile", "ReviewReconcileOutput"),
             ("CoverageSetup", "CoverageSetupOutput"),
@@ -1392,6 +1417,18 @@ mod drift_tests {
                 "finding type `{name}` is augmented with `actions`/`introduced` but never registered as a derived definition. Add it to `derived_definition_names()` (and the corresponding `subschema_for::<{name}>()` call) before listing it as a finding."
             );
         }
+    }
+
+    #[test]
+    fn backwards_compatibility_kind_list_matches_output_schema() {
+        let document: Value = serde_json::from_str(COMMITTED_SCHEMA)
+            .expect("committed docs/output-schema.json must parse");
+        let schema_kinds = fallow_output_kind_values_from_schema(&document);
+        let docs_kinds = documented_fallow_output_kind_values(BACKWARDS_COMPATIBILITY_DOC);
+        assert_eq!(
+            docs_kinds, schema_kinds,
+            "docs/backwards-compatibility.md factual `kind` list must match docs/output-schema.json. Update the marked list from the schema manifest instead of editing protocol prose by hand."
+        );
     }
 
     /// Verify augmentation adds the expected `actions` / `introduced` fields.
@@ -1809,6 +1846,42 @@ mod drift_tests {
              as a sibling root branch (the bare-array spec form); found refs: {:?}",
             refs.iter().collect::<Vec<_>>(),
         );
+    }
+
+    fn fallow_output_kind_values_from_schema(document: &Value) -> Vec<String> {
+        document
+            .pointer("/definitions/FallowOutput/oneOf")
+            .and_then(Value::as_array)
+            .expect("FallowOutput must expose oneOf variants")
+            .iter()
+            .map(|variant| {
+                variant
+                    .pointer("/allOf/1/properties/kind/const")
+                    .and_then(Value::as_str)
+                    .expect("FallowOutput variant must carry a kind const")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn documented_fallow_output_kind_values(doc: &str) -> Vec<String> {
+        let start = "<!-- fallow-output-kind-list:start -->";
+        let end = "<!-- fallow-output-kind-list:end -->";
+        let section = doc
+            .split_once(start)
+            .and_then(|(_, rest)| rest.split_once(end).map(|(section, _)| section))
+            .expect("backwards compatibility doc must contain fallow output kind markers");
+        section
+            .split('`')
+            .enumerate()
+            .filter_map(|(index, value)| {
+                if index % 2 == 1 {
+                    Some(value.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     #[test]

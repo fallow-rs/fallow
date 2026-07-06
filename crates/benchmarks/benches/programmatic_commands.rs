@@ -16,11 +16,11 @@ use fallow_api::{
     run_circular_dependencies, run_combined, run_dead_code, run_duplication,
     run_health_with_runner,
 };
-use fallow_core::{
+use fallow_extract::{
     cache::{CacheStore, module_to_cached},
-    discover::{DiscoveredFile, FileId},
-    extract::{parse_all_files, parse_single_file},
+    parse_all_files, parse_single_file,
 };
+use fallow_types::discover::{DiscoveredFile, FileId};
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
