@@ -4,9 +4,9 @@
 //! `fallow-core` directly. The goal is to keep core-backed orchestration
 //! contained while the engine-owned contracts continue to stabilize.
 
-use fallow_config::{ExternalPluginDef, PackageJson, ResolvedConfig};
+use fallow_config::{EntryPointRole, ExternalPluginDef, PackageJson, ResolvedConfig};
 use fallow_types::trace::PipelineTimings;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use crate::{
@@ -252,43 +252,27 @@ pub fn dead_code_pipeline_profile(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendPluginRegexValidationError {
-    inner: fallow_core::plugins::registry::PluginRegexValidationError,
-}
-
-impl From<fallow_core::plugins::registry::PluginRegexValidationError>
-    for BackendPluginRegexValidationError
-{
-    fn from(inner: fallow_core::plugins::registry::PluginRegexValidationError) -> Self {
-        Self { inner }
-    }
+    message: String,
 }
 
 impl BackendPluginRegexValidationError {
     pub fn message(&self) -> String {
-        self.inner.to_string()
+        self.message.clone()
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct BackendAggregatedPluginResult {
-    inner: fallow_core::plugins::AggregatedPluginResult,
+    active_plugins: Vec<String>,
+    entry_patterns: Vec<PluginEntryPattern>,
+    support_patterns: Vec<PluginNamedPattern>,
+    setup_files: Vec<PluginSetupFile>,
+    entry_point_roles: FxHashMap<String, EntryPointRole>,
 }
 
 impl BackendAggregatedPluginResult {
-    pub fn active_plugins(&self) -> &[String] {
-        &self.inner.active_plugins
-    }
-
-    pub fn merge_active_plugins_from(&mut self, other: &Self) {
-        for plugin_name in &other.inner.active_plugins {
-            if !self.inner.active_plugins.contains(plugin_name) {
-                self.inner.active_plugins.push(plugin_name.clone());
-            }
-        }
-    }
-
-    pub(crate) fn entry_patterns(&self) -> Vec<PluginEntryPattern> {
-        self.inner
+    fn from_core(inner: fallow_core::plugins::AggregatedPluginResult) -> Self {
+        let entry_patterns = inner
             .entry_patterns
             .iter()
             .map(|(rule, plugin_name)| PluginEntryPattern {
@@ -300,50 +284,68 @@ impl BackendAggregatedPluginResult {
                 },
                 plugin_name: plugin_name.clone(),
             })
-            .collect()
-    }
-
-    pub(crate) fn support_patterns(&self) -> Vec<PluginNamedPattern> {
-        self.inner
+            .collect();
+        let support_patterns = inner
             .discovered_always_used
             .iter()
-            .chain(self.inner.always_used.iter())
-            .chain(self.inner.fixture_patterns.iter())
+            .chain(inner.always_used.iter())
+            .chain(inner.fixture_patterns.iter())
             .map(|(pattern, plugin_name)| PluginNamedPattern {
                 pattern: pattern.clone(),
                 plugin_name: plugin_name.clone(),
             })
-            .collect()
-    }
-
-    pub(crate) fn setup_files(&self) -> Vec<PluginSetupFile> {
-        self.inner
+            .collect();
+        let setup_files = inner
             .setup_files
             .iter()
             .map(|(path, plugin_name)| PluginSetupFile {
                 path: path.clone(),
                 plugin_name: plugin_name.clone(),
             })
-            .collect()
+            .collect();
+        Self {
+            active_plugins: inner.active_plugins,
+            entry_patterns,
+            support_patterns,
+            setup_files,
+            entry_point_roles: inner.entry_point_roles,
+        }
     }
 
-    pub(crate) fn entry_point_role(&self, plugin_name: &str) -> fallow_config::EntryPointRole {
-        self.inner
-            .entry_point_roles
+    pub fn active_plugins(&self) -> &[String] {
+        &self.active_plugins
+    }
+
+    pub fn merge_active_plugins_from(&mut self, other: &Self) {
+        for plugin_name in &other.active_plugins {
+            if !self.active_plugins.contains(plugin_name) {
+                self.active_plugins.push(plugin_name.clone());
+            }
+        }
+    }
+
+    pub(crate) fn entry_patterns(&self) -> Vec<PluginEntryPattern> {
+        self.entry_patterns.clone()
+    }
+
+    pub(crate) fn support_patterns(&self) -> Vec<PluginNamedPattern> {
+        self.support_patterns.clone()
+    }
+
+    pub(crate) fn setup_files(&self) -> Vec<PluginSetupFile> {
+        self.setup_files.clone()
+    }
+
+    pub(crate) fn entry_point_role(&self, plugin_name: &str) -> EntryPointRole {
+        self.entry_point_roles
             .get(plugin_name)
             .copied()
-            .unwrap_or(fallow_config::EntryPointRole::Support)
+            .unwrap_or(EntryPointRole::Support)
     }
 
     #[cfg(test)]
     pub fn push_active_plugin_for_test(&mut self, plugin_name: impl Into<String>) {
-        self.inner.active_plugins.push(plugin_name.into());
-    }
-}
-
-impl From<fallow_core::plugins::AggregatedPluginResult> for BackendAggregatedPluginResult {
-    fn from(inner: fallow_core::plugins::AggregatedPluginResult) -> Self {
-        Self { inner }
+        self.active_plugins.push(plugin_name.into());
     }
 }
 
@@ -370,7 +372,14 @@ impl BackendPluginRegistry {
     ) -> Result<BackendAggregatedPluginResult, Vec<BackendPluginRegexValidationError>> {
         self.inner
             .try_run(pkg, root, discovered_files)
-            .map(Into::into)
-            .map_err(|errors| errors.into_iter().map(Into::into).collect())
+            .map(BackendAggregatedPluginResult::from_core)
+            .map_err(|errors| {
+                errors
+                    .into_iter()
+                    .map(|error| BackendPluginRegexValidationError {
+                        message: error.to_string(),
+                    })
+                    .collect()
+            })
     }
 }
