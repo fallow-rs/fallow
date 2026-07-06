@@ -20,6 +20,9 @@ typed `AnalysisResults`.
 
 ## Architecture north star
 
+For the contributor-facing crate rules, IO boundaries, contract rules, and
+current exceptions, see [`architecture-invariants.md`](architecture-invariants.md).
+
 Fallow should be a deterministic repo-intelligence engine with thin integration
 surfaces, not a CLI with libraries arranged around it. That means new analysis
 flows should start in `fallow-engine`, expose typed contracts through
@@ -35,6 +38,12 @@ Use these boundaries when adding new product flows:
   SARIF, CodeClimate, suppressions, docs anchors, LSP diagnostic metadata, and
   TypeScript aliases must derive from typed contract registries instead of
   scattered string tables.
+- **Output-owned protocol formatting**: SARIF, CodeClimate, GitHub/GitLab
+  markdown, compact, and human render helpers should live in `fallow-output` or
+  protocol adapter crates once analysis findings have been normalized. API
+  layers may walk typed result structures, but they should delegate common
+  result assembly, fingerprints, docs metadata, and formatter invariants to the
+  shared output boundary.
 - **Session reuse before broad persistence**: grow `AnalysisSession` toward a
   lightweight query model for shared discovery, parsed modules, graph state,
   changed files, fingerprints, and production modes. Persisted cache expansion

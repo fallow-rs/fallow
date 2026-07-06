@@ -553,6 +553,75 @@ fn initialization_config_path_returns_none_for_non_string_value() {
 }
 
 #[test]
+fn parse_initialization_options_reads_full_payload() {
+    let opts = json!({
+        "configPath": "config/fallow.json",
+        "issueTypes": {
+            "unused-exports": false
+        },
+        "changedSince": "origin/main",
+        "production": true,
+        "duplication": {
+            "mode": "semantic",
+            "minTokens": 64
+        },
+        "health": {
+            "inlineComplexity": true
+        },
+        "futureClientOnly": true
+    });
+
+    let parsed = parse_initialization_options(Some(&opts));
+
+    assert_eq!(parsed.config_path.as_deref(), Some("config/fallow.json"));
+    assert_eq!(
+        parsed
+            .issue_types
+            .as_ref()
+            .and_then(|issue_types| issue_types.get("unused-exports")),
+        Some(&false)
+    );
+    assert_eq!(parsed.changed_since.as_deref(), Some("origin/main"));
+    assert_eq!(parsed.production, Some(true));
+    assert_eq!(
+        parsed
+            .duplication
+            .as_ref()
+            .and_then(|duplication| duplication.min_tokens),
+        Some(64)
+    );
+    assert!(
+        parsed
+            .health
+            .as_ref()
+            .and_then(|health| health.inline_complexity)
+            .unwrap_or(false)
+    );
+}
+
+#[test]
+fn parse_initialization_options_is_permissive_for_missing_or_malformed_payload() {
+    assert_eq!(
+        parse_initialization_options(None),
+        LspInitializationOptions::default()
+    );
+    assert_eq!(
+        parse_initialization_options(Some(&json!("not an object"))),
+        LspInitializationOptions::default()
+    );
+    assert_eq!(
+        parse_initialization_options(Some(&json!({
+            "production": "on",
+            "health": {
+                "inlineComplexity": "yes"
+            }
+        })))
+        .production,
+        None
+    );
+}
+
+#[test]
 fn initialization_duplication_options_reads_vscode_payload() {
     let opts = json!({
         "duplication": {

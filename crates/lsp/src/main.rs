@@ -56,7 +56,11 @@ use fallow_config::DetectionMode;
 #[cfg(test)]
 use fallow_config::DuplicatesConfig;
 use initialization::{
-    LspDuplicationOptions, initialization_config_path, initialization_duplication_options,
+    LspDuplicationOptions, initialization_config_path, parse_initialization_options,
+};
+#[cfg(test)]
+use initialization::{
+    LspInitializationOptions, initialization_duplication_options,
     initialization_inline_complexity_enabled, initialization_production_override,
 };
 #[cfg(test)]
@@ -170,24 +174,22 @@ impl LanguageServer for FallowLspServer {
         }
 
         if let Some(opts) = &params.initialization_options {
-            if let Some(issue_types) = opts.get("issueTypes").and_then(|v| v.as_object()) {
+            let parsed_options = parse_initialization_options(Some(opts));
+
+            if let Some(issue_types) = &parsed_options.issue_types {
                 let mut disabled = FxHashSet::default();
                 for issue_type in diagnostic_issue_type_metas() {
                     let Some(config_key) = issue_type.config_key else {
                         continue;
                     };
-                    if let Some(enabled) = issue_types
-                        .get(config_key)
-                        .and_then(serde_json::Value::as_bool)
-                        && !enabled
-                    {
+                    if issue_types.get(config_key) == Some(&false) {
                         disabled.insert(issue_type.code.to_string());
                     }
                 }
                 *self.disabled_diagnostic_codes.write().await = disabled;
             }
 
-            if let Some(git_ref) = opts.get("changedSince").and_then(|v| v.as_str()) {
+            if let Some(git_ref) = parsed_options.changed_since.as_deref() {
                 let trimmed = git_ref.trim();
                 *self.changed_since.write().await = if trimmed.is_empty() {
                     None
@@ -198,10 +200,12 @@ impl LanguageServer for FallowLspServer {
 
             *self.config_path.write().await =
                 initialization_config_path(opts, canonical_root.as_deref());
-            *self.duplication_options.write().await = initialization_duplication_options(opts);
-            *self.production_override.write().await = initialization_production_override(opts);
-            *self.inline_complexity_enabled.write().await =
-                initialization_inline_complexity_enabled(opts);
+            *self.duplication_options.write().await = parsed_options.duplication;
+            *self.production_override.write().await = parsed_options.production;
+            *self.inline_complexity_enabled.write().await = parsed_options
+                .health
+                .and_then(|health| health.inline_complexity)
+                .unwrap_or(false);
         }
 
         let advertise_pull_diagnostics =

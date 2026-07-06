@@ -32,6 +32,49 @@ scripts/test-public-config-corpus.sh
 
 The offline fixture mode reads fake `gh search code --json` output and cached config bodies from `scripts/fixtures/public-config-corpus/`.
 
+## Public Smoke Conformance
+
+Use the public smoke lane when analyzer, framework, output-contract, or release
+work needs real-project evidence without running the full scheduled
+Fallow-vs-Knip conformance suite.
+
+```bash
+npm run conformance:public-smoke
+```
+
+The default command performs no network access. It writes compact skip/pass/fail
+summaries under `target/public-smoke-conformance/`, which is ignored by git. To
+run against local clones, pass one or more project paths:
+
+```bash
+npm run conformance:public-smoke -- --project next=/path/to/next.js --project vite=/path/to/vite
+```
+
+For release-readiness evidence, opt in to network fetches explicitly:
+
+```bash
+npm run conformance:public-smoke -- --clone
+```
+
+The pinned smoke set lives in `scripts/public-smoke-projects.json` and covers:
+
+| Category | Project |
+| --- | --- |
+| Next.js shape | `vercel/next.js` |
+| Vue/Nuxt shape | `vuejs/core` |
+| SvelteKit shape | `sveltejs/svelte` |
+| Workspace-heavy shape | `TanStack/query` |
+| Catalog or override-heavy shape | `vitejs/vite` |
+
+Artifacts:
+
+- `target/public-smoke-conformance/public-smoke-summary.json`
+- `target/public-smoke-conformance/public-smoke-summary.md`
+
+Artifacts intentionally contain compact counts, command names, public repo refs,
+and project ids only. They do not store raw Fallow JSON, source snippets, or
+absolute project paths.
+
 ## Reproducibility
 
 Each manifest entry records:
@@ -49,6 +92,10 @@ Partial fetches are visible in the report instead of silently shrinking the corp
 ## Privacy And License Boundaries
 
 Use this workflow only for public repositories. Do not run it with private repository search results or copy private config files into fixtures.
+
+Do not publish private project output in public release notes, README examples,
+or GitHub issues. When public-smoke output is useful as release evidence, cite
+the public repository id, pinned ref, command, and summary category only.
 
 When turning a finding into an issue:
 

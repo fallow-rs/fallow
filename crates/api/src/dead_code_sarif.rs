@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{RulesConfig, Severity};
 use fallow_output::{
-    SarifDocumentInput, SarifResultInput, build_sarif_document, build_sarif_result,
+    SarifDocumentInput, SarifFindingInput, build_sarif_document, build_sarif_finding,
     issue_output_contracts, normalize_uri,
 };
 use fallow_types::{
@@ -94,6 +94,10 @@ fn configured_sarif_level(s: Severity) -> &'static str {
     }
 }
 
+fn issue_code_from_rule_id(rule_id: &str) -> &str {
+    rule_id.strip_prefix("fallow/").unwrap_or(rule_id)
+}
+
 fn sarif_result_with_snippet(
     rule_id: &str,
     level: &str,
@@ -102,13 +106,15 @@ fn sarif_result_with_snippet(
     region: Option<(u32, u32)>,
     snippet: Option<&str>,
 ) -> serde_json::Value {
-    build_sarif_result(SarifResultInput {
+    build_sarif_finding(SarifFindingInput {
+        issue_code: issue_code_from_rule_id(rule_id),
         rule_id,
         level,
         message,
         uri,
         region,
         snippet,
+        properties: None,
     })
 }
 
@@ -126,17 +132,16 @@ fn push_sarif_results<T>(
             .as_deref()
             .zip(fields.region)
             .and_then(|(path, (line, _))| snippets.line(path, line));
-        let mut result = sarif_result_with_snippet(
-            fields.rule_id,
-            fields.level,
-            &fields.message,
-            &fields.uri,
-            fields.region,
-            source_snippet.as_deref(),
-        );
-        if let Some(props) = fields.properties {
-            result["properties"] = props;
-        }
+        let result = build_sarif_finding(SarifFindingInput {
+            issue_code: issue_code_from_rule_id(fields.rule_id),
+            rule_id: fields.rule_id,
+            level: fields.level,
+            message: &fields.message,
+            uri: &fields.uri,
+            region: fields.region,
+            snippet: source_snippet.as_deref(),
+            properties: fields.properties,
+        });
         sarif_results.push(result);
     }
 }

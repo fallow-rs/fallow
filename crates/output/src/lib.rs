@@ -273,9 +273,9 @@ pub use root_envelopes::{
     serialize_combined_json_output, serialize_json_root_output, serialize_named_json_output,
 };
 pub use sarif::{
-    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifResultInput,
-    SarifRuleInput, build_sarif_document, build_sarif_result, build_sarif_rule,
-    normalize_sarif_snippet, sarif_finding_fingerprint,
+    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifFindingInput,
+    SarifResultInput, SarifRuleInput, build_sarif_document, build_sarif_finding,
+    build_sarif_result, build_sarif_rule, normalize_sarif_snippet, sarif_finding_fingerprint,
 };
 pub use security::{
     SecurityBlindSpotFile, SecurityBlindSpotGroup, SecurityBlindSpotsOutput,

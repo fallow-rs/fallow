@@ -80,6 +80,7 @@ jobs:
               - 'npm/fallow/types/output-contract.d.ts'
               - 'npm/fallow/skills/fallow/**'
               - 'editors/vscode/src/generated/output-contract.d.ts'
+              - 'editors/vscode/src/generated/lsp-initialization-options.d.ts'
               - 'scripts/generate-all.mjs'
               - 'scripts/generate-agent-docs.mjs'
               - 'Cargo.toml'

@@ -5,9 +5,15 @@
     "tests/conformance/fixtures/**",
     "editors/vscode/test/integration/fixtures/**"
   ],
+  "ignoreUnresolvedImports": [
+    "./generated/lsp-initialization-options.js",
+    "../src/generated/lsp-initialization-options.js"
+  ],
   "health": {
     "ignore": [
       "npm/fallow/scripts/**",
+      "scripts/check-contract-surfaces.mjs",
+      "scripts/public-smoke-conformance.mjs",
       "scripts/styling-corpus-smoke.mjs"
     ]
   },

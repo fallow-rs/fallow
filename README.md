@@ -1098,6 +1098,7 @@ fallow uses syntactic analysis -- no type information. This is what makes it fas
 - [Configuration reference](https://docs.fallow.tools/configuration/overview)
 - [CI integration guide](https://docs.fallow.tools/integrations/ci)
 - [Migrating from knip](https://docs.fallow.tools/migration/from-knip)
+- [Architecture invariants](docs/architecture-invariants.md)
 - [Fallow compliance happy path](https://github.com/fallow-rs/fallow/blob/main/docs/fallow-compliance.md)
 - [Plugin authoring guide](https://github.com/fallow-rs/fallow/blob/main/docs/plugin-authoring.md)
 

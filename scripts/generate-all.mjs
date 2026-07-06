@@ -20,6 +20,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  checkSummaryRowFiles,
+  formatSummaryRowProblems,
+  hasSummaryRowProblems,
+} from "./check-ci-summary-rows.mjs";
+import { checkGithubActionsFile } from "./check-contract-surfaces.mjs";
+
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CHECK = process.argv.includes("--check");
 const HELP = process.argv.includes("--help") || process.argv.includes("-h");
@@ -147,6 +154,30 @@ const generateNapiTypes = () => {
   run("node", args, { stdio: "inherit" });
 };
 
+const checkContractSurfaceCoverage = () => {
+  const result = checkGithubActionsFile(join(REPO_ROOT, ".github/workflows/ci.yml"), undefined, {
+    filterName: "rust",
+  });
+  if (result.missing.length > 0) {
+    throw new Error(
+      `generated contract surfaces are missing from CI path filters: ${result.missing
+        .map(({ path }) => path)
+        .join(", ")}`,
+    );
+  }
+};
+
+const checkCiSummaryRows = () => {
+  const result = checkSummaryRowFiles({
+    githubPath: join(REPO_ROOT, "action/jq/summary-check.jq"),
+    gitlabPath: join(REPO_ROOT, "ci/jq/summary-check.jq"),
+    registryPath: join(REPO_ROOT, ISSUE_REGISTRY_PATH),
+  });
+  if (hasSummaryRowProblems(result)) {
+    throw new Error(`CI summary rows are stale:\n${formatSummaryRowProblems(result)}`);
+  }
+};
+
 const withCapabilitySchemaFile = (capabilitySchema, callback) => {
   const dir = mkdtempSync(join(tmpdir(), "fallow-generate-all-"));
   const capabilityPath = join(dir, "schema.json");
@@ -169,6 +200,10 @@ const main = () => {
     generateAgentDocs(capabilityPath);
   });
   generateNapiTypes();
+  if (CHECK) {
+    checkContractSurfaceCoverage();
+    checkCiSummaryRows();
+  }
 };
 
 try {

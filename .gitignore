@@ -1,4 +1,5 @@
 target/
+# Public smoke conformance artifacts live under target/public-smoke-conformance/
 # Ignore everything in .cargo/ (credentials, local overrides) but track
 # the committed workspace config so target-specific rustflags (e.g.
 # Windows main-thread stack size) ship with the repo.

@@ -5,6 +5,12 @@ framework-specific rule.
 
 ## Start With The Contract
 
+Before choosing a crate or protocol surface, read
+[`architecture-invariants.md`](architecture-invariants.md). It lists the
+allowed dependency directions, IO boundaries, serialization boundaries, and
+current migration exceptions. New analyzer work should fit those boundaries or
+call out the exception before implementation.
+
 Pick the public identity before writing detection code:
 
 - `rule_id`: the stable output rule id, usually `fallow/<code>`.
@@ -20,6 +26,12 @@ Common contract facts live in `crates/types/src/issue_meta.rs`. Add the row
 there first when the finding has a stable issue code, LSP diagnostic code,
 filter flag, or suppression token. Keep prose and caveats in the surface that
 owns them.
+
+The generated contract surfaces are tracked in `scripts/contract-surfaces.mjs`.
+Check that manifest before adding or renaming any schema, issue registry,
+editor type, NAPI type, or agent-doc artifact. The manifest is also checked
+against `.github/workflows/ci.yml` so the CI drift gate runs when a generated
+surface changes.
 
 ## Optional Scaffold
 
@@ -45,7 +57,7 @@ Use this as the default map for a new finding:
 - Total counts: if a new serialized `AnalysisResults` array contributes to `total_issues()`, add it to `TOTAL_ISSUE_RESULT_KEYS` and set the metadata row's `counts_in_total`. If the array is advisory, keep `counts_in_total` false so schema consumers know not to gate PR summary surfaces on it.
 - Actions: add suppress, fix, trace, or config actions when agents can act on the finding safely.
 - LSP and MCP: prefer the shared metadata row for contract facts. Keep editor and agent guidance hand-written where nuance matters.
-- Contract bundle: run `npm run generate:contracts` after changing schema, output, issue registry, CLI capability, TS type, NAPI type, or agent-doc surfaces.
+- Contract bundle: run `npm run generate:contracts` after changing schema, output, issue registry, CLI capability, TS type, NAPI type, agent-doc surfaces, or the contract surface manifest.
 - Docs: update this guide or `docs/plugin-authoring.md` when the workflow changes.
 
 ## Detection Shape
@@ -109,4 +121,24 @@ npm run generate:contracts:check
 The check command fails on drift without rewriting committed files. It verifies
 the full generated contract bundle: config/plugin/rule-pack schemas, output
 schema, npm `schema.json`, npm `capabilities.json`, npm `issue-registry.json`,
-TS output contracts, NAPI types, and agent-facing docs.
+TS output contracts, NAPI types, agent-facing docs, and CI path-filter coverage
+for every generated path listed in `scripts/contract-surfaces.mjs`.
+
+For a faster CI path-filter check while editing generated surfaces, run:
+
+```bash
+npm run check:contract-surfaces
+```
+
+If this fails, either add the new generated path to the manifest or add the
+manifested path to the `.github/workflows/ci.yml` filter that runs the contract
+drift gate. Do not rely on the checklist alone.
+
+When changing workspace crate dependencies, also run:
+
+```bash
+npm run check:crate-boundaries
+```
+
+This catches the clearest architecture back-edges, such as foundation crates
+depending on protocol adapters or `fallow-output` starting analysis.

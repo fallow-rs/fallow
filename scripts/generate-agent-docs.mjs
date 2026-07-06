@@ -366,11 +366,12 @@ const renderIssueTypesSection = (schema, existing) => {
 };
 
 const renderMcpToolsSection = (schema, existing) => {
-  const headers = ["Tool", "Kind", "License", "Key params", "Description"];
+  const headers = ["Tool", "Kind", "License", "CLI fallback", "Key params", "Description"];
   const rows = schema.mcp_tools.tools.map((tool) => [
     code(tool.name),
     tool.kind,
     tool.license,
+    codeOrDash(tool.cli_command),
     tool.key_params.length > 0 ? tool.key_params.map(code).join(", ") : "-",
     curatedCell(existing, tool.name, "Description", tool.description),
   ]);

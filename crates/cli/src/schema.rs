@@ -437,6 +437,7 @@ fn mcp_tools_schema() -> serde_json::Value {
                 "name": tool.name,
                 "kind": tool.kind,
                 "description": tool.description,
+                "cli_command": tool.cli_command,
                 "key_params": tool.key_params,
                 "license": tool.license.as_str(),
                 "license_note": tool.license_note,
@@ -446,7 +447,7 @@ fn mcp_tools_schema() -> serde_json::Value {
         .collect();
     serde_json::json!({
         "server": "fallow-mcp",
-        "note": "key_params is a curated subset; the live MCP input schemas (list_tools) are authoritative for the full parameter list",
+        "note": "key_params is a curated subset; the live MCP input schemas (list_tools) are authoritative for the full parameter list. cli_command is the nearest CLI fallback, not a full MCP input-schema projection",
         "tools": tools,
     })
 }
@@ -1371,6 +1372,7 @@ mod tests {
                 "name",
                 "kind",
                 "description",
+                "cli_command",
                 "key_params",
                 "license",
                 "license_note",
@@ -1395,6 +1397,15 @@ mod tests {
             .find(|t| t["name"] == "code_execute")
             .expect("code_execute in mcp_tools");
         assert_eq!(code_execute["kind"], "composition");
+        assert!(code_execute["cli_command"].is_null());
+        let analyze = tools
+            .iter()
+            .find(|t| t["name"] == "analyze")
+            .expect("analyze in mcp_tools");
+        assert_eq!(
+            analyze["cli_command"],
+            "fallow dead-code --format json --quiet"
+        );
     }
 
     #[test]

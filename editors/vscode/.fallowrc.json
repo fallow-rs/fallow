@@ -10,7 +10,9 @@
   ],
   "ignoreUnresolvedImports": [
     "./generated/output-contract.js",
-    "../src/generated/output-contract.js"
+    "../src/generated/output-contract.js",
+    "./generated/lsp-initialization-options.js",
+    "../src/generated/lsp-initialization-options.js"
   ],
   "ignoreDependencies": ["@vscode/vsce"],
   "ignoreExports": [

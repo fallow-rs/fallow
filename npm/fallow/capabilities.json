@@ -5436,12 +5436,13 @@
   ],
   "mcp_tools": {
     "server": "fallow-mcp",
-    "note": "key_params is a curated subset; the live MCP input schemas (list_tools) are authoritative for the full parameter list",
+    "note": "key_params is a curated subset; the live MCP input schemas (list_tools) are authoritative for the full parameter list. cli_command is the nearest CLI fallback, not a full MCP input-schema projection",
     "tools": [
       {
         "name": "code_execute",
         "kind": "composition",
         "description": "Run a bounded read-only JavaScript snippet that composes fallow's analysis tools inside a sandbox (Code Mode meta-tool, not a plain analysis call)",
+        "cli_command": null,
         "key_params": [
           "code",
           "timeout_ms",
@@ -5455,6 +5456,7 @@
         "name": "analyze",
         "kind": "analysis",
         "description": "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations",
+        "cli_command": "fallow dead-code --format json --quiet",
         "key_params": [
           "issue_types",
           "production",
@@ -5471,6 +5473,7 @@
         "name": "check_changed",
         "kind": "analysis",
         "description": "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review)",
+        "cli_command": "fallow dead-code --changed-since <ref> --format json --quiet",
         "key_params": [
           "since",
           "baseline",
@@ -5484,6 +5487,7 @@
         "name": "security_candidates",
         "kind": "analysis",
         "description": "Unverified local security candidates (tainted sinks) for downstream agent verification",
+        "cli_command": "fallow security --format json --quiet",
         "key_params": [
           "gate",
           "surface",
@@ -5498,6 +5502,7 @@
         "name": "inspect_target",
         "kind": "analysis",
         "description": "One evidence bundle for a file or exported symbol: trace, dead-code actions, duplication, complexity, and security candidates",
+        "cli_command": "fallow inspect --format json --quiet",
         "key_params": [
           "target",
           "production"
@@ -5510,6 +5515,7 @@
         "name": "guard",
         "kind": "introspection",
         "description": "Report the architecture rules that apply to given files before editing them: boundary zone, allowed import zones, forbidden calls, and rule-pack policies",
+        "cli_command": "fallow guard <file> --format json --quiet",
         "key_params": [
           "files"
         ],
@@ -5521,6 +5527,7 @@
         "name": "find_dupes",
         "kind": "analysis",
         "description": "Code duplication detection with clone groups and refactoring suggestions",
+        "cli_command": "fallow dupes --format json --quiet",
         "key_params": [
           "mode",
           "min_tokens",
@@ -5536,6 +5543,7 @@
         "name": "check_health",
         "kind": "analysis",
         "description": "Complexity, styling health, hotspots, ownership, refactoring targets, coverage gaps, and CSS/CSS-in-JS candidates",
+        "cli_command": "fallow health --format json --quiet",
         "key_params": [
           "score",
           "css",
@@ -5555,6 +5563,7 @@
         "name": "check_runtime_coverage",
         "kind": "runtime-coverage",
         "description": "Merge V8 or Istanbul runtime coverage into the health report (hot paths, cold paths, verdicts)",
+        "cli_command": "fallow health --runtime-coverage <path> --format json --quiet",
         "key_params": [
           "coverage",
           "min_invocations_hot",
@@ -5570,6 +5579,7 @@
         "name": "get_hot_paths",
         "kind": "runtime-coverage",
         "description": "Production hot paths from runtime coverage, sorted by invocation volume",
+        "cli_command": "fallow health --runtime-coverage <path> --format json --quiet",
         "key_params": [
           "coverage",
           "top",
@@ -5583,6 +5593,7 @@
         "name": "get_blast_radius",
         "kind": "runtime-coverage",
         "description": "Blast-radius context (caller counts, risk bands) from runtime coverage; augments review only, never gates safe_to_delete (three-state tracking issues that verdict)",
+        "cli_command": "fallow health --runtime-coverage <path> --format json --quiet",
         "key_params": [
           "coverage",
           "group_by"
@@ -5595,6 +5606,7 @@
         "name": "get_importance",
         "kind": "runtime-coverage",
         "description": "Production-importance scores (0-100) combining invocations, complexity, and ownership; augments review only, never gates safe_to_delete (three-state tracking issues that verdict)",
+        "cli_command": "fallow health --runtime-coverage <path> --format json --quiet",
         "key_params": [
           "coverage",
           "group_by"
@@ -5607,6 +5619,7 @@
         "name": "get_cleanup_candidates",
         "kind": "runtime-coverage",
         "description": "Cleanup candidates with safe_to_delete, review_required, and low_traffic verdicts from runtime coverage",
+        "cli_command": "fallow health --runtime-coverage <path> --format json --quiet",
         "key_params": [
           "coverage",
           "group_by"
@@ -5619,6 +5632,7 @@
         "name": "get_token_blast_radius",
         "kind": "analysis",
         "description": "Design-token blast radius for Tailwind v4 @theme tokens AND CSS-in-JS defineVars/createTheme-family token definitions: per token, a consumer_count (static lower bound) and a capped located consumers[] sample tagged theme-var/css-var/utility/apply (Tailwind) or js-member (CSS-in-JS cross-module member access); descriptive context for sizing a token change, never a deletion gate",
+        "cli_command": "fallow health --css --format json --quiet",
         "key_params": [],
         "license": "free",
         "license_note": null,
@@ -5628,6 +5642,7 @@
         "name": "audit",
         "kind": "analysis",
         "description": "Combined dead-code, complexity, duplication, and styling audit for changed files with a pass/warn/fail verdict",
+        "cli_command": "fallow audit --format json --quiet",
         "key_params": [
           "gate",
           "base",
@@ -5644,6 +5659,7 @@
         "name": "decision_surface",
         "kind": "analysis",
         "description": "Surface the few consequential structural decisions a change embeds (coupling, public API, dependency), each as a judgment question with the routed expert; ranked, capped, and signal_id-anchored",
+        "cli_command": "fallow decision-surface --format json --quiet",
         "key_params": [
           "base",
           "max_decisions",
@@ -5657,6 +5673,7 @@
         "name": "fallow_explain",
         "kind": "introspection",
         "description": "Explain one issue type (rationale, examples, fix guidance) without running an analysis",
+        "cli_command": "fallow explain <issue-type> --format json --quiet",
         "key_params": [
           "issue_type"
         ],
@@ -5668,6 +5685,7 @@
         "name": "fix_preview",
         "kind": "fix",
         "description": "Dry-run auto-fix preview; shows what would change without modifying files",
+        "cli_command": "fallow fix --dry-run --format json --quiet",
         "key_params": [
           "no_create_config"
         ],
@@ -5679,6 +5697,7 @@
         "name": "fix_apply",
         "kind": "fix",
         "description": "Apply auto-fixes: removes unused exports, dependencies, and enum members (mutates files)",
+        "cli_command": "fallow fix --yes --format json --quiet",
         "key_params": [
           "no_create_config"
         ],
@@ -5690,6 +5709,7 @@
         "name": "project_info",
         "kind": "introspection",
         "description": "Project metadata: active framework plugins, discovered files, entry points, and boundary zones",
+        "cli_command": "fallow list --files --entry-points --plugins --format json --quiet",
         "key_params": [
           "entry_points",
           "files",
@@ -5704,6 +5724,7 @@
         "name": "list_boundaries",
         "kind": "introspection",
         "description": "List architecture boundary zones and access rules",
+        "cli_command": "fallow list --boundaries --format json --quiet",
         "key_params": [],
         "license": "free",
         "license_note": null,
@@ -5713,6 +5734,7 @@
         "name": "feature_flags",
         "kind": "analysis",
         "description": "Detect feature flag patterns (environment variables, SDK calls, config objects)",
+        "cli_command": "fallow flags --format json --quiet",
         "key_params": [
           "workspace",
           "production"
@@ -5725,6 +5747,7 @@
         "name": "impact",
         "kind": "introspection",
         "description": "Read the local Fallow Impact value-tracking report (per-project history in the user config dir, never in the repo; local-dev only)",
+        "cli_command": "fallow impact --format json --quiet",
         "key_params": [
           "root"
         ],
@@ -5736,6 +5759,7 @@
         "name": "impact_all",
         "kind": "introspection",
         "description": "Roll every tracked fallow project on this machine into one cross-repo value report (hashed keys plus basename labels, never paths; local-dev only)",
+        "cli_command": "fallow impact --all --format json --quiet",
         "key_params": [
           "sort",
           "limit"
@@ -5748,6 +5772,7 @@
         "name": "trace_export",
         "kind": "trace",
         "description": "Trace why an export is used or unused, including re-export chains and entry-point status",
+        "cli_command": "fallow dead-code --trace <file:export> --format json --quiet",
         "key_params": [
           "file",
           "export_name"
@@ -5760,6 +5785,7 @@
         "name": "trace_file",
         "kind": "trace",
         "description": "Trace all module-graph edges for a file (imports, exports, importers, re-exports)",
+        "cli_command": "fallow dead-code --trace-file <file> --format json --quiet",
         "key_params": [
           "file"
         ],
@@ -5771,6 +5797,7 @@
         "name": "trace_dependency",
         "kind": "trace",
         "description": "Trace where a dependency is imported and whether scripts or CI use it",
+        "cli_command": "fallow dead-code --trace-dependency <package> --format json --quiet",
         "key_params": [
           "package_name"
         ],
@@ -5782,6 +5809,7 @@
         "name": "trace_clone",
         "kind": "trace",
         "description": "Deep-dive a duplicate-code clone group by location or fingerprint",
+        "cli_command": "fallow dupes --trace <file:line> --format json --quiet",
         "key_params": [
           "file",
           "line",

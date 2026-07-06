@@ -31,8 +31,9 @@ import {
 import { showBinarySkewToastOnce } from "./binary-skew.js";
 import { findBinaryInPath, findLocalBinary, resolveConfiguredBinaryPath } from "./binary-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
+// fallow-ignore-next-line unresolved-import
+import type { LspInitializationOptions } from "./generated/lsp-initialization-options.js";
 import type { AnalysisCompleteParams } from "./statusBar-utils.js";
-import type { DuplicationMode, IssueTypeConfig } from "./types.js";
 import {
   parseDiagnosticCategories,
   resetDiagnosticCategories,
@@ -47,29 +48,6 @@ let client: LanguageClient | null = null;
 // `startClient`, racing two server processes (and double-stopping one client).
 // Chaining every restart onto this queue makes them strictly sequential.
 let restartQueue: Promise<LanguageClient | null> = Promise.resolve(null);
-
-export interface LspInitializationOptions {
-  readonly issueTypes: IssueTypeConfig;
-  readonly changedSince: string;
-  readonly configPath: string;
-  /**
-   * Production-mode override forwarded so the LSP diagnostics match the
-   * CLI-driven sidebar. `true`/`false` force production on/off; `undefined`
-   * (the `"auto"` setting) is dropped by `JSON.stringify`, so the LSP sees no
-   * `production` key and defers to the project config (issue #1055).
-   */
-  readonly production: boolean | undefined;
-  readonly duplication: {
-    readonly mode: DuplicationMode | undefined;
-    readonly threshold: number | undefined;
-    readonly minTokens: number | undefined;
-    readonly minLines: number | undefined;
-    readonly minOccurrences: number | undefined;
-    readonly skipLocal: boolean | undefined;
-    readonly crossLanguage: boolean | undefined;
-    readonly ignoreImports: boolean | undefined;
-  };
-}
 
 export const createInitializationOptions = (): LspInitializationOptions => ({
   issueTypes: getIssueTypes(),

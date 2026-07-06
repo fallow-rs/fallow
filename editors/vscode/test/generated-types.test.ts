@@ -19,9 +19,33 @@ import type {
   IssueAction,
   UnusedFileFinding,
 } from "../src/generated/output-contract.js";
+import type { LspInitializationOptions } from "../src/generated/lsp-initialization-options.js";
 import type { SecurityFinding, SecurityOutput } from "../src/types.js";
 
 describe("generated/output-contract.d.ts", () => {
+  it("exposes the LSP initializationOptions contract sent by the extension", () => {
+    const sample: LspInitializationOptions = {
+      changedSince: "origin/main",
+      configPath: "/workspace/.fallowrc.jsonc",
+      duplication: {
+        crossLanguage: true,
+        ignoreImports: true,
+        minLines: 8,
+        minOccurrences: 3,
+        minTokens: 80,
+        mode: "semantic",
+        skipLocal: true,
+        threshold: 8,
+      },
+      issueTypes: {
+        "unused-exports": false,
+      },
+      production: true,
+    };
+
+    expect(sample.issueTypes["unused-exports"]).toBe(false);
+  });
+
   it("exposes CombinedOutput with optional check/dupes/health branches", () => {
     const sample: CombinedOutput = {
       schema_version: 7,

@@ -73,3 +73,13 @@ cargo bench -p fallow-core --bench analysis <filter> -- --sample-size 10
 Use CodSpeed CI as the release-grade signal. Local `cargo codspeed` runs are
 useful smoke checks, but the GitHub workflow is the source of truth for tracked
 performance reports.
+
+For correctness or output-contract release evidence on public projects, use the
+separate public smoke conformance lane:
+
+```bash
+npm run conformance:public-smoke
+```
+
+That lane writes compact summaries under `target/public-smoke-conformance/` and
+does not report timing data.

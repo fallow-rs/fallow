@@ -19,6 +19,19 @@ pub struct SarifResultInput<'a> {
     pub snippet: Option<&'a str>,
 }
 
+/// Normalized finding input for output-owned SARIF result assembly.
+#[derive(Debug, Clone)]
+pub struct SarifFindingInput<'a> {
+    pub issue_code: &'a str,
+    pub rule_id: &'a str,
+    pub level: &'a str,
+    pub message: &'a str,
+    pub uri: &'a str,
+    pub region: Option<(u32, u32)>,
+    pub snippet: Option<&'a str>,
+    pub properties: Option<Value>,
+}
+
 /// Fields needed to build one SARIF rule object.
 #[derive(Debug, Clone, Copy)]
 pub struct SarifRuleInput<'a> {
@@ -97,6 +110,23 @@ pub fn build_sarif_result(input: SarifResultInput<'_>) -> Value {
     })
 }
 
+/// Build a SARIF result from a normalized finding.
+#[must_use]
+pub fn build_sarif_finding(input: SarifFindingInput<'_>) -> Value {
+    let mut result = build_sarif_result(SarifResultInput {
+        rule_id: input.rule_id,
+        level: input.level,
+        message: input.message,
+        uri: input.uri,
+        region: input.region,
+        snippet: input.snippet,
+    });
+    if let Some(properties) = input.properties {
+        result["properties"] = properties;
+    }
+    result
+}
+
 /// Build a SARIF rule object.
 #[must_use]
 pub fn build_sarif_rule(input: SarifRuleInput<'_>) -> Value {
@@ -164,6 +194,40 @@ mod tests {
         );
         assert!(result["partialFingerprints"][SARIF_FINGERPRINT_KEY].is_string());
         assert!(result["partialFingerprints"][GHAS_SARIF_FINGERPRINT_KEY].is_string());
+    }
+
+    #[test]
+    fn sarif_finding_includes_custom_properties() {
+        let finding = build_sarif_finding(SarifFindingInput {
+            issue_code: "unused-export",
+            rule_id: "fallow/unused-export",
+            level: "warning",
+            message: "Export is never imported",
+            uri: "src/app.ts",
+            region: Some((3, 14)),
+            snippet: Some("export const unused = 1;"),
+            properties: Some(serde_json::json!({ "is_re_export": true })),
+        });
+
+        assert_eq!(finding["ruleId"], "fallow/unused-export");
+        assert_eq!(finding["properties"]["is_re_export"], true);
+        assert!(finding["partialFingerprints"][SARIF_FINGERPRINT_KEY].is_string());
+    }
+
+    #[test]
+    fn sarif_finding_omits_empty_properties() {
+        let finding = build_sarif_finding(SarifFindingInput {
+            issue_code: "unused-file",
+            rule_id: "fallow/unused-file",
+            level: "error",
+            message: "File is unreachable",
+            uri: "src/unused.ts",
+            region: None,
+            snippet: None,
+            properties: None,
+        });
+
+        assert!(finding.get("properties").is_none());
     }
 
     #[test]
