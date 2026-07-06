@@ -109,6 +109,8 @@ pub use parse::parse_source_to_module;
 /// without BOM; line offsets are computed against the post-BOM view; the BOM,
 /// if present on input, is preserved on output by `fallow fix`."
 const BOM_CHAR: char = '\u{FEFF}';
+// Small, cache-hot inputs are faster on one thread than through Rayon setup.
+// Larger file sets still use parallel parsing where parse work dominates.
 const PARALLEL_PARSE_FILE_THRESHOLD: usize = 32;
 
 /// Strip the leading UTF-8 BOM if present.
@@ -123,7 +125,10 @@ pub(crate) fn strip_bom(source: &str) -> &str {
     source.strip_prefix(BOM_CHAR).unwrap_or(source)
 }
 
-/// Parse all files in parallel, extracting imports and exports.
+/// Parse all files, extracting imports and exports.
+///
+/// Small file sets use a sequential fast path to avoid parallel scheduling
+/// overhead; larger file sets use parallel extraction.
 /// Uses the cache to skip reparsing files whose content hasn't changed.
 ///
 /// When `need_complexity` is true, per-function cyclomatic/cognitive complexity
