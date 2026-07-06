@@ -43,6 +43,14 @@ pub const PRODUCTION_EXCLUDE_PATTERNS: &[&str] = &[
     "**/.*.cjs",
 ];
 
+const ALLOWED_HIDDEN_DIRS: &[&str] = &[
+    ".storybook",
+    ".vitepress",
+    ".well-known",
+    ".changeset",
+    ".github",
+];
+
 /// Discover workspace packages through the engine boundary.
 ///
 /// Use this for callers that only need workspace metadata and do not yet own an
@@ -344,7 +352,9 @@ fn warn_undeclared_workspaces(
 /// Check if a hidden directory name is on the discovery allowlist.
 #[must_use]
 pub fn is_allowed_hidden_dir(name: &OsStr) -> bool {
-    core_backend::is_allowed_hidden_dir(name)
+    ALLOWED_HIDDEN_DIRS
+        .iter()
+        .any(|&dir| OsStr::new(dir) == name)
 }
 
 /// Collect plugin-derived hidden directory scopes.
@@ -406,7 +416,10 @@ pub fn discover_plugin_entry_points(
 mod tests {
     use std::path::PathBuf;
 
-    use super::{CategorizedEntryPoints, EntryPoint, EntryPointSource, HiddenDirScope};
+    use super::{
+        ALLOWED_HIDDEN_DIRS, CategorizedEntryPoints, EntryPoint, EntryPointSource, HiddenDirScope,
+        is_allowed_hidden_dir,
+    };
 
     #[test]
     fn hidden_dir_scope_exposes_root_and_dirs() {
@@ -414,6 +427,14 @@ mod tests {
 
         assert_eq!(scope.root(), PathBuf::from("/repo/packages/app"));
         assert_eq!(scope.dirs(), [".next"]);
+    }
+
+    #[test]
+    fn hidden_dir_allowlist_is_engine_owned() {
+        for dir in ALLOWED_HIDDEN_DIRS {
+            assert!(is_allowed_hidden_dir(std::ffi::OsStr::new(dir)));
+        }
+        assert!(!is_allowed_hidden_dir(std::ffi::OsStr::new(".git")));
     }
 
     #[test]

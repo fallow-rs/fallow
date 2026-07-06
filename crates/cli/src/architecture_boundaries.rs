@@ -1375,7 +1375,6 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::build_dead_code_graph",
         "fallow_core::run_dead_code_detectors",
         "fallow_core::discover::HiddenDirScope",
-        "fallow_core::discover::is_allowed_hidden_dir",
         "fallow_core::discover::collect_plugin_hidden_dir_scopes",
         "fallow_core::discover::collect_hidden_dir_scopes",
         "fallow_core::discover::discover_files_and_config_candidates",

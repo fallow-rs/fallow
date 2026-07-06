@@ -297,10 +297,6 @@ fn core_hidden_dir_scopes(scopes: &[HiddenDirScope]) -> Vec<fallow_core::discove
     scopes.iter().map(core_hidden_dir_scope).collect()
 }
 
-pub fn is_allowed_hidden_dir(name: &std::ffi::OsStr) -> bool {
-    fallow_core::discover::is_allowed_hidden_dir(name)
-}
-
 pub fn collect_plugin_hidden_dir_scopes(
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
