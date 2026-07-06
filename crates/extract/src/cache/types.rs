@@ -736,7 +736,11 @@ use crate::MemberKind;
 /// crediting now includes Vue `ref.value` / object-member `v-for` sources,
 /// function-local JS array receivers, and Angular external `templateUrl`
 /// loop-item remapping through component field array facts.
-pub(super) const CACHE_VERSION: u32 = 223;
+///
+/// Bumped to 224 for React Router and Remix route-loader data keys: conventional
+/// route modules now harvest `loader` / `clientLoader` return keys and emit
+/// synthetic `useLoaderData()` member accesses. Warm 223 caches lack both.
+pub(super) const CACHE_VERSION: u32 = 224;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

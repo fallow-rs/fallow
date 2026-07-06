@@ -722,6 +722,11 @@ fn create_audit_css_deep_fixture() -> TempDir {
         "@theme {\n  --color-zbrand: #f05a28;\n  --color-danger: red;\n  --color-abrand: rgb(240 90 41);\n  --color-status-queued-bg: rgb(240 90 42);\n  --color-secondary: hsl(40 6% 93%);\n  --color-muted: hsl(40 6% 93%);\n  --text-body: 14px;\n  --spacing-zcard: 1rem;\n  --spacing-acard: 16.25px;\n  --shadow-glow: 0 0 8px red;\n}\n:root { --color-notice: #00ff00; }\n.btn-primary { color: red; font-size: 14px; }\n.notice { background-color: #00ff00; }\n.stylex-match { color: #123456; }\n.vanilla-match { color: #654321; }\n.panda-match { color: #abcdef; }\n.panda-config-match { color: #fedcba; }\n",
     )
     .unwrap();
+    fs::write(
+        root.join("src/tokens.stylex.ts"),
+        "import * as stylex from '@stylexjs/stylex';\nexport const vars = stylex.defineVars({ color: { brand: '#123456', signal: '#123457' } });\n",
+    )
+    .unwrap();
     dir
 }
 
@@ -799,6 +804,17 @@ fn assert_has_deep_css_findings(findings: &[serde_json::Value]) {
                 })
         }),
         "semantic shadcn-style aliases must not be near-duplicate token findings: {findings:#?}"
+    );
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "css-token-drift"
+                && finding["sub_kind"] == "near-duplicate-css-in-js-token"
+                && finding["value"] == "vars.color.signal: #123457"
+                && finding["nearest_token"]["name"] == "vars.color.brand"
+                && finding["confidence"] == "low"
+                && finding["agent_disposition"] == "verify-first"
+        }),
+        "deep audit should include near-duplicate CSS-in-JS token with target: {findings:#?}"
     );
 }
 
@@ -890,6 +906,7 @@ fn assert_no_deep_css_findings(findings: &[serde_json::Value]) {
                     "unused-theme-token"
                         | "unresolved-class-reference"
                         | "near-duplicate-theme-token"
+                        | "near-duplicate-css-in-js-token"
                 )
             )
         }),

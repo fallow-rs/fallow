@@ -1,9 +1,11 @@
-//! SvelteKit `load()` return-key harvesting.
+//! Route load return-key harvesting.
 
 use oxc_ast::ast::{
     BindingPattern, Declaration, Expression, FunctionBody, ObjectPropertyKind, TSType, TSTypeName,
 };
 use oxc_span::GetSpan;
+
+use crate::visitor::RouteLoadHarvestMode;
 
 use super::{
     ModuleInfoExtractor, count_returns_in_statements, extract_arrow_return_expr,
@@ -11,17 +13,20 @@ use super::{
 };
 
 impl ModuleInfoExtractor {
-    /// Harvest the SvelteKit `load()` return-object keys from an
-    /// `export const load = ...` / `export [async] function load` declaration.
-    /// The harvest is loose here (it fires for ANY exported `load`); `parse.rs`
-    /// clears the result for non-`+page.{ts,server.ts,js,server.js}` files and
-    /// the analyze-layer `@sveltejs/kit` gate is the activation boundary.
+    /// Harvest route-data return-object keys from a framework-specific producer
+    /// export. `parse.rs` sets `route_load_harvest_mode` before the AST walk so
+    /// SvelteKit only harvests `load`, while React Router and Remix harvest
+    /// `loader` / `clientLoader`.
     /// Abstains (sets `has_unharvestable_load`) on any unsafe shape, mirroring
     /// the Pinia setup-store harvest abstain.
     pub(super) fn try_harvest_load_export(&mut self, declaration: &Declaration<'_>) {
         match declaration {
             Declaration::FunctionDeclaration(function) => {
-                if function.id.as_ref().is_none_or(|id| id.name != "load") {
+                if function
+                    .id
+                    .as_ref()
+                    .is_none_or(|id| !self.should_harvest_route_load_export(&id.name))
+                {
                     return;
                 }
                 let Some(body) = function.body.as_ref() else {
@@ -36,12 +41,10 @@ impl ModuleInfoExtractor {
             }
             Declaration::VariableDeclaration(var) => {
                 for declarator in &var.declarations {
-                    // The binding must be named `load`. A `: PageLoad` annotation
-                    // (S4) only matters in addition to the name; SvelteKit always
-                    // exports the function under the name `load`.
+                    // The binding must be a route data producer export.
                     let is_load_binding = matches!(
                         &declarator.id,
-                        BindingPattern::BindingIdentifier(id) if id.name == "load"
+                        BindingPattern::BindingIdentifier(id) if self.should_harvest_route_load_export(&id.name)
                     );
                     if !is_load_binding {
                         continue;
@@ -115,6 +118,14 @@ impl ModuleInfoExtractor {
             Err(()) => self.has_unharvestable_load = true,
         }
     }
+
+    pub(super) fn should_harvest_route_load_export(&self, name: &str) -> bool {
+        match self.route_load_harvest_mode {
+            RouteLoadHarvestMode::None => false,
+            RouteLoadHarvestMode::SvelteKitPage => name == "load",
+            RouteLoadHarvestMode::ConventionalRoute => matches!(name, "loader" | "clientLoader"),
+        }
+    }
 }
 
 /// Whether a TS type annotation names a SvelteKit load type (`PageLoad`,
@@ -146,7 +157,8 @@ fn ts_type_reference_base_name(ty: &TSType<'_>) -> Option<String> {
 fn harvest_load_return_keys(
     returned: &Expression<'_>,
 ) -> Result<Vec<fallow_types::extract::LoadReturnKey>, ()> {
-    let Expression::ObjectExpression(obj) = unwrap_paren_expr(returned) else {
+    let returned = unwrap_json_return_expr(unwrap_paren_expr(returned));
+    let Expression::ObjectExpression(obj) = returned else {
         // A non-object terminal return (`return data`, `return makeData()`)
         // cannot be key-harvested: abstain.
         return Err(());
@@ -174,6 +186,28 @@ fn harvest_load_return_keys(
         }
     }
     Ok(keys)
+}
+
+fn unwrap_json_return_expr<'a>(returned: &'a Expression<'a>) -> &'a Expression<'a> {
+    let Expression::CallExpression(call) = returned else {
+        return returned;
+    };
+    let is_json_call = match &call.callee {
+        Expression::Identifier(callee) => callee.name == "json",
+        Expression::StaticMemberExpression(member) => member.property.name == "json",
+        _ => false,
+    };
+    if !is_json_call {
+        return returned;
+    }
+    let Some(first) = call
+        .arguments
+        .first()
+        .and_then(oxc_ast::ast::Argument::as_expression)
+    else {
+        return returned;
+    };
+    unwrap_paren_expr(first)
 }
 
 /// The terminal return object of a function/arrow `load` body, with the

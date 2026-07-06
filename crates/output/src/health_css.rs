@@ -103,6 +103,12 @@ pub struct CssAnalyticsReport {
     /// candidates because they need whole-project token context.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub near_duplicate_theme_tokens: Vec<NearDuplicateThemeToken>,
+    /// CSS-in-JS design tokens whose comparable values are close to another
+    /// token from the same project. Covers StyleX, vanilla-extract, PandaCSS,
+    /// styled-components, and Emotion token definitions. These are opt-in
+    /// `--css-deep` candidates because they need whole-project token context.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub near_duplicate_css_in_js_tokens: Vec<NearDuplicateThemeToken>,
     /// A location-aware reverse index of Tailwind v4 `@theme` token consumers:
     /// per token, where it is consumed (`var()` reads, `@apply` bodies, generated
     /// utility classes) and through which surface, plus the full `consumer_count`
@@ -1104,6 +1110,10 @@ pub struct CssAnalyticsSummary {
     /// token in the same theme dictionary. Located in
     /// `near_duplicate_theme_tokens`.
     pub near_duplicate_theme_tokens: u32,
+    /// CSS-in-JS design tokens whose comparable values are close to another
+    /// token from the same project. Located in
+    /// `near_duplicate_css_in_js_tokens`.
+    pub near_duplicate_css_in_js_tokens: u32,
     /// Number of distinct `font-size` units (`px` / `rem` / `em` / `%`) authored
     /// across the codebase. Mixing units is a type-scale consistency smell,
     /// broken out in `font_size_unit_mix`.
@@ -1182,6 +1192,7 @@ mod tests {
             unused_font_faces: Vec::new(),
             unused_theme_tokens: Vec::new(),
             near_duplicate_theme_tokens: Vec::new(),
+            near_duplicate_css_in_js_tokens: Vec::new(),
             token_consumers: Vec::new(),
             font_size_unit_mix: None,
         };
@@ -1211,6 +1222,7 @@ mod tests {
             unused_font_faces: Vec::new(),
             unused_theme_tokens: Vec::new(),
             near_duplicate_theme_tokens: Vec::new(),
+            near_duplicate_css_in_js_tokens: Vec::new(),
             token_consumers: vec![TokenConsumers {
                 token: "--color-brand".to_string(),
                 namespace: "color".to_string(),

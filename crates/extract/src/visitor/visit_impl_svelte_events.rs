@@ -8,7 +8,7 @@ use oxc_ast::ast::*;
 
 use fallow_types::extract::DispatchedEvent;
 
-use super::ModuleInfoExtractor;
+use super::{ModuleInfoExtractor, ROUTE_LOADER_DATA_OBJECT};
 
 impl ModuleInfoExtractor {
     /// FP-1 (unused-load-data-key): `fn(data)` / `fn(...data)` passes the whole
@@ -27,6 +27,24 @@ impl ModuleInfoExtractor {
             };
             if is_whole_data {
                 self.has_load_data_whole_use = true;
+                return;
+            }
+            let route_data_name = match arg {
+                Argument::SpreadElement(spread) => match &spread.argument {
+                    Expression::Identifier(id) => Some(id.name.as_str()),
+                    _ => None,
+                },
+                Argument::Identifier(id) => Some(id.name.as_str()),
+                _ => None,
+            };
+            if route_data_name.is_some_and(|name| self.route_loader_data_bindings.contains(name)) {
+                self.whole_object_uses
+                    .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+                return;
+            }
+            if route_data_name == Some("loaderData") {
+                self.whole_object_uses
+                    .push(ROUTE_LOADER_DATA_OBJECT.to_string());
                 return;
             }
         }

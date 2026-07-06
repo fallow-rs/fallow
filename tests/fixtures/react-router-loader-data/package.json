@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "react": "latest",
+    "react-router": "latest"
+  },
+  "devDependencies": {}
+}

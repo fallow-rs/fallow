@@ -83,7 +83,7 @@ Recommended fixture row format for docs, tests, or review notes:
 | Analyzer | Fixture | Proof |
 | --- | --- | --- |
 | `unused-store-member` | `tests/fixtures/pinia-*` | Reports unused Pinia members while reachable store modules stay live. |
-| `unused-load-data-key` | `tests/fixtures/sveltekit-*` | Reports unused SvelteKit load keys and keeps sibling data reads live. |
+| `unused-load-data-key` | `tests/fixtures/sveltekit-*`, `tests/fixtures/react-router-loader-data`, `tests/fixtures/remix-loader-data`, `tests/fixtures/route-loader-data-no-dep` | Reports unused SvelteKit, React Router, and Remix loader data keys while keeping visible data reads live. |
 | `invalid-client-export` | `tests/fixtures/invalid-client-export-no-next` | Abstains outside Next.js. |
 | `security-sink` | `tests/fixtures/security-*` | Keeps security categories gated by configured matcher and category rules. |
 

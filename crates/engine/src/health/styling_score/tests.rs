@@ -49,6 +49,7 @@ fn clean_report() -> CssAnalyticsReport {
         unused_font_faces: Vec::new(),
         unused_theme_tokens: Vec::new(),
         near_duplicate_theme_tokens: Vec::new(),
+        near_duplicate_css_in_js_tokens: Vec::new(),
         token_consumers: Vec::new(),
         font_size_unit_mix: None,
     }

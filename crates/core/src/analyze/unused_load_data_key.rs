@@ -24,8 +24,9 @@
 //!   universal `+page.ts` reads / forwards its `data` param is credited (the
 //!   universal load consumes the server keys the page never reads directly).
 //! - **Global whole-object abstain** (cut A): any module's whole-object use of
-//!   `page.data` / `$page.data` abstains ALL routes' keys project-wide, and sets
-//!   the observable `global_abstain` flag (S1).
+//!   `page.data` / `$page.data` abstains all SvelteKit load keys project-wide,
+//!   sets the observable `global_abstain` flag (S1), and does not suppress
+//!   React Router or Remix route-loader findings.
 
 use std::path::Path;
 
@@ -51,9 +52,20 @@ const SERVER_LOAD_PRODUCER_NAMES: &[&str] = &["+page.server.ts", "+page.server.j
 /// The universal-load sibling basenames (cut A).
 const UNIVERSAL_LOAD_NAMES: &[&str] = &["+page.ts", "+page.js"];
 
+const ROUTE_LOADER_DATA_OBJECT: &str = "$fallow.routeLoaderData";
+
+const REACT_ROUTER_DEPS: &[&str] = &["react-router", "react-router-dom", "@react-router/dev"];
+
+const REMIX_DEPS: &[&str] = &[
+    "@remix-run/react",
+    "@remix-run/node",
+    "@remix-run/cloudflare",
+    "@remix-run/deno",
+];
+
 /// Result of the load-data-key detector: the surviving findings plus a flag set
-/// when a global whole-object use of `page.data` / `$page.data` abstained every
-/// route project-wide (S1 observability).
+/// when a global whole-object use of `page.data` / `$page.data` abstained
+/// SvelteKit load keys project-wide (S1 observability).
 pub struct LoadDataKeyResult {
     /// The surviving dead-key findings.
     pub findings: Vec<UnusedLoadDataKey>,
@@ -74,39 +86,131 @@ pub fn find_unused_load_data_keys(
     line_offsets_by_file: &LineOffsetsMap<'_>,
     root: &Path,
 ) -> LoadDataKeyResult {
-    if !declared_deps.contains("@sveltejs/kit") {
+    let has_sveltekit = declared_deps.contains("@sveltejs/kit");
+    let has_route_loader_deps = declared_deps
+        .iter()
+        .any(|dep| REACT_ROUTER_DEPS.contains(&dep.as_str()) || REMIX_DEPS.contains(&dep.as_str()));
+    if !has_sveltekit && !has_route_loader_deps {
         return empty_result();
     }
 
     // Ladder (ii): any module's whole-object use of `page.data` / `$page.data`
-    // means a reflective read could consume any key, so abstain ALL routes. Read
-    // the persisted `has_page_data_store_whole_use` signal (derived in
-    // `release_resolution_payload` from `whole_object_uses` before that vector is
-    // released), NOT the now-drained `whole_object_uses` itself.
-    let global_abstain = modules.iter().any(|m| m.has_page_data_store_whole_use);
-    if global_abstain {
-        return LoadDataKeyResult {
-            findings: Vec::new(),
-            global_abstain: true,
-        };
-    }
+    // means a reflective read could consume any SvelteKit key, so abstain that
+    // branch. Read the persisted `has_page_data_store_whole_use` signal (derived
+    // in `release_resolution_payload` from `whole_object_uses` before that
+    // vector is released), NOT the now-drained `whole_object_uses` itself.
+    let global_abstain = has_sveltekit && modules.iter().any(|m| m.has_page_data_store_whole_use);
 
     let module_indexes = build_module_indexes(graph, modules);
     let global_used = collect_global_page_data_member_accesses(modules);
-    let findings = collect_unused_load_data_key_findings(&LoadDataKeyScanInput {
-        graph,
-        modules,
-        module_indexes: &module_indexes,
-        global_used: &global_used,
-        root,
-        suppressions,
-        line_offsets_by_file,
-    });
+    let mut findings = Vec::new();
+    if has_sveltekit && !global_abstain {
+        findings.extend(collect_unused_load_data_key_findings(
+            &LoadDataKeyScanInput {
+                graph,
+                modules,
+                module_indexes: &module_indexes,
+                global_used: &global_used,
+                root,
+                suppressions,
+                line_offsets_by_file,
+            },
+        ));
+    }
+    if has_route_loader_deps {
+        findings.extend(collect_unused_route_loader_data_key_findings(
+            &LoadDataKeyScanInput {
+                graph,
+                modules,
+                module_indexes: &module_indexes,
+                global_used: &global_used,
+                root,
+                suppressions,
+                line_offsets_by_file,
+            },
+        ));
+    }
 
     LoadDataKeyResult {
         findings,
-        global_abstain: false,
+        global_abstain,
     }
+}
+
+fn collect_unused_route_loader_data_key_findings(
+    input: &LoadDataKeyScanInput<'_>,
+) -> Vec<UnusedLoadDataKey> {
+    let mut findings = Vec::new();
+    for node in &input.graph.modules {
+        let Some(candidate) =
+            route_loader_candidate_for_node(node, input.modules, input.module_indexes, input.root)
+        else {
+            continue;
+        };
+        let ProducerCandidate {
+            producer,
+            file_id,
+            producer_path,
+            route_dir,
+            route_used,
+        } = candidate;
+        let finding_input = ProducerFindingInput {
+            producer,
+            file_id,
+            producer_path,
+            route_dir,
+            route_used: &route_used,
+            suppressions: input.suppressions,
+            line_offsets_by_file: input.line_offsets_by_file,
+        };
+        append_unused_keys_for_producer(&mut findings, &finding_input);
+    }
+
+    findings
+}
+
+fn route_loader_candidate_for_node<'a>(
+    node: &ModuleNode,
+    modules: &'a [ModuleInfo],
+    module_indexes: &ModuleIndexes<'a>,
+    root: &Path,
+) -> Option<ProducerCandidate<'a>> {
+    let producer = modules.get(node.file_id.0 as usize)?;
+    if producer.load_return_keys.is_empty() || producer.has_unharvestable_load {
+        return None;
+    }
+    if !is_conventional_route_loader_file(&node.path) {
+        return None;
+    }
+    let route_used = collect_route_loader_used_keys(producer)?;
+    let route_dir = node.path.parent();
+    let producer_path = *module_indexes.path_by_id.get(&node.file_id)?;
+
+    Some(ProducerCandidate {
+        producer,
+        file_id: node.file_id,
+        producer_path,
+        route_dir: route_dir.and_then(|dir| relativize_route_dir(dir, root)),
+        route_used,
+    })
+}
+
+fn collect_route_loader_used_keys(module: &ModuleInfo) -> Option<FxHashSet<&str>> {
+    if module
+        .whole_object_uses
+        .iter()
+        .any(|name| name == ROUTE_LOADER_DATA_OBJECT)
+    {
+        return None;
+    }
+
+    let mut used = FxHashSet::default();
+    for access in &module.member_accesses {
+        if access.object == ROUTE_LOADER_DATA_OBJECT || access.object == "loaderData" {
+            used.insert(access.member.as_str());
+        }
+    }
+    Some(used)
 }
 
 /// Inputs for the SvelteKit unused-load-data-key emit pass.
@@ -378,6 +482,42 @@ fn is_server_load_producer(path: &Path) -> bool {
     matches_basename(path, SERVER_LOAD_PRODUCER_NAMES)
 }
 
+fn is_conventional_route_loader_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name.starts_with('+') {
+        return false;
+    }
+    if !matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("ts" | "tsx" | "js" | "jsx")
+    ) {
+        return false;
+    }
+    if matches!(name, "root.ts" | "root.tsx" | "root.js" | "root.jsx")
+        && path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|part| part.to_str())
+            .is_some_and(|part| matches!(part, "app" | "src"))
+    {
+        return true;
+    }
+    path_has_route_dir(path, "app") || path_has_route_dir(path, "src")
+}
+
+fn path_has_route_dir(path: &Path, app_dir: &str) -> bool {
+    let mut previous = None;
+    for part in path.components().filter_map(|c| c.as_os_str().to_str()) {
+        if previous == Some(app_dir) && part == "routes" {
+            return true;
+        }
+        previous = Some(part);
+    }
+    false
+}
+
 fn matches_basename(path: &Path, names: &[&str]) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
@@ -392,4 +532,95 @@ fn relativize_route_dir(absolute_route_dir: &Path, root: &Path) -> Option<String
         .strip_prefix(root)
         .ok()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use fallow_types::discover::{DiscoveredFile, EntryPoint, FileId};
+    use fallow_types::extract::{LoadReturnKey, MemberAccess};
+    use rustc_hash::{FxHashMap, FxHashSet};
+
+    use crate::analyze::test_support::empty_module;
+    use crate::graph::ModuleGraph;
+    use crate::resolve::ResolvedModule;
+    use crate::suppress::SuppressionContext;
+
+    use super::{ROUTE_LOADER_DATA_OBJECT, find_unused_load_data_keys};
+
+    fn graph_for_paths(paths: &[PathBuf]) -> ModuleGraph {
+        let files: Vec<DiscoveredFile> = paths
+            .iter()
+            .enumerate()
+            .map(|(idx, path)| DiscoveredFile {
+                id: FileId(u32::try_from(idx).expect("test file count fits u32")),
+                path: path.clone(),
+                size_bytes: 0,
+            })
+            .collect();
+        let resolved: Vec<ResolvedModule> = files
+            .iter()
+            .map(|file| ResolvedModule {
+                file_id: file.id,
+                path: file.path.clone(),
+                ..Default::default()
+            })
+            .collect();
+        let entry_points: Vec<EntryPoint> = Vec::new();
+        ModuleGraph::build(&resolved, &entry_points, &files)
+    }
+
+    #[test]
+    fn sveltekit_global_abstain_does_not_skip_route_loader_branch() {
+        let root = Path::new("/repo");
+        let global_path = root.join("src/lib/global.ts");
+        let route_path = root.join("app/routes/home.tsx");
+        let graph = graph_for_paths(&[global_path, route_path]);
+
+        let mut global = empty_module();
+        global.file_id = FileId(0);
+        global.has_page_data_store_whole_use = true;
+
+        let mut route = empty_module();
+        route.file_id = FileId(1);
+        route.load_return_keys = vec![
+            LoadReturnKey {
+                name: "used".to_string(),
+                span_start: 0,
+                span_end: 4,
+            },
+            LoadReturnKey {
+                name: "dead".to_string(),
+                span_start: 6,
+                span_end: 10,
+            },
+        ];
+        route.member_accesses = vec![MemberAccess {
+            object: ROUTE_LOADER_DATA_OBJECT.to_string(),
+            member: "used".to_string(),
+        }];
+
+        let mut declared_deps = FxHashSet::default();
+        declared_deps.insert("@sveltejs/kit".to_string());
+        declared_deps.insert("react-router".to_string());
+        let line_offsets = FxHashMap::default();
+
+        let result = find_unused_load_data_keys(
+            &graph,
+            &[global, route],
+            &declared_deps,
+            &SuppressionContext::empty(),
+            &line_offsets,
+            root,
+        );
+
+        let keys: Vec<&str> = result
+            .findings
+            .iter()
+            .map(|finding| finding.key_name.as_str())
+            .collect();
+        assert!(result.global_abstain);
+        assert_eq!(keys, vec!["dead"]);
+    }
 }

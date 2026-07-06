@@ -110,6 +110,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`unused-load-data-key` now covers React Router and Remix route loaders.**
+  Conventional route modules under `app/root.*`, `app/routes/**`,
+  `src/root.*`, and `src/routes/**` now report unused object keys returned by
+  exported `loader` or `clientLoader` functions when no same-route
+  `useLoaderData()` or `loaderData` consumer reads them. The existing rule kind,
+  suppress token, severity, and output contract are reused, and unsafe shapes
+  such as rest destructures or whole route-data forwarding abstain instead of
+  reporting.
+
 - **Rule-pack authoring commands for repo-wide policy linting.** `fallow rule-pack`
   now exposes `init`, `list`, `test`, and `schema` as one command family. `init`
   can scaffold starter and architecture-oriented packs, wire them into the local

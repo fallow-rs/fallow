@@ -6014,6 +6014,13 @@ unused_theme_tokens?: UnusedThemeToken[]
  */
 near_duplicate_theme_tokens?: NearDuplicateThemeToken[]
 /**
+ * CSS-in-JS design tokens whose comparable values are close to another
+ * token from the same project. Covers StyleX, vanilla-extract, PandaCSS,
+ * styled-components, and Emotion token definitions. These are opt-in
+ * `--css-deep` candidates because they need whole-project token context.
+ */
+near_duplicate_css_in_js_tokens?: NearDuplicateThemeToken[]
+/**
  * A location-aware reverse index of Tailwind v4 `@theme` token consumers:
  * per token, where it is consumed (`var()` reads, `@apply` bodies, generated
  * utility classes) and through which surface, plus the full `consumer_count`
@@ -6389,6 +6396,12 @@ unused_theme_tokens: number
  * `near_duplicate_theme_tokens`.
  */
 near_duplicate_theme_tokens: number
+/**
+ * CSS-in-JS design tokens whose comparable values are close to another
+ * token from the same project. Located in
+ * `near_duplicate_css_in_js_tokens`.
+ */
+near_duplicate_css_in_js_tokens: number
 /**
  * Number of distinct `font-size` units (`px` / `rem` / `em` / `%`) authored
  * across the codebase. Mixing units is a type-scale consistency smell,

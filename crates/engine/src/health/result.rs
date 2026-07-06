@@ -254,6 +254,7 @@ fn append_css_token_drift_findings(
     append_cva_variant_token_drift_findings(findings, ctx);
     append_raw_style_value_findings(findings, ctx);
     append_near_duplicate_theme_token_findings(findings, ctx);
+    append_near_duplicate_css_in_js_token_findings(findings, ctx);
 }
 
 fn append_tailwind_arbitrary_value_findings(
@@ -401,6 +402,41 @@ fn append_near_duplicate_theme_token_findings(
             nearest_token: Some(candidate.nearest_token.clone()),
             fix_hint: Some(format!(
                 "Reuse {} instead of adding {} after verifying the semantic intent.",
+                candidate.nearest_token.name, candidate.token
+            )),
+            actions: candidate.actions.clone(),
+        });
+    }
+}
+
+fn append_near_duplicate_css_in_js_token_findings(
+    findings: &mut Vec<fallow_output::StylingFinding>,
+    ctx: &StylingFindingContext<'_, '_>,
+) {
+    if !ctx.include_cross_file_reachability {
+        return;
+    }
+    for candidate in &ctx.css.near_duplicate_css_in_js_tokens {
+        if ctx.is_suppressed(
+            &candidate.path,
+            candidate.line,
+            fallow_types::suppress::IssueKind::CssTokenDrift,
+        ) {
+            continue;
+        }
+        findings.push(fallow_output::StylingFinding {
+            code: "css-token-drift".to_string(),
+            sub_kind: "near-duplicate-css-in-js-token".to_string(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            value: format!("{}: {}", candidate.token, candidate.value),
+            effective_severity: styling_finding_severity(ctx.config.rules.css_token_drift),
+            blast_radius: None,
+            confidence: Some(fallow_output::StylingFindingConfidence::Low),
+            agent_disposition: Some(fallow_output::StylingAgentDisposition::VerifyFirst),
+            nearest_token: Some(candidate.nearest_token.clone()),
+            fix_hint: Some(format!(
+                "Verify this CSS-in-JS token is not an intentional semantic alias, then reuse {} instead of adding {}.",
                 candidate.nearest_token.name, candidate.token
             )),
             actions: candidate.actions.clone(),

@@ -2559,6 +2559,75 @@ fn scan_near_duplicate_theme_tokens(
     out
 }
 
+struct NearDuplicateCssInJsTokenScanInput<'a> {
+    files: &'a [fallow_types::discover::DiscoveredFile],
+    modules: &'a [fallow_types::extract::ModuleInfo],
+    config: &'a ResolvedConfig,
+    changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    output_changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&'a [std::path::PathBuf]>,
+    summary: &'a mut fallow_output::CssAnalyticsSummary,
+}
+
+fn scan_near_duplicate_css_in_js_tokens(
+    input: &mut NearDuplicateCssInJsTokenScanInput<'_>,
+) -> Vec<fallow_output::NearDuplicateThemeToken> {
+    use fallow_output::{CssCandidateAction, NearDuplicateThemeToken, NearestStylingToken};
+
+    if input.changed_files.is_some() || input.ws_roots.is_some() {
+        return Vec::new();
+    }
+
+    let mut candidates =
+        comparable_css_in_js_token_candidates(input.files, input.modules, input.config);
+    candidates.sort_by(|a, b| theme_token_sort_key(a).cmp(&theme_token_sort_key(b)));
+    if candidates.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    for candidate in &candidates {
+        if let Some(changed) = input.output_changed_files
+            && !css_output_path_in_changed_scope(&candidate.path, input.config, changed)
+        {
+            continue;
+        }
+        let Some((nearest, distance)) = find_nearest_duplicate_theme_token(
+            candidate,
+            &candidates,
+            input.output_changed_files.is_some(),
+        ) else {
+            continue;
+        };
+        let nearest_token = NearestStylingToken {
+            name: nearest.token.clone(),
+            value: nearest.value.clone(),
+            path: nearest.path.clone(),
+            line: nearest.line,
+            distance: round_distance(distance),
+        };
+        out.push(NearDuplicateThemeToken {
+            token: candidate.token.clone(),
+            value: candidate.value.clone(),
+            path: candidate.path.clone(),
+            line: candidate.line,
+            actions: vec![CssCandidateAction::replace_near_duplicate_token(
+                &candidate.token,
+                &nearest.token,
+            )],
+            nearest_token,
+        });
+    }
+    out.sort_by(|a, b| {
+        a.path
+            .cmp(&b.path)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.token.cmp(&b.token))
+    });
+    input.summary.near_duplicate_css_in_js_tokens = saturate_len(out.len());
+    out
+}
+
 fn annotate_raw_style_value_nearest_tokens(
     tokens: &mut CssTokenSets,
     candidates: &[ComparableThemeTokenCandidate],
@@ -3800,6 +3869,7 @@ struct MarkupCssCandidates {
     unreferenced_css_classes: Vec<fallow_output::UnreferencedCssClass>,
     unused_theme_tokens: Vec<fallow_output::UnusedThemeToken>,
     near_duplicate_theme_tokens: Vec<fallow_output::NearDuplicateThemeToken>,
+    near_duplicate_css_in_js_tokens: Vec<fallow_output::NearDuplicateThemeToken>,
 }
 
 struct MarkupTokenCandidates {
@@ -3814,8 +3884,9 @@ struct MarkupReferenceCandidates {
 }
 
 struct ThemeTokenCandidates {
-    unused_theme_tokens: Vec<fallow_output::UnusedThemeToken>,
-    near_duplicate_theme_tokens: Vec<fallow_output::NearDuplicateThemeToken>,
+    unused: Vec<fallow_output::UnusedThemeToken>,
+    near_duplicates: Vec<fallow_output::NearDuplicateThemeToken>,
+    css_in_js_near_duplicates: Vec<fallow_output::NearDuplicateThemeToken>,
 }
 
 /// Run the markup / source-scanning CSS candidates (Tailwind arbitrary values,
@@ -3825,6 +3896,7 @@ struct ThemeTokenCandidates {
 struct MarkupCssCandidateInput<'a> {
     tokens: &'a CssTokenSets,
     files: &'a [fallow_types::discover::DiscoveredFile],
+    modules: &'a [fallow_types::extract::ModuleInfo],
     config: &'a ResolvedConfig,
     ignore_set: &'a globset::GlobSet,
     changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
@@ -3847,8 +3919,9 @@ fn scan_markup_css_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Markup
         cva_variant_token_drifts: markup.cva_variant_token_drifts,
         unresolved_class_references: references.unresolved_class_references,
         unreferenced_css_classes: references.unreferenced_css_classes,
-        unused_theme_tokens: theme.unused_theme_tokens,
-        near_duplicate_theme_tokens: theme.near_duplicate_theme_tokens,
+        unused_theme_tokens: theme.unused,
+        near_duplicate_theme_tokens: theme.near_duplicates,
+        near_duplicate_css_in_js_tokens: theme.css_in_js_near_duplicates,
     }
 }
 
@@ -3918,10 +3991,24 @@ fn scan_theme_token_candidates(input: &mut MarkupCssCandidateInput<'_>) -> Theme
     } else {
         Vec::new()
     };
+    let near_duplicate_css_in_js_tokens = if input.css_deep {
+        scan_near_duplicate_css_in_js_tokens(&mut NearDuplicateCssInJsTokenScanInput {
+            files: input.files,
+            modules: input.modules,
+            config: input.config,
+            changed_files: input.changed_files,
+            output_changed_files: input.output_changed_files,
+            ws_roots: input.ws_roots,
+            summary: input.summary,
+        })
+    } else {
+        Vec::new()
+    };
 
     ThemeTokenCandidates {
-        unused_theme_tokens,
-        near_duplicate_theme_tokens,
+        unused: unused_theme_tokens,
+        near_duplicates: near_duplicate_theme_tokens,
+        css_in_js_near_duplicates: near_duplicate_css_in_js_tokens,
     }
 }
 
@@ -4639,6 +4726,7 @@ pub(super) fn compute_css_analytics_report_with_artifacts(
     let candidates = scan_markup_css_candidates(&mut MarkupCssCandidateInput {
         tokens: &walk.tokens,
         files,
+        modules,
         config,
         ignore_set,
         changed_files,
@@ -4801,6 +4889,7 @@ fn assemble_css_report(
         unused_font_faces: metrics.unused_font_faces,
         unused_theme_tokens: candidates.unused_theme_tokens,
         near_duplicate_theme_tokens: candidates.near_duplicate_theme_tokens,
+        near_duplicate_css_in_js_tokens: candidates.near_duplicate_css_in_js_tokens,
         token_consumers,
         font_size_unit_mix: metrics.font_size_unit_mix,
     })
@@ -4822,6 +4911,7 @@ fn css_report_is_empty(
         && metrics.unused_font_faces.is_empty()
         && candidates.unused_theme_tokens.is_empty()
         && candidates.near_duplicate_theme_tokens.is_empty()
+        && candidates.near_duplicate_css_in_js_tokens.is_empty()
         && token_consumers.is_empty()
 }
 
@@ -4920,6 +5010,9 @@ fn retain_markup_candidates_changed_scope(
         .retain(|item| in_scope(&item.path));
     candidates
         .near_duplicate_theme_tokens
+        .retain(|item| in_scope(&item.path));
+    candidates
+        .near_duplicate_css_in_js_tokens
         .retain(|item| in_scope(&item.path));
 }
 
@@ -5262,6 +5355,24 @@ mod token_consumer_tests {
     /// Phase 3d CSS-in-JS token-consumer driver (which reads imports +
     /// member-access) actually runs.
     fn css_computation_3d(root: &Path, files: &[DiscoveredFile]) -> CssAnalyticsComputation {
+        css_computation_3d_with_output_changed_files(root, files, None)
+    }
+
+    fn css_computation_3d_with_output_changed_files(
+        root: &Path,
+        files: &[DiscoveredFile],
+        output_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ) -> CssAnalyticsComputation {
+        css_computation_3d_with_filters(root, files, None, output_changed_files, None)
+    }
+
+    fn css_computation_3d_with_filters(
+        root: &Path,
+        files: &[DiscoveredFile],
+        changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+        output_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+        ws_roots: Option<&[std::path::PathBuf]>,
+    ) -> CssAnalyticsComputation {
         let config = config_at(root);
         let modules: Vec<fallow_types::extract::ModuleInfo> = files
             .iter()
@@ -5276,9 +5387,9 @@ mod token_consumer_tests {
             HealthScanCtx {
                 config: &config,
                 ignore_set: &globset::GlobSet::empty(),
-                changed_files: None,
-                output_changed_files: None,
-                ws_roots: None,
+                changed_files,
+                output_changed_files,
+                ws_roots,
             },
         )
         .expect("css_analytics is non-null")
@@ -5353,6 +5464,91 @@ mod token_consumer_tests {
         let secondary =
             find_token(&computation, "vars.color.secondary").expect("secondary present");
         assert_eq!(secondary.consumer_count, 0);
+    }
+
+    #[test]
+    fn stylex_define_vars_reports_near_duplicate_css_in_js_tokens_in_deep_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@stylexjs/stylex":"0.1.0"}}"#,
+        )
+        .unwrap();
+        let base = write_file(
+            root,
+            0,
+            "src/base-tokens.stylex.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const vars = stylex.defineVars({ color: { brand: '#33679a' } });\n",
+        );
+        let feature = write_file(
+            root,
+            1,
+            "src/feature-tokens.stylex.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const featureVars = stylex.defineVars({ color: { accent: '#33679b' } });\n",
+        );
+        let mut changed = rustc_hash::FxHashSet::default();
+        changed.insert(feature.path.clone());
+
+        let computation =
+            css_computation_3d_with_output_changed_files(root, &[base, feature], Some(&changed));
+        let candidates = &computation.report.near_duplicate_css_in_js_tokens;
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].token, "featureVars.color.accent");
+        assert_eq!(candidates[0].value, "#33679b");
+        assert_eq!(candidates[0].nearest_token.name, "vars.color.brand");
+        assert_eq!(candidates[0].path, "src/feature-tokens.stylex.ts");
+        assert_eq!(
+            computation.report.summary.near_duplicate_css_in_js_tokens,
+            1
+        );
+    }
+
+    #[test]
+    fn stylex_near_duplicate_css_in_js_tokens_abstain_in_partial_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"@stylexjs/stylex":"0.1.0"}}"#,
+        )
+        .unwrap();
+        let base = write_file(
+            root,
+            0,
+            "src/base-tokens.stylex.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const vars = stylex.defineVars({ color: { brand: '#33679a' } });\n",
+        );
+        let feature = write_file(
+            root,
+            1,
+            "src/feature-tokens.stylex.ts",
+            "import * as stylex from '@stylexjs/stylex';\n\
+             export const featureVars = stylex.defineVars({ color: { accent: '#33679b' } });\n",
+        );
+        let mut changed = rustc_hash::FxHashSet::default();
+        changed.insert(feature.path.clone());
+
+        let computation = css_computation_3d_with_filters(
+            root,
+            &[base, feature],
+            Some(&changed),
+            Some(&changed),
+            None,
+        );
+        assert!(
+            computation
+                .report
+                .near_duplicate_css_in_js_tokens
+                .is_empty()
+        );
+        assert_eq!(
+            computation.report.summary.near_duplicate_css_in_js_tokens,
+            0
+        );
     }
 
     #[test]

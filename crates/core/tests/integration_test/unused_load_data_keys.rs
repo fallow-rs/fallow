@@ -149,9 +149,21 @@ fn global_page_data_whole_object_use_abstains_project_wide() {
         "a project-wide whole-`page.data` use must abstain all routes: {:?}",
         key_names(&results)
     );
+}
+
+#[test]
+fn mixed_sveltekit_project_does_not_suppress_route_loader_keys() {
+    let config = fixture_config("mixed-route-loader-global-sveltekit-abstain");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let keys = key_names(&results);
     assert!(
-        results.unused_load_data_keys_global_abstain,
-        "the project-wide abstain flag must be set so a 0 finding count is distinguishable from 'abstained'"
+        keys.contains(&"dead".to_string()),
+        "SvelteKit page-data abstain must not suppress React Router loader findings: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&"used".to_string()),
+        "React Router useLoaderData member reads should still credit used keys: {keys:?}"
     );
 }
 
@@ -163,6 +175,58 @@ fn no_findings_when_sveltekit_is_absent() {
     assert!(
         results.unused_load_data_keys.is_empty(),
         "without @sveltejs/kit declared, the rule must not fire: {:?}",
+        key_names(&results)
+    );
+}
+
+#[test]
+fn react_router_loader_key_is_flagged_and_consumers_are_credited() {
+    let config = fixture_config("react-router-loader-data");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let keys = key_names(&results);
+    assert!(
+        keys.contains(&"dead".to_string()),
+        "the unread React Router loader key should be flagged: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&"used".to_string()),
+        "useLoaderData alias member reads should credit the key: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&"propOnly".to_string()),
+        "loaderData prop member reads should credit the key: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&"pageOnly".to_string()),
+        "a SvelteKit-style load export in a React Router route must not be analyzed as loader data: {keys:?}"
+    );
+}
+
+#[test]
+fn remix_json_loader_key_is_flagged_and_consumed_key_is_credited() {
+    let config = fixture_config("remix-loader-data");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let keys = key_names(&results);
+    assert!(
+        keys.contains(&"dead".to_string()),
+        "the unread Remix json loader key should be flagged: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&"used".to_string()),
+        "useLoaderData destructuring should credit the Remix key: {keys:?}"
+    );
+}
+
+#[test]
+fn route_loader_data_rule_does_not_fire_without_framework_dependency() {
+    let config = fixture_config("route-loader-data-no-dep");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_load_data_keys.is_empty(),
+        "React Router and Remix loader-data detection must be dependency-gated: {:?}",
         key_names(&results)
     );
 }

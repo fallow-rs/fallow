@@ -4567,6 +4567,18 @@ fn whole_object_object_values() {
 }
 
 #[test]
+fn whole_object_object_values_member_expression() {
+    let info = parse("Object.values(page.data);");
+    assert!(info.whole_object_uses.contains(&"page.data".to_string()));
+}
+
+#[test]
+fn whole_object_object_values_member_expression_with_import() {
+    let info = parse("import { page } from '$app/state'; Object.values(page.data);");
+    assert!(info.whole_object_uses.contains(&"page.data".to_string()));
+}
+
+#[test]
 fn whole_object_object_keys() {
     let info = parse("Object.keys(myObj);");
     assert!(info.whole_object_uses.contains(&"myObj".to_string()));

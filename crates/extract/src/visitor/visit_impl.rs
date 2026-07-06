@@ -32,9 +32,10 @@ use super::helpers::{
     lit_custom_element_tag, regex_pattern_to_suffix, ts_import_type_qualifier_root,
 };
 use super::{
-    BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, SideEffectRegistrationTarget,
-    collect_static_import_specifiers, extract_import_expression, try_extract_arrow_wrapped_import,
-    try_extract_import_then_callback, try_extract_property_callback_import, try_extract_require,
+    BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, ROUTE_LOADER_DATA_OBJECT,
+    SideEffectRegistrationTarget, collect_static_import_specifiers, extract_import_expression,
+    try_extract_arrow_wrapped_import, try_extract_import_then_callback,
+    try_extract_property_callback_import, try_extract_require,
 };
 
 #[path = "visit_impl_di.rs"]
@@ -110,6 +111,9 @@ const ITERABLE_ELEMENT_CALLBACK_METHODS: &[&str] = &[
     "some",
     "every",
 ];
+
+const ROUTE_LOADER_DATA_SOURCES: &[&str] =
+    &["react-router", "react-router-dom", "@remix-run/react"];
 
 fn is_css_module_import_source(source: &str) -> bool {
     let path = source.split(['?', '#']).next().unwrap_or(source);
@@ -647,6 +651,10 @@ impl ModuleInfoExtractor {
             )
             && let Some(arg_name) = expr.arguments.first().and_then(static_argument_object_name)
         {
+            if self.route_loader_data_bindings.contains(arg_name.as_str()) {
+                self.whole_object_uses
+                    .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+            }
             self.whole_object_uses.push(arg_name);
         }
     }
@@ -1198,10 +1206,13 @@ impl<'a> ModuleInfoExtractor {
 
             // A local `export { load }` re-exports a `const load` declared
             // elsewhere in the file; the declaration-side harvest above already
-            // covered a direct `const load = ...`. A bare `export { load }` with
-            // no matching local declaration means the terminal object is not
+            // covered a direct `const load = ...`. A bare export with no
+            // matching local declaration means the terminal object is not
             // visible here, so abstain.
-            if !spec_type_only && local_name_str == "load" && self.load_return_keys.is_empty() {
+            if !spec_type_only
+                && self.should_harvest_route_load_export(local_name_str)
+                && self.load_return_keys.is_empty()
+            {
                 self.has_unharvestable_load = true;
             }
 
@@ -1305,6 +1316,82 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
+    fn record_route_loader_data_declarator(
+        &mut self,
+        declarator: &VariableDeclarator<'a>,
+        init: &Expression<'a>,
+    ) {
+        if !self.is_route_loader_data_call(init) {
+            return;
+        }
+
+        match &declarator.id {
+            BindingPattern::BindingIdentifier(id) => {
+                self.route_loader_data_bindings.insert(id.name.to_string());
+            }
+            BindingPattern::ObjectPattern(obj_pat) => {
+                if obj_pat.rest.is_some() {
+                    self.whole_object_uses
+                        .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+                    return;
+                }
+                for prop in &obj_pat.properties {
+                    let Some(name) = prop.key.static_name() else {
+                        self.whole_object_uses
+                            .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+                        return;
+                    };
+                    self.member_accesses.push(MemberAccess {
+                        object: ROUTE_LOADER_DATA_OBJECT.to_string(),
+                        member: name.to_string(),
+                    });
+                }
+            }
+            _ => {
+                self.whole_object_uses
+                    .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+            }
+        }
+    }
+
+    fn record_route_loader_data_whole_arg_use(&mut self, expr: &CallExpression<'a>) {
+        for arg in &expr.arguments {
+            if let Some(arg_expr) = arg.as_expression()
+                && self.is_route_loader_data_call(arg_expr)
+            {
+                self.whole_object_uses
+                    .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+                return;
+            }
+        }
+    }
+
+    fn is_route_loader_data_call(&self, expr: &Expression<'_>) -> bool {
+        let Expression::CallExpression(call) = unwrap_route_loader_data_expr(expr) else {
+            return false;
+        };
+        match &call.callee {
+            Expression::Identifier(callee) => ROUTE_LOADER_DATA_SOURCES
+                .iter()
+                .any(|source| self.is_named_import_from(&callee.name, source, "useLoaderData")),
+            Expression::StaticMemberExpression(member)
+                if member.property.name == "useLoaderData" =>
+            {
+                let Expression::Identifier(namespace) = &member.object else {
+                    return false;
+                };
+                ROUTE_LOADER_DATA_SOURCES.iter().any(|source| {
+                    self.imports.iter().any(|import| {
+                        import.source == *source
+                            && import.local_name == namespace.name.as_str()
+                            && matches!(import.imported_name, ImportedName::Namespace)
+                    })
+                })
+            }
+            _ => false,
+        }
+    }
+
     /// Process a single variable declarator: metadata, binding-target
     /// extraction, require / namespace-destructure / dynamic-import handling.
     /// Early returns mirror the original loop's `continue` control flow.
@@ -1323,6 +1410,7 @@ impl<'a> ModuleInfoExtractor {
         self.record_initialized_variable_bindings(decl, declarator, init);
         self.record_playwright_variable_helpers(declarator, init);
         self.record_pinia_store(declarator, init);
+        self.record_route_loader_data_declarator(declarator, init);
 
         // Capture a MODULE-SCOPE `let id = new Class()` / `let id = factory()`
         // initializer for the alias value-proof. Module scope only: a declarator
@@ -1365,6 +1453,16 @@ impl<'a> ModuleInfoExtractor {
         // `{a, ...rest} = data` rest forms are already in `whole_object_uses`.
         if matches!(init, Expression::Identifier(id) if id.name == "data") {
             self.has_load_data_whole_use = true;
+        }
+        if let Expression::Identifier(id) = init
+            && self.route_loader_data_bindings.contains(id.name.as_str())
+        {
+            self.whole_object_uses
+                .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+        }
+        if matches!(init, Expression::Identifier(id) if id.name == "loaderData") {
+            self.whole_object_uses
+                .push(ROUTE_LOADER_DATA_OBJECT.to_string());
         }
 
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
@@ -2136,6 +2234,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_svelte_dispatch_call(expr);
         self.record_svelte_dispatch_whole_arg_use(expr);
         self.record_load_data_whole_arg_use(expr);
+        self.record_route_loader_data_whole_arg_use(expr);
 
         self.capture_security_call_sites(expr);
 
@@ -2318,6 +2417,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 member: expr.property.name.to_string(),
             });
         } else if let Some(object_name) = static_member_object_name(&expr.object) {
+            if self
+                .route_loader_data_bindings
+                .contains(object_name.as_str())
+            {
+                self.member_accesses.push(MemberAccess {
+                    object: ROUTE_LOADER_DATA_OBJECT.to_string(),
+                    member: expr.property.name.to_string(),
+                });
+            }
             self.member_accesses.push(MemberAccess {
                 object: object_name,
                 member: expr.property.name.to_string(),
@@ -2336,6 +2444,17 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
         if let Expression::Identifier(obj) = &expr.object {
+            if self.route_loader_data_bindings.contains(obj.name.as_str()) {
+                if let Expression::StringLiteral(lit) = &expr.expression {
+                    self.member_accesses.push(MemberAccess {
+                        object: ROUTE_LOADER_DATA_OBJECT.to_string(),
+                        member: lit.value.to_string(),
+                    });
+                } else {
+                    self.whole_object_uses
+                        .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+                }
+            }
             if let Expression::StringLiteral(lit) = &expr.expression {
                 self.member_accesses.push(MemberAccess {
                     object: obj.name.to_string(),
@@ -3077,6 +3196,17 @@ fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
             _ => None,
         },
         _ => None,
+    }
+}
+
+fn unwrap_route_loader_data_expr<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
+    match expr {
+        Expression::TSAsExpression(as_expr) => unwrap_route_loader_data_expr(&as_expr.expression),
+        Expression::TSSatisfiesExpression(sat) => unwrap_route_loader_data_expr(&sat.expression),
+        Expression::ParenthesizedExpression(paren) => {
+            unwrap_route_loader_data_expr(&paren.expression)
+        }
+        _ => expr,
     }
 }
 

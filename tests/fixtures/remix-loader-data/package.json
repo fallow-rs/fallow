@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@remix-run/react": "latest",
+    "@remix-run/node": "latest",
+    "react": "latest"
+  },
+  "devDependencies": {}
+}

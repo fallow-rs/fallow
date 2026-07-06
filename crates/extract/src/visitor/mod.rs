@@ -30,6 +30,16 @@ use fallow_types::extract::{
 use helpers::LitCustomElementDecorator;
 use helpers::array_element_type_from_type;
 
+pub(crate) const ROUTE_LOADER_DATA_OBJECT: &str = "$fallow.routeLoaderData";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum RouteLoadHarvestMode {
+    #[default]
+    None,
+    SvelteKitPage,
+    ConventionalRoute,
+}
+
 /// Infer the element class of a Vue `defineProps` field whose declared type is an
 /// array (or nullable array) of a non-builtin class (`items: Util[]` /
 /// `Array<Util>` / `readonly Util[]` / `Util[] | null`). Thin crate-visible
@@ -448,6 +458,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// non-`+page.{ts,server.ts,js,server.js}` file). Consumed by the
     /// `unused-load-data-key` detector.
     pub(crate) load_return_keys: Vec<fallow_types::extract::LoadReturnKey>,
+    /// Which route-data producer names should be harvested for this file. Set by
+    /// `parse.rs` before the AST walk because SvelteKit and conventional route
+    /// modules use different export names but share the same cached field.
+    route_load_harvest_mode: RouteLoadHarvestMode,
     /// `true` when a `load` export was seen whose body could not be harvested
     /// safely (spread/non-literal/multi-return/computed-key/wrapped). Forces the
     /// `unused-load-data-key` detector to abstain on the whole file.
@@ -456,6 +470,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// (`const X = data`, `fn(data)` / `fn(...data)`). Name-gated on `data`.
     /// Consumed only by the `unused-load-data-key` detector (FP-1).
     pub(crate) has_load_data_whole_use: bool,
+    /// Locals bound to `useLoaderData()`. Reads on these locals are mirrored to
+    /// the reserved route-data marker for React Router and Remix route modules.
+    /// Working state only, not persisted.
+    route_loader_data_bindings: FxHashSet<String>,
     /// `true` when the parse is JSX-capable (`.jsx`/`.tsx`, or a `.js`/`.ts`
     /// file re-parsed through the JSX retry). Gates the React/JSX structural
     /// walk so it is a no-op on non-JSX files (perf: `audit` hot path on
@@ -608,6 +626,10 @@ pub(crate) struct SecurityPathSinkBinding {
 impl ModuleInfoExtractor {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn set_route_load_harvest_mode(&mut self, mode: RouteLoadHarvestMode) {
+        self.route_load_harvest_mode = mode;
     }
 
     pub(crate) fn record_local_class_export(

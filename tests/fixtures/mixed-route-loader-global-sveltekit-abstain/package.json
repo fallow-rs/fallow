@@ -1,0 +1,11 @@
+{
+  "name": "mixed-route-loader-global-sveltekit-abstain",
+  "private": true,
+  "dependencies": {
+    "@sveltejs/kit": "^2.0.0",
+    "react": "latest",
+    "react-router": "latest",
+    "svelte": "^5.0.0"
+  },
+  "devDependencies": {}
+}

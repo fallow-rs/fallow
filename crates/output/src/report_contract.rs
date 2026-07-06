@@ -541,7 +541,7 @@ fn health_runtime_metrics() -> [(String, MetaMetric); 5] {
     ]
 }
 
-fn health_styling_metrics() -> [(String, MetaMetric); 10] {
+fn health_styling_metrics() -> [(String, MetaMetric); 11] {
     [
         health_metric(
             "styling_health.score",
@@ -598,6 +598,13 @@ fn health_styling_metrics() -> [(String, MetaMetric); 10] {
             "Count of Tailwind v4 theme tokens whose comparable values are close to another token in the same theme dictionary. Present only in deep CSS analysis.",
             Some("[0, infinity)"),
             "0 means no near-duplicate token candidates were found",
+        ),
+        health_metric(
+            "css_analytics.summary.near_duplicate_css_in_js_tokens",
+            "Near-Duplicate CSS-in-JS Tokens",
+            "Count of CSS-in-JS design tokens whose comparable values are close to another project token. Present only in deep CSS analysis.",
+            Some("[0, infinity)"),
+            "0 means no near-duplicate CSS-in-JS token candidates were found",
         ),
         health_metric(
             "styling_findings[].blast_radius",

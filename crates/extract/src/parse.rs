@@ -15,7 +15,7 @@ use crate::graphql::{is_graphql_file, parse_graphql_to_module};
 use crate::html::{is_html_file, parse_html_to_module_with_complexity};
 use crate::mdx::{is_mdx_file, parse_mdx_to_module};
 use crate::sfc::{is_sfc_file, parse_sfc_to_module};
-use crate::visitor::ModuleInfoExtractor;
+use crate::visitor::{ModuleInfoExtractor, RouteLoadHarvestMode};
 use fallow_types::discover::FileId;
 use fallow_types::extract::{FlagUse, FunctionComplexity, ImportInfo, VisibilityTag};
 
@@ -52,11 +52,10 @@ pub fn parse_source_to_module(
         parse_source_to_module_inner(file_id, path, source, content_hash, need_complexity);
     module.iconify_prefixes = crate::iconify::extract_iconify_prefixes(path, source);
     module.iconify_icon_names = crate::iconify::extract_iconify_icon_names(path, source);
-    // The `load()` producer harvest fires loosely in the visitor (any exported
-    // `load`); scope it to SvelteKit page-load files by basename here, where the
-    // path is known. A non-page `load` export (`export const load = ...` in an
-    // ordinary module) carries no SvelteKit `data` semantics.
-    if !is_sveltekit_page_load_file(path) {
+    // Keep this post-parse guard as defense in depth. The extractor is also
+    // mode-gated before the AST walk, so incompatible route producer names never
+    // enter the shared cached field in the first place.
+    if route_load_harvest_mode_for_path(path) == RouteLoadHarvestMode::None {
         module.load_return_keys = Vec::new();
         module.has_unharvestable_load = false;
     }
@@ -75,6 +74,52 @@ fn is_sveltekit_page_load_file(path: &Path) -> bool {
         name,
         "+page.ts" | "+page.server.ts" | "+page.js" | "+page.server.js"
     )
+}
+
+fn route_load_harvest_mode_for_path(path: &Path) -> RouteLoadHarvestMode {
+    if is_sveltekit_page_load_file(path) {
+        return RouteLoadHarvestMode::SvelteKitPage;
+    }
+    if is_conventional_route_loader_file(path) {
+        return RouteLoadHarvestMode::ConventionalRoute;
+    }
+    RouteLoadHarvestMode::None
+}
+
+fn is_conventional_route_loader_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name.starts_with('+') {
+        return false;
+    }
+    if !matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("ts" | "tsx" | "js" | "jsx")
+    ) {
+        return false;
+    }
+    if matches!(name, "root.ts" | "root.tsx" | "root.js" | "root.jsx")
+        && path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|part| part.to_str())
+            .is_some_and(|part| matches!(part, "app" | "src"))
+    {
+        return true;
+    }
+    path_has_route_dir(path, "app") || path_has_route_dir(path, "src")
+}
+
+fn path_has_route_dir(path: &Path, app_dir: &str) -> bool {
+    let mut previous = None;
+    for part in path.components().filter_map(|c| c.as_os_str().to_str()) {
+        if previous == Some(app_dir) && part == "routes" {
+            return true;
+        }
+        previous = Some(part);
+    }
+    false
 }
 
 fn parse_source_to_module_inner(
@@ -177,6 +222,7 @@ fn build_primary_extractor(
     source_type: SourceType,
 ) -> (ModuleInfoExtractor, SemanticUsage) {
     let mut extractor = ModuleInfoExtractor::new();
+    extractor.set_route_load_harvest_mode(route_load_harvest_mode_for_path(path));
     // Gate the React/JSX structural walk on a JSX-capable parse so it is a
     // no-op on non-JSX files (perf: the `audit` hot path on non-React repos
     // must not regress).
@@ -312,6 +358,7 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
     let allocator = Allocator::default();
     let retry_return = Parser::new(&allocator, input.parser_source, jsx_type).parse();
     let mut extractor = ModuleInfoExtractor::new();
+    extractor.set_route_load_harvest_mode(route_load_harvest_mode_for_path(input.path));
     // The retry re-parses a `.js`/`.ts` file that turned out to contain JSX, so
     // the JSX structural walk applies here too.
     extractor.jsx_capable = true;
