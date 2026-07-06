@@ -836,7 +836,7 @@ struct AngularTemplateComponentContext<'b> {
     local_to_export_keys: FxHashMap<&'b str, Vec<ExportKey>>,
 }
 
-impl<'a> AngularTemplateChainContext<'a, '_> {
+impl AngularTemplateChainContext<'_, '_> {
     fn credit_members(
         &mut self,
         chains: &[(&str, &str)],
