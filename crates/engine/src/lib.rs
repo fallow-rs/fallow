@@ -33,10 +33,102 @@ pub mod duplicates;
 mod error;
 mod feature_flags;
 pub mod flags;
+pub(crate) mod graph {
+    pub use fallow_graph::graph::*;
+}
 #[path = "git_env.rs"]
 mod git_env;
 pub mod guard;
 pub mod health;
+#[cfg(test)]
+pub(crate) mod extract {
+    pub use fallow_types::extract::*;
+}
+#[cfg(test)]
+pub(crate) mod analyze {
+    pub mod test_support {
+        use fallow_types::discover::FileId;
+        use fallow_types::extract::ModuleInfo;
+
+        pub fn empty_module() -> ModuleInfo {
+            ModuleInfo {
+                file_id: FileId(1),
+                exports: Vec::new(),
+                imports: Vec::new(),
+                re_exports: Vec::new(),
+                dynamic_imports: Vec::new(),
+                dynamic_import_patterns: Vec::new(),
+                require_calls: Vec::new(),
+                package_path_references: Box::default(),
+                member_accesses: Vec::new(),
+                semantic_facts: Box::default(),
+                whole_object_uses: Box::default(),
+                has_cjs_exports: false,
+                has_angular_component_template_url: false,
+                content_hash: 0,
+                suppressions: Vec::new(),
+                unknown_suppression_kinds: Vec::new(),
+                unused_import_bindings: Vec::new(),
+                type_referenced_import_bindings: Vec::new(),
+                value_referenced_import_bindings: Vec::new(),
+                line_offsets: Vec::new(),
+                complexity: Vec::new(),
+                flag_uses: Vec::new(),
+                class_heritage: Vec::new(),
+                exported_factory_returns: Box::default(),
+                injection_tokens: Vec::new(),
+                local_type_declarations: Vec::new(),
+                public_signature_type_references: Vec::new(),
+                namespace_object_aliases: Vec::new(),
+                iconify_prefixes: Vec::new(),
+                iconify_icon_names: Vec::new(),
+                auto_import_candidates: Vec::new(),
+                directives: Vec::new(),
+                client_only_dynamic_import_spans: Vec::new(),
+                security_sinks: Vec::new(),
+                security_sinks_skipped: 0,
+                security_unresolved_callee_sites: Vec::new(),
+                tainted_bindings: Vec::new(),
+                sanitized_sink_args: Vec::new(),
+                security_control_sites: Vec::new(),
+                callee_uses: Vec::new(),
+                misplaced_directives: Vec::new(),
+                inline_server_action_exports: Vec::new(),
+                di_key_sites: Vec::new(),
+                has_dynamic_provide: false,
+                referenced_import_bindings: Vec::new(),
+                component_props: Vec::new(),
+                has_props_attrs_fallthrough: false,
+                has_define_expose: false,
+                has_define_model: false,
+                has_unharvestable_props: false,
+                component_emits: Vec::new(),
+                angular_inputs: Vec::new(),
+                angular_outputs: Vec::new(),
+                has_unharvestable_emits: false,
+                has_dynamic_emit: false,
+                has_emit_whole_object_use: false,
+                load_return_keys: Vec::new(),
+                has_unharvestable_load: false,
+                has_load_data_whole_use: false,
+                has_page_data_store_whole_use: false,
+                component_functions: Vec::new(),
+                react_props: Vec::new(),
+                hook_uses: Vec::new(),
+                render_edges: Vec::new(),
+                svelte_dispatched_events: Vec::new(),
+                svelte_listened_events: Vec::new(),
+                angular_component_selectors: Vec::new(),
+                registered_custom_elements: Vec::new(),
+                used_custom_element_tags: Vec::new(),
+                angular_used_selectors: Vec::new(),
+                angular_entry_component_refs: Vec::new(),
+                has_dynamic_component_render: false,
+                has_dynamic_dispatch: false,
+            }
+        }
+    }
+}
 pub mod list_inventory;
 pub mod module_graph;
 pub mod plugins;
@@ -44,6 +136,10 @@ pub mod project_analysis;
 pub mod project_config;
 mod public_api;
 pub mod repo_refs;
+#[cfg(test)]
+pub(crate) mod resolve {
+    pub use fallow_graph::resolve::*;
+}
 mod results;
 mod security;
 pub mod session;

@@ -7,7 +7,6 @@
 use fallow_config::{
     DuplicatesConfig, ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceInfo,
 };
-use fallow_graph::graph::ModuleGraph;
 use fallow_types::discover::{DiscoveredFile, EntryPoint};
 use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationReport};
 use fallow_types::trace::PipelineTimings;
@@ -288,87 +287,6 @@ pub fn dead_code_pipeline_profile(
             total_ms: prelude.elapsed_ms(),
         }),
     }
-}
-
-impl From<ParseMetrics> for fallow_core::AnalysisParseMetrics {
-    fn from(metrics: ParseMetrics) -> Self {
-        Self {
-            parse_ms: metrics.parse_ms,
-            cache_ms: metrics.cache_ms,
-            cache_hits: metrics.cache_hits,
-            cache_misses: metrics.cache_misses,
-            parse_cpu_ms: metrics.parse_cpu_ms,
-        }
-    }
-}
-
-pub fn trace_export(
-    graph: &ModuleGraph,
-    root: &Path,
-    file_path: &str,
-    export_name: &str,
-) -> Option<fallow_types::trace::ExportTrace> {
-    fallow_core::trace::trace_export(graph, root, file_path, export_name)
-}
-
-pub fn trace_class_member(
-    graph: &ModuleGraph,
-    root: &Path,
-    file_path: &str,
-    member_name: &str,
-) -> Option<fallow_types::trace::ClassMemberTrace> {
-    fallow_core::trace::trace_class_member(graph, root, file_path, member_name)
-}
-
-pub fn trace_file(
-    graph: &ModuleGraph,
-    root: &Path,
-    file_path: &str,
-) -> Option<fallow_types::trace::FileTrace> {
-    fallow_core::trace::trace_file(graph, root, file_path)
-}
-
-pub fn trace_dependency(
-    graph: &ModuleGraph,
-    root: &Path,
-    package_name: &str,
-    script_used_packages: &FxHashSet<String>,
-) -> fallow_types::trace::DependencyTrace {
-    fallow_core::trace::trace_dependency(graph, root, package_name, script_used_packages)
-}
-
-pub fn trace_clone(
-    report: &DuplicationReport,
-    root: &Path,
-    file_path: &str,
-    line: usize,
-) -> fallow_types::trace::CloneTrace {
-    fallow_core::trace::trace_clone(report, root, file_path, line)
-}
-
-pub fn trace_clone_by_fingerprint(
-    report: &DuplicationReport,
-    root: &Path,
-    fingerprint: &str,
-) -> fallow_types::trace::CloneTrace {
-    fallow_core::trace::trace_clone_by_fingerprint(report, root, fingerprint)
-}
-
-pub fn trace_impact_closure(
-    graph: &ModuleGraph,
-    root: &Path,
-    file_path: &str,
-) -> Option<fallow_types::trace::ImpactClosureTrace> {
-    fallow_core::trace::trace_impact_closure(graph, root, file_path)
-}
-
-pub fn trace_symbol_chain(
-    graph: &ModuleGraph,
-    modules: &[ModuleInfo],
-    root: &Path,
-    query: fallow_types::trace_chain::SymbolChainQuery<'_>,
-) -> Option<fallow_types::trace_chain::SymbolChainTrace> {
-    fallow_core::trace_chain::trace_symbol_chain(graph, modules, root, query)
 }
 
 #[derive(Debug, Clone)]

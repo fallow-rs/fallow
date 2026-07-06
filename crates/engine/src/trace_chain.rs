@@ -2,9 +2,16 @@
 
 use fallow_config::ResolvedConfig;
 
-use crate::{EngineError, EngineResult, core_backend, session::AnalysisSession};
+use crate::{EngineError, EngineResult, session::AnalysisSession};
 
 use fallow_types::trace_chain::{SymbolChainQuery, SymbolChainTrace};
+
+#[allow(
+    unused_imports,
+    reason = "engine owns a copied trace-chain implementation whose internal pub uses serve its tests"
+)]
+#[path = "trace_chain_impl.rs"]
+mod trace_chain_impl;
 
 /// Run symbol-level call-chain tracing through the engine boundary.
 ///
@@ -36,7 +43,7 @@ pub fn trace_symbol_chain_with_session(
         .as_ref()
         .ok_or_else(|| EngineError::new("trace requires a retained module graph"))?;
     let modules = output.modules.as_deref().unwrap_or(&[]);
-    Ok(core_backend::trace_symbol_chain(
+    Ok(trace_chain_impl::trace_symbol_chain(
         graph.as_graph(),
         modules,
         session.root(),

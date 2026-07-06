@@ -15,6 +15,8 @@ pub type CloneInstance = fallow_types::duplicates::CloneInstance;
 pub type DefaultIgnoreSkips = fallow_types::duplicates::DefaultIgnoreSkips;
 pub type DuplicationReport = fallow_types::duplicates::DuplicationReport;
 pub type DuplicationStats = fallow_types::duplicates::DuplicationStats;
+pub type RefactoringKind = fallow_types::duplicates::RefactoringKind;
+pub type RefactoringSuggestion = fallow_types::duplicates::RefactoringSuggestion;
 
 /// Report-scoped clone fingerprint assignment exposed through the engine boundary.
 #[derive(Debug, Clone)]
@@ -76,6 +78,21 @@ pub fn fingerprint_for_fragment(fragment: &str) -> String {
 #[must_use]
 pub fn dominant_identifier(group: &CloneGroup) -> Option<String> {
     core_backend::dominant_identifier(group)
+}
+
+/// Build a per-group extract-function refactoring suggestion.
+#[must_use]
+pub fn group_refactoring_suggestion(group: &CloneGroup) -> RefactoringSuggestion {
+    let estimated_savings = group.line_count * group.instances.len().saturating_sub(1);
+    RefactoringSuggestion {
+        kind: RefactoringKind::ExtractFunction,
+        description: format!(
+            "Extract the shared {}-line block into one function and call it from {} sites",
+            group.line_count,
+            group.instances.len(),
+        ),
+        estimated_savings,
+    }
 }
 
 /// Refresh clone-family and mirrored-directory fields after clone groups change.

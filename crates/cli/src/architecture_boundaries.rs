@@ -1272,6 +1272,39 @@ fn assert_engine_dead_code_facade_has_no_analysis_bypasses() {
     );
 }
 
+#[test]
+fn engine_owns_trace_without_core_adapter() {
+    let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
+        .expect("read engine core backend source");
+    for forbidden in [
+        "fallow_core::trace::",
+        "fallow_core::trace_chain::",
+        "pub fn trace_export(",
+        "pub fn trace_symbol_chain(",
+    ] {
+        assert!(
+            !core_backend.contains(forbidden),
+            "engine trace must stay owned by trace modules instead of core_backend adapter: {forbidden}"
+        );
+    }
+
+    for source_path in [
+        "crates/engine/src/trace.rs",
+        "crates/engine/src/trace_impl.rs",
+        "crates/engine/src/trace_chain.rs",
+        "crates/engine/src/trace_chain_impl.rs",
+    ] {
+        let source = read_source_without_line_comments(source_path)
+            .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
+        for forbidden in ["core_backend::trace", "fallow_core::trace"] {
+            assert!(
+                !source.contains(forbidden),
+                "{source_path} must not route trace behavior through {forbidden}"
+            );
+        }
+    }
+}
+
 fn assert_engine_discovery_exposes_session_oriented_surface() {
     let engine_discover = read_source_without_line_comments("crates/engine/src/discover.rs")
         .expect("read engine discover");
