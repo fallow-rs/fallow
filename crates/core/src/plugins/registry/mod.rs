@@ -27,6 +27,24 @@ pub fn builtin_plugin_names() -> Vec<&'static str> {
         .collect()
 }
 
+/// Basenames from every built-in plugin config pattern, in stable order.
+///
+/// Engine-owned source discovery uses this to capture non-source config
+/// candidates during the file walk without depending on discovery internals.
+#[must_use]
+pub fn builtin_plugin_config_candidate_basenames() -> Vec<String> {
+    let mut set: FxHashSet<String> = FxHashSet::default();
+    for plugin in builtin::create_builtin_plugins() {
+        for pattern in plugin.config_patterns() {
+            let basename = pattern.rsplit('/').next().unwrap_or(pattern);
+            set.insert(basename.to_string());
+        }
+    }
+    let mut basenames = set.into_iter().collect::<Vec<_>>();
+    basenames.sort_unstable();
+    basenames
+}
+
 pub use helpers::ConfigCandidateIndex;
 use helpers::{
     check_has_config_file, discover_config_files, is_external_plugin_active,

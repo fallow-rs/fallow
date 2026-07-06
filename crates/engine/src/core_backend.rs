@@ -11,12 +11,8 @@ use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::{
-    EngineResult,
-    discover::{AnalysisDiscovery, HiddenDirScope},
-    engine_error,
-    module_graph::RetainedModuleGraph,
-    results::AnalysisResults,
-    source::ModuleInfo,
+    EngineResult, discover::AnalysisDiscovery, engine_error, module_graph::RetainedModuleGraph,
+    results::AnalysisResults, source::ModuleInfo,
 };
 
 #[derive(Debug, Clone)]
@@ -285,24 +281,12 @@ pub fn dead_code_pipeline_profile(
     }
 }
 
-fn core_hidden_dir_scope(value: &HiddenDirScope) -> fallow_core::discover::HiddenDirScope {
-    fallow_core::discover::HiddenDirScope::new(value.root().to_path_buf(), value.dirs().to_vec())
-}
-
-fn core_hidden_dir_scopes(scopes: &[HiddenDirScope]) -> Vec<fallow_core::discover::HiddenDirScope> {
-    scopes.iter().map(core_hidden_dir_scope).collect()
-}
-
-pub fn discover_files_and_config_candidates(
-    config: &ResolvedConfig,
-    additional_hidden_dir_scopes: &[HiddenDirScope],
-) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
-    let scopes = core_hidden_dir_scopes(additional_hidden_dir_scopes);
-    fallow_core::discover::discover_files_and_config_candidates(config, &scopes)
-}
-
 pub fn discover_entry_points(config: &ResolvedConfig, files: &[DiscoveredFile]) -> Vec<EntryPoint> {
     fallow_core::discover::discover_entry_points(config, files)
+}
+
+pub fn builtin_plugin_config_candidate_basenames() -> Vec<String> {
+    fallow_core::plugins::registry::builtin_plugin_config_candidate_basenames()
 }
 
 pub fn discover_workspace_entry_points(

@@ -838,7 +838,16 @@ pub fn discover_files_and_config_candidates(
     config: &ResolvedConfig,
     additional_hidden_dir_scopes: &[HiddenDirScope],
 ) -> (Vec<DiscoveredFile>, Vec<PathBuf>) {
-    core_backend::discover_files_and_config_candidates(config, additional_hidden_dir_scopes)
+    let scopes = additional_hidden_dir_scopes
+        .iter()
+        .map(|scope| {
+            crate::discover_walk::HiddenDirScope::new(
+                scope.root().to_path_buf(),
+                scope.dirs().to_vec(),
+            )
+        })
+        .collect::<Vec<_>>();
+    crate::discover_walk::discover_files_and_config_candidates(config, &scopes)
 }
 
 /// Discover configured and inferred entry points.

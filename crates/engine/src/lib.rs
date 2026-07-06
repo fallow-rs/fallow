@@ -29,6 +29,7 @@ pub mod cross_reference;
 mod css;
 pub mod dead_code;
 pub mod discover;
+mod discover_walk;
 pub mod duplicates;
 mod error;
 mod feature_flags;

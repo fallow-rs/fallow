@@ -2355,6 +2355,16 @@ fn create_builtin_plugins_returns_non_empty() {
 }
 
 #[test]
+fn builtin_plugin_config_candidate_basenames_are_stable_and_non_empty() {
+    let basenames = super::builtin_plugin_config_candidate_basenames();
+
+    assert!(!basenames.is_empty());
+    assert!(basenames.windows(2).all(|window| window[0] <= window[1]));
+    assert!(basenames.iter().any(|name| name == "tsconfig.json"));
+    assert!(basenames.iter().any(|name| name == "bunfig.toml"));
+}
+
+#[test]
 fn create_builtin_plugins_all_have_unique_names() {
     let plugins = builtin::create_builtin_plugins();
     let mut seen = FxHashSet::default();

@@ -1146,6 +1146,7 @@ dependencies = [
  "fallow-security",
  "fallow-types",
  "globset",
+ "ignore",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
