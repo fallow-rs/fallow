@@ -1339,6 +1339,53 @@ fn engine_owns_duplication_pure_helpers_without_core_adapter() {
 }
 
 #[test]
+fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
+    let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
+        .expect("read engine core backend source");
+    let allowed = [
+        "fallow_core::AnalysisDiscovery",
+        "fallow_core::DeadCodeBackendPrelude",
+        "fallow_core::DeadCodeEntryPoints",
+        "fallow_core::prepare_dead_code_backend_prelude",
+        "fallow_core::discover_dead_code_entry_points",
+        "fallow_core::try_load_dead_code_graph_cache",
+        "fallow_core::resolve_dead_code_imports",
+        "fallow_core::build_dead_code_graph",
+        "fallow_core::run_dead_code_detectors",
+        "fallow_core::duplicates::tokenize::tokenize_file",
+        "fallow_core::duplicates::find_duplicates",
+        "fallow_core::duplicates::find_duplicates_cached",
+        "fallow_core::duplicates::find_duplicates_cached_with_default_ignore_skips",
+        "fallow_core::duplicates::find_duplicates_with_default_ignore_skips",
+        "fallow_core::duplicates::find_duplicates_touching_files_cached_with_default_ignore_skips",
+        "fallow_core::duplicates::find_duplicates_touching_files_with_default_ignore_skips",
+        "fallow_core::discover::HiddenDirScope",
+        "fallow_core::discover::is_allowed_hidden_dir",
+        "fallow_core::discover::collect_plugin_hidden_dir_scopes",
+        "fallow_core::discover::collect_hidden_dir_scopes",
+        "fallow_core::discover::discover_files_and_config_candidates",
+        "fallow_core::discover::discover_entry_points",
+        "fallow_core::discover::discover_workspace_entry_points",
+        "fallow_core::discover::discover_plugin_entry_points",
+        "fallow_core::plugins::registry::PluginRegexValidationError",
+        "fallow_core::plugins::registry::builtin_plugin_names",
+        "fallow_core::plugins::registry::format_plugin_regex_errors",
+        "fallow_core::plugins::AggregatedPluginResult",
+        "fallow_core::plugins::PluginRegistry",
+    ];
+
+    for line in core_backend.lines() {
+        if !line.contains("fallow_core::") {
+            continue;
+        }
+        assert!(
+            allowed.iter().any(|allowed| line.contains(allowed)),
+            "unexpected fallow-core adapter dependency in core_backend.rs: {line}"
+        );
+    }
+}
+
+#[test]
 fn engine_owns_churn_without_core_adapter() {
     let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
         .expect("read engine core backend source");
