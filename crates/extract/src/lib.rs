@@ -109,6 +109,7 @@ pub use parse::parse_source_to_module;
 /// without BOM; line offsets are computed against the post-BOM view; the BOM,
 /// if present on input, is preserved on output by `fallow fix`."
 const BOM_CHAR: char = '\u{FEFF}';
+const PARALLEL_PARSE_FILE_THRESHOLD: usize = 32;
 
 /// Strip the leading UTF-8 BOM if present.
 ///
@@ -133,10 +134,17 @@ pub fn parse_all_files(
     cache: Option<&CacheStore>,
     need_complexity: bool,
 ) -> ParseResult {
-    let results: Vec<ParseFileResult> = files
-        .par_iter()
-        .map(|file| parse_single_file_cached(file, cache, need_complexity))
-        .collect();
+    let results: Vec<ParseFileResult> = if files.len() <= PARALLEL_PARSE_FILE_THRESHOLD {
+        files
+            .iter()
+            .map(|file| parse_single_file_cached(file, cache, need_complexity))
+            .collect()
+    } else {
+        files
+            .par_iter()
+            .map(|file| parse_single_file_cached(file, cache, need_complexity))
+            .collect()
+    };
 
     let mut modules = Vec::with_capacity(results.len());
     let mut hits = 0usize;
