@@ -1305,6 +1305,39 @@ fn engine_owns_trace_without_core_adapter() {
     }
 }
 
+#[test]
+fn engine_owns_duplication_pure_helpers_without_core_adapter() {
+    let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
+        .expect("read engine core backend source");
+    for forbidden in [
+        "fallow_core::duplicates::CloneFingerprintSet",
+        "fallow_core::duplicates::clone_fingerprint",
+        "fallow_core::duplicates::fingerprint_for_fragment",
+        "fallow_core::duplicates::dominant_identifier",
+        "fallow_core::duplicates::families::",
+        "pub struct BackendCloneFingerprintSet",
+    ] {
+        assert!(
+            !core_backend.contains(forbidden),
+            "pure duplication helpers must stay engine-owned instead of core_backend adapter: {forbidden}"
+        );
+    }
+
+    let duplicates =
+        read_source_without_line_comments("crates/engine/src/duplicates.rs").expect("read source");
+    for forbidden in [
+        "core_backend::clone_fingerprint",
+        "core_backend::fingerprint_for_fragment",
+        "core_backend::dominant_identifier",
+        "core_backend::refresh_clone_families",
+    ] {
+        assert!(
+            !duplicates.contains(forbidden),
+            "engine duplicates helpers must not route pure helper behavior through {forbidden}"
+        );
+    }
+}
+
 fn assert_engine_discovery_exposes_session_oriented_surface() {
     let engine_discover = read_source_without_line_comments("crates/engine/src/discover.rs")
         .expect("read engine discover");

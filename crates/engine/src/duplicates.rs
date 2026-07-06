@@ -8,7 +8,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{core_backend, results::DuplicationAnalysis};
 
-pub const FINGERPRINT_PREFIX: &str = "dup:";
+#[path = "duplicates_deepdive.rs"]
+mod deepdive;
+#[path = "duplicates_families.rs"]
+mod families;
 
 pub type CloneGroup = fallow_types::duplicates::CloneGroup;
 pub type CloneInstance = fallow_types::duplicates::CloneInstance;
@@ -18,86 +21,16 @@ pub type DuplicationStats = fallow_types::duplicates::DuplicationStats;
 pub type RefactoringKind = fallow_types::duplicates::RefactoringKind;
 pub type RefactoringSuggestion = fallow_types::duplicates::RefactoringSuggestion;
 
-/// Report-scoped clone fingerprint assignment exposed through the engine boundary.
-#[derive(Debug, Clone)]
-pub struct CloneFingerprintSet {
-    inner: core_backend::BackendCloneFingerprintSet,
-}
-
-impl CloneFingerprintSet {
-    /// Assign collision-free fingerprints for the report's clone groups.
-    #[must_use]
-    pub fn from_groups(groups: &[CloneGroup]) -> Self {
-        Self {
-            inner: core_backend::BackendCloneFingerprintSet::from_groups(groups),
-        }
-    }
-
-    /// Return the assigned fingerprint for a clone group.
-    #[must_use]
-    pub fn fingerprint_for_group(&self, group: &CloneGroup) -> String {
-        self.inner.fingerprint_for_group(group)
-    }
-
-    /// Return the assigned fingerprint for clone-group parts.
-    #[must_use]
-    pub fn fingerprint_for_parts(
-        &self,
-        instances: &[CloneInstance],
-        token_count: usize,
-        line_count: usize,
-    ) -> String {
-        self.inner
-            .fingerprint_for_parts(instances, token_count, line_count)
-    }
-
-    /// Find the group addressed by an assigned fingerprint.
-    #[must_use]
-    pub fn find_group<'a>(
-        &self,
-        groups: &'a [CloneGroup],
-        fingerprint: &str,
-    ) -> Option<&'a CloneGroup> {
-        self.inner.find_group(groups, fingerprint)
-    }
-}
-
-/// Compute the stable fingerprint for a clone group.
-#[must_use]
-pub fn clone_fingerprint(instances: &[CloneInstance]) -> String {
-    core_backend::clone_fingerprint(instances)
-}
-
-/// Compute a clone fingerprint directly from a representative source fragment.
-#[must_use]
-pub fn fingerprint_for_fragment(fragment: &str) -> String {
-    core_backend::fingerprint_for_fragment(fragment)
-}
-
-/// Return the best-effort dominant identifier for a clone group.
-#[must_use]
-pub fn dominant_identifier(group: &CloneGroup) -> Option<String> {
-    core_backend::dominant_identifier(group)
-}
-
-/// Build a per-group extract-function refactoring suggestion.
-#[must_use]
-pub fn group_refactoring_suggestion(group: &CloneGroup) -> RefactoringSuggestion {
-    let estimated_savings = group.line_count * group.instances.len().saturating_sub(1);
-    RefactoringSuggestion {
-        kind: RefactoringKind::ExtractFunction,
-        description: format!(
-            "Extract the shared {}-line block into one function and call it from {} sites",
-            group.line_count,
-            group.instances.len(),
-        ),
-        estimated_savings,
-    }
-}
+pub use deepdive::{
+    CloneFingerprintKey, CloneFingerprintSet, FINGERPRINT_PREFIX, clone_fingerprint,
+    dominant_identifier, fingerprint_for_fragment, group_refactoring_suggestion,
+};
 
 /// Refresh clone-family and mirrored-directory fields after clone groups change.
 pub fn refresh_clone_families(report: &mut DuplicationReport, root: &Path) {
-    core_backend::refresh_clone_families(report, root);
+    report.clone_families = families::group_into_families(&report.clone_groups, root);
+    report.mirrored_directories =
+        families::detect_mirrored_directories(&report.clone_families, root);
 }
 
 /// Recompute duplication statistics after clone groups have been filtered.

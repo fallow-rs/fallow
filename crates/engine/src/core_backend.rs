@@ -8,7 +8,7 @@ use fallow_config::{
     DuplicatesConfig, ExternalPluginDef, PackageJson, ResolvedConfig, WorkspaceInfo,
 };
 use fallow_types::discover::{DiscoveredFile, EntryPoint};
-use fallow_types::duplicates::{CloneGroup, CloneInstance, DuplicationReport};
+use fallow_types::duplicates::DuplicationReport;
 use fallow_types::trace::PipelineTimings;
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
@@ -287,62 +287,6 @@ pub fn dead_code_pipeline_profile(
             total_ms: prelude.elapsed_ms(),
         }),
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct BackendCloneFingerprintSet {
-    inner: fallow_core::duplicates::CloneFingerprintSet,
-}
-
-impl BackendCloneFingerprintSet {
-    pub fn from_groups(groups: &[CloneGroup]) -> Self {
-        Self {
-            inner: fallow_core::duplicates::CloneFingerprintSet::from_groups(groups),
-        }
-    }
-
-    pub fn fingerprint_for_group(&self, group: &CloneGroup) -> String {
-        self.inner.fingerprint_for_group(group)
-    }
-
-    pub fn fingerprint_for_parts(
-        &self,
-        instances: &[CloneInstance],
-        token_count: usize,
-        line_count: usize,
-    ) -> String {
-        self.inner
-            .fingerprint_for_parts(instances, token_count, line_count)
-    }
-
-    pub fn find_group<'a>(
-        &self,
-        groups: &'a [CloneGroup],
-        fingerprint: &str,
-    ) -> Option<&'a CloneGroup> {
-        self.inner.find_group(groups, fingerprint)
-    }
-}
-
-pub fn clone_fingerprint(instances: &[CloneInstance]) -> String {
-    fallow_core::duplicates::clone_fingerprint(instances)
-}
-
-pub fn fingerprint_for_fragment(fragment: &str) -> String {
-    fallow_core::duplicates::fingerprint_for_fragment(fragment)
-}
-
-pub fn dominant_identifier(group: &CloneGroup) -> Option<String> {
-    fallow_core::duplicates::dominant_identifier(group)
-}
-
-pub fn refresh_clone_families(report: &mut DuplicationReport, root: &Path) {
-    report.clone_families =
-        fallow_core::duplicates::families::group_into_families(&report.clone_groups, root);
-    report.mirrored_directories = fallow_core::duplicates::families::detect_mirrored_directories(
-        &report.clone_families,
-        root,
-    );
 }
 
 pub fn rules_applying_to_path<'a>(
