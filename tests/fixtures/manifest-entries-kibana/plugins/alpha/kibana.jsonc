@@ -1,0 +1,5 @@
+{
+  "type": "plugin",
+  "id": "@kbn/alpha-plugin",
+  "plugin": { "id": "alpha", "browser": true, "server": true, "extraPublicDirs": ["common"] }
+}

@@ -194,6 +194,77 @@ fn external_plugin_active_in_list() {
     );
 }
 
+fn manifest_config(root: &std::path::Path) -> fallow_config::ResolvedConfig {
+    external_plugin_config(root)
+}
+
+fn unused_rel_paths(results: &fallow_core::results::AnalysisResults) -> Vec<String> {
+    results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect()
+}
+
+fn is_unused(unused: &[String], suffix: &str) -> bool {
+    unused.iter().any(|p| p.ends_with(suffix))
+}
+
+#[test]
+fn manifest_entries_seed_plugin_trees_from_kibana_jsonc() {
+    let root = fixture_path("manifest-entries-kibana");
+    let config = manifest_config(&root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_rel_paths(&results);
+
+    // browser + server + extraPublicDirs seeds are all reachable, plus transitive helper.
+    for reachable in [
+        "plugins/alpha/public/index.ts",
+        "plugins/alpha/public/helper.ts",
+        "plugins/alpha/server/index.ts",
+        "plugins/alpha/common/index.ts",
+        "plugins/beta/public/index.ts",
+    ] {
+        assert!(
+            !is_unused(&unused, reachable),
+            "{reachable} should be seeded/reachable via manifestEntries, unused: {unused:?}"
+        );
+    }
+
+    // beta has server:false, so the per-seed `when` skips its server entry.
+    assert!(
+        is_unused(&unused, "plugins/beta/server/index.ts"),
+        "beta server (server:false) must NOT be seeded and stays unused, unused: {unused:?}"
+    );
+    // a genuinely-orphan file stays flagged.
+    assert!(
+        is_unused(&unused, "orphan.ts"),
+        "orphan.ts should stay unused, unused: {unused:?}"
+    );
+}
+
+#[test]
+fn manifest_entries_are_load_bearing() {
+    // Neuter: with the external plugin removed, the plugin trees have no entry
+    // point and must report as unused, proving manifestEntries is what seeds them.
+    let root = fixture_path("manifest-entries-kibana");
+    let mut config = manifest_config(&root);
+    config.external_plugins = vec![];
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_rel_paths(&results);
+
+    for should_be_unused in [
+        "plugins/alpha/public/index.ts",
+        "plugins/alpha/server/index.ts",
+        "plugins/beta/public/index.ts",
+    ] {
+        assert!(
+            is_unused(&unused, should_be_unused),
+            "{should_be_unused} should be unused WITHOUT the manifestEntries plugin, unused: {unused:?}"
+        );
+    }
+}
+
 #[test]
 fn external_plugin_config_patterns_always_used() {
     let root = fixture_path("external-plugins");

@@ -1,0 +1,17 @@
+{
+  // Seed Kibana plugin entry points from kibana.jsonc manifests.
+  "name": "kibana",
+  "detection": { "type": "fileExists", "pattern": "**/kibana.jsonc" },
+  "entryPointRole": "runtime",
+  "manifestEntries": [
+    {
+      "manifests": "**/kibana.jsonc",
+      "when": { "type": "plugin" },
+      "entries": [
+        { "path": "public/index.{ts,tsx}", "when": { "plugin.browser": true } },
+        { "path": "server/index.{ts,tsx}", "when": { "plugin.server": true } },
+        { "path": "${plugin.extraPublicDirs}/index.{ts,tsx}" }
+      ]
+    }
+  ]
+}

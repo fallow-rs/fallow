@@ -4568,6 +4568,7 @@ thresholdOverrides = [
                 enablers: vec![],
                 entry_points: vec!["[invalid-glob".to_owned()],
                 entry_point_role: EntryPointRole::Support,
+                manifest_entries: vec![],
                 config_patterns: vec![],
                 always_used: vec![],
                 tooling_dependencies: vec![],

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **External plugins can now seed entry points derived from framework manifest
+  files (`manifestEntries`).** Static `entryPoints` globs cannot read a
+  framework manifest and derive entries from its fields, so monorepos whose
+  plugins are loaded at runtime through per-package manifests (rather than a
+  single app entry or `package.json` `main`/`exports`) had no entry points into
+  their plugin trees and reported that source as unused. A `fallow-plugin-*.jsonc`
+  can now declare `manifestEntries`: each rule finds manifest files by a
+  recursive glob, parses them (JSON / JSONC), and for every manifest that passes
+  a dotted-field `when` gate resolves each `entries[].path` relative to that
+  manifest's directory (with `${dotted.field}` interpolation that fans out over
+  string / array fields) into an entry point under the plugin's `entryPointRole`.
+  `when` uses strict equality; manifest discovery respects `.gitignore` and skips
+  `node_modules`; and a warning fires when a `manifests` glob matches nothing, a
+  `when` gate excludes every manifest, or a field path resolves in no matched
+  manifest (a likely typo). This makes manifest-driven frameworks self-serviceable
+  in a config file instead of requiring a built-in plugin. See
+  [custom plugins](https://docs.fallow.tools/frameworks/custom-plugins#manifest-derived-entries).
+
 ## [3.2.0] - 2026-07-05
 
 ### Added

@@ -15,6 +15,7 @@ fn make_external(name: &str, enablers: &[&str], config_patterns: &[&str]) -> Ext
         enablers: enablers.iter().map(|s| (*s).to_string()).collect(),
         entry_points: Vec::new(),
         entry_point_role: fallow_config::EntryPointRole::Support,
+        manifest_entries: Vec::new(),
         config_patterns: config_patterns.iter().map(|s| (*s).to_string()).collect(),
         always_used: Vec::new(),
         tooling_dependencies: Vec::new(),
@@ -407,6 +408,7 @@ fn external_plugin_detected_by_enablers() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["my-framework"]);
@@ -439,6 +441,7 @@ fn external_plugin_not_detected_when_dep_missing() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["react"]);
@@ -466,6 +469,7 @@ fn external_plugin_prefix_enabler() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["@custom/core"]);
@@ -489,6 +493,7 @@ fn external_plugin_detection_dependency() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["special-dep"]);
@@ -523,6 +528,7 @@ fn external_plugin_detection_any_combinator() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["pkg-b"]);
@@ -553,6 +559,7 @@ fn external_plugin_detection_all_combinator_fails_partial() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["pkg-a"]);
@@ -577,6 +584,7 @@ fn external_plugin_used_exports_aggregated() {
         }],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["ue-dep"]);
@@ -601,6 +609,7 @@ fn external_plugin_without_enablers_or_detection_stays_inactive() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["anything"]);
@@ -791,6 +800,7 @@ fn external_plugin_detection_overrides_enablers() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["pkg-y"]);
@@ -817,6 +827,7 @@ fn external_plugin_detection_overrides_enablers_positive() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["pkg-x"]);
@@ -841,6 +852,7 @@ fn external_plugin_config_patterns_added_to_always_used() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["cfg-dep"]);
@@ -881,6 +893,7 @@ fn external_plugin_detection_all_combinator_succeeds() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["pkg-a", "pkg-b"]);
@@ -921,6 +934,7 @@ fn external_plugin_nested_any_inside_all() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext.clone()]);
     let pkg = make_pkg(&["required-dep", "optional-b"]);
@@ -957,6 +971,7 @@ fn external_plugin_detection_file_exists_against_discovered() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = PackageJson::default();
@@ -984,6 +999,7 @@ fn external_plugin_detection_file_exists_no_match() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = PackageJson::default();
@@ -1610,6 +1626,7 @@ fn multiple_external_plugins_independently_activated() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let ext_b = ExternalPluginDef {
         schema: None,
@@ -1623,6 +1640,7 @@ fn multiple_external_plugins_independently_activated() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext_a, ext_b]);
     let pkg = make_pkg(&["dep-a"]);
@@ -1656,6 +1674,7 @@ fn external_plugin_multiple_used_exports() {
         ],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["multi-dep"]);
@@ -1941,6 +1960,7 @@ fn process_external_plugins_prefix_enabler_requires_slash() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let mut result = AggregatedPluginResult::default();
     let deps = vec!["@organism".to_string()];
@@ -1965,6 +1985,7 @@ fn process_external_plugins_prefix_enabler_matches_scoped() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let mut result = AggregatedPluginResult::default();
     let deps = vec!["@org/core".to_string()];
@@ -2130,6 +2151,7 @@ fn external_plugin_detection_all_with_file_and_dep() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["my-lib"]);
@@ -2164,6 +2186,7 @@ fn external_plugin_detection_all_dep_and_file_missing_file() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let registry = PluginRegistry::new(vec![ext]);
     let pkg = make_pkg(&["my-lib"]);
@@ -2576,6 +2599,7 @@ fn process_external_plugins_detection_dependency() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let mut result = AggregatedPluginResult::default();
     let deps = vec!["my-dep".to_string()];
@@ -2605,6 +2629,7 @@ fn process_external_plugins_detection_not_matched() {
         used_exports: vec![],
         used_class_members: vec![],
         entry_point_role: fallow_config::EntryPointRole::Runtime,
+        manifest_entries: Vec::new(),
     };
     let mut result = AggregatedPluginResult::default();
     let deps = vec!["other-dep".to_string()];

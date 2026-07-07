@@ -224,6 +224,13 @@ pub fn process_external_plugins(
                     .iter()
                     .map(|p| (PathRule::new(p.clone()), ext.name.clone())),
             );
+            if !ext.manifest_entries.is_empty() {
+                result.entry_patterns.extend(
+                    crate::plugins::manifest_entries::evaluate_manifest_entries(ext, root)
+                        .into_iter()
+                        .map(|rule| (rule, ext.name.clone())),
+                );
+            }
             result.config_patterns.extend(ext.config_patterns.clone());
             result.always_used.extend(
                 ext.config_patterns

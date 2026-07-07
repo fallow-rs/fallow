@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
@@ -131,6 +132,15 @@ pub struct ExternalPluginDef {
     #[serde(default = "default_external_entry_point_role")]
     pub entry_point_role: EntryPointRole,
 
+    /// Entry points DERIVED from framework manifest files.
+    ///
+    /// Unlike `entryPoints` (static globs), each rule finds manifest files by a
+    /// recursive glob, parses them, and seeds sibling entries resolved relative
+    /// to each manifest's directory, gated on the manifest's own fields. Seeded
+    /// entries use this plugin's `entryPointRole`.
+    #[serde(default)]
+    pub manifest_entries: Vec<ManifestEntryRule>,
+
     /// Glob patterns for config files (marked as always-used when active).
     #[serde(default)]
     pub config_patterns: Vec<String>,
@@ -163,6 +173,76 @@ pub struct ExternalUsedExport {
     pub pattern: String,
     /// Export names always considered used.
     pub exports: Vec<String>,
+}
+
+/// Format of the manifest files a [`ManifestEntryRule`] reads.
+///
+/// `jsonc` (the default) also parses plain JSON, so it is the tolerant choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ManifestFormat {
+    /// JSONC (comments + trailing commas). Also accepts plain JSON.
+    #[default]
+    Jsonc,
+    /// Strict JSON.
+    Json,
+}
+
+/// A rule that seeds entry points DERIVED from framework manifest files.
+///
+/// For every file matching `manifests` (a recursive glob) that passes the
+/// manifest-level `when` gate, each rule in `entries` is resolved relative to
+/// the manifest's directory (with `${dotted.field}` interpolation) into an entry
+/// point. Seeded entries use the owning plugin's `entryPointRole`.
+///
+/// ```jsonc
+/// {
+///   "manifests": "**/kibana.jsonc",
+///   "when": { "type": "plugin" },
+///   "entries": [
+///     { "path": "public/index.{ts,tsx}", "when": { "plugin.browser": true } },
+///     { "path": "server/index.{ts,tsx}", "when": { "plugin.server": true } },
+///     { "path": "${plugin.extraPublicDirs}/index.{ts,tsx}" }
+///   ]
+/// }
+/// ```
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestEntryRule {
+    /// Recursive glob selecting the manifest files to read (e.g. `**/kibana.jsonc`).
+    pub manifests: String,
+
+    /// Manifest format. Defaults to `jsonc` (which also parses plain JSON).
+    #[serde(default)]
+    pub format: ManifestFormat,
+
+    /// Manifest-level gate: a map of dotted field path to an expected scalar
+    /// value. ALL entries must match by STRICT EQUALITY for the manifest to be
+    /// processed. An empty map matches every manifest.
+    #[serde(default)]
+    pub when: BTreeMap<String, serde_json::Value>,
+
+    /// Entry rules seeded per matching manifest.
+    pub entries: Vec<ManifestSeedRule>,
+}
+
+/// A single entry seeded by a [`ManifestEntryRule`], resolved relative to the
+/// manifest's directory.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestSeedRule {
+    /// Entry glob relative to the manifest directory. May contain
+    /// `${dotted.field}` interpolation that fans out over string / array
+    /// manifest field values (a missing or empty field seeds nothing). The glob
+    /// must encode its own extension (e.g. `public/index.{ts,tsx}`); glob entry
+    /// patterns are matched literally against discovered files without
+    /// source-extension probing.
+    pub path: String,
+
+    /// Per-entry gate (strict equality), evaluated against the same manifest.
+    /// An empty map always passes.
+    #[serde(default)]
+    pub when: BTreeMap<String, serde_json::Value>,
 }
 
 fn default_external_entry_point_role() -> EntryPointRole {
@@ -207,6 +287,23 @@ impl ExternalPluginDef {
                 errors.push(e);
             }
         }
+        for rule in &self.manifest_entries {
+            if let Err(e) =
+                compile_user_glob(&rule.manifests, "framework[].manifestEntries[].manifests")
+            {
+                errors.push(e);
+            }
+            for seed in &rule.entries {
+                // Substitute `${...}` interpolation with a placeholder segment so
+                // the surrounding glob (e.g. `${x}/index.{ts,tsx}`) validates.
+                let probe = substitute_interpolation_placeholder(&seed.path);
+                if let Err(e) =
+                    compile_user_glob(&probe, "framework[].manifestEntries[].entries[].path")
+                {
+                    errors.push(e);
+                }
+            }
+        }
         if let Some(detection) = &self.detection {
             validate_detection_user_globs(detection, "framework[].detection", &mut errors);
         }
@@ -216,6 +313,27 @@ impl ExternalPluginDef {
             Err(errors)
         }
     }
+}
+
+/// Replace every `${...}` interpolation span with a placeholder path segment so
+/// the surrounding glob can be validated. Used only for validation; the actual
+/// interpolation happens at evaluation time in the core crate. An unterminated
+/// `${` is left intact so it fails glob validation as a loud error.
+fn substitute_interpolation_placeholder(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut rest = path;
+    while let Some(start) = rest.find("${") {
+        out.push_str(&rest[..start]);
+        if let Some(end_rel) = rest[start + 2..].find('}') {
+            out.push_str("fallowinterp");
+            rest = &rest[start + 2 + end_rel + 1..];
+        } else {
+            out.push_str(&rest[start..]);
+            return out;
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Recursively validate `FileExists.pattern` fields inside a `PluginDetection`

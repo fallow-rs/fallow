@@ -350,6 +350,14 @@
           "$ref": "#/$defs/EntryPointRole",
           "default": "support"
         },
+        "manifestEntries": {
+          "description": "Entry points DERIVED from framework manifest files.\n\nUnlike `entryPoints` (static globs), each rule finds manifest files by a\nrecursive glob, parses them, and seeds sibling entries resolved relative\nto each manifest's directory, gated on the manifest's own fields. Seeded\nentries use this plugin's `entryPointRole`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ManifestEntryRule"
+          },
+          "default": []
+        },
         "configPatterns": {
           "description": "Glob patterns for config files (marked as always-used when active).",
           "type": "array",
@@ -492,6 +500,72 @@
           "type": "string",
           "const": "support"
         }
+      ]
+    },
+    "ManifestEntryRule": {
+      "description": "A rule that seeds entry points DERIVED from framework manifest files.\n\nFor every file matching `manifests` (a recursive glob) that passes the\nmanifest-level `when` gate, each rule in `entries` is resolved relative to\nthe manifest's directory (with `${dotted.field}` interpolation) into an entry\npoint. Seeded entries use the owning plugin's `entryPointRole`.\n\n```jsonc\n{\n  \"manifests\": \"**/kibana.jsonc\",\n  \"when\": { \"type\": \"plugin\" },\n  \"entries\": [\n    { \"path\": \"public/index.{ts,tsx}\", \"when\": { \"plugin.browser\": true } },\n    { \"path\": \"server/index.{ts,tsx}\", \"when\": { \"plugin.server\": true } },\n    { \"path\": \"${plugin.extraPublicDirs}/index.{ts,tsx}\" }\n  ]\n}\n```",
+      "type": "object",
+      "properties": {
+        "manifests": {
+          "description": "Recursive glob selecting the manifest files to read (e.g. `**/kibana.jsonc`).",
+          "type": "string"
+        },
+        "format": {
+          "description": "Manifest format. Defaults to `jsonc` (which also parses plain JSON).",
+          "$ref": "#/$defs/ManifestFormat",
+          "default": "jsonc"
+        },
+        "when": {
+          "description": "Manifest-level gate: a map of dotted field path to an expected scalar\nvalue. ALL entries must match by STRICT EQUALITY for the manifest to be\nprocessed. An empty map matches every manifest.",
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "entries": {
+          "description": "Entry rules seeded per matching manifest.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ManifestSeedRule"
+          }
+        }
+      },
+      "required": [
+        "manifests",
+        "entries"
+      ]
+    },
+    "ManifestFormat": {
+      "description": "Format of the manifest files a [`ManifestEntryRule`] reads.\n\n`jsonc` (the default) also parses plain JSON, so it is the tolerant choice.",
+      "oneOf": [
+        {
+          "description": "JSONC (comments + trailing commas). Also accepts plain JSON.",
+          "type": "string",
+          "const": "jsonc"
+        },
+        {
+          "description": "Strict JSON.",
+          "type": "string",
+          "const": "json"
+        }
+      ]
+    },
+    "ManifestSeedRule": {
+      "description": "A single entry seeded by a [`ManifestEntryRule`], resolved relative to the\nmanifest's directory.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Entry glob relative to the manifest directory. May contain\n`${dotted.field}` interpolation that fans out over string / array\nmanifest field values (a missing or empty field seeds nothing). The glob\nmust encode its own extension (e.g. `public/index.{ts,tsx}`); glob entry\npatterns are matched literally against discovered files without\nsource-extension probing.",
+          "type": "string"
+        },
+        "when": {
+          "description": "Per-entry gate (strict equality), evaluated against the same manifest.\nAn empty map always passes.",
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        }
+      },
+      "required": [
+        "path"
       ]
     },
     "ExternalUsedExport": {

@@ -1132,6 +1132,7 @@ macro_rules! define_plugin {
 
 pub mod config_parser;
 mod manifest;
+pub mod manifest_entries;
 pub mod registry;
 mod tooling;
 

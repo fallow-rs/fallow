@@ -1,0 +1,5 @@
+{
+  "type": "plugin",
+  "id": "@kbn/beta-plugin",
+  "plugin": { "id": "beta", "browser": true, "server": false }
+}
