@@ -8,8 +8,8 @@ framework-specific rule.
 Before choosing a crate or protocol surface, read
 [`architecture-invariants.md`](architecture-invariants.md). It lists the
 allowed dependency directions, IO boundaries, serialization boundaries, and
-current migration exceptions. New analyzer work should fit those boundaries or
-call out the exception before implementation.
+final ownership policy. New analyzer work should fit those boundaries or call
+out the policy change before implementation.
 
 Pick the public identity before writing detection code:
 

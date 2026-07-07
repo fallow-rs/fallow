@@ -30,6 +30,8 @@ fn repo_architecture_north_star_stays_documented() {
         "while engine migration is in progress",
         "while `fallow-engine` still builds on it",
         "owns the migration boundary",
+        "current exceptions",
+        "current migration exceptions",
     ] {
         assert!(
             !migration_doc.contains(forbidden),
@@ -62,6 +64,9 @@ fn architecture_invariants_doc_tracks_guarded_boundaries() {
     );
     for forbidden in [
         "Current Exceptions",
+        "current exceptions",
+        "current migration exceptions",
+        "migration exceptions",
         "while engine migration continues",
         "known migration states",
         "still owns some CI",

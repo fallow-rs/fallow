@@ -111,7 +111,7 @@ as user-visible behavior.
 
 ## Boundary Policy
 
-These are final ownership rules, not migration exceptions:
+These are final ownership rules:
 
 - `fallow-core` can contain private detector mechanics and compatibility
   shims, but public Rust consumers should use `fallow-api` or typed

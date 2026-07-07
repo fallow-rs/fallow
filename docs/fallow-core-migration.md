@@ -21,7 +21,7 @@ where editor, API, and embedding surfaces should depend before using typed
 ## Architecture north star
 
 For the contributor-facing crate rules, IO boundaries, contract rules, and
-current exceptions, see [`architecture-invariants.md`](architecture-invariants.md).
+final ownership policy, see [`architecture-invariants.md`](architecture-invariants.md).
 
 Fallow should be a deterministic repo-intelligence engine with thin integration
 surfaces, not a CLI with libraries arranged around it. That means new analysis
