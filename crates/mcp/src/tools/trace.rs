@@ -8,7 +8,7 @@ use fallow_api::{
     serialize_trace_export_programmatic_json, serialize_trace_file_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     VALID_DUPES_MODES,
@@ -23,14 +23,14 @@ use super::{
 pub async fn run_trace_export_tool(params: TraceExportParams) -> Result<CallToolResult, McpError> {
     let options = match trace_export_options_from_params(&params) {
         Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![Content::text(msg)])),
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
     let result = run_api_blocking("trace_export", move || {
         run_trace_export(&options).and_then(serialize_trace_export_programmatic_json)
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)
@@ -40,14 +40,14 @@ pub async fn run_trace_export_tool(params: TraceExportParams) -> Result<CallTool
 pub async fn run_trace_file_tool(params: TraceFileParams) -> Result<CallToolResult, McpError> {
     let options = match trace_file_options_from_params(&params) {
         Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![Content::text(msg)])),
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
     let result = run_api_blocking("trace_file", move || {
         run_trace_file(&options).and_then(serialize_trace_file_programmatic_json)
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)
@@ -59,14 +59,14 @@ pub async fn run_trace_dependency_tool(
 ) -> Result<CallToolResult, McpError> {
     let options = match trace_dependency_options_from_params(&params) {
         Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![Content::text(msg)])),
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
     let result = run_api_blocking("trace_dependency", move || {
         run_trace_dependency(&options).and_then(serialize_trace_dependency_programmatic_json)
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)
@@ -76,14 +76,14 @@ pub async fn run_trace_dependency_tool(
 pub async fn run_trace_clone_tool(params: TraceCloneParams) -> Result<CallToolResult, McpError> {
     let options = match trace_clone_options_from_params(&params) {
         Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![Content::text(msg)])),
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
     let result = run_api_blocking("trace_clone", move || {
         run_trace_clone(&options).and_then(serialize_trace_clone_programmatic_json)
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)

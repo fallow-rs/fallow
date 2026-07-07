@@ -5,7 +5,7 @@ use fallow_api::{
     run_health as run_api_health, serialize_health_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
@@ -28,7 +28,7 @@ pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolRe
 
     let options = match health_options_from_params(&params) {
         Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![Content::text(msg)])),
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
 
     let result = run_api_blocking("check_health", move || {
@@ -36,7 +36,7 @@ pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolRe
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)
@@ -387,7 +387,7 @@ fn target_effort_from_param(value: Option<&str>) -> Result<Option<TargetEffort>,
 mod tests {
     use std::path::PathBuf;
 
-    use rmcp::model::RawContent;
+    use rmcp::model::ContentBlock;
 
     use super::*;
 
@@ -566,7 +566,7 @@ mod tests {
         let [content] = result.content.as_slice() else {
             panic!("expected one content item");
         };
-        let RawContent::Text(text) = &content.raw else {
+        let ContentBlock::Text(text) = content else {
             panic!("expected text content");
         };
         let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");

@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use rmcp::model::RawContent;
+use rmcp::model::ContentBlock;
 
 use crate::tools::{
     build_analyze_args, build_health_args, build_project_info_args, build_security_candidates_args,
@@ -46,8 +46,8 @@ fn fixture_path(name: &str) -> PathBuf {
 
 /// Extract the text content from a `CallToolResult`.
 fn extract_text(result: &rmcp::model::CallToolResult) -> &str {
-    match &result.content[0].raw {
-        RawContent::Text(t) => &t.text,
+    match &result.content[0] {
+        ContentBlock::Text(t) => &t.text,
         _ => panic!("expected text content"),
     }
 }

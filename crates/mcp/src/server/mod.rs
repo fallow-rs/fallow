@@ -1,6 +1,6 @@
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, Content, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo};
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 
 use crate::params::{
@@ -82,8 +82,8 @@ impl FallowMcp {
             .await
             .map_err(|err| McpError::internal_error(format!("code mode task failed: {err}"), None))
             .map(|result| match result {
-                Ok(output) => CallToolResult::success(vec![Content::text(output)]),
-                Err(output) => CallToolResult::error(vec![Content::text(output)]),
+                Ok(output) => CallToolResult::success(vec![ContentBlock::text(output)]),
+                Err(output) => CallToolResult::error(vec![ContentBlock::text(output)]),
             })
     }
 

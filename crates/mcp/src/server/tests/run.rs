@@ -12,8 +12,8 @@ use super::super::resolve_binary;
 /// Extract the text content from a `CallToolResult`.
 #[cfg(unix)]
 fn extract_text(result: &CallToolResult) -> &str {
-    match &result.content[0].raw {
-        RawContent::Text(t) => &t.text,
+    match &result.content[0] {
+        ContentBlock::Text(t) => &t.text,
         _ => panic!("expected text content"),
     }
 }

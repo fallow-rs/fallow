@@ -1,7 +1,7 @@
 use crate::params::SecurityCandidatesParams;
 
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{push_global, push_str_flag, run_tool, validation_error_body};
 
@@ -19,7 +19,7 @@ pub async fn run_security_candidates(
 ) -> Result<CallToolResult, McpError> {
     match build_security_candidates_args(&params) {
         Ok(args) => run_tool(binary, "security_candidates", &args).await,
-        Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+        Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     }
 }
 

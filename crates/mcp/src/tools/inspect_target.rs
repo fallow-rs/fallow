@@ -1,5 +1,5 @@
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use crate::params::{InspectTarget, InspectTargetParams};
 
@@ -14,7 +14,7 @@ pub async fn inspect_target(
 ) -> Result<CallToolResult, McpError> {
     match build_inspect_args(params) {
         Ok(args) => run_tool(binary, TOOL, &args).await,
-        Err(message) => Ok(CallToolResult::error(vec![Content::text(
+        Err(message) => Ok(CallToolResult::error(vec![ContentBlock::text(
             validation_error_body(message),
         )])),
     }

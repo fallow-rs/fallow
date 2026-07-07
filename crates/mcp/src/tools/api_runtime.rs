@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use fallow_api::ProgrammaticError;
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Serialize;
 
 pub(super) async fn run_api_blocking<T, F>(
@@ -72,7 +72,7 @@ pub(super) fn non_empty_string(value: Option<&str>) -> Option<String> {
 
 pub(super) fn json_success(value: &impl Serialize) -> CallToolResult {
     let text = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
-    CallToolResult::success(vec![Content::text(text)])
+    CallToolResult::success(vec![ContentBlock::text(text)])
 }
 
 pub(super) fn programmatic_error_body(error: &ProgrammaticError) -> String {

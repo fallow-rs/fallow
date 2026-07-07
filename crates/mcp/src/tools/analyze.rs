@@ -8,7 +8,7 @@ use fallow_api::{
     serialize_circular_dependencies_programmatic_json, serialize_dead_code_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     ISSUE_TYPE_FLAGS,
@@ -27,14 +27,14 @@ pub async fn run_analyze(binary: &str, params: AnalyzeParams) -> Result<CallTool
     if requires_cli_fallback(&params) {
         return match build_analyze_args(&params) {
             Ok(args) => run_tool(binary, "analyze", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+            Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
     }
 
     let family = analyze_family(&params);
     let options = match dead_code_options_from_params(&params) {
         Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![Content::text(msg)])),
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
 
     let result = run_api_blocking("analyze", move || match family {
@@ -48,7 +48,7 @@ pub async fn run_analyze(binary: &str, params: AnalyzeParams) -> Result<CallTool
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)
@@ -256,7 +256,7 @@ fn push_analyze_issue_type_flags(
 
 #[cfg(test)]
 mod tests {
-    use rmcp::model::RawContent;
+    use rmcp::model::ContentBlock;
 
     use super::*;
 
@@ -419,8 +419,8 @@ mod tests {
         .expect("api result");
 
         assert_eq!(result.is_error, Some(false));
-        let text = match &result.content[0].raw {
-            RawContent::Text(text) => &text.text,
+        let text = match &result.content[0] {
+            ContentBlock::Text(text) => &text.text,
             _ => panic!("expected text content"),
         };
         let json: serde_json::Value = serde_json::from_str(text).expect("json");
@@ -453,8 +453,8 @@ mod tests {
         .expect("api result");
 
         assert_eq!(result.is_error, Some(false));
-        let text = match &result.content[0].raw {
-            RawContent::Text(text) => &text.text,
+        let text = match &result.content[0] {
+            ContentBlock::Text(text) => &text.text,
             _ => panic!("expected text content"),
         };
         let json: serde_json::Value = serde_json::from_str(text).expect("json");

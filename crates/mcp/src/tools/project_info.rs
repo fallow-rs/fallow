@@ -5,7 +5,7 @@ use fallow_api::{
     serialize_project_info_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
@@ -26,7 +26,7 @@ pub async fn run_project_info(
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)
@@ -98,7 +98,7 @@ fn project_info_options_from_params(params: &ProjectInfoParams) -> ProjectInfoOp
 
 #[cfg(test)]
 mod tests {
-    use rmcp::model::RawContent;
+    use rmcp::model::ContentBlock;
 
     use super::*;
 
@@ -132,7 +132,7 @@ mod tests {
         let [content] = result.content.as_slice() else {
             panic!("expected one content item");
         };
-        let RawContent::Text(text) = &content.raw else {
+        let ContentBlock::Text(text) = content else {
             panic!("expected text content");
         };
         let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");

@@ -5,7 +5,7 @@ use fallow_api::{
     serialize_duplication_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     VALID_DUPES_MODES,
@@ -26,13 +26,13 @@ pub async fn run_find_dupes(
     if requires_cli_fallback(&params) {
         return match build_find_dupes_args(&params) {
             Ok(args) => run_tool(binary, "find_dupes", &args).await,
-            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+            Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
     }
 
     let options = match duplication_options_from_params(&params) {
         Ok(options) => options,
-        Err(msg) => return Ok(CallToolResult::error(vec![Content::text(msg)])),
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
 
     let result = run_api_blocking("find_dupes", move || {
@@ -40,7 +40,7 @@ pub async fn run_find_dupes(
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)
@@ -215,7 +215,7 @@ fn push_dupes_toggle_flags(args: &mut Vec<String>, params: &FindDupesParams) {
 
 #[cfg(test)]
 mod tests {
-    use rmcp::model::RawContent;
+    use rmcp::model::ContentBlock;
 
     use super::*;
 
@@ -334,8 +334,8 @@ mod tests {
         .expect("api result");
 
         assert_eq!(result.is_error, Some(false));
-        let text = match &result.content[0].raw {
-            RawContent::Text(text) => &text.text,
+        let text = match &result.content[0] {
+            ContentBlock::Text(text) => &text.text,
             _ => panic!("expected text content"),
         };
         let json: serde_json::Value = serde_json::from_str(text).expect("json");

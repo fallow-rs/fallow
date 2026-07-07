@@ -5,7 +5,7 @@ use fallow_api::{
     serialize_audit_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     VALID_AUDIT_GATES,
@@ -23,14 +23,14 @@ pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResu
     if !requires_cli_fallback(&params) {
         let options = match audit_options_from_params(&params) {
             Ok(options) => options,
-            Err(msg) => return Ok(CallToolResult::error(vec![Content::text(msg)])),
+            Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
         let result = run_api_blocking("audit", move || {
             run_audit_api(&options).and_then(serialize_audit_programmatic_json)
         })
         .await?
         .map_or_else(
-            |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+            |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
             |value| json_success(&value),
         );
         return Ok(result);
@@ -38,7 +38,7 @@ pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResu
 
     match build_audit_args(&params) {
         Ok(args) => run_tool(binary, "audit", &args).await,
-        Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+        Err(msg) => Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     }
 }
 
@@ -212,7 +212,7 @@ fn audit_gate_from_param(value: Option<&str>) -> Result<AuditGate, String> {
 mod tests {
     use std::process::Command;
 
-    use rmcp::model::RawContent;
+    use rmcp::model::ContentBlock;
 
     use super::*;
 
@@ -277,8 +277,8 @@ mod tests {
         .expect("api result");
 
         assert_eq!(result.is_error, Some(false));
-        let text = match &result.content[0].raw {
-            RawContent::Text(text) => &text.text,
+        let text = match &result.content[0] {
+            ContentBlock::Text(text) => &text.text,
             _ => panic!("expected text content"),
         };
         let json: serde_json::Value = serde_json::from_str(text).expect("json");
@@ -304,8 +304,8 @@ mod tests {
         .expect("api result");
 
         assert_eq!(result.is_error, Some(false));
-        let text = match &result.content[0].raw {
-            RawContent::Text(text) => &text.text,
+        let text = match &result.content[0] {
+            ContentBlock::Text(text) => &text.text,
             _ => panic!("expected text content"),
         };
         let json: serde_json::Value = serde_json::from_str(text).expect("json");

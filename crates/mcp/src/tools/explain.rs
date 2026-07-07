@@ -10,9 +10,9 @@ use super::api_runtime::{json_success, programmatic_error_body};
 pub async fn run_explain(_binary: &str, params: ExplainParams) -> Result<CallToolResult, McpError> {
     match serialize_explain_programmatic_json(&params.issue_type, RootEnvelopeMode::Tagged, None) {
         Ok(value) => Ok(json_success(&value)),
-        Err(error) => Ok(CallToolResult::error(vec![rmcp::model::Content::text(
-            programmatic_error_body(&error),
-        )])),
+        Err(error) => Ok(CallToolResult::error(vec![
+            rmcp::model::ContentBlock::text(programmatic_error_body(&error)),
+        ])),
     }
 }
 
@@ -29,7 +29,7 @@ pub fn build_explain_args(params: &ExplainParams) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use rmcp::model::RawContent;
+    use rmcp::model::ContentBlock;
 
     use super::*;
 
@@ -48,7 +48,7 @@ mod tests {
         let [content] = result.content.as_slice() else {
             panic!("expected one content item");
         };
-        let RawContent::Text(text) = &content.raw else {
+        let ContentBlock::Text(text) = content else {
             panic!("expected text content");
         };
         let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");
@@ -71,7 +71,7 @@ mod tests {
         let [content] = result.content.as_slice() else {
             panic!("expected one content item");
         };
-        let RawContent::Text(text) = &content.raw else {
+        let ContentBlock::Text(text) = content else {
             panic!("expected text content");
         };
         let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");

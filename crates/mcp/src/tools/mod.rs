@@ -62,7 +62,7 @@ use std::time::Duration;
 
 pub use fallow_types::issue_meta::MCP_ISSUE_TYPE_FLAGS as ISSUE_TYPE_FLAGS;
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content, RawContent};
+use rmcp::model::{CallToolResult, ContentBlock};
 use tokio::process::Command;
 
 /// Default subprocess timeout in seconds.
@@ -231,12 +231,12 @@ async fn spawn_fallow(
     }
 
     if stdout.is_empty() {
-        return Ok(CallToolResult::success(vec![Content::text(
+        return Ok(CallToolResult::success(vec![ContentBlock::text(
             "{}".to_string(),
         )]));
     }
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         stdout.to_string(),
     )]))
 }
@@ -251,11 +251,11 @@ fn non_success_result(exit_code: i32, stdout: &str, stderr: &str) -> CallToolRes
         } else {
             stdout.to_string()
         };
-        return CallToolResult::success(vec![Content::text(text)]);
+        return CallToolResult::success(vec![ContentBlock::text(text)]);
     }
 
     if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(stdout).is_ok() {
-        return CallToolResult::error(vec![Content::text(stdout.to_string())]);
+        return CallToolResult::error(vec![ContentBlock::text(stdout.to_string())]);
     }
 
     let message = if stderr.is_empty() {
@@ -270,7 +270,7 @@ fn non_success_result(exit_code: i32, stdout: &str, stderr: &str) -> CallToolRes
         "exit_code": exit_code,
     });
 
-    CallToolResult::error(vec![Content::text(error_json.to_string())])
+    CallToolResult::error(vec![ContentBlock::text(error_json.to_string())])
 }
 
 fn timeout_result(timeout: Duration) -> CallToolResult {
@@ -282,7 +282,7 @@ fn timeout_result(timeout: Duration) -> CallToolResult {
         "help": "Set FALLOW_TIMEOUT_SECS to increase the limit.",
         "context": "subprocess",
     });
-    CallToolResult::error(vec![Content::text(error_json.to_string())])
+    CallToolResult::error(vec![ContentBlock::text(error_json.to_string())])
 }
 
 /// Execute fallow and ensure successful JSON responses have a top-level
@@ -316,7 +316,7 @@ fn ensure_top_level_warnings(result: CallToolResult) -> CallToolResult {
     let Some(content) = result.content.first() else {
         return result;
     };
-    let RawContent::Text(text) = &content.raw else {
+    let ContentBlock::Text(text) = content else {
         return result;
     };
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text.text) else {
@@ -330,5 +330,5 @@ fn ensure_top_level_warnings(result: CallToolResult) -> CallToolResult {
         .or_insert_with(|| serde_json::Value::Array(Vec::new()));
 
     let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| text.text.clone());
-    CallToolResult::success(vec![Content::text(text)])
+    CallToolResult::success(vec![ContentBlock::text(text)])
 }

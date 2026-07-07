@@ -3,7 +3,7 @@ use fallow_api::{
     serialize_dead_code_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use crate::params::CheckChangedParams;
 
@@ -34,7 +34,7 @@ pub async fn run_check_changed(
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)
@@ -137,7 +137,7 @@ fn check_changed_options_from_params(params: &CheckChangedParams) -> DeadCodeOpt
 mod tests {
     use std::process::Command;
 
-    use rmcp::model::RawContent;
+    use rmcp::model::ContentBlock;
 
     use super::*;
 
@@ -198,7 +198,7 @@ mod tests {
         let [content] = result.content.as_slice() else {
             panic!("expected one content item");
         };
-        let RawContent::Text(text) = &content.raw else {
+        let ContentBlock::Text(text) = content else {
             panic!("expected text content");
         };
         let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");

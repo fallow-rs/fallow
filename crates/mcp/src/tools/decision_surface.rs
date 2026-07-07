@@ -5,7 +5,7 @@ use fallow_api::{
     serialize_decision_surface_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::api_runtime::{
     changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
@@ -23,7 +23,7 @@ pub async fn run_decision_surface(
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)
@@ -50,7 +50,7 @@ fn decision_surface_options_from_params(params: &DecisionSurfaceParams) -> Decis
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rmcp::model::RawContent;
+    use rmcp::model::ContentBlock;
 
     #[test]
     fn default_decision_surface_maps_to_programmatic_api_options() {
@@ -101,8 +101,8 @@ mod tests {
         .expect("api result");
 
         assert_eq!(result.is_error, Some(false));
-        let text = match &result.content[0].raw {
-            RawContent::Text(text) => &text.text,
+        let text = match &result.content[0] {
+            ContentBlock::Text(text) => &text.text,
             _ => panic!("expected text content"),
         };
         let json: serde_json::Value = serde_json::from_str(text).expect("json");

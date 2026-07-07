@@ -5,7 +5,7 @@ use fallow_api::{
     serialize_feature_flags_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::api_runtime::{
     changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
@@ -23,7 +23,7 @@ pub async fn run_feature_flags(
     })
     .await?
     .map_or_else(
-        |err| CallToolResult::error(vec![Content::text(programmatic_error_body(&err))]),
+        |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
         |value| json_success(&value),
     );
     Ok(result)
@@ -96,7 +96,7 @@ fn feature_flags_options_from_params(params: &FeatureFlagsParams) -> FeatureFlag
 
 #[cfg(test)]
 mod tests {
-    use rmcp::model::RawContent;
+    use rmcp::model::ContentBlock;
 
     use super::*;
 
@@ -130,7 +130,7 @@ mod tests {
         let [content] = result.content.as_slice() else {
             panic!("expected one content item");
         };
-        let RawContent::Text(text) = &content.raw else {
+        let ContentBlock::Text(text) = content else {
             panic!("expected text content");
         };
         let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");
@@ -172,7 +172,7 @@ mod tests {
         let [content] = result.content.as_slice() else {
             panic!("expected one content item");
         };
-        let RawContent::Text(text) = &content.raw else {
+        let ContentBlock::Text(text) = content else {
             panic!("expected text content");
         };
         let json: serde_json::Value = serde_json::from_str(&text.text).expect("json");
