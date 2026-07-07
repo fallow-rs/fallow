@@ -147,10 +147,14 @@ fn warn_once_tsconfig(ctx: &ResolveContext<'_>, err: &ResolveError) {
     };
     if should_warn {
         tracing::warn!(
-            "Broken tsconfig chain: {message}. Falling back to resolver-less resolution for \
-             affected files. Relative and bare imports still work, but tsconfig path aliases \
-             from missing inherited configs will not. Fix the extends/references chain to restore \
-             full alias support."
+            "tsconfig chain not fully loaded: {message}. Falling back to resolver-less \
+             resolution for the affected files. Relative imports, bare imports, and path \
+             aliases declared in a discovered root or workspace tsconfig still resolve (fallow \
+             applies those project-wide), so this is usually harmless and is common when \
+             analyzing before dependencies are installed. Only aliases declared solely in the \
+             unreadable inherited config are affected: if imports look misreported, install \
+             dependencies so the referenced config resolves, or fix the extends/references \
+             chain."
         );
     }
 }

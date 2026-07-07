@@ -1429,7 +1429,7 @@ fn audit_base_preserves_node_modules_tsconfig_extends_context() {
     ]);
 
     assert!(
-        !output.stderr.contains("Broken tsconfig chain")
+        !output.stderr.contains("tsconfig chain")
             && !output.stderr.contains("node_modules directory not found"),
         "audit base worktree should retain installed tsconfig context. stderr: {}",
         output.stderr

@@ -878,8 +878,9 @@ fn audit_base_worktree_reuses_current_node_modules_context() {
 /// `.nuxt/` generated dir from the host checkout into the audit base
 /// worktree. Without this, root `tsconfig.json` `references` entries
 /// pointing into `.nuxt/tsconfig.app.json` break in the base pass and
-/// emit "Nuxt project missing .nuxt/tsconfig.json" plus "Broken tsconfig
-/// chain" warnings. The function is exercised directly here rather than
+/// emit "Nuxt project missing .nuxt/tsconfig.json" plus "tsconfig chain
+/// not fully loaded" warnings. The function is exercised directly here
+/// rather than
 /// through `BaseWorktree::create` to avoid the `git worktree add`
 /// concurrency-flakiness the worktree-level integration tests already
 /// exhibit.

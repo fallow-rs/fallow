@@ -27,6 +27,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in a config file instead of requiring a built-in plugin. See
   [custom plugins](https://docs.fallow.tools/frameworks/custom-plugins#manifest-derived-entries).
 
+### Changed
+
+- **The incomplete-tsconfig-chain warning no longer implies your path aliases
+  are broken.** When a file's `tsconfig` `extends` / `references` chain cannot
+  be fully loaded (most commonly a base config in `node_modules` that has not
+  been installed yet, e.g. analyzing a large monorepo before `npm install`),
+  fallow falls back to resolver-less resolution for the affected files and
+  emits one warning. The old wording ("Broken tsconfig chain ... tsconfig path
+  aliases from missing inherited configs will not [work]") read as if all path
+  aliases were unresolved, which alarmed users of large monorepos whose
+  `@scope/*` aliases actually resolve fine. In practice, aliases declared in a
+  discovered root or workspace `tsconfig.json` / `tsconfig.*.json` (including a
+  root `tsconfig.base.json`) are applied project-wide by fallow's TypeScript
+  plugin independently of the per-file chain, so they still resolve. The
+  warning now says so ("tsconfig chain not fully loaded ... path aliases
+  declared in a discovered root or workspace tsconfig still resolve") and only
+  flags aliases declared solely in the unreadable inherited config. Wording and
+  documentation only; resolution behavior is unchanged.
+
 ## [3.2.0] - 2026-07-05
 
 ### Added
