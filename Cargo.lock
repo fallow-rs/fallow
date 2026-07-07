@@ -1024,6 +1024,7 @@ dependencies = [
  "fallow-security",
  "fallow-types",
  "fallow-v8-coverage",
+ "glob",
  "globset",
  "http",
  "httpdate",

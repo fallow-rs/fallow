@@ -128,7 +128,15 @@ pub fn build_dead_code_next_steps(
         impact_digest: digest.map(impact_counts),
         workspace_ref: workspace_ref.as_deref(),
         audit_changed: audit_changed_applicable(root),
+        has_external_plugins: has_external_plugins(root),
     })
+}
+
+/// Whether the project declares any auto-discovered external plugin
+/// (`fallow-plugin-*` files or `.fallow/plugins/`). A cheap readdir probe used
+/// to route the agent to `fallow plugin-check` when files are also unused.
+fn has_external_plugins(root: &Path) -> bool {
+    !fallow_config::discover_external_plugins(root, &[]).is_empty()
 }
 
 /// Next-steps for standalone `fallow health`. See [`build_dead_code_next_steps`]
@@ -207,6 +215,8 @@ pub fn build_combined_next_steps(
         offer_setup,
         impact_digest: digest.map(impact_counts),
         audit_changed: audit_changed_applicable(root),
+        has_external_plugins: has_external_plugins(root),
+        has_unused_files: results.is_some_and(|r| !r.unused_files.is_empty()),
     })
 }
 

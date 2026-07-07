@@ -56,6 +56,7 @@ mod onboarding;
 mod output_envelope;
 mod output_runtime;
 mod path_util;
+mod plugin_check;
 mod rayon_pool;
 mod regression;
 mod report;
@@ -139,6 +140,7 @@ Setup and configuration:
   config            Show the resolved config and loaded config file
   config-schema     Print the fallow config JSON Schema
   plugin-schema     Print the external plugin JSON Schema
+  plugin-check      Dry-run external plugins and report what they seed
   rule-pack-schema  Print the rule pack JSON Schema
 
 Automation and CI:
@@ -758,6 +760,9 @@ enum Command {
 
     /// Print the JSON Schema for external plugin files
     PluginSchema,
+
+    /// Dry-run external plugins: report what each activated and seeded
+    PluginCheck,
 
     /// Print the JSON Schema for rule pack files
     RulePackSchema,
@@ -2748,6 +2753,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::Ci { subcommand } => ci::run(map_ci_subcommand(subcommand), output),
         Command::ConfigSchema => init::run_config_schema(),
         Command::PluginSchema => init::run_plugin_schema(),
+        Command::PluginCheck => plugin_check::run_plugin_check(root, output),
         Command::RulePackSchema => init::run_rule_pack_schema(),
         Command::RulePack { subcommand } => dispatch_rule_pack_command(dispatch, subcommand),
         Command::Guard { files } => dispatch_guard_command(dispatch, &files),
@@ -4902,6 +4908,7 @@ mod tests {
             "  config",
             "  config-schema",
             "  plugin-schema",
+            "  plugin-check",
             "  rule-pack-schema",
             "Automation and CI:",
             "  ci",

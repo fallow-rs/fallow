@@ -832,7 +832,7 @@ exports = ["default"]
     #[test]
     fn deserialize_json_with_schema_field() {
         let json_str = r#"{
-            "$schema": "https://fallow.dev/plugin-schema.json",
+            "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
             "name": "schema-plugin",
             "enablers": ["my-pkg"]
         }"#;
@@ -1365,7 +1365,7 @@ pattern = "next.config.js"
     #[test]
     fn plugin_all_fields_json() {
         let json = r#"{
-            "$schema": "https://fallow.dev/plugin-schema.json",
+            "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/plugin-schema.json",
             "name": "full-plugin",
             "detection": {"type": "dependency", "package": "my-pkg"},
             "enablers": ["fallback-enabler"],

@@ -46,10 +46,10 @@ pub fn builtin_plugin_config_candidate_basenames() -> Vec<String> {
 }
 
 pub use helpers::ConfigCandidateIndex;
+pub use helpers::is_external_plugin_active;
 use helpers::{
-    check_has_config_file, discover_config_files, is_external_plugin_active,
-    prepare_config_pattern, process_config_result, process_external_plugins,
-    process_package_json_metadata, process_static_patterns,
+    check_has_config_file, discover_config_files, prepare_config_pattern, process_config_result,
+    process_external_plugins, process_package_json_metadata, process_static_patterns,
 };
 
 fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {

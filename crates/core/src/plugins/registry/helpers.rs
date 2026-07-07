@@ -180,7 +180,7 @@ pub fn process_package_json_metadata(
 
 /// Determine whether an external plugin activates against the given project.
 ///
-/// Shared between [`process_external_plugins`] and the collision-warning
+/// Shared between `process_external_plugins` and the collision-warning
 /// helper in `registry::mod` so both paths agree on activation semantics.
 pub fn is_external_plugin_active(
     ext: &ExternalPluginDef,

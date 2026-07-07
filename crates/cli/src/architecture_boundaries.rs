@@ -1406,6 +1406,8 @@ fn core_backend_fallow_core_calls_are_explicitly_allowlisted() {
         "fallow_core::run_dead_code_detectors",
         "fallow_core::plugins::AggregatedPluginResult",
         "fallow_core::plugins::PluginRegistry",
+        "fallow_core::plugins::manifest_entries",
+        "fallow_core::plugins::registry::is_external_plugin_active",
     ];
 
     for line in core_backend.lines() {

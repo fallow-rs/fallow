@@ -19,6 +19,13 @@ use crate::{
     source::ModuleInfo,
 };
 
+// External-plugin dry-run primitives surfaced through the engine boundary for
+// the CLI's `plugin-check` command (read-only; no analysis pipeline).
+pub use fallow_core::plugins::manifest_entries::{
+    CheckWarning, ManifestResult, RuleReport, WarningKind, check_manifest_entries,
+};
+pub use fallow_core::plugins::registry::is_external_plugin_active;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ParseMetrics {
     pub parse_ms: f64,

@@ -69,6 +69,7 @@ fn api_check_json_document(
             impact_digest: None,
             workspace_ref: None,
             audit_changed: false,
+            has_external_plugins: false,
         }),
         envelope_mode: RootEnvelopeMode::Tagged,
         telemetry_analysis_run_id: None,

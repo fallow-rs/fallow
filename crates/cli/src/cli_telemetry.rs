@@ -250,6 +250,7 @@ pub fn telemetry_workflow_for_command(
             | Command::Hooks { .. }
             | Command::ConfigSchema
             | Command::PluginSchema
+            | Command::PluginCheck
             | Command::RulePackSchema
             | Command::RulePack { .. }
             | Command::Config { .. }

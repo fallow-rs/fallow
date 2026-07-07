@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`fallow plugin-check`: a read-only dry-run that makes external-plugin
+  authoring verifiable for agents.** Authoring a `fallow-plugin-*.jsonc` (and
+  especially a `manifestEntries` rule) previously gave feedback only as
+  `tracing::warn!` on stderr, invisible to anything parsing `--format json`.
+  `fallow plugin-check [--format json]` now reports, per external plugin,
+  whether it ACTIVATED (with the unmet `detection`/`enabler` requirement when it
+  did not, so a plugin that never activates is no longer silent), and for active
+  plugins with `manifestEntries` the per-rule result: the manifests it matched,
+  each manifest's `when`-gate pass/fail, the entries it seeded (each with a
+  `path_exists` flag), and typed `warnings[]` (`manifests-matched-none`,
+  `when-excluded-all`, `field-path-unresolved`, `entries-empty`,
+  `manifest-parse-failed`, `entry-outside-root`, `seeded-paths-missing`). Output
+  is deterministic (sorted) and the command always exits 0 (advisory, never a
+  gate). A `dead-code --format json` run with active external plugins and unused
+  files now surfaces a `verify-plugins` next step pointing at it, and the
+  `fallow schema` manifest's `related_schemas` gained `plugin_schema_command` /
+  `plugin_check_command` pointers, so agents discover the authoring + verify
+  loop without a full analysis.
 - **External plugins can now seed entry points derived from framework manifest
   files (`manifestEntries`).** Static `entryPoints` globs cannot read a
   framework manifest and derive entries from its fields, so monorepos whose

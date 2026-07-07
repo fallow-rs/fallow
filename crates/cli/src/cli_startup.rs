@@ -396,6 +396,7 @@ fn command_rejects_output_gate(command: Option<&Command>) -> bool {
             Command::Init { .. }
                 | Command::ConfigSchema
                 | Command::PluginSchema
+                | Command::PluginCheck
                 | Command::RulePackSchema
                 | Command::Schema
                 | Command::Explain { .. }

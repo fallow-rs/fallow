@@ -91,6 +91,10 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
             "config_schema_note": "Full JSON Schema of the config file: every top-level key (rules, entry, ignorePatterns, workspaces, boundaries, duplicates, health, security, rulePacks, production, cache, ...) and its shape. entry and ignorePatterns are how you declare entry points and exclusions; fallow also auto-honors package.json exports/main/module for library public APIs.",
             "rule_pack_schema_command": "fallow rule-pack-schema",
             "rule_pack_schema_note": "JSON Schema for a declarative rule pack referenced from rulePacks.",
+            "plugin_schema_command": "fallow plugin-schema",
+            "plugin_schema_note": "JSON Schema for a user-authored external plugin (fallow-plugin-*.jsonc). Teach fallow about an unsupported framework declaratively: detection, entryPoints, alwaysUsed, usedExports, usedClassMembers, and manifestEntries (derive entry points from per-package manifest files).",
+            "plugin_check_command": "fallow plugin-check",
+            "plugin_check_note": "Read-only dry-run of your external plugins: reports which activated, which manifests each manifestEntries rule matched, what it seeded (with path-exists), and typed warnings (manifests-matched-none, when-excluded-all, field-path-unresolved, entries-empty, manifest-parse-failed, entry-outside-root, seeded-paths-missing). Run it after authoring a fallow-plugin-*.jsonc to verify it before a full analysis.",
             "config_files": [".fallowrc.json", ".fallowrc.jsonc", "fallow.toml", ".fallow.toml"]
         },
         "boundary_presets": crate::onboarding::boundary_presets_schema(),
@@ -828,6 +832,18 @@ mod tests {
         sub.get_arguments()
             .filter_map(|a| a.get_long().map(|l| format!("--{l}")))
             .collect()
+    }
+
+    #[test]
+    fn related_schemas_points_at_plugin_authoring() {
+        let schema = schema();
+        let related = &schema["related_schemas"];
+        assert_eq!(related["plugin_schema_command"], "fallow plugin-schema");
+        assert_eq!(related["plugin_check_command"], "fallow plugin-check");
+        assert!(
+            related["plugin_schema_note"].is_string() && related["plugin_check_note"].is_string(),
+            "plugin schema/check pointers must carry an agent-facing note"
+        );
     }
 
     #[test]

@@ -30,6 +30,9 @@ pub struct DeadCodeNextStepsInput<'a> {
     pub impact_digest: Option<ImpactDigestCounts>,
     pub workspace_ref: Option<&'a str>,
     pub audit_changed: bool,
+    /// The project has external plugins declared; when files are also unused,
+    /// route the agent to `fallow plugin-check` to verify what they seed.
+    pub has_external_plugins: bool,
 }
 
 /// Runtime-independent inputs for standalone duplication next steps.
@@ -61,6 +64,10 @@ pub struct CombinedNextStepsInput<'a> {
     pub offer_setup: bool,
     pub impact_digest: Option<ImpactDigestCounts>,
     pub audit_changed: bool,
+    /// External plugins are declared for this project.
+    pub has_external_plugins: bool,
+    /// The run reported unused files (the signal a plugin may be misconfigured).
+    pub has_unused_files: bool,
 }
 
 /// Runtime-independent inputs for audit next steps.
@@ -164,6 +171,7 @@ pub fn build_dead_code_next_steps(input: DeadCodeNextStepsInput<'_>) -> Vec<Next
     }
 
     let mut steps: Vec<NextStep> = [
+        verify_plugins(input.has_external_plugins && !input.results.unused_files.is_empty()),
         setup_pointer(input.offer_setup),
         impact_digest_step(input.impact_digest),
         trace_unused_export(input.results, input.root),
@@ -218,6 +226,7 @@ pub fn build_combined_next_steps(input: &CombinedNextStepsInput<'_>) -> Vec<Next
     }
 
     let mut steps: Vec<NextStep> = [
+        verify_plugins(input.has_external_plugins && input.has_unused_files),
         setup_pointer(input.offer_setup),
         impact_digest_step(input.impact_digest),
         trace_unused_export_from_input(input.trace_unused_export.as_ref()),
@@ -311,6 +320,16 @@ fn trace_unused_export_from_input(target: Option<&TraceUnusedExportInput>) -> Op
         ),
         "verify an export is truly unused before deleting",
     ))
+}
+
+fn verify_plugins(applicable: bool) -> Option<NextStep> {
+    applicable.then(|| {
+        next_step(
+            "verify-plugins",
+            "fallow plugin-check --format json".to_string(),
+            "external plugins are active and files are unused; verify what they seed",
+        )
+    })
 }
 
 fn trace_clone(fingerprints: &[&str]) -> Option<NextStep> {
@@ -470,6 +489,7 @@ mod tests {
             impact_digest: None,
             workspace_ref: None,
             audit_changed: false,
+            has_external_plugins: false,
         }
     }
 
@@ -494,6 +514,8 @@ mod tests {
             offer_setup: false,
             impact_digest: None,
             audit_changed: false,
+            has_external_plugins: false,
+            has_unused_files: false,
         }
     }
 
@@ -688,6 +710,46 @@ mod tests {
     }
 
     #[test]
+    fn verify_plugins_step_fires_when_external_plugins_and_unused_files() {
+        let results = AnalysisResults {
+            unused_files: vec![
+                fallow_types::output_dead_code::UnusedFileFinding::with_actions(
+                    fallow_types::results::UnusedFile {
+                        path: "/project/src/orphan.ts".into(),
+                    },
+                ),
+            ],
+            ..AnalysisResults::default()
+        };
+        let steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+            has_external_plugins: true,
+            ..dead_code_input(&results)
+        });
+        let first = &steps[0];
+        assert_eq!(first.id, "verify-plugins");
+        assert_eq!(first.command, "fallow plugin-check --format json");
+        assert_valid(first);
+
+        // No external plugins: the step is absent even with unused files.
+        let without = build_dead_code_next_steps(DeadCodeNextStepsInput {
+            has_external_plugins: false,
+            ..dead_code_input(&results)
+        });
+        assert!(without.iter().all(|step| step.id != "verify-plugins"));
+
+        // External plugins but no unused files: absent (nothing to explain).
+        let no_unused = AnalysisResults {
+            unused_exports: vec![unused_export("/project/src/a.ts", "alpha")],
+            ..AnalysisResults::default()
+        };
+        let steps = build_dead_code_next_steps(DeadCodeNextStepsInput {
+            has_external_plugins: true,
+            ..dead_code_input(&no_unused)
+        });
+        assert!(steps.iter().all(|step| step.id != "verify-plugins"));
+    }
+
+    #[test]
     fn dupes_steps_trace_smallest_clone_fingerprint() {
         let fingerprints = ["dup:bbbbbbbb", "dup:aaaaaaaa"];
 
@@ -746,6 +808,8 @@ mod tests {
             offer_setup: true,
             impact_digest: Some(digest(2, 1)),
             audit_changed: true,
+            has_external_plugins: false,
+            has_unused_files: false,
         });
 
         assert!(steps.is_empty());

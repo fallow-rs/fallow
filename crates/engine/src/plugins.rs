@@ -6,6 +6,12 @@ use fallow_config::{EntryPointRole, ExternalPluginDef, PackageJson};
 
 use crate::core_backend;
 
+/// External-plugin dry-run primitives for the CLI's `plugin-check` command.
+pub use crate::core_backend::{
+    CheckWarning, ManifestResult, RuleReport, WarningKind, check_manifest_entries,
+    is_external_plugin_active,
+};
+
 pub mod registry {
     use crate::core_backend;
 
