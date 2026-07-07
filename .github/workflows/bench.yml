@@ -103,7 +103,7 @@ jobs:
           cache-key: bench-${{ matrix.cache_key }}
 
       - name: Install cargo-codspeed
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-codspeed@4.7.0
 
@@ -148,7 +148,7 @@ jobs:
           cache-key: bench-${{ matrix.cache_key }}
 
       - name: Install cargo-codspeed
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2.82.2
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-codspeed@4.7.0
 
