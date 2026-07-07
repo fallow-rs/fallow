@@ -90,7 +90,7 @@ jobs:
             done
           }
           first=1
-          for crate in fallow-types fallow-output fallow-config fallow-extract fallow-graph fallow-security fallow-core fallow-engine fallow-api fallow-license fallow-v8-coverage fallow-cli fallow-mcp; do
+          for crate in fallow-types fallow-config fallow-output fallow-extract fallow-graph fallow-security fallow-core fallow-engine fallow-api fallow-license fallow-v8-coverage fallow-cli fallow-mcp; do
             # Settle delay between crates so a dependent crate usually finds its
             # dependency already indexed; the retry loop is the real guarantee.
             if [ "$first" = 0 ]; then sleep 30; fi

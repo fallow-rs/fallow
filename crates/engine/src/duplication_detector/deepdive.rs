@@ -233,7 +233,7 @@ fn hash_fragment(fragment: &str) -> u64 {
 
 /// Build a per-group `ExtractFunction` refactoring suggestion.
 ///
-/// Mirrors the per-group branch of [`super::families`]'s `generate_suggestions`:
+/// Mirrors the per-group branch of the families suggestion generator:
 /// the savings is `(instances - 1)` copies of the group's line count, since one
 /// copy survives as the extracted function and the rest collapse to call sites.
 #[must_use]
