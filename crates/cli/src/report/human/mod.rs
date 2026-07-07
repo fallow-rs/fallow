@@ -249,7 +249,7 @@ fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static 
 /// Map section title to the corresponding fallow-ignore rule name.
 fn section_suppress_rule(title: &str) -> Option<&'static str> {
     match title {
-        "Unused files" => Some("unused-files"),
+        "Unused files" => Some("unused-file"),
         "Unused exports" => Some("unused-exports"),
         "Unused type exports" => Some("unused-types"),
         "Private type leaks" => Some("private-type-leak"),
@@ -289,7 +289,7 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
 
 /// Rules that only support file-level suppression (not next-line).
 fn is_file_level_only(rule: &str) -> bool {
-    matches!(rule, "circular-dependencies" | "boundary-violation")
+    matches!(rule, "circular-dependencies" | "boundary-violation" | "unused-file")
 }
 
 /// Rules whose findings live in YAML files (so the suppression comment must
