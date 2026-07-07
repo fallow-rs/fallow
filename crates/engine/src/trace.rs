@@ -7,7 +7,7 @@ use rustc_hash::FxHashSet;
 use crate::duplicates::DuplicationReport;
 use crate::module_graph::RetainedModuleGraph;
 
-#[allow(
+#[expect(
     unused_imports,
     reason = "engine owns a copied trace implementation whose internal pub uses serve its tests"
 )]
