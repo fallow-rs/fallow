@@ -72,9 +72,12 @@ pub struct CompiledIgnoreExportRule {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IgnoreCatalogReferenceRule {
+    /// Required exact package name whose `unresolved-catalog-reference` finding this rule suppresses; compared by string equality against the referenced package, so one rule targets one package's catalog reference (further narrowed by the optional `catalog` and `consumer` filters, all of which must match).
     pub package: String,
+    /// Optional catalog-name filter: when set, the rule suppresses only references to this exact catalog name (string equality), and when omitted it applies regardless of which catalog is referenced. Use it to scope suppression to one catalog (e.g. `"react18"`) while leaving other catalog references for the same package reportable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog: Option<String>,
+    /// Optional glob matched against the consuming workspace `package.json` path (compiled into a glob matcher at config load): when set, the rule suppresses the finding only for consumers whose path matches, and when omitted it applies to every consumer. Use it to suppress a catalog reference in one specific workspace during a staged migration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consumer: Option<String>,
 }
@@ -112,7 +115,9 @@ impl CompiledIgnoreCatalogReferenceRule {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IgnoreDependencyOverrideRule {
+    /// Required exact package name whose `unused-dependency-override` or `misconfigured-dependency-override` finding this rule suppresses; compared by string equality against the override's target package, so one rule targets one override entry (further narrowable with the optional `source` filter).
     pub package: String,
+    /// Optional source filter matched by exact string equality against the override's declaring-file label: set it to `"pnpm-workspace.yaml"` or `"package.json"` to scope the suppression to overrides declared in that file, or omit it to suppress the package's override regardless of where it is declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 }
@@ -144,7 +149,9 @@ impl CompiledIgnoreDependencyOverrideRule {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigOverride {
+    /// Glob-pattern string array selecting which source files this override entry applies to (patterns are validated and compiled to matchers at config load). Set to scope the entry's rule severities to a subset of paths (e.g. `["src/generated/**", "**/*.test.ts"]`); when several override entries match one file, its severities come from every matching entry, applied in list order (later entries win on conflict).
     pub files: Vec<String>,
+    /// Partial per-rule severity map applied only to files matching this entry's `files` globs; each rule key takes `error`, `warn`, or `off`, and omitted rules keep their top-level severity. Set to change how specific rules (e.g. unused-exports, unused-files) behave for the scoped paths. Inter-file rules (duplicate-exports, circular-dependencies, re-export-cycle) have no effect in an override; fallow warns during analysis and names the right mechanism instead (top-level `ignoreExports` for duplicate-exports, a file-level `// fallow-ignore-file` comment for circular-dependencies and re-export-cycle).
     #[serde(default)]
     pub rules: PartialRulesConfig,
 }

@@ -6,6 +6,7 @@ use fallow_output::issue_output_contracts;
 use fallow_output::{TsAliasMeta, issue_output_contract_by_code};
 use fallow_types::issue_meta::{ISSUE_KIND_META, issue_meta_by_code};
 use fallow_types::mcp_manifest::{MCP_TOOLS, RUNTIME_COVERAGE_LICENSE_NOTE};
+use fallow_types::suppress::IssueKind;
 
 use crate::Cli;
 use crate::explain::{
@@ -78,6 +79,23 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
         },
         "environment_variables": environment_variables_schema(),
         "severity_levels": ["error", "warn", "off"],
+        "field_notes": {
+            "default_severity": "The rule's severity under zero config (error/warn/off). null means the finding is not gated by a rules.* severity (a metric or command-driven finding, or a security-catalogue row).",
+            "opt_in": "true when the rule defaults to off and reports nothing until enabled. Enabling an opt_in rule blindly is the most common way to flood a repo with findings, so treat true as a deliberate decision.",
+            "frameworks": "Non-empty ONLY when the rule's DETECTOR self-gates on that framework (it does nothing unless the framework is declared). An EMPTY array does NOT mean the rule is framework-agnostic: many rules are framework-relevant (see the description) yet fire on any matching syntax, so never disable a rule solely because frameworks is empty.",
+            "config_key": "The canonical key under `rules` in the config file, i.e. rules.<config_key>. The `id` is an accepted alias. null for findings that are not configured via a rules.* severity."
+        },
+        "related_schemas": {
+            "note": "This manifest lists RULES, capabilities, presets, and the taste catalog. To author a config FILE you also need its shape, which is a separate schema.",
+            "config_schema_command": "fallow config-schema",
+            "config_schema_note": "Full JSON Schema of the config file: every top-level key (rules, entry, ignorePatterns, workspaces, boundaries, duplicates, health, security, rulePacks, production, cache, ...) and its shape. entry and ignorePatterns are how you declare entry points and exclusions; fallow also auto-honors package.json exports/main/module for library public APIs.",
+            "rule_pack_schema_command": "fallow rule-pack-schema",
+            "rule_pack_schema_note": "JSON Schema for a declarative rule pack referenced from rulePacks.",
+            "config_files": [".fallowrc.json", ".fallowrc.jsonc", "fallow.toml", ".fallow.toml"]
+        },
+        "boundary_presets": crate::onboarding::boundary_presets_schema(),
+        "taste_choices": crate::onboarding::taste_choices_schema(),
+        "security_categories": security_categories_schema(),
         "mcp_tools": mcp_tools_schema(),
         "plugins": plugins_schema(),
         "task_matrix": task_matrix_schema(),
@@ -165,29 +183,107 @@ impl IssueTypeMeta {
     }
 }
 
+/// The machine-readable vocabulary for `security.categories.include` /
+/// `exclude`: every valid category id, its title, CWE (when it maps to one),
+/// and whether it is include-required (runs only when explicitly named). This
+/// is the id list the config file's `security` key needs and the config-schema
+/// itself does not carry (it only describes the mechanism).
+fn security_categories_schema() -> serde_json::Value {
+    let categories: Vec<serde_json::Value> = fallow_security::security_categories()
+        .into_iter()
+        .map(|category| {
+            serde_json::json!({
+                "id": category.id,
+                "title": category.title,
+                "cwe": category.cwe,
+                "include_required": category.include_required,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "note": "Valid ids for security.categories.include / exclude. include-required categories (hardcoded-secret, secret-to-network) run only when explicitly listed in categories.include; all others are admitted by default unless an include list restricts to a whitelist.",
+        "categories": categories,
+    })
+}
+
 fn issue_types_schema() -> serde_json::Value {
+    // A flat map of config_key -> default severity string, serialized ONCE from
+    // RulesConfig::default(). This is the single source of default severities
+    // and covers every rule that has a `rules.*` config field, including rules
+    // that carry no distinct IssueKind (e.g. unused-optional-dependency, whose
+    // finding folds into another kind but which is independently configurable).
+    // Infallible in practice (a flat struct of Severity enums); the empty-map
+    // fallback keeps this panic-free and simply yields null default_severity if
+    // serialization ever changed shape.
+    let default_severities = serde_json::to_value(fallow_config::RulesConfig::default())
+        .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()));
     let mut rows = Vec::new();
     for rule in CHECK_RULES {
-        rows.push(issue_type_row(rule, "dead-code"));
+        rows.push(issue_type_row(rule, "dead-code", &default_severities));
     }
     for rule in HEALTH_RULES {
-        rows.push(issue_type_row(rule, "health"));
+        rows.push(issue_type_row(rule, "health", &default_severities));
     }
     for rule in DUPES_RULES {
-        rows.push(issue_type_row(rule, "dupes"));
+        rows.push(issue_type_row(rule, "dupes", &default_severities));
     }
     for rule in FLAGS_RULES {
-        rows.push(issue_type_row(rule, "flags"));
+        rows.push(issue_type_row(rule, "flags", &default_severities));
     }
     for rule in SECURITY_RULES {
-        rows.push(issue_type_row(rule, "security"));
+        rows.push(issue_type_row(rule, "security", &default_severities));
     }
     serde_json::Value::Array(rows)
 }
 
-fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
+/// The frameworks whose DETECTOR self-gates on the framework being declared, so
+/// the rule genuinely does nothing unless the project uses that framework.
+///
+/// Only a rule whose detector short-circuits on a framework dependency belongs
+/// here. "Commonly relevant to framework X" is the OPPOSITE semantics and must
+/// NOT be encoded: labeling a framework-agnostic rule (e.g. `unused-server-action`,
+/// which fires on any `use server` export) as framework-specific would tell an
+/// agent to disable a real safeguard. When in doubt, return the empty slice.
+/// Verified against the detectors: `route_collision` / `dynamic_segment_name_conflict`
+/// / `invalid_client_export` gate on `declared_deps.contains("next")`;
+/// `misplaced_directive` / `mixed_client_server_barrel` gate on the broader
+/// framework-agnostic RSC-directive predicate, so they stay empty.
+fn frameworks_for_kind(kind: IssueKind) -> &'static [&'static str] {
+    match kind {
+        IssueKind::RouteCollision
+        | IssueKind::DynamicSegmentNameConflict
+        | IssueKind::InvalidClientExport => &["next"],
+        _ => &[],
+    }
+}
+
+fn issue_type_row(
+    rule: &RuleDef,
+    command: &str,
+    default_severities: &serde_json::Value,
+) -> serde_json::Value {
     let bare_id = rule.id.split_once('/').map_or(rule.id, |(_, bare)| bare);
     let meta = issue_type_meta(bare_id, command);
+    let kind = meta
+        .registry_index
+        .and_then(|i| ISSUE_KIND_META.get(i))
+        .and_then(|m| m.kind);
+    // Default severity comes from the rule that GATES this finding: its own
+    // `config_key` when it is a 1:1 rule, else the suppression token's rule when
+    // the finding is gated by a shared rule (every tainted-sink category is
+    // gated by `security-sink`; coverage findings by `coverage-gaps`). This lets
+    // opt-in command families (security, coverage) expose default_severity/opt_in
+    // like any other rule instead of reading as null. Stays null only for
+    // findings with no `rules.*` gate at all (complexity, duplication metrics).
+    let severity_key = meta
+        .config_key
+        .or_else(|| meta.suppress.map(|(token, _)| token));
+    let default_severity = severity_key
+        .and_then(|key| default_severities.get(key))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let opt_in = default_severity.as_deref().map(|sev| sev == "off");
+    let frameworks = kind.map_or(&[][..], frameworks_for_kind);
     let suppress_comment = meta.suppress.map(|(token, file_level)| {
         if file_level {
             format!("// fallow-ignore-file {token}")
@@ -220,6 +316,16 @@ fn issue_type_row(rule: &RuleDef, command: &str) -> serde_json::Value {
         "fixable": meta.fixable,
         "suppressible": meta.suppress.is_some(),
         "suppress_comment": suppress_comment,
+        // Zero-config default severity for this rule (error/warn/off). Null only
+        // for synthetic sub-rows that have no distinct IssueKind of their own.
+        "default_severity": default_severity,
+        // True when the rule defaults to off and detects nothing until enabled.
+        // The single most load-bearing signal for avoiding a findings flood.
+        "opt_in": opt_in,
+        // Frameworks whose detector self-gates on the framework (empty for the
+        // framework-agnostic majority). "detector self-gates on X", NOT
+        // "commonly relevant to X"; see frameworks_for_kind.
+        "frameworks": frameworks,
         "note": meta.note,
         "license": if meta.freemium { "freemium" } else { "free" },
         "license_note": meta.freemium.then_some(RUNTIME_COVERAGE_LICENSE_NOTE),
@@ -1046,6 +1152,159 @@ mod tests {
         }
     }
 
+    /// `default_severity` / `opt_in` are derived from the rule that GATES a
+    /// finding via the SINGLE serialized `RulesConfig::default()` (no second copy
+    /// of the default table): the row's own `config_key` for a 1:1 rule, else the
+    /// rule named by its suppression token for a shared-gate finding (every
+    /// tainted-sink category is gated by `security-sink`, coverage findings by
+    /// `coverage-gaps`). Null only for findings with no `rules.*` gate at all
+    /// (complexity, duplication metrics).
+    #[test]
+    fn issue_type_default_severity_and_opt_in_track_the_gating_rule() {
+        let defaults = serde_json::to_value(fallow_config::RulesConfig::default()).unwrap();
+        let schema = schema();
+        for row in schema["issue_types"].as_array().unwrap() {
+            let id = row["id"].as_str().unwrap();
+            // The gating rule: own config_key, else the suppression token's rule.
+            let suppress_rule = row["suppress_comment"]
+                .as_str()
+                .and_then(|comment| comment.rsplit(' ').next());
+            let severity_key = row["config_key"].as_str().or(suppress_rule);
+            let expected = severity_key
+                .and_then(|key| defaults.get(key))
+                .and_then(serde_json::Value::as_str);
+            assert_eq!(
+                row["default_severity"].as_str(),
+                expected,
+                "row {id} default_severity must equal the loader default for its gating rule ({severity_key:?})"
+            );
+            match row["default_severity"].as_str() {
+                Some(sev) => {
+                    assert!(
+                        ["error", "warn", "off"].contains(&sev),
+                        "row {id} default_severity {sev} is not a severity level"
+                    );
+                    assert_eq!(
+                        row["opt_in"].as_bool(),
+                        Some(sev == "off"),
+                        "row {id} opt_in must mean default severity off"
+                    );
+                }
+                None => assert!(
+                    row["opt_in"].is_null(),
+                    "row {id} with no gating rule must carry null opt_in"
+                ),
+            }
+            assert!(
+                row["frameworks"].is_array(),
+                "row {id} frameworks must always be an array"
+            );
+        }
+    }
+
+    /// The opt-in command families (security, coverage) now expose opt_in=true
+    /// on their gated findings, so an agent scanning the manifest sees they are
+    /// off by default like any other opt-in rule.
+    #[test]
+    fn opt_in_command_findings_expose_opt_in() {
+        let schema = schema();
+        let opt_in = |id: &str| {
+            schema["issue_types"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["id"] == id)
+                .and_then(|row| row["opt_in"].as_bool())
+        };
+        for id in ["tainted-sink", "client-server-leak", "hardcoded-secret"] {
+            assert_eq!(
+                opt_in(id),
+                Some(true),
+                "security finding {id} must read as opt-in (off by default)"
+            );
+        }
+    }
+
+    /// The known opt-in rules (default off) are exactly the rows flagged
+    /// `opt_in: true`, so an agent can trust the manifest to avoid enabling a
+    /// findings-flooding rule blindly.
+    #[test]
+    fn opt_in_rows_are_the_off_default_rules() {
+        let schema = schema();
+        let mut opt_in_ids: Vec<&str> = schema["issue_types"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["opt_in"].as_bool() == Some(true))
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+        opt_in_ids.sort_unstable();
+        opt_in_ids.dedup();
+        for expected in [
+            "private-type-leak",
+            "prop-drilling",
+            "thin-wrapper",
+            "duplicate-prop-shape",
+            "feature-flag",
+        ] {
+            assert!(
+                opt_in_ids.contains(&expected),
+                "expected opt-in rule {expected} to be flagged opt_in in the manifest, got {opt_in_ids:?}"
+            );
+        }
+    }
+
+    /// The only rules whose detector self-gates on a framework carry a
+    /// non-empty `frameworks`; the framework-agnostic majority stays empty so
+    /// an agent never disables a real safeguard.
+    #[test]
+    fn only_self_gating_rules_carry_frameworks() {
+        let schema = schema();
+        for row in schema["issue_types"].as_array().unwrap() {
+            let id = row["id"].as_str().unwrap();
+            let frameworks: Vec<&str> = row["frameworks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| f.as_str().unwrap())
+                .collect();
+            if frameworks.is_empty() {
+                continue;
+            }
+            assert!(
+                matches!(
+                    id,
+                    "route-collision" | "dynamic-segment-name-conflict" | "invalid-client-export"
+                ),
+                "row {id} carries frameworks {frameworks:?} but its detector is not known to self-gate"
+            );
+            assert_eq!(frameworks, ["next"], "row {id} unexpected frameworks");
+        }
+    }
+
+    /// The manifest carries the security-category vocabulary an agent needs to
+    /// author `security.categories.include` / `exclude`, since the config-schema
+    /// only describes the mechanism, not the valid ids.
+    #[test]
+    fn schema_has_security_categories_with_include_required_flags() {
+        let schema = schema();
+        let cats = schema["security_categories"]["categories"]
+            .as_array()
+            .expect("security_categories.categories is an array");
+        assert!(!cats.is_empty(), "security categories must be listed");
+        for c in cats {
+            assert!(c["id"].as_str().is_some(), "each category has an id");
+            assert!(c["include_required"].as_bool().is_some());
+        }
+        let flagged: Vec<&str> = cats
+            .iter()
+            .filter(|c| c["include_required"].as_bool() == Some(true))
+            .map(|c| c["id"].as_str().unwrap())
+            .collect();
+        assert!(flagged.contains(&"hardcoded-secret"));
+        assert!(flagged.contains(&"secret-to-network"));
+    }
+
     /// Nullable fields are ALWAYS present (null when not applicable), so
     /// consumers never face absent-vs-null ambiguity.
     #[test]
@@ -1062,6 +1321,9 @@ mod tests {
                 "codeclimate_check_names",
                 "ts_alias",
                 "suppress_comment",
+                "default_severity",
+                "opt_in",
+                "frameworks",
                 "note",
                 "license_note",
                 "rule_id",

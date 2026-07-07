@@ -49,7 +49,8 @@ fn all_tools_registered() {
     assert!(names.contains(&"impact".to_string()));
     assert!(names.contains(&"impact_all".to_string()));
     assert!(names.contains(&"decision_surface".to_string()));
-    assert_eq!(tools.len(), 28);
+    assert!(names.contains(&"recommend".to_string()));
+    assert_eq!(tools.len(), 29);
 }
 
 #[test]
@@ -84,6 +85,7 @@ fn read_only_tools_have_annotations() {
         "get_token_blast_radius",
         "impact",
         "impact_all",
+        "recommend",
     ];
     for tool in &tools {
         let name = tool.name.to_string();
@@ -155,6 +157,7 @@ fn open_world_hint_on_analysis_tools() {
         "feature_flags",
         "check_runtime_coverage",
         "impact_all",
+        "recommend",
     ];
     for tool in &tools {
         let name = tool.name.to_string();
@@ -250,6 +253,7 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("check_health"));
     assert!(instructions.contains("audit"));
     assert!(instructions.contains("decision_surface"));
+    assert!(instructions.contains("recommend"));
     assert!(instructions.contains("fallow_explain"));
     assert!(instructions.contains("list_boundaries"));
     assert!(instructions.contains("feature_flags"));

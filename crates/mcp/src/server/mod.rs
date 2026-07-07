@@ -7,8 +7,9 @@ use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
     DecisionSurfaceParams, ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams,
     GetTokenBlastRadiusParams, GuardParams, HealthParams, ImpactAllParams, ImpactParams,
-    InspectTargetParams, ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams,
-    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
+    InspectTargetParams, ListBoundariesParams, ProjectInfoParams, RecommendParams,
+    SecurityCandidatesParams, TraceCloneParams, TraceDependencyParams, TraceExportParams,
+    TraceFileParams,
 };
 use crate::tools::{
     execute_code_mode, inspect_target, run_analyze, run_audit, run_check_changed,
@@ -16,7 +17,7 @@ use crate::tools::{
     run_find_dupes, run_fix_apply, run_fix_preview, run_get_blast_radius,
     run_get_cleanup_candidates, run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
     run_guard, run_health, run_impact, run_impact_all, run_list_boundaries, run_project_info,
-    run_security_candidates, run_trace_clone_tool, run_trace_dependency_tool,
+    run_recommend, run_security_candidates, run_trace_clone_tool, run_trace_dependency_tool,
     run_trace_export_tool, run_trace_file_tool,
 };
 
@@ -171,6 +172,17 @@ impl FallowMcp {
         params: Parameters<ProjectInfoParams>,
     ) -> Result<CallToolResult, McpError> {
         run_project_info(&self.binary, params.0).await
+    }
+
+    #[tool(
+        description = "Recommend a project-tailored fallow config for an agent to author (`fallow recommend --format json`). Read-only: runs project detection (frameworks, workspace layout, tooling) but NOT the analysis pipeline, and always exits 0. Returns `{detected, proposed_config, decisions[]}`. `detected` is what fallow saw; `proposed_config` is a safe starting config that BOTH validates against config-schema AND loads through fallow's real config loader; `decisions[]` is THREE-valued: `auto` (decided from unambiguous detection and applied silently), `default` (a disclosed, overridable default carrying a quantified `rationale`), and `taste` (a genuinely subjective choice surfaced as an open, AskUserQuestion-shaped `question` with 2-4 options and NO baked-in recommended answer, per fallow's taste-ownership principle). Framework rules are never uniformly auto-enabled on a heterogeneous monorepo; entry points beyond the obvious fall back to fallow's own defaults rather than a baked-in guess. Zero-config is a valid stop: the proposed config is an optional refinement over already-strong defaults, not a requirement. Pair with `fallow schema` (the capability manifest carrying per-rule default severity + opt-in) for the full cold-start discover -> recommend -> ask-taste -> author sequence. Honors `root`.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn recommend(
+        &self,
+        params: Parameters<RecommendParams>,
+    ) -> Result<CallToolResult, McpError> {
+        run_recommend(&self.binary, params.0).await
     }
 
     #[tool(
@@ -383,6 +395,7 @@ impl ServerHandler for FallowMcp {
                  guard (architecture rules that apply to files before editing them), \
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points, boundary zones), \
+                 recommend (project-tailored config recommendation for cold-start onboarding: detected + a loader-validated proposed_config + three-valued auto/default/taste decisions; read-only, runs detection not analysis), \
                  trace_export / trace_file / trace_dependency / trace_clone (graph and clone evidence), \
                  check_health (code complexity metrics), \
                  check_runtime_coverage (paid; merges a V8 or Istanbul runtime coverage dump into the health report), \

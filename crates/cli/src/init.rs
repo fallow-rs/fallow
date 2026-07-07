@@ -98,10 +98,7 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
 
     let workspace = detect_workspace_shape(root, pkg.as_ref());
 
-    let all_deps = pkg
-        .as_ref()
-        .map(PackageJson::all_dependency_names)
-        .unwrap_or_default();
+    let all_deps = collect_dependency_names(root, pkg.as_ref(), workspace.is_monorepo);
 
     let (test_framework, test_framework_ambiguous) = detect_test_framework(&all_deps);
     let ui_framework = detect_ui_framework(&all_deps);
@@ -125,6 +122,41 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         package_manager,
         test_framework_ambiguous,
     }
+}
+
+/// Collect dependency names from the root `package.json` plus, for a monorepo,
+/// every workspace member's `package.json`.
+///
+/// Framework and test-framework detection read this union so a monorepo whose
+/// frameworks live in workspace packages (the common case, e.g. Next.js in
+/// `apps/web` rather than the root) is detected, not just root-level tooling.
+/// Non-monorepo projects skip the workspace walk entirely and see only the root
+/// dependencies, so their detection is behavior-identical to before.
+///
+/// Workspace discovery is routed through the engine, not the config crate
+/// directly, per the `crates/cli` architecture boundary.
+pub fn collect_dependency_names(
+    root: &Path,
+    root_pkg: Option<&PackageJson>,
+    is_monorepo: bool,
+) -> Vec<String> {
+    let mut names: Vec<String> = root_pkg
+        .map(PackageJson::all_dependency_names)
+        .unwrap_or_default();
+    if !is_monorepo {
+        return names;
+    }
+    for member in fallow_engine::discover::discover_workspace_packages(root) {
+        if member.root.as_path() == root {
+            continue;
+        }
+        if let Ok(pkg) = PackageJson::load(&member.root.join("package.json")) {
+            names.extend(pkg.all_dependency_names());
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
 }
 
 /// Detect the monorepo flag, workspace package patterns, and workspace tool.
@@ -232,54 +264,31 @@ fn read_pnpm_workspace_patterns(root: &Path) -> Vec<String> {
     reason = "init config is built from json literals and serializes infallibly"
 )]
 pub fn build_json_config(info: &ProjectInfo) -> String {
-    let mut config = serde_json::json!({
-        "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
-    });
-
-    add_json_entry_config(&mut config, info);
-    add_json_workspace_config(&mut config, info);
-    add_json_ignore_config(&mut config, info);
+    // The detection-derived base ($schema, entry, workspaces.patterns,
+    // ignorePatterns) comes from the shared `fallow recommend` core so init and
+    // recommend can never drift on it. init layers its human-oriented scaffold
+    // (the rules heuristic + the commented duplicates template) on top.
+    let mut config = crate::onboarding::proposed_config_value(info);
     add_json_rules_config(&mut config, info);
 
     let mut output = serde_json::to_string_pretty(&config)
         .expect("config built from json! literals is always serializable");
     insert_json_duplicates_template(&mut output);
+    insert_json_header_comment(&mut output);
     output.push('\n');
     output
 }
 
-fn json_entry_extensions(info: &ProjectInfo) -> &'static str {
-    if info.has_typescript {
-        "{ts,tsx,js,jsx}"
-    } else {
-        "{js,jsx,mjs}"
-    }
-}
-
-fn add_json_entry_config(config: &mut serde_json::Value, info: &ProjectInfo) {
-    let extensions = json_entry_extensions(info);
-    config["entry"] = serde_json::json!([
-        format!("src/index.{extensions}"),
-        format!("src/main.{extensions}"),
-    ]);
-}
-
-fn add_json_workspace_config(config: &mut serde_json::Value, info: &ProjectInfo) {
-    if info.is_monorepo && !info.workspace_patterns.is_empty() {
-        config["workspaces"] = serde_json::json!({
-            "packages": info.workspace_patterns,
-        });
-    }
-}
-
-fn add_json_ignore_config(config: &mut serde_json::Value, info: &ProjectInfo) {
-    let mut ignore = Vec::new();
-    if info.has_storybook {
-        ignore.push(".storybook/**");
-    }
-    if !ignore.is_empty() {
-        config["ignorePatterns"] = serde_json::json!(ignore);
-    }
+/// Prepend a one-line JSONC-provenance comment so readers know the `//` comments
+/// are intentional: fallow parses `.fallowrc.json` as JSONC, but generic JSON
+/// tooling (editor linters, `JSON.parse`) may reject the comments. `$schema` is
+/// always the first key, so the anchor is stable.
+fn insert_json_header_comment(output: &mut String) {
+    *output = output.replacen(
+        "{\n  \"$schema\":",
+        "{\n  // This file is JSONC: fallow reads these comments; generic JSON tools may not.\n  \"$schema\":",
+        1,
+    );
 }
 
 fn add_json_rules_config(config: &mut serde_json::Value, info: &ProjectInfo) {
@@ -473,37 +482,57 @@ fn agents_module_boundaries_line(info: &ProjectInfo) -> String {
     }
 }
 
+/// Render a JSON string array as a TOML inline array of double-quoted strings.
+///
+/// Used to render the detection-derived arrays (`entry`, `ignorePatterns`,
+/// `workspaces.patterns`) sourced from the shared recommend core into the TOML
+/// scaffold. The values are globs with no `"`/`\` characters, so a simple quote
+/// wrap is sufficient (matching the JSON scaffold's rendering of the same data).
+fn toml_string_array(values: &[serde_json::Value]) -> String {
+    let items: Vec<String> = values
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(|s| format!("\"{s}\""))
+        .collect();
+    format!("[{}]", items.join(", "))
+}
+
 /// Build a TOML config string tailored to the detected project.
+///
+/// The detection-derived values (entry, ignorePatterns, workspaces.patterns) are
+/// read from the shared `fallow recommend` core (`onboarding::proposed_config_value`)
+/// so the TOML scaffold can never drift from the JSON scaffold or from
+/// `fallow recommend`. Sourcing from that value is also what keeps the loader's
+/// `patterns` key correct: the loader's `WorkspaceConfig` field is `patterns`, so
+/// a `packages` key would be silently dropped, losing monorepo scoping.
 fn build_toml_config(info: &ProjectInfo) -> String {
+    let base = crate::onboarding::proposed_config_value(info);
+
     let mut lines = vec![
         "# fallow.toml - Codebase analysis configuration".to_string(),
         "# See https://docs.fallow.tools for documentation".to_string(),
         String::new(),
     ];
 
-    let extensions = if info.has_typescript {
-        "{ts,tsx,js,jsx}"
-    } else {
-        "{js,jsx,mjs}"
-    };
-    lines.push(format!(
-        "entry = [\"src/index.{extensions}\", \"src/main.{extensions}\"]"
-    ));
-
-    if info.has_storybook {
-        lines.push("ignorePatterns = [\".storybook/**\"]".to_string());
+    if let Some(entry) = base.get("entry").and_then(serde_json::Value::as_array) {
+        lines.push(format!("entry = {}", toml_string_array(entry)));
+    }
+    if let Some(ignore) = base
+        .get("ignorePatterns")
+        .and_then(serde_json::Value::as_array)
+    {
+        lines.push(format!("ignorePatterns = {}", toml_string_array(ignore)));
     }
 
     lines.push(String::new());
 
-    if info.is_monorepo && !info.workspace_patterns.is_empty() {
+    if let Some(patterns) = base
+        .get("workspaces")
+        .and_then(|w| w.get("patterns"))
+        .and_then(serde_json::Value::as_array)
+    {
         lines.push("[workspaces]".to_string());
-        let patterns_str: Vec<String> = info
-            .workspace_patterns
-            .iter()
-            .map(|p| format!("\"{p}\""))
-            .collect();
-        lines.push(format!("packages = [{}]", patterns_str.join(", ")));
+        lines.push(format!("patterns = {}", toml_string_array(patterns)));
         lines.push(String::new());
     }
 
@@ -1798,6 +1827,39 @@ mod tests {
     }
 
     #[test]
+    fn detect_project_aggregates_workspace_member_frameworks() {
+        // A pnpm monorepo whose framework lives in a workspace member, not the
+        // root package.json (the common shape). Root has only tooling; the
+        // Next.js app is in apps/web. Root-only detection would miss it.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"private":true,"devDependencies":{"typescript":"^5"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pnpm-workspace.yaml"),
+            "packages:\n  - 'apps/*'\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("apps/web")).unwrap();
+        std::fs::write(
+            root.join("apps/web/package.json"),
+            r#"{"name":"@acme/web","dependencies":{"next":"^14","react":"^18"}}"#,
+        )
+        .unwrap();
+
+        let info = detect_project(root);
+        assert!(info.is_monorepo);
+        assert_eq!(
+            info.ui_framework.as_deref(),
+            Some("React"),
+            "a framework in a workspace member must be detected, not just root deps"
+        );
+    }
+
+    #[test]
     fn detect_npm_workspaces() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
@@ -1926,6 +1988,29 @@ mod tests {
     }
 
     #[test]
+    fn init_json_has_jsonc_provenance_header() {
+        let info = ProjectInfo {
+            is_monorepo: false,
+            workspace_patterns: Vec::new(),
+            workspace_tool: None,
+            has_typescript: false,
+            test_framework: None,
+            ui_framework: None,
+            has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
+        };
+        let json = build_json_config(&info);
+        // Guards against a silent no-op of `insert_json_header_comment` if the
+        // `$schema`-first anchor ever changes.
+        let comment = json
+            .find("// This file is JSONC: fallow reads these comments; generic JSON tools may not.")
+            .expect("generated .fallowrc.json must carry the JSONC-provenance header comment");
+        let schema = json.find("\"$schema\"").expect("$schema key present");
+        assert!(comment < schema, "header comment must precede $schema");
+    }
+
+    #[test]
     fn json_config_typescript_uses_ts_extensions() {
         let info = ProjectInfo {
             is_monorepo: false,
@@ -1957,9 +2042,9 @@ mod tests {
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
-        assert!(parsed["workspaces"]["packages"].is_array());
-        let packages = parsed["workspaces"]["packages"].as_array().unwrap();
-        assert_eq!(packages.len(), 2);
+        assert!(parsed["workspaces"]["patterns"].is_array());
+        let patterns = parsed["workspaces"]["patterns"].as_array().unwrap();
+        assert_eq!(patterns.len(), 2);
     }
 
     #[test]
@@ -2014,7 +2099,74 @@ mod tests {
         };
         let toml = build_toml_config(&info);
         assert!(toml.contains("[workspaces]"));
-        assert!(toml.contains("packages = [\"packages/*\"]"));
+        assert!(
+            toml.contains("patterns = [\"packages/*\"]"),
+            "monorepo TOML must use the loader's `patterns` key, not `packages`"
+        );
+    }
+
+    /// The generated JSON scaffold (also the `fallow fix` missing-config seed via
+    /// `init::build_json_config`, see `fix/config.rs`) must LOAD through the real
+    /// config loader, not merely parse as JSONC. A monorepo's workspace patterns
+    /// must survive the round-trip under the correct `patterns` key.
+    #[test]
+    fn init_json_output_loads_through_real_loader() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let info = ProjectInfo {
+            is_monorepo: true,
+            workspace_patterns: vec!["packages/*".to_string(), "apps/*".to_string()],
+            workspace_tool: Some("pnpm".to_string()),
+            has_typescript: true,
+            test_framework: Some("Vitest".to_string()),
+            ui_framework: None,
+            has_storybook: true,
+            package_manager: Some("pnpm".to_string()),
+            test_framework_ambiguous: false,
+        };
+        // The filename extension drives format detection, so this MUST be a real
+        // config name (`.fallowrc.json`); an arbitrary name would be parsed as TOML.
+        let path = root.join(".fallowrc.json");
+        std::fs::write(&path, build_json_config(&info)).unwrap();
+        let config = FallowConfig::load(&path)
+            .unwrap_or_else(|e| panic!("init JSON scaffold must load through the loader: {e:?}"));
+        assert_eq!(
+            config.workspaces.map(|w| w.patterns).unwrap_or_default(),
+            info.workspace_patterns,
+            "workspace patterns must survive the round-trip"
+        );
+    }
+
+    /// The generated TOML scaffold must LOAD through the real config loader with
+    /// its workspace patterns preserved end-to-end (which the string-shape
+    /// assertion in `toml_config_monorepo_includes_workspaces` does not cover).
+    /// That sibling test pins the exact key the scaffold writes (`patterns`);
+    /// because `packages` is now a back-compat serde alias, this loader test would
+    /// still pass on the old key, so the sibling string assertion is the format guard.
+    #[test]
+    fn init_toml_output_loads_and_preserves_workspaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let info = ProjectInfo {
+            is_monorepo: true,
+            workspace_patterns: vec!["packages/*".to_string()],
+            workspace_tool: Some("pnpm".to_string()),
+            has_typescript: true,
+            test_framework: None,
+            ui_framework: None,
+            has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
+        };
+        let path = root.join("fallow.toml");
+        std::fs::write(&path, build_toml_config(&info)).unwrap();
+        let config = FallowConfig::load(&path)
+            .unwrap_or_else(|e| panic!("init TOML scaffold must load through the loader: {e:?}"));
+        assert_eq!(
+            config.workspaces.map(|w| w.patterns).unwrap_or_default(),
+            info.workspace_patterns,
+            "workspace patterns must survive the round-trip under the `patterns` key"
+        );
     }
 
     #[test]
@@ -2052,7 +2204,7 @@ mod tests {
 
         let content = std::fs::read_to_string(root.join(".fallowrc.json")).unwrap();
         let parsed = parse_jsonc_config(&content);
-        assert!(parsed["workspaces"]["packages"].is_array());
+        assert!(parsed["workspaces"]["patterns"].is_array());
         assert!(content.contains("{ts,tsx,js,jsx}"));
     }
 

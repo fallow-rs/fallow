@@ -11,6 +11,92 @@ use rustc_hash::FxHashSet;
 static CONFIG_LOADED_LOGGED: LazyLock<Mutex<FxHashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(FxHashSet::default()));
 
+/// Process-wide dedup of `security.categories` typo warnings so combined mode's
+/// repeated config loads emit each at most once.
+static SECURITY_CATEGORY_WARNED: LazyLock<Mutex<FxHashSet<String>>> =
+    LazyLock::new(|| Mutex::new(FxHashSet::default()));
+
+/// An unknown `security.categories` id plus the closest valid suggestion.
+pub struct UnknownSecurityCategory {
+    /// `include` or `exclude`.
+    pub field: &'static str,
+    /// The unrecognized category id.
+    pub id: String,
+    /// The closest valid category id, when one is near enough to suggest.
+    pub suggestion: Option<String>,
+}
+
+/// Find ids in `security.categories.{include,exclude}` that are not real
+/// catalogue categories, each with a closest-match suggestion. Pure: no output.
+///
+/// The security config crate cannot depend on `fallow-security` (the catalogue
+/// lives there), so this validation runs at the CLI layer where both are
+/// available, mirroring the config crate's own unknown-rule-key check.
+#[must_use]
+pub fn find_unknown_security_categories(
+    security: &fallow_config::SecurityConfig,
+) -> Vec<UnknownSecurityCategory> {
+    let Some(categories) = &security.categories else {
+        return Vec::new();
+    };
+    let valid: Vec<String> = fallow_security::security_categories()
+        .into_iter()
+        .map(|category| category.id)
+        .collect();
+    let valid_set: FxHashSet<&str> = valid.iter().map(String::as_str).collect();
+    let mut unknown = Vec::new();
+    for (field, ids) in [
+        ("include", categories.include.as_ref()),
+        ("exclude", categories.exclude.as_ref()),
+    ] {
+        let Some(ids) = ids else { continue };
+        for id in ids {
+            if valid_set.contains(id.as_str()) {
+                continue;
+            }
+            unknown.push(UnknownSecurityCategory {
+                field,
+                id: id.clone(),
+                suggestion: fallow_config::levenshtein::closest_match(
+                    id,
+                    valid.iter().map(String::as_str),
+                )
+                .map(str::to_owned),
+            });
+        }
+    }
+    unknown
+}
+
+/// Emit one deduped `tracing::warn!` per unknown `security.categories` id.
+///
+/// Advisory only: an unknown id is silently ignored by the detector, so a typo
+/// otherwise disables a category with no signal at all.
+pub fn warn_unknown_security_categories(security: &fallow_config::SecurityConfig) {
+    for unknown in find_unknown_security_categories(security) {
+        let dedup_key = format!("{}:{}", unknown.field, unknown.id);
+        if let Ok(mut seen) = SECURITY_CATEGORY_WARNED.lock()
+            && !seen.insert(dedup_key)
+        {
+            continue;
+        }
+        if let Some(suggestion) = &unknown.suggestion {
+            tracing::warn!(
+                "unknown security category '{}' in security.categories.{} (did you mean '{}'?); it is ignored. Valid ids: fallow schema (security_categories) or fallow security --help",
+                unknown.id,
+                unknown.field,
+                suggestion
+            );
+        } else {
+            tracing::warn!(
+                "unknown security category '{}' in security.categories.{}; it is ignored. Valid ids: fallow schema (security_categories) or fallow security --help",
+                unknown.id,
+                unknown.field
+            );
+        }
+    }
+}
+
 /// The `--max-file-size` global flag value, set once from `main()` after clap
 /// parse. `Some(Some(mb))` means the flag was passed; `Some(None)` / unset
 /// means it was not. Held in a `OnceLock` rather than threaded through the ten
@@ -256,6 +342,7 @@ pub fn load_config_for_analysis(
     );
 
     report_workspace_diagnostics(root, &resolved, &options)?;
+    warn_unknown_security_categories(&resolved.security);
 
     Ok(resolved)
 }
@@ -464,6 +551,37 @@ fn apply_cache_dir_env_override(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn find_unknown_security_categories_flags_typos_with_suggestion() {
+        let security = fallow_config::SecurityConfig {
+            categories: Some(fallow_config::SecurityCategories {
+                include: Some(vec!["sql-injection".to_owned(), "sql-injektion".to_owned()]),
+                exclude: Some(vec!["hardcoded-secret".to_owned()]),
+            }),
+            ..fallow_config::SecurityConfig::default()
+        };
+        let unknown = find_unknown_security_categories(&security);
+        assert_eq!(unknown.len(), 1, "only the typo is unknown");
+        assert_eq!(unknown[0].id, "sql-injektion");
+        assert_eq!(unknown[0].field, "include");
+        assert_eq!(unknown[0].suggestion.as_deref(), Some("sql-injection"));
+    }
+
+    #[test]
+    fn find_unknown_security_categories_empty_when_all_valid_or_unset() {
+        assert!(
+            find_unknown_security_categories(&fallow_config::SecurityConfig::default()).is_empty()
+        );
+        let security = fallow_config::SecurityConfig {
+            categories: Some(fallow_config::SecurityCategories {
+                include: Some(vec!["secret-to-network".to_owned()]),
+                exclude: None,
+            }),
+            ..fallow_config::SecurityConfig::default()
+        };
+        assert!(find_unknown_security_categories(&security).is_empty());
+    }
 
     #[test]
     fn config_loaded_notice_dedupes_by_config_path() {

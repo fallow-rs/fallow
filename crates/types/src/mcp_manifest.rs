@@ -299,6 +299,16 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         read_only: true,
     },
     McpToolInfo {
+        name: "recommend",
+        kind: "introspection",
+        description: "Recommend a project-tailored config from framework/workspace/tooling detection: a loader-validated proposed_config and three-valued auto/default/taste decisions for cold-start onboarding",
+        cli_command: Some("fallow recommend --format json --quiet"),
+        key_params: &["root"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+    },
+    McpToolInfo {
         name: "list_boundaries",
         kind: "introspection",
         description: "List architecture boundary zones and access rules",

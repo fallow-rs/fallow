@@ -121,6 +121,13 @@ mod fix;
 )]
 mod init;
 
+#[allow(
+    dead_code,
+    unused_imports,
+    reason = "shared CLI library compiles bin-oriented support modules for reuse"
+)]
+mod onboarding;
+
 /// Metric and rule definitions for explainable CLI output.
 pub mod explain;
 

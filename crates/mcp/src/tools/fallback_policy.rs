@@ -92,6 +92,7 @@ mod tests {
             "impact.rs",
             "inspect_target.rs",
             "mod.rs",
+            "recommend.rs",
             "security.rs",
         ];
         let conditional_cli_backed = [

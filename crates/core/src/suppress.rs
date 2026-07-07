@@ -26,71 +26,12 @@ pub fn kind_to_kebab(kind: IssueKind) -> &'static str {
 
 /// Map an `IssueKind` to its corresponding severity in `RulesConfig`.
 ///
-/// Exhaustive match by design: a new `IssueKind` variant triggers a compile
-/// error here, forcing the implementer to decide which `RulesConfig` field
-/// (if any) gates emission. Kinds that have no matching field
-/// (`CodeDuplication`, gated by the dupes command itself) return the
-/// non-Off value `Severity::Error`; in practice these kinds short-circuit
-/// earlier via `NON_CORE_KINDS` so the returned value is unobservable.
+/// Thin wrapper over `RulesConfig::severity_for_kind` (the single source of
+/// truth for the kind-to-severity table, which also backs the `fallow schema`
+/// manifest's per-rule `default_severity`). Kept here as a free helper only to
+/// preserve the `(rules, kind)` call shape at the local call sites.
 fn severity_for_kind(rules: &RulesConfig, kind: IssueKind) -> Severity {
-    match kind {
-        IssueKind::UnusedFile => rules.unused_files,
-        IssueKind::UnusedExport => rules.unused_exports,
-        IssueKind::UnusedType => rules.unused_types,
-        IssueKind::PrivateTypeLeak => rules.private_type_leaks,
-        IssueKind::UnusedDependency => rules.unused_dependencies,
-        IssueKind::UnusedDevDependency => rules.unused_dev_dependencies,
-        IssueKind::UnusedEnumMember => rules.unused_enum_members,
-        IssueKind::UnusedClassMember => rules.unused_class_members,
-        IssueKind::UnusedStoreMember => rules.unused_store_members,
-        IssueKind::UnprovidedInject => rules.unprovided_injects,
-        IssueKind::UnresolvedImport => rules.unresolved_imports,
-        IssueKind::UnlistedDependency => rules.unlisted_dependencies,
-        IssueKind::DuplicateExport => rules.duplicate_exports,
-        IssueKind::CircularDependency => rules.circular_dependencies,
-        IssueKind::ReExportCycle => rules.re_export_cycle,
-        IssueKind::TypeOnlyDependency => rules.type_only_dependencies,
-        IssueKind::TestOnlyDependency => rules.test_only_dependencies,
-        IssueKind::DevDependencyInProduction => rules.dev_dependencies_in_production,
-        IssueKind::BoundaryViolation => rules.boundary_violation,
-        IssueKind::CoverageGaps => rules.coverage_gaps,
-        IssueKind::FeatureFlag => rules.feature_flags,
-        IssueKind::StaleSuppression => rules.stale_suppressions,
-        IssueKind::PnpmCatalogEntry => rules.unused_catalog_entries,
-        IssueKind::EmptyCatalogGroup => rules.empty_catalog_groups,
-        IssueKind::UnresolvedCatalogReference => rules.unresolved_catalog_references,
-        IssueKind::UnusedDependencyOverride => rules.unused_dependency_overrides,
-        IssueKind::MisconfiguredDependencyOverride => rules.misconfigured_dependency_overrides,
-        IssueKind::SecurityClientServerLeak => rules.security_client_server_leak,
-        IssueKind::SecuritySink => rules.security_sink,
-        IssueKind::PolicyViolation => rules.policy_violation,
-        IssueKind::InvalidClientExport => rules.invalid_client_export,
-        IssueKind::MixedClientServerBarrel => rules.mixed_client_server_barrel,
-        IssueKind::MisplacedDirective => rules.misplaced_directive,
-        IssueKind::RouteCollision => rules.route_collision,
-        IssueKind::DynamicSegmentNameConflict => rules.dynamic_segment_name_conflict,
-        IssueKind::UnrenderedComponent => rules.unrendered_components,
-        IssueKind::UnusedComponentProp => rules.unused_component_props,
-        IssueKind::UnusedComponentEmit => rules.unused_component_emits,
-        IssueKind::UnusedComponentInput => rules.unused_component_inputs,
-        IssueKind::UnusedComponentOutput => rules.unused_component_outputs,
-        IssueKind::UnusedSvelteEvent => rules.unused_svelte_events,
-        IssueKind::UnusedServerAction => rules.unused_server_actions,
-        IssueKind::UnusedLoadDataKey => rules.unused_load_data_keys,
-        IssueKind::PropDrilling => rules.prop_drilling,
-        IssueKind::ThinWrapper => rules.thin_wrapper,
-        IssueKind::DuplicatePropShape => rules.duplicate_prop_shape,
-        // CssTokenDrift is a STYLING-domain finding produced by the engine css
-        // pass (short-circuits via NON_CORE_KINDS for core suppression), but it
-        // has a real config rule, so return it: the engine reads this to gate
-        // production (off) and the audit verdict reads it for error-escalation.
-        IssueKind::CssTokenDrift => rules.css_token_drift,
-        IssueKind::CssDuplicateBlock => rules.css_duplicate_block,
-        IssueKind::CssSelectorComplexity => rules.css_selector_complexity,
-        IssueKind::CssDeadSurface => rules.css_dead_surface,
-        IssueKind::CssBrokenReference => rules.css_broken_reference,
-        IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
-    }
+    rules.severity_for_kind(kind)
 }
 
 /// Issue kinds whose suppression is not checked via `SuppressionContext`

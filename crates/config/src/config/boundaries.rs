@@ -130,6 +130,55 @@ pub enum BoundaryPreset {
 }
 
 impl BoundaryPreset {
+    /// Every built-in preset, in a stable order.
+    ///
+    /// A new variant added to the enum forces a compile error in the exhaustive
+    /// `name()` and `description()` matches below, which is the reminder to add
+    /// it here too so the agent capability manifest never silently omits it.
+    #[must_use]
+    pub const fn all() -> &'static [BoundaryPreset] {
+        &[
+            Self::Layered,
+            Self::Hexagonal,
+            Self::FeatureSliced,
+            Self::Bulletproof,
+        ]
+    }
+
+    /// The kebab-case config value that selects this preset (`boundaries.preset`).
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Layered => "layered",
+            Self::Hexagonal => "hexagonal",
+            Self::FeatureSliced => "feature-sliced",
+            Self::Bulletproof => "bulletproof",
+        }
+    }
+
+    /// One-line intent, for agent-facing discovery in the capability manifest.
+    #[must_use]
+    pub const fn description(&self) -> &'static str {
+        match self {
+            Self::Layered => {
+                "Classic layers: presentation depends on application depends on domain; \
+                 infrastructure depends on domain and application."
+            }
+            Self::Hexagonal => {
+                "Ports and adapters: adapters depend on ports, ports depend on the domain; \
+                 the domain depends on nothing outward."
+            }
+            Self::FeatureSliced => {
+                "Feature-Sliced Design: app, pages, widgets, features, entities, shared; \
+                 each layer may only import from the layers below it."
+            }
+            Self::Bulletproof => {
+                "Bulletproof React: app and features depend on shared and server; \
+                 features stay isolated from each other."
+            }
+        }
+    }
+
     /// Expand the preset into default zones and rules.
     #[must_use]
     pub fn default_config(&self, source_root: &str) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {

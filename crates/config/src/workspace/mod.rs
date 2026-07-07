@@ -36,7 +36,12 @@ pub use pnpm_overrides::{
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct WorkspaceConfig {
     /// Additional workspace patterns (beyond what's in root package.json).
-    #[serde(default)]
+    ///
+    /// `packages` is accepted as a back-compat alias: an older `fallow init --toml`
+    /// wrote `[workspaces]` with a `packages` key, and reading it as `patterns`
+    /// keeps those existing configs scoping correctly. schemars omits serde
+    /// aliases, so `schema.json` documents only `patterns`.
+    #[serde(default, alias = "packages")]
     pub patterns: Vec<String>,
 }
 

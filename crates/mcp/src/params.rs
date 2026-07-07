@@ -840,6 +840,16 @@ pub struct ListBoundariesParams {
     pub threads: Option<usize>,
 }
 
+/// Parameters for the `recommend` config-recommendation tool.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct RecommendParams {
+    /// Project root directory to inspect for framework, workspace, and tooling
+    /// detection. `recommend` runs detection only (no config load, no analysis
+    /// pipeline), so this is the sole parameter. Defaults to the current
+    /// working directory.
+    pub root: Option<String>,
+}
+
 /// Parameters for the `impact` value-report tool.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct ImpactParams {

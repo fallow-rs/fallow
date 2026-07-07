@@ -1021,6 +1021,7 @@ dependencies = [
  "fallow-engine",
  "fallow-license",
  "fallow-output",
+ "fallow-security",
  "fallow-types",
  "fallow-v8-coverage",
  "globset",

@@ -51,6 +51,7 @@ mod inspect;
 mod license;
 mod list;
 mod migrate;
+mod onboarding;
 #[cfg(test)]
 mod output_envelope;
 mod output_runtime;
@@ -133,6 +134,7 @@ Project inspection:
 
 Setup and configuration:
   init              Create a fallow config, optionally with a Git hook
+  recommend         Recommend a project-tailored config for an agent to author
   migrate           Migrate knip, jscpd, or stylelint config to fallow
   config            Show the resolved config and loaded config file
   config-schema     Print the fallow config JSON Schema
@@ -778,8 +780,10 @@ enum Command {
     /// Walks up from the project root looking for `.fallowrc.json`,
     /// `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`, resolves `extends`, and prints
     /// the final config as JSON. Use `--path` to print only the config
-    /// file path (useful in shell scripts). Exit code 0 if a config was
-    /// found, 3 if only defaults are in effect.
+    /// file path (useful in shell scripts). The default view always exits 0:
+    /// it prints the loaded config, or, on a zero-config project, the effective
+    /// defaults (fully supported). `--path` exits 3 when no config file exists,
+    /// since there is no path to report.
     ///
     /// Precedence is first-match-wins per directory, in the order
     /// `.fallowrc.json` > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`,
@@ -793,6 +797,15 @@ enum Command {
         #[arg(long)]
         path: bool,
     },
+
+    /// Recommend a project-tailored config for an agent to author.
+    ///
+    /// Read-only. Inspects the project (frameworks, workspace layout, tooling)
+    /// and emits what fallow detected, a safe proposed config, and a list of
+    /// decisions split into auto (decided from detection), default (a disclosed
+    /// overridable default), and taste (a genuinely subjective choice surfaced
+    /// to the user as an open question). Honors `--root` and `--format`.
+    Recommend,
 
     /// List discovered entry points, files, plugins, boundaries, and workspaces.
     List {
@@ -2739,7 +2752,10 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::RulePack { subcommand } => dispatch_rule_pack_command(dispatch, subcommand),
         Command::Guard { files } => dispatch_guard_command(dispatch, &files),
         Command::CiTemplate { subcommand } => dispatch_ci_template_command(subcommand),
-        Command::Config { path } => config::run_config(root, cli.config.as_deref(), path, output),
+        Command::Config { path } => {
+            config::run_config(root, cli.config.as_deref(), path, output, quiet)
+        }
+        Command::Recommend => onboarding::run_recommend(root, output),
         list @ (Command::Workspaces | Command::List { .. }) => {
             dispatch_list_command(&list, dispatch)
         }
@@ -4881,6 +4897,7 @@ mod tests {
             "  impact",
             "Setup and configuration:",
             "  init",
+            "  recommend",
             "  migrate",
             "  config",
             "  config-schema",

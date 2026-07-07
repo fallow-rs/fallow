@@ -1,3 +1,4 @@
+use fallow_types::suppress::IssueKind;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -392,6 +393,75 @@ macro_rules! apply_partial_rules {
 }
 
 impl RulesConfig {
+    /// Map an [`IssueKind`] to its configured [`Severity`] in this config.
+    ///
+    /// Single source of truth for the kind-to-severity mapping, shared by core
+    /// suppression gating (`severity_for_kind`) and the agent capability
+    /// manifest (`fallow schema`'s per-rule `default_severity`). Exhaustive by
+    /// design: a new `IssueKind` variant is a compile error here, forcing the
+    /// implementer to decide which `RulesConfig` field (if any) gates emission.
+    /// Kinds with no matching field (`Complexity`, `CodeDuplication`, gated by
+    /// their own command rather than a rule) return the non-`Off`
+    /// `Severity::Error`; in core these short-circuit earlier via
+    /// `NON_CORE_KINDS` so the value is unobservable there.
+    #[must_use]
+    pub const fn severity_for_kind(&self, kind: IssueKind) -> Severity {
+        match kind {
+            IssueKind::UnusedFile => self.unused_files,
+            IssueKind::UnusedExport => self.unused_exports,
+            IssueKind::UnusedType => self.unused_types,
+            IssueKind::PrivateTypeLeak => self.private_type_leaks,
+            IssueKind::UnusedDependency => self.unused_dependencies,
+            IssueKind::UnusedDevDependency => self.unused_dev_dependencies,
+            IssueKind::UnusedEnumMember => self.unused_enum_members,
+            IssueKind::UnusedClassMember => self.unused_class_members,
+            IssueKind::UnusedStoreMember => self.unused_store_members,
+            IssueKind::UnprovidedInject => self.unprovided_injects,
+            IssueKind::UnresolvedImport => self.unresolved_imports,
+            IssueKind::UnlistedDependency => self.unlisted_dependencies,
+            IssueKind::DuplicateExport => self.duplicate_exports,
+            IssueKind::CircularDependency => self.circular_dependencies,
+            IssueKind::ReExportCycle => self.re_export_cycle,
+            IssueKind::TypeOnlyDependency => self.type_only_dependencies,
+            IssueKind::TestOnlyDependency => self.test_only_dependencies,
+            IssueKind::DevDependencyInProduction => self.dev_dependencies_in_production,
+            IssueKind::BoundaryViolation => self.boundary_violation,
+            IssueKind::CoverageGaps => self.coverage_gaps,
+            IssueKind::FeatureFlag => self.feature_flags,
+            IssueKind::StaleSuppression => self.stale_suppressions,
+            IssueKind::PnpmCatalogEntry => self.unused_catalog_entries,
+            IssueKind::EmptyCatalogGroup => self.empty_catalog_groups,
+            IssueKind::UnresolvedCatalogReference => self.unresolved_catalog_references,
+            IssueKind::UnusedDependencyOverride => self.unused_dependency_overrides,
+            IssueKind::MisconfiguredDependencyOverride => self.misconfigured_dependency_overrides,
+            IssueKind::SecurityClientServerLeak => self.security_client_server_leak,
+            IssueKind::SecuritySink => self.security_sink,
+            IssueKind::PolicyViolation => self.policy_violation,
+            IssueKind::InvalidClientExport => self.invalid_client_export,
+            IssueKind::MixedClientServerBarrel => self.mixed_client_server_barrel,
+            IssueKind::MisplacedDirective => self.misplaced_directive,
+            IssueKind::RouteCollision => self.route_collision,
+            IssueKind::DynamicSegmentNameConflict => self.dynamic_segment_name_conflict,
+            IssueKind::UnrenderedComponent => self.unrendered_components,
+            IssueKind::UnusedComponentProp => self.unused_component_props,
+            IssueKind::UnusedComponentEmit => self.unused_component_emits,
+            IssueKind::UnusedComponentInput => self.unused_component_inputs,
+            IssueKind::UnusedComponentOutput => self.unused_component_outputs,
+            IssueKind::UnusedSvelteEvent => self.unused_svelte_events,
+            IssueKind::UnusedServerAction => self.unused_server_actions,
+            IssueKind::UnusedLoadDataKey => self.unused_load_data_keys,
+            IssueKind::PropDrilling => self.prop_drilling,
+            IssueKind::ThinWrapper => self.thin_wrapper,
+            IssueKind::DuplicatePropShape => self.duplicate_prop_shape,
+            IssueKind::CssTokenDrift => self.css_token_drift,
+            IssueKind::CssDuplicateBlock => self.css_duplicate_block,
+            IssueKind::CssSelectorComplexity => self.css_selector_complexity,
+            IssueKind::CssDeadSurface => self.css_dead_surface,
+            IssueKind::CssBrokenReference => self.css_broken_reference,
+            IssueKind::Complexity | IssueKind::CodeDuplication => Severity::Error,
+        }
+    }
+
     /// Apply a partial rules config on top. Only `Some` fields override.
     pub const fn apply_partial(&mut self, partial: &PartialRulesConfig) {
         apply_partial_rules!(
@@ -478,6 +548,29 @@ impl RulesConfig {
             ]
         );
     }
+}
+
+/// The default [`Severity`] for an [`IssueKind`] under zero config.
+///
+/// Equivalent to `RulesConfig::default().severity_for_kind(kind)`, exposed as a
+/// free function so the agent capability manifest (`fallow schema`) can publish
+/// each rule's out-of-the-box severity without threading a config through. There
+/// is exactly ONE kind-to-severity table (`RulesConfig::severity_for_kind`); this
+/// reuses it rather than duplicating the mapping.
+#[must_use]
+pub fn default_severity_for_kind(kind: IssueKind) -> Severity {
+    RulesConfig::default().severity_for_kind(kind)
+}
+
+/// Whether a rule is opt-in: its default severity is `Off`, so it detects and
+/// reports nothing until a user explicitly enables it.
+///
+/// This is the single most load-bearing manifest signal for agents: enabling an
+/// opt-in rule blindly (`private-type-leak`, `security-*`) is the most common way
+/// to flood a repo with findings, so the manifest exposes it as a first-class bool.
+#[must_use]
+pub fn is_opt_in_kind(kind: IssueKind) -> bool {
+    matches!(default_severity_for_kind(kind), Severity::Off)
 }
 
 /// Partial per-issue-type severity for overrides. All fields optional.
@@ -802,7 +895,7 @@ pub struct PartialRulesConfig {
 ///
 /// Includes both the canonical name produced by `#[serde(rename_all = "kebab-case")]`
 /// and every `#[serde(alias = ...)]` value. Used by
-/// [`find_unknown_rule_keys`] to detect typos in user-supplied configs and
+/// `find_unknown_rule_keys` to detect typos in user-supplied configs and
 /// emit a `tracing::warn!` suggestion at config load time.
 ///
 /// Keep in sync with the `#[serde]` attributes on `RulesConfig` and

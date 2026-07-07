@@ -27,6 +27,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in a config file instead of requiring a built-in plugin. See
   [custom plugins](https://docs.fallow.tools/frameworks/custom-plugins#manifest-derived-entries).
 
+- **`fallow schema` now enumerates the security-candidate categories, so an
+  agent can author `security.categories.include` / `exclude` without guessing.**
+  The config surface documented the include/exclude mechanism but not the valid
+  category ids (they live in the embedded catalogue), so an agent had to scrape
+  them from `fallow security --help` and a typo was silently accepted. The
+  capability manifest gains a `security_categories` block listing every category
+  id with its title, CWE, and an `include_required` flag (true for
+  `hardcoded-secret` and `secret-to-network`, which run only when explicitly
+  listed in `categories.include`). The config-schema `security` description now
+  points at it. Backed by `fallow_security::security_categories()`, deduped from
+  the compile-time-embedded catalogue.
+
+- **`fallow config-schema` is now self-documenting: every config key carries an
+  agent-facing description.** Previously the config schema listed key names and
+  types but almost no descriptions (1 of 36 top-level keys), so an agent
+  authoring an advanced config could produce structurally-valid JSON but had to
+  guess the semantics of keys like `boundaries`, `overrides`, `security`,
+  `publicPackages`, `includeEntryExports`, `sealed`, or `dynamicallyLoaded`.
+  Every top-level `FallowConfig` key (36 of 36) and the previously-undocumented
+  user-authored nested structs (`AuditConfig`, `ConfigOverride`, the `ignore*`
+  rule structs, `PerAnalysisProductionConfig`, `FixConfig`, `RegressionConfig`)
+  now carry a description that states exactly what the key controls, its valid
+  values and shape, and when to set it, including caveats (e.g. per-file
+  `overrides` cannot re-severity inter-file rules; `publicPackages` is a no-op
+  without workspaces; the `hardcoded-secret` and `secret-to-network` security
+  categories are include-required). Descriptions were written and adversarially
+  validated against the source by a panel of agents so every factual claim is
+  code-accurate.
+
+- **New read-only `fallow recommend` command: a project-tailored config
+  recommendation for an agent to author.** An agent onboarding a project cold no
+  longer has to guess a config. `fallow recommend` inspects the project
+  (frameworks, workspace layout, tooling) and emits, as JSON or a human summary,
+  three things: what fallow `detected`, a safe `proposed_config` it can write
+  (entry points, workspace packages, Storybook ignore), and a `decisions` list
+  split into three tiers, `auto` (decided from detection), `default` (a disclosed
+  overridable default), and `taste` (a genuinely subjective choice surfaced to
+  the user as an open question with no baked-in answer). Framework rule
+  severities are deliberately never written into the proposed config: fallow's
+  detectors self-gate on the framework, so those rules auto-activate at their
+  defaults, and not writing them avoids wrongly assuming one framework's rules on
+  a heterogeneous monorepo. The command is read-only, always exits 0, is
+  byte-deterministic, and states that zero config is a valid stop. Its
+  `proposed_config` is validated to load through fallow's real config loader.
+
+- **The `fallow schema` capability manifest now publishes each rule's default
+  severity and opt-in status, plus catalogs of boundary presets and taste
+  choices.** Previously an agent reading the manifest to author a config could
+  see every rule's id, category, and suppression comment, but NOT whether a rule
+  defaults to error, warn, or off, nor whether it is opt-in (detects nothing
+  until enabled). That information lived only in Rust, so an agent had to guess
+  or reverse-engineer it, and the most common way to flood a repo with findings
+  was enabling an opt-in rule (`private-type-leak`, security checks) blindly.
+  Each `issue_types` row now carries `default_severity` (`error`/`warn`/`off`,
+  guaranteed for every real rule), `opt_in` (a first-class boolean), and
+  `frameworks` (a framework label only where the detector genuinely self-gates
+  on that framework, so a framework-agnostic rule like `unused-server-action` is
+  never mislabeled and wrongly disabled). Two new top-level manifest sections,
+  `boundary_presets` (the built-in architecture presets with a one-line intent
+  each) and `taste_choices` (a curated catalog of the subjective config knobs an
+  agent should surface to the user rather than guess), round out the discovery
+  surface. All additive; the default-severity table has a single source of truth
+  shared with the analyzer's suppression gating, so the manifest can never drift
+  from the real defaults.
+
 ### Changed
 
 - **The incomplete-tsconfig-chain warning no longer implies your path aliases
@@ -45,6 +110,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared in a discovered root or workspace tsconfig still resolve") and only
   flags aliases declared solely in the unreadable inherited config. Wording and
   documentation only; resolution behavior is unchanged.
+
+- **`fallow config` now prints clean, pipeable JSON to stdout.** The
+  `loaded config: <path>` provenance line was printed to stdout ahead of the
+  config JSON, so `fallow config | jq` (and `fallow config --format json | jq`)
+  failed to parse. That provenance line, and the `no config file found` notice,
+  now go to stderr (suppressed by `--quiet`), leaving stdout as just the resolved
+  config JSON (or, with `--path`, just the path). Exit codes are unchanged.
+
+- **fallow now warns on an unknown `security.categories.include` / `exclude`
+  id.** A typo'd category id was silently ignored, quietly disabling the
+  category the config author meant to enable or exclude, with no signal. fallow
+  now emits a `tracing::warn!` naming the unknown id, its closest valid match
+  ("did you mean ...?"), and where to find the full list (`fallow schema`
+  `security_categories` / `fallow security --help`), mirroring the existing
+  unknown-rule-key warning. The check runs at the CLI config-load layer (the
+  config crate cannot depend on the security catalogue) for both the analysis
+  commands and `fallow config`, deduped process-wide.
+
+- **`fallow schema` now reports the opt-in status and default severity of the
+  security and coverage findings, matching every other rule.** Previously every
+  `fallow security` row (and the coverage findings) showed
+  `default_severity: null, opt_in: null`, so an agent scanning the manifest for
+  opt-in rules (the signal that most guards against flooding a repo with
+  findings) could not tell that security and coverage are off by default, even
+  though the sibling opt-in command `feature-flag` reported `off / true`. These
+  findings are gated by a shared rule (`security-sink`,
+  `security-client-server-leak`, `coverage-gaps`) rather than a 1:1 config key,
+  so the manifest now resolves their `default_severity` / `opt_in` from that
+  gating rule. `config_key` stays null for them (they are not individually
+  configurable), but they now read `off / true` consistently.
+
+### Fixed
+
+- **`fallow config` now prints the effective defaults and exits 0 on a
+  zero-config project, instead of exiting 3 with no output.** fallow fully
+  supports running with no config file, but `fallow config` (the "what am I
+  running with?" command) treated the no-config case as a non-zero "not found"
+  and printed nothing usable, so an agent could misread it as an error. It now
+  writes the resolved default config as clean JSON to stdout (the `no config
+  file found, using defaults` note stays on stderr) and exits 0. `fallow config
+  --path`, which answers "which file", still exits 3 when there is no file.
+
+- **`fallow recommend`'s human output now points to `--format json` for the full
+  decision set.** The concise human summary intentionally omits the detected
+  project block, per-decision rationale, and taste-option tradeoffs; it now ends
+  with a one-line tip so a reader knows the full structured output (which an
+  agent consumes) is one flag away.
+
+- **`fallow recommend` and `fallow init` now detect frameworks that live in
+  workspace packages, not just the root `package.json`.** In a monorepo where the
+  framework sits in a member package (the common shape, e.g. Next.js in
+  `apps/web`), `recommend` previously reported `frameworks_present: []` and
+  `ui_framework: null` even though the analysis engine already activated the
+  right plugins, an onboarding signal that undersold the project and could
+  mislead an agent into hand-configuring what the framework plugin already
+  handles. Detection now aggregates dependency names across the root plus every
+  discovered workspace member, so the onboarding signal matches what analysis
+  sees. Non-monorepo projects are unaffected.
+
+- **`fallow init` now writes the workspace config under the key the loader
+  actually reads, in both JSON and TOML output.** The generated config emitted
+  `workspaces.packages`, but the loader's `WorkspaceConfig` field is `patterns`,
+  and unknown keys are silently dropped, so a generated monorepo config lost its
+  workspace scoping without any error. The `.fallowrc.json` scaffold was
+  corrected earlier; the `--toml` scaffold now emits `workspaces.patterns` too.
+  `fallow init` also derives its detection-based config (entry points, workspace
+  patterns, Storybook ignore) from the same core as `fallow recommend`, so the
+  two stay in lock-step. For configs already written with the old key,
+  `workspaces.packages` is now accepted as a back-compat alias for `patterns`, so
+  an existing `fallow.toml` keeps scoping correctly without a manual edit.
 
 ## [3.2.0] - 2026-07-05
 

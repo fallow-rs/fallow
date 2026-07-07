@@ -651,6 +651,69 @@ pub fn catalogue_title(id: &str) -> Option<&'static str> {
     catalogue().title_for(id)
 }
 
+/// The catalogue id of the secret-to-network exfil category (CWE-201). Like
+/// [`HARDCODED_SECRET_CATEGORY_ID`], it is include-required: it runs only when
+/// listed in `security.categories.include`.
+pub const SECRET_TO_NETWORK_CATEGORY_ID: &str = "secret-to-network";
+
+/// Whether a `security.categories` id is include-required, i.e. it stays off
+/// even when no include list is set and fires only when named in
+/// `categories.include`. Both the standalone hardcoded-secret detector and the
+/// secret-to-network catalogue category are include-required.
+#[must_use]
+pub fn is_include_required_category(id: &str) -> bool {
+    id == HARDCODED_SECRET_CATEGORY_ID || id == SECRET_TO_NETWORK_CATEGORY_ID
+}
+
+/// A user-facing security candidate category, valid in `security.categories`
+/// `include` / `exclude`.
+#[derive(Debug, Clone)]
+pub struct SecurityCategory {
+    /// The category id used in `security.categories.include` / `exclude`.
+    pub id: String,
+    /// Human-readable title.
+    pub title: String,
+    /// The CWE number, when the category maps to one (`None` for the
+    /// entropy-based hardcoded-secret detector).
+    pub cwe: Option<u32>,
+    /// Whether the category runs only when explicitly named in
+    /// `categories.include`.
+    pub include_required: bool,
+}
+
+/// Every security candidate category an agent can name in
+/// `security.categories.include` / `exclude`, deduped by id and sorted.
+///
+/// This is the canonical, machine-readable vocabulary for the `security`
+/// config surface: the embedded catalogue's distinct sink categories plus the
+/// standalone hardcoded-secret detector. Because the catalogue is
+/// `include_str!`-embedded, the set is deterministic per build.
+#[must_use]
+pub fn security_categories() -> Vec<SecurityCategory> {
+    let mut seen = FxHashSet::default();
+    let mut out = Vec::new();
+    for matcher in catalogue().matchers() {
+        if seen.insert(matcher.id.clone()) {
+            out.push(SecurityCategory {
+                id: matcher.id.clone(),
+                title: matcher.title.clone(),
+                cwe: Some(matcher.cwe),
+                include_required: is_include_required_category(&matcher.id),
+            });
+        }
+    }
+    if seen.insert(HARDCODED_SECRET_CATEGORY_ID.to_owned()) {
+        out.push(SecurityCategory {
+            id: HARDCODED_SECRET_CATEGORY_ID.to_owned(),
+            title: HARDCODED_SECRET_CATEGORY_TITLE.to_owned(),
+            cwe: None,
+            include_required: true,
+        });
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out
+}
+
 /// Resolve a kebab-case sink-shape string into the typed [`SinkShape`].
 fn parse_sink_shape(s: &str) -> Option<SinkShape> {
     match s {
@@ -942,6 +1005,54 @@ pub fn catalogue() -> &'static Catalogue {
 mod tests {
     use super::*;
     use rustc_hash::FxHashSet;
+
+    #[test]
+    fn security_categories_are_deduped_and_flag_include_required() {
+        let cats = security_categories();
+        assert!(!cats.is_empty(), "catalogue must yield categories");
+        // deduped by id
+        let mut ids = FxHashSet::default();
+        for c in &cats {
+            assert!(ids.insert(c.id.clone()), "duplicate category id {}", c.id);
+        }
+        // sorted by id
+        let sorted: Vec<&String> = {
+            let mut v: Vec<&String> = cats.iter().map(|c| &c.id).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(
+            cats.iter().map(|c| &c.id).collect::<Vec<_>>(),
+            sorted,
+            "categories must be sorted by id"
+        );
+        // both include-required categories present and flagged; hardcoded-secret
+        // carries no CWE (entropy detector).
+        let by_id = |id: &str| cats.iter().find(|c| c.id == id);
+        let hs = by_id(HARDCODED_SECRET_CATEGORY_ID).expect("hardcoded-secret present");
+        assert!(hs.include_required && hs.cwe.is_none());
+        let stn = by_id(SECRET_TO_NETWORK_CATEGORY_ID).expect("secret-to-network present");
+        assert!(
+            stn.include_required,
+            "secret-to-network must be include-required"
+        );
+        // a normal category is NOT include-required
+        assert!(
+            cats.iter().any(|c| !c.include_required),
+            "most categories are admitted by default"
+        );
+    }
+
+    #[test]
+    fn secret_to_network_const_matches_catalogue() {
+        assert!(
+            catalogue()
+                .matchers()
+                .iter()
+                .any(|m| m.id == SECRET_TO_NETWORK_CATEGORY_ID),
+            "SECRET_TO_NETWORK_CATEGORY_ID must name a real catalogue category"
+        );
+    }
 
     #[test]
     fn security_catalogue_parses() {
