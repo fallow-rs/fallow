@@ -2189,3 +2189,37 @@ const props = defineProps<{ items: number[] }>()
         info.member_accesses
     );
 }
+
+#[test]
+fn vue_script_typed_property_fact_survives_sfc_merge() {
+    // Issue #1785 review finding: the SFC merge path must carry typed
+    // semantic facts, so a Vue `<script>` consuming a class through an
+    // IMPORTED interface property hop emits the cross-module fact.
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import type { SharedOpts } from './opts';
+
+export class UserS {
+    constructor(private opts: SharedOpts) {}
+    run() {
+        this.opts.c.viaShared();
+    }
+}
+</script>
+<template><div></div></template>
+"#,
+        "App.vue",
+    );
+    assert!(
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                fallow_types::extract::SemanticFact::TypedPropertyMemberAccess(access)
+                    if access.type_name == "SharedOpts" && access.member == "viaShared"
+            )
+        }),
+        "the typed-property fact should survive the SFC merge, found: {:?}",
+        info.semantic_facts
+    );
+}

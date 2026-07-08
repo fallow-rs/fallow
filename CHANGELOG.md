@@ -179,7 +179,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Playwright fixture maps declared as an interface (`base.extend<MyFixtures>`
   where `MyFixtures` is an `interface` rather than a `type` alias): those now
   resolve identically to the alias form, so POM members consumed only through
-  interface-declared fixtures are credited. Warm caches invalidate
+  interface-declared fixtures are credited. Vue and Svelte `<script>` blocks
+  previously dropped ALL typed extraction facts during the SFC merge, so the
+  cross-module member-crediting joins (factory returns, fluent chains, and the
+  new typed-property hop) never saw SFC consumers; those facts now survive the
+  merge and SFC files participate like plain TS files. Warm caches invalidate
   automatically on upgrade. Thanks [@martijnwalraven](https://github.com/martijnwalraven)
   for the report with the receiver-shape matrix. (Closes
   [#1785](https://github.com/fallow-rs/fallow/issues/1785))

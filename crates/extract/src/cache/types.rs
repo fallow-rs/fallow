@@ -744,11 +744,13 @@ use crate::MemberKind;
 /// Bumped to 225 for issue #1785: interface / type-literal-alias property
 /// types now persist as `type_member_types`, compound binding targets expand
 /// through them into new `member_accesses`, imported-type dead-ends emit the
-/// new `TypedPropertyMemberAccess` semantic fact, and INTERFACE-declared
+/// new `TypedPropertyMemberAccess` semantic fact, INTERFACE-declared
 /// Playwright fixture maps (`base.extend<MyFixtures>` where `MyFixtures` is
-/// an interface) now emit the same fixture facts as the type-alias form.
-/// Warm 224 caches lack all four, leaving interface-typed DI receivers and
-/// interface-fixture POM members falsely unused.
+/// an interface) now emit the same fixture facts as the type-alias form, and
+/// the SFC merge path now carries `semantic_facts`, so Vue/Svelte `<script>`
+/// blocks persist every fact kind they previously dropped. Warm 224 caches
+/// lack all five, leaving interface-typed DI receivers, interface-fixture POM
+/// members, and SFC fact consumers falsely unused.
 pub(super) const CACHE_VERSION: u32 = 225;
 
 /// Duplication token cache version. Bump when duplicate tokenization,

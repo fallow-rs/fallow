@@ -582,6 +582,48 @@ fn merge_into_extends_imports() {
 }
 
 #[test]
+fn merge_into_extends_semantic_facts() {
+    // Issue #1785 review finding: the SFC merge path must carry typed
+    // semantic facts; a fact emitted by a `<script>` block extractor was
+    // previously dropped, making every cross-module fact join inert for
+    // Vue/Svelte files.
+    let mut base = parse("export const x = 1;");
+    assert!(base.semantic_facts.is_empty());
+
+    let allocator = oxc_allocator::Allocator::default();
+    let source_type = oxc_span::SourceType::from_path(Path::new("extra.ts")).unwrap_or_default();
+    let parser_return = oxc_parser::Parser::new(
+        &allocator,
+        r"
+            import type { SharedOpts } from './opts';
+            export class UserS {
+                constructor(private opts: SharedOpts) {}
+                run() {
+                    this.opts.c.viaShared();
+                }
+            }
+        ",
+        source_type,
+    )
+    .parse();
+    let mut extractor = ModuleInfoExtractor::new();
+    oxc_ast_visit::Visit::visit_program(&mut extractor, &parser_return.program);
+    extractor.merge_into(&mut base);
+
+    assert!(
+        base.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::TypedPropertyMemberAccess(access)
+                    if access.type_name == "SharedOpts" && access.member == "viaShared"
+            )
+        }),
+        "merge_into should carry semantic facts from the merged script, found: {:?}",
+        base.semantic_facts
+    );
+}
+
+#[test]
 fn merge_into_ors_cjs_flag() {
     let mut base = parse("export const x = 1;");
     assert!(!base.has_cjs_exports);

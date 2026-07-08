@@ -2026,6 +2026,14 @@ impl ModuleInfoExtractor {
         let mut whole_object_uses = std::mem::take(&mut info.whole_object_uses).into_vec();
         whole_object_uses.append(&mut self.whole_object_uses);
         info.whole_object_uses = whole_object_uses.into_boxed_slice();
+        // Carry typed semantic facts through the SFC merge path; without this
+        // every fact kind (factory-fn, fluent-chain, typed-property-hop, ...)
+        // was silently dropped for Vue/Svelte `<script>` blocks, so the
+        // analyze-layer cross-module joins never saw SFC consumers. See issue
+        // #1785 (review finding).
+        let mut semantic_facts = std::mem::take(&mut info.semantic_facts).into_vec();
+        semantic_facts.append(&mut self.semantic_facts);
+        info.semantic_facts = semantic_facts.into_boxed_slice();
         info.has_cjs_exports |= self.has_cjs_exports;
         info.has_angular_component_template_url |= self.has_angular_component_template_url;
         info.class_heritage.append(&mut self.class_heritage);
