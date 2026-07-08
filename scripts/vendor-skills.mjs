@@ -108,7 +108,7 @@ const resolveCanonical = () => {
   return { tree, present: existsSync(join(tree, "SKILL.md")), explicit: Boolean(explicit) };
 };
 
-export const runCheck = (canonical, vendored = VENDORED_TREE) => {
+export const runCheck = (canonical, vendored = VENDORED_TREE, { renderDiffs = true } = {}) => {
   const { missing, extra, changed } = diffTrees(canonical, vendored);
   if (missing.length === 0 && extra.length === 0 && changed.length === 0) {
     console.log("vendor-skills: npm/fallow/skills is in sync with canonical fallow-skills");
@@ -125,8 +125,12 @@ export const runCheck = (canonical, vendored = VENDORED_TREE) => {
     console.error(`  differs: ${f}`);
   }
   console.error("\nRe-vendor with: node scripts/vendor-skills.mjs\n");
-  for (const f of changed) {
-    showDiff(canonical, vendored, f);
+  // renderDiffs spawns `git diff` per changed file (helpful for a human running
+  // the gate); tests pass false to keep git output out of the TAP stream.
+  if (renderDiffs) {
+    for (const f of changed) {
+      showDiff(canonical, vendored, f);
+    }
   }
   return 1;
 };
@@ -150,18 +154,32 @@ export const runVendor = (canonical, vendored = VENDORED_TREE) => {
   return 0;
 };
 
-const main = (argv = process.argv.slice(2)) => {
+/** Pure dispatch for main() given the resolved canonical state. `skip` is the
+ * contributor-without-the-sibling-repo case (drift check only); `error` when the
+ * canonical tree is missing and skipping is not allowed. */
+export const decide = ({ present, explicit, check }) => {
+  if (!present) {
+    return check && !explicit ? { action: "skip" } : { action: "error" };
+  }
+  return { action: check ? "check" : "vendor" };
+};
+
+export const main = (argv = process.argv.slice(2)) => {
   const check = argv.includes("--check");
   const { tree, present, explicit } = resolveCanonical();
-  if (!present) {
-    const message = `canonical fallow-skills not found at ${tree}`;
-    if (check && !explicit) {
-      console.warn(`vendor-skills: ${message}; skipping drift check`);
-      return 0;
-    }
-    throw new Error(`${message}${explicit ? " (FALLOW_SKILLS_DIR is set)" : ""}`);
+  const { action } = decide({ present, explicit, check });
+  if (action === "skip") {
+    console.warn(
+      `vendor-skills: canonical fallow-skills not found at ${tree}; skipping drift check`,
+    );
+    return 0;
   }
-  return check ? runCheck(tree) : runVendor(tree);
+  if (action === "error") {
+    throw new Error(
+      `canonical fallow-skills not found at ${tree}${explicit ? " (FALLOW_SKILLS_DIR is set)" : ""}`,
+    );
+  }
+  return action === "check" ? runCheck(tree) : runVendor(tree);
 };
 
 // Only run when executed directly (not when imported by the test), so importing

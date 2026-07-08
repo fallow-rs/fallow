@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { diffTrees, listFiles, runCheck, runVendor } from "./vendor-skills.mjs";
+import { decide, diffTrees, listFiles, main, runCheck, runVendor } from "./vendor-skills.mjs";
 
 /** Materialize { "rel/path": "contents" } into a fresh temp dir; returns its path. */
 const makeTree = (files) => {
@@ -88,8 +88,8 @@ test("runCheck returns 1 on drift and 0 when in sync", () => {
   const canonical = makeTree({ "SKILL.md": "x" });
   const drifted = makeTree({ "SKILL.md": "y" });
   const identical = makeTree({ "SKILL.md": "x" });
-  assert.equal(runCheck(canonical, drifted), 1);
-  assert.equal(runCheck(canonical, identical), 0);
+  assert.equal(runCheck(canonical, drifted, { renderDiffs: false }), 1);
+  assert.equal(runCheck(canonical, identical, { renderDiffs: false }), 0);
   for (const d of [canonical, drifted, identical]) {
     rmSync(d, { recursive: true });
   }
@@ -107,4 +107,27 @@ test("runVendor mirrors canonical into vendored: adds, updates, removes extras",
   assert.equal(existsSync(join(vendored, "stale.md")), false);
   rmSync(canonical, { recursive: true });
   rmSync(vendored, { recursive: true });
+});
+
+test("decide dispatches skip / error / check / vendor by resolved state", () => {
+  assert.equal(decide({ present: false, explicit: false, check: true }).action, "skip");
+  assert.equal(decide({ present: false, explicit: true, check: true }).action, "error");
+  assert.equal(decide({ present: false, explicit: false, check: false }).action, "error");
+  assert.equal(decide({ present: true, explicit: false, check: true }).action, "check");
+  assert.equal(decide({ present: true, explicit: false, check: false }).action, "vendor");
+});
+
+test("main throws when FALLOW_SKILLS_DIR is set but missing (both modes)", () => {
+  const prev = process.env.FALLOW_SKILLS_DIR;
+  process.env.FALLOW_SKILLS_DIR = join(tmpdir(), "vendor-skills-nonexistent-canonical");
+  try {
+    assert.throws(() => main(["--check"]), /FALLOW_SKILLS_DIR is set/);
+    assert.throws(() => main([]), /not found/);
+  } finally {
+    if (prev === undefined) {
+      delete process.env.FALLOW_SKILLS_DIR;
+    } else {
+      process.env.FALLOW_SKILLS_DIR = prev;
+    }
+  }
 });
