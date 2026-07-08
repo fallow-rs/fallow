@@ -107,6 +107,30 @@ fn cache_omits_empty_exported_factory_returns_but_roundtrips_non_empty() {
 }
 
 #[test]
+fn cache_omits_empty_type_member_types_but_roundtrips_non_empty() {
+    let empty = parse_from_content(
+        FileId(7),
+        Path::new("src/plain.ts"),
+        "export const value = 1;",
+    );
+    assert!(empty.type_member_types.is_empty());
+    let cached_empty = module_to_cached_from_parts(&empty, 10, 20);
+    assert!(cached_empty.type_member_types.is_none());
+
+    let module = parse_from_content(
+        FileId(8),
+        Path::new("src/opts.ts"),
+        "import type { OptDep } from './dep';\nexport interface SharedOpts { c: OptDep }",
+    );
+    assert_eq!(module.type_member_types.len(), 1);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    assert!(cached.type_member_types.is_some());
+    let restored = cached_to_module(&cached, FileId(8));
+
+    assert_eq!(restored.type_member_types, module.type_member_types);
+}
+
+#[test]
 fn cache_store_insert_and_get() {
     let mut store = CacheStore::new();
     let module = CachedModule {
