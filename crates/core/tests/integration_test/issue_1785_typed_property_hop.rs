@@ -88,4 +88,17 @@ fn imported_interface_typed_property_hop_credits_class_member() {
         "RenamedDep.viaRenamed is reached through a same-file-renamed interface export and \
          must be credited (issue #1785 review finding), found: {unused:?}"
     );
+    // MULTI-HOP chain crossing TWO module boundaries within one property path:
+    // consumer -> OuterOpts (outer.ts) -> MidOpts (mid.ts) -> LeafDep (leaf.ts)
+    // via `this.opts.mid.leaf.deepM()`. Exercises the frontier re-resolution
+    // branch of the analyze join (an imported mid-chain type).
+    assert!(
+        !unused.contains(&"LeafDep.deepM".to_string()),
+        "LeafDep.deepM is reached through a two-boundary typed-property chain and must be \
+         credited (issue #1785), found: {unused:?}"
+    );
+    assert!(
+        unused.contains(&"LeafDep.deadOnLeafDep".to_string()),
+        "LeafDep.deadOnLeafDep has no call site and must stay flagged, found: {unused:?}"
+    );
 }

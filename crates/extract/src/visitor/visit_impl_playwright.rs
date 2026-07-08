@@ -48,16 +48,19 @@ impl ModuleInfoExtractor {
             &self.playwright_fixture_types,
             &mut bindings,
         );
-        bindings.sort_unstable();
-        bindings.dedup();
         self.record_playwright_fixture_type_bindings(iface.id.name.as_str(), bindings);
     }
 
+    /// Shared sink for alias- and interface-declared fixture maps: normalizes
+    /// (sort + dedup), records the binding table, and emits the fixture-type
+    /// facts.
     fn record_playwright_fixture_type_bindings(
         &mut self,
         type_name: &str,
-        bindings: Vec<(String, String)>,
+        mut bindings: Vec<(String, String)>,
     ) {
+        bindings.sort_unstable();
+        bindings.dedup();
         if bindings.is_empty() {
             return;
         }
