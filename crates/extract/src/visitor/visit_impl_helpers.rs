@@ -972,9 +972,12 @@ pub(super) fn collect_fixture_type_bindings_from_type(
 ) {
     match ty {
         TSType::TSTypeLiteral(type_lit) => {
-            for member in &type_lit.members {
-                collect_fixture_type_binding_from_member(member, path_prefix, aliases, bindings);
-            }
+            collect_fixture_type_bindings_from_members(
+                &type_lit.members,
+                path_prefix,
+                aliases,
+                bindings,
+            );
         }
         TSType::TSTypeReference(type_ref) => {
             let Some((alias_name, _)) = type_name_root(&type_ref.type_name) else {
@@ -1005,6 +1008,20 @@ pub(super) fn collect_fixture_type_bindings_from_type(
             );
         }
         _ => {}
+    }
+}
+
+/// Collect fixture bindings from a slice of type members (a `TSTypeLiteral`
+/// body or a `TSInterfaceDeclaration` body; both are `TSSignature` lists, so
+/// an interface-declared fixture map resolves identically to the alias form).
+pub(super) fn collect_fixture_type_bindings_from_members(
+    members: &[TSSignature<'_>],
+    path_prefix: &str,
+    aliases: &FxHashMap<String, Vec<(String, String)>>,
+    bindings: &mut Vec<(String, String)>,
+) {
+    for member in members {
+        collect_fixture_type_binding_from_member(member, path_prefix, aliases, bindings);
     }
 }
 

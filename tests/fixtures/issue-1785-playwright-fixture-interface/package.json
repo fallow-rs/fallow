@@ -1,0 +1,8 @@
+{
+  "name": "issue-1785-playwright-fixture-interface",
+  "private": true,
+  "main": "src/index.ts",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}

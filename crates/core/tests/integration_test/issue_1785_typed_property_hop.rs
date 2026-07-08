@@ -42,6 +42,25 @@ fn interface_typed_property_hop_credits_class_member() {
 }
 
 #[test]
+fn interface_declared_playwright_fixture_map_credits_pom_member() {
+    // Issue #1785 V4: `base.extend<MyFixtures>` where `MyFixtures` is an
+    // INTERFACE (not a type alias) must resolve the fixture map identically,
+    // so a spec's `loginPage.fillForm()` credits the POM class member. A dead
+    // method on the same class stays flagged.
+    let unused = unused_member_names(fixture_path("issue-1785-playwright-fixture-interface"));
+
+    assert!(
+        !unused.contains(&"LoginPage.fillForm".to_string()),
+        "LoginPage.fillForm is reached through an interface-declared Playwright fixture map \
+         and must be credited (issue #1785), found: {unused:?}"
+    );
+    assert!(
+        unused.contains(&"LoginPage.deadOnLoginPage".to_string()),
+        "LoginPage.deadOnLoginPage has no call site and must stay flagged, found: {unused:?}"
+    );
+}
+
+#[test]
 fn imported_interface_typed_property_hop_credits_class_member() {
     // Issue #1785 Part B: the options interface lives in a THIRD file
     // (`export interface SharedOpts {{ c: SharedDep }}`), consumed directly

@@ -830,6 +830,7 @@ impl ModuleInfoExtractor {
     fn record_top_level_interface_declaration(&mut self, iface: &TSInterfaceDeclaration<'_>) {
         self.record_local_declaration_name(&iface.id.name);
         self.record_local_type_declaration(&iface.id.name, iface.id.span);
+        self.record_playwright_fixture_interface(iface);
         let refs = Self::collect_interface_signature_refs(iface);
         self.record_local_signature_refs(&iface.id.name, refs);
         let properties = collect_object_type_property_types(&iface.body.body);

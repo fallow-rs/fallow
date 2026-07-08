@@ -1,11 +1,13 @@
-use oxc_ast::ast::{Argument, CallExpression, Expression, TSType, TSTypeAliasDeclaration};
+use oxc_ast::ast::{
+    Argument, CallExpression, Expression, TSInterfaceDeclaration, TSType, TSTypeAliasDeclaration,
+};
 
 use crate::DynamicImportInfo;
 
 use super::super::{ModuleInfoExtractor, PendingPlaywrightFactory};
 use super::visit_helpers::{
-    collect_fixture_type_bindings_from_type, playwright_extend_base_name, vi_mock_has_factory,
-    vitest_auto_mock_source, vitest_mock_source,
+    collect_fixture_type_bindings_from_members, collect_fixture_type_bindings_from_type,
+    playwright_extend_base_name, vi_mock_has_factory, vitest_auto_mock_source, vitest_mock_source,
 };
 
 impl ModuleInfoExtractor {
@@ -27,16 +29,46 @@ impl ModuleInfoExtractor {
         alias: &TSTypeAliasDeclaration<'_>,
     ) {
         let bindings = self.collect_playwright_fixture_type_bindings(&alias.type_annotation);
-        if !bindings.is_empty() {
-            self.playwright_fixture_types
-                .insert(alias.id.name.to_string(), bindings.clone());
-            for (fixture_name, type_name) in bindings {
-                self.record_playwright_fixture_type_fact(
-                    alias.id.name.to_string(),
-                    fixture_name.clone(),
-                    type_name,
-                );
-            }
+        self.record_playwright_fixture_type_bindings(alias.id.name.as_str(), bindings);
+    }
+
+    /// Record an INTERFACE-declared fixture map (`interface MyFixtures {
+    /// loginPage: LoginPage }` consumed by `base.extend<MyFixtures>`) into the
+    /// same `playwright_fixture_types` table as the type-alias form, so both
+    /// declaration styles resolve identically. `extends` heritage members are
+    /// not expanded (the body's own members still resolve). See issue #1785.
+    pub(super) fn record_playwright_fixture_interface(
+        &mut self,
+        iface: &TSInterfaceDeclaration<'_>,
+    ) {
+        let mut bindings = Vec::new();
+        collect_fixture_type_bindings_from_members(
+            &iface.body.body,
+            "",
+            &self.playwright_fixture_types,
+            &mut bindings,
+        );
+        bindings.sort_unstable();
+        bindings.dedup();
+        self.record_playwright_fixture_type_bindings(iface.id.name.as_str(), bindings);
+    }
+
+    fn record_playwright_fixture_type_bindings(
+        &mut self,
+        type_name: &str,
+        bindings: Vec<(String, String)>,
+    ) {
+        if bindings.is_empty() {
+            return;
+        }
+        self.playwright_fixture_types
+            .insert(type_name.to_string(), bindings.clone());
+        for (fixture_name, fixture_type) in bindings {
+            self.record_playwright_fixture_type_fact(
+                type_name.to_string(),
+                fixture_name.clone(),
+                fixture_type,
+            );
         }
     }
 

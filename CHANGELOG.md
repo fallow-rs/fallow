@@ -175,7 +175,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   options interface in another module, including through barrel re-exports) a
   new cross-module fact joins consumer, declaring module, and class at analyze
   time, gated on the resolved export actually being a class with members, so a
-  wrong annotation can only under-report, never flag. Warm caches invalidate
+  wrong annotation can only under-report, never flag. The same gap existed for
+  Playwright fixture maps declared as an interface (`base.extend<MyFixtures>`
+  where `MyFixtures` is an `interface` rather than a `type` alias): those now
+  resolve identically to the alias form, so POM members consumed only through
+  interface-declared fixtures are credited. Warm caches invalidate
   automatically on upgrade. Thanks [@martijnwalraven](https://github.com/martijnwalraven)
   for the report with the receiver-shape matrix. (Closes
   [#1785](https://github.com/fallow-rs/fallow/issues/1785))

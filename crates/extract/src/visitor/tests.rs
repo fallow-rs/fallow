@@ -3096,6 +3096,31 @@ fn playwright_extend_type_alias_records_fixture_definitions() {
 }
 
 #[test]
+fn playwright_extend_interface_records_fixture_definitions() {
+    // Issue #1785 V4: an INTERFACE-declared fixture map must resolve the same
+    // as the type-alias form.
+    let info = parse(
+        r"
+            import { test as base } from '@playwright/test';
+            import { LoginPage } from './login-page';
+
+            interface MyFixtures {
+                loginPage: LoginPage;
+            }
+
+            export const test = base.extend<MyFixtures>({});
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_definition_fact(&info, "test", "loginPage", "LoginPage"),
+        "interface-declared Playwright fixture loginPage should emit a fixture definition \
+         fact, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn non_playwright_extend_does_not_record_fixture_definitions() {
     let info = parse(
         r"
