@@ -50,6 +50,7 @@ fn make_module(file_id: FileId, complexity: Vec<FunctionComplexity>) -> ModuleIn
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),

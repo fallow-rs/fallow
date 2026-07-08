@@ -161,6 +161,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Class members reached through an interface- or type-alias-typed property no
+  longer report as `unused-class-member`, same-file and cross-module.** The
+  dominant constructor-injected DI pattern (`interface Opts { c: OptDep }`,
+  `constructor(private opts: Opts)`, `this.opts.c.optM()`) previously flagged
+  `OptDep.optM` as unused whenever the receiver's type hop went through a named
+  interface or type-literal alias: directly-typed params, locals, and class
+  properties were already credited, but the named-type property hop was never
+  resolved. Codebases wiring classes through typed options objects saw
+  near-100% false-positive rates on the rule and had to disable it. The
+  extraction layer now expands those hops through the file's own
+  interface/alias property types, and when the type is imported (a shared
+  options interface in another module, including through barrel re-exports) a
+  new cross-module fact joins consumer, declaring module, and class at analyze
+  time, gated on the resolved export actually being a class with members, so a
+  wrong annotation can only under-report, never flag. Warm caches invalidate
+  automatically on upgrade. Thanks [@martijnwalraven](https://github.com/martijnwalraven)
+  for the report with the receiver-shape matrix. (Closes
+  [#1785](https://github.com/fallow-rs/fallow/issues/1785))
+
 - **`fallow config` now prints the effective defaults and exits 0 on a
   zero-config project, instead of exiting 3 with no output.** fallow fully
   supports running with no config file, but `fallow config` (the "what am I

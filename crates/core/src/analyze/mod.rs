@@ -3031,6 +3031,7 @@ mod tests {
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
                 exported_factory_returns: Box::default(),
+                type_member_types: Box::default(),
             }];
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
 
@@ -3088,6 +3089,7 @@ mod tests {
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
                 exported_factory_returns: Box::default(),
+                type_member_types: Box::default(),
             }];
             let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
             graph.modules[0].exports = vec![ExportSymbol {
@@ -3171,6 +3173,7 @@ mod tests {
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
                 exported_factory_returns: Box::default(),
+                type_member_types: Box::default(),
             }];
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
             let config = make_config_with_rules(RulesConfig::default());
@@ -3228,6 +3231,7 @@ mod tests {
                     value_referenced_import_bindings: vec![],
                     namespace_object_aliases: vec![],
                     exported_factory_returns: Box::default(),
+                    type_member_types: Box::default(),
                 })
                 .collect::<Vec<_>>();
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
@@ -3257,6 +3261,7 @@ mod tests {
                 flag_uses: vec![],
                 class_heritage: vec![],
                 exported_factory_returns: Box::default(),
+                type_member_types: Box::default(),
                 injection_tokens: vec![],
                 local_type_declarations: Vec::new(),
                 public_signature_type_references: Vec::new(),

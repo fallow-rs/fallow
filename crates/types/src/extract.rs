@@ -2936,6 +2936,11 @@ mod tests {
                 export_name: "useApi".to_string(),
                 class_local_name: "RESTApi".to_string(),
             }]),
+            type_member_types: Box::from([TypeMemberTypeEntry {
+                type_name: "Opts".to_string(),
+                property: "c".to_string(),
+                property_type: "OptDep".to_string(),
+            }]),
             injection_tokens: vec![("TOKEN".to_string(), "Contract".to_string())],
             local_type_declarations: vec![LocalTypeDeclaration {
                 name: "Contract".to_string(),
@@ -4167,6 +4172,7 @@ mod tests {
             flag_uses: Vec::new(),
             class_heritage: Vec::new(),
             exported_factory_returns: Box::default(),
+            type_member_types: Box::default(),
             injection_tokens: Vec::new(),
             local_type_declarations: Vec::new(),
             public_signature_type_references: Vec::new(),

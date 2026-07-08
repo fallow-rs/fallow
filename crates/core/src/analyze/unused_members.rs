@@ -3512,6 +3512,7 @@ mod tests {
                 instance_bindings: Vec::new(),
             }],
             exported_factory_returns: Box::default(),
+            type_member_types: Box::default(),
             injection_tokens: Vec::new(),
             local_type_declarations: vec![],
             public_signature_type_references: vec![],

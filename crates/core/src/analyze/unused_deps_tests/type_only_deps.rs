@@ -70,6 +70,7 @@ fn type_only_dep_not_detected_when_runtime_import_exists() {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            type_member_types: Box::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -100,6 +101,7 @@ fn type_only_dep_not_detected_when_runtime_import_exists() {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            type_member_types: Box::default(),
         },
     ];
 

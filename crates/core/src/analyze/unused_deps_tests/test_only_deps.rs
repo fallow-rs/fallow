@@ -43,6 +43,7 @@ fn test_only_dep_from_root_test_file() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        type_member_types: Box::default(),
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -100,6 +101,7 @@ fn test_only_dep_from_root_config_file() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        type_member_types: Box::default(),
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -159,6 +161,7 @@ fn test_only_dep_from_workspace_config_file() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        type_member_types: Box::default(),
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -217,6 +220,7 @@ fn not_test_only_when_imported_from_app_config() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        type_member_types: Box::default(),
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -288,6 +292,7 @@ fn not_test_only_when_also_imported_from_source() {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            type_member_types: Box::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -318,6 +323,7 @@ fn not_test_only_when_also_imported_from_source() {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            type_member_types: Box::default(),
         },
     ];
 
@@ -376,6 +382,7 @@ fn test_only_dep_from_workspace_jest_config() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        type_member_types: Box::default(),
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

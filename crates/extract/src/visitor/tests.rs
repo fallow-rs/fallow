@@ -2159,6 +2159,227 @@ fn assigned_nested_object_member_access_mapped_to_class() {
 }
 
 #[test]
+fn interface_property_hop_member_access_mapped_to_class() {
+    // Issue #1785 Part A: a NAMED local interface hop (`this.opts.c.optM()`
+    // where `opts: Opts` and `interface Opts { c: OptDep }`) expands to the
+    // property's declared type, so the access is keyed by the imported name.
+    let info = parse(
+        r"
+            import type { OptDep } from './dep';
+            interface Opts { c: OptDep }
+            export class UserG {
+                constructor(private opts: Opts) {}
+                run() {
+                    this.opts.c.optM();
+                }
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "OptDep" && a.member == "optM"),
+        "this.opts.c.optM() through a named interface hop should map to OptDep.optM, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn type_literal_alias_property_hop_member_access_mapped_to_class() {
+    let info = parse(
+        r"
+            import type { AliasDep } from './dep';
+            type Opts = { c: AliasDep };
+            export class UserA {
+                constructor(private opts: Opts) {}
+                run() {
+                    this.opts.c.viaAlias();
+                }
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "AliasDep" && a.member == "viaAlias"),
+        "this.opts.c.viaAlias() through a type-literal alias hop should map to AliasDep.viaAlias, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn two_level_interface_hop_member_access_mapped_to_class() {
+    // Multi-segment expansion: each hop consumes one segment, so nested named
+    // interfaces resolve to the terminal property type.
+    let info = parse(
+        r"
+            import type { LeafDep } from './dep';
+            interface Inner { leaf: LeafDep }
+            interface Outer { inner: Inner }
+            export class UserN {
+                constructor(private opts: Outer) {}
+                run() {
+                    this.opts.inner.leaf.deep();
+                }
+            }
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "LeafDep" && a.member == "deep"),
+        "two-level interface hop should map to LeafDep.deep, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn imported_interface_hop_emits_typed_property_fact() {
+    // Issue #1785 Part B: the options type is IMPORTED, so the extract layer
+    // cannot expand locally and must emit a TypedPropertyMemberAccess fact
+    // for the analyze-layer join.
+    let info = parse(
+        r"
+            import type { SharedOpts } from './opts';
+            export class UserS {
+                constructor(private opts: SharedOpts) {}
+                run() {
+                    this.opts.c.viaShared();
+                }
+            }
+            ",
+    );
+    assert!(
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::TypedPropertyMemberAccess(access)
+                    if access.type_name == "SharedOpts"
+                        && access.property_path == "c"
+                        && access.member == "viaShared"
+            )
+        }),
+        "imported-interface hop should emit a TypedPropertyMemberAccess fact, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn mid_chain_imported_hop_emits_fact_with_remaining_path() {
+    // A local interface whose property type is IMPORTED dead-ends mid-chain;
+    // the fact carries the remaining segments from that point.
+    let info = parse(
+        r"
+            import type { SubOpts } from './sub';
+            interface Opts { c: SubOpts }
+            export class UserM {
+                constructor(private opts: Opts) {}
+                run() {
+                    this.opts.c.d.deepMember();
+                }
+            }
+            ",
+    );
+    assert!(
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::TypedPropertyMemberAccess(access)
+                    if access.type_name == "SubOpts"
+                        && access.property_path == "d"
+                        && access.member == "deepMember"
+            )
+        }),
+        "mid-chain imported hop should emit a fact with the remaining path, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn local_class_compound_does_not_emit_typed_property_fact() {
+    // A compound rooted at a LOCAL class stays on the instance_bindings path;
+    // no fact is emitted (Opaque).
+    let info = parse(
+        r"
+            import type { DepClassOpts } from './dep';
+            class Opts {
+                constructor(public c: DepClassOpts) {}
+            }
+            export class UserC {
+                constructor(private opts: Opts) {}
+                run() {
+                    this.opts.c.viaClassOpts();
+                }
+            }
+            ",
+    );
+    assert!(
+        !info
+            .semantic_facts
+            .iter()
+            .any(|fact| matches!(fact, SemanticFact::TypedPropertyMemberAccess(_))),
+        "a local-class compound must not emit a TypedPropertyMemberAccess fact, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn whole_object_use_through_interface_hop_maps_to_class() {
+    // Parity: `Object.keys(this.opts.c)` through a local interface hop
+    // credits the terminal class as a whole-object use.
+    let info = parse(
+        r"
+            import type { OptDep } from './dep';
+            interface Opts { c: OptDep }
+            export class UserW {
+                constructor(private opts: Opts) {}
+                run() {
+                    Object.keys(this.opts.c);
+                }
+            }
+            ",
+    );
+    assert!(
+        info.whole_object_uses.iter().any(|name| name == "OptDep"),
+        "whole-object use through an interface hop should credit OptDep, found: {:?}",
+        info.whole_object_uses
+    );
+}
+
+#[test]
+fn type_member_types_persist_interface_and_alias_entries() {
+    // Issue #1785 Part B declaring side: top-level interfaces and
+    // type-literal aliases persist their named-reference property types.
+    let info = parse(
+        r"
+            import type { OptDep } from './dep';
+            export interface SharedOpts { c: OptDep }
+            type LocalOpts = { d: OptDep };
+            export const keep = 1;
+            ",
+    );
+    let entries: Vec<(&str, &str, &str)> = info
+        .type_member_types
+        .iter()
+        .map(|entry| {
+            (
+                entry.type_name.as_str(),
+                entry.property.as_str(),
+                entry.property_type.as_str(),
+            )
+        })
+        .collect();
+    assert!(
+        entries.contains(&("SharedOpts", "c", "OptDep")),
+        "exported interface property types should persist, found: {entries:?}"
+    );
+    assert!(
+        entries.contains(&("LocalOpts", "d", "OptDep")),
+        "type-literal alias property types should persist, found: {entries:?}"
+    );
+}
+
+#[test]
 fn destructure_binding_typed_by_interface_mapped_to_class() {
     let info = parse(
         r"
