@@ -4,16 +4,18 @@
  * `fallow schema` capability manifest (issues #1188 and #1189).
  *
  * Targets: `<target>/SKILL.md` and, when present,
- * `<target>/references/cli-reference.md`. SKILL.md sections:
+ * `<target>/references/cli-reference.md` and `<target>/references/mcp.md`.
+ * SKILL.md sections:
  *
  *   <!-- generated:commands:start -->    ... <!-- generated:commands:end -->
  *   <!-- generated:issue-types:start --> ... <!-- generated:issue-types:end -->
- *   <!-- generated:mcp-tools:start -->   ... <!-- generated:mcp-tools:end -->
  *   <!-- generated:task-matrix:start --> ... <!-- generated:task-matrix:end -->
  *
- * CLI reference sections use `generated:flags:*` markers for global flags,
- * bare `fallow` combined-mode flags, command-local flags, and the dead-code
- * issue filter table.
+ * references/mcp.md carries the `generated:mcp-tools:*` section (moved out of
+ * SKILL.md so the always-loaded entry file stays lean; SKILL.md keeps only a
+ * pointer). CLI reference sections use `generated:flags:*` markers for global
+ * flags, bare `fallow` combined-mode flags, command-local flags, and the
+ * dead-code issue filter table.
  *
  * A target whose text contains NEITHER marker of a section has not adopted
  * that section and is skipped; a half-present marker pair still fails loudly.
@@ -60,7 +62,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const SKILL_SECTION_IDS = ["commands", "issue-types", "mcp-tools", "task-matrix"];
+const SKILL_SECTION_IDS = ["commands", "issue-types", "task-matrix"];
+// mcp-tools moved out of SKILL.md into references/mcp.md: the full 20+ tool
+// catalogue is reference-grade and (when the server is connected) already
+// advertised via live tool schemas, so it does not belong in the always-loaded
+// entry file. SKILL.md keeps only a short pointer section.
+const MCP_REFERENCE_SECTION_IDS = ["mcp-tools"];
 const CLI_REFERENCE_SECTION_IDS = [
   "flags:global",
   "flags:fallow-combined",
@@ -79,7 +86,11 @@ const CLI_REFERENCE_SECTION_IDS = [
   "flags:security",
   "flags:config",
 ];
-export const SECTION_IDS = [...SKILL_SECTION_IDS, ...CLI_REFERENCE_SECTION_IDS];
+export const SECTION_IDS = [
+  ...SKILL_SECTION_IDS,
+  ...MCP_REFERENCE_SECTION_IDS,
+  ...CLI_REFERENCE_SECTION_IDS,
+];
 
 /** Security family rows kept in the SKILL.md issue-types table; the ~47
  * per-CWE catalogue categories collapse under tainted-sink there. */
@@ -637,6 +648,9 @@ export const regenerateSkillMd = (text, schema, fileLabel = "SKILL.md") =>
 export const regenerateCliReferenceMd = (text, schema, fileLabel = "references/cli-reference.md") =>
   regenerateSections(text, schema, fileLabel, CLI_REFERENCE_SECTION_IDS);
 
+export const regenerateMcpReferenceMd = (text, schema, fileLabel = "references/mcp.md") =>
+  regenerateSections(text, schema, fileLabel, MCP_REFERENCE_SECTION_IDS);
+
 const changedSections = (before, schema, fileLabel, sectionIds) =>
   sectionIds.filter(
     (id) =>
@@ -749,6 +763,24 @@ export const main = (argv = process.argv.slice(2)) => {
           after: cliAfter,
           schema,
           sectionIds: CLI_REFERENCE_SECTION_IDS,
+          check: opts.check,
+        })
+      ) {
+        drifted += 1;
+      }
+    }
+
+    const mcpReferenceFile = join(target, "references", "mcp.md");
+    if (existsSync(mcpReferenceFile)) {
+      const mcpBefore = readFileSync(mcpReferenceFile, "utf8");
+      const mcpAfter = regenerateMcpReferenceMd(mcpBefore, schema, mcpReferenceFile);
+      if (
+        processFile({
+          file: mcpReferenceFile,
+          before: mcpBefore,
+          after: mcpAfter,
+          schema,
+          sectionIds: MCP_REFERENCE_SECTION_IDS,
           check: opts.check,
         })
       ) {

@@ -7,6 +7,7 @@ import {
   hasSection,
   parseExistingTable,
   regenerateCliReferenceMd,
+  regenerateMcpReferenceMd,
   regenerateSkillMd,
   sectionIsAbsent,
   spliceSection,
@@ -270,14 +271,6 @@ Hand-written intro stays.
 | \`unused-file\` | \`--unused-files\` | - | \`// fallow-ignore-file unused-file\` | Curated teaching prose for unused files |
 <!-- generated:issue-types:end -->
 
-## MCP Tools
-
-<!-- generated:mcp-tools:start -->
-| Tool | Kind | License | Key params | Description |
-|---|---|---|---|---|
-| \`analyze\` | analysis | free | \`issue_types\` | Curated long analyze prose with call hints |
-<!-- generated:mcp-tools:end -->
-
 ## Task Map
 
 <!-- generated:task-matrix:start -->
@@ -312,7 +305,17 @@ Hand-written intro stays.
 | \`unused-file\` | \`--unused-files\` | - | \`// fallow-ignore-file unused-file\` | Curated teaching prose for unused files |
 <!-- generated:issue-types:end -->
 
-## MCP Tools
+Hand-written outro stays.
+`;
+
+/** A dedicated references/mcp.md target: the mcp-tools section moved here out of
+ * SKILL.md. Stale relative to SCHEMA (analyze is missing its 2nd key param and
+ * list_boundaries is absent) so regeneration has work to do. */
+const DOC_MCP_REFERENCE = `# Fallow MCP Server Reference
+
+Hand-written intro stays.
+
+## Tool catalogue
 
 <!-- generated:mcp-tools:start -->
 | Tool | Kind | License | Key params | Description |
@@ -403,9 +406,6 @@ test("curated cells are preserved; identity columns are regenerated", () => {
   assert.ok(out.includes("Curated dead code purpose"));
   assert.ok(out.includes("`--changed-since`"));
   assert.ok(out.includes("Curated teaching prose for unused files"));
-  assert.ok(out.includes("Curated long analyze prose with call hints"));
-  // Identity regenerated: analyze gains its second key param from the manifest.
-  assert.ok(out.includes("`issue_types`, `production`"));
 });
 
 test("new rows are seeded from the manifest", () => {
@@ -416,8 +416,28 @@ test("new rows are seeded from the manifest", () => {
       "| `type-only-dependency` | `--unused-deps` | - | - | Dependency only used via import type; Only reported in --production mode |",
     ),
   );
-  // New MCP tool seeded; empty key params render as a dash.
+});
+
+test("mcp-tools regenerates in references/mcp.md: curated preserved, identity + new rows", () => {
+  const out = regenerateMcpReferenceMd(DOC_MCP_REFERENCE, SCHEMA);
+  // Idempotent.
+  assert.equal(regenerateMcpReferenceMd(out, SCHEMA), out);
+  // Curated Description preserved across regeneration.
+  assert.ok(out.includes("Curated long analyze prose with call hints"));
+  // Identity regenerated: analyze gains its second key param from the manifest.
+  assert.ok(out.includes("`issue_types`, `production`"));
+  // New tool seeded; empty key params render as a dash.
   assert.ok(out.includes("| `list_boundaries` | introspection | free | - |"));
+  // Hand-written prose outside the markers is untouched.
+  assert.ok(out.startsWith("# Fallow MCP Server Reference"));
+  assert.ok(out.trimEnd().endsWith("Hand-written outro stays."));
+});
+
+test("SKILL.md no longer carries or regenerates an mcp-tools section", () => {
+  assert.ok(sectionIsAbsent(DOC, "mcp-tools"));
+  const out = regenerateSkillMd(DOC, SCHEMA);
+  assert.ok(!out.includes("generated:mcp-tools"));
+  assert.ok(!out.includes("list_boundaries"));
 });
 
 test("removed rows drop; nested-subcommand rows survive while their parent exists", () => {
@@ -437,7 +457,7 @@ test("security catalogue and freemium rows stay out of the issue-types table", (
 });
 
 test("seeded cells escape pipes and newlines from manifest text", () => {
-  const out = regenerateSkillMd(DOC, SCHEMA);
+  const out = regenerateMcpReferenceMd(DOC_MCP_REFERENCE, SCHEMA);
   assert.ok(out.includes("List architecture \\| boundary zones and access rules"));
 });
 
@@ -480,8 +500,8 @@ test("a target without the task-matrix markers regenerates the other sections an
   assert.ok(!hasSection(DOC_WITHOUT_TASK_MATRIX, "task-matrix"));
   // Tolerance: regeneration must NOT throw on the absent section.
   const out = regenerateSkillMd(DOC_WITHOUT_TASK_MATRIX, SCHEMA);
-  // The three adopted sections still regenerate (analyze gains its 2nd param).
-  assert.ok(out.includes("`issue_types`, `production`"));
+  // The adopted sections still regenerate: new command + issue-type rows appear.
+  assert.ok(out.includes("| `dupes` |"));
   assert.ok(out.includes("`type-only-dependency`"));
   // No task-matrix markers were injected, and the surrounding prose is intact.
   assert.ok(!out.includes("generated:task-matrix"));
@@ -493,15 +513,15 @@ test("a target without the task-matrix markers regenerates the other sections an
 
 test("a half-present task-matrix marker still throws", () => {
   const halfStart = DOC_WITHOUT_TASK_MATRIX.replace(
-    "## MCP Tools",
-    "<!-- generated:task-matrix:start -->\n\n## MCP Tools",
+    "Hand-written outro stays.",
+    "<!-- generated:task-matrix:start -->\n\nHand-written outro stays.",
   );
   assert.ok(!sectionIsAbsent(halfStart, "task-matrix"));
   assert.throws(() => regenerateSkillMd(halfStart, SCHEMA), /missing marker.*task-matrix/s);
 
   const halfEnd = DOC_WITHOUT_TASK_MATRIX.replace(
-    "## MCP Tools",
-    "<!-- generated:task-matrix:end -->\n\n## MCP Tools",
+    "Hand-written outro stays.",
+    "<!-- generated:task-matrix:end -->\n\nHand-written outro stays.",
   );
   assert.ok(!sectionIsAbsent(halfEnd, "task-matrix"));
   assert.throws(() => regenerateSkillMd(halfEnd, SCHEMA), /missing marker.*task-matrix/s);
@@ -595,16 +615,22 @@ test("--check exits 1 on drift, writes nothing, and exits 0 when in sync", async
   writeFileSync(join(dir, "SKILL.md"), DOC);
   mkdirSync(referencesDir);
   writeFileSync(join(referencesDir, "cli-reference.md"), DOC_CLI_REFERENCE);
+  writeFileSync(join(referencesDir, "mcp.md"), DOC_MCP_REFERENCE);
 
   // DOC is stale relative to SCHEMA: --check must report drift without writing.
   const before = readFileSync(join(dir, "SKILL.md"), "utf8");
   const cliBefore = readFileSync(join(referencesDir, "cli-reference.md"), "utf8");
+  const mcpBefore = readFileSync(join(referencesDir, "mcp.md"), "utf8");
   assert.equal(main(["--schema", schemaPath, "--target", dir, "--check"]), 1);
   assert.equal(readFileSync(join(dir, "SKILL.md"), "utf8"), before);
   assert.equal(readFileSync(join(referencesDir, "cli-reference.md"), "utf8"), cliBefore);
+  assert.equal(readFileSync(join(referencesDir, "mcp.md"), "utf8"), mcpBefore);
 
   // Regenerate for real, then --check must pass.
   assert.equal(main(["--schema", schemaPath, "--target", dir]), 0);
   assert.equal(main(["--schema", schemaPath, "--target", dir, "--check"]), 0);
+  // The mcp-tools table now lives in references/mcp.md, not SKILL.md.
+  assert.ok(readFileSync(join(referencesDir, "mcp.md"), "utf8").includes("list_boundaries"));
+  assert.ok(!readFileSync(join(dir, "SKILL.md"), "utf8").includes("generated:mcp-tools"));
   rmSync(dir, { recursive: true });
 });
