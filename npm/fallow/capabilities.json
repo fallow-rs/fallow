@@ -986,6 +986,11 @@
       "flags": []
     },
     {
+      "name": "plugin-check",
+      "description": "Dry-run external plugins: report what each activated and seeded",
+      "flags": []
+    },
+    {
       "name": "rule-pack-schema",
       "description": "Print the JSON Schema for rule pack files",
       "flags": []
@@ -5808,6 +5813,10 @@
     "config_schema_note": "Full JSON Schema of the config file: every top-level key (rules, entry, ignorePatterns, workspaces, boundaries, duplicates, health, security, rulePacks, production, cache, ...) and its shape. entry and ignorePatterns are how you declare entry points and exclusions; fallow also auto-honors package.json exports/main/module for library public APIs.",
     "rule_pack_schema_command": "fallow rule-pack-schema",
     "rule_pack_schema_note": "JSON Schema for a declarative rule pack referenced from rulePacks.",
+    "plugin_schema_command": "fallow plugin-schema",
+    "plugin_schema_note": "JSON Schema for a user-authored external plugin (fallow-plugin-*.jsonc). Teach fallow about an unsupported framework declaratively: detection, entryPoints, alwaysUsed, usedExports, usedClassMembers, and manifestEntries (derive entry points from per-package manifest files).",
+    "plugin_check_command": "fallow plugin-check",
+    "plugin_check_note": "Read-only dry-run of your external plugins: reports which activated, which manifests each manifestEntries rule matched, what it seeded (with path-exists), and typed warnings (manifests-matched-none, when-excluded-all, field-path-unresolved, entries-empty, manifest-parse-failed, entry-outside-root, seeded-paths-missing). Run it after authoring a fallow-plugin-*.jsonc to verify it before a full analysis.",
     "config_files": [
       ".fallowrc.json",
       ".fallowrc.jsonc",

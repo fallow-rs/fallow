@@ -23,6 +23,7 @@ Complete command and flag specifications for all fallow CLI commands.
 - [`schema`: CLI Introspection](#schema-cli-introspection)
 - [`config-schema`: Config JSON Schema](#config-schema-config-json-schema)
 - [`plugin-schema`: Plugin JSON Schema](#plugin-schema-plugin-json-schema)
+- [`plugin-check`: Verify external plugins](#plugin-check-verify-external-plugins)
 - [`rule-pack-schema`: Rule Pack JSON Schema](#rule-pack-schema-rule-pack-json-schema)
 - [`config`: Show Resolved Config](#config-show-resolved-config)
 - [Global Flags](#global-flags)
@@ -1337,6 +1338,16 @@ Prints the JSON Schema for external plugin definition files.
 
 ```bash
 fallow plugin-schema > plugin-schema.json
+```
+
+---
+
+## `plugin-check`: Verify external plugins
+
+Read-only dry-run of your external plugins. Reports, per plugin, whether it activated (with the unmet `detection`/`enabler` requirement when inactive), and for `manifestEntries` rules which manifests each matched, what it seeded (with `path_exists`), and typed warnings (`manifests-matched-none`, `when-excluded-all`, `field-path-unresolved`, `entries-empty`, `manifest-parse-failed`, `entry-outside-root`, `seeded-paths-missing`). Run it after authoring a `fallow-plugin-*.jsonc` to verify it before a full analysis. Deterministic output; always exits 0 (advisory, never a gate).
+
+```bash
+fallow plugin-check --format json
 ```
 
 ---
