@@ -71,6 +71,12 @@ pub struct ModuleInfo {
     /// `const x = useApi(); x.member` consumer can credit the returned class.
     /// See issue #1441 (Part A).
     pub exported_factory_returns: Box<[FactoryReturnExport]>,
+    /// Named-type property types declared by this module's top-level interfaces
+    /// and type-literal aliases (`interface Opts { c: OptDep }`). Names are
+    /// local to this module; resolution is deferred to analyze time. Consumed
+    /// by the `unused-class-member` typed-property-hop join and the Playwright
+    /// fixture-type resolution. See issue #1785.
+    pub type_member_types: Box<[TypeMemberTypeEntry]>,
     /// Angular `InjectionToken<Interface>` declarations, as
     /// `(token_export_name, interface_name)` pairs. Recorded only for
     /// `new InjectionToken<I>(...)` initializers whose `InjectionToken` is
@@ -1323,6 +1329,35 @@ pub struct FactoryReturnExport {
     pub class_local_name: String,
 }
 
+/// A named-type property whose declared type is a named type reference.
+///
+/// `interface Opts { c: OptDep }` (or `type Opts = { c: OptDep }`) records
+/// `TypeMemberTypeEntry { type_name: "Opts", property: "c", property_type: "OptDep" }`.
+/// Both `type_name` and `property_type` are the DECLARING module's own local
+/// names; resolution through that module's imports/exports is deferred to
+/// analyze time, mirroring `FactoryReturnExport.class_local_name`. Consumed by
+/// the `unused-class-member` typed-property-hop join so a consumer's
+/// `this.opts.c.optM()` credits `OptDep.optM` across module boundaries.
+/// See issue #1785.
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+    PartialEq,
+    Eq,
+)]
+pub struct TypeMemberTypeEntry {
+    /// Local interface or type-alias name declaring the property.
+    pub type_name: String,
+    /// Property name declared on the type.
+    pub property: String,
+    /// The property's declared type name (local to the declaring module).
+    pub property_type: String,
+}
+
 /// A module-scope declaration that can be used as a TypeScript type.
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct LocalTypeDeclaration {
@@ -1444,6 +1479,10 @@ pub enum SemanticFact {
     /// A member access on a value returned by an imported free-function factory
     /// (`const x = importedFactory(); x.member`). See issue #1441 (Part A).
     FactoryFnMemberAccess(FactoryFnMemberAccessFact),
+    /// A member access reached through a property of a value whose declared
+    /// type is an imported named type (`this.opts.c.optM()` where `opts` is
+    /// typed by an imported interface). See issue #1785.
+    TypedPropertyMemberAccess(TypedPropertyMemberAccessFact),
     /// A member access on a fluent chain rooted at an imported static factory.
     FluentChainMemberAccess(FluentChainMemberAccessFact),
     /// A member access on a fluent chain rooted at a `new` expression.
@@ -1592,6 +1631,13 @@ impl<'a> SemanticFactView<'a> {
             .collect()
     }
 
+    /// Collect typed-property-hop member facts.
+    pub fn typed_property_member_accesses(self) -> Vec<TypedPropertyMemberAccessFact> {
+        typed_property_member_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
     /// Collect static factory fluent-chain member facts.
     pub fn fluent_chain_member_accesses(self) -> Vec<FluentChainMemberAccessFact> {
         fluent_chain_member_access_facts(self.semantic_facts)
@@ -1697,6 +1743,19 @@ fn fluent_chain_member_access_facts(
 ) -> impl Iterator<Item = &FluentChainMemberAccessFact> {
     semantic_facts.iter().filter_map(|fact| {
         if let SemanticFact::FluentChainMemberAccess(access) = fact {
+            Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate typed-property-hop member facts.
+fn typed_property_member_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &TypedPropertyMemberAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::TypedPropertyMemberAccess(access) = fact {
             Some(access)
         } else {
             None
@@ -1818,6 +1877,29 @@ pub struct FactoryFnMemberAccessFact {
     /// Local imported function used as the factory callee.
     pub callee_name: String,
     /// Member accessed on the returned instance-like object.
+    pub member: String,
+}
+
+/// A member access reached through a typed property hop that the extraction
+/// layer could not resolve locally.
+///
+/// `constructor(private opts: Opts) { ... this.opts.c.optM() }` where `Opts`
+/// is NOT declared in this file emits
+/// `TypedPropertyMemberAccessFact { type_name: "Opts", property_path: "c", member: "optM" }`.
+/// The analyze layer resolves `type_name` through the consumer's imports to the
+/// declaring module, walks `property_path` through that module's
+/// `type_member_types`, resolves the terminal type name through the declaring
+/// module's own imports, and credits `member` on the resolved class (gated on
+/// the export actually being a class with members). See issue #1785.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypedPropertyMemberAccessFact {
+    /// Local (usually imported) named-type symbol the receiver is typed by.
+    pub type_name: String,
+    /// Remaining dotted property segments between the typed binding and the
+    /// final member (e.g. `"c"` for `this.opts.c.optM()`).
+    pub property_path: String,
+    /// Member accessed on the terminal property's instance.
     pub member: String,
 }
 
@@ -2377,7 +2459,9 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1320);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1336);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

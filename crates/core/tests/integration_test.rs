@@ -217,6 +217,8 @@ mod inheritance_members;
 mod issue_1441_factory_return_member;
 #[path = "integration_test/issue_1640_commit_and_tag_version_updater.rs"]
 mod issue_1640_commit_and_tag_version_updater;
+#[path = "integration_test/issue_1785_typed_property_hop.rs"]
+mod issue_1785_typed_property_hop;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]

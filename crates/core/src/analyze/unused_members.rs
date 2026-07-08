@@ -15,7 +15,7 @@ use fallow_types::extract::{
     FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FluentChainMemberAccessFact,
     FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
     PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    SemanticFactView, ordinary_whole_object_uses,
+    SemanticFactView, TypedPropertyMemberAccessFact, ordinary_whole_object_uses,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -1023,6 +1023,11 @@ fn factory_fn_member_accesses(resolved: &ResolvedModule) -> Vec<FactoryFnMemberA
     view.factory_fn_member_accesses()
 }
 
+fn typed_property_member_accesses(resolved: &ResolvedModule) -> Vec<TypedPropertyMemberAccessFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    view.typed_property_member_accesses()
+}
+
 fn fluent_chain_member_accesses(resolved: &ResolvedModule) -> Vec<FluentChainMemberAccessFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
     view.fluent_chain_member_accesses()
@@ -1743,6 +1748,154 @@ fn propagate_factory_fn_accesses(
     }
 }
 
+/// Resolve `name` (as seen from `module`) to the modules that DECLARE a
+/// named-type property map for it: the module itself when it declares the
+/// type, else every re-export-walked import origin whose `type_member_types`
+/// carries the origin export name. A name that resolves to no declaring site
+/// (a global, a class, a wrong annotation) contributes nothing.
+fn typed_property_declaring_sites<'a>(
+    graph: &ModuleGraph,
+    module_by_id: &FxHashMap<FileId, &'a ResolvedModule>,
+    local_keys_cache: &mut FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>>,
+    module: &'a ResolvedModule,
+    name: &str,
+) -> Vec<(&'a ResolvedModule, String)> {
+    if module
+        .type_member_types
+        .iter()
+        .any(|entry| entry.type_name == name)
+    {
+        return vec![(module, name.to_string())];
+    }
+    let local_keys = local_keys_cache
+        .entry(module.file_id)
+        .or_insert_with(|| build_local_to_export_keys(module));
+    let Some(seed_keys) = local_keys.get(name) else {
+        return Vec::new();
+    };
+    let seed_keys = seed_keys.clone();
+    let mut sites = Vec::new();
+    for seed in &seed_keys {
+        for origin in walk_re_export_origins(graph, seed.file_id, seed.export_name.as_str()) {
+            let Some(origin_module) = module_by_id.get(&origin.file_id) else {
+                continue;
+            };
+            if origin_module
+                .type_member_types
+                .iter()
+                .any(|entry| entry.type_name == origin.export_name.as_str())
+            {
+                sites.push((*origin_module, origin.export_name));
+            }
+        }
+    }
+    sites
+}
+
+/// Credit member accesses reached through a typed property hop whose named
+/// type is not declared in the consumer file (`this.opts.c.optM()` where
+/// `opts` is typed by an imported interface / alias). Mirrors
+/// `propagate_factory_fn_accesses`'s chain-of-gates shape; a wrong resolution
+/// at any link credits nothing (false-negative-preferring):
+///
+///   1. the fact's `type_name` resolves through the consumer's imports/exports
+///      (re-export aware) to a module whose `type_member_types` declares the
+///      type, the cross-module over-credit gate;
+///   2. each `property_path` segment must be a named-reference-typed property
+///      of the current type; a segment whose property type is itself imported
+///      re-resolves through THAT declaring module's imports (depth bounded by
+///      the segment count, each level deduped);
+///   3. the terminal property type resolves through the last declaring
+///      module's own imports/exports and must be a class with members
+///      (`export_is_class_with_members`, reused via
+///      `credit_factory_return_class_member`).
+///
+/// See issue #1785.
+fn propagate_typed_property_accesses(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) {
+    let module_by_id: FxHashMap<FileId, &ResolvedModule> = resolved_modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
+    let mut local_keys_cache: FxHashMap<FileId, FxHashMap<&str, Vec<ExportKey>>> =
+        FxHashMap::default();
+
+    // Phase 1: walk every fact's property path to its terminal
+    // (declaring module, terminal type local name, member) triples.
+    let mut terminals: FxHashSet<(FileId, String, String)> = FxHashSet::default();
+    for resolved in resolved_modules {
+        for fact in typed_property_member_accesses(resolved) {
+            let segments: Vec<&str> = fact
+                .property_path
+                .split('.')
+                .filter(|segment| !segment.is_empty())
+                .collect();
+            if segments.is_empty() {
+                continue;
+            }
+            let mut frontier: Vec<(&ResolvedModule, String)> =
+                vec![(resolved, fact.type_name.clone())];
+            for (idx, segment) in segments.iter().enumerate() {
+                let mut next: Vec<(&ResolvedModule, String)> = Vec::new();
+                let mut seen: FxHashSet<(FileId, String)> = FxHashSet::default();
+                for (module, name) in frontier {
+                    for (declaring, declared_name) in typed_property_declaring_sites(
+                        graph,
+                        &module_by_id,
+                        &mut local_keys_cache,
+                        module,
+                        &name,
+                    ) {
+                        let Some(entry) = declaring.type_member_types.iter().find(|entry| {
+                            entry.type_name == declared_name && entry.property == *segment
+                        }) else {
+                            continue;
+                        };
+                        let property_type = entry.property_type.clone();
+                        if idx + 1 == segments.len() {
+                            terminals.insert((
+                                declaring.file_id,
+                                property_type,
+                                fact.member.clone(),
+                            ));
+                        } else if seen.insert((declaring.file_id, property_type.clone())) {
+                            next.push((declaring, property_type));
+                        }
+                    }
+                }
+                frontier = next;
+                if frontier.is_empty() {
+                    break;
+                }
+            }
+        }
+    }
+
+    // Phase 2: resolve each terminal type name through its declaring module's
+    // own imports/exports to a class export and credit the member.
+    let mut credit_context = FactoryReturnCreditContext {
+        graph,
+        module_by_id: &module_by_id,
+        factory_keys_cache: &mut local_keys_cache,
+        accessed_members,
+    };
+    for (declaring_file_id, terminal_name, member) in terminals {
+        let Some(declaring_module) = credit_context.module_by_id.get(&declaring_file_id) else {
+            continue;
+        };
+        credit_factory_return_class_member(
+            &mut credit_context,
+            declaring_file_id,
+            declaring_module,
+            terminal_name.as_str(),
+            member.as_str(),
+        );
+    }
+}
+
 /// Validate a fluent chain against a single class export.
 fn export_validates_fluent_chain(
     export: &crate::extract::ExportInfo,
@@ -2424,6 +2577,7 @@ fn propagate_common_member_accesses(
     propagate_playwright_fixture_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_factory_call_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_factory_fn_accesses(input.graph, input.resolved_modules, accessed_members);
+    propagate_typed_property_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_fluent_chain_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_fluent_chain_new_accesses(input.graph, input.resolved_modules, accessed_members);
     propagate_accesses_through_typed_instance_bindings(

@@ -1,0 +1,5 @@
+{
+  "name": "issue-1785-typed-property-hop",
+  "private": true,
+  "main": "src/index.ts"
+}

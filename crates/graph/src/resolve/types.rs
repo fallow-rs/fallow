@@ -179,6 +179,10 @@ pub struct ResolvedModule {
     /// Exported free-function factories that provably return one class instance.
     /// See `fallow_types::extract::FactoryReturnExport` and issue #1441 (Part A).
     pub exported_factory_returns: Box<[fallow_types::extract::FactoryReturnExport]>,
+    /// Named-type property types declared by this module's top-level interfaces
+    /// and type-literal aliases. See `fallow_types::extract::TypeMemberTypeEntry`
+    /// and issue #1785.
+    pub type_member_types: Box<[fallow_types::extract::TypeMemberTypeEntry]>,
 }
 
 impl Default for ResolvedModule {
@@ -201,6 +205,7 @@ impl Default for ResolvedModule {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            type_member_types: Box::default(),
         }
     }
 }

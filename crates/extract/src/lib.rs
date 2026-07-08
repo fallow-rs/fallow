@@ -60,8 +60,8 @@ pub use fallow_types::extract::{
     ImportedName, InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess, MemberInfo,
     MemberKind, ModuleInfo, ParseResult, PlaywrightFixtureAliasFact,
     PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
-    compute_line_offsets,
+    PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
+    TypedPropertyMemberAccessFact, VisibilityTag, compute_line_offsets,
 };
 
 pub use astro::{

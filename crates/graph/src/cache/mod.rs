@@ -427,6 +427,7 @@ fn restore_cached_resolved_module(
         value_referenced_import_bindings: module.value_referenced_import_bindings.clone(),
         namespace_object_aliases: module.namespace_object_aliases.clone(),
         exported_factory_returns: module.exported_factory_returns.clone(),
+        type_member_types: module.type_member_types.clone(),
     })
 }
 

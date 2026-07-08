@@ -18,7 +18,8 @@ use crate::{
     FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
     InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
     PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
-    PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo, SemanticFact, VisibilityTag,
+    PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
+    TypedPropertyMemberAccessFact, VisibilityTag,
 };
 use fallow_types::extract::{
     AngularComponentSelector, AngularInputMember, AngularOutputMember, CalleeUse,
@@ -156,6 +157,24 @@ impl BindingTarget {
         self.class_name()
             .map(|class_name| format!("{class_name}.{suffix}"))
     }
+}
+
+/// Outcome of expanding a compound binding target (`Opts.c`) through the
+/// file's named-type property maps. See issue #1785.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TypedPropertyExpansion {
+    /// Every hop resolved locally; the terminal name is an ordinary
+    /// local / imported identifier the analyze layer can resolve.
+    Resolved(String),
+    /// A hop's type name is not declared in this file (imported); the
+    /// remainder must be joined cross-module at analyze time.
+    CrossModule {
+        type_name: String,
+        property_path: String,
+    },
+    /// Not an interface/alias hop (e.g. a local-class compound handled by
+    /// `instance_bindings`); leave the compound access untouched.
+    Opaque,
 }
 
 #[derive(Debug, Clone)]
@@ -782,6 +801,22 @@ impl ModuleInfoExtractor {
             .push(SemanticFact::FactoryFnMemberAccess(
                 FactoryFnMemberAccessFact {
                     callee_name,
+                    member,
+                },
+            ));
+    }
+
+    fn record_typed_property_member_fact(
+        &mut self,
+        type_name: String,
+        property_path: String,
+        member: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::TypedPropertyMemberAccess(
+                TypedPropertyMemberAccessFact {
+                    type_name,
+                    property_path,
                     member,
                 },
             ));
@@ -1529,6 +1564,29 @@ impl ModuleInfoExtractor {
         out
     }
 
+    /// Flatten this file's named-type property maps into the persisted
+    /// `ModuleInfo.type_member_types` entries, sorted for deterministic
+    /// output. Names stay local to this module; resolution is deferred to
+    /// the analyze-layer join. See issue #1785.
+    fn collect_type_member_types(&self) -> Vec<TypeMemberTypeEntry> {
+        let mut entries: Vec<TypeMemberTypeEntry> = self
+            .interface_property_types
+            .iter()
+            .flat_map(|(type_name, properties)| {
+                properties
+                    .iter()
+                    .map(|(property, property_type)| TypeMemberTypeEntry {
+                        type_name: type_name.clone(),
+                        property: property.clone(),
+                        property_type: property_type.clone(),
+                    })
+            })
+            .collect();
+        entries
+            .sort_unstable_by(|a, b| (&a.type_name, &a.property).cmp(&(&b.type_name, &b.property)));
+        entries
+    }
+
     pub(crate) fn resolve_typed_destructure_bindings(&mut self) {
         let pending = std::mem::take(&mut self.pending_typed_destructures);
         if pending.is_empty() {
@@ -1568,38 +1626,124 @@ impl ModuleInfoExtractor {
         }
         let mut additional_accesses = Vec::new();
         let mut additional_facts = Vec::new();
+        let mut additional_typed_property_facts = Vec::new();
         for access in &self.member_accesses {
             let Some(target) = self.resolve_bound_object_name(&access.object) else {
                 continue;
             };
             match target {
-                BindingTarget::Class(object) => additional_accesses.push(MemberAccess {
-                    object,
-                    member: access.member.clone(),
-                }),
+                BindingTarget::Class(object) => {
+                    // A compound target (`Opts.c` from `this.opts.c` with binding
+                    // `this.opts -> Opts`) may hop through a named interface /
+                    // type-literal alias; expand it so the terminal property type
+                    // is credited (issue #1785). The compound access itself is
+                    // still pushed: local-class compounds resolve downstream via
+                    // `instance_bindings`, and interface compounds are inert.
+                    match self.expand_typed_property_compound(&object) {
+                        TypedPropertyExpansion::Resolved(terminal) => {
+                            additional_accesses.push(MemberAccess {
+                                object: terminal,
+                                member: access.member.clone(),
+                            });
+                        }
+                        TypedPropertyExpansion::CrossModule {
+                            type_name,
+                            property_path,
+                        } => additional_typed_property_facts.push((
+                            type_name,
+                            property_path,
+                            access.member.clone(),
+                        )),
+                        TypedPropertyExpansion::Opaque => {}
+                    }
+                    additional_accesses.push(MemberAccess {
+                        object,
+                        member: access.member.clone(),
+                    });
+                }
                 BindingTarget::FactoryCall {
                     callee_object,
                     callee_method,
                 } => additional_facts.push((callee_object, callee_method, access.member.clone())),
             }
         }
-        let additional_whole: Vec<String> = self
-            .whole_object_uses
-            .iter()
-            .filter_map(|name| self.resolve_bound_object_name(name))
-            .filter_map(|target| {
-                if let BindingTarget::Class(name) = target {
-                    Some(name)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let additional_whole: Vec<String> =
+            self.whole_object_uses
+                .iter()
+                .filter_map(|name| self.resolve_bound_object_name(name))
+                .filter_map(|target| {
+                    if let BindingTarget::Class(name) = target {
+                        Some(name)
+                    } else {
+                        None
+                    }
+                })
+                .flat_map(|name| {
+                    // Mirror the member-access expansion for whole-object uses:
+                    // `use(this.opts.c)` through a local interface hop credits the
+                    // terminal class wholesale. Cross-module whole-object hops are
+                    // out of scope (issue #1785 covers member accesses).
+                    let expanded = match self.expand_typed_property_compound(&name) {
+                        TypedPropertyExpansion::Resolved(terminal) => Some(terminal),
+                        TypedPropertyExpansion::CrossModule { .. }
+                        | TypedPropertyExpansion::Opaque => None,
+                    };
+                    std::iter::once(name).chain(expanded)
+                })
+                .collect();
         self.member_accesses.extend(additional_accesses);
         for (callee_object, callee_method, member) in additional_facts {
             self.record_factory_call_member_fact(callee_object, callee_method, member);
         }
+        for (type_name, property_path, member) in additional_typed_property_facts {
+            self.record_typed_property_member_fact(type_name, property_path, member);
+        }
         self.whole_object_uses.extend(additional_whole);
+    }
+
+    /// Expand a compound binding target (`Opts.c[.d...]`) through this file's
+    /// named-type property maps (`interface_property_types`).
+    ///
+    /// Each hop consumes one path segment, so the walk terminates after at most
+    /// `segments` iterations even for self-referential types. A hop through a
+    /// locally-declared non-literal type (a class, an enum) returns `Opaque` at
+    /// the root (the `instance_bindings` machinery owns local-class compounds);
+    /// a hop that leaves the file (the type name is not declared here, i.e.
+    /// imported) returns `CrossModule` so the caller can emit a
+    /// `TypedPropertyMemberAccess` fact for the analyze-layer join. See issue
+    /// #1785.
+    fn expand_typed_property_compound(&self, compound: &str) -> TypedPropertyExpansion {
+        let mut segments = compound.split('.');
+        let Some(root) = segments.next() else {
+            return TypedPropertyExpansion::Opaque;
+        };
+        let remaining: Vec<&str> = segments.collect();
+        if remaining.is_empty() {
+            return TypedPropertyExpansion::Opaque;
+        }
+        let mut current = root.to_string();
+        let mut idx = 0;
+        while idx < remaining.len() {
+            let Some(properties) = self.interface_property_types.get(&current) else {
+                if idx == 0 && self.local_declaration_names.contains(&current) {
+                    // A local class / enum root: the compound access resolves
+                    // through `instance_bindings` downstream; leave it alone.
+                    return TypedPropertyExpansion::Opaque;
+                }
+                return TypedPropertyExpansion::CrossModule {
+                    type_name: current,
+                    property_path: remaining[idx..].join("."),
+                };
+            };
+            let Some(next) = properties.get(remaining[idx]) else {
+                // The property is not a named-reference-typed member of this
+                // type (union / generic / unharvested shape): abstain.
+                return TypedPropertyExpansion::Opaque;
+            };
+            current = next.clone();
+            idx += 1;
+        }
+        TypedPropertyExpansion::Resolved(current)
     }
 
     fn resolve_structural_class_calls(&mut self) {
@@ -1760,6 +1904,7 @@ impl ModuleInfoExtractor {
         } = parsed;
         let namespace_object_aliases = self.finalize_resolution_phase();
         let exported_factory_returns = self.collect_exported_factory_returns();
+        let type_member_types = self.collect_type_member_types();
         ModuleInfo {
             file_id,
             exports: self.exports,
@@ -1785,6 +1930,7 @@ impl ModuleInfoExtractor {
             flag_uses: Vec::new(),
             class_heritage: self.class_heritage,
             exported_factory_returns: exported_factory_returns.into_boxed_slice(),
+            type_member_types: type_member_types.into_boxed_slice(),
             injection_tokens: self.injection_tokens,
             local_type_declarations: self.local_type_declarations,
             public_signature_type_references: self.public_signature_type_references,
@@ -1864,6 +2010,7 @@ impl ModuleInfoExtractor {
     ) {
         // Compute before `self.exports` is drained below; the join reads exports.
         let mut exported_factory_returns = self.collect_exported_factory_returns();
+        let mut type_member_types = self.collect_type_member_types();
         info.imports.append(&mut self.imports);
         info.exports.append(&mut self.exports);
         info.re_exports.append(&mut self.re_exports);
@@ -1886,6 +2033,11 @@ impl ModuleInfoExtractor {
             let mut merged = std::mem::take(&mut info.exported_factory_returns).into_vec();
             merged.append(&mut exported_factory_returns);
             info.exported_factory_returns = merged.into_boxed_slice();
+        }
+        if !type_member_types.is_empty() {
+            let mut merged = std::mem::take(&mut info.type_member_types).into_vec();
+            merged.append(&mut type_member_types);
+            info.type_member_types = merged.into_boxed_slice();
         }
         info.injection_tokens.append(&mut self.injection_tokens);
         info.local_type_declarations

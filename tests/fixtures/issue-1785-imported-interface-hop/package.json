@@ -1,0 +1,5 @@
+{
+  "name": "issue-1785-imported-interface-hop",
+  "private": true,
+  "main": "src/index.ts"
+}
