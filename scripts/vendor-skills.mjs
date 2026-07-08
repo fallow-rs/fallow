@@ -27,7 +27,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const VENDORED_TREE = join(REPO_ROOT, "npm", "fallow", "skills", "fallow");
@@ -36,7 +36,7 @@ const SKILL_SUBPATH = join("fallow", "skills", "fallow");
 /** Recursively list files under `dir` as base-relative POSIX paths, sorted.
  * Dotfiles (e.g. `.DS_Store`) are ignored so incidental local cruft on one
  * side never trips the gate. */
-const listFiles = (dir, base = dir) => {
+export const listFiles = (dir, base = dir) => {
   const out = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.name.startsWith(".")) {
@@ -54,16 +54,27 @@ const listFiles = (dir, base = dir) => {
 
 const bytes = (root, relPath) => readFileSync(join(root, relPath));
 
+/** `"version": "x.y.z"` strings (in example JSON inside the reference docs) track
+ * the fallow release version and are bumped on a staggered cadence at release
+ * time: `/fallow-release` step 5c bumps the vendored copy inline while canonical
+ * catches up later (step 10a-pre). The drift gate ignores those lines so it does
+ * not false-fail on that transient window; content drift (plugin counts,
+ * descriptions, commands, flags) is unaffected. The release's own step-10c
+ * byte-identical `diff -r` stays the authoritative version-sync check. */
+const VERSION_STRING = /"version":\s*"[^"]*"/g;
+const normalize = (buf) => buf.toString("utf8").replace(VERSION_STRING, '"version": "<v>"');
+
 /** Compare the two trees. Returns { missing, extra, changed } relative-path
  * lists: `missing` exists in canonical but not vendored, `extra` exists in
- * vendored but not canonical, `changed` exists in both with differing bytes. */
-const diffTrees = (canonical, vendored) => {
+ * vendored but not canonical, `changed` exists in both with differing content
+ * (byte-for-byte, except `"version"` strings; see `normalize`). */
+export const diffTrees = (canonical, vendored) => {
   const canonicalFiles = new Set(listFiles(canonical));
   const vendoredFiles = existsSync(vendored) ? new Set(listFiles(vendored)) : new Set();
   const missing = [...canonicalFiles].filter((f) => !vendoredFiles.has(f));
   const extra = [...vendoredFiles].filter((f) => !canonicalFiles.has(f));
   const changed = [...canonicalFiles].filter(
-    (f) => vendoredFiles.has(f) && !bytes(canonical, f).equals(bytes(vendored, f)),
+    (f) => vendoredFiles.has(f) && normalize(bytes(canonical, f)) !== normalize(bytes(vendored, f)),
   );
   return { missing, extra, changed };
 };
@@ -97,8 +108,8 @@ const resolveCanonical = () => {
   return { tree, present: existsSync(join(tree, "SKILL.md")), explicit: Boolean(explicit) };
 };
 
-const runCheck = (canonical) => {
-  const { missing, extra, changed } = diffTrees(canonical, VENDORED_TREE);
+export const runCheck = (canonical, vendored = VENDORED_TREE) => {
+  const { missing, extra, changed } = diffTrees(canonical, vendored);
   if (missing.length === 0 && extra.length === 0 && changed.length === 0) {
     console.log("vendor-skills: npm/fallow/skills is in sync with canonical fallow-skills");
     return 0;
@@ -115,20 +126,20 @@ const runCheck = (canonical) => {
   }
   console.error("\nRe-vendor with: node scripts/vendor-skills.mjs\n");
   for (const f of changed) {
-    showDiff(canonical, VENDORED_TREE, f);
+    showDiff(canonical, vendored, f);
   }
   return 1;
 };
 
-const runVendor = (canonical) => {
-  const { missing, extra, changed } = diffTrees(canonical, VENDORED_TREE);
+export const runVendor = (canonical, vendored = VENDORED_TREE) => {
+  const { missing, extra, changed } = diffTrees(canonical, vendored);
   for (const relPath of [...missing, ...changed]) {
-    const dest = join(VENDORED_TREE, relPath);
+    const dest = join(vendored, relPath);
     mkdirSync(dirname(dest), { recursive: true });
     writeFileSync(dest, bytes(canonical, relPath));
   }
   for (const relPath of extra) {
-    rmSync(join(VENDORED_TREE, relPath));
+    rmSync(join(vendored, relPath));
   }
   const touched = missing.length + changed.length + extra.length;
   console.log(
@@ -153,9 +164,13 @@ const main = (argv = process.argv.slice(2)) => {
   return check ? runCheck(tree) : runVendor(tree);
 };
 
-try {
-  process.exitCode = main();
-} catch (error) {
-  console.error(`vendor-skills: ${error.message}`);
-  process.exitCode = 2;
+// Only run when executed directly (not when imported by the test), so importing
+// never triggers a re-vendor or a "canonical not found" throw.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    process.exitCode = main();
+  } catch (error) {
+    console.error(`vendor-skills: ${error.message}`);
+    process.exitCode = 2;
+  }
 }
