@@ -2546,9 +2546,13 @@ async fn security_diagnostics_push_when_client_never_pulls() {
         runtime: None,
     };
     let mut diags_by_file: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+    let mut position_mapper = crate::position::PositionMapper::default();
     diags_by_file.insert(
         uri.clone(),
-        vec![crate::diagnostics::security::security_diagnostic(&finding)],
+        vec![crate::diagnostics::security::security_diagnostic(
+            &finding,
+            &mut position_mapper,
+        )],
     );
 
     let mut socket = socket;

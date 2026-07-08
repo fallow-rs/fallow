@@ -372,6 +372,16 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         read_only: true,
     },
     McpToolInfo {
+        name: "impact_closure",
+        kind: "trace",
+        description: "Trace the transitive affected-but-not-in-diff set and coordination gaps for one file",
+        cli_command: Some("fallow dead-code --impact-closure <path> --format json --quiet"),
+        key_params: &["path"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+    },
+    McpToolInfo {
         name: "trace_dependency",
         kind: "trace",
         description: "Trace where a dependency is imported and whether scripts or CI use it",

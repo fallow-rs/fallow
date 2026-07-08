@@ -20,6 +20,8 @@ use ls_types::{
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 use fallow_api::editor_results::{SecurityFinding, SecurityFindingKind};
 
+use crate::position::PositionMapper;
+
 /// Documentation page for the security candidate surface. The dead-code
 /// `DOCS_BASE` in `super` points at the dead-code explanation; security has its
 /// own CLI page, so this block uses a dedicated link.
@@ -95,14 +97,15 @@ fn security_data(finding: &SecurityFinding) -> serde_json::Value {
 /// diagnostic and the action's linked diagnostic correlate exactly (range +
 /// message + code). `message` is plain text per the LSP spec, NOT
 /// markdown-escaped.
-pub fn security_diagnostic(finding: &SecurityFinding) -> Diagnostic {
+pub fn security_diagnostic(finding: &SecurityFinding, mapper: &mut PositionMapper) -> Diagnostic {
     let line = finding.line.saturating_sub(1);
+    let col = mapper.utf16_col(&finding.path, line, finding.col);
     let label = security_label(finding);
     Diagnostic {
         range: Range {
             start: Position {
                 line,
-                character: finding.col,
+                character: col,
             },
             end: Position {
                 line,
@@ -126,6 +129,7 @@ pub fn security_diagnostic(finding: &SecurityFinding) -> Diagnostic {
 pub fn push_security_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.security_findings {
         let Some(uri) = Uri::from_file_path(&finding.path) else {
@@ -133,7 +137,7 @@ pub fn push_security_diagnostics(
         };
         map.entry(uri)
             .or_default()
-            .push(security_diagnostic(finding));
+            .push(security_diagnostic(finding, mapper));
     }
 }
 
@@ -219,7 +223,8 @@ mod tests {
         results.security_findings.push(tainted_sink(path.clone()));
 
         let mut map = FxHashMap::default();
-        push_security_diagnostics(&mut map, &results);
+        let mut mapper = PositionMapper::default();
+        push_security_diagnostics(&mut map, &results, &mut mapper);
 
         let uri = Uri::from_file_path(&path).unwrap();
         let diags = map.get(&uri).expect("security diagnostic present");
@@ -248,7 +253,8 @@ mod tests {
             .push(client_server_leak(path.clone()));
 
         let mut map = FxHashMap::default();
-        push_security_diagnostics(&mut map, &results);
+        let mut mapper = PositionMapper::default();
+        push_security_diagnostics(&mut map, &results, &mut mapper);
 
         let uri = Uri::from_file_path(&path).unwrap();
         let d = &map.get(&uri).expect("diagnostic present")[0];
@@ -264,7 +270,8 @@ mod tests {
     fn empty_findings_produce_no_diagnostics() {
         let results = AnalysisResults::default();
         let mut map = FxHashMap::default();
-        push_security_diagnostics(&mut map, &results);
+        let mut mapper = PositionMapper::default();
+        push_security_diagnostics(&mut map, &results, &mut mapper);
         assert!(map.is_empty());
     }
 
@@ -273,7 +280,8 @@ mod tests {
         let root = test_root();
         let path = root.join("src/render.ts");
         let finding = tainted_sink(path);
-        let d = security_diagnostic(&finding);
+        let mut mapper = PositionMapper::default();
+        let d = security_diagnostic(&finding, &mut mapper);
         let data = d.data.expect("data present");
         let sec = &data["security"];
         assert_eq!(sec["kind"], serde_json::json!("tainted-sink"));
@@ -291,7 +299,8 @@ mod tests {
     fn diagnostic_data_null_reachability_when_absent() {
         let root = test_root();
         let finding = client_server_leak(root.join("src/leak.ts"));
-        let d = security_diagnostic(&finding);
+        let mut mapper = PositionMapper::default();
+        let d = security_diagnostic(&finding, &mut mapper);
         let sec = &d.data.expect("data present")["security"];
         assert_eq!(sec["reachableFromEntry"], serde_json::Value::Null);
         assert_eq!(sec["taintConfidence"], serde_json::Value::Null);

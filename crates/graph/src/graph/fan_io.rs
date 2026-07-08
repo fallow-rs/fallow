@@ -70,6 +70,18 @@ pub struct FocusFileFactsPaths {
     pub re_export_indirection: bool,
 }
 
+/// Signal sets for `focus_file_facts`, built in one pass over every module.
+struct ReferenceSignalSets {
+    /// Files referenced via a `DynamicImport` reference (target direction).
+    dynamic_targets: FxHashSet<FileId>,
+    /// Files referenced via a `ReExport` reference (target direction).
+    re_export_ref_targets: FxHashSet<FileId>,
+    /// Files that originate a `DynamicImport` reference (source direction).
+    dynamic_sources: FxHashSet<FileId>,
+    /// Files some barrel re-exports from (re-export source direction).
+    re_export_sources: FxHashSet<FileId>,
+}
+
 impl ModuleGraph {
     /// Compute the per-file focus graph facts (fan-in/out + the two
     /// confidence-flag signals) for a changed-file seed set.
@@ -89,21 +101,19 @@ impl ModuleGraph {
         }
         changed_ids.sort_unstable_by_key(|f| f.0);
 
-        // A file is referenced via a DynamicImport / ReExport when ANY export on
-        // ANY module carries such a reference TO it. Build the per-target signal
-        // sets once (a single pass over every export's references), so the
-        // per-changed-file lookups are O(1).
-        let (dynamic_targets, re_export_ref_targets) = self.collect_reference_signal_targets();
+        // A file participates in DynamicImport / ReExport when ANY export on
+        // ANY module carries such a reference TO or FROM it. Build the signal
+        // sets once, so the per-changed-file lookups are O(1).
+        let reference_signals = self.collect_reference_signal_sets();
 
         changed_ids
             .iter()
             .map(|&id| {
                 let fan_in = self.fan_in_count(id);
                 let fan_out = self.fan_out_count(id);
-                let dynamic_dispatch =
-                    dynamic_targets.contains(&id) || self.has_dynamic_outgoing_edge(id);
-                let re_export_indirection = re_export_ref_targets.contains(&id)
-                    || self.is_re_export_participant(id, &re_export_ref_targets);
+                let dynamic_dispatch = reference_signals.dynamic_targets.contains(&id)
+                    || reference_signals.dynamic_sources.contains(&id);
+                let re_export_indirection = self.is_re_export_participant(id, &reference_signals);
                 FocusFileFacts {
                     file: id,
                     fan_in,
@@ -141,56 +151,45 @@ impl ModuleGraph {
         u32::try_from(distinct.len()).unwrap_or(u32::MAX)
     }
 
-    /// Build the set of files referenced via a `DynamicImport` reference and the
-    /// set referenced via a `ReExport` reference, in one pass over every export's
-    /// reference list.
-    fn collect_reference_signal_targets(&self) -> (FxHashSet<FileId>, FxHashSet<FileId>) {
-        let mut dynamic: FxHashSet<FileId> = FxHashSet::default();
-        let mut re_export: FxHashSet<FileId> = FxHashSet::default();
+    /// Build reference signal sets in one pass over every module.
+    fn collect_reference_signal_sets(&self) -> ReferenceSignalSets {
+        let mut dynamic_targets: FxHashSet<FileId> = FxHashSet::default();
+        let mut re_export_ref_targets: FxHashSet<FileId> = FxHashSet::default();
+        let mut dynamic_sources: FxHashSet<FileId> = FxHashSet::default();
+        let mut re_export_sources: FxHashSet<FileId> = FxHashSet::default();
         for node in &self.modules {
+            for edge in &node.re_exports {
+                re_export_sources.insert(edge.source_file);
+            }
             for export in &node.exports {
                 for reference in &export.references {
                     match reference.kind {
                         ReferenceKind::DynamicImport => {
-                            dynamic.insert(node.file_id);
+                            dynamic_targets.insert(node.file_id);
+                            dynamic_sources.insert(reference.from_file);
                         }
                         ReferenceKind::ReExport => {
-                            re_export.insert(node.file_id);
+                            re_export_ref_targets.insert(node.file_id);
                         }
                         _ => {}
                     }
                 }
             }
         }
-        (dynamic, re_export)
-    }
-
-    /// Whether `file` has any outgoing edge whose target is dynamically imported.
-    /// The `Edge` type does not carry a per-edge kind, so this is approximated by
-    /// the presence of a dynamic reference FROM `file` on a target's export
-    /// reference list. Conservative: it is fine to over-flag.
-    fn has_dynamic_outgoing_edge(&self, file: FileId) -> bool {
-        // A target export referenced by `file` via DynamicImport means `file`
-        // dynamically imports that target.
-        self.modules.iter().any(|node| {
-            node.exports.iter().any(|export| {
-                export.references.iter().any(|reference| {
-                    reference.kind == ReferenceKind::DynamicImport && reference.from_file == file
-                })
-            })
-        })
+        ReferenceSignalSets {
+            dynamic_targets,
+            re_export_ref_targets,
+            dynamic_sources,
+            re_export_sources,
+        }
     }
 
     /// Whether `file` participates in re-export indirection: it is a re-export
     /// barrel (declares its own `re_exports`), it is a re-export SOURCE of some
     /// barrel, or it is referenced via a `ReExport` reference (the
-    /// `re_export_ref_targets` membership the caller passes in).
-    fn is_re_export_participant(
-        &self,
-        file: FileId,
-        re_export_ref_targets: &FxHashSet<FileId>,
-    ) -> bool {
-        if re_export_ref_targets.contains(&file) {
+    /// `re_export_ref_targets` membership).
+    fn is_re_export_participant(&self, file: FileId, sets: &ReferenceSignalSets) -> bool {
+        if sets.re_export_ref_targets.contains(&file) {
             return true;
         }
         // Barrel: declares its own re-exports.
@@ -200,9 +199,7 @@ impl ModuleGraph {
             return true;
         }
         // Re-export SOURCE: some barrel re-exports FROM this file.
-        self.modules
-            .iter()
-            .any(|node| node.re_exports.iter().any(|edge| edge.source_file == file))
+        sets.re_export_sources.contains(&file)
     }
 
     /// Resolve a `FocusFileFacts` set's `FileId`s to root-relative, forward-

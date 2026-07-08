@@ -1,8 +1,8 @@
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CombinedParams,
-    ExplainParams, FeatureFlagsParams, FindDupesParams, HealthParams, ImpactParams,
-    ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams, TraceCloneParams,
-    TraceDependencyParams, TraceExportParams, TraceFileParams,
+    ExplainParams, FeatureFlagsParams, FindDupesParams, HealthParams, ImpactClosureParams,
+    ImpactParams, ListBoundariesParams, ProjectInfoParams, SecurityCandidatesParams,
+    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 
 use fallow_api::{
@@ -19,9 +19,9 @@ use super::super::{
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
     build_find_dupes_args, build_get_blast_radius_args, build_get_cleanup_candidates_args,
     build_get_hot_paths_args, build_get_importance_args, build_health_args, build_impact_args,
-    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
-    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args,
+    build_impact_closure_args, build_list_boundaries_args, build_project_info_args,
+    build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
+    build_trace_export_args, build_trace_file_args,
     check_changed::run_check_changed_api_value,
     dupes::run_find_dupes_api_value,
     flags::run_feature_flags_api_value,
@@ -45,6 +45,7 @@ pub(super) enum CodeModeTool {
     ProjectInfo,
     TraceExport,
     TraceFile,
+    ImpactClosure,
     TraceDependency,
     TraceClone,
     CheckHealth,
@@ -71,6 +72,7 @@ impl CodeModeTool {
             "project_info" => Ok(Self::ProjectInfo),
             "trace_export" => Ok(Self::TraceExport),
             "trace_file" => Ok(Self::TraceFile),
+            "impact_closure" => Ok(Self::ImpactClosure),
             "trace_dependency" => Ok(Self::TraceDependency),
             "trace_clone" => Ok(Self::TraceClone),
             "check_health" => Ok(Self::CheckHealth),
@@ -102,6 +104,7 @@ impl CodeModeTool {
             Self::ProjectInfo => "project_info",
             Self::TraceExport => "trace_export",
             Self::TraceFile => "trace_file",
+            Self::ImpactClosure => "impact_closure",
             Self::TraceDependency => "trace_dependency",
             Self::TraceClone => "trace_clone",
             Self::CheckHealth => "check_health",
@@ -140,6 +143,7 @@ pub(super) const CODE_MODE_ALIASES: &[(&str, &str)] = &[
     ("projectInfo", "project_info"),
     ("traceExport", "trace_export"),
     ("traceFile", "trace_file"),
+    ("impactClosure", "impact_closure"),
     ("traceDependency", "trace_dependency"),
     ("traceClone", "trace_clone"),
     ("checkHealth", "check_health"),
@@ -217,6 +221,7 @@ pub(super) fn run_api_tool(
         | CodeModeTool::FeatureFlags
         | CodeModeTool::ListBoundaries => run_report_api_tool(tool, params),
         CodeModeTool::SecurityCandidates
+        | CodeModeTool::ImpactClosure
         | CodeModeTool::Impact
         | CodeModeTool::CheckRuntimeCoverage
         | CodeModeTool::GetHotPaths
@@ -327,6 +332,7 @@ pub(super) fn build_tool_args(
         | CodeModeTool::ProjectInfo => build_project_tool_args(tool, params),
         CodeModeTool::TraceExport
         | CodeModeTool::TraceFile
+        | CodeModeTool::ImpactClosure
         | CodeModeTool::TraceDependency
         | CodeModeTool::TraceClone => build_trace_tool_args(tool, params),
         CodeModeTool::CheckHealth
@@ -388,6 +394,10 @@ fn build_trace_tool_args(
         CodeModeTool::TraceFile => {
             let params: TraceFileParams = parse_params(params)?;
             build_trace_file_args(&params)
+        }
+        CodeModeTool::ImpactClosure => {
+            let params: ImpactClosureParams = parse_params(params)?;
+            build_impact_closure_args(&params)
         }
         CodeModeTool::TraceDependency => {
             let params: TraceDependencyParams = parse_params(params)?;

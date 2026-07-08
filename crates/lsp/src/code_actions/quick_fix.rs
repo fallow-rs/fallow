@@ -11,6 +11,7 @@ use ls_types::*;
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 
 use crate::diagnostics::FIRST_LINE_RANGE;
+use crate::position::PositionMapper;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
 
@@ -234,6 +235,7 @@ fn remove_export_action(
         }],
     );
 
+    let mut position_mapper = PositionMapper::default();
     Some(CodeActionOrCommand::CodeAction(CodeAction {
         title: format!("Remove unused export `{}`", export.export_name),
         kind: Some(CodeActionKind::QUICKFIX),
@@ -245,6 +247,7 @@ fn remove_export_action(
             export,
             msg_prefix,
             export_line,
+            &mut position_mapper,
         )]),
         ..Default::default()
     }))
@@ -286,24 +289,23 @@ fn export_prefix_to_remove(trimmed: &str) -> Option<&'static str> {
     }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "identifier lengths are bounded by source size"
-)]
 fn remove_export_diagnostic(
     export: &fallow_api::editor_results::UnusedExport,
     msg_prefix: &str,
     export_line: u32,
+    mapper: &mut PositionMapper,
 ) -> Diagnostic {
+    let (start, end) =
+        mapper.utf16_col_span(&export.path, export_line, export.col, &export.export_name);
     Diagnostic {
         range: Range {
             start: Position {
                 line: export_line,
-                character: export.col,
+                character: start,
             },
             end: Position {
                 line: export_line,
-                character: export.col + export.export_name.len() as u32,
+                character: end,
             },
         },
         severity: Some(DiagnosticSeverity::HINT),

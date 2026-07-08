@@ -5,9 +5,10 @@ use crate::tools::{
     build_feature_flags_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
     build_get_importance_args, build_get_token_blast_radius_args, build_guard_args,
-    build_health_args, build_impact_all_args, build_impact_args, build_list_boundaries_args,
-    build_project_info_args, build_security_candidates_args, build_trace_clone_args,
-    build_trace_dependency_args, build_trace_export_args, build_trace_file_args,
+    build_health_args, build_impact_all_args, build_impact_args, build_impact_closure_args,
+    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
+    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
+    build_trace_file_args,
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
@@ -927,6 +928,41 @@ fn trace_file_args_with_scope() {
 }
 
 #[test]
+fn impact_closure_args_with_scope() {
+    let args = build_impact_closure_args(&ImpactClosureParams {
+        path: "src/utils.ts".to_string(),
+        root: Some("/repo".to_string()),
+        config: Some("fallow.toml".to_string()),
+        production: Some(true),
+        workspace: Some("packages/web".to_string()),
+        no_cache: Some(true),
+        threads: Some(3),
+    })
+    .unwrap();
+    assert_eq!(
+        args,
+        [
+            "dead-code",
+            "--format",
+            "json",
+            "--quiet",
+            "--root",
+            "/repo",
+            "--config",
+            "fallow.toml",
+            "--no-cache",
+            "--threads",
+            "3",
+            "--production",
+            "--workspace",
+            "packages/web",
+            "--impact-closure",
+            "src/utils.ts",
+        ]
+    );
+}
+
+#[test]
 fn trace_dependency_args_minimal() {
     let args = build_trace_dependency_args(&TraceDependencyParams {
         package_name: "react".to_string(),
@@ -1139,6 +1175,21 @@ fn trace_args_reject_blank_required_values() {
     assert_eq!(
         parse_validation_message(&file_err),
         "file must not be empty"
+    );
+
+    let impact_closure_err = build_impact_closure_args(&ImpactClosureParams {
+        path: "\t".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap_err();
+    assert_eq!(
+        parse_validation_message(&impact_closure_err),
+        "path must not be empty"
     );
 
     let dependency_err = build_trace_dependency_args(&TraceDependencyParams {
@@ -1588,6 +1639,10 @@ fn impact_all_args_empty_sort_dropped() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "central contract table intentionally enumerates every arg builder"
+)]
 fn all_arg_builders_include_format_json_and_quiet() {
     let analyze = build_analyze_args(&AnalyzeParams::default()).unwrap();
     let check_changed = build_check_changed_args(check_changed("main"));
@@ -1608,6 +1663,16 @@ fn all_arg_builders_include_format_json_and_quiet() {
     .unwrap();
     let trace_file = build_trace_file_args(&TraceFileParams {
         file: "src/utils.ts".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+    let impact_closure = build_impact_closure_args(&ImpactClosureParams {
+        path: "src/utils.ts".to_string(),
         root: None,
         config: None,
         production: None,
@@ -1667,6 +1732,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
         ("project_info", &project_info),
         ("trace_export", &trace_export),
         ("trace_file", &trace_file),
+        ("impact_closure", &impact_closure),
         ("trace_dependency", &trace_dependency),
         ("trace_clone", &trace_clone),
         ("health", &health),
@@ -1691,6 +1757,10 @@ fn all_arg_builders_include_format_json_and_quiet() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "central contract table intentionally enumerates every tool command"
+)]
 fn each_tool_uses_correct_subcommand() {
     assert_eq!(
         build_analyze_args(&AnalyzeParams::default()).unwrap()[0],
@@ -1738,6 +1808,19 @@ fn each_tool_uses_correct_subcommand() {
     assert_eq!(
         build_trace_file_args(&TraceFileParams {
             file: "src/utils.ts".to_string(),
+            root: None,
+            config: None,
+            production: None,
+            workspace: None,
+            no_cache: None,
+            threads: None,
+        })
+        .unwrap()[0],
+        "dead-code"
+    );
+    assert_eq!(
+        build_impact_closure_args(&ImpactClosureParams {
+            path: "src/utils.ts".to_string(),
             root: None,
             config: None,
             production: None,

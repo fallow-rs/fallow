@@ -268,7 +268,7 @@ jobs:
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
 
       - name: Build NAPI package
-        run: cd crates/napi && npm run build:debug
+        run: cd crates/napi && npx napi build --platform --profile napi-release && npm run publish:prepare
 
       - name: Run NAPI smoke test
         run: cd crates/napi && npm test
@@ -575,7 +575,7 @@ jobs:
         run: |
           cd crates/napi
           npm ci --omit=optional --ignore-scripts
-          npx napi build --platform --release --target aarch64-pc-windows-msvc
+          npx napi build --platform --profile napi-release --target aarch64-pc-windows-msvc
 
   windows-audit-smoke:
     name: Windows Audit Lifecycle Smoke

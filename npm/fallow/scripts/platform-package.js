@@ -13,7 +13,7 @@ function getPlatformPackage(platform, arch, libcFamily) {
   }
 
   if (platform === "linux") {
-    const libc = libcFamily === "musl" ? "musl" : "gnu";
+    const libc = libcFamily === "glibc" ? "gnu" : "musl";
     if (arch === "x64" || arch === "arm64") {
       return `@fallow-cli/linux-${arch}-${libc}`;
     }

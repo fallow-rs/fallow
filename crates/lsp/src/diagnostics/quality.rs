@@ -11,15 +11,17 @@ use fallow_api::{
 };
 
 use super::doc_link_for_code;
+use crate::position::PositionMapper;
 
 pub fn push_duplicate_export_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for dup in &results.duplicate_exports {
         let dup = &dup.export;
         for loc in &dup.locations {
-            push_duplicate_export_location_diagnostic(map, dup, loc);
+            push_duplicate_export_location_diagnostic(map, dup, loc, mapper);
         }
     }
 }
@@ -28,22 +30,23 @@ fn push_duplicate_export_location_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     dup: &DuplicateExport,
     loc: &DuplicateLocation,
+    mapper: &mut PositionMapper,
 ) {
     let Some(uri) = Uri::from_file_path(&loc.path) else {
         return;
     };
-    let related_info = duplicate_export_related_info(dup, loc);
+    let related_info = duplicate_export_related_info(dup, loc, mapper);
     let line = loc.line.saturating_sub(1);
-    let export_name_len = duplicate_export_name_len(dup);
+    let (start, end) = mapper.utf16_col_span(&loc.path, line, loc.col, &dup.export_name);
     map.entry(uri).or_default().push(Diagnostic {
         range: Range {
             start: Position {
                 line,
-                character: loc.col,
+                character: start,
             },
             end: Position {
                 line,
-                character: loc.col + export_name_len,
+                character: end,
             },
         },
         severity: Some(DiagnosticSeverity::WARNING),
@@ -59,48 +62,43 @@ fn push_duplicate_export_location_diagnostic(
 fn duplicate_export_related_info(
     dup: &DuplicateExport,
     loc: &DuplicateLocation,
+    mapper: &mut PositionMapper,
 ) -> Vec<DiagnosticRelatedInformation> {
-    let export_name_len = duplicate_export_name_len(dup);
-    dup.locations
-        .iter()
-        .filter(|l| l.path != loc.path)
-        .filter_map(|l| {
-            let other_uri = Uri::from_file_path(&l.path)?;
-            Some(DiagnosticRelatedInformation {
-                location: Location {
-                    uri: other_uri,
-                    range: Range {
-                        start: Position {
-                            line: l.line.saturating_sub(1),
-                            character: l.col,
-                        },
-                        end: Position {
-                            line: l.line.saturating_sub(1),
-                            character: l.col + export_name_len,
-                        },
+    let mut related = Vec::new();
+    for l in dup.locations.iter().filter(|l| l.path != loc.path) {
+        let Some(other_uri) = Uri::from_file_path(&l.path) else {
+            continue;
+        };
+        let line = l.line.saturating_sub(1);
+        let (start, end) = mapper.utf16_col_span(&l.path, line, l.col, &dup.export_name);
+        related.push(DiagnosticRelatedInformation {
+            location: Location {
+                uri: other_uri,
+                range: Range {
+                    start: Position {
+                        line,
+                        character: start,
+                    },
+                    end: Position {
+                        line,
+                        character: end,
                     },
                 },
-                message: "Also exported here".to_string(),
-            })
-        })
-        .collect()
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "export name lengths are bounded by source size"
-)]
-fn duplicate_export_name_len(dup: &DuplicateExport) -> u32 {
-    dup.export_name.len() as u32
+            },
+            message: "Also exported here".to_string(),
+        });
+    }
+    related
 }
 
 pub fn push_duplication_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     duplication: &DuplicationReport,
+    mapper: &mut PositionMapper,
 ) {
     for group in &duplication.clone_groups {
         for instance in &group.instances {
-            push_duplication_instance_diagnostic(map, group, instance);
+            push_duplication_instance_diagnostic(map, group, instance, mapper);
         }
     }
 }
@@ -115,6 +113,7 @@ fn push_duplication_instance_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     group: &fallow_api::editor_duplicates::CloneGroup,
     instance: &fallow_api::editor_duplicates::CloneInstance,
+    mapper: &mut PositionMapper,
 ) {
     let Some(inst_uri) = Uri::from_file_path(&instance.file) else {
         return;
@@ -122,14 +121,15 @@ fn push_duplication_instance_diagnostic(
 
     let start_line = (instance.start_line as u32).saturating_sub(1);
     let end_line = (instance.end_line as u32).saturating_sub(1);
+    let start_col = mapper.utf16_col(&instance.file, start_line, instance.start_col as u32);
 
-    let related_info = duplication_related_info(group, instance);
+    let related_info = duplication_related_info(group, instance, mapper);
 
     map.entry(inst_uri).or_default().push(Diagnostic {
         range: Range {
             start: Position {
                 line: start_line,
-                character: instance.start_col as u32,
+                character: start_col,
             },
             end: Position {
                 line: end_line,
@@ -166,42 +166,50 @@ fn push_duplication_instance_diagnostic(
 fn duplication_related_info(
     group: &fallow_api::editor_duplicates::CloneGroup,
     instance: &fallow_api::editor_duplicates::CloneInstance,
+    mapper: &mut PositionMapper,
 ) -> Vec<DiagnosticRelatedInformation> {
-    group
+    let mut related = Vec::new();
+    for other in group
         .instances
         .iter()
         .filter(|other| !(other.file == instance.file && other.start_line == instance.start_line))
-        .filter_map(|other| {
-            let other_uri = Uri::from_file_path(&other.file)?;
-            Some(DiagnosticRelatedInformation {
-                location: Location {
-                    uri: other_uri,
-                    range: Range {
-                        start: Position {
-                            line: (other.start_line as u32).saturating_sub(1),
-                            character: other.start_col as u32,
-                        },
-                        end: Position {
-                            line: (other.end_line as u32).saturating_sub(1),
-                            character: u32::MAX,
-                        },
+    {
+        let Some(other_uri) = Uri::from_file_path(&other.file) else {
+            continue;
+        };
+        let start_line = (other.start_line as u32).saturating_sub(1);
+        let start_col = mapper.utf16_col(&other.file, start_line, other.start_col as u32);
+        related.push(DiagnosticRelatedInformation {
+            location: Location {
+                uri: other_uri,
+                range: Range {
+                    start: Position {
+                        line: start_line,
+                        character: start_col,
+                    },
+                    end: Position {
+                        line: (other.end_line as u32).saturating_sub(1),
+                        character: u32::MAX,
                     },
                 },
-                message: "Also duplicated here".to_string(),
-            })
-        })
-        .collect()
+            },
+            message: "Also duplicated here".to_string(),
+        });
+    }
+    related
 }
 
 pub fn push_stale_suppression_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for s in &results.stale_suppressions {
         let Some(uri) = Uri::from_file_path(&s.path) else {
             continue;
         };
         let line = s.line.saturating_sub(1);
+        let col = mapper.utf16_col(&s.path, line, s.col);
         let message = format!(
             "Stale suppression: {} ({})",
             s.description(),
@@ -212,7 +220,7 @@ pub fn push_stale_suppression_diagnostics(
             range: Range {
                 start: Position {
                     line,
-                    character: s.col,
+                    character: col,
                 },
                 end: Position {
                     line,

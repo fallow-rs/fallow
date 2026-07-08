@@ -379,6 +379,24 @@ pub struct TraceFileParams {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct ImpactClosureParams {
+    #[schemars(length(min = 1))]
+    pub path: String,
+
+    pub root: Option<String>,
+
+    pub config: Option<String>,
+
+    pub production: Option<bool>,
+
+    pub workspace: Option<String>,
+
+    pub no_cache: Option<bool>,
+
+    pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct TraceDependencyParams {
     #[schemars(length(min = 1))]
     pub package_name: String,

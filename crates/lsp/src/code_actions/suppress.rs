@@ -25,6 +25,7 @@ use fallow_api::EditorAnalysisResults as AnalysisResults;
 use fallow_api::editor_results::SecurityFindingKind;
 
 use crate::diagnostics::security::{security_diagnostic, security_label, security_token};
+use crate::position::PositionMapper;
 
 /// Build suppress code actions for security candidates under the cursor.
 ///
@@ -75,6 +76,7 @@ pub fn build_suppress_security_actions(
     } = input;
     let mut actions = Vec::new();
     let mut file_level_tokens: FxHashSet<&'static str> = FxHashSet::default();
+    let mut position_mapper = PositionMapper::default();
 
     for finding in &results.security_findings {
         if finding.path != file_path {
@@ -95,7 +97,7 @@ pub fn build_suppress_security_actions(
 
         let token = security_token(finding.kind);
         let label = security_label(finding);
-        let linked = security_diagnostic(finding);
+        let linked = security_diagnostic(finding, &mut position_mapper);
 
         // Line-level: only for TaintedSink (the only kind whose detector honors
         // line-level suppression). Match the anchor's indentation so the

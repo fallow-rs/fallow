@@ -6,8 +6,8 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
     DecisionSurfaceParams, ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams,
-    GetTokenBlastRadiusParams, GuardParams, HealthParams, ImpactAllParams, ImpactParams,
-    InspectTargetParams, ListBoundariesParams, ProjectInfoParams, RecommendParams,
+    GetTokenBlastRadiusParams, GuardParams, HealthParams, ImpactAllParams, ImpactClosureParams,
+    ImpactParams, InspectTargetParams, ListBoundariesParams, ProjectInfoParams, RecommendParams,
     SecurityCandidatesParams, TraceCloneParams, TraceDependencyParams, TraceExportParams,
     TraceFileParams,
 };
@@ -16,9 +16,9 @@ use crate::tools::{
     run_check_runtime_coverage, run_decision_surface, run_explain, run_feature_flags,
     run_find_dupes, run_fix_apply, run_fix_preview, run_get_blast_radius,
     run_get_cleanup_candidates, run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
-    run_guard, run_health, run_impact, run_impact_all, run_list_boundaries, run_project_info,
-    run_recommend, run_security_candidates, run_trace_clone_tool, run_trace_dependency_tool,
-    run_trace_export_tool, run_trace_file_tool,
+    run_guard, run_health, run_impact, run_impact_all, run_impact_closure, run_list_boundaries,
+    run_project_info, run_recommend, run_security_candidates, run_trace_clone_tool,
+    run_trace_dependency_tool, run_trace_export_tool, run_trace_file_tool,
 };
 
 #[cfg(test)]
@@ -69,7 +69,7 @@ fn resolve_binary() -> String {
 #[tool_router]
 impl FallowMcp {
     #[tool(
-        description = "Execute a bounded, read-only JavaScript Code Mode snippet against fallow's MCP host API. `code` must be a JavaScript function expression or function body that receives `{ fallow, root }` and returns a JSON-serializable value. The embedded sandbox exposes only a typed `fallow` object with read-only analysis calls: analyze, combined, checkChanged, securityCandidates, findDupes, projectInfo, traceExport, traceFile, traceDependency, traceClone, checkHealth, audit, explain, listBoundaries, featureFlags, impact, checkRuntimeCoverage, getHotPaths, getBlastRadius, getImportance, getCleanupCandidates, plus `fallow.run(tool, params)` for the same allowlist. Mutating fix tools are intentionally not exposed. The sandbox has no filesystem, network, imports, eval, Function, process, require, Deno, Bun, or shell access. `root` is injected into host calls that omit params.root. `timeout_ms` caps JS execution and subprocess-backed host calls. In Code Mode, analyze, combined, findDupes, checkHealth, and audit stay subprocess-backed and are killed on timeout. API-backed host calls use `timeout_ms` as a response deadline; in-process analysis may finish after a timeout response. `max_output_bytes` caps total fallow JSON read by host calls.",
+        description = "Execute a bounded, read-only JavaScript Code Mode snippet against fallow's MCP host API. `code` must be a JavaScript function expression or function body that receives `{ fallow, root }` and returns a JSON-serializable value. The embedded sandbox exposes only a typed `fallow` object with read-only analysis calls: analyze, combined, checkChanged, securityCandidates, findDupes, projectInfo, traceExport, traceFile, impactClosure, traceDependency, traceClone, checkHealth, audit, explain, listBoundaries, featureFlags, impact, checkRuntimeCoverage, getHotPaths, getBlastRadius, getImportance, getCleanupCandidates, plus `fallow.run(tool, params)` for the same allowlist. Mutating fix tools are intentionally not exposed. The sandbox has no filesystem, network, imports, eval, Function, process, require, Deno, Bun, or shell access. `root` is injected into host calls that omit params.root. `timeout_ms` caps JS execution and subprocess-backed host calls. In Code Mode, analyze, combined, findDupes, checkHealth, and audit stay subprocess-backed and are killed on timeout. API-backed host calls use `timeout_ms` as a response deadline; in-process analysis may finish after a timeout response. `max_output_bytes` caps total fallow JSON read by host calls.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn code_execute(
@@ -205,6 +205,17 @@ impl FallowMcp {
         params: Parameters<TraceFileParams>,
     ) -> Result<CallToolResult, McpError> {
         run_trace_file_tool(params.0).await
+    }
+
+    #[tool(
+        description = "Trace the impact closure for a file. Runs `fallow dead-code --impact-closure <path> --format json --quiet` and returns the transitive affected-but-not-in-diff set plus coordination gaps for consumers of the file contract. This is evidence for review planning, not proof that the affected files are wrong. Supports root, config, production, workspace, no_cache, and threads.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn impact_closure(
+        &self,
+        params: Parameters<ImpactClosureParams>,
+    ) -> Result<CallToolResult, McpError> {
+        run_impact_closure(&self.binary, params.0).await
     }
 
     #[tool(
@@ -396,7 +407,7 @@ impl ServerHandler for FallowMcp {
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points, boundary zones), \
                  recommend (project-tailored config recommendation for cold-start onboarding: detected + a loader-validated proposed_config + three-valued auto/default/taste decisions; read-only, runs detection not analysis), \
-                 trace_export / trace_file / trace_dependency / trace_clone (graph and clone evidence), \
+                 trace_export / trace_file / impact_closure / trace_dependency / trace_clone (graph and clone evidence), \
                  check_health (code complexity metrics), \
                  check_runtime_coverage (paid; merges a V8 or Istanbul runtime coverage dump into the health report), \
                  get_hot_paths / get_blast_radius / get_importance / get_cleanup_candidates (paid runtime context slices), \

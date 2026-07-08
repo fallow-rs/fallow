@@ -535,9 +535,30 @@ impl<'task> ScopedTask<'task> for ProgrammaticTask {
             ));
         };
 
-        match task() {
-            Ok(output) => Ok(output),
-            Err(error) => {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert!(
+                std::env::var_os("FALLOW_NAPI_TEST_PANIC").is_none(),
+                "FALLOW_NAPI_TEST_PANIC set: deliberate test panic"
+            );
+            task()
+        }));
+
+        match outcome {
+            Ok(Ok(output)) => Ok(output),
+            Ok(Err(error)) => {
+                let message = error.message.clone();
+                self.error = Some(error);
+                Err(napi::Error::new(Status::GenericFailure, message))
+            }
+            Err(payload) => {
+                let detail = payload
+                    .downcast_ref::<&str>()
+                    .map(ToString::to_string)
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown panic".to_string());
+                let error =
+                    api::ProgrammaticError::new(format!("internal error (panic): {detail}"), 2)
+                        .with_code("FALLOW_PANIC");
                 let message = error.message.clone();
                 self.error = Some(error);
                 Err(napi::Error::new(Status::GenericFailure, message))

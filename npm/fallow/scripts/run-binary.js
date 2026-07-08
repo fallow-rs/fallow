@@ -11,6 +11,7 @@
 const { execFileSync } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
+const os = require("node:os");
 
 const { getPlatformPackage } = require("./platform-package");
 const { ensureVerified } = require("./lazy-verify");
@@ -107,6 +108,15 @@ function writeVerifiedLineIfVersionQuery(verifyResult, version) {
   }
 }
 
+// Exit code for a child failure caught from execFileSync. A signal death has
+// status === null; map it to the shell convention 128 + signal number so CI
+// gates see a crash, never a success.
+function exitCodeForChildFailure(e) {
+  if (e.status !== null) return e.status;
+  const signalNumber = os.constants.signals[e.signal];
+  return signalNumber ? 128 + signalNumber : 1;
+}
+
 // Read the resolved CLI version from the platform package manifest (its version
 // is released in lockstep with the CLI). Best-effort: never throws, so a
 // missing/garbled manifest just omits the signing annotation on --version.
@@ -159,10 +169,13 @@ function runBinary(binaryBaseName) {
     execFileSync(binaryPath, process.argv.slice(2), { stdio: "inherit" });
   } catch (e) {
     if (e.status === undefined) throw e;
+    if (e.status === null) {
+      process.stderr.write(`fallow binary terminated by signal ${e.signal ?? "unknown"}\n`);
+    }
     // Child has already written its --version line via inherited stdio;
     // append the verified line here only on a clean exit.
     if (e.status === 0) writeVerifiedLineIfVersionQuery(verifyResult, resolvedVersion);
-    process.exit(e.status);
+    process.exit(exitCodeForChildFailure(e));
   }
 
   writeVerifiedLineIfVersionQuery(verifyResult, resolvedVersion);
@@ -173,4 +186,5 @@ module.exports = {
   describeVerified, // test-only
   isVersionQuery, // test-only
   guardBrokenStdout, // test-only
+  exitCodeForChildFailure, // test-only
 };

@@ -33,6 +33,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"project_info".to_string()));
     assert!(names.contains(&"trace_export".to_string()));
     assert!(names.contains(&"trace_file".to_string()));
+    assert!(names.contains(&"impact_closure".to_string()));
     assert!(names.contains(&"trace_dependency".to_string()));
     assert!(names.contains(&"trace_clone".to_string()));
     assert!(names.contains(&"check_health".to_string()));
@@ -50,7 +51,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"impact_all".to_string()));
     assert!(names.contains(&"decision_surface".to_string()));
     assert!(names.contains(&"recommend".to_string()));
-    assert_eq!(tools.len(), 29);
+    assert_eq!(tools.len(), 30);
 }
 
 #[test]
@@ -69,6 +70,7 @@ fn read_only_tools_have_annotations() {
         "project_info",
         "trace_export",
         "trace_file",
+        "impact_closure",
         "trace_dependency",
         "trace_clone",
         "check_health",
@@ -148,6 +150,7 @@ fn open_world_hint_on_analysis_tools() {
         "project_info",
         "trace_export",
         "trace_file",
+        "impact_closure",
         "trace_dependency",
         "trace_clone",
         "check_health",
@@ -248,6 +251,7 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("project_info"));
     assert!(instructions.contains("trace_export"));
     assert!(instructions.contains("trace_file"));
+    assert!(instructions.contains("impact_closure"));
     assert!(instructions.contains("trace_dependency"));
     assert!(instructions.contains("trace_clone"));
     assert!(instructions.contains("check_health"));
@@ -678,6 +682,36 @@ fn trace_file_schema_contains_expected_properties() {
     assert_eq!(
         schema
             .pointer("/properties/file/minLength")
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
+}
+
+#[test]
+fn impact_closure_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "impact_closure").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "path",
+        "root",
+        "config",
+        "production",
+        "workspace",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "impact_closure schema should contain property '{prop}'"
+        );
+    }
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+    assert_required_fields(&schema, &["path"]);
+    assert_eq!(
+        schema
+            .pointer("/properties/path/minLength")
             .and_then(|v| v.as_u64()),
         Some(1)
     );

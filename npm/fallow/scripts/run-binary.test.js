@@ -1,5 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const os = require("node:os");
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
 
@@ -73,4 +74,20 @@ test("describeVerified annotates the resolved version's signing status", () => {
   // Unknown / unreadable version: no annotation, version line stays intact.
   assert.equal(describeVerified(ok, undefined), "verified: yes (sentinel /c/s)");
   assert.equal(describeVerified(ok, ""), "verified: yes (sentinel /c/s)");
+});
+
+test("exitCodeForChildFailure preserves status codes and maps signal deaths", () => {
+  const { exitCodeForChildFailure } = require(RUN_BINARY);
+  assert.equal(exitCodeForChildFailure({ status: 3 }), 3);
+  assert.equal(exitCodeForChildFailure({ status: 0 }), 0);
+  assert.equal(
+    exitCodeForChildFailure({ status: null, signal: "SIGSEGV" }),
+    128 + os.constants.signals.SIGSEGV,
+  );
+  assert.equal(
+    exitCodeForChildFailure({ status: null, signal: "SIGKILL" }),
+    128 + os.constants.signals.SIGKILL,
+  );
+  assert.equal(exitCodeForChildFailure({ status: null, signal: undefined }), 1);
+  assert.equal(exitCodeForChildFailure({ status: null, signal: "NOT_A_SIGNAL" }), 1);
 });

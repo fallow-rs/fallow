@@ -1,7 +1,8 @@
 use ls_types::{
     ClientCapabilities, CodeActionKind, CodeActionOptions, CodeActionProviderCapability,
     CodeLensOptions, DiagnosticOptions, DiagnosticServerCapabilities, HoverProviderCapability,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, WorkDoneProgressOptions,
+    PositionEncodingKind, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    WorkDoneProgressOptions,
 };
 
 pub fn build_server_capabilities(advertise_pull_diagnostics: bool) -> ServerCapabilities {
@@ -15,6 +16,7 @@ pub fn build_server_capabilities(advertise_pull_diagnostics: bool) -> ServerCapa
             resolve_provider: Some(false),
         }),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
+        position_encoding: Some(PositionEncodingKind::UTF16),
         diagnostic_provider: advertise_pull_diagnostics.then(|| {
             DiagnosticServerCapabilities::Options(DiagnosticOptions {
                 identifier: Some("fallow".to_string()),

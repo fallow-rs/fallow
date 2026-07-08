@@ -244,6 +244,13 @@ inherits = "release"
 strip = "none"
 debug = "full"
 
+# Shipped @fallow/node addon: release-equivalent codegen, but panics unwind so
+# napi-rs can convert them to catchable JS errors instead of aborting the host
+# Node process. The CLI binary keeps panic = "abort".
+[profile.napi-release]
+inherits = "release"
+panic = "unwind"
+
 # Coverage profile for cargo-llvm-cov loops: preserve runtime checks while
 # avoiding full release build cost.
 [profile.coverage]

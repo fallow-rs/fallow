@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { strict as assert } from "node:assert";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 import {
   computeComplexity,
@@ -166,6 +166,61 @@ export function duplicatedTwo(items: number[]) {
   return root;
 }
 
+function makeAdversarialFixture() {
+  const root = mkdtempSync(join(tmpdir(), "fallow-node-adversarial-"));
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify(
+      {
+        name: "fallow-node-adversarial",
+        version: "1.0.0",
+        main: "src/main.ts",
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+  writeFileSync(join(root, "src", "main.ts"), "export const ok = 1;\n");
+  writeFileSync(join(root, "src", "broken.ts"), "export function nope( {\n");
+  writeFileSync(join(root, "src", "invalid.ts"), Buffer.from([0xff, 0xfe, 0x00]));
+  return root;
+}
+
+function runPanicBoundaryChild() {
+  const script = String.raw`
+const { mkdtempSync, mkdirSync, writeFileSync } = require("node:fs");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
+const { detectDeadCode } = require("./index.js");
+
+const root = mkdtempSync(join(tmpdir(), "fallow-node-panic-"));
+mkdirSync(join(root, "src"), { recursive: true });
+writeFileSync(join(root, "package.json"), JSON.stringify({ name: "panic-fixture", main: "src/main.ts" }) + "\n");
+writeFileSync(join(root, "src", "main.ts"), "export const value = 1;\n");
+
+(async () => {
+  try {
+    await detectDeadCode({ root });
+    throw new Error("expected FALLOW_NAPI_TEST_PANIC to reject");
+  } catch (error) {
+    if (error.name !== "FallowNodeError" || error.code !== "FALLOW_PANIC") {
+      throw error;
+    }
+    console.log("CAUGHT:" + error.code + ":" + error.name);
+  }
+})().catch((error) => {
+  console.error(error && error.stack ? error.stack : String(error));
+  process.exit(1);
+});
+`;
+  return spawnSync(process.execPath, ["-e", script], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: { ...process.env, FALLOW_NAPI_TEST_PANIC: "1" },
+  });
+}
+
 console.log("Testing @fallow-cli/fallow-node...\n");
 
 const root = makeFixture();
@@ -285,6 +340,29 @@ writeFileSync(
   assert.equal(error.context, "analysis.root");
   assert.match(error.message, /invalid root path/);
   console.log("  [PASS] structured errors");
+}
+
+{
+  const child = runPanicBoundaryChild();
+  assert.equal(child.status, 0, child.stderr);
+  assert.match(child.stdout, /CAUGHT:FALLOW_PANIC:FallowNodeError/);
+  console.log("  [PASS] panic boundary");
+}
+
+{
+  const adversarialRoot = makeAdversarialFixture();
+  let error = null;
+  try {
+    const report = await detectDeadCode({ root: adversarialRoot });
+    assert.equal(report.kind, "dead-code");
+  } catch (caught) {
+    error = caught;
+  }
+  if (error) {
+    assert.equal(error.name, "FallowNodeError");
+    assert.equal(typeof error.exitCode, "number");
+  }
+  console.log("  [PASS] adversarial input stays structured");
 }
 
 console.log("\nAll tests passed.");

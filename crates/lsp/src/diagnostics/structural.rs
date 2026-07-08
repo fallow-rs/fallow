@@ -8,6 +8,25 @@ use ls_types::{
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 
 use super::{FIRST_LINE_RANGE, doc_link_for_code};
+use crate::position::PositionMapper;
+
+fn line_range_from_byte_col(
+    mapper: &mut PositionMapper,
+    path: &std::path::Path,
+    line: u32,
+    col: u32,
+) -> Range {
+    Range {
+        start: Position {
+            line,
+            character: mapper.utf16_col(path, line, col),
+        },
+        end: Position {
+            line,
+            character: u32::MAX,
+        },
+    }
+}
 
 /// Basename of `path`, falling back to the full display string.
 fn cycle_file_name(path: &std::path::Path) -> String {
@@ -47,6 +66,7 @@ fn push_legacy_circular_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     cycle: &fallow_api::editor_results::CircularDependency,
     names: &[String],
+    mapper: &mut PositionMapper,
 ) {
     let Some(first_file) = cycle.files.first() else {
         return;
@@ -56,6 +76,7 @@ fn push_legacy_circular_diagnostic(
     };
     let message = format!("Circular dependency: {}", names.join(" \u{2192} "));
     let line = cycle.line.saturating_sub(1);
+    let range = line_range_from_byte_col(mapper, first_file, line, cycle.col);
 
     let related_info: Vec<DiagnosticRelatedInformation> = cycle
         .files
@@ -75,16 +96,7 @@ fn push_legacy_circular_diagnostic(
         .collect();
 
     map.entry(uri).or_default().push(Diagnostic {
-        range: Range {
-            start: Position {
-                line,
-                character: cycle.col,
-            },
-            end: Position {
-                line,
-                character: u32::MAX,
-            },
-        },
+        range,
         severity: Some(DiagnosticSeverity::WARNING),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String("circular-dependency".to_string())),
@@ -102,6 +114,7 @@ fn push_legacy_circular_diagnostic(
 pub fn push_circular_dep_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for cycle in &results.circular_dependencies {
         let files = &cycle.cycle.files;
@@ -112,11 +125,11 @@ pub fn push_circular_dep_diagnostics(
         // diagnostic so behavior is unchanged for consumers predating `edges`.
         if cycle.cycle.edges.is_empty() {
             let file_names: Vec<String> = files.iter().map(|f| cycle_file_name(f)).collect();
-            push_legacy_circular_diagnostic(map, &cycle.cycle, &file_names);
+            push_legacy_circular_diagnostic(map, &cycle.cycle, &file_names, mapper);
             continue;
         }
 
-        push_circular_cycle_edge_diagnostics(map, &cycle.cycle);
+        push_circular_cycle_edge_diagnostics(map, &cycle.cycle, mapper);
     }
 }
 
@@ -125,6 +138,7 @@ pub fn push_circular_dep_diagnostics(
 fn push_circular_cycle_edge_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     cycle: &fallow_api::editor_results::CircularDependency,
+    mapper: &mut PositionMapper,
 ) {
     // Names are derived from the EDGES (not `files`) so all the rotated
     // message and related-info index math below stays in bounds even if a
@@ -147,6 +161,7 @@ fn push_circular_cycle_edge_diagnostics(
             continue;
         };
         let line = edge.line.saturating_sub(1);
+        let range = line_range_from_byte_col(mapper, &edge.path, line, edge.col);
         // Rotate the chain so the message reads from the file the user is
         // standing in: on `b` of a -> b -> c -> a it reads
         // "Circular dependency (3 files): b -> c -> a -> b".
@@ -156,19 +171,10 @@ fn push_circular_cycle_edge_diagnostics(
             rotated.join(" \u{2192} "),
         );
 
-        let related_info = circular_cycle_related_info(cycle, &names, i, n);
+        let related_info = circular_cycle_related_info(cycle, &names, i, n, mapper);
 
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position {
-                    line,
-                    character: edge.col,
-                },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range,
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("circular-dependency".to_string())),
@@ -197,33 +203,23 @@ fn circular_cycle_related_info(
     names: &[String],
     i: usize,
     n: usize,
+    mapper: &mut PositionMapper,
 ) -> Vec<DiagnosticRelatedInformation> {
-    cycle
-        .edges
-        .iter()
-        .enumerate()
-        .filter(|(j, _)| *j != i)
-        .filter_map(|(j, other)| {
-            let other_uri = Uri::from_file_path(&other.path)?;
-            let other_line = other.line.saturating_sub(1);
-            Some(DiagnosticRelatedInformation {
-                location: Location {
-                    uri: other_uri,
-                    range: Range {
-                        start: Position {
-                            line: other_line,
-                            character: other.col,
-                        },
-                        end: Position {
-                            line: other_line,
-                            character: u32::MAX,
-                        },
-                    },
-                },
-                message: format!("Cycle hop: {} \u{2192} {}", names[j], names[(j + 1) % n]),
-            })
-        })
-        .collect()
+    let mut related = Vec::new();
+    for (j, other) in cycle.edges.iter().enumerate().filter(|(j, _)| *j != i) {
+        let Some(other_uri) = Uri::from_file_path(&other.path) else {
+            continue;
+        };
+        let other_line = other.line.saturating_sub(1);
+        related.push(DiagnosticRelatedInformation {
+            location: Location {
+                uri: other_uri,
+                range: line_range_from_byte_col(mapper, &other.path, other_line, other.col),
+            },
+            message: format!("Cycle hop: {} \u{2192} {}", names[j], names[(j + 1) % n]),
+        });
+    }
+    related
 }
 
 pub fn push_re_export_cycle_diagnostics(
@@ -311,10 +307,11 @@ fn push_re_export_member_diagnostic(
 pub fn push_boundary_violation_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
-    push_boundary_import_violation_diagnostics(map, results);
-    push_boundary_coverage_violation_diagnostics(map, results);
-    push_boundary_call_violation_diagnostics(map, results);
+    push_boundary_import_violation_diagnostics(map, results, mapper);
+    push_boundary_coverage_violation_diagnostics(map, results, mapper);
+    push_boundary_call_violation_diagnostics(map, results, mapper);
 }
 
 /// Push WARNING diagnostics for cross-zone import boundary violations, each
@@ -322,12 +319,14 @@ pub fn push_boundary_violation_diagnostics(
 fn push_boundary_import_violation_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for v in &results.boundary_violations {
         let Some(uri) = Uri::from_file_path(&v.violation.from_path) else {
             continue;
         };
         let line = v.violation.line.saturating_sub(1);
+        let range = line_range_from_byte_col(mapper, &v.violation.from_path, line, v.violation.col);
         let to_name = v.violation.to_path.file_name().map_or_else(
             || v.violation.to_path.display().to_string(),
             |n| n.to_string_lossy().into_owned(),
@@ -348,16 +347,7 @@ fn push_boundary_import_violation_diagnostics(
         });
 
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position {
-                    line,
-                    character: v.violation.col,
-                },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range,
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("boundary-violation".to_string())),
@@ -373,23 +363,16 @@ fn push_boundary_import_violation_diagnostics(
 fn push_boundary_coverage_violation_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for v in &results.boundary_coverage_violations {
         let Some(uri) = Uri::from_file_path(&v.violation.path) else {
             continue;
         };
         let line = v.violation.line.saturating_sub(1);
+        let range = line_range_from_byte_col(mapper, &v.violation.path, line, v.violation.col);
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position {
-                    line,
-                    character: v.violation.col,
-                },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range,
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("boundary-violation".to_string())),
@@ -405,23 +388,16 @@ fn push_boundary_coverage_violation_diagnostics(
 fn push_boundary_call_violation_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for v in &results.boundary_call_violations {
         let Some(uri) = Uri::from_file_path(&v.violation.path) else {
             continue;
         };
         let line = v.violation.line.saturating_sub(1);
+        let range = line_range_from_byte_col(mapper, &v.violation.path, line, v.violation.col);
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position {
-                    line,
-                    character: v.violation.col,
-                },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range,
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("boundary-violation".to_string())),
@@ -444,6 +420,7 @@ fn push_boundary_call_violation_diagnostics(
 pub fn push_policy_violation_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     use fallow_api::editor_results::PolicyViolationSeverity;
 
@@ -452,6 +429,7 @@ pub fn push_policy_violation_diagnostics(
             continue;
         };
         let line = v.violation.line.saturating_sub(1);
+        let range = line_range_from_byte_col(mapper, &v.violation.path, line, v.violation.col);
         let severity = match v.violation.severity {
             PolicyViolationSeverity::Error => DiagnosticSeverity::ERROR,
             PolicyViolationSeverity::Warn => DiagnosticSeverity::WARNING,
@@ -467,16 +445,7 @@ pub fn push_policy_violation_diagnostics(
             ),
         };
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position {
-                    line,
-                    character: v.violation.col,
-                },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range,
             severity: Some(severity),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("policy-violation".to_string())),
@@ -495,27 +464,21 @@ pub fn push_policy_violation_diagnostics(
 pub fn push_invalid_client_export_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.invalid_client_exports {
         let Some(uri) = Uri::from_file_path(&finding.export.path) else {
             continue;
         };
         let line = finding.export.line.saturating_sub(1);
+        let range =
+            line_range_from_byte_col(mapper, &finding.export.path, line, finding.export.col);
         let message = format!(
             "Export `{}` is not allowed in a \"{}\" file (Next.js server-only / route-config name)",
             finding.export.export_name, finding.export.directive
         );
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position {
-                    line,
-                    character: finding.export.col,
-                },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range,
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("invalid-client-export".to_string())),
@@ -534,27 +497,21 @@ pub fn push_invalid_client_export_diagnostics(
 pub fn push_mixed_client_server_barrel_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.mixed_client_server_barrels {
         let Some(uri) = Uri::from_file_path(&finding.barrel.path) else {
             continue;
         };
         let line = finding.barrel.line.saturating_sub(1);
+        let range =
+            line_range_from_byte_col(mapper, &finding.barrel.path, line, finding.barrel.col);
         let message = format!(
             "Barrel re-exports both a \"use client\" module (`{}`) and a server-only module (`{}`); one import drags the other's directive across the boundary",
             finding.barrel.client_origin, finding.barrel.server_origin
         );
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position {
-                    line,
-                    character: finding.barrel.col,
-                },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range,
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String(
@@ -575,27 +532,25 @@ pub fn push_mixed_client_server_barrel_diagnostics(
 pub fn push_misplaced_directive_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.misplaced_directives {
         let Some(uri) = Uri::from_file_path(&finding.directive_site.path) else {
             continue;
         };
         let line = finding.directive_site.line.saturating_sub(1);
+        let range = line_range_from_byte_col(
+            mapper,
+            &finding.directive_site.path,
+            line,
+            finding.directive_site.col,
+        );
         let message = format!(
             "Directive \"{}\" is not in the leading position, so the RSC bundler ignores it; move it to the top of the file",
             finding.directive_site.directive
         );
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position {
-                    line,
-                    character: finding.directive_site.col,
-                },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range,
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("misplaced-directive".to_string())),
@@ -614,27 +569,21 @@ pub fn push_misplaced_directive_diagnostics(
 pub fn push_unprovided_inject_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.unprovided_injects {
         let Some(uri) = Uri::from_file_path(&finding.inject.path) else {
             continue;
         };
         let line = finding.inject.line.saturating_sub(1);
+        let range =
+            line_range_from_byte_col(mapper, &finding.inject.path, line, finding.inject.col);
         let message = format!(
             "inject(`{}`) has no matching provide(`{}`); at runtime it returns undefined",
             finding.inject.key_name, finding.inject.key_name
         );
         map.entry(uri).or_default().push(Diagnostic {
-            range: Range {
-                start: Position {
-                    line,
-                    character: finding.inject.col,
-                },
-                end: Position {
-                    line,
-                    character: u32::MAX,
-                },
-            },
+            range,
             severity: Some(DiagnosticSeverity::WARNING),
             source: Some("fallow".to_string()),
             code: Some(NumberOrString::String("unprovided-inject".to_string())),

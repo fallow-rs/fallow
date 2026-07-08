@@ -234,7 +234,7 @@ jobs:
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
 
       - name: Build NAPI addon
-        run: cd crates/napi && npx napi build --platform --release --target ${{ matrix.target }}
+        run: cd crates/napi && npx napi build --platform --profile napi-release --target ${{ matrix.target }}
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc

@@ -871,6 +871,7 @@ mod tests {
             "project_info",
             "trace_export",
             "trace_file",
+            "impact_closure",
             "trace_dependency",
             "trace_clone",
             "check_health",
@@ -938,6 +939,7 @@ mod tests {
             ("project_info", "project_info"),
             ("trace_export", "trace_export"),
             ("trace_file", "trace_file"),
+            ("impact_closure", "impact_closure"),
             ("trace_dependency", "trace_dependency"),
             ("trace_clone", "trace_clone"),
             ("check_health", "check_health"),
@@ -1297,6 +1299,15 @@ mod tests {
         let args =
             build_tool_args(CodeModeTool::TraceFile, params).expect("trace_file args should build");
         assert!(args.contains(&"--trace-file".to_string()));
+        assert!(args.contains(&"src/utils.ts".to_string()));
+    }
+
+    #[test]
+    fn build_tool_args_impact_closure_includes_impact_closure_flag() {
+        let params = serde_json::json!({ "path": "src/utils.ts" });
+        let args = build_tool_args(CodeModeTool::ImpactClosure, params)
+            .expect("impact_closure args should build");
+        assert!(args.contains(&"--impact-closure".to_string()));
         assert!(args.contains(&"src/utils.ts".to_string()));
     }
 

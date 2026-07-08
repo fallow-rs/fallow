@@ -16,6 +16,7 @@ mod document_state;
 mod hover;
 mod initialization;
 mod markdown;
+mod position;
 mod protocol;
 mod server_capabilities;
 

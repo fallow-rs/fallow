@@ -7,10 +7,12 @@ use ls_types::{
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 
 use super::{FIRST_LINE_RANGE, doc_link_for_code};
+use crate::position::PositionMapper;
 
 pub fn push_export_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     let exports_iter = results.unused_exports.iter().map(|f| &f.export);
     let types_iter = results.unused_types.iter().map(|f| &f.export);
@@ -29,39 +31,28 @@ pub fn push_export_diagnostics(
         ),
     ] {
         for export in exports {
-            push_unused_export_diagnostic(map, export, code, msg_prefix);
+            push_unused_export_diagnostic(map, export, code, msg_prefix, mapper);
         }
     }
 
-    push_private_type_leak_diagnostics(map, results);
+    push_private_type_leak_diagnostics(map, results, mapper);
 }
 
 /// Push one HINT diagnostic for an unused export or type export.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "identifier lengths are bounded by source size"
-)]
 fn push_unused_export_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     export: &fallow_api::editor_results::UnusedExport,
     code: &str,
     msg_prefix: &str,
+    mapper: &mut PositionMapper,
 ) {
     let Some(uri) = Uri::from_file_path(&export.path) else {
         return;
     };
     let line = export.line.saturating_sub(1);
+    let range = identifier_range(mapper, &export.path, line, export.col, &export.export_name);
     map.entry(uri).or_default().push(Diagnostic {
-        range: Range {
-            start: Position {
-                line,
-                character: export.col,
-            },
-            end: Position {
-                line,
-                character: export.col + export.export_name.len() as u32,
-            },
-        },
+        range,
         severity: Some(DiagnosticSeverity::HINT),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String(code.to_string())),
@@ -73,28 +64,23 @@ fn push_unused_export_diagnostic(
 }
 
 /// Push WARNING diagnostics for exports that reference a private type.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "identifier lengths are bounded by source size"
-)]
 fn push_private_type_leak_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for leak in &results.private_type_leaks {
         if let Some(uri) = Uri::from_file_path(&leak.leak.path) {
             let line = leak.leak.line.saturating_sub(1);
+            let range = identifier_range(
+                mapper,
+                &leak.leak.path,
+                line,
+                leak.leak.col,
+                &leak.leak.type_name,
+            );
             map.entry(uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line,
-                        character: leak.leak.col,
-                    },
-                    end: Position {
-                        line,
-                        character: leak.leak.col + leak.leak.type_name.len() as u32,
-                    },
-                },
+                range,
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("private-type-leak".to_string())),
@@ -126,28 +112,26 @@ pub fn push_file_diagnostics(map: &mut FxHashMap<Uri, Vec<Diagnostic>>, results:
     }
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "specifier lengths are bounded by source size"
-)]
 pub fn push_import_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for import in &results.unresolved_imports {
         if let Some(uri) = Uri::from_file_path(&import.import.path) {
             let line = import.import.line.saturating_sub(1);
+            let start = mapper.utf16_col(&import.import.path, line, import.import.specifier_col);
+            let width =
+                u32::try_from(import.import.specifier.encode_utf16().count()).unwrap_or(u32::MAX);
             map.entry(uri).or_default().push(Diagnostic {
                 range: Range {
                     start: Position {
                         line,
-                        character: import.import.specifier_col,
+                        character: start,
                     },
                     end: Position {
                         line,
-                        character: import.import.specifier_col
-                            + import.import.specifier.len() as u32
-                            + 2,
+                        character: start.saturating_add(width).saturating_add(2),
                     },
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
@@ -534,6 +518,7 @@ fn push_misconfigured_dependency_override_diagnostics(
 pub fn push_member_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
     let class_iter = results.unused_class_members.iter().map(|f| &f.member);
@@ -559,18 +544,18 @@ pub fn push_member_diagnostics(
         ),
     ] {
         for member in members {
-            push_unused_member_diagnostic(map, member, code, kind_label);
+            push_unused_member_diagnostic(map, member, code, kind_label, mapper);
         }
     }
 
-    push_unrendered_component_diagnostics(map, results);
-    push_unused_component_prop_diagnostics(map, results);
-    push_unused_component_emit_diagnostics(map, results);
-    push_unused_component_input_diagnostics(map, results);
-    push_unused_component_output_diagnostics(map, results);
-    push_unused_svelte_event_diagnostics(map, results);
-    push_unused_server_action_diagnostics(map, results);
-    push_unused_load_data_key_diagnostics(map, results);
+    push_unrendered_component_diagnostics(map, results, mapper);
+    push_unused_component_prop_diagnostics(map, results, mapper);
+    push_unused_component_emit_diagnostics(map, results, mapper);
+    push_unused_component_input_diagnostics(map, results, mapper);
+    push_unused_component_output_diagnostics(map, results, mapper);
+    push_unused_svelte_event_diagnostics(map, results, mapper);
+    push_unused_server_action_diagnostics(map, results, mapper);
+    push_unused_load_data_key_diagnostics(map, results, mapper);
 }
 
 /// Push one HINT diagnostic for an unused enum / class / store member.
@@ -579,22 +564,15 @@ fn push_unused_member_diagnostic(
     member: &fallow_api::editor_results::UnusedMember,
     code: &str,
     kind_label: &str,
+    mapper: &mut PositionMapper,
 ) {
     let Some(uri) = Uri::from_file_path(&member.path) else {
         return;
     };
     let line = member.line.saturating_sub(1);
+    let range = identifier_range(mapper, &member.path, line, member.col, &member.member_name);
     map.entry(uri).or_default().push(Diagnostic {
-        range: Range {
-            start: Position {
-                line,
-                character: member.col,
-            },
-            end: Position {
-                line,
-                character: diagnostic_end_col(member.col, &member.member_name),
-            },
-        },
+        range,
         severity: Some(DiagnosticSeverity::HINT),
         source: Some("fallow".to_string()),
         code: Some(NumberOrString::String(code.to_string())),
@@ -608,29 +586,38 @@ fn push_unused_member_diagnostic(
     });
 }
 
-fn diagnostic_end_col(start: u32, text: &str) -> u32 {
-    start.saturating_add(u32::try_from(text.len()).unwrap_or(u32::MAX))
+fn identifier_range(
+    mapper: &mut PositionMapper,
+    path: &std::path::Path,
+    line: u32,
+    col: u32,
+    text: &str,
+) -> Range {
+    let (start, end) = mapper.utf16_col_span(path, line, col, text);
+    Range {
+        start: Position {
+            line,
+            character: start,
+        },
+        end: Position {
+            line,
+            character: end,
+        },
+    }
 }
 
 fn push_unrendered_component_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.unrendered_components {
         let c = &finding.component;
         if let Some(uri) = Uri::from_file_path(&c.path) {
             let line = c.line.saturating_sub(1);
+            let range = identifier_range(mapper, &c.path, line, c.col, &c.component_name);
             map.entry(uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line,
-                        character: c.col,
-                    },
-                    end: Position {
-                        line,
-                        character: diagnostic_end_col(c.col, &c.component_name),
-                    },
-                },
+                range,
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unrendered-component".to_string())),
@@ -649,22 +636,15 @@ fn push_unrendered_component_diagnostics(
 fn push_unused_component_prop_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.unused_component_props {
         let p = &finding.prop;
         if let Some(uri) = Uri::from_file_path(&p.path) {
             let line = p.line.saturating_sub(1);
+            let range = identifier_range(mapper, &p.path, line, p.col, &p.prop_name);
             map.entry(uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line,
-                        character: p.col,
-                    },
-                    end: Position {
-                        line,
-                        character: diagnostic_end_col(p.col, &p.prop_name),
-                    },
-                },
+                range,
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-component-prop".to_string())),
@@ -683,22 +663,15 @@ fn push_unused_component_prop_diagnostics(
 fn push_unused_component_emit_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.unused_component_emits {
         let e = &finding.emit;
         if let Some(uri) = Uri::from_file_path(&e.path) {
             let line = e.line.saturating_sub(1);
+            let range = identifier_range(mapper, &e.path, line, e.col, &e.emit_name);
             map.entry(uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line,
-                        character: e.col,
-                    },
-                    end: Position {
-                        line,
-                        character: diagnostic_end_col(e.col, &e.emit_name),
-                    },
-                },
+                range,
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-component-emit".to_string())),
@@ -717,22 +690,15 @@ fn push_unused_component_emit_diagnostics(
 fn push_unused_component_input_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.unused_component_inputs {
         let i = &finding.input;
         if let Some(uri) = Uri::from_file_path(&i.path) {
             let line = i.line.saturating_sub(1);
+            let range = identifier_range(mapper, &i.path, line, i.col, &i.input_name);
             map.entry(uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line,
-                        character: i.col,
-                    },
-                    end: Position {
-                        line,
-                        character: diagnostic_end_col(i.col, &i.input_name),
-                    },
-                },
+                range,
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-component-input".to_string())),
@@ -751,22 +717,15 @@ fn push_unused_component_input_diagnostics(
 fn push_unused_component_output_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.unused_component_outputs {
         let o = &finding.output;
         if let Some(uri) = Uri::from_file_path(&o.path) {
             let line = o.line.saturating_sub(1);
+            let range = identifier_range(mapper, &o.path, line, o.col, &o.output_name);
             map.entry(uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line,
-                        character: o.col,
-                    },
-                    end: Position {
-                        line,
-                        character: diagnostic_end_col(o.col, &o.output_name),
-                    },
-                },
+                range,
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String(
@@ -787,22 +746,15 @@ fn push_unused_component_output_diagnostics(
 fn push_unused_svelte_event_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.unused_svelte_events {
         let e = &finding.event;
         if let Some(uri) = Uri::from_file_path(&e.path) {
             let line = e.line.saturating_sub(1);
+            let range = identifier_range(mapper, &e.path, line, e.col, &e.event_name);
             map.entry(uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line,
-                        character: e.col,
-                    },
-                    end: Position {
-                        line,
-                        character: diagnostic_end_col(e.col, &e.event_name),
-                    },
-                },
+                range,
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-svelte-event".to_string())),
@@ -820,29 +772,18 @@ fn push_unused_svelte_event_diagnostics(
 
 /// Push HINT diagnostics for unused SvelteKit `load()` return-object keys
 /// (returned by `+page.{ts,server.ts,js,server.js}` but read by no consumer).
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "key name lengths are bounded by source size"
-)]
 fn push_unused_load_data_key_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.unused_load_data_keys {
         let k = &finding.key;
         if let Some(uri) = Uri::from_file_path(&k.path) {
             let line = k.line.saturating_sub(1);
+            let range = identifier_range(mapper, &k.path, line, k.col, &k.key_name);
             map.entry(uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line,
-                        character: k.col,
-                    },
-                    end: Position {
-                        line,
-                        character: k.col + k.key_name.len() as u32,
-                    },
-                },
+                range,
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-load-data-key".to_string())),
@@ -860,29 +801,18 @@ fn push_unused_load_data_key_diagnostics(
 
 /// Push HINT diagnostics for unused Next.js server actions (exports of a
 /// `"use server"` file referenced by no code in the project).
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "action name lengths are bounded by source size"
-)]
 fn push_unused_server_action_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
+    mapper: &mut PositionMapper,
 ) {
     for finding in &results.unused_server_actions {
         let a = &finding.action;
         if let Some(uri) = Uri::from_file_path(&a.path) {
             let line = a.line.saturating_sub(1);
+            let range = identifier_range(mapper, &a.path, line, a.col, &a.action_name);
             map.entry(uri).or_default().push(Diagnostic {
-                range: Range {
-                    start: Position {
-                        line,
-                        character: a.col,
-                    },
-                    end: Position {
-                        line,
-                        character: a.col + a.action_name.len() as u32,
-                    },
-                },
+                range,
                 severity: Some(DiagnosticSeverity::HINT),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-server-action".to_string())),

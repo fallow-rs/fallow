@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use rmcp::model::ContentBlock;
 
 use crate::tools::{
-    build_analyze_args, build_health_args, build_project_info_args, build_security_candidates_args,
-    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args, execute_code_mode, inspect_target, run_fallow, run_trace_clone_tool,
-    run_trace_export_tool,
+    build_analyze_args, build_health_args, build_impact_closure_args, build_project_info_args,
+    build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
+    build_trace_export_args, build_trace_file_args, execute_code_mode, inspect_target, run_fallow,
+    run_trace_clone_tool, run_trace_export_tool,
 };
 
 /// Resolve the fallow binary from `FALLOW_BIN`, or the workspace target dir.
@@ -339,6 +339,32 @@ async fn e2e_trace_file_returns_json() {
         json["exports"].is_array(),
         "trace_file should include exports"
     );
+}
+
+#[tokio::test]
+async fn e2e_impact_closure_returns_json() {
+    let bin = fallow_binary();
+    let root = fixture_path("basic-project");
+    let args = build_impact_closure_args(&crate::params::ImpactClosureParams {
+        path: "src/utils.ts".to_string(),
+        root: Some(root.to_string_lossy().to_string()),
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+    let result = run_fallow(&bin, &args).await.unwrap();
+
+    assert_eq!(result.is_error, Some(false));
+
+    let text = extract_text(&result);
+    let json: serde_json::Value = serde_json::from_str(text)
+        .unwrap_or_else(|e| panic!("should parse as JSON: {e}\ntext: {text}"));
+    assert_eq!(json["seed"].as_str(), Some("src/utils.ts"));
+    assert!(json["affected_not_shown"].is_array());
+    assert!(json["coordination_gap"].is_array());
 }
 
 #[tokio::test]

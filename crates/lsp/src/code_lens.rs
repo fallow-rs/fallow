@@ -9,6 +9,8 @@ use fallow_api::{
     EditorInlineComplexityFinding as InlineComplexityFinding,
 };
 
+use crate::position::PositionMapper;
+
 fn complexity_exceeded_label(exceeded: InlineComplexityExceeded) -> &'static str {
     match exceeded {
         InlineComplexityExceeded::Cyclomatic => "cyclomatic",
@@ -51,9 +53,10 @@ pub fn build_code_lenses(input: CodeLensInput<'_>) -> Vec<CodeLens> {
         file_path,
         document_uri,
     } = input;
-    let mut lenses = export_usage_code_lenses(results, file_path, document_uri);
-    lenses.extend(complexity_code_lenses(complexity, file_path));
-    lenses.extend(react_component_code_lenses(results, file_path));
+    let mut mapper = PositionMapper::default();
+    let mut lenses = export_usage_code_lenses(results, file_path, document_uri, &mut mapper);
+    lenses.extend(complexity_code_lenses(complexity, file_path, &mut mapper));
+    lenses.extend(react_component_code_lenses(results, file_path, &mut mapper));
 
     lenses
 }
@@ -96,19 +99,30 @@ struct ReferenceLocationPayload {
 /// breakdown. Ambient editor context, never a finding. Zero segments are
 /// omitted cleanly (a component rendered nowhere with no props and no hooks
 /// still gets a lens, but the segments it lacks are dropped).
-fn react_component_code_lenses(results: &AnalysisResults, file_path: &Path) -> Vec<CodeLens> {
+fn react_component_code_lenses(
+    results: &AnalysisResults,
+    file_path: &Path,
+    mapper: &mut PositionMapper,
+) -> Vec<CodeLens> {
     results
         .react_component_intel
         .iter()
         .filter(|intel| intel.path == file_path)
-        .map(react_component_code_lens)
+        .map(|intel| react_component_code_lens(intel, mapper))
         .collect()
 }
 
-fn react_component_code_lens(intel: &fallow_api::editor_results::ReactComponentIntel) -> CodeLens {
+fn react_component_code_lens(
+    intel: &fallow_api::editor_results::ReactComponentIntel,
+    mapper: &mut PositionMapper,
+) -> CodeLens {
     let position = Position {
         line: intel.anchor_line.saturating_sub(1),
-        character: intel.anchor_col,
+        character: mapper.utf16_col(
+            &intel.path,
+            intel.anchor_line.saturating_sub(1),
+            intel.anchor_col,
+        ),
     };
     CodeLens {
         range: Range {
@@ -197,18 +211,20 @@ fn export_usage_code_lenses(
     results: &AnalysisResults,
     file_path: &Path,
     document_uri: &Uri,
+    mapper: &mut PositionMapper,
 ) -> Vec<CodeLens> {
     results
         .export_usages
         .iter()
         .filter(|usage| usage.path == file_path)
-        .map(|usage| export_usage_code_lens(usage, document_uri))
+        .map(|usage| export_usage_code_lens(usage, document_uri, mapper))
         .collect()
 }
 
 fn export_usage_code_lens(
     usage: &fallow_api::editor_results::ExportUsage,
     document_uri: &Uri,
+    mapper: &mut PositionMapper,
 ) -> CodeLens {
     let line = usage.line.saturating_sub(1);
     let title = if usage.reference_count == 1 {
@@ -218,12 +234,12 @@ fn export_usage_code_lens(
     };
     let export_position = Position {
         line,
-        character: usage.col,
+        character: mapper.utf16_col(&usage.path, line, usage.col),
     };
     let ref_locations: Vec<ReferenceLocationPayload> = usage
         .reference_locations
         .iter()
-        .filter_map(reference_location_payload)
+        .filter_map(|loc| reference_location_payload(loc, mapper))
         .collect();
     let (command_name, arguments) =
         reference_command(document_uri, export_position, &ref_locations);
@@ -244,12 +260,13 @@ fn export_usage_code_lens(
 
 fn reference_location_payload(
     loc: &fallow_api::editor_results::ReferenceLocation,
+    mapper: &mut PositionMapper,
 ) -> Option<ReferenceLocationPayload> {
     let uri = Uri::from_file_path(&loc.path)?;
     let ref_line = loc.line.saturating_sub(1);
     let position = ReferenceCommandPosition {
         line: ref_line,
-        character: loc.col,
+        character: mapper.utf16_col(&loc.path, ref_line, loc.col),
     };
     Some(ReferenceLocationPayload {
         uri: uri.as_str().to_string(),
@@ -294,18 +311,23 @@ fn reference_command_arguments(
 fn complexity_code_lenses(
     complexity: &[InlineComplexityFinding],
     file_path: &Path,
+    mapper: &mut PositionMapper,
 ) -> Vec<CodeLens> {
     complexity
         .iter()
         .filter(|finding| finding.path == file_path)
-        .map(complexity_code_lens)
+        .map(|finding| complexity_code_lens(finding, mapper))
         .collect()
 }
 
-fn complexity_code_lens(finding: &InlineComplexityFinding) -> CodeLens {
+fn complexity_code_lens(
+    finding: &InlineComplexityFinding,
+    mapper: &mut PositionMapper,
+) -> CodeLens {
+    let line = finding.line.saturating_sub(1);
     let position = Position {
-        line: finding.line.saturating_sub(1),
-        character: finding.col,
+        line,
+        character: mapper.utf16_col(&finding.path, line, finding.col),
     };
     CodeLens {
         range: Range {
@@ -760,6 +782,35 @@ mod tests {
             command.title,
             "parseConfig complexity: 31 cyc, 26 cog (cyclomatic, cognitive)"
         );
+    }
+
+    #[test]
+    fn complexity_lens_uses_utf16_columns() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        let path = root.join("src/non_ascii.ts");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        let source = "const emoji = \"🎉\"; function parseConfig() {}\n";
+        std::fs::write(&path, source).expect("write fixture");
+        let byte_col = source.find("parseConfig").expect("parseConfig") as u32;
+        let utf16_col = source[..byte_col as usize].encode_utf16().count() as u32;
+        let results = AnalysisResults::default();
+        let complexity = vec![InlineComplexityFinding {
+            path: path.clone(),
+            name: "parseConfig".to_string(),
+            line: 1,
+            col: byte_col,
+            cyclomatic: 31,
+            cognitive: 26,
+            exceeded: InlineComplexityExceeded::CyclomaticAndCognitive,
+        }];
+
+        let uri = Uri::from_file_path(&path).unwrap();
+        let lenses = build_code_lenses_for_test(&results, &complexity, &path, &uri);
+
+        assert_eq!(lenses.len(), 1);
+        assert_eq!(lenses[0].range.start.character, utf16_col);
+        assert_eq!(lenses[0].range.end.character, utf16_col);
     }
 
     #[test]

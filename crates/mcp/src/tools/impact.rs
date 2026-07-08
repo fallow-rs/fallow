@@ -1,9 +1,9 @@
-use crate::params::{ImpactAllParams, ImpactParams};
+use crate::params::{ImpactAllParams, ImpactClosureParams, ImpactParams};
 
 use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
-use super::{push_str_flag, run_tool};
+use super::{push_global, push_scope, push_str_flag, run_tool, validation_error_body};
 
 /// Run the read-only `impact` value report through the CLI-backed local store
 /// reader. It is not an analysis tool, and the store lifecycle remains CLI-owned.
@@ -20,6 +20,23 @@ pub async fn run_impact_all(
 ) -> Result<CallToolResult, McpError> {
     let args = build_impact_all_args(&params);
     run_tool(binary, "impact_all", &args).await
+}
+
+/// Run the read-only `impact_closure` evidence query through the existing
+/// `dead-code --impact-closure` CLI path.
+pub async fn run_impact_closure(
+    binary: &str,
+    params: ImpactClosureParams,
+) -> Result<CallToolResult, McpError> {
+    let args = match build_impact_closure_args(&params) {
+        Ok(args) => args,
+        Err(msg) => {
+            return Ok(CallToolResult::error(vec![
+                rmcp::model::ContentBlock::text(msg),
+            ]));
+        }
+    };
+    run_tool(binary, "impact_closure", &args).await
 }
 
 /// Build CLI arguments for the `impact` tool.
@@ -62,4 +79,30 @@ pub fn build_impact_all_args(params: &ImpactAllParams) -> Vec<String> {
     }
 
     args
+}
+
+/// Build CLI arguments for the `impact_closure` tool.
+pub fn build_impact_closure_args(params: &ImpactClosureParams) -> Result<Vec<String>, String> {
+    if params.path.trim().is_empty() {
+        return Err(validation_error_body("path must not be empty"));
+    }
+
+    let mut args = vec![
+        "dead-code".to_string(),
+        "--format".to_string(),
+        "json".to_string(),
+        "--quiet".to_string(),
+    ];
+
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
+    push_scope(&mut args, params.production, params.workspace.as_deref());
+    args.extend(["--impact-closure".to_string(), params.path.clone()]);
+
+    Ok(args)
 }

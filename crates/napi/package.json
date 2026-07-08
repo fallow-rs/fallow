@@ -52,7 +52,7 @@
     ]
   },
   "scripts": {
-    "build": "napi build --release --platform && npm run publish:prepare",
+    "build": "napi build --profile napi-release --platform && npm run publish:prepare",
     "build:debug": "napi build --platform && npm run publish:prepare",
     "publish:prepare": "node scripts/write-dts.mjs",
     "prepublishOnly": "npm run publish:prepare",

@@ -9,9 +9,9 @@ test("maps Windows x64 and arm64 to MSVC packages", () => {
 });
 
 test("maps Linux packages with libc awareness", () => {
-  assert.equal(getPlatformPackage("linux", "x64", "gnu"), "@fallow-cli/linux-x64-gnu");
-  assert.equal(getPlatformPackage("linux", "arm64", "musl"), "@fallow-cli/linux-arm64-musl");
-  assert.equal(getPlatformPackage("linux", "arm64"), "@fallow-cli/linux-arm64-gnu");
+  assert.equal(getPlatformPackage("linux", "x64", "glibc"), "@fallow-cli/linux-x64-gnu");
+  assert.equal(getPlatformPackage("linux", "x64", "musl"), "@fallow-cli/linux-x64-musl");
+  assert.equal(getPlatformPackage("linux", "x64", null), "@fallow-cli/linux-x64-musl");
 });
 
 test("maps macOS packages by architecture", () => {

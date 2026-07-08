@@ -10,6 +10,7 @@ use fallow_api::{
 
 use crate::diagnostics::security::security_label;
 use crate::markdown::format_inline_code;
+use crate::position::PositionMapper;
 
 /// Typed input for building hover information from editor analysis state.
 #[derive(Clone, Copy)]
@@ -49,35 +50,36 @@ pub fn build_hover(input: HoverInput<'_>) -> Option<Hover> {
         file_path,
         position,
     } = input;
+    let mut mapper = PositionMapper::default();
     if let Some(hover) = check_unused_file(results, file_path) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_unused_export(results, file_path, position) {
+    if let Some(hover) = check_unused_export(results, file_path, position, &mut mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_used_export(results, file_path, position) {
+    if let Some(hover) = check_used_export(results, file_path, position, &mut mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_unused_member(results, file_path, position) {
+    if let Some(hover) = check_unused_member(results, file_path, position, &mut mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_component_hover(results, file_path, position) {
+    if let Some(hover) = check_component_hover(results, file_path, position, &mut mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_unresolved_import(results, file_path, position) {
+    if let Some(hover) = check_unresolved_import(results, file_path, position, &mut mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_security(results, file_path, position) {
+    if let Some(hover) = check_security(results, file_path, position, &mut mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_duplication(duplication, file_path, position) {
+    if let Some(hover) = check_duplication(duplication, file_path, position, &mut mapper) {
         return Some(hover);
     }
 
@@ -88,47 +90,94 @@ fn check_component_hover(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
-    if let Some(hover) = check_unrendered_component(results, file_path, position) {
+    if let Some(hover) = check_unrendered_component(results, file_path, position, mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_unused_component_prop(results, file_path, position) {
+    if let Some(hover) = check_unused_component_prop(results, file_path, position, mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_unused_component_emit(results, file_path, position) {
+    if let Some(hover) = check_unused_component_emit(results, file_path, position, mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_unused_component_input(results, file_path, position) {
+    if let Some(hover) = check_unused_component_input(results, file_path, position, mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_unused_component_output(results, file_path, position) {
+    if let Some(hover) = check_unused_component_output(results, file_path, position, mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_unused_svelte_event(results, file_path, position) {
+    if let Some(hover) = check_unused_svelte_event(results, file_path, position, mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_unused_server_action(results, file_path, position) {
+    if let Some(hover) = check_unused_server_action(results, file_path, position, mapper) {
         return Some(hover);
     }
 
-    if let Some(hover) = check_unused_load_data_key(results, file_path, position) {
+    if let Some(hover) = check_unused_load_data_key(results, file_path, position, mapper) {
         return Some(hover);
     }
 
     // Descriptive React component intelligence (per-prop usage hover, plus a
     // component-anchor summary hover). Placed AFTER every component-finding
     // hover so a real finding (e.g. an unused prop) wins when both match.
-    if let Some(hover) = check_react_prop_intel(results, file_path, position) {
+    if let Some(hover) = check_react_prop_intel(results, file_path, position, mapper) {
         return Some(hover);
     }
 
-    check_react_component_intel(results, file_path, position)
+    check_react_component_intel(results, file_path, position, mapper)
+}
+
+fn utf16_span(
+    mapper: &mut PositionMapper,
+    path: &Path,
+    line: u32,
+    col: u32,
+    text: &str,
+) -> (u32, u32) {
+    mapper.utf16_col_span(path, line, col, text)
+}
+
+fn position_in_span(position: Position, start: u32, end: u32) -> bool {
+    position.character >= start && position.character < end
+}
+
+fn span_range(line: u32, start: u32, end: u32) -> Range {
+    Range {
+        start: Position {
+            line,
+            character: start,
+        },
+        end: Position {
+            line,
+            character: end,
+        },
+    }
+}
+
+fn line_range_from_byte_col(
+    mapper: &mut PositionMapper,
+    path: &Path,
+    line: u32,
+    col: u32,
+) -> Range {
+    let start = mapper.utf16_col(path, line, col);
+    Range {
+        start: Position {
+            line,
+            character: start,
+        },
+        end: Position {
+            line,
+            character: u32::MAX,
+        },
+    }
 }
 
 #[cfg(test)]
@@ -155,6 +204,7 @@ fn check_security(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for finding in &results.security_findings {
         if finding.path != file_path {
@@ -164,7 +214,8 @@ fn check_security(
         if finding_line != position.line {
             continue;
         }
-        if position.character < finding.col {
+        let range = line_range_from_byte_col(mapper, &finding.path, finding_line, finding.col);
+        if position.character < range.start.character {
             continue;
         }
 
@@ -173,16 +224,7 @@ fn check_security(
                 kind: MarkupKind::Markdown,
                 value: security_hover_markdown(finding, file_path),
             }),
-            range: Some(Range {
-                start: Position {
-                    line: finding_line,
-                    character: finding.col,
-                },
-                end: Position {
-                    line: finding_line,
-                    character: u32::MAX,
-                },
-            }),
+            range: Some(range),
         });
     }
 
@@ -286,14 +328,11 @@ fn check_unused_file(results: &AnalysisResults, file_path: &Path) -> Option<Hove
 }
 
 /// Check if the position is on an unused export or type.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "identifier lengths are bounded by source size"
-)]
 fn check_unused_export(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     let unused_exports_iter = results.unused_exports.iter().map(|f| &f.export);
     let unused_types_iter = results.unused_types.iter().map(|f| &f.export);
@@ -317,8 +356,14 @@ fn check_unused_export(
             if export_line != position.line {
                 continue;
             }
-            let end_col = export.col + export.export_name.len() as u32;
-            if position.character < export.col || position.character >= end_col {
+            let (start_col, end_col) = utf16_span(
+                mapper,
+                &export.path,
+                export_line,
+                export.col,
+                &export.export_name,
+            );
+            if !position_in_span(position, start_col, end_col) {
                 continue;
             }
 
@@ -332,16 +377,7 @@ fn check_unused_export(
                     kind: MarkupKind::Markdown,
                     value,
                 }),
-                range: Some(Range {
-                    start: Position {
-                        line: export_line,
-                        character: export.col,
-                    },
-                    end: Position {
-                        line: export_line,
-                        character: export.col + export.export_name.len() as u32,
-                    },
-                }),
+                range: Some(span_range(export_line, start_col, end_col)),
             });
         }
     }
@@ -350,14 +386,11 @@ fn check_unused_export(
 }
 
 /// Check if the position is on a used export and show reference information.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "identifier lengths are bounded by source size"
-)]
 fn check_used_export(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for usage in &results.export_usages {
         if usage.path != file_path {
@@ -367,8 +400,14 @@ fn check_used_export(
         if usage_line != position.line {
             continue;
         }
-        let end_col = usage.col + usage.export_name.len() as u32;
-        if position.character < usage.col || position.character >= end_col {
+        let (start_col, end_col) = utf16_span(
+            mapper,
+            &usage.path,
+            usage_line,
+            usage.col,
+            &usage.export_name,
+        );
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -381,16 +420,7 @@ fn check_used_export(
                 kind: MarkupKind::Markdown,
                 value: used_export_hover_markdown(usage),
             }),
-            range: Some(Range {
-                start: Position {
-                    line: usage_line,
-                    character: usage.col,
-                },
-                end: Position {
-                    line: usage_line,
-                    character: usage.col + usage.export_name.len() as u32,
-                },
-            }),
+            range: Some(span_range(usage_line, start_col, end_col)),
         });
     }
 
@@ -444,6 +474,7 @@ fn check_unused_member(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     let enum_iter = results.unused_enum_members.iter().map(|f| &f.member);
     let class_iter = results.unused_class_members.iter().map(|f| &f.member);
@@ -466,7 +497,9 @@ fn check_unused_member(
         ),
     ] {
         for member in members {
-            if let Some(hover) = unused_member_hover(member, kind_label, file_path, position) {
+            if let Some(hover) =
+                unused_member_hover(member, kind_label, file_path, position, mapper)
+            {
                 return Some(hover);
             }
         }
@@ -475,15 +508,12 @@ fn check_unused_member(
     None
 }
 
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "member name lengths are bounded by source size"
-)]
 fn unused_member_hover(
     member: &fallow_api::editor_results::UnusedMember,
     kind_label: &str,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     if member.path != file_path {
         return None;
@@ -492,8 +522,14 @@ fn unused_member_hover(
     if member_line != position.line {
         return None;
     }
-    let end_col = member.col + member.member_name.len() as u32;
-    if position.character < member.col || position.character >= end_col {
+    let (start_col, end_col) = utf16_span(
+        mapper,
+        &member.path,
+        member_line,
+        member.col,
+        &member.member_name,
+    );
+    if !position_in_span(position, start_col, end_col) {
         return None;
     }
 
@@ -507,28 +543,16 @@ fn unused_member_hover(
             kind: MarkupKind::Markdown,
             value,
         }),
-        range: Some(Range {
-            start: Position {
-                line: member_line,
-                character: member.col,
-            },
-            end: Position {
-                line: member_line,
-                character: end_col,
-            },
-        }),
+        range: Some(span_range(member_line, start_col, end_col)),
     })
 }
 
 /// Check if the position is on an unrendered Vue/Svelte component anchor.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "component name lengths are bounded by source size"
-)]
 fn check_unrendered_component(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for finding in &results.unrendered_components {
         let c = &finding.component;
@@ -539,8 +563,9 @@ fn check_unrendered_component(
         if component_line != position.line {
             continue;
         }
-        let end_col = c.col + c.component_name.len() as u32;
-        if position.character < c.col || position.character >= end_col {
+        let (start_col, end_col) =
+            utf16_span(mapper, &c.path, component_line, c.col, &c.component_name);
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -563,16 +588,7 @@ fn check_unrendered_component(
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range {
-                start: Position {
-                    line: component_line,
-                    character: c.col,
-                },
-                end: Position {
-                    line: component_line,
-                    character: end_col,
-                },
-            }),
+            range: Some(span_range(component_line, start_col, end_col)),
         });
     }
 
@@ -580,14 +596,11 @@ fn check_unrendered_component(
 }
 
 /// Check if the position is on an unused component prop anchor.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "prop name lengths are bounded by source size"
-)]
 fn check_unused_component_prop(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for finding in &results.unused_component_props {
         let p = &finding.prop;
@@ -598,8 +611,8 @@ fn check_unused_component_prop(
         if prop_line != position.line {
             continue;
         }
-        let end_col = p.col + p.prop_name.len() as u32;
-        if position.character < p.col || position.character >= end_col {
+        let (start_col, end_col) = utf16_span(mapper, &p.path, prop_line, p.col, &p.prop_name);
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -613,16 +626,7 @@ fn check_unused_component_prop(
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range {
-                start: Position {
-                    line: prop_line,
-                    character: p.col,
-                },
-                end: Position {
-                    line: prop_line,
-                    character: end_col,
-                },
-            }),
+            range: Some(span_range(prop_line, start_col, end_col)),
         });
     }
 
@@ -630,14 +634,11 @@ fn check_unused_component_prop(
 }
 
 /// Check if the position is on an unused Vue component emit anchor.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "emit name lengths are bounded by source size"
-)]
 fn check_unused_component_emit(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for finding in &results.unused_component_emits {
         let e = &finding.emit;
@@ -648,8 +649,8 @@ fn check_unused_component_emit(
         if emit_line != position.line {
             continue;
         }
-        let end_col = e.col + e.emit_name.len() as u32;
-        if position.character < e.col || position.character >= end_col {
+        let (start_col, end_col) = utf16_span(mapper, &e.path, emit_line, e.col, &e.emit_name);
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -663,16 +664,7 @@ fn check_unused_component_emit(
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range {
-                start: Position {
-                    line: emit_line,
-                    character: e.col,
-                },
-                end: Position {
-                    line: emit_line,
-                    character: end_col,
-                },
-            }),
+            range: Some(span_range(emit_line, start_col, end_col)),
         });
     }
 
@@ -680,14 +672,11 @@ fn check_unused_component_emit(
 }
 
 /// Check if the position is on an unused Angular component input anchor.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "input name lengths are bounded by source size"
-)]
 fn check_unused_component_input(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for finding in &results.unused_component_inputs {
         let i = &finding.input;
@@ -698,8 +687,8 @@ fn check_unused_component_input(
         if input_line != position.line {
             continue;
         }
-        let end_col = i.col + i.input_name.len() as u32;
-        if position.character < i.col || position.character >= end_col {
+        let (start_col, end_col) = utf16_span(mapper, &i.path, input_line, i.col, &i.input_name);
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -713,16 +702,7 @@ fn check_unused_component_input(
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range {
-                start: Position {
-                    line: input_line,
-                    character: i.col,
-                },
-                end: Position {
-                    line: input_line,
-                    character: end_col,
-                },
-            }),
+            range: Some(span_range(input_line, start_col, end_col)),
         });
     }
 
@@ -730,14 +710,11 @@ fn check_unused_component_input(
 }
 
 /// Check if the position is on an unused Angular component output anchor.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "output name lengths are bounded by source size"
-)]
 fn check_unused_component_output(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for finding in &results.unused_component_outputs {
         let o = &finding.output;
@@ -748,8 +725,8 @@ fn check_unused_component_output(
         if output_line != position.line {
             continue;
         }
-        let end_col = o.col + o.output_name.len() as u32;
-        if position.character < o.col || position.character >= end_col {
+        let (start_col, end_col) = utf16_span(mapper, &o.path, output_line, o.col, &o.output_name);
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -763,16 +740,7 @@ fn check_unused_component_output(
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range {
-                start: Position {
-                    line: output_line,
-                    character: o.col,
-                },
-                end: Position {
-                    line: output_line,
-                    character: end_col,
-                },
-            }),
+            range: Some(span_range(output_line, start_col, end_col)),
         });
     }
 
@@ -780,14 +748,11 @@ fn check_unused_component_output(
 }
 
 /// Check if the position is on an unused Svelte dispatched event anchor.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "event name lengths are bounded by source size"
-)]
 fn check_unused_svelte_event(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for finding in &results.unused_svelte_events {
         let e = &finding.event;
@@ -798,8 +763,8 @@ fn check_unused_svelte_event(
         if event_line != position.line {
             continue;
         }
-        let end_col = e.col + e.event_name.len() as u32;
-        if position.character < e.col || position.character >= end_col {
+        let (start_col, end_col) = utf16_span(mapper, &e.path, event_line, e.col, &e.event_name);
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -813,16 +778,7 @@ fn check_unused_svelte_event(
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range {
-                start: Position {
-                    line: event_line,
-                    character: e.col,
-                },
-                end: Position {
-                    line: event_line,
-                    character: end_col,
-                },
-            }),
+            range: Some(span_range(event_line, start_col, end_col)),
         });
     }
 
@@ -830,14 +786,11 @@ fn check_unused_svelte_event(
 }
 
 /// Check if the position is on an unused Next.js server action.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "action name lengths are bounded by source size"
-)]
 fn check_unused_server_action(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for finding in &results.unused_server_actions {
         let a = &finding.action;
@@ -848,8 +801,8 @@ fn check_unused_server_action(
         if action_line != position.line {
             continue;
         }
-        let end_col = a.col + a.action_name.len() as u32;
-        if position.character < a.col || position.character >= end_col {
+        let (start_col, end_col) = utf16_span(mapper, &a.path, action_line, a.col, &a.action_name);
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -863,16 +816,7 @@ fn check_unused_server_action(
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range {
-                start: Position {
-                    line: action_line,
-                    character: a.col,
-                },
-                end: Position {
-                    line: action_line,
-                    character: end_col,
-                },
-            }),
+            range: Some(span_range(action_line, start_col, end_col)),
         });
     }
 
@@ -880,14 +824,11 @@ fn check_unused_server_action(
 }
 
 /// Check if the position is on an unused SvelteKit `load()` return-object key.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "key name lengths are bounded by source size"
-)]
 fn check_unused_load_data_key(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for finding in &results.unused_load_data_keys {
         let k = &finding.key;
@@ -898,8 +839,8 @@ fn check_unused_load_data_key(
         if key_line != position.line {
             continue;
         }
-        let end_col = k.col + k.key_name.len() as u32;
-        if position.character < k.col || position.character >= end_col {
+        let (start_col, end_col) = utf16_span(mapper, &k.path, key_line, k.col, &k.key_name);
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -913,16 +854,7 @@ fn check_unused_load_data_key(
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range {
-                start: Position {
-                    line: key_line,
-                    character: k.col,
-                },
-                end: Position {
-                    line: key_line,
-                    character: end_col,
-                },
-            }),
+            range: Some(span_range(key_line, start_col, end_col)),
         });
     }
 
@@ -934,14 +866,11 @@ fn check_unused_load_data_key(
 /// body and how many call sites pass it. Ambient editor context, never a
 /// finding. The cursor must fall within the prop-name span (line + `[col, col +
 /// name.len())`), matching the React `unused-component-prop` anchor convention.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "prop name lengths are bounded by source size"
-)]
 fn check_react_prop_intel(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for intel in &results.react_component_intel {
         if intel.path != file_path {
@@ -952,8 +881,9 @@ fn check_react_prop_intel(
             if prop_line != position.line {
                 continue;
             }
-            let end_col = prop.anchor_col + prop.name.len() as u32;
-            if position.character < prop.anchor_col || position.character >= end_col {
+            let (start_col, end_col) =
+                utf16_span(mapper, &intel.path, prop_line, prop.anchor_col, &prop.name);
+            if !position_in_span(position, start_col, end_col) {
                 continue;
             }
 
@@ -990,16 +920,7 @@ fn check_react_prop_intel(
                     kind: MarkupKind::Markdown,
                     value,
                 }),
-                range: Some(Range {
-                    start: Position {
-                        line: prop_line,
-                        character: prop.anchor_col,
-                    },
-                    end: Position {
-                        line: prop_line,
-                        character: end_col,
-                    },
-                }),
+                range: Some(span_range(prop_line, start_col, end_col)),
             });
         }
     }
@@ -1011,14 +932,11 @@ fn check_react_prop_intel(
 /// the DESCRIPTIVE component summary hover (the same render/prop/hook breakdown
 /// as the code lens). Ambient editor context, never a finding. The cursor must
 /// fall within the component-name span on the anchor line.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "component name lengths are bounded by source size"
-)]
 fn check_react_component_intel(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for intel in &results.react_component_intel {
         if intel.path != file_path {
@@ -1028,8 +946,14 @@ fn check_react_component_intel(
         if component_line != position.line {
             continue;
         }
-        let end_col = intel.anchor_col + intel.component_name.len() as u32;
-        if position.character < intel.anchor_col || position.character >= end_col {
+        let (start_col, end_col) = utf16_span(
+            mapper,
+            &intel.path,
+            component_line,
+            intel.anchor_col,
+            &intel.component_name,
+        );
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -1044,16 +968,7 @@ fn check_react_component_intel(
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range {
-                start: Position {
-                    line: component_line,
-                    character: intel.anchor_col,
-                },
-                end: Position {
-                    line: component_line,
-                    character: end_col,
-                },
-            }),
+            range: Some(span_range(component_line, start_col, end_col)),
         });
     }
 
@@ -1122,14 +1037,11 @@ fn intel_pluralize(count: u32, noun: &str) -> String {
 }
 
 /// Check if the position is on an unresolved import.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "specifier lengths are bounded by source size"
-)]
 fn check_unresolved_import(
     results: &AnalysisResults,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for import in &results.unresolved_imports {
         if import.import.path != file_path {
@@ -1139,8 +1051,15 @@ fn check_unresolved_import(
         if import_line != position.line {
             continue;
         }
-        let end_col = import.import.specifier_col + import.import.specifier.len() as u32 + 2;
-        if position.character < import.import.specifier_col || position.character >= end_col {
+        let start_col = mapper.utf16_col(
+            &import.import.path,
+            import_line,
+            import.import.specifier_col,
+        );
+        let width =
+            u32::try_from(import.import.specifier.encode_utf16().count()).unwrap_or(u32::MAX);
+        let end_col = start_col.saturating_add(width).saturating_add(2);
+        if !position_in_span(position, start_col, end_col) {
             continue;
         }
 
@@ -1155,16 +1074,7 @@ fn check_unresolved_import(
                 kind: MarkupKind::Markdown,
                 value,
             }),
-            range: Some(Range {
-                start: Position {
-                    line: import_line,
-                    character: import.import.specifier_col,
-                },
-                end: Position {
-                    line: import_line,
-                    character: end_col,
-                },
-            }),
+            range: Some(span_range(import_line, start_col, end_col)),
         });
     }
 
@@ -1180,6 +1090,7 @@ fn check_duplication(
     duplication: &DuplicationReport,
     file_path: &Path,
     position: Position,
+    mapper: &mut PositionMapper,
 ) -> Option<Hover> {
     for group in &duplication.clone_groups {
         for instance in &group.instances {
@@ -1189,6 +1100,8 @@ fn check_duplication(
 
             let start_line = (instance.start_line as u32).saturating_sub(1);
             let end_line = (instance.end_line as u32).saturating_sub(1);
+            let start_col = mapper.utf16_col(&instance.file, start_line, instance.start_col as u32);
+            let end_col = mapper.utf16_col(&instance.file, end_line, instance.end_col as u32);
 
             if position.line < start_line || position.line > end_line {
                 continue;
@@ -1202,11 +1115,11 @@ fn check_duplication(
                 range: Some(Range {
                     start: Position {
                         line: start_line,
-                        character: instance.start_col as u32,
+                        character: start_col,
                     },
                     end: Position {
                         line: end_line,
-                        character: instance.end_col as u32,
+                        character: end_col,
                     },
                 }),
             });
@@ -1378,6 +1291,43 @@ mod tests {
         assert_eq!(range.start.line, 4);
         assert_eq!(range.start.character, 7);
         assert_eq!(range.end.character, 7 + "helper".len() as u32);
+    }
+
+    #[test]
+    fn hover_on_unused_export_uses_utf16_columns() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        let path = root.join("src/non_ascii.ts");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        let source = "const emoji = \"🎉\"; export const helper = 1;\n";
+        std::fs::write(&path, source).expect("write fixture");
+        let byte_col = source.find("helper").expect("helper") as u32;
+        let utf16_col = source[..byte_col as usize].encode_utf16().count() as u32;
+        let mut results = AnalysisResults::default();
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: byte_col,
+                span_start: byte_col,
+                is_re_export: false,
+            }));
+        let duplication = DuplicationReport::default();
+        let pos = Position {
+            line: 0,
+            character: utf16_col,
+        };
+
+        let hover = build_hover_for_test(&results, &duplication, &path, pos).unwrap();
+        let range = hover.range.expect("range");
+        assert_eq!(range.start.character, utf16_col);
+        assert_eq!(
+            range.end.character,
+            utf16_col + "helper".encode_utf16().count() as u32
+        );
     }
 
     #[test]

@@ -321,6 +321,19 @@ fn trace_file_params_require_file() {
 }
 
 #[test]
+fn impact_closure_params_require_path() {
+    let json = "{}";
+    let result: Result<ImpactClosureParams, _> = serde_json::from_str(json);
+    assert!(result.is_err());
+
+    let json = r#"{"path":"src/utils.ts","production":true,"workspace":"apps/web"}"#;
+    let params: ImpactClosureParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.path, "src/utils.ts");
+    assert_eq!(params.production, Some(true));
+    assert_eq!(params.workspace.as_deref(), Some("apps/web"));
+}
+
+#[test]
 fn trace_dependency_params_require_package_name() {
     let json = "{}";
     let result: Result<TraceDependencyParams, _> = serde_json::from_str(json);

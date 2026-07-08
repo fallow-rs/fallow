@@ -13,6 +13,8 @@ use fallow_api::{
 };
 use fallow_types::issue_meta::issue_meta_by_code;
 
+use crate::position::PositionMapper;
+
 /// Base URL for diagnostic documentation links.
 const DOCS_BASE: &str = "https://docs.fallow.tools/explanations/dead-code#";
 
@@ -66,27 +68,28 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
         root,
     } = input;
     let mut map: FxHashMap<Uri, Vec<Diagnostic>> = FxHashMap::default();
+    let mut mapper = PositionMapper::default();
     let package_json_uri = Uri::from_file_path(root.join("package.json"));
 
-    unused::push_export_diagnostics(&mut map, results);
+    unused::push_export_diagnostics(&mut map, results, &mut mapper);
     unused::push_file_diagnostics(&mut map, results);
-    unused::push_import_diagnostics(&mut map, results);
+    unused::push_import_diagnostics(&mut map, results, &mut mapper);
     unused::push_dep_diagnostics(&mut map, results, package_json_uri.as_ref(), root);
-    unused::push_member_diagnostics(&mut map, results);
-    quality::push_duplicate_export_diagnostics(&mut map, results);
-    quality::push_duplication_diagnostics(&mut map, duplication);
-    structural::push_circular_dep_diagnostics(&mut map, results);
+    unused::push_member_diagnostics(&mut map, results, &mut mapper);
+    quality::push_duplicate_export_diagnostics(&mut map, results, &mut mapper);
+    quality::push_duplication_diagnostics(&mut map, duplication, &mut mapper);
+    structural::push_circular_dep_diagnostics(&mut map, results, &mut mapper);
     structural::push_re_export_cycle_diagnostics(&mut map, results);
-    structural::push_boundary_violation_diagnostics(&mut map, results);
-    structural::push_policy_violation_diagnostics(&mut map, results);
-    structural::push_invalid_client_export_diagnostics(&mut map, results);
-    structural::push_mixed_client_server_barrel_diagnostics(&mut map, results);
-    structural::push_misplaced_directive_diagnostics(&mut map, results);
-    structural::push_unprovided_inject_diagnostics(&mut map, results);
+    structural::push_boundary_violation_diagnostics(&mut map, results, &mut mapper);
+    structural::push_policy_violation_diagnostics(&mut map, results, &mut mapper);
+    structural::push_invalid_client_export_diagnostics(&mut map, results, &mut mapper);
+    structural::push_mixed_client_server_barrel_diagnostics(&mut map, results, &mut mapper);
+    structural::push_misplaced_directive_diagnostics(&mut map, results, &mut mapper);
+    structural::push_unprovided_inject_diagnostics(&mut map, results, &mut mapper);
     structural::push_route_collision_diagnostics(&mut map, results);
     structural::push_dynamic_segment_name_conflict_diagnostics(&mut map, results);
-    quality::push_stale_suppression_diagnostics(&mut map, results);
-    security::push_security_diagnostics(&mut map, results);
+    quality::push_stale_suppression_diagnostics(&mut map, results, &mut mapper);
+    security::push_security_diagnostics(&mut map, results, &mut mapper);
 
     map
 }
@@ -137,6 +140,44 @@ mod tests {
                 clone_groups_below_min_occurrences: 0,
             },
         }
+    }
+
+    #[test]
+    fn unused_export_diagnostic_uses_utf16_columns() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        let path = root.join("src/non_ascii.ts");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        let source = "const emoji = \"🎉\"; export const helper = 1;\n";
+        std::fs::write(&path, source).expect("write fixture");
+        let byte_col = source.find("helper").expect("helper") as u32;
+        let utf16_col = source[..byte_col as usize].encode_utf16().count() as u32;
+
+        let mut results = AnalysisResults::default();
+        results
+            .unused_exports
+            .push(UnusedExportFinding::with_actions(UnusedExport {
+                path: path.clone(),
+                export_name: "helper".to_string(),
+                is_type_only: false,
+                line: 1,
+                col: byte_col,
+                span_start: byte_col,
+                is_re_export: false,
+            }));
+
+        let diags = build_diagnostics_for_test(&results, &empty_duplication(), root);
+        let uri = Uri::from_file_path(&path).expect("uri");
+        let diag = diags
+            .get(&uri)
+            .expect("diagnostic file")
+            .first()
+            .expect("diagnostic");
+        assert_eq!(diag.range.start.character, utf16_col);
+        assert_eq!(
+            diag.range.end.character,
+            utf16_col + "helper".encode_utf16().count() as u32
+        );
     }
 
     #[test]

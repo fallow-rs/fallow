@@ -45,7 +45,9 @@ pub use guard::run_guard;
 pub use health::{build_health_args, run_health};
 #[cfg(test)]
 pub use impact::build_impact_all_args;
-pub use impact::{build_impact_args, run_impact, run_impact_all};
+pub use impact::{
+    build_impact_args, build_impact_closure_args, run_impact, run_impact_all, run_impact_closure,
+};
 pub use inspect_target::inspect_target;
 pub use list_boundaries::{build_list_boundaries_args, run_list_boundaries};
 pub use project_info::{build_project_info_args, run_project_info};
