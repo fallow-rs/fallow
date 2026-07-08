@@ -4181,7 +4181,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Per-action wire shape attached to each `CloneGroupFinding` and\n`AttributedCloneGroupFinding`. Mirrors the action types previously\nemitted by `inject_dupes_actions::build_clone_group_actions` in\n`crates/cli/src/report/json.rs`: `extract-shared` plus `suppress-line`."
+      "description": "Per-action wire shape attached to each `CloneGroupFinding` and\n`AttributedCloneGroupFinding` (see `crates/api/src/dupes_output.rs`):\n`extract-shared` plus `suppress-line`. The typed wrappers replaced the\nlegacy JSON post-pass injection that used to live in the CLI report layer."
     },
     "UnusedFile": {
       "type": "object",
@@ -10301,7 +10301,7 @@
         "fingerprint",
         "actions"
       ],
-      "description": "Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare\ngroup via `#[serde(flatten)]` and carries a typed `actions` array plus\nthe optional audit-mode `introduced` flag. Replaces the legacy\npost-pass injection in `crates/cli/src/report/json.rs::inject_dupes_actions`."
+      "description": "Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare\ngroup via `#[serde(flatten)]` and carries a typed `actions` array plus\nthe optional audit-mode `introduced` flag. The typed envelope replaced\nthe legacy JSON post-pass injection; a guard test in\n`crates/cli/src/report/json.rs` rejects any reintroduced post-pass."
     },
     "DupesReportPayload": {
       "type": "object",

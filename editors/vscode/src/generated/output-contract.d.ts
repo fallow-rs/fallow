@@ -3752,8 +3752,9 @@ stats: DuplicationStats
 /**
  * Wire-shape envelope for a [`CloneGroup`] finding. Flattens the bare
  * group via `#[serde(flatten)]` and carries a typed `actions` array plus
- * the optional audit-mode `introduced` flag. Replaces the legacy
- * post-pass injection in `crates/cli/src/report/json.rs::inject_dupes_actions`.
+ * the optional audit-mode `introduced` flag. The typed envelope replaced
+ * the legacy JSON post-pass injection; a guard test in
+ * `crates/cli/src/report/json.rs` rejects any reintroduced post-pass.
  */
 export interface CloneGroupFinding {
 /**
@@ -3827,9 +3828,9 @@ fragment: string
 }
 /**
  * Per-action wire shape attached to each `CloneGroupFinding` and
- * `AttributedCloneGroupFinding`. Mirrors the action types previously
- * emitted by `inject_dupes_actions::build_clone_group_actions` in
- * `crates/cli/src/report/json.rs`: `extract-shared` plus `suppress-line`.
+ * `AttributedCloneGroupFinding` (see `crates/api/src/dupes_output.rs`):
+ * `extract-shared` plus `suppress-line`. The typed wrappers replaced the
+ * legacy JSON post-pass injection that used to live in the CLI report layer.
  */
 export interface CloneGroupAction {
 type: CloneGroupActionType
