@@ -79,4 +79,13 @@ fn imported_interface_typed_property_hop_credits_class_member() {
         unused.contains(&"SharedDep.deadOnSharedDep".to_string()),
         "SharedDep.deadOnSharedDep has no call site and must stay flagged, found: {unused:?}"
     );
+    // Same-file RENAMED export of the interface (`interface InnerOpts {{...}};
+    // export {{ InnerOpts as RenamedOpts }}`): the origin's export name and the
+    // declared local name diverge, and the declaring-site lookup must resolve
+    // the export's LOCAL name before matching `type_member_types`.
+    assert!(
+        !unused.contains(&"RenamedDep.viaRenamed".to_string()),
+        "RenamedDep.viaRenamed is reached through a same-file-renamed interface export and \
+         must be credited (issue #1785 review finding), found: {unused:?}"
+    );
 }

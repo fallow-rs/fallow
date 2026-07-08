@@ -1740,7 +1740,7 @@ impl ModuleInfoExtractor {
                 // type (union / generic / unharvested shape): abstain.
                 return TypedPropertyExpansion::Opaque;
             };
-            current = next.clone();
+            current.clone_from(next);
             idx += 1;
         }
         TypedPropertyExpansion::Resolved(current)

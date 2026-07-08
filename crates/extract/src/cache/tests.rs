@@ -1741,6 +1741,10 @@ fn get_by_path_only_returns_none_for_missing() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; linear setup/assert, length is not a maintainability concern"
+)]
 fn retain_paths_removes_stale_entries() {
     use fallow_types::discover::DiscoveredFile;
     use std::path::PathBuf;

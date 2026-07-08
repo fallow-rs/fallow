@@ -1780,12 +1780,23 @@ fn typed_property_declaring_sites<'a>(
             let Some(origin_module) = module_by_id.get(&origin.file_id) else {
                 continue;
             };
+            // The origin export may be a same-file RENAME (`interface Foo
+            // {...}; export { Foo as Bar }`): `origin.export_name` lives in
+            // export-name space while `type_member_types.type_name` carries
+            // the DECLARED local name, so resolve the export's local name
+            // first (falling back to the export name when they coincide).
+            let declared_name = origin_module
+                .exports
+                .iter()
+                .find(|export| export.name.matches_str(origin.export_name.as_str()))
+                .and_then(|export| export.local_name.as_deref())
+                .unwrap_or(origin.export_name.as_str());
             if origin_module
                 .type_member_types
                 .iter()
-                .any(|entry| entry.type_name == origin.export_name.as_str())
+                .any(|entry| entry.type_name == declared_name)
             {
-                sites.push((*origin_module, origin.export_name));
+                sites.push((*origin_module, declared_name.to_string()));
             }
         }
     }
