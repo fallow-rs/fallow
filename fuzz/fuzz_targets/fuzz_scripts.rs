@@ -3,6 +3,6 @@ use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(s) = std::str::from_utf8(data) {
-        let _ = fallow_core::scripts::parse_script(s);
+        let _ = fallow_core::parse_script(s);
     }
 });

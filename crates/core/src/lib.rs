@@ -31,6 +31,10 @@ pub mod plugins;
 pub(crate) mod progress;
 pub mod results;
 pub(crate) mod scripts;
+/// Public hook for the fuzz harness (fuzz/fuzz_targets/fuzz_scripts.rs) only;
+/// not a supported API. The module itself stays crate-private.
+#[doc(hidden)]
+pub use scripts::parse_script;
 pub mod suppress;
 
 pub use fallow_graph::cache as graph_cache;
