@@ -163,7 +163,11 @@ impl ModuleInfoExtractor {
             // the helper inherits the base's fixture bindings even when the
             // wrapping `.extend({})` carries no type argument of its own (issue
             // #1791). The alias no-ops when `base` is the raw `test` import, since
-            // no captured factory is keyed on it.
+            // no captured factory is keyed on it. The alias is name-based, so a
+            // non-Playwright `<x>.extend(...)` helper whose `<x>` collides with a
+            // same-file genuine fixture const could over-credit that fixture's
+            // class; this only ever over-credits (false-negative direction),
+            // matching the documented `mergeTests` name-collision tolerance.
             self.pending_playwright_factory_aliases
                 .push((test_name.to_string(), base_name.clone()));
 
