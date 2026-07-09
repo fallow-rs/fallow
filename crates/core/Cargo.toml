@@ -43,7 +43,6 @@ regex = { workspace = true }
 tempfile = { workspace = true }
 
 # Serialization
-bitcode = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml_ng = { workspace = true }

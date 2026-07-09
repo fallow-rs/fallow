@@ -453,6 +453,23 @@ fn engine_adapter_modules_are_explicit_public_boundaries() {
 }
 
 #[test]
+fn core_does_not_publish_engine_owned_copy_modules() {
+    let core_lib = std::fs::read_to_string(workspace_root().join("crates/core/src/lib.rs"))
+        .expect("read core lib");
+    for forbidden in [
+        "pub mod churn;",
+        "pub mod cross_reference;",
+        "pub mod trace;",
+        "pub mod trace_chain;",
+    ] {
+        assert!(
+            !core_lib.contains(forbidden),
+            "fallow-core must not republish engine-owned copy module: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn api_and_cli_do_not_use_removed_engine_root_adapter_exports() {
     for source_path in rust_sources_under(["crates/api/src", "crates/cli/src"]) {
         if source_path == "crates/cli/src/architecture_boundaries.rs" {

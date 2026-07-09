@@ -91,18 +91,11 @@ fn issue_1373_merged_namespace_value_import_through_star_barrel_is_used() {
         "unrelated value exports should remain reportable, found: {unused_export_names:?}"
     );
 
-    let output = fallow_core::analyze_with_trace(&config).expect("trace analysis should succeed");
-    let graph = output
-        .graph
-        .as_ref()
-        .expect("trace graph should be retained");
-    let trace = fallow_core::trace::trace_export(graph, &config.root, "src/merged.ts", "Merged")
-        .expect("Merged trace should exist");
-
-    assert!(trace.is_used, "trace should agree the value export is used");
-    assert_eq!(
-        trace.direct_references.len(),
-        1,
-        "trace should include the consumer named import"
+    assert!(
+        results
+            .duplicate_exports
+            .iter()
+            .all(|duplicate| duplicate.export.export_name != "Merged"),
+        "Merged should not become ambiguous while flowing through the star barrel"
     );
 }

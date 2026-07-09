@@ -865,4 +865,165 @@ mod tests {
                 .any(|caller| caller.file == Path::new("src/index.ts"))
         }));
     }
+
+    fn workspace_fixture_path(name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures")
+            .join(name)
+    }
+
+    fn trace_symbol_chain_fixture(
+        fixture: &str,
+        file: &str,
+        symbol: &str,
+        directions: fallow_types::trace_chain::TraceDirections,
+        depth: u32,
+    ) -> fallow_types::trace_chain::SymbolChainTrace {
+        let root = workspace_fixture_path(fixture);
+        let session = AnalysisSession::load(&root, None).expect("session loads");
+        crate::trace_chain::trace_symbol_chain_with_session(
+            &session,
+            fallow_types::trace_chain::SymbolChainQuery {
+                file,
+                symbol,
+                depth,
+                directions,
+            },
+        )
+        .expect("trace succeeds")
+        .expect("trace target exists")
+    }
+
+    fn symbol_chain_hop_files(
+        hops: &[fallow_types::trace_chain::ChainHop],
+    ) -> std::collections::BTreeSet<String> {
+        hops.iter()
+            .map(|hop| hop.file.to_string_lossy().replace('\\', "/"))
+            .collect()
+    }
+
+    #[test]
+    fn trace_symbol_chain_caller_set_matches_import_symbol_callers() {
+        let trace = trace_symbol_chain_fixture(
+            "e8-symbol-chain",
+            "src/format.ts",
+            "formatDate",
+            fallow_types::trace_chain::TraceDirections {
+                callers: true,
+                callees: false,
+            },
+            1,
+        );
+
+        assert!(trace.symbol_found, "formatDate is an export of format.ts");
+        assert!(
+            trace.best_effort,
+            "symbol-level chains are labeled best-effort"
+        );
+
+        let callers = trace.callers.expect("callers were requested");
+        let actual = symbol_chain_hop_files(&callers);
+        let expected: std::collections::BTreeSet<String> =
+            ["src/report.ts".to_string(), "src/middle.ts".to_string()]
+                .into_iter()
+                .collect();
+        assert_eq!(actual, expected);
+
+        for hop in &callers {
+            assert_eq!(hop.imported_as, "formatDate");
+            assert_eq!(hop.local_name, "formatDate");
+            assert_eq!(hop.depth, 1);
+            assert!(!hop.type_only);
+        }
+    }
+
+    #[test]
+    fn trace_symbol_chain_reports_unresolved_callees() {
+        let trace = trace_symbol_chain_fixture(
+            "e8-symbol-chain",
+            "src/report.ts",
+            "buildReport",
+            fallow_types::trace_chain::TraceDirections {
+                callers: false,
+                callees: true,
+            },
+            1,
+        );
+
+        assert!(trace.symbol_found, "buildReport is an export of report.ts");
+
+        let unresolved = trace
+            .unresolved_callees
+            .expect("callees were requested, so unresolved_callees is present");
+        let callees: Vec<&str> = unresolved
+            .iter()
+            .map(|callee| callee.callee.as_str())
+            .collect();
+
+        assert!(
+            callees.contains(&"localHelper"),
+            "the local helper callee must be reported as unresolved, got {callees:?}"
+        );
+        assert!(
+            callees.contains(&"parseInt"),
+            "the global callee must be reported as unresolved, got {callees:?}"
+        );
+        assert!(
+            !callees.contains(&"formatDate"),
+            "an imported callee resolves to an edge and is not unresolved, got {callees:?}"
+        );
+
+        let local_helper = unresolved
+            .iter()
+            .find(|callee| callee.callee == "localHelper")
+            .expect("local helper is unresolved");
+        assert_eq!(
+            local_helper.reason,
+            fallow_types::trace_chain::UnresolvedReason::LocalOrGlobal
+        );
+
+        let callees_hops = trace.callees.expect("callees were requested");
+        let resolved_files = symbol_chain_hop_files(&callees_hops);
+        assert!(
+            resolved_files.contains("src/format.ts"),
+            "the resolved import-symbol callee edge to format.ts must be present, got {resolved_files:?}"
+        );
+    }
+
+    #[test]
+    fn trace_export_uses_retained_engine_analysis_for_star_reexport() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(
+            src.join("merged.ts"),
+            "export const Merged = 1;\nexport const unusedControl = 2;\n",
+        )
+        .expect("merged source");
+        std::fs::write(src.join("barrel.ts"), "export * from './merged';\n")
+            .expect("barrel source");
+        std::fs::write(
+            src.join("index.ts"),
+            "import { Merged } from './barrel';\nconsole.log(Merged);\n",
+        )
+        .expect("index source");
+
+        let config = config_for_project(temp.path(), None)
+            .expect("config")
+            .config;
+        let session = AnalysisSession::from_resolved_config(config);
+        let artifacts = session
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("analysis succeeds");
+        let graph = artifacts.graph.as_ref().expect("graph is retained");
+        let trace = crate::trace::trace_export(graph, session.root(), "src/merged.ts", "Merged")
+            .expect("trace exists");
+
+        assert!(trace.is_used, "trace should agree the value export is used");
+        assert_eq!(
+            trace.direct_references.len(),
+            1,
+            "trace should include the consumer named import"
+        );
+    }
 }

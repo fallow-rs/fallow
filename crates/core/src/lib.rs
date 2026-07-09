@@ -21,8 +21,6 @@
 
 pub mod analyze;
 pub mod cache;
-pub mod churn;
-pub mod cross_reference;
 pub mod discover;
 pub(crate) mod errors;
 mod external_style_usage;
@@ -33,10 +31,7 @@ pub mod plugins;
 pub(crate) mod progress;
 pub mod results;
 pub(crate) mod scripts;
-pub(crate) mod spawn;
 pub mod suppress;
-pub mod trace;
-pub mod trace_chain;
 
 pub use fallow_graph::cache as graph_cache;
 pub use fallow_graph::graph;
@@ -51,10 +46,10 @@ use fallow_config::{
     EntryPointRole, PackageJson, ResolvedConfig, discover_workspaces,
     find_undeclared_workspaces_with_ignores,
 };
+use fallow_types::trace::PipelineTimings;
 use rayon::prelude::*;
 use results::AnalysisResults;
 use rustc_hash::FxHashSet;
-use trace::PipelineTimings;
 
 const UNDECLARED_WORKSPACE_WARNING_PREVIEW: usize = 5;
 type LoadedWorkspacePackage = (fallow_config::WorkspaceInfo, PackageJson);

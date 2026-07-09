@@ -1,8 +1,8 @@
 //! Runtime backstop for fallow's "static analysis never executes the analyzed
 //! project's code" invariant. The compile-time guarantee is the
 //! `#![cfg_attr(not(test), deny(clippy::disallowed_methods))]` ban on raw
-//! `Command::new` in fallow-core/extract/graph (only `fallow_core::spawn::git`
-//! is permitted); this test proves the behavioral consequence end-to-end: a
+//! `Command::new` in fallow-core/extract/graph; this test proves the behavioral
+//! consequence end-to-end: a
 //! `package.json` lifecycle script that would write a sentinel file never runs,
 //! because fallow reads `package.json` as data and never invokes a package
 //! manager.
