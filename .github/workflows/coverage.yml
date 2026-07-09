@@ -3,6 +3,7 @@ name: Coverage
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -19,9 +20,14 @@ jobs:
     name: Coverage
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      badge_color: ${{ steps.badge.outputs.color }}
+      percentage: ${{ steps.compute.outputs.percentage }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-rust
 
@@ -40,6 +46,7 @@ jobs:
           cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 
       - name: Compute coverage
+        id: compute
         run: |
           COVERAGE=$(awk -F: '
             /^LF:/ { total += $2 }
@@ -47,6 +54,7 @@ jobs:
             END { if (total > 0) printf "%.1f", (hit/total)*100; else print "0" }
           ' coverage/lcov.info)
           echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
+          echo "percentage=$COVERAGE" >> "$GITHUB_OUTPUT"
           echo "Coverage: $COVERAGE%"
 
       - name: Enforce coverage floor
@@ -63,6 +71,7 @@ jobs:
           }'
 
       - name: Compute badge color
+        id: badge
         run: |
           int=${COVERAGE%.*}
           if [ "$int" -ge 90 ]; then color="brightgreen"
@@ -73,6 +82,7 @@ jobs:
           else color="red"
           fi
           echo "BADGE_COLOR=$color" >> "$GITHUB_ENV"
+          echo "color=$color" >> "$GITHUB_OUTPUT"
 
       - name: Write coverage metrics
         run: |
@@ -81,6 +91,36 @@ jobs:
           data = [{'name': 'Code Coverage', 'unit': '%', 'value': float('${COVERAGE:-0}')}]
           print(json.dumps(data, indent=2))
           " > coverage-bench.json
+
+      - name: Upload coverage publication input
+        if: >-
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-publication
+          path: coverage-bench.json
+          retention-days: 1
+
+  publish:
+    name: Publish coverage
+    needs: coverage
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      BADGE_COLOR: ${{ needs.coverage.outputs.badge_color }}
+      COVERAGE: ${{ needs.coverage.outputs.percentage }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Download coverage publication input
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.0
+        with:
+          name: coverage-publication
 
       - name: Store coverage metrics
         uses: ./.github/actions/store-benchmark

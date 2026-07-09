@@ -44,9 +44,14 @@ Broader bets, still being scoped.
 
 Safe removals (unused exports, enum members, dependencies) are already auto-fixable. The open question is the judgment calls: deleting files, consolidating duplicates, restructuring modules. The bet: structured MCP output plus the right review workflow lets an agent propose those changes, a human approves the PR, and fallow verifies nothing regressed.
 
-### Codebase health grade
+### Health score calibration and adoption
 
-One letter (A-F) per project, derived from dead code ratio, duplication, complexity density, and dependency hygiene. Visible as a badge, tracked in vital signs snapshots, trended over time. Managers understand it, developers trust it, agents optimize for it. The risk is that a single grade collapses signal the existing health score already surfaces more precisely; scoping needs to show it adds value over the current score.
+Shipped today: `fallow health` provides a 0-100 score, an A-F letter grade,
+badge output, saved vital-sign snapshots, and trend comparisons. Planned work
+focuses on calibrating the formula against a broad real-world corpus, explaining
+how its multiple signals contribute to each result, and helping teams adopt
+baselines and thresholds that fit their project context. This direction improves
+confidence and multi-signal explainability rather than adding another grade.
 
 ### Visualization
 

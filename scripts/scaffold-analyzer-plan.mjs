@@ -96,7 +96,8 @@ Status: draft
 
 ## Verification
 
-- [ ] \`cargo test --workspace --all-targets\`
+- [ ] \`cargo test --workspace --lib --bins --tests --examples\`
+- [ ] \`cargo check --workspace --benches\`
 - [ ] \`npm run generate:contracts:check\`
 - [ ] Real project smoke with \`--format json --quiet\`
 `;

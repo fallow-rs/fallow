@@ -63,21 +63,39 @@ cd benchmarks && npm run generate:circular && npm run bench:circular  # vs madge
 
 ## Project structure
 
-```
-crates/
-  cli/      — CLI binary and output formatting
-  config/   — Configuration types, presets, workspace discovery
-  core/     — Analysis engine: plugins, discovery, parsing, resolution, graph, detection
-  extract/  — AST extraction (JS/TS, Vue/Svelte SFC, Astro, MDX, CSS)
-  graph/    — Module graph construction and resolution
-  types/    — Shared types across crates
-  lsp/      — LSP server
-  mcp/      — MCP server for AI agents
-editors/
-  vscode/   — VS Code extension
-npm/
-  fallow/   — npm wrapper package
-```
+The workspace follows the ownership boundaries in
+[`docs/architecture-invariants.md`](docs/architecture-invariants.md):
+
+| Path | Responsibility |
+| --- | --- |
+| `crates/types/` | Shared typed contracts, issue metadata, suppressions, and envelope data. |
+| `crates/config/` | Configuration loading, typed configuration, presets, and workspace discovery. |
+| `crates/extract/` | Parser-facing facts for JavaScript, TypeScript, framework files, MDX, and CSS. |
+| `crates/graph/` | Module graph construction, import resolution, dependency traversal, cycles, and impact facts. |
+| `crates/security/` | Shared security matcher catalogue and candidate helpers. |
+| `crates/core/` | Internal detector backend used by `fallow-engine` for private detector phases. It is not the supported embedder surface. |
+| `crates/engine/` | Analysis sessions, discovery, parsing, graph construction, and typed analysis orchestration. |
+| `crates/output/` | Shared output contracts, action builders, summaries, SARIF builders, and reusable formatter pieces. |
+| `crates/api/` | Supported Rust facade and programmatic workflow adapters. |
+| `crates/cli/` | CLI protocol adapter, command dispatch, terminal interaction, and protocol-specific serialization. |
+| `crates/lsp/` | LSP adapter for diagnostics, code actions, hover, and code lens. |
+| `crates/mcp/` | MCP adapter exposing fallow as typed tools for AI agents. |
+| `crates/napi/` | NAPI adapter and Node.js bindings over the supported Rust facade. |
+| `crates/license/` | Offline signed-license verification used by licensed CLI capabilities. |
+| `crates/v8-coverage/` | V8 coverage parsing and source-offset mapping. |
+| `crates/benchmarks/` | CodSpeed and Criterion benchmark suites for the Rust workspace. |
+| `editors/vscode/` | VS Code extension and generated TypeScript contract consumer. |
+| `editors/zed/` | Zed extension. |
+| `editors/nvim/` | Neovim integration documentation. |
+| `npm/fallow/` | npm wrapper, launchers, generated types, and bundled agent skill. |
+| `npm/<platform>/` | Platform-specific native binary packages consumed by the npm wrapper. |
+
+Dependency direction is deliberate. Foundation and analysis crates do not
+depend on protocol adapters. `fallow-core` remains an internal detector backend
+behind `fallow-engine`; `fallow-output` shapes reusable contracts without
+starting analysis; `fallow-api` provides the supported Rust facade. The CLI,
+LSP, MCP, and NAPI adapters translate their protocol options and call
+`fallow-api` or `fallow-engine` rather than calling `fallow-core` directly.
 
 ## Adding a framework plugin
 

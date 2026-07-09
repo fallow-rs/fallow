@@ -47,7 +47,7 @@ jobs:
             # gates:
             #   - `cargo test/clippy --features schema-emit` for the
             #     Rust-source -> docs/output-schema.json chain (output schema)
-            #   - `cargo test --workspace --all-targets` (the existing step)
+            #   - `cargo test --workspace --lib --bins --tests --examples`
             #     for the FallowConfig -> schema.json chain (config-input
             #     schema, #440), via a `#[cfg(test)] mod config_schema_drift`
             #     test in `crates/cli/src/init.rs`.
@@ -91,6 +91,7 @@ jobs:
               - 'rust-toolchain.toml'
             vscode:
               - 'editors/vscode/**'
+              - '.github/workflows/ci.yml'
             zed:
               - 'editors/zed/**'
             npm:
@@ -230,13 +231,13 @@ jobs:
         if: matrix.os != 'windows-latest'
         # Benchmark targets exceed this job's timeout and are covered by the
         # dedicated benchmark workflows.
-        run: cargo test --workspace --lib --bins --tests
+        run: cargo test --workspace --lib --bins --tests --examples
 
       - name: Run tests (Windows)
         if: matrix.os == 'windows-latest'
         # Windows push checks catch path and filesystem regressions.
         # Benchmark targets are covered by dedicated benchmark workflows.
-        run: cargo test --workspace --lib --bins --tests
+        run: cargo test --workspace --lib --bins --tests --examples
 
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests
@@ -505,6 +506,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.33.0
@@ -513,12 +516,18 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: editors/vscode/pnpm-lock.yaml
+      - name: Cache VS Code test download
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: /tmp/fallow-vscode-test-cache
+          key: vscode-test-${{ runner.os }}-${{ runner.arch }}-vscode-1.96.0
       - run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
       - run: cd editors/vscode && pnpm audit --prod
       - name: Verify generated extension contracts
         run: cd editors/vscode && pnpm run check:contracts
       - run: cd editors/vscode && pnpm lint
-      - run: cd editors/vscode && pnpm build
+      - name: Run VS Code extension-host integration tests
+        run: cd editors/vscode && xvfb-run -a pnpm test:integration
       - run: cd editors/vscode && pnpm test:unit
       - run: cd editors/vscode && pnpm package
 

@@ -284,6 +284,7 @@ const main = async (): Promise<void> => {
         `--extensions-dir=${extensionsDir}`,
         `--user-data-dir=${userDataDir}`,
       ],
+      version: "1.96.0",
     });
   } catch (error) {
     console.error("Failed to run extension tests");

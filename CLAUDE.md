@@ -58,7 +58,8 @@ Pipeline: Config → File Discovery → Incremental Parallel Parsing (rayon + ox
 ```bash
 git config core.hooksPath .githooks  # Enable pre-commit hooks (fmt + clippy)
 cargo build --workspace
-cargo test --workspace --all-targets
+cargo test --workspace --lib --bins --tests --examples
+cargo check --workspace --benches
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo run --bin fallow                       # Run all analyses (dead-code + dupes + health)

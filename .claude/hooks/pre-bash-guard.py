@@ -61,7 +61,8 @@ def main() -> int:
     if uses_unbounded_workspace_cargo(command, commands):
         deny(
             "Redirect full workspace cargo output to a log and return only the tail, for example "
-            "`cargo test --workspace --all-targets > /tmp/fallow-test.log 2>&1; tail -80 /tmp/fallow-test.log`."
+            "`cargo test --workspace --lib --bins --tests --examples "
+            "> /tmp/fallow-test.log 2>&1; tail -80 /tmp/fallow-test.log`."
         )
         return 0
 

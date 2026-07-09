@@ -27,7 +27,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 # 10x / 2x multipliers, so we keep those off the local chain too;
 # they live in CI matrices that are budget-tuned separately).
 # If you want to run the full suite locally before opening a PR:
-#   cargo test --workspace --all-targets
+#   cargo test --workspace --lib --bins --tests --examples
+#   cargo check --workspace --benches
 #   RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 #   rustup run nightly cargo miri test -p fallow-types --lib --tests -- --skip proptests
 

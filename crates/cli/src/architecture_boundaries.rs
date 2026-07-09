@@ -80,6 +80,75 @@ fn architecture_invariants_doc_tracks_guarded_boundaries() {
 }
 
 #[test]
+fn contributor_architecture_map_and_roadmap_track_current_ownership() {
+    let contributing = std::fs::read_to_string(workspace_root().join("CONTRIBUTING.md"))
+        .expect("read contributing guide");
+    let project_structure = contributing
+        .split_once("## Project structure")
+        .and_then(|(_, rest)| rest.split_once("\n## ").map(|(section, _)| section))
+        .expect("find project structure section");
+
+    for manifest_path in workspace_crate_manifests() {
+        let crate_path = manifest_path
+            .strip_suffix("Cargo.toml")
+            .expect("workspace manifest path ends in Cargo.toml");
+        let documented_path = format!("`{crate_path}`");
+        assert!(
+            project_structure.contains(&documented_path),
+            "CONTRIBUTING project map must include workspace crate {documented_path}"
+        );
+    }
+
+    for required in [
+        "Internal detector backend used by `fallow-engine`",
+        "Analysis sessions, discovery, parsing, graph construction",
+        "Shared output contracts",
+        "Supported Rust facade",
+        "CLI protocol adapter",
+        "LSP adapter",
+        "MCP adapter",
+        "NAPI adapter",
+        "`editors/vscode/`",
+        "`editors/zed/`",
+        "`editors/nvim/`",
+        "`npm/fallow/`",
+        "`npm/<platform>/`",
+    ] {
+        assert!(
+            project_structure.contains(required),
+            "CONTRIBUTING project map must preserve current ownership: {required}"
+        );
+    }
+    assert!(
+        !project_structure
+            .contains("Analysis engine: plugins, discovery, parsing, resolution, graph, detection"),
+        "CONTRIBUTING must not assign engine orchestration to fallow-core"
+    );
+
+    let roadmap =
+        std::fs::read_to_string(workspace_root().join("ROADMAP.md")).expect("read roadmap");
+    assert!(
+        !roadmap.contains("### Codebase health grade"),
+        "ROADMAP must not present the shipped health grade as planned work"
+    );
+    for required in [
+        "### Health score calibration and adoption",
+        "Shipped today",
+        "0-100 score",
+        "A-F letter grade",
+        "badge output",
+        "saved vital-sign snapshots",
+        "trend comparisons",
+        "multi-signal explainability",
+    ] {
+        assert!(
+            roadmap.contains(required),
+            "ROADMAP must distinguish shipped health scoring from planned calibration: {required}"
+        );
+    }
+}
+
+#[test]
 fn api_consumers_depend_on_api_not_engine_cli_or_core() {
     for manifest in [
         "crates/lsp/Cargo.toml",
