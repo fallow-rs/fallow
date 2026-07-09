@@ -1,4 +1,4 @@
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 use rmcp::model::*;
 #[cfg(any(unix, windows))]
 use std::time::Duration;
@@ -15,7 +15,7 @@ use crate::tools::{run_fallow_with_output_limit, run_fallow_with_top_level_warni
 use super::super::resolve_binary;
 
 /// Extract the text content from a `CallToolResult`.
-#[cfg(any(unix, windows))]
+#[cfg(unix)]
 fn extract_text(result: &CallToolResult) -> &str {
     match &result.content[0] {
         ContentBlock::Text(t) => &t.text,
@@ -626,21 +626,31 @@ async fn run_fallow_timeout_terminates_and_reaps_windows_job_tree() {
     let temp = tempfile::tempdir().expect("temp directory");
     let direct_pid_path = temp.path().join("direct.pid");
     let descendant_pid_path = temp.path().join("descendant.pid");
+    let script_path = temp.path().join("process-tree-fixture.ps1");
     let script = r#"
-$PID | Set-Content -NoNewline -LiteralPath $args[0]
+param(
+    [Parameter(Mandatory = $true)][string]$DirectPidPath,
+    [Parameter(Mandatory = $true)][string]$DescendantPidPath
+)
+$PID | Set-Content -NoNewline -LiteralPath $DirectPidPath
 $child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru
-$child.Id | Set-Content -NoNewline -LiteralPath $args[1]
+$child.Id | Set-Content -NoNewline -LiteralPath $DescendantPidPath
 Start-Sleep -Seconds 30
 "#;
+    std::fs::write(&script_path, script).expect("PowerShell fixture script");
 
     let result = run_fallow_with_timeout(
         "powershell.exe",
         &[
             "-NoProfile".to_string(),
             "-NonInteractive".to_string(),
-            "-Command".to_string(),
-            script.to_string(),
+            "-ExecutionPolicy".to_string(),
+            "Bypass".to_string(),
+            "-File".to_string(),
+            script_path.to_string_lossy().into_owned(),
+            "-DirectPidPath".to_string(),
             direct_pid_path.to_string_lossy().into_owned(),
+            "-DescendantPidPath".to_string(),
             descendant_pid_path.to_string_lossy().into_owned(),
         ],
         WINDOWS_FIXTURE_STARTUP_TIMEOUT,
