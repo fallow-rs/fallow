@@ -725,6 +725,7 @@ fn build_member_heritage_context<'a>(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     modules: &'a [ModuleInfo],
+    indexes: &MemberPassIndexes<'_>,
 ) -> MemberHeritageContext<'a> {
     let mut class_heritage_by_export: FxHashMap<ExportKey, (Option<String>, Vec<String>)> =
         FxHashMap::default();
@@ -758,7 +759,7 @@ fn build_member_heritage_context<'a>(
     }
 
     let interface_to_implementers =
-        build_interface_to_implementers(graph, resolved_modules, &class_heritage_by_file);
+        build_interface_to_implementers(graph, resolved_modules, &class_heritage_by_file, indexes);
 
     MemberHeritageContext {
         class_heritage_by_export,
@@ -800,6 +801,7 @@ fn propagate_angular_template_member_accesses(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     heritage_context: &MemberHeritageContext<'_>,
+    indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
     self_accessed_members: &mut FxHashMap<FileId, FxHashSet<String>>,
 ) {
@@ -819,7 +821,7 @@ fn propagate_angular_template_member_accesses(
         implementers_by_name: &heritage_context.implementers_by_name,
         accessed_members,
     };
-    angular_chain_context.propagate(resolved_modules);
+    angular_chain_context.propagate(resolved_modules, indexes);
 }
 
 struct AngularTemplateChainContext<'a, 'b> {
@@ -858,7 +860,7 @@ impl AngularTemplateChainContext<'_, '_> {
         }
     }
 
-    fn propagate(&mut self, resolved_modules: &[ResolvedModule]) {
+    fn propagate(&mut self, resolved_modules: &[ResolvedModule], indexes: &MemberPassIndexes<'_>) {
         if self.chain_accesses.is_empty() {
             return;
         }
@@ -867,9 +869,12 @@ impl AngularTemplateChainContext<'_, '_> {
             let Some(class_heritage) = self.class_heritage_by_file.get(&resolved.file_id) else {
                 continue;
             };
+            // This context stores an OWNED key map (converting it to a borrow
+            // fights the struct's lifetimes), so clone from the shared index; the
+            // map is still built once per scan rather than per pass.
             let component = AngularTemplateComponentContext {
                 component_bindings: component_bindings(resolved, class_heritage),
-                local_to_export_keys: build_local_to_export_keys(resolved),
+                local_to_export_keys: indexes.local_keys(resolved.file_id).clone(),
             };
             if component.component_bindings.is_empty() {
                 continue;
@@ -1065,20 +1070,21 @@ fn playwright_test_keys_for_local(
 fn build_playwright_fixture_targets(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
 ) -> FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> {
-    let type_targets = build_playwright_fixture_type_targets(graph, resolved_modules);
+    let type_targets = build_playwright_fixture_type_targets(graph, resolved_modules, indexes);
     let mut targets_by_test: FxHashMap<PlaywrightTestKey, FxHashMap<String, Vec<ExportKey>>> =
         FxHashMap::default();
     let mut aliases_by_test: FxHashMap<PlaywrightTestKey, Vec<PlaywrightTestKey>> =
         FxHashMap::default();
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         let local_playwright_test_names = collect_playwright_local_test_names(resolved);
         collect_playwright_fixture_def_targets(
             graph,
             resolved,
-            &local_to_export_keys,
+            local_to_export_keys,
             &local_playwright_test_names,
             &type_targets,
             &mut targets_by_test,
@@ -1086,7 +1092,7 @@ fn build_playwright_fixture_targets(
         collect_playwright_fixture_aliases(
             graph,
             resolved,
-            &local_to_export_keys,
+            local_to_export_keys,
             &local_playwright_test_names,
             &mut aliases_by_test,
         );
@@ -1260,12 +1266,13 @@ fn push_playwright_fixture_type_target(
 fn build_playwright_fixture_type_targets(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
 ) -> FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> {
     let mut targets_by_alias: FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> =
         FxHashMap::default();
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         let type_facts = playwright_fixture_types(resolved);
         for access in type_facts {
             let Some(alias_keys) = local_to_export_keys.get(access.alias_name.as_str()) else {
@@ -1295,15 +1302,16 @@ fn build_playwright_fixture_type_targets(
 fn propagate_playwright_fixture_accesses(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
-    let targets_by_test = build_playwright_fixture_targets(graph, resolved_modules);
+    let targets_by_test = build_playwright_fixture_targets(graph, resolved_modules, indexes);
     if targets_by_test.is_empty() {
         return;
     }
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         let use_facts = playwright_fixture_uses(resolved);
         for access in use_facts {
             let Some(test_keys) = local_to_export_keys.get(access.test_name.as_str()) else {
@@ -1331,11 +1339,12 @@ fn propagate_playwright_fixture_accesses(
 fn build_instance_export_targets(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
 ) -> FxHashMap<ExportKey, Vec<ExportKey>> {
     let mut targets_by_instance: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         for access in instance_export_bindings(resolved) {
             let Some(target_keys) = local_to_export_keys.get(access.target_name.as_str()) else {
                 continue;
@@ -1390,21 +1399,17 @@ fn propagate_accesses_through_instance_exports(
 
 fn build_typed_instance_binding_targets(
     graph: &ModuleGraph,
-    resolved_modules: &[ResolvedModule],
     modules: &[ModuleInfo],
+    indexes: &MemberPassIndexes<'_>,
 ) -> FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> {
-    let resolved_by_file: FxHashMap<FileId, &ResolvedModule> = resolved_modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
     let mut targets_by_class: FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>> =
         FxHashMap::default();
 
     for module in modules {
-        let Some(resolved) = resolved_by_file.get(&module.file_id) else {
+        if !indexes.module_by_id.contains_key(&module.file_id) {
             continue;
-        };
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        }
+        let local_to_export_keys = indexes.local_keys(module.file_id);
         for heritage in &module.class_heritage {
             if heritage.instance_bindings.is_empty() {
                 continue;
@@ -1492,29 +1497,29 @@ fn propagate_accesses_through_typed_instance_bindings(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     modules: &[ModuleInfo],
+    indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
     whole_object_used_exports: &mut FxHashSet<ExportKey>,
 ) {
-    let typed_instance_targets =
-        build_typed_instance_binding_targets(graph, resolved_modules, modules);
+    let typed_instance_targets = build_typed_instance_binding_targets(graph, modules, indexes);
     if typed_instance_targets.is_empty() {
         return;
     }
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         propagate_typed_member_accesses(
             graph,
             resolved,
             &typed_instance_targets,
-            &local_to_export_keys,
+            local_to_export_keys,
             accessed_members,
         );
         propagate_typed_whole_object_uses(
             graph,
             resolved,
             &typed_instance_targets,
-            &local_to_export_keys,
+            local_to_export_keys,
             whole_object_used_exports,
         );
     }
@@ -1572,15 +1577,11 @@ fn propagate_typed_whole_object_uses(
 fn propagate_factory_call_accesses(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
-    let module_by_id: FxHashMap<FileId, &ResolvedModule> = resolved_modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
-
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         for access in factory_call_member_accesses(resolved) {
             let Some(seed_keys) = local_to_export_keys.get(access.callee_object.as_str()) else {
                 continue;
@@ -1589,7 +1590,7 @@ fn propagate_factory_call_accesses(
                 for origin in
                     walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
                 {
-                    let Some(origin_module) = module_by_id.get(&origin.file_id) else {
+                    let Some(origin_module) = indexes.module_by_id.get(&origin.file_id) else {
                         continue;
                     };
                     let matches_factory = origin_module.exports.iter().any(|export| {
@@ -1628,37 +1629,29 @@ fn export_is_class_with_members(module: &ResolvedModule, name: &str) -> bool {
 
 struct FactoryReturnCreditContext<'a, 'ctx> {
     graph: &'ctx ModuleGraph,
-    module_by_id: &'ctx FxHashMap<FileId, &'a ResolvedModule>,
-    factory_keys_cache: &'ctx mut FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>>,
+    indexes: &'ctx MemberPassIndexes<'a>,
     accessed_members: &'ctx mut FxHashMap<ExportKey, FxHashSet<String>>,
 }
 
-fn credit_factory_return_class_member<'a>(
-    context: &mut FactoryReturnCreditContext<'a, '_>,
+fn credit_factory_return_class_member(
+    context: &mut FactoryReturnCreditContext<'_, '_>,
     factory_origin_file_id: FileId,
-    factory_module: &'a ResolvedModule,
     class_local_name: &str,
     member: &str,
 ) {
-    let factory_local_keys = context
-        .factory_keys_cache
-        .entry(factory_origin_file_id)
-        .or_insert_with(|| build_local_to_export_keys(factory_module));
+    let factory_local_keys = context.indexes.local_keys(factory_origin_file_id);
     let Some(class_seed_keys) = factory_local_keys.get(class_local_name) else {
         return;
     };
     for class_seed in class_seed_keys {
         for class_origin in export_key_with_origins(context.graph, class_seed) {
-            let class_has_members =
-                context
-                    .module_by_id
-                    .get(&class_origin.file_id)
-                    .is_some_and(|class_module| {
-                        export_is_class_with_members(
-                            class_module,
-                            class_origin.export_name.as_str(),
-                        )
-                    });
+            let class_has_members = context
+                .indexes
+                .module_by_id
+                .get(&class_origin.file_id)
+                .is_some_and(|class_module| {
+                    export_is_class_with_members(class_module, class_origin.export_name.as_str())
+                });
             if class_has_members {
                 context
                     .accessed_members
@@ -1688,25 +1681,17 @@ fn credit_factory_return_class_member<'a>(
 fn propagate_factory_fn_accesses(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
-    let module_by_id: FxHashMap<FileId, &ResolvedModule> = resolved_modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
-    // The same factory module is reached once per credited access; build its
-    // local->export keys once and reuse (mirrors the per-consumer hoist below).
-    let mut factory_keys_cache: FxHashMap<FileId, FxHashMap<&str, Vec<ExportKey>>> =
-        FxHashMap::default();
     let mut credit_context = FactoryReturnCreditContext {
         graph,
-        module_by_id: &module_by_id,
-        factory_keys_cache: &mut factory_keys_cache,
+        indexes,
         accessed_members,
     };
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         for access in factory_fn_member_accesses(resolved) {
             let Some(seed_keys) = local_to_export_keys.get(access.callee_name.as_str()) else {
                 continue;
@@ -1715,8 +1700,10 @@ fn propagate_factory_fn_accesses(
                 for factory_origin in
                     walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
                 {
-                    let Some(factory_module) =
-                        credit_context.module_by_id.get(&factory_origin.file_id)
+                    let Some(factory_module) = credit_context
+                        .indexes
+                        .module_by_id
+                        .get(&factory_origin.file_id)
                     else {
                         continue;
                     };
@@ -1738,7 +1725,6 @@ fn propagate_factory_fn_accesses(
                     credit_factory_return_class_member(
                         &mut credit_context,
                         factory_origin.file_id,
-                        factory_module,
                         factory_return.class_local_name.as_str(),
                         access.member.as_str(),
                     );
@@ -1755,8 +1741,7 @@ fn propagate_factory_fn_accesses(
 /// (a global, a class, a wrong annotation) contributes nothing.
 fn typed_property_declaring_sites<'a>(
     graph: &ModuleGraph,
-    module_by_id: &FxHashMap<FileId, &'a ResolvedModule>,
-    local_keys_cache: &mut FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>>,
+    indexes: &MemberPassIndexes<'a>,
     module: &'a ResolvedModule,
     name: &str,
 ) -> Vec<(&'a ResolvedModule, String)> {
@@ -1767,17 +1752,13 @@ fn typed_property_declaring_sites<'a>(
     {
         return vec![(module, name.to_string())];
     }
-    let local_keys = local_keys_cache
-        .entry(module.file_id)
-        .or_insert_with(|| build_local_to_export_keys(module));
-    let Some(seed_keys) = local_keys.get(name) else {
+    let Some(seed_keys) = indexes.local_keys(module.file_id).get(name) else {
         return Vec::new();
     };
-    let seed_keys = seed_keys.clone();
     let mut sites = Vec::new();
-    for seed in &seed_keys {
+    for seed in seed_keys {
         for origin in walk_re_export_origins(graph, seed.file_id, seed.export_name.as_str()) {
-            let Some(origin_module) = module_by_id.get(&origin.file_id) else {
+            let Some(origin_module) = indexes.module_by_id.get(&origin.file_id) else {
                 continue;
             };
             // The origin export may be a same-file RENAME (`interface Foo
@@ -1825,15 +1806,9 @@ fn typed_property_declaring_sites<'a>(
 fn propagate_typed_property_accesses(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
-    let module_by_id: FxHashMap<FileId, &ResolvedModule> = resolved_modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
-    let mut local_keys_cache: FxHashMap<FileId, FxHashMap<&str, Vec<ExportKey>>> =
-        FxHashMap::default();
-
     // Phase 1: walk every fact's property path to its terminal
     // (declaring module, terminal type local name, member) triples.
     let mut terminals: FxHashSet<(FileId, String, String)> = FxHashSet::default();
@@ -1853,13 +1828,9 @@ fn propagate_typed_property_accesses(
                 let mut next: Vec<(&ResolvedModule, String)> = Vec::new();
                 let mut seen: FxHashSet<(FileId, String)> = FxHashSet::default();
                 for (module, name) in frontier {
-                    for (declaring, declared_name) in typed_property_declaring_sites(
-                        graph,
-                        &module_by_id,
-                        &mut local_keys_cache,
-                        module,
-                        &name,
-                    ) {
+                    for (declaring, declared_name) in
+                        typed_property_declaring_sites(graph, indexes, module, &name)
+                    {
                         let Some(entry) = declaring.type_member_types.iter().find(|entry| {
                             entry.type_name == declared_name && entry.property == *segment
                         }) else {
@@ -1889,18 +1860,20 @@ fn propagate_typed_property_accesses(
     // own imports/exports to a class export and credit the member.
     let mut credit_context = FactoryReturnCreditContext {
         graph,
-        module_by_id: &module_by_id,
-        factory_keys_cache: &mut local_keys_cache,
+        indexes,
         accessed_members,
     };
     for (declaring_file_id, terminal_name, member) in terminals {
-        let Some(declaring_module) = credit_context.module_by_id.get(&declaring_file_id) else {
+        if !credit_context
+            .indexes
+            .module_by_id
+            .contains_key(&declaring_file_id)
+        {
             continue;
-        };
+        }
         credit_factory_return_class_member(
             &mut credit_context,
             declaring_file_id,
-            declaring_module,
             terminal_name.as_str(),
             member.as_str(),
         );
@@ -1938,15 +1911,11 @@ fn export_validates_fluent_chain(
 fn propagate_fluent_chain_accesses(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
-    let module_by_id: FxHashMap<FileId, &ResolvedModule> = resolved_modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
-
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         for access in fluent_chain_member_accesses(resolved) {
             let Some(seed_keys) = local_to_export_keys.get(access.root_object.as_str()) else {
                 continue;
@@ -1955,7 +1924,7 @@ fn propagate_fluent_chain_accesses(
                 for origin in
                     walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
                 {
-                    let Some(origin_module) = module_by_id.get(&origin.file_id) else {
+                    let Some(origin_module) = indexes.module_by_id.get(&origin.file_id) else {
                         continue;
                     };
                     let chain = access.chain.iter().map(String::as_str).collect::<Vec<_>>();
@@ -2002,15 +1971,11 @@ fn export_validates_fluent_chain_new(
 fn propagate_fluent_chain_new_accesses(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
-    let module_by_id: FxHashMap<FileId, &ResolvedModule> = resolved_modules
-        .iter()
-        .map(|module| (module.file_id, module))
-        .collect();
-
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         for access in fluent_chain_new_member_accesses(resolved) {
             let Some(seed_keys) = local_to_export_keys.get(access.class_name.as_str()) else {
                 continue;
@@ -2019,7 +1984,7 @@ fn propagate_fluent_chain_new_accesses(
                 for origin in
                     walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
                 {
-                    let Some(origin_module) = module_by_id.get(&origin.file_id) else {
+                    let Some(origin_module) = indexes.module_by_id.get(&origin.file_id) else {
                         continue;
                     };
                     let chain = access.chain.iter().map(String::as_str).collect::<Vec<_>>();
@@ -2045,11 +2010,12 @@ fn propagate_fluent_chain_new_accesses(
 fn build_parent_to_children(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
 ) -> FxHashMap<ExportKey, Vec<ExportKey>> {
     let mut parent_to_children: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
 
         for export in &resolved.exports {
             if let Some(super_local) = &export.super_class {
@@ -2210,6 +2176,51 @@ pub struct UnusedMemberResults {
     pub class_members: Vec<UnusedMember>,
     /// Unused store members (Pinia stores).
     pub store_members: Vec<UnusedMember>,
+}
+
+/// Per-run memoized lookup maps shared across every member-propagation pass.
+///
+/// Almost every access-propagation pass independently rebuilds the same two
+/// derived structures for every module: the per-module local-name -> export-key
+/// map (O(imports + exports) per module) and a `module_by_id` index over all
+/// modules. Building both once per scan and threading a shared reference through
+/// the passes removes the redundant constant-factor rebuilds on one of the
+/// hottest analysis paths. Keys borrow from the `resolved_modules` slice (via
+/// `build_local_to_export_keys`), so the struct is built where that slice
+/// outlives all passes (`find_unused_members_with_public_api_entry_points` holds
+/// `input` for the whole scan).
+pub(super) struct MemberPassIndexes<'a> {
+    module_by_id: FxHashMap<FileId, &'a ResolvedModule>,
+    local_keys_by_file: FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>>,
+    empty: FxHashMap<&'a str, Vec<ExportKey>>,
+}
+
+impl<'a> MemberPassIndexes<'a> {
+    /// Build both maps eagerly in one loop over `resolved_modules`. Eager (not
+    /// lazy) because every pass iterates all modules anyway, and eager building
+    /// keeps the borrow lifetimes simple.
+    pub(super) fn build(resolved_modules: &'a [ResolvedModule]) -> Self {
+        let mut module_by_id: FxHashMap<FileId, &'a ResolvedModule> = FxHashMap::default();
+        let mut local_keys_by_file: FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>> =
+            FxHashMap::default();
+        for module in resolved_modules {
+            module_by_id.insert(module.file_id, module);
+            local_keys_by_file.insert(module.file_id, build_local_to_export_keys(module));
+        }
+        Self {
+            module_by_id,
+            local_keys_by_file,
+            empty: FxHashMap::default(),
+        }
+    }
+
+    /// The local-name -> export-key map for `file_id`, built once in `build`.
+    /// Every module in `resolved_modules` is present; a `file_id` outside the
+    /// slice (never reached by the passes, which only look up resolved modules)
+    /// returns a shared empty map so callers stay branchless.
+    pub(super) fn local_keys(&self, file_id: FileId) -> &FxHashMap<&'a str, Vec<ExportKey>> {
+        self.local_keys_by_file.get(&file_id).unwrap_or(&self.empty)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2453,15 +2464,19 @@ fn push_unused_member(buckets: &mut MemberScanBuckets, unused: UnusedMember, kin
 }
 
 fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'_> {
+    // Build the shared local-export-key and module-index maps once per scan; the
+    // passes below all borrow them instead of rebuilding per module.
+    let indexes = MemberPassIndexes::build(input.resolved_modules);
     let heritage_context =
-        build_member_heritage_context(input.graph, input.resolved_modules, input.modules);
-    let parent_to_children = build_parent_to_children(input.graph, input.resolved_modules);
+        build_member_heritage_context(input.graph, input.resolved_modules, input.modules, &indexes);
+    let parent_to_children =
+        build_parent_to_children(input.graph, input.resolved_modules, &indexes);
 
     let MemberAccessCollections {
         accessed_members,
         self_accessed_members,
         whole_object_used_exports,
-    } = collect_propagated_member_accesses(input, &heritage_context, &parent_to_children);
+    } = collect_propagated_member_accesses(input, &heritage_context, &parent_to_children, &indexes);
 
     let entry_star_targets =
         entry_point_star_re_export_targets(input.graph, input.public_api_entry_points);
@@ -2545,14 +2560,20 @@ fn collect_propagated_member_accesses(
     input: UnusedMemberScanInput<'_>,
     heritage_context: &MemberHeritageContext<'_>,
     parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
+    indexes: &MemberPassIndexes<'_>,
 ) -> MemberAccessCollections {
     let MemberAccessCollections {
         mut accessed_members,
         mut self_accessed_members,
         mut whole_object_used_exports,
-    } = collect_direct_member_accesses(input.resolved_modules);
+    } = collect_direct_member_accesses(input.resolved_modules, indexes);
 
-    propagate_common_member_accesses(input, &mut accessed_members, &mut whole_object_used_exports);
+    propagate_common_member_accesses(
+        input,
+        indexes,
+        &mut accessed_members,
+        &mut whole_object_used_exports,
+    );
 
     propagate_interface_member_accesses(
         &heritage_context.interface_to_implementers,
@@ -2563,6 +2584,7 @@ fn collect_propagated_member_accesses(
         input.graph,
         input.resolved_modules,
         heritage_context,
+        indexes,
         &mut accessed_members,
         &mut self_accessed_members,
     );
@@ -2582,25 +2604,58 @@ fn collect_propagated_member_accesses(
 
 fn propagate_common_member_accesses(
     input: UnusedMemberScanInput<'_>,
+    indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
     whole_object_used_exports: &mut FxHashSet<ExportKey>,
 ) {
-    propagate_playwright_fixture_accesses(input.graph, input.resolved_modules, accessed_members);
-    propagate_factory_call_accesses(input.graph, input.resolved_modules, accessed_members);
-    propagate_factory_fn_accesses(input.graph, input.resolved_modules, accessed_members);
-    propagate_typed_property_accesses(input.graph, input.resolved_modules, accessed_members);
-    propagate_fluent_chain_accesses(input.graph, input.resolved_modules, accessed_members);
-    propagate_fluent_chain_new_accesses(input.graph, input.resolved_modules, accessed_members);
+    propagate_playwright_fixture_accesses(
+        input.graph,
+        input.resolved_modules,
+        indexes,
+        accessed_members,
+    );
+    propagate_factory_call_accesses(
+        input.graph,
+        input.resolved_modules,
+        indexes,
+        accessed_members,
+    );
+    propagate_factory_fn_accesses(
+        input.graph,
+        input.resolved_modules,
+        indexes,
+        accessed_members,
+    );
+    propagate_typed_property_accesses(
+        input.graph,
+        input.resolved_modules,
+        indexes,
+        accessed_members,
+    );
+    propagate_fluent_chain_accesses(
+        input.graph,
+        input.resolved_modules,
+        indexes,
+        accessed_members,
+    );
+    propagate_fluent_chain_new_accesses(
+        input.graph,
+        input.resolved_modules,
+        indexes,
+        accessed_members,
+    );
     propagate_accesses_through_typed_instance_bindings(
         input.graph,
         input.resolved_modules,
         input.modules,
+        indexes,
         accessed_members,
         whole_object_used_exports,
     );
     propagate_accesses_through_re_exports(input.graph, accessed_members);
     propagate_whole_object_through_re_exports(input.graph, whole_object_used_exports);
-    let instance_targets = build_instance_export_targets(input.graph, input.resolved_modules);
+    let instance_targets =
+        build_instance_export_targets(input.graph, input.resolved_modules, indexes);
     propagate_accesses_through_instance_exports(
         &instance_targets,
         accessed_members,
@@ -2760,6 +2815,7 @@ fn build_interface_to_implementers(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     class_heritage_by_file: &FxHashMap<FileId, &[fallow_types::extract::ClassHeritageInfo]>,
+    indexes: &MemberPassIndexes<'_>,
 ) -> FxHashMap<ExportKey, Vec<ExportKey>> {
     let mut interface_to_implementers: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
     for resolved in resolved_modules {
@@ -2770,7 +2826,7 @@ fn build_interface_to_implementers(
             continue;
         }
 
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         for heritage in *class_heritage {
             if heritage.implements.is_empty() {
                 continue;
@@ -2803,13 +2859,16 @@ struct MemberAccessCollections {
     whole_object_used_exports: FxHashSet<ExportKey>,
 }
 
-fn collect_direct_member_accesses(resolved_modules: &[ResolvedModule]) -> MemberAccessCollections {
+fn collect_direct_member_accesses(
+    resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
+) -> MemberAccessCollections {
     let mut accessed_members: FxHashMap<ExportKey, FxHashSet<String>> = FxHashMap::default();
     let mut self_accessed_members: FxHashMap<FileId, FxHashSet<String>> = FxHashMap::default();
     let mut whole_object_used_exports: FxHashSet<ExportKey> = FxHashSet::default();
 
     for resolved in resolved_modules {
-        let local_to_export_keys = build_local_to_export_keys(resolved);
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
         for access in SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses)
             .ordinary_member_accesses()
         {
@@ -3061,7 +3120,13 @@ mod tests {
         }];
 
         let mut accessed_members = FxHashMap::default();
-        propagate_playwright_fixture_accesses(&graph, &resolved_modules, &mut accessed_members);
+        let indexes = MemberPassIndexes::build(&resolved_modules);
+        propagate_playwright_fixture_accesses(
+            &graph,
+            &resolved_modules,
+            &indexes,
+            &mut accessed_members,
+        );
 
         let credited = accessed_members
             .get(&ExportKey::new(FileId(2), "AdminPage"))
@@ -3150,7 +3215,13 @@ mod tests {
         ];
 
         let mut accessed_members = FxHashMap::default();
-        propagate_playwright_fixture_accesses(&graph, &resolved_modules, &mut accessed_members);
+        let indexes = MemberPassIndexes::build(&resolved_modules);
+        propagate_playwright_fixture_accesses(
+            &graph,
+            &resolved_modules,
+            &indexes,
+            &mut accessed_members,
+        );
 
         let credited = accessed_members
             .get(&ExportKey::new(FileId(3), "AdminPage"))
@@ -3223,7 +3294,13 @@ mod tests {
         ];
 
         let mut accessed_members = FxHashMap::default();
-        propagate_playwright_fixture_accesses(&graph, &resolved_modules, &mut accessed_members);
+        let indexes = MemberPassIndexes::build(&resolved_modules);
+        propagate_playwright_fixture_accesses(
+            &graph,
+            &resolved_modules,
+            &indexes,
+            &mut accessed_members,
+        );
 
         let credited = accessed_members
             .get(&ExportKey::new(FileId(3), "AdminPage"))
@@ -3262,7 +3339,8 @@ mod tests {
             ..Default::default()
         }];
 
-        let instance_targets = build_instance_export_targets(&graph, &resolved_modules);
+        let indexes = MemberPassIndexes::build(&resolved_modules);
+        let instance_targets = build_instance_export_targets(&graph, &resolved_modules, &indexes);
 
         assert_eq!(
             instance_targets.get(&ExportKey::new(FileId(0), "service")),
@@ -3332,7 +3410,8 @@ mod tests {
         ];
 
         let mut accessed_members = FxHashMap::default();
-        propagate_factory_call_accesses(&graph, &resolved_modules, &mut accessed_members);
+        let indexes = MemberPassIndexes::build(&resolved_modules);
+        propagate_factory_call_accesses(&graph, &resolved_modules, &indexes, &mut accessed_members);
 
         let credited = accessed_members
             .get(&ExportKey::new(FileId(1), "MyClass"))
@@ -3407,7 +3486,8 @@ mod tests {
         ];
 
         let mut accessed_members = FxHashMap::default();
-        propagate_fluent_chain_accesses(&graph, &resolved_modules, &mut accessed_members);
+        let indexes = MemberPassIndexes::build(&resolved_modules);
+        propagate_fluent_chain_accesses(&graph, &resolved_modules, &indexes, &mut accessed_members);
 
         let credited = accessed_members
             .get(&ExportKey::new(FileId(1), "EventBuilder"))
@@ -3479,7 +3559,13 @@ mod tests {
         ];
 
         let mut accessed_members = FxHashMap::default();
-        propagate_fluent_chain_new_accesses(&graph, &resolved_modules, &mut accessed_members);
+        let indexes = MemberPassIndexes::build(&resolved_modules);
+        propagate_fluent_chain_new_accesses(
+            &graph,
+            &resolved_modules,
+            &indexes,
+            &mut accessed_members,
+        );
 
         let credited = accessed_members
             .get(&ExportKey::new(FileId(1), "OptionBuilder"))
