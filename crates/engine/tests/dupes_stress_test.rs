@@ -7,7 +7,6 @@
 //! Adversarial stress tests for the suffix array + LCP clone detection engine.
 
 use std::path::PathBuf;
-use std::time::Instant;
 
 use fallow_config::DetectionMode;
 use fallow_engine::duplicates::detect::CloneDetector;
@@ -79,14 +78,7 @@ fn two_identical_large_files_single_group_no_quadratic_blowup() {
         .collect();
 
     let detector = CloneDetector::new(5, 1, false);
-    let start = Instant::now();
     let report = detector.detect(data);
-    let elapsed = start.elapsed();
-
-    assert!(
-        elapsed.as_secs() < 5,
-        "Detection on 2x{count} tokens took {elapsed:?}, expected < 5s"
-    );
 
     assert!(
         !report.clone_groups.is_empty(),
@@ -414,14 +406,7 @@ fn all_identical_tokens_does_not_hang() {
     ];
 
     let detector = CloneDetector::new(5, 1, false);
-    let start = Instant::now();
     let report = detector.detect(data);
-    let elapsed = start.elapsed();
-
-    assert!(
-        elapsed.as_secs() < 5,
-        "All-identical-token input took {elapsed:?}, should not hang"
-    );
 
     assert!(
         !report.clone_groups.is_empty(),

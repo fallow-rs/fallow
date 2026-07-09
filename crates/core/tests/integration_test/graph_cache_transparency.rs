@@ -139,13 +139,10 @@ fn source_change_misses_cache_and_reflects_change() {
     let unused_before = before.unused_exports.len();
 
     // Mutate a source file: add a brand-new export that nothing imports. This
-    // changes the file's size (and mtime), so its SourceFingerprint changes and
-    // the persisted manifest no longer matches the current inputs.
+    // changes the file's size, so its SourceFingerprint changes and the
+    // persisted manifest no longer matches the current inputs.
     let target = root.join("src/module-a.ts");
     let original = std::fs::read_to_string(&target).expect("read module-a");
-    // Sleep a touch so the mtime is guaranteed to differ on coarse-resolution
-    // filesystems even though the size change alone already misses.
-    std::thread::sleep(std::time::Duration::from_millis(10));
     std::fs::write(
         &target,
         format!("{original}\nexport const brandNewDeadExport = 42;\n"),

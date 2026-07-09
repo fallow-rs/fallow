@@ -129,6 +129,7 @@ fn profile_scenario(name: &str, data: &DupeInput, runs: usize) {
 }
 
 #[test]
+#[ignore = "profiling harness, run manually with -- --ignored"]
 fn profile_dupe_detection() {
     if std::env::var("FALLOW_PROFILE").is_ok() {
         tracing_subscriber::fmt()
