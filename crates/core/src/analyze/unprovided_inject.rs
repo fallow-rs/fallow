@@ -37,7 +37,7 @@ use crate::resolve::ResolvedModule;
 use crate::results::UnprovidedInject;
 use crate::suppress::{IssueKind, SuppressionContext};
 
-use super::unused_members::{
+use super::members::{
     ExportKey, build_local_to_export_keys, entry_point_star_re_export_targets,
     export_has_entry_point_re_export_reference, export_key_with_origins,
 };

@@ -6,6 +6,7 @@ mod dynamic_segment_name_conflict;
 pub mod feature_flags;
 mod iconify;
 mod invalid_client_exports;
+mod members;
 mod misplaced_directive;
 mod mixed_barrel;
 mod package_json_utils;
@@ -32,7 +33,6 @@ mod unused_deps;
 mod unused_exports;
 mod unused_files;
 mod unused_load_data_key;
-mod unused_members;
 mod unused_overrides;
 mod unused_server_action;
 mod unused_svelte_event;
@@ -80,6 +80,7 @@ use crate::suppress::{IssueKind, SuppressionContext};
 use duplicate_prop_shape::find_duplicate_prop_shapes;
 use dynamic_segment_name_conflict::find_dynamic_segment_name_conflicts;
 use invalid_client_exports::find_invalid_client_exports;
+use members::{UnusedMemberScanInput, find_unused_members_with_public_api_entry_points};
 use misplaced_directive::find_misplaced_directives;
 use mixed_barrel::find_mixed_client_server_barrels;
 use prop_drilling::find_prop_drilling_chains;
@@ -128,7 +129,6 @@ use unused_exports::{
 )]
 use unused_files::find_unused_files;
 use unused_load_data_key::find_unused_load_data_keys;
-use unused_members::{UnusedMemberScanInput, find_unused_members_with_public_api_entry_points};
 #[expect(
     deprecated,
     reason = "Core-internal policy deprecates detector helpers for external callers; core orchestration still calls them internally"
