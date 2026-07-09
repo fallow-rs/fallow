@@ -1,0 +1,6 @@
+{
+  "name": "issue-1791-playwright-factory-wraps-fixture-const",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}

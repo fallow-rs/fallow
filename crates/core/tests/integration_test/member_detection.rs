@@ -338,6 +338,36 @@ fn playwright_helper_function_fixture_pom_methods_are_credited() {
 }
 
 #[test]
+fn playwright_factory_wrapping_fixture_const_credits_pom_methods() {
+    // Issue #1791: a helper exported as a function that wraps a LOCAL
+    // `base.extend<T>({...})` fixture const via `<const>.extend({})` (no type
+    // argument), called as `ordersTest()(...)`. The helper must inherit the
+    // const's fixture bindings so POM methods used only through it are credited.
+    let root = fixture_path("issue-1791-playwright-factory-wraps-fixture-const");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    assert!(
+        !unused_class_members.contains(&"OrdersPage.placeOrder".to_string()),
+        "OrdersPage.placeOrder should be credited through the function-wrapped fixture (ordersTest()()), found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"OrdersPage.cancelOrder".to_string()),
+        "OrdersPage.cancelOrder should be credited through the function-wrapped fixture (ordersTest()()), found: {unused_class_members:?}"
+    );
+    assert!(
+        unused_class_members.contains(&"OrdersPage.unusedOrderOnly".to_string()),
+        "a genuinely unused POM method on the same class should still be reported, found: {unused_class_members:?}"
+    );
+}
+
+#[test]
 fn playwright_helper_function_with_local_setup_fixture_pom_methods_are_credited() {
     let root = fixture_path("issue-586-playwright-helper-local-setup");
     let config = create_config(root);

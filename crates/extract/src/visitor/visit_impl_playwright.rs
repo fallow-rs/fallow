@@ -95,6 +95,13 @@ impl ModuleInfoExtractor {
         }
         bindings.sort_unstable();
         bindings.dedup();
+        // Remember this local `const X = base.extend<T>({...})` fixture definition
+        // so a helper wrapping `<X>.extend(...)` can inherit the bindings under its
+        // own name (issue #1791). Stored whether or not the const is exported.
+        if !bindings.is_empty() {
+            self.playwright_local_fixture_defs
+                .insert(test_name.to_string(), bindings.clone());
+        }
         for (fixture_name, type_name) in bindings {
             self.record_playwright_fixture_definition_fact(
                 test_name.to_string(),
@@ -149,6 +156,17 @@ impl ModuleInfoExtractor {
         call: &CallExpression<'_>,
     ) {
         if let Some(base_name) = playwright_extend_base_name(call) {
+            // A helper returning `<base>.extend(...)`. `<base>` is either the
+            // `@playwright/test` `test` import (its own fixtures come from the
+            // type argument via the PendingPlaywrightFactory below) OR a local
+            // fixture const / another helper. Record an alias unconditionally so
+            // the helper inherits the base's fixture bindings even when the
+            // wrapping `.extend({})` carries no type argument of its own (issue
+            // #1791). The alias no-ops when `base` is the raw `test` import, since
+            // no captured factory is keyed on it.
+            self.pending_playwright_factory_aliases
+                .push((test_name.to_string(), base_name.clone()));
+
             let Some(type_arguments) = call.type_arguments.as_deref() else {
                 return;
             };

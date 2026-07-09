@@ -3756,6 +3756,40 @@ fn playwright_helper_chain_records_fixture_definitions() {
 }
 
 #[test]
+fn playwright_helper_wrapping_fixture_const_records_fixture_definitions() {
+    // Issue #1791: a helper that wraps a LOCAL `base.extend<T>({...})` fixture
+    // const via `<const>.extend({})` (no type argument) must inherit the const's
+    // bindings under the helper's own name, so `helper()(...)` credits POM methods.
+    let info = parse(
+        r"
+            import { test as base } from '@playwright/test';
+            import { OrdersPage } from './orders-page';
+
+            type OrdersFixtures = {
+                orders: OrdersPage;
+            };
+
+            const ordersBaseFixture = base.extend<OrdersFixtures>({});
+
+            export function ordersTest() {
+                return ordersBaseFixture.extend({});
+            }
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_definition_fact(&info, "ordersTest", "orders", "OrdersPage"),
+        "the wrapping helper should inherit the local fixture const's bindings, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        has_playwright_fixture_definition_fact(&info, "ordersBaseFixture", "orders", "OrdersPage"),
+        "the wrapped fixture const should still record its own definition, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn playwright_helper_records_typed_use_fact_for_curried_call() {
     let info = parse(
         r"

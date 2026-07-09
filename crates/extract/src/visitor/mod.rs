@@ -342,6 +342,11 @@ pub(crate) struct ModuleInfoExtractor {
     pub(crate) class_type_param_constraints: Vec<FxHashMap<String, Option<String>>>,
     pub(crate) pending_playwright_factory_calls: Vec<PendingPlaywrightFactory>,
     pub(crate) pending_playwright_factory_aliases: Vec<(String, String)>,
+    /// Local `const X = base.extend<T>({...})` fixture definitions keyed by the
+    /// const's local name. A helper wrapping `<X>.extend(...)` (issue #1791)
+    /// inherits these bindings through `pending_playwright_factory_aliases`, even
+    /// when the wrapping `.extend({})` carries no type argument of its own.
+    pub(crate) playwright_local_fixture_defs: FxHashMap<String, Vec<(String, String)>>,
     source_returning_helpers: FxHashMap<String, SourceReturningHelper>,
     /// File-level string directives (`"use client"`, `"use server"`) captured
     /// from `Program::directives`. Consumed by the security `client-server-leak`
@@ -1265,6 +1270,7 @@ impl ModuleInfoExtractor {
     fn resolve_playwright_factory_call_definitions(&mut self) {
         let pending_calls = std::mem::take(&mut self.pending_playwright_factory_calls);
         let pending_aliases = std::mem::take(&mut self.pending_playwright_factory_aliases);
+        let local_fixture_defs = std::mem::take(&mut self.playwright_local_fixture_defs);
         if pending_calls.is_empty() && pending_aliases.is_empty() {
             return;
         }
@@ -1299,7 +1305,16 @@ impl ModuleInfoExtractor {
                 if factory_bindings.contains_key(caller) {
                     continue;
                 }
-                if let Some(bindings) = factory_bindings.get(callee).cloned() {
+                // Inherit from another captured helper factory OR a local
+                // `base.extend<T>({...})` fixture const wrapped via `<X>.extend(...)`
+                // (issue #1791). Local const defs are only an inheritance SOURCE:
+                // their facts were already emitted directly, so they are never
+                // re-emitted (only `factory_bindings` keys, the helper names, are).
+                if let Some(bindings) = factory_bindings
+                    .get(callee)
+                    .or_else(|| local_fixture_defs.get(callee))
+                    .cloned()
+                {
                     factory_bindings.insert(caller.clone(), bindings);
                     changed = true;
                 }
