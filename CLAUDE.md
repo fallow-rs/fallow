@@ -18,7 +18,7 @@ crates/
   v8-coverage/ -- V8 ScriptCoverage parser + byte-offset-to-line/col mapper + Istanbul normalizer (open-source layer of Phase-2 runtime coverage)
   benchmarks/ -- CodSpeed benchmark suites for fallow
   core/     -- Analysis orchestration: discovery, plugins, scripts, caching, progress
-    analyze/    -- Dead code detection (mod.rs orchestration, predicates.rs, unused_files/exports/deps/members.rs)
+    analyze/    -- Dead code detection (mod.rs orchestration, predicates.rs, unused_files/exports/deps.rs, members/)
     plugins/    -- Plugin system + tooling.rs (general tooling dependency detection)
   engine/   -- Command-neutral analysis runners and typed engine results; owns health scoring (health/), the duplication detector (duplication_detector/), and input validation (validate.rs)
   api/      -- Programmatic API boundary for JS/native callers
