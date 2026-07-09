@@ -161,6 +161,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An options object typed by a local, unexported class now credits the
+  members of its imported property types.** Follow-up to the interface/alias
+  property-hop fix below: `class Opts { constructor(public c: ImportedDep) {} }`
+  declared in the consumer file (without `export`) never resolves through the
+  export-based instance-binding chain, so `this.opts.c.optM()` still reported
+  `ImportedDep.optM` as an `unused-class-member`. The typed-property-hop
+  expansion now also walks a locally-declared class's own typed-property
+  bindings, closing the last receiver shape from the #1785 investigation.
+  Warm caches invalidate automatically on upgrade. (Closes
+  [#1788](https://github.com/fallow-rs/fallow/issues/1788))
+
 - **Class members reached through an interface- or type-alias-typed property no
   longer report as `unused-class-member`, same-file and cross-module.** The
   dominant constructor-injected DI pattern (`interface Opts { c: OptDep }`,

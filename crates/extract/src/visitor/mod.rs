@@ -1702,16 +1702,20 @@ impl ModuleInfoExtractor {
     }
 
     /// Expand a compound binding target (`Opts.c[.d...]`) through this file's
-    /// named-type property maps (`interface_property_types`).
+    /// named-type property maps: `interface_property_types` for interfaces and
+    /// type-literal aliases, and a locally-declared class's own typed-property
+    /// bindings (`local_class_exports[..].instance_bindings`, issue #1788, so
+    /// an UNEXPORTED options class resolves; exported classes keep their
+    /// analyze-side `instance_bindings` path too, the extract-side credit is
+    /// additive and gated identically downstream).
     ///
     /// Each hop consumes one path segment, so the walk terminates after at most
     /// `segments` iterations even for self-referential types. A hop through a
-    /// locally-declared non-literal type (a class, an enum) returns `Opaque` at
-    /// the root (the `instance_bindings` machinery owns local-class compounds);
-    /// a hop that leaves the file (the type name is not declared here, i.e.
-    /// imported) returns `CrossModule` so the caller can emit a
-    /// `TypedPropertyMemberAccess` fact for the analyze-layer join. See issue
-    /// #1785.
+    /// locally-declared non-class, non-literal type (an enum, a const) returns
+    /// `Opaque` at the root; a hop that leaves the file (the type name is not
+    /// declared here, i.e. imported) returns `CrossModule` so the caller can
+    /// emit a `TypedPropertyMemberAccess` fact for the analyze-layer join. See
+    /// issue #1785.
     fn expand_typed_property_compound(&self, compound: &str) -> TypedPropertyExpansion {
         let mut segments = compound.split('.');
         let Some(root) = segments.next() else {
@@ -1724,10 +1728,28 @@ impl ModuleInfoExtractor {
         let mut current = root.to_string();
         let mut idx = 0;
         while idx < remaining.len() {
-            let Some(properties) = self.interface_property_types.get(&current) else {
+            let next = if let Some(properties) = self.interface_property_types.get(&current) {
+                let Some(next) = properties.get(remaining[idx]) else {
+                    // The property is not a named-reference-typed member of
+                    // this type (union / generic / unharvested shape): abstain.
+                    return TypedPropertyExpansion::Opaque;
+                };
+                next.clone()
+            } else if let Some(local_class) = self.local_class_exports.get(&current) {
+                let Some((_, bound_type)) = local_class
+                    .instance_bindings
+                    .iter()
+                    .find(|(name, _)| name == remaining[idx])
+                else {
+                    // A known local class whose property is not a typed
+                    // binding (untyped, private, method): abstain.
+                    return TypedPropertyExpansion::Opaque;
+                };
+                bound_type.clone()
+            } else {
                 if idx == 0 && self.local_declaration_names.contains(&current) {
-                    // A local class / enum root: the compound access resolves
-                    // through `instance_bindings` downstream; leave it alone.
+                    // A local non-class root (enum, function, const): the
+                    // compound is not a typed-property hop; leave it alone.
                     return TypedPropertyExpansion::Opaque;
                 }
                 return TypedPropertyExpansion::CrossModule {
@@ -1735,12 +1757,7 @@ impl ModuleInfoExtractor {
                     property_path: remaining[idx..].join("."),
                 };
             };
-            let Some(next) = properties.get(remaining[idx]) else {
-                // The property is not a named-reference-typed member of this
-                // type (union / generic / unharvested shape): abstain.
-                return TypedPropertyExpansion::Opaque;
-            };
-            current.clone_from(next);
+            current = next;
             idx += 1;
         }
         TypedPropertyExpansion::Resolved(current)

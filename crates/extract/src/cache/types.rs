@@ -751,7 +751,13 @@ use crate::MemberKind;
 /// blocks persist every fact kind they previously dropped. Warm 224 caches
 /// lack all five, leaving interface-typed DI receivers, interface-fixture POM
 /// members, and SFC fact consumers falsely unused.
-pub(super) const CACHE_VERSION: u32 = 225;
+///
+/// Bumped to 226 for issue #1788: the typed-property-hop expansion now also
+/// hops through a locally-declared class's own typed-property bindings, so an
+/// UNEXPORTED options class (`class Opts { constructor(public c: ImportedDep)
+/// {} }`) emits the member access / cross-module fact a warm 225 cache lacks,
+/// leaving such receivers falsely unused until re-parse.
+pub(super) const CACHE_VERSION: u32 = 226;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

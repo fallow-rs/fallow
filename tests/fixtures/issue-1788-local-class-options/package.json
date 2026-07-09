@@ -1,0 +1,5 @@
+{
+  "name": "issue-1788-local-class-options",
+  "private": true,
+  "main": "src/index.ts"
+}

@@ -2307,6 +2307,66 @@ fn imported_interface_hop_emits_typed_property_fact() {
 }
 
 #[test]
+fn local_class_property_hop_member_access_mapped_to_imported_type() {
+    // Issue #1788: the options type is a LOCAL, UNEXPORTED class whose typed
+    // property names an imported class. The hop must continue through the
+    // class's own typed-property bindings (its `instance_bindings`), the same
+    // way an interface hop resolves.
+    let info = parse(
+        r"
+            import type { ImportedDep } from './dep';
+            class Opts {
+                constructor(public c: ImportedDep) {}
+            }
+            export class User {
+                constructor(private opts: Opts) {}
+                run() {
+                    this.opts.c.viaLocalOpts();
+                }
+            }
+            export const makeUser = (dep: ImportedDep): User => new User(new Opts(dep));
+            ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "ImportedDep" && a.member == "viaLocalOpts"),
+        "this.opts.c.viaLocalOpts() through a local unexported class hop should map to \
+         ImportedDep.viaLocalOpts, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn local_class_hop_unknown_property_stays_opaque() {
+    // A local-class hop whose property is NOT a typed binding (untyped or
+    // method) must abstain rather than emit a bogus fact.
+    let info = parse(
+        r"
+            import type { ImportedDep } from './dep';
+            class Opts {
+                constructor(public c: ImportedDep) {}
+            }
+            export class User {
+                constructor(private opts: Opts) {}
+                run() {
+                    this.opts.unknown.something();
+                }
+            }
+            export const makeUser = (dep: ImportedDep): User => new User(new Opts(dep));
+            ",
+    );
+    assert!(
+        !info
+            .semantic_facts
+            .iter()
+            .any(|fact| matches!(fact, SemanticFact::TypedPropertyMemberAccess(_))),
+        "an unknown property on a local-class hop must not emit a fact, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn mid_chain_imported_hop_emits_fact_with_remaining_path() {
     // A local interface whose property type is IMPORTED dead-ends mid-chain;
     // the fact carries the remaining segments from that point.
