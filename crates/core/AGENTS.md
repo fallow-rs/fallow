@@ -6,9 +6,8 @@ Use this file when editing `crates/core/**`.
 
 - `discover.rs` and `discover/`: source walking, default ignores, entry point detection, workspace-aware file discovery.
 - `analyze/`: dead-code and structural issue detection.
-- `duplicates/`: clone detection pipeline.
 - `plugins/`: built-in framework and tool integrations.
-- `scripts/` and cross-reference helpers: package scripts, dependency usage, and report enrichment.
+- `scripts/`: package scripts and dependency-usage parsing.
 
 ## Rules
 

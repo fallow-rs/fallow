@@ -17,10 +17,9 @@ crates/
   security/ -- Shared security catalogue contracts for fallow
   v8-coverage/ -- V8 ScriptCoverage parser + byte-offset-to-line/col mapper + Istanbul normalizer (open-source layer of Phase-2 runtime coverage)
   benchmarks/ -- CodSpeed benchmark suites for fallow
-  core/     -- Analysis orchestration: discovery, plugins, scripts, duplicates, cross-reference, caching, progress
+  core/     -- Analysis orchestration: discovery, plugins, scripts, caching, progress
     analyze/    -- Dead code detection (mod.rs orchestration, predicates.rs, unused_files/exports/deps/members.rs)
     plugins/    -- Plugin system + tooling.rs (general tooling dependency detection)
-    duplicates/ -- Clone detection (families, normalize, tokenize)
   engine/   -- Command-neutral analysis runners and typed engine results; owns health scoring (health/), the duplication detector (duplication_detector/), and input validation (validate.rs)
   api/      -- Programmatic API boundary for JS/native callers
   napi/     -- napi-rs native Node addon (cdylib, #[napi] bindings) behind the @fallow/node package
@@ -29,7 +28,7 @@ crates/
     license/    -- `fallow license {activate, status, refresh, deactivate}` with offline JWT verify plus live trial / refresh flows
     coverage/   -- `fallow coverage setup` resumable first-run state machine for runtime coverage
     report/     -- Output formatting (mod.rs dispatch, human/, json.rs, sarif.rs, compact.rs, markdown.rs)
-    migrate/    -- Config migration (mod.rs, knip.rs, jscpd.rs)
+    migrate/    -- Config migration (mod.rs, knip.rs, jscpd.rs, stylelint.rs)
   lsp/      -- LSP server, split into modules
     main.rs, diagnostics/, code_actions/, code_lens.rs, hover.rs
   mcp/      -- MCP server for AI agent integration (stdio transport, API-backed analysis with CLI fallback)
