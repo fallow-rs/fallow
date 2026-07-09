@@ -2276,6 +2276,71 @@ fn two_level_interface_hop_member_access_mapped_to_class() {
 }
 
 #[test]
+fn self_referential_interface_hop_terminates_and_credits_class() {
+    // Issue #1785 termination invariant: a self-referential interface
+    // (`interface Node { self: Node; leaf: LeafDep }`) accessed through
+    // repeated self-hops (`this.opts.self.self.leaf.deep()`) must terminate
+    // (the walk is bounded by access-path segment count, never the type
+    // graph) and still credit the terminal class member exactly once, with
+    // no runaway or duplicated facts.
+    let info = parse(
+        r"
+            import type { LeafDep } from './dep';
+            interface Node { self: Node; leaf: LeafDep }
+            export class UserSelfRef {
+                constructor(private opts: Node) {}
+                run() {
+                    this.opts.self.self.leaf.deep();
+                }
+            }
+            ",
+    );
+    let credited = info
+        .member_accesses
+        .iter()
+        .filter(|a| a.object == "LeafDep" && a.member == "deep")
+        .count();
+    assert_eq!(
+        credited, 1,
+        "a self-referential interface hop must terminate and credit LeafDep.deep exactly once, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn two_type_cycle_hop_terminates_and_credits_class() {
+    // Issue #1785 termination invariant: two interfaces forming a cycle in
+    // one parse unit (`interface TypeA { b: TypeB; leaf: LeafDep }` /
+    // `interface TypeB { a: TypeA }`) accessed through a path that traverses
+    // the A -> B -> A cycle before terminating on an imported class
+    // (`this.opts.b.a.b.a.leaf.deep()`) must terminate and credit the
+    // terminal class member exactly once.
+    let info = parse(
+        r"
+            import type { LeafDep } from './dep';
+            interface TypeA { b: TypeB; leaf: LeafDep }
+            interface TypeB { a: TypeA }
+            export class UserCyc {
+                constructor(private opts: TypeA) {}
+                run() {
+                    this.opts.b.a.b.a.leaf.deep();
+                }
+            }
+            ",
+    );
+    let credited = info
+        .member_accesses
+        .iter()
+        .filter(|a| a.object == "LeafDep" && a.member == "deep")
+        .count();
+    assert_eq!(
+        credited, 1,
+        "a two-type cyclic interface hop must terminate and credit LeafDep.deep exactly once, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn imported_interface_hop_emits_typed_property_fact() {
     // Issue #1785 Part B: the options type is IMPORTED, so the extract layer
     // cannot expand locally and must emit a TypedPropertyMemberAccess fact

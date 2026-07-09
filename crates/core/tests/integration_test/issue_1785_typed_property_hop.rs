@@ -102,3 +102,27 @@ fn imported_interface_typed_property_hop_credits_class_member() {
         "LeafDep.deadOnLeafDep has no call site and must stay flagged, found: {unused:?}"
     );
 }
+
+#[test]
+fn cross_module_type_cycle_hop_terminates_and_credits_class() {
+    // Issue #1785 termination invariant (analyze join): two type modules
+    // import each other, forming an A -> B -> A cycle (`types-a.ts` declares
+    // `TypeA { b: TypeB; leaf: LeafDep }`, `types-b.ts` declares
+    // `TypeB { a: TypeA }`). A consumer access `this.opts.b.a.leaf.deepM()`
+    // walks that cycle before terminating on `LeafDep` (a class-with-members
+    // in a third module). The join must terminate (a hang fails the suite by
+    // timeout), credit the terminal member, and leave a sibling dead member
+    // flagged (no blanket over-credit through the cycle).
+    let unused = unused_member_names(fixture_path("issue-1785-cyclic-type-hop"));
+
+    assert!(
+        !unused.contains(&"LeafDep.deepM".to_string()),
+        "LeafDep.deepM is reached through a cross-module A -> B -> A type cycle and must be \
+         credited (issue #1785), found: {unused:?}"
+    );
+    assert!(
+        unused.contains(&"LeafDep.deadOnLeafDep".to_string()),
+        "LeafDep.deadOnLeafDep has no call site and must stay flagged even with a cyclic hop \
+         in the project, found: {unused:?}"
+    );
+}
