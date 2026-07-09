@@ -2399,8 +2399,9 @@ fn mid_chain_imported_hop_emits_fact_with_remaining_path() {
 
 #[test]
 fn local_class_compound_does_not_emit_typed_property_fact() {
-    // A compound rooted at a LOCAL class stays on the instance_bindings path;
-    // no fact is emitted (Opaque).
+    // A compound rooted at a LOCAL class resolves through the class's own
+    // typed-property bindings (issue #1788); a LOCAL hop never emits the
+    // cross-module TypedPropertyMemberAccess fact (only imported hops do).
     let info = parse(
         r"
             import type { DepClassOpts } from './dep';

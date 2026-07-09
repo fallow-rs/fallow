@@ -1635,10 +1635,12 @@ impl ModuleInfoExtractor {
                 BindingTarget::Class(object) => {
                     // A compound target (`Opts.c` from `this.opts.c` with binding
                     // `this.opts -> Opts`) may hop through a named interface /
-                    // type-literal alias; expand it so the terminal property type
-                    // is credited (issue #1785). The compound access itself is
-                    // still pushed: local-class compounds resolve downstream via
-                    // `instance_bindings`, and interface compounds are inert.
+                    // type-literal alias (issue #1785) or a locally-declared
+                    // class's typed-property bindings (issue #1788); expand it
+                    // so the terminal property type is credited. The compound
+                    // access itself is still pushed: exported-class compounds
+                    // also resolve downstream via `instance_bindings`, and
+                    // interface compounds are inert.
                     match self.expand_typed_property_compound(&object) {
                         TypedPropertyExpansion::Resolved(terminal) => {
                             additional_accesses.push(MemberAccess {
