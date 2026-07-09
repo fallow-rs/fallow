@@ -1,21 +1,22 @@
 FROM debian:bookworm-slim AS download
 
-ARG FALLOW_VERSION=2.94.0
+ARG FALLOW_VERSION=3.3.0
 ARG TARGETARCH
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
 
+# The sha256 pins below are bound to FALLOW_VERSION above; bump both together.
 RUN set -eux; \
   case "${TARGETARCH}" in \
     amd64) \
       asset="fallow-linux-x64-musl"; \
-      sha256="e70fce061dbae33cb2ff1b651a13c4dcc6bb09bb3abf8df004e639287aba425f"; \
+      sha256="e0af720a13a1758f982e5dda590e57f633c6c4d2ba79de9b1bc5a952a7dd6766"; \
       ;; \
     arm64) \
       asset="fallow-linux-arm64-musl"; \
-      sha256="d7d0007b7edf01c73e1e1227df1cc5234faeff92bc8f0bb31cfc6c87560fe02b"; \
+      sha256="f615c1ba69073ba8025ac03a6729ad8b8a0334c0c9059b7657cb5c05ee0b0c96"; \
       ;; \
     *) \
       echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; \
