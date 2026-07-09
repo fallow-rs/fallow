@@ -5,13 +5,23 @@ const run = promisify(execFile);
 
 export type FileDiff = { patch: string; binary: boolean };
 
+/** Refs and revision expressions git accepts: SHAs, branch names, `HEAD`, `HEAD~2`, `origin/main`. */
+const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._/^~-]*$/;
+
+/**
+ * Reject anything that isn't a well-formed git ref, falling back to `HEAD`.
+ * Guards against option injection (a ref beginning with `-`, e.g.
+ * `--output=/tmp/x`, would otherwise be parsed by git as a flag).
+ */
+export const sanitizeRef = (ref: string): string => (SAFE_REF.test(ref) ? ref : "HEAD");
+
 /**
  * Unified `git diff <base> -- <file>` for a changed file (base = the review's
  * merge-base). New-since-base files show as all-additions; binary files are
  * flagged. Errors degrade to an empty patch (the UI shows "no textual diff").
  */
 export const getFileDiff = async (root: string, base: string, file: string): Promise<FileDiff> => {
-  const ref = base || "HEAD";
+  const ref = sanitizeRef(base || "HEAD");
   try {
     const { stdout } = await run("git", ["diff", ref, "--", file], {
       cwd: root,
@@ -29,7 +39,7 @@ export const getFileDiff = async (root: string, base: string, file: string): Pro
  * the multi-file patch into per-file sections.
  */
 export const getAllDiffs = async (root: string, base: string): Promise<{ patch: string }> => {
-  const ref = base || "HEAD";
+  const ref = sanitizeRef(base || "HEAD");
   try {
     const { stdout } = await run("git", ["diff", ref], {
       cwd: root,
