@@ -161,6 +161,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Playwright Page Object methods used through a function-wrapped fixture are
+  no longer reported as unused.** A fixture exported as a function that wraps a
+  local `base.extend<T>({...})` fixture const via `<const>.extend(...)` and is
+  called in specs as `myTest()("title", cb)` (instead of the direct
+  `export const myTest = base.extend(...)` form called as `myTest("title", cb)`)
+  left every Page Object method reported as `unused-class-member`. The wrapping
+  helper now inherits the fixture bindings of the const it wraps, so methods
+  used only through it are credited. Warm caches invalidate automatically on
+  upgrade. Thanks [@committedpazz](https://github.com/committedpazz) for the
+  precise minimal repro. (Closes
+  [#1791](https://github.com/fallow-rs/fallow/issues/1791))
+
 - **An options object typed by a local, unexported class now credits the
   members of its imported property types.** Follow-up to the interface/alias
   property-hop fix below: `class Opts { constructor(public c: ImportedDep) {} }`
