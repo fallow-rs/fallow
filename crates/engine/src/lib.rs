@@ -838,6 +838,7 @@ mod tests {
                 production_override: None,
                 quiet: true,
                 analysis: ProductionAnalysis::DeadCode,
+                allow_remote_extends: false,
             },
         )
         .expect("project config loads");

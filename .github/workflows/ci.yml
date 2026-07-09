@@ -692,8 +692,7 @@ jobs:
   msrv:
     name: MSRV (1.92)
     needs: changes
-    # Temporarily disabled to conserve CI minutes; run `cargo +1.92.0 check --workspace` locally.
-    if: false && (needs.changes.outputs.rust == 'true' || github.event_name == 'push')
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -704,6 +703,14 @@ jobs:
         with:
           toolchain: '1.92.0'
           cache-key: msrv
+      - name: Verify published crate MSRV metadata
+        run: |
+          cargo metadata --no-deps --format-version 1 | jq -e --arg msrv "1.92" '
+            [.packages[]
+              | select((.publish | type) == "null" or (.publish | length) > 0)
+              | .rust_version]
+            | length > 0 and all(. == $msrv)
+          '
       - name: Check compilation
         run: cargo check --workspace
 

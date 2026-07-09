@@ -252,6 +252,7 @@ pub struct ConfigLoadOptions {
     pub threads: usize,
     pub production_override: Option<bool>,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
 }
 
 /// The scalar config-loading knobs for [`load_config`], bundled so the entry
@@ -264,6 +265,7 @@ pub struct LoadConfigArgs {
     pub threads: usize,
     pub production: bool,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
 }
 
 #[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
@@ -278,6 +280,7 @@ pub fn load_config(
         threads,
         production,
         quiet,
+        allow_remote_extends,
     } = args;
     load_config_for_analysis(
         root,
@@ -288,6 +291,7 @@ pub fn load_config(
             threads,
             production_override: production.then_some(true),
             quiet,
+            allow_remote_extends,
         },
         ProductionAnalysis::DeadCode,
     )
@@ -355,8 +359,11 @@ fn load_user_config(
     config_path: &Option<PathBuf>,
     options: &ConfigLoadOptions,
 ) -> Result<Option<FallowConfig>, ExitCode> {
+    let load_options = fallow_config::ConfigLoadOptions {
+        allow_remote_extends: options.allow_remote_extends,
+    };
     if let Some(path) = config_path {
-        return match FallowConfig::load(path) {
+        return match FallowConfig::load_with_options(path, load_options) {
             Ok(c) => {
                 log_config_loaded(path, options.output, options.quiet);
                 Ok(Some(c))
@@ -367,7 +374,7 @@ fn load_user_config(
             }
         };
     }
-    match FallowConfig::find_and_load(root) {
+    match FallowConfig::find_and_load_with_options(root, load_options) {
         Ok(Some((config, found_path))) => {
             log_config_loaded(&found_path, options.output, options.quiet);
             Ok(Some(config))

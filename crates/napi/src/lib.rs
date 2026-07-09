@@ -17,6 +17,7 @@ use napi_derive::napi;
 pub struct DeadCodeOptions {
     pub root: Option<String>,
     pub config_path: Option<String>,
+    pub allow_remote_extends: Option<bool>,
     pub no_cache: Option<bool>,
     pub threads: Option<u32>,
     pub diff_file: Option<String>,
@@ -64,6 +65,7 @@ pub struct DeadCodeOptions {
 pub struct DuplicationOptions {
     pub root: Option<String>,
     pub config_path: Option<String>,
+    pub allow_remote_extends: Option<bool>,
     pub no_cache: Option<bool>,
     pub threads: Option<u32>,
     pub diff_file: Option<String>,
@@ -90,6 +92,7 @@ pub struct DuplicationOptions {
 pub struct FeatureFlagsOptions {
     pub root: Option<String>,
     pub config_path: Option<String>,
+    pub allow_remote_extends: Option<bool>,
     pub no_cache: Option<bool>,
     pub threads: Option<u32>,
     pub diff_file: Option<String>,
@@ -106,6 +109,7 @@ pub struct FeatureFlagsOptions {
 pub struct ComplexityOptions {
     pub root: Option<String>,
     pub config_path: Option<String>,
+    pub allow_remote_extends: Option<bool>,
     pub no_cache: Option<bool>,
     pub threads: Option<u32>,
     pub diff_file: Option<String>,
@@ -140,6 +144,7 @@ pub struct ComplexityOptions {
 struct CommonOptionsInput {
     root: Option<String>,
     config_path: Option<String>,
+    allow_remote_extends: Option<bool>,
     no_cache: Option<bool>,
     threads: Option<u32>,
     diff_file: Option<String>,
@@ -165,6 +170,7 @@ fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOp
     Ok(api::AnalysisOptions {
         root: input.root.map(std::path::PathBuf::from),
         config_path: input.config_path.map(std::path::PathBuf::from),
+        allow_remote_extends: input.allow_remote_extends.unwrap_or(false),
         no_cache: input.no_cache.unwrap_or(false),
         threads,
         diff_file: input.diff_file.map(std::path::PathBuf::from),
@@ -277,6 +283,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
             analysis: map_common_options(CommonOptionsInput {
                 root: value.root,
                 config_path: value.config_path,
+                allow_remote_extends: value.allow_remote_extends,
                 no_cache: value.no_cache,
                 threads: value.threads,
                 diff_file: value.diff_file,
@@ -339,6 +346,7 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
             analysis: map_common_options(CommonOptionsInput {
                 root: value.root,
                 config_path: value.config_path,
+                allow_remote_extends: value.allow_remote_extends,
                 no_cache: value.no_cache,
                 threads: value.threads,
                 diff_file: value.diff_file,
@@ -380,6 +388,7 @@ impl TryFrom<FeatureFlagsOptions> for api::FeatureFlagsOptions {
             analysis: map_common_options(CommonOptionsInput {
                 root: value.root,
                 config_path: value.config_path,
+                allow_remote_extends: value.allow_remote_extends,
                 no_cache: value.no_cache,
                 threads: value.threads,
                 diff_file: value.diff_file,
@@ -402,6 +411,7 @@ impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
             analysis: map_common_options(CommonOptionsInput {
                 root: value.root,
                 config_path: value.config_path,
+                allow_remote_extends: value.allow_remote_extends,
                 no_cache: value.no_cache,
                 threads: value.threads,
                 diff_file: value.diff_file,
@@ -683,6 +693,7 @@ mod tests {
         let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
             root: Some("/repo".to_string()),
             config_path: Some("/repo/fallow.toml".to_string()),
+            allow_remote_extends: Some(true),
             no_cache: Some(true),
             threads: Some(4),
             diff_file: Some("/tmp/diff.patch".to_string()),
@@ -1008,6 +1019,7 @@ mod tests {
         let options = api::FeatureFlagsOptions::try_from(FeatureFlagsOptions {
             root: Some("/repo".to_string()),
             config_path: Some("/repo/fallow.toml".to_string()),
+            allow_remote_extends: Some(true),
             no_cache: Some(true),
             threads: Some(2),
             diff_file: Some("/tmp/flags.diff".to_string()),

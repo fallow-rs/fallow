@@ -26,6 +26,7 @@ pub struct CombinedOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
     pub fail_on_issues: bool,
     pub sarif_file: Option<&'a std::path::Path>,
     pub changed_since: Option<&'a str>,
@@ -142,6 +143,7 @@ fn build_combined_check_options<'a>(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
+        allow_remote_extends: opts.allow_remote_extends,
         fail_on_issues: opts.fail_on_issues,
         filters,
         changed_since: opts.changed_since,
@@ -301,6 +303,7 @@ fn load_combined_dupes_config(opts: &CombinedOptions<'_>) -> Result<DuplicatesCo
                 .production_dupes
                 .or_else(|| opts.production.then_some(true)),
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
         fallow_config::ProductionAnalysis::Dupes,
     )?
@@ -318,6 +321,7 @@ fn build_combined_dupes_options<'a>(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
+        allow_remote_extends: opts.allow_remote_extends,
         mode: Some(
             opts.dupes_mode
                 .unwrap_or_else(|| DupesMode::from(dupes_cfg.mode)),
@@ -385,6 +389,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         sort: fallow_engine::health::HealthSort::Cyclomatic,
         production: opts.production_health.unwrap_or(opts.production),
         production_override: opts.production_health,
+        allow_remote_extends: opts.allow_remote_extends,
         changed_since: opts.changed_since,
         diff_index: None,
         use_shared_diff_index: true,
@@ -512,6 +517,7 @@ mod tests {
             no_cache: false,
             threads: 1,
             quiet: true,
+            allow_remote_extends: false,
             fail_on_issues: false,
             sarif_file: None,
             changed_since: None,

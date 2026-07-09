@@ -148,8 +148,21 @@ pub(super) fn dirty_worktree(root: &Path) -> bool {
     output.stdout.iter().any(|b| !b.is_ascii_whitespace())
 }
 
+#[cfg(test)]
 pub(super) fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, String> {
-    let user_config = match FallowConfig::find_and_load(root) {
+    load_resolved_config_with_options(root, false)
+}
+
+pub(super) fn load_resolved_config_with_options(
+    root: &Path,
+    allow_remote_extends: bool,
+) -> Result<ResolvedConfig, String> {
+    let user_config = match FallowConfig::find_and_load_with_options(
+        root,
+        fallow_config::ConfigLoadOptions {
+            allow_remote_extends,
+        },
+    ) {
         Ok(Some((config, _path))) => Some(config),
         Ok(None) => None,
         Err(e) => return Err(format!("config load failed: {e}")),

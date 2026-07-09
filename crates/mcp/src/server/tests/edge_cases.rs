@@ -9,6 +9,7 @@ fn analyze_args_with_spaces_in_paths() {
     let params = AnalyzeParams {
         root: Some("/path/with spaces/project".to_string()),
         config: Some("my config.json".to_string()),
+        allow_remote_extends: None,
         workspace: Some("my package".to_string()),
         ..Default::default()
     };
@@ -24,6 +25,7 @@ fn check_changed_args_with_special_ref() {
         since: "origin/feature/my-branch".to_string(),
         root: None,
         config: None,
+        allow_remote_extends: None,
         production: None,
         workspace: None,
         baseline: None,
@@ -70,6 +72,7 @@ fn check_changed_args_production_false_is_omitted() {
         production: Some(false),
         root: None,
         config: None,
+        allow_remote_extends: None,
         workspace: None,
         baseline: None,
         save_baseline: None,
@@ -273,6 +276,7 @@ fn check_changed_args_only_root() {
         root: Some("/workspace".to_string()),
         since: "HEAD~1".to_string(),
         config: None,
+        allow_remote_extends: None,
         production: None,
         workspace: None,
         baseline: None,
@@ -309,6 +313,7 @@ fn project_info_args_only_root() {
 fn project_info_args_only_config() {
     let params = ProjectInfoParams {
         config: Some(".fallowrc.json".to_string()),
+        allow_remote_extends: None,
         ..Default::default()
     };
     let args = build_project_info_args(&params);
@@ -344,6 +349,7 @@ fn analyze_args_threads_only() {
 fn find_dupes_args_config_and_workspace() {
     let params = FindDupesParams {
         config: Some("custom.toml".to_string()),
+        allow_remote_extends: None,
         workspace: Some("libs/core".to_string()),
         ..Default::default()
     };
@@ -373,6 +379,7 @@ fn fix_args_workspace_only() {
 fn health_args_config_only() {
     let params = HealthParams {
         config: Some("health.toml".to_string()),
+        allow_remote_extends: None,
         ..Default::default()
     };
     let args = build_health_args(&params);
@@ -561,6 +568,7 @@ fn check_changed_args_baseline_only() {
         baseline: Some("baseline.json".to_string()),
         root: None,
         config: None,
+        allow_remote_extends: None,
         production: None,
         workspace: None,
         save_baseline: None,
@@ -585,6 +593,7 @@ fn check_changed_args_save_baseline_only() {
         save_baseline: Some("new.json".to_string()),
         root: None,
         config: None,
+        allow_remote_extends: None,
         production: None,
         workspace: None,
         baseline: None,
@@ -664,6 +673,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
     let params = HealthParams {
         root: Some("/project".to_string()),
         config: Some("fallow.toml".to_string()),
+        allow_remote_extends: None,
         max_cyclomatic: Some(25),
         max_cognitive: Some(15),
         max_crap: Some(30.0),
@@ -740,6 +750,7 @@ fn check_changed_args_unicode_in_paths() {
         since: "main".to_string(),
         root: Some("/home/用户/项目".to_string()),
         config: Some("配置.json".to_string()),
+        allow_remote_extends: None,
         workspace: Some("包裹".to_string()),
         production: None,
         baseline: None,
@@ -763,6 +774,7 @@ fn find_dupes_args_unicode_in_paths() {
     let params = FindDupesParams {
         root: Some("/home/ユーザー/プロジェクト".to_string()),
         config: Some("設定.toml".to_string()),
+        allow_remote_extends: None,
         workspace: Some("パッケージ".to_string()),
         ..Default::default()
     };
@@ -777,6 +789,7 @@ fn fix_args_unicode_in_paths() {
     let params = FixParams {
         root: Some("/home/사용자/프로젝트".to_string()),
         config: Some("설정.json".to_string()),
+        allow_remote_extends: None,
         workspace: Some("패키지".to_string()),
         ..Default::default()
     };
@@ -796,6 +809,7 @@ fn health_args_unicode_in_paths() {
     let params = HealthParams {
         root: Some("/home/Benutzer/Projekt".to_string()),
         config: Some("Konfiguration.toml".to_string()),
+        allow_remote_extends: None,
         workspace: Some("Paket".to_string()),
         save_snapshot: Some("/Schnappschüsse/v1.json".to_string()),
         ..Default::default()
@@ -812,6 +826,7 @@ fn project_info_args_unicode_in_paths() {
     let params = ProjectInfoParams {
         root: Some("/домой/пользователь/проект".to_string()),
         config: Some("конфиг.toml".to_string()),
+        allow_remote_extends: None,
         ..Default::default()
     };
     let args = build_project_info_args(&params);
@@ -824,6 +839,7 @@ fn check_changed_args_empty_config_is_dropped() {
     let params = CheckChangedParams {
         since: "main".to_string(),
         config: Some(String::new()),
+        allow_remote_extends: None,
         root: None,
         production: None,
         workspace: None,
@@ -861,6 +877,7 @@ fn find_dupes_args_empty_root_is_dropped() {
 fn fix_args_empty_config_is_dropped() {
     let params = FixParams {
         config: Some(String::new()),
+        allow_remote_extends: None,
         ..Default::default()
     };
     let preview = build_fix_preview_args(&params);
@@ -883,6 +900,7 @@ fn check_changed_args_threads_boundary() {
         threads: Some(1),
         root: None,
         config: None,
+        allow_remote_extends: None,
         production: None,
         workspace: None,
         baseline: None,
@@ -1001,6 +1019,7 @@ fn check_changed_args_no_cache_true() {
         no_cache: Some(true),
         root: None,
         config: None,
+        allow_remote_extends: None,
         production: None,
         workspace: None,
         baseline: None,
@@ -1020,6 +1039,7 @@ fn check_changed_args_no_cache_true() {
 fn fix_preview_args_config_only() {
     let params = FixParams {
         config: Some("custom.toml".to_string()),
+        allow_remote_extends: None,
         ..Default::default()
     };
     let args = build_fix_preview_args(&params);

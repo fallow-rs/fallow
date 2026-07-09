@@ -14,7 +14,8 @@ use super::{
         programmatic_error_body, run_api_blocking,
     },
     fallback_policy::{CliFallbackReason, baseline_fallback_reason, duplication_fallback_reason},
-    push_baseline, push_global, push_str_flag, run_tool, validation_error_body,
+    push_baseline, push_global, push_remote_extends, push_str_flag, run_tool,
+    validation_error_body,
 };
 
 /// Run `find_dupes` through the typed API when parameters map cleanly to the
@@ -79,6 +80,7 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_str_flag(&mut args, "--workspace", params.workspace.as_deref());
     push_dupes_detection_flags(&mut args, params)?;
     push_dupes_toggle_flags(&mut args, params);
@@ -111,6 +113,7 @@ fn duplication_options_from_params(params: &FindDupesParams) -> Result<Duplicati
         analysis: AnalysisOptions {
             root: non_empty_path(params.root.as_deref()),
             config_path: non_empty_path(params.config.as_deref()),
+            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
             no_cache: params.no_cache.unwrap_or(false),
             threads: params.threads,
             changed_since: changed_since_from_param(params.changed_since.as_deref()),

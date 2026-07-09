@@ -1,6 +1,7 @@
 export interface AnalysisOptions {
   root?: string;
   configPath?: string;
+  allowRemoteExtends?: boolean;
   noCache?: boolean;
   threads?: number;
   diffFile?: string;

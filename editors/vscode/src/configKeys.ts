@@ -1,6 +1,7 @@
 export const RESTART_CONFIG_KEYS = [
   "fallow.lspPath",
   "fallow.configPath",
+  "fallow.allowRemoteExtends",
   "fallow.trace.server",
   "fallow.issueTypes",
   "fallow.changedSince",
@@ -20,6 +21,7 @@ export const RESTART_CONFIG_KEYS = [
 
 export const REANALYSIS_CONFIG_KEYS = [
   "fallow.configPath",
+  "fallow.allowRemoteExtends",
   "fallow.production",
   "fallow.duplication",
   "fallow.issueTypes",

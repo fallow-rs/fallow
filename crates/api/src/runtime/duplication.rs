@@ -133,9 +133,12 @@ pub(super) fn load_duplication_session(
     options: &DuplicationOptions,
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let project_config = fallow_engine::project_config::config_for_project(
+    let project_config = fallow_engine::project_config::config_for_project_with_load_options(
         &resolved.root,
         resolved.config_path.as_deref(),
+        fallow_config::ConfigLoadOptions {
+            allow_remote_extends: resolved.allow_remote_extends(),
+        },
     )
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to load config: {err}"), 2)

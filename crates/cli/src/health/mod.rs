@@ -201,6 +201,7 @@ fn load_health_config(
                 .production_override
                 .or_else(|| opts.production.then_some(true)),
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
         fallow_config::ProductionAnalysis::Health,
     )?;

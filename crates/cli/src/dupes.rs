@@ -35,6 +35,7 @@ pub struct DupesOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
     /// CLI override for detection mode. `None` falls back to the value from
     /// the config file (or its default if unspecified there).
     pub mode: Option<DupesMode>,
@@ -281,6 +282,7 @@ fn load_dupes_config_for_analysis(opts: &DupesOptions<'_>) -> Result<ResolvedCon
                 .production_override
                 .or_else(|| opts.production.then_some(true)),
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
         fallow_config::ProductionAnalysis::Dupes,
     )
@@ -931,6 +933,7 @@ mod tests {
             no_cache: true,
             threads: 1,
             quiet: true,
+            allow_remote_extends: false,
             mode: Some(mode),
             min_tokens: Some(50),
             min_lines: Some(5),

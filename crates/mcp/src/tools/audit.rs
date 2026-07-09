@@ -14,7 +14,7 @@ use super::{
         programmatic_error_body, run_api_blocking,
     },
     fallback_policy::{baseline_fallback_reason, filled, grouped_fallback_reason},
-    push_global, push_scope, push_str_flag, run_tool, validation_error_body,
+    push_global, push_remote_extends, push_scope, push_str_flag, run_tool, validation_error_body,
 };
 
 /// Run the `audit` tool through the typed API when parameters map cleanly to
@@ -78,6 +78,7 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_str_flag(&mut args, "--base", params.base.as_deref());
     push_scope(&mut args, params.production, params.workspace.as_deref());
     push_audit_production_flags(&mut args, params);
@@ -171,6 +172,7 @@ fn audit_options_from_params(params: &AuditParams) -> Result<AuditOptions, Strin
         analysis: AnalysisOptions {
             root: non_empty_path(params.root.as_deref()),
             config_path: non_empty_path(params.config.as_deref()),
+            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
             no_cache: params.no_cache.unwrap_or(false),
             threads: params.threads,
             diff_file: env_diff_file(),

@@ -13,7 +13,7 @@ use super::{
         run_api_blocking,
     },
     fallback_policy::{CliFallbackReason, baseline_fallback_reason, regression_fallback_reason},
-    push_baseline, push_global, push_regression, push_scope, run_tool,
+    push_baseline, push_global, push_regression, push_remote_extends, push_scope, run_tool,
 };
 
 /// Run `check_changed` through the typed API when parameters map cleanly to the
@@ -73,6 +73,7 @@ pub fn build_check_changed_args(params: CheckChangedParams) -> Vec<String> {
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_scope(&mut args, params.production, params.workspace.as_deref());
     push_baseline(
         &mut args,
@@ -116,6 +117,7 @@ fn check_changed_options_from_params(params: &CheckChangedParams) -> DeadCodeOpt
         analysis: AnalysisOptions {
             root: non_empty_path(params.root.as_deref()),
             config_path: non_empty_path(params.config.as_deref()),
+            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
             no_cache: params.no_cache.unwrap_or(false),
             threads: params.threads,
             production: params.production.unwrap_or(false),
@@ -235,6 +237,7 @@ mod tests {
             root: None,
             since: since.to_string(),
             config: None,
+            allow_remote_extends: None,
             production: None,
             workspace: None,
             baseline: None,

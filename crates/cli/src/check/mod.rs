@@ -315,6 +315,7 @@ pub struct CheckOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
     pub fail_on_issues: bool,
     pub filters: &'a IssueFilters,
     pub changed_since: Option<&'a str>,
@@ -495,6 +496,7 @@ fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitC
                 .production_override
                 .or_else(|| opts.production.then_some(true)),
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
         fallow_config::ProductionAnalysis::DeadCode,
     )?;

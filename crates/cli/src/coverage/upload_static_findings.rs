@@ -108,8 +108,8 @@ impl fmt::Debug for UploadStaticFindingsArgs {
 }
 
 /// Dispatch `fallow coverage upload-static-findings`.
-pub fn run(args: &UploadStaticFindingsArgs, root: &Path) -> ExitCode {
-    match run_inner(args, root) {
+pub fn run(args: &UploadStaticFindingsArgs, root: &Path, allow_remote_extends: bool) -> ExitCode {
+    match run_inner(args, root, allow_remote_extends) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => err.into_exit(args.ignore_upload_errors),
     }
@@ -158,12 +158,17 @@ impl UploadError {
     }
 }
 
-fn run_inner(args: &UploadStaticFindingsArgs, root: &Path) -> Result<(), UploadError> {
+fn run_inner(
+    args: &UploadStaticFindingsArgs,
+    root: &Path,
+    allow_remote_extends: bool,
+) -> Result<(), UploadError> {
     let project_id = resolve_project_id(args, root)?;
     let git_sha = resolve_git_sha(args, root)?;
     enforce_clean_worktree(args, root)?;
 
-    let config = load_resolved_config(root)?;
+    let config = upload_common::load_resolved_config_with_options(root, allow_remote_extends)
+        .map_err(UploadError::Validation)?;
     let results = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
         .analyze_dead_code_with_artifacts(false, false)
         .map(|analysis| analysis.results)
@@ -235,10 +240,6 @@ fn enforce_clean_worktree(args: &UploadStaticFindingsArgs, root: &Path) -> Resul
 
 fn dirty_worktree(root: &Path) -> bool {
     upload_common::dirty_worktree(root)
-}
-
-fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, UploadError> {
-    upload_common::load_resolved_config(root).map_err(UploadError::Validation)
 }
 
 /// Map the static analysis results into the cloud finding wire shape.
@@ -963,7 +964,7 @@ mod tests {
     fn run_dry_run_analyzes_and_exits_zero() {
         let project = project_with_unused_export();
         // Explicit project_id + git_sha keep this env- and git-free.
-        let code = run(&dry_run_args(), project.path());
+        let code = run(&dry_run_args(), project.path(), false);
         assert_eq!(code, ExitCode::SUCCESS);
     }
 

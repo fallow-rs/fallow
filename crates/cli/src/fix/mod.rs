@@ -36,6 +36,7 @@ pub struct FixOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
     pub dry_run: bool,
     pub yes: bool,
     pub production: bool,
@@ -62,6 +63,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
             threads: opts.threads,
             production: opts.production,
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
     ) {
         Ok(c) => c,

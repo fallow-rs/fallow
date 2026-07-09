@@ -3,7 +3,7 @@ use crate::params::SecurityCandidatesParams;
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
-use super::{push_global, push_str_flag, run_tool, validation_error_body};
+use super::{push_global, push_remote_extends, push_str_flag, run_tool, validation_error_body};
 
 const VALID_SECURITY_GATES: &[&str] = &["new", "newly-reachable"];
 
@@ -61,6 +61,7 @@ pub fn build_security_candidates_args(
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_str_flag(&mut args, "--workspace", params.workspace.as_deref());
     push_str_flag(
         &mut args,

@@ -32,6 +32,7 @@ const EXIT_NO_CONFIG: u8 = 3;
 /// `{"error": true, "message": ..., "exit_code": 2}` on stdout for failed
 /// loads (matching the rest of the CLI's error contract); other formats
 /// render to stderr.
+#[cfg(test)]
 pub fn run_config(
     root: &Path,
     explicit_config: Option<&Path>,
@@ -39,12 +40,30 @@ pub fn run_config(
     output: OutputFormat,
     quiet: bool,
 ) -> ExitCode {
+    run_config_with_options(
+        root,
+        explicit_config,
+        path_only,
+        output,
+        quiet,
+        fallow_config::ConfigLoadOptions::default(),
+    )
+}
+
+pub fn run_config_with_options(
+    root: &Path,
+    explicit_config: Option<&Path>,
+    path_only: bool,
+    output: OutputFormat,
+    quiet: bool,
+    load_options: fallow_config::ConfigLoadOptions,
+) -> ExitCode {
     let result = if let Some(path) = explicit_config {
-        FallowConfig::load(path)
+        FallowConfig::load_with_options(path, load_options)
             .map(|c| Some((c, path.to_path_buf())))
             .map_err(|e| format!("failed to load config '{}': {e}", path.display()))
     } else {
-        FallowConfig::find_and_load(root)
+        FallowConfig::find_and_load_with_options(root, load_options)
     };
 
     match result {

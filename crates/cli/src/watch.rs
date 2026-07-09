@@ -26,6 +26,7 @@ pub struct WatchOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
     pub production: bool,
     pub clear_screen: bool,
     pub explain: bool,
@@ -347,6 +348,7 @@ fn reload_config_or_keep_previous(
             threads: opts.threads,
             production: opts.production,
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
     ) {
         Ok(mut reloaded) => {
@@ -519,6 +521,7 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<fallow_config::ResolvedC
             threads: opts.threads,
             production: opts.production,
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
     )?;
     if opts.include_entry_exports {
@@ -1056,6 +1059,7 @@ mod tests {
             no_cache: false,
             threads,
             quiet,
+            allow_remote_extends: false,
             production: false,
             clear_screen: false,
             explain: false,

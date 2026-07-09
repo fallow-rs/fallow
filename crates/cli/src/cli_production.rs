@@ -28,9 +28,13 @@ fn load_config_production(
     root: &std::path::Path,
     config_path: Option<&PathBuf>,
     output: OutputFormat,
+    allow_remote_extends: bool,
 ) -> Result<ProductionConfig, ExitCode> {
+    let load_options = fallow_config::ConfigLoadOptions {
+        allow_remote_extends,
+    };
     let loaded = if let Some(path) = config_path {
-        fallow_config::FallowConfig::load(path)
+        fallow_config::FallowConfig::load_with_options(path, load_options)
             .map(Some)
             .map_err(|e| {
                 emit_error(
@@ -40,7 +44,7 @@ fn load_config_production(
                 )
             })?
     } else {
-        fallow_config::FallowConfig::find_and_load(root)
+        fallow_config::FallowConfig::find_and_load_with_options(root, load_options)
             .map(|found| found.map(|(config, _)| config))
             .map_err(|e| emit_error(&e, 2, output))?
     };
@@ -59,7 +63,8 @@ pub fn resolve_production_modes(
     production_health: bool,
     production_dupes: bool,
 ) -> Result<ProductionModes, ExitCode> {
-    let config = load_config_production(root, cli.config.as_ref(), output)?;
+    let config =
+        load_config_production(root, cli.config.as_ref(), output, cli.allow_remote_extends)?;
     let env_global = bool_from_env("FALLOW_PRODUCTION");
 
     let resolve_one = |analysis: ProductionAnalysis, cli_specific: bool, env_name: &str| {

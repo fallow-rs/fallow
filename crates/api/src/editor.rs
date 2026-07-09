@@ -396,6 +396,27 @@ impl EditorAnalysisSession {
             .map(Self::from_engine)
     }
 
+    /// Load config with an explicit inheritance trust policy, apply one
+    /// editor-specific adjustment, then discover files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an engine error when project config loading fails.
+    pub fn load_with_config_options(
+        root: &Path,
+        config_path: Option<&Path>,
+        load_options: fallow_config::ConfigLoadOptions,
+        configure: impl FnOnce(&mut fallow_config::ResolvedConfig),
+    ) -> fallow_engine::EngineResult<Self> {
+        fallow_engine::session::AnalysisSession::load_with_config_options(
+            root,
+            config_path,
+            load_options,
+            configure,
+        )
+        .map(Self::from_engine)
+    }
+
     /// Build a session from built-in defaults, ignoring project config files.
     #[must_use]
     pub fn load_default(root: &Path) -> Self {

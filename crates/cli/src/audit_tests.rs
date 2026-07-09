@@ -1164,6 +1164,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         no_cache: false,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -1235,6 +1236,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         no_cache: false,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -1320,6 +1322,7 @@ fn audit_base_snapshot_cache_key_includes_extended_config() {
         no_cache: false,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -1402,6 +1405,7 @@ fn audit_gate_all_skips_base_snapshot() {
         no_cache: true,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -1489,6 +1493,7 @@ fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
         no_cache: true,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -1592,6 +1597,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
         no_cache: true,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -1679,6 +1685,7 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
         no_cache: true,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: Some(true),
@@ -1794,14 +1801,12 @@ fn remap_cache_dir_keeps_external_absolute_cache_shared() {
     assert_eq!(remapped, cache_dir);
 }
 
-#[test]
-fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
+fn inherited_duplicate_audit_repo() -> tempfile::TempDir {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-    let root_buf = tmp
+    let root = tmp
         .path()
         .canonicalize()
         .expect("temp root should canonicalize");
-    let root = root_buf.as_path();
     fs::create_dir_all(root.join("src")).expect("src dir should be created");
     fs::write(
         root.join("package.json"),
@@ -1818,10 +1823,10 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
     fs::write(root.join("src/changed.ts"), dup_block).expect("changed should be written");
     fs::write(root.join("src/peer.ts"), dup_block).expect("peer should be written");
 
-    git(root, &["init", "-b", "main"]);
-    git(root, &["add", "."]);
+    git(&root, &["init", "-b", "main"]);
+    git(&root, &["add", "."]);
     git(
-        root,
+        &root,
         &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
     );
     fs::write(
@@ -1829,11 +1834,23 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
         format!("{dup_block}// touched\n"),
     )
     .expect("changed file should be modified");
-    git(root, &["add", "."]);
+    git(&root, &["add", "."]);
     git(
-        root,
+        &root,
         &["-c", "commit.gpgsign=false", "commit", "-m", "touch"],
     );
+
+    tmp
+}
+
+#[test]
+fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
+    let tmp = inherited_duplicate_audit_repo();
+    let root_buf = tmp
+        .path()
+        .canonicalize()
+        .expect("temp root should canonicalize");
+    let root = root_buf.as_path();
 
     let config_path = None;
     let cache_root = root.join(".fallow");
@@ -1845,6 +1862,7 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
         no_cache: true,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD~1"),
         production: false,
         production_dead_code: None,
@@ -1989,6 +2007,7 @@ export function App() {
         no_cache: true,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -2140,6 +2159,7 @@ export function App() {
         no_cache: true,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -2232,6 +2252,7 @@ fn audit_base_uses_new_explicit_config_without_hard_failure() {
         no_cache: true,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -2318,6 +2339,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
         no_cache: true,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -2410,6 +2432,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         no_cache: false,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,
@@ -2525,6 +2548,7 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
         no_cache: true,
         threads: 1,
         quiet: true,
+        allow_remote_extends: false,
         changed_since: Some("HEAD"),
         production: false,
         production_dead_code: None,

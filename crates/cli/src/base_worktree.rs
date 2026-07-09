@@ -276,7 +276,11 @@ pub fn touch_last_used(reusable_path: &Path) {
 /// config field > 30-day default. `0` from either source disables the sweep
 /// entirely (returns `None`). Invalid env values (non-integer) silently fall
 /// back to config / default; audits do not fail on a typo in a runner env var.
-pub fn resolve_cache_max_age(root: &Path, config_path: Option<&PathBuf>) -> Option<Duration> {
+pub fn resolve_cache_max_age_with_options(
+    root: &Path,
+    config_path: Option<&PathBuf>,
+    allow_remote_extends: bool,
+) -> Option<Duration> {
     if let Ok(raw) = std::env::var(AUDIT_CACHE_MAX_AGE_ENV) {
         if let Ok(days) = raw.trim().parse::<u32>() {
             return days_to_duration(days);
@@ -286,7 +290,9 @@ pub fn resolve_cache_max_age(root: &Path, config_path: Option<&PathBuf>) -> Opti
             "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS is not a valid u32; falling back to config/default",
         );
     }
-    if let Some(days) = load_audit_config(root, config_path).and_then(|c| c.cache_max_age_days) {
+    if let Some(days) = load_audit_config(root, config_path, allow_remote_extends)
+        .and_then(|c| c.cache_max_age_days)
+    {
         return days_to_duration(days);
     }
     days_to_duration(DEFAULT_AUDIT_CACHE_MAX_AGE_DAYS)
@@ -305,13 +311,17 @@ pub fn days_to_duration(days: u32) -> Option<Duration> {
 fn load_audit_config(
     root: &Path,
     config_path: Option<&PathBuf>,
+    allow_remote_extends: bool,
 ) -> Option<fallow_config::AuditConfig> {
+    let options = fallow_config::ConfigLoadOptions {
+        allow_remote_extends,
+    };
     if let Some(path) = config_path {
-        return fallow_config::FallowConfig::load(path)
+        return fallow_config::FallowConfig::load_with_options(path, options)
             .ok()
             .map(|config| config.audit);
     }
-    fallow_config::FallowConfig::find_and_load(root)
+    fallow_config::FallowConfig::find_and_load_with_options(root, options)
         .ok()
         .flatten()
         .map(|(config, _path)| config.audit)

@@ -20,6 +20,7 @@ type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 pub struct ProgrammaticAnalysisContext {
     pub(crate) root: PathBuf,
     pub(crate) config_path: Option<PathBuf>,
+    pub(crate) allow_remote_extends: bool,
     pub(crate) no_cache: bool,
     pub(crate) threads: usize,
     pub(crate) pool: rayon::ThreadPool,
@@ -83,6 +84,7 @@ fn resolve_programmatic_analysis_context_inner(
     Ok(ProgrammaticAnalysisContext {
         root,
         config_path: options.config_path.clone(),
+        allow_remote_extends: options.allow_remote_extends,
         no_cache: options.no_cache,
         threads,
         pool,
@@ -166,6 +168,12 @@ impl ProgrammaticAnalysisContext {
     #[must_use]
     pub fn config_path(&self) -> &Option<PathBuf> {
         &self.config_path
+    }
+
+    /// Whether this call permits remote config inheritance.
+    #[must_use]
+    pub const fn allow_remote_extends(&self) -> bool {
+        self.allow_remote_extends
     }
 
     /// Whether parser cache use is disabled for this call.

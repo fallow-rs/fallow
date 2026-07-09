@@ -3,7 +3,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use crate::params::{InspectTarget, InspectTargetParams};
 
-use super::{push_global, push_scope, run_tool, validation_error_body};
+use super::{push_global, push_remote_extends, push_scope, run_tool, validation_error_body};
 
 const TOOL: &str = "inspect_target";
 
@@ -34,6 +34,7 @@ fn build_inspect_args(params: &InspectTargetParams) -> Result<Vec<String>, Strin
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     if params.production == Some(false) {
         args.push("--no-production".to_string());
         push_scope(&mut args, None, params.workspace.as_deref());
@@ -77,6 +78,7 @@ mod tests {
         let params = InspectTargetParams {
             root: None,
             config: None,
+            allow_remote_extends: None,
             no_cache: None,
             threads: None,
             production: Some(false),
@@ -99,6 +101,7 @@ mod tests {
         let params = InspectTargetParams {
             root: None,
             config: None,
+            allow_remote_extends: None,
             no_cache: None,
             threads: None,
             production: None,
@@ -123,6 +126,7 @@ mod tests {
         let params = InspectTargetParams {
             root: None,
             config: None,
+            allow_remote_extends: None,
             no_cache: None,
             threads: None,
             production: None,
@@ -143,6 +147,7 @@ mod tests {
         let params = InspectTargetParams {
             root: None,
             config: None,
+            allow_remote_extends: None,
             no_cache: None,
             threads: None,
             production: None,

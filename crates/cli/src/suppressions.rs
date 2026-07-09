@@ -28,6 +28,7 @@ pub struct SuppressionsOptions<'a> {
     pub threads: usize,
     pub quiet: bool,
     pub production: bool,
+    pub allow_remote_extends: bool,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub changed_since: Option<&'a str>,
@@ -101,6 +102,7 @@ fn load_suppressions_config(opts: &SuppressionsOptions<'_>) -> Result<ResolvedCo
             threads: opts.threads,
             production: opts.production,
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
     )
 }
@@ -310,6 +312,7 @@ mod tests {
             threads: 1,
             quiet: true,
             production: false,
+            allow_remote_extends: false,
             workspace: None,
             changed_workspaces: None,
             changed_since: None,

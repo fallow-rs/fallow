@@ -252,6 +252,7 @@ pub(super) fn load_dead_code_session(
             production_override: resolved.production_override,
             quiet: true,
             analysis: ProductionAnalysis::DeadCode,
+            allow_remote_extends: resolved.allow_remote_extends,
         },
     )
     .map_err(|err| {

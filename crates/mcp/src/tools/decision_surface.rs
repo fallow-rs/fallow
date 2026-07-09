@@ -34,6 +34,7 @@ fn decision_surface_options_from_params(params: &DecisionSurfaceParams) -> Decis
         analysis: AnalysisOptions {
             root: non_empty_path(params.root.as_deref()),
             config_path: non_empty_path(params.config.as_deref()),
+            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
             no_cache: params.no_cache.unwrap_or(false),
             threads: params.threads,
             diff_file: env_diff_file(),

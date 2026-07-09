@@ -51,6 +51,7 @@ fn load_test_config(
             threads: ctx.threads.unwrap_or_else(default_threads),
             production: false,
             quiet: ctx.quiet,
+            allow_remote_extends: ctx.allow_remote_extends,
         },
     )?;
 

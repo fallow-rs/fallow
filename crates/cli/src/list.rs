@@ -19,6 +19,7 @@ pub struct ListOptions<'a> {
     pub boundaries: bool,
     pub workspaces: bool,
     pub production: bool,
+    pub allow_remote_extends: bool,
 }
 
 /// Owned listing data assembled by [`collect_list_data`] and borrowed by the
@@ -42,6 +43,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
             threads: opts.threads,
             production: opts.production,
             quiet: true, // list command doesn't need progress bars
+            allow_remote_extends: opts.allow_remote_extends,
         },
     ) {
         Ok(c) => c,
@@ -650,6 +652,7 @@ mod tests {
             boundaries,
             workspaces: false,
             production: false,
+            allow_remote_extends: false,
         }
     }
 

@@ -21,6 +21,7 @@ pub struct RulePackContext<'a> {
     pub quiet: bool,
     pub no_cache: bool,
     pub threads: Option<usize>,
+    pub allow_remote_extends: bool,
 }
 
 #[allow(

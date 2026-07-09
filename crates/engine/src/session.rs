@@ -101,7 +101,31 @@ impl AnalysisSession {
         config_path: Option<&Path>,
         configure: impl FnOnce(&mut ResolvedConfig),
     ) -> EngineResult<Self> {
-        let mut project_config = config_for_project(root, config_path)?;
+        Self::load_with_config_options(
+            root,
+            config_path,
+            fallow_config::ConfigLoadOptions::default(),
+            configure,
+        )
+    }
+
+    /// Load config with an explicit inheritance trust policy, apply one
+    /// caller-supplied adjustment, then discover project files.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when config loading fails.
+    pub fn load_with_config_options(
+        root: &Path,
+        config_path: Option<&Path>,
+        load_options: fallow_config::ConfigLoadOptions,
+        configure: impl FnOnce(&mut ResolvedConfig),
+    ) -> EngineResult<Self> {
+        let mut project_config = crate::project_config::config_for_project_with_load_options(
+            root,
+            config_path,
+            load_options,
+        )?;
         configure(&mut project_config.config);
         project_config.workspaces.clear();
         project_config.workspace_diagnostics.clear();

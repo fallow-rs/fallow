@@ -17,6 +17,7 @@ import {
   getIssueTypes,
   getChangedSince,
   getResolvedConfigPath,
+  getAllowRemoteExtends,
   getProductionOverride,
   getDuplicationCrossLanguageOverride,
   getDuplicationIgnoreImportsOverride,
@@ -53,6 +54,7 @@ export const createInitializationOptions = (): LspInitializationOptions => ({
   issueTypes: getIssueTypes(),
   changedSince: getChangedSince(),
   configPath: getResolvedConfigPath(),
+  allowRemoteExtends: getAllowRemoteExtends(),
   production: getProductionOverride(),
   // `fallow.health.inlineComplexity` is rendered by the extension's own
   // ComplexityLensProvider (so the lens can toggle the per-line breakdown), so

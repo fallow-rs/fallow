@@ -19,6 +19,16 @@
       "short": "-c"
     },
     {
+      "name": "--allow-remote-extends",
+      "type": "bool",
+      "required": false,
+      "description": "Allow trusted config files to extend HTTPS URLs",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
       "name": "--format",
       "type": "string",
       "required": false,

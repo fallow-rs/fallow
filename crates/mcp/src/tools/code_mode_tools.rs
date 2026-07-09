@@ -28,7 +28,7 @@ use super::super::{
     health::run_health_api_value,
     list_boundaries::run_list_boundaries_api_value,
     project_info::run_project_info_api_value,
-    push_global,
+    push_global, push_remote_extends,
     trace::{
         run_trace_clone_api_value, run_trace_dependency_api_value, run_trace_export_api_value,
         run_trace_file_api_value,
@@ -487,6 +487,7 @@ fn combined_options_from_params(params: &CombinedParams) -> Result<CombinedOptio
         analysis: AnalysisOptions {
             root: non_empty_path(params.root.as_deref()),
             config_path: non_empty_path(params.config.as_deref()),
+            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
             no_cache: params.no_cache.unwrap_or(false),
             threads: params.threads,
             production: params.production.unwrap_or(false),
@@ -552,6 +553,7 @@ fn build_combined_args(params: &CombinedParams) -> Vec<String> {
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     if params.production == Some(true) {
         args.push("--production".to_string());
     }
@@ -721,6 +723,74 @@ mod tests {
 
         assert!(args.contains(&"--dupes-no-ignore-imports".to_string()));
         assert!(!args.contains(&"--dupes-ignore-imports".to_string()));
+    }
+
+    #[test]
+    fn subprocess_tools_forward_remote_extends_only_when_explicitly_enabled() {
+        for tool in [
+            CodeModeTool::Analyze,
+            CodeModeTool::Combined,
+            CodeModeTool::FindDupes,
+            CodeModeTool::CheckHealth,
+            CodeModeTool::Audit,
+        ] {
+            for (value, expected) in [(Some(true), true), (Some(false), false), (None, false)] {
+                let params = value.map_or_else(
+                    || serde_json::json!({}),
+                    |value| serde_json::json!({ "allow_remote_extends": value }),
+                );
+                let args = build_tool_args(tool, params).expect("subprocess arguments");
+
+                assert_eq!(
+                    args.contains(&"--allow-remote-extends".to_string()),
+                    expected,
+                    "{} with allow_remote_extends={value:?}",
+                    tool.name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn check_changed_builder_forwards_remote_extends_only_when_explicitly_enabled() {
+        for (value, expected) in [(Some(true), true), (Some(false), false), (None, false)] {
+            let mut params = serde_json::json!({ "since": "main" });
+            if let Some(value) = value {
+                params["allow_remote_extends"] = serde_json::json!(value);
+            }
+            let args = build_tool_args(CodeModeTool::CheckChanged, params)
+                .expect("check_changed arguments");
+
+            assert_eq!(
+                args.contains(&"--allow-remote-extends".to_string()),
+                expected,
+                "allow_remote_extends={value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn config_listing_builders_forward_remote_extends_only_when_explicitly_enabled() {
+        for tool in [
+            CodeModeTool::ProjectInfo,
+            CodeModeTool::ListBoundaries,
+            CodeModeTool::FeatureFlags,
+        ] {
+            for (value, expected) in [(Some(true), true), (Some(false), false), (None, false)] {
+                let params = value.map_or_else(
+                    || serde_json::json!({}),
+                    |value| serde_json::json!({ "allow_remote_extends": value }),
+                );
+                let args = build_tool_args(tool, params).expect("config listing arguments");
+
+                assert_eq!(
+                    args.contains(&"--allow-remote-extends".to_string()),
+                    expected,
+                    "{} with allow_remote_extends={value:?}",
+                    tool.name()
+                );
+            }
+        }
     }
 
     #[test]

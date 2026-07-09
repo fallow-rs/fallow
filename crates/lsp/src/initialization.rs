@@ -14,6 +14,7 @@ pub struct LspHealthOptions {
 #[serde(rename_all = "camelCase")]
 pub struct LspInitializationOptions {
     pub config_path: Option<String>,
+    pub allow_remote_extends: bool,
     pub issue_types: Option<BTreeMap<String, bool>>,
     pub changed_since: Option<String>,
     pub duplication: Option<LspDuplicationOptions>,
@@ -32,6 +33,10 @@ pub fn parse_initialization_options(opts: Option<&serde_json::Value>) -> LspInit
             .get("configPath")
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned),
+        allow_remote_extends: obj
+            .get("allowRemoteExtends")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
         issue_types: obj.get("issueTypes").and_then(|value| {
             let issue_types = value
                 .as_object()?

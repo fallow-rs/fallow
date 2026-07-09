@@ -15,7 +15,8 @@ use super::{
     fallback_policy::{
         CliFallbackReason, baseline_fallback_reason, filled, grouped_fallback_reason,
     },
-    push_baseline, push_global, push_scope, push_str_flag, run_tool, validation_error_body,
+    push_baseline, push_global, push_remote_extends, push_scope, push_str_flag, run_tool,
+    validation_error_body,
 };
 
 /// Run `check_health` through the typed API when parameters map cleanly to the
@@ -104,6 +105,7 @@ impl HealthArgsBuilder<'_> {
             self.params.no_cache,
             self.params.threads,
         );
+        push_remote_extends(&mut self.args, self.params.allow_remote_extends);
         push_scope(
             &mut self.args,
             self.params.production,
@@ -311,6 +313,7 @@ fn health_options_from_params(params: &HealthParams) -> Result<ComplexityOptions
         analysis: AnalysisOptions {
             root: non_empty_path(params.root.as_deref()),
             config_path: non_empty_path(params.config.as_deref()),
+            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
             no_cache: params.no_cache.unwrap_or(false),
             threads: params.threads,
             production: params.production.unwrap_or(false),

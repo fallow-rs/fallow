@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 let mockIssueTypes = {};
 let mockChangedSince = "";
 let mockConfigPath = "";
+let mockAllowRemoteExtends = false;
 let mockProductionOverride: boolean | undefined;
 let mockDuplicationMode = "mild";
 let mockDuplicationThreshold = 0;
@@ -121,6 +122,7 @@ vi.mock("../src/config.js", () => ({
   getIssueTypes: () => mockIssueTypes,
   getChangedSince: () => mockChangedSince,
   getResolvedConfigPath: () => mockConfigPath,
+  getAllowRemoteExtends: () => mockAllowRemoteExtends,
   getProductionOverride: () => mockProductionOverride,
   getDuplicationModeOverride: () => mockDuplicationMode,
   getDuplicationThresholdOverride: () => mockDuplicationThreshold,
@@ -162,6 +164,7 @@ beforeEach(() => {
   mockIssueTypes = { "code-duplication": true };
   mockChangedSince = "origin/main";
   mockConfigPath = "/workspace/.fallowrc.jsonc";
+  mockAllowRemoteExtends = false;
   mockProductionOverride = undefined;
   mockDuplicationMode = "semantic";
   mockDuplicationThreshold = 8;
@@ -196,6 +199,7 @@ describe("createInitializationOptions", () => {
       issueTypes: { "code-duplication": true },
       changedSince: "origin/main",
       configPath: "/workspace/.fallowrc.jsonc",
+      allowRemoteExtends: false,
       production: undefined,
       duplication: {
         mode: "semantic",
@@ -208,6 +212,11 @@ describe("createInitializationOptions", () => {
         ignoreImports: true,
       },
     });
+  });
+
+  it("forwards the remote config trust opt-in to fallow-lsp", () => {
+    mockAllowRemoteExtends = true;
+    expect(createInitializationOptions().allowRemoteExtends).toBe(true);
   });
 
   it("forwards the production override so the LSP matches the sidebar (#1055)", () => {

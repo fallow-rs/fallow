@@ -213,6 +213,12 @@
           "default": "",
           "markdownDescription": "Path to a Fallow config file. Relative paths are resolved from the workspace root (the first folder, in multi-root workspaces). Mirrors the CLI's `--config` flag. Empty = auto-discover `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`."
         },
+        "fallow.allowRemoteExtends": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Allow the language server to load trusted `https://` config inheritance. Disabled by default."
+        },
         "fallow.autoDownload": {
           "type": "boolean",
           "default": true,

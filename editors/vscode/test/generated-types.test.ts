@@ -25,6 +25,7 @@ import type { SecurityFinding, SecurityOutput } from "../src/types.js";
 describe("generated/output-contract.d.ts", () => {
   it("exposes the LSP initializationOptions contract sent by the extension", () => {
     const sample: LspInitializationOptions = {
+      allowRemoteExtends: false,
       changedSince: "origin/main",
       configPath: "/workspace/.fallowrc.jsonc",
       duplication: {

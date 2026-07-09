@@ -158,8 +158,8 @@ impl fmt::Debug for UploadInventoryArgs {
 }
 
 /// Dispatch `fallow coverage upload-inventory`.
-pub fn run(args: &UploadInventoryArgs, root: &Path) -> ExitCode {
-    match run_inner(args, root) {
+pub fn run(args: &UploadInventoryArgs, root: &Path, allow_remote_extends: bool) -> ExitCode {
+    match run_inner(args, root, allow_remote_extends) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => err.into_exit(args.ignore_upload_errors),
     }
@@ -207,8 +207,12 @@ impl UploadError {
     }
 }
 
-fn run_inner(args: &UploadInventoryArgs, root: &Path) -> Result<(), UploadError> {
-    let prepared = prepare_inventory_upload(args, root)?;
+fn run_inner(
+    args: &UploadInventoryArgs,
+    root: &Path,
+    allow_remote_extends: bool,
+) -> Result<(), UploadError> {
+    let prepared = prepare_inventory_upload(args, root, allow_remote_extends)?;
     let payload = InventoryRequest {
         version: prepared.version,
         git_sha: &prepared.git_sha,
@@ -256,13 +260,14 @@ struct PreparedInventory {
 fn prepare_inventory_upload(
     args: &UploadInventoryArgs,
     root: &Path,
+    allow_remote_extends: bool,
 ) -> Result<PreparedInventory, UploadError> {
     let project_id = resolve_project_id(args, root)?;
     let git_sha = resolve_git_sha(args, root)?;
     let path_prefix = normalize_path_prefix(args.path_prefix.as_deref())?;
     enforce_clean_worktree(args, root)?;
 
-    let config = load_resolved_config(root)?;
+    let config = load_resolved_config_with_options(root, allow_remote_extends)?;
     let session = AnalysisSession::from_resolved_config(config.clone());
     let exclude_matcher = compile_exclude_matcher(&args.exclude_paths)?;
     let functions = collect_inventory(&session, &exclude_matcher, path_prefix.as_deref());
@@ -345,8 +350,17 @@ fn dirty_worktree(root: &Path) -> bool {
     upload_common::dirty_worktree(root)
 }
 
+#[cfg(test)]
 fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, UploadError> {
     upload_common::load_resolved_config(root).map_err(UploadError::Validation)
+}
+
+fn load_resolved_config_with_options(
+    root: &Path,
+    allow_remote_extends: bool,
+) -> Result<ResolvedConfig, UploadError> {
+    upload_common::load_resolved_config_with_options(root, allow_remote_extends)
+        .map_err(UploadError::Validation)
 }
 
 fn compile_exclude_matcher(patterns: &[String]) -> Result<GlobSet, UploadError> {
@@ -1880,7 +1894,7 @@ mod tests {
     fn run_dry_run_emits_inventory_and_exits_zero() {
         let project = project_with_one_function();
         // Explicit project_id + git_sha keep this env- and git-free.
-        let code = run(&dry_run_args(), project.path());
+        let code = run(&dry_run_args(), project.path(), false);
         assert_eq!(code, ExitCode::SUCCESS);
     }
 
@@ -1897,7 +1911,7 @@ mod tests {
             "export declare const x: number;\n",
         )
         .unwrap();
-        let code = run(&dry_run_args(), root);
+        let code = run(&dry_run_args(), root, false);
         assert_eq!(code, ExitCode::from(EXIT_VALIDATION));
     }
 

@@ -11,6 +11,7 @@ use super::api_runtime::{
     changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
     programmatic_error_body, run_api_blocking,
 };
+use super::push_remote_extends;
 
 /// Run `feature_flags` through the typed API.
 pub async fn run_feature_flags(
@@ -55,6 +56,7 @@ pub fn build_feature_flags_args(params: &FeatureFlagsParams) -> Vec<String> {
     if let Some(ref config) = params.config {
         args.extend(["--config".to_string(), config.clone()]);
     }
+    push_remote_extends(&mut args, params.allow_remote_extends);
     if params.production == Some(true) {
         args.push("--production".to_string());
     }
@@ -79,6 +81,7 @@ fn feature_flags_options_from_params(params: &FeatureFlagsParams) -> FeatureFlag
         analysis: AnalysisOptions {
             root: non_empty_path(params.root.as_deref()),
             config_path: non_empty_path(params.config.as_deref()),
+            allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
             no_cache: params.no_cache == Some(true),
             threads: params.threads,
             diff_file: env_diff_file(),

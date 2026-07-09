@@ -36,6 +36,7 @@ fn analyze_project_root_for_test(
     analyze_project_root(&mut ProjectRootAnalysisInput {
         project_root,
         config_path,
+        allow_remote_extends: false,
         duplication_options,
         production_override,
         inline_complexity_enabled,
@@ -1739,6 +1740,7 @@ fn run_blocking_analysis_only_stamps_applied_changed_since_scope() {
     let output = run_blocking_analysis(&BlockingAnalysisInput {
         project_roots: vec![root.to_path_buf()],
         config_path: None,
+        allow_remote_extends: false,
         duplication_options: Some(LspDuplicationOptions {
             min_tokens: Some(1),
             min_lines: Some(1),
@@ -1779,6 +1781,7 @@ fn run_blocking_analysis_only_stamps_applied_changed_since_scope() {
     let invalid = run_blocking_analysis(&BlockingAnalysisInput {
         project_roots: vec![root.to_path_buf()],
         config_path: None,
+        allow_remote_extends: false,
         duplication_options: None,
         production_override: None,
         inline_complexity_enabled: false,

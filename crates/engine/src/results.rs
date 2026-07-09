@@ -195,6 +195,7 @@ mod tests {
                 production_override: None,
                 quiet: true,
                 analysis: ProductionAnalysis::Health,
+                allow_remote_extends: false,
             },
         )
         .expect("project config loads");

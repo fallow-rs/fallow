@@ -36,6 +36,9 @@ const getConfiguredValue = <T>(key: string): T | undefined => {
 
 export const getLspPath = (): string => getConfig().get<string>("lspPath", "");
 
+export const getAllowRemoteExtends = (): boolean =>
+  getConfig().get<boolean>("allowRemoteExtends", false);
+
 const getConfigPath = (resource?: vscode.Uri): string =>
   getConfig(resource).get<string>("configPath", "").trim();
 

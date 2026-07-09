@@ -1632,6 +1632,7 @@ Available on all commands:
 |---|---|---|---|
 | `-r, --root` | `string` | - | Project root directory |
 | `-c, --config` | `string` | - | Config file path |
+| `--allow-remote-extends` | `bool` | `false` | Allow trusted config files to extend HTTPS URLs |
 | `-f, --format` | `human\|json\|sarif\|compact\|markdown\|codeclimate\|pr-comment-github\|pr-comment-gitlab\|review-github\|review-gitlab\|badge\|github-annotations\|github-summary` | `human` | Output format (alias: --output) |
 | `-q, --quiet` | `bool` | `false` | Suppress progress output |
 | `--no-cache` | `bool` | `false` | Disable incremental caching |

@@ -100,6 +100,7 @@ pub struct SecurityOptions<'a> {
     pub threads: usize,
     /// Suppress progress output.
     pub quiet: bool,
+    pub allow_remote_extends: bool,
     /// Exit with code 1 when candidates are found.
     pub fail_on_issues: bool,
     /// Write SARIF to a sidecar file in addition to the primary output.
@@ -236,6 +237,7 @@ fn build_security_command_output(
             threads: opts.threads,
             production_override: None,
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
         ProductionAnalysis::DeadCode,
     )?;
@@ -873,6 +875,7 @@ fn compute_base_security_snapshot(
             threads: opts.threads,
             production_override: None,
             quiet: true,
+            allow_remote_extends: opts.allow_remote_extends,
         },
         ProductionAnalysis::DeadCode,
     )?;
@@ -907,6 +910,7 @@ fn base_snapshot_security_options<'a>(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: true,
+        allow_remote_extends: opts.allow_remote_extends,
         fail_on_issues: false,
         sarif_file: None,
         summary: false,
@@ -1203,6 +1207,7 @@ fn security_runtime_health_options<'a>(
         sort: fallow_engine::health::HealthSort::Cyclomatic,
         production: true,
         production_override: Some(true),
+        allow_remote_extends: opts.allow_remote_extends,
         changed_since: opts.changed_since,
         diff_index: None,
         use_shared_diff_index: opts.use_shared_diff_index,
@@ -4139,6 +4144,7 @@ mod tests {
             no_cache: true,
             threads: 1,
             quiet: true,
+            allow_remote_extends: false,
             fail_on_issues,
             sarif_file: None,
             summary: false,
@@ -4167,6 +4173,7 @@ mod tests {
                 threads: 1,
                 production_override: None,
                 quiet: true,
+                allow_remote_extends: false,
             },
             ProductionAnalysis::DeadCode,
         )

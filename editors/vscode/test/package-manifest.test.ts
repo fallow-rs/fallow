@@ -140,6 +140,17 @@ describe("package.json binary download settings", () => {
   });
 });
 
+describe("package.json remote config trust setting", () => {
+  it("keeps remote config trust machine-controlled", () => {
+    const setting =
+      pkg.contributes.configuration.properties["fallow.allowRemoteExtends"];
+
+    expect(setting?.default).toBe(false);
+    expect(setting?.scope).toBe("machine");
+    expect(setting?.markdownDescription).toContain("trusted");
+  });
+});
+
 describe("package.json workspace picker contributions", () => {
   it("contributes the select and clear workspace commands", () => {
     expect(command("fallow.selectWorkspace")).toMatchObject({

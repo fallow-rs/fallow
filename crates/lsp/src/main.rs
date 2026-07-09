@@ -104,6 +104,8 @@ struct FallowLspServer {
     /// Optional explicit config path from `initializationOptions.configPath`.
     /// Mirrors the CLI's `--config` flag for editor clients.
     config_path: Arc<RwLock<Option<PathBuf>>>,
+    /// Per-client opt-in for trusted HTTPS config inheritance.
+    allow_remote_extends: Arc<RwLock<bool>>,
     /// Optional duplication overrides from `initializationOptions.duplication`.
     /// VS Code sends these so live diagnostics match the sidebar CLI run.
     duplication_options: Arc<RwLock<Option<LspDuplicationOptions>>>,
@@ -201,6 +203,7 @@ impl LanguageServer for FallowLspServer {
 
             *self.config_path.write().await =
                 initialization_config_path(opts, canonical_root.as_deref());
+            *self.allow_remote_extends.write().await = parsed_options.allow_remote_extends;
             *self.duplication_options.write().await = parsed_options.duplication;
             *self.production_override.write().await = parsed_options.production;
             *self.inline_complexity_enabled.write().await = parsed_options
@@ -437,6 +440,7 @@ impl FallowLspServer {
             disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
             changed_since: Arc::new(RwLock::new(None)),
             config_path: Arc::new(RwLock::new(None)),
+            allow_remote_extends: Arc::new(RwLock::new(false)),
             duplication_options: Arc::new(RwLock::new(None)),
             production_override: Arc::new(RwLock::new(None)),
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
@@ -564,6 +568,7 @@ impl FallowLspServer {
 
         let changed_since = self.changed_since.read().await.clone();
         let config_path = self.config_path.read().await.clone();
+        let allow_remote_extends = *self.allow_remote_extends.read().await;
         let duplication_options = self.duplication_options.read().await.clone();
         let production_override = *self.production_override.read().await;
         let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
@@ -576,6 +581,7 @@ impl FallowLspServer {
             let input = BlockingAnalysisInput {
                 project_roots,
                 config_path,
+                allow_remote_extends,
                 duplication_options,
                 production_override,
                 inline_complexity_enabled,

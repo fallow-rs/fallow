@@ -68,6 +68,7 @@ pub struct RunContext<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub explain: bool,
+    pub allow_remote_extends: bool,
 }
 
 /// Arguments for `fallow coverage setup`.
@@ -334,10 +335,12 @@ pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
     match subcommand {
         CoverageSubcommand::Setup(args) => run_setup(args, ctx.root),
         CoverageSubcommand::Analyze(args) => analyze::run(&args, ctx),
-        CoverageSubcommand::UploadInventory(args) => upload_inventory::run(&args, ctx.root),
+        CoverageSubcommand::UploadInventory(args) => {
+            upload_inventory::run(&args, ctx.root, ctx.allow_remote_extends)
+        }
         CoverageSubcommand::UploadSourceMaps(args) => upload_source_maps::run(&args, ctx.root),
         CoverageSubcommand::UploadStaticFindings(args) => {
-            upload_static_findings::run(&args, ctx.root)
+            upload_static_findings::run(&args, ctx.root, ctx.allow_remote_extends)
         }
     }
 }

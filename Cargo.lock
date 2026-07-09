@@ -1248,6 +1248,7 @@ version = "3.3.0"
 dependencies = [
  "fallow-api",
  "fallow-types",
+ "libc",
  "regex",
  "rmcp",
  "rquickjs",
@@ -1257,6 +1258,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

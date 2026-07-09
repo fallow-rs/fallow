@@ -26,7 +26,7 @@ discover these without parsing this page.
 | `FALLOW_CACHE_DIR` | Directory for fallow's persistent analysis cache. Relative paths resolve from the project root and override the `cache.dir` config field. | `.fallow/cache` | `FALLOW_CACHE_DIR=.cache/fallow` |
 | `FALLOW_CACHE_MAX_SIZE` | Extraction cache size cap in megabytes. Wins over the `cache.maxSizeMb` config field. | `256` | `FALLOW_CACHE_MAX_SIZE=512` |
 | `FALLOW_MAX_FILE_SIZE` | Per-file size ceiling in megabytes for source discovery; `0` means no limit. The `--max-file-size` flag overrides it. | `5` | `FALLOW_MAX_FILE_SIZE=10` |
-| `FALLOW_EXTENDS_TIMEOUT_SECS` | Timeout in seconds for fetching `https://` configs referenced via the `extends` field. | `5` | `FALLOW_EXTENDS_TIMEOUT_SECS=15` |
+| `FALLOW_EXTENDS_TIMEOUT_SECS` | Timeout in seconds after a host explicitly permits `https://` config inheritance. This does not enable remote extends; use `--allow-remote-extends` or the typed library option. | `5` | `FALLOW_EXTENDS_TIMEOUT_SECS=15` |
 
 ## Production mode
 

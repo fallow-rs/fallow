@@ -19,6 +19,7 @@ use crate::protocol::config_load_error_detail;
 pub struct ProjectRootAnalysisInput<'a> {
     pub project_root: &'a Path,
     pub config_path: Option<&'a Path>,
+    pub allow_remote_extends: bool,
     pub duplication_options: Option<&'a LspDuplicationOptions>,
     pub production_override: Option<bool>,
     pub inline_complexity_enabled: bool,
@@ -31,6 +32,7 @@ pub struct ProjectRootAnalysisInput<'a> {
 pub struct BlockingAnalysisInput {
     pub project_roots: Vec<PathBuf>,
     pub config_path: Option<PathBuf>,
+    pub allow_remote_extends: bool,
     pub duplication_options: Option<LspDuplicationOptions>,
     pub production_override: Option<bool>,
     pub inline_complexity_enabled: bool,
@@ -68,8 +70,13 @@ impl LspAnalysisSnapshot {
 }
 
 pub fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
-    let session =
-        match AnalysisSession::load_with_config(input.project_root, input.config_path, |config| {
+    let session = match AnalysisSession::load_with_config_options(
+        input.project_root,
+        input.config_path,
+        fallow_config::ConfigLoadOptions {
+            allow_remote_extends: input.allow_remote_extends,
+        },
+        |config| {
             // Override the project config's production resolution when the
             // editor forwarded an explicit `fallow.production` (on/off).
             // Mirrors the CLI-driven sidebar receiving
@@ -78,13 +85,14 @@ pub fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
             if let Some(production) = input.production_override {
                 config.production = production;
             }
-        }) {
-            Ok(session) => session,
-            Err(e) => {
-                analyze_project_root_config_fallback(input, &e);
-                return;
-            }
-        };
+        },
+    ) {
+        Ok(session) => session,
+        Err(e) => {
+            analyze_project_root_config_fallback(input, &e);
+            return;
+        }
+    };
 
     let message = (
         MessageType::INFO,
@@ -163,6 +171,7 @@ pub fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisO
         analyze_project_root(&mut ProjectRootAnalysisInput {
             project_root,
             config_path: input.config_path.as_deref(),
+            allow_remote_extends: input.allow_remote_extends,
             duplication_options: input.duplication_options.as_ref(),
             production_override: input.production_override,
             inline_complexity_enabled: input.inline_complexity_enabled,

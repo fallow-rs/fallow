@@ -32,6 +32,10 @@ pub struct AnalyzeParams {
 
     pub config: Option<String>,
 
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
     pub production: Option<bool>,
 
     pub workspace: Option<String>,
@@ -69,6 +73,10 @@ pub struct CombinedParams {
     pub root: Option<String>,
 
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     pub production: Option<bool>,
 
@@ -136,6 +144,10 @@ pub struct CheckChangedParams {
 
     pub config: Option<String>,
 
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
     pub production: Option<bool>,
 
     pub workspace: Option<String>,
@@ -168,6 +180,10 @@ pub struct SecurityCandidatesParams {
     pub root: Option<String>,
 
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     /// Scope candidates to selected workspace roots. Mutually exclusive with
     /// `changed_workspaces`.
@@ -203,6 +219,10 @@ pub struct FindDupesParams {
     pub root: Option<String>,
 
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     pub workspace: Option<String>,
 
@@ -250,6 +270,10 @@ pub struct FixParams {
 
     pub config: Option<String>,
 
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
     pub production: Option<bool>,
 
     pub workspace: Option<String>,
@@ -266,6 +290,10 @@ pub struct ProjectInfoParams {
     pub root: Option<String>,
 
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     /// Include entry-point patterns in the response.
     pub entry_points: Option<bool>,
@@ -297,6 +325,10 @@ pub struct InspectTargetParams {
 
     pub config: Option<String>,
 
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
     pub production: Option<bool>,
 
     pub workspace: Option<String>,
@@ -322,6 +354,10 @@ pub struct GuardParams {
 
     /// Project root. Defaults to the MCP server's working directory.
     pub root: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -351,6 +387,10 @@ pub struct TraceExportParams {
 
     pub config: Option<String>,
 
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
     pub production: Option<bool>,
 
     pub workspace: Option<String>,
@@ -368,6 +408,10 @@ pub struct TraceFileParams {
     pub root: Option<String>,
 
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     pub production: Option<bool>,
 
@@ -387,6 +431,10 @@ pub struct ImpactClosureParams {
 
     pub config: Option<String>,
 
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
     pub production: Option<bool>,
 
     pub workspace: Option<String>,
@@ -404,6 +452,10 @@ pub struct TraceDependencyParams {
     pub root: Option<String>,
 
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     pub production: Option<bool>,
 
@@ -428,6 +480,10 @@ pub struct TraceCloneParams {
     pub root: Option<String>,
 
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     pub workspace: Option<String>,
 
@@ -463,6 +519,10 @@ pub struct HealthParams {
 
     /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     /// Maximum cyclomatic complexity threshold. Functions exceeding this are reported.
     pub max_cyclomatic: Option<u16>,
@@ -662,6 +722,10 @@ pub struct CheckRuntimeCoverageParams {
     /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
@@ -719,6 +783,10 @@ pub struct AuditParams {
 
     /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
     /// base is the git merge-base against the branch's upstream or the remote
@@ -851,6 +919,10 @@ pub struct ListBoundariesParams {
     /// Path to a fallow config file.
     pub config: Option<String>,
 
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
     /// Disable the incremental parse cache.
     pub no_cache: Option<bool>,
 
@@ -920,6 +992,10 @@ pub struct FeatureFlagsParams {
     /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
@@ -947,6 +1023,10 @@ pub struct DecisionSurfaceParams {
 
     /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     /// Git ref to compare against (e.g., "main", "HEAD~5"). When unset, the
     /// base is the git merge-base against the branch's upstream or the remote
@@ -985,6 +1065,10 @@ pub struct GetTokenBlastRadiusParams {
 
     /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
+
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
 
     /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,

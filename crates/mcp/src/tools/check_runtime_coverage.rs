@@ -3,7 +3,9 @@ use crate::params::{CheckRuntimeCoverageParams, GetTokenBlastRadiusParams};
 use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
-use super::{push_global, push_scope, run_tool, run_tool_with_top_level_warnings};
+use super::{
+    push_global, push_remote_extends, push_scope, run_tool, run_tool_with_top_level_warnings,
+};
 
 /// Run the runtime coverage health merge. This stays CLI-backed while the
 /// paid sidecar/license integration remains command-owned.
@@ -74,6 +76,7 @@ pub fn build_check_runtime_coverage_args(params: &CheckRuntimeCoverageParams) ->
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_scope(&mut args, params.production, params.workspace.as_deref());
 
     if let Some(min_invocations_hot) = params.min_invocations_hot {
@@ -149,6 +152,7 @@ pub fn build_get_token_blast_radius_args(params: &GetTokenBlastRadiusParams) -> 
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
 
     args
 }

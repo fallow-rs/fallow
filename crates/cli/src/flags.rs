@@ -17,6 +17,7 @@ pub struct FlagsOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
     pub production: bool,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
@@ -77,6 +78,7 @@ fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode
             threads: opts.threads,
             production: opts.production,
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
     )
 }
@@ -704,6 +706,7 @@ mod tests {
             no_cache: true,
             threads: 1,
             quiet: true,
+            allow_remote_extends: false,
             production: false,
             workspace: None,
             changed_workspaces: None,

@@ -108,9 +108,10 @@ dhat = "0.3"
 insta = { version = "1", features = ["yaml"] }
 proptest = "1"
 tempfile = "3"
+libc = "0.2"
 
-# Windows-only Win32 bindings (process query for audit orphan sweep, console control handler for signals)
-windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_System_Console"] }
+# Windows-only Win32 bindings (process query, job objects, and console signal handling)
+windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_Diagnostics_ToolHelp", "Win32_Foundation", "Win32_Security", "Win32_System_Console"] }
 
 # Signal handling (Unix-only; Windows uses windows-sys::SetConsoleCtrlHandler directly)
 signal-hook = { version = "0.4", default-features = false, features = ["iterator"] }

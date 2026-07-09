@@ -661,6 +661,7 @@ export interface LspInitializationOptions {
   readonly issueTypes: Record<string, boolean>;
   readonly changedSince: string;
   readonly configPath: string;
+  readonly allowRemoteExtends: boolean;
   readonly production: boolean | undefined;
   readonly duplication: LspDuplicationOptions;
   readonly health?: LspHealthInitializationOptions;

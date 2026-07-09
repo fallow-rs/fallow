@@ -3,7 +3,9 @@ use crate::params::{ImpactAllParams, ImpactClosureParams, ImpactParams};
 use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
-use super::{push_global, push_scope, push_str_flag, run_tool, validation_error_body};
+use super::{
+    push_global, push_remote_extends, push_scope, push_str_flag, run_tool, validation_error_body,
+};
 
 /// Run the read-only `impact` value report through the CLI-backed local store
 /// reader. It is not an analysis tool, and the store lifecycle remains CLI-owned.
@@ -101,6 +103,7 @@ pub fn build_impact_closure_args(params: &ImpactClosureParams) -> Result<Vec<Str
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_scope(&mut args, params.production, params.workspace.as_deref());
     args.extend(["--impact-closure".to_string(), params.path.clone()]);
 

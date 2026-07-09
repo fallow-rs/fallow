@@ -188,6 +188,7 @@ pub const COMMON_ANALYSIS_OPTION_FLAGS: &[&str] = &[
     "workspace",
     "changed-workspaces",
     "explain",
+    "allow-remote-extends",
 ];
 
 /// Structured error surface for the programmatic API.
@@ -244,6 +245,8 @@ impl std::error::Error for ProgrammaticError {}
 pub struct AnalysisOptions {
     pub root: Option<PathBuf>,
     pub config_path: Option<PathBuf>,
+    /// Permit `https://` config inheritance for this analysis call.
+    pub allow_remote_extends: bool,
     pub no_cache: bool,
     pub threads: Option<usize>,
     pub diff_file: Option<PathBuf>,

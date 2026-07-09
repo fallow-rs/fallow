@@ -100,14 +100,19 @@ fn effective_production_mode(
 fn load_context_production_config(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<ProductionConfig> {
+    let load_options = fallow_config::ConfigLoadOptions {
+        allow_remote_extends: resolved.allow_remote_extends(),
+    };
     let loaded = if let Some(path) = resolved.config_path().as_deref() {
-        FallowConfig::load(path).map(Some).map_err(|err| {
-            ProgrammaticError::new(format!("failed to load config: {err:#}"), 2)
-                .with_code("FALLOW_CONFIG_LOAD_FAILED")
-                .with_context("analysis.configPath")
-        })?
+        FallowConfig::load_with_options(path, load_options)
+            .map(Some)
+            .map_err(|err| {
+                ProgrammaticError::new(format!("failed to load config: {err:#}"), 2)
+                    .with_code("FALLOW_CONFIG_LOAD_FAILED")
+                    .with_context("analysis.configPath")
+            })?
     } else {
-        FallowConfig::find_and_load(resolved.root())
+        FallowConfig::find_and_load_with_options(resolved.root(), load_options)
             .map(|found| found.map(|(config, _)| config))
             .map_err(|err| {
                 ProgrammaticError::new(format!("failed to load config: {err}"), 2)
@@ -333,6 +338,7 @@ fn derive_programmatic_health_execution_options<'a>(
         sort: crate::complexity_sort_to_engine(run.sort),
         production: resolved.production_override().unwrap_or(false),
         production_override: resolved.production_override(),
+        allow_remote_extends: resolved.allow_remote_extends(),
         changed_since: resolved.changed_since(),
         diff_index: resolved.diff_index(),
         use_shared_diff_index: false,

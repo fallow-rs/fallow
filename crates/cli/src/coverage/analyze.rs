@@ -168,6 +168,7 @@ fn local_health_options<'a>(
         sort: fallow_engine::health::HealthSort::Cyclomatic,
         production: args.production,
         production_override: Some(args.production),
+        allow_remote_extends: ctx.allow_remote_extends,
         changed_since: None,
         diff_index: None,
         use_shared_diff_index: true,
@@ -380,6 +381,7 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
             threads: ctx.threads,
             production_override: Some(production),
             quiet: ctx.quiet,
+            allow_remote_extends: ctx.allow_remote_extends,
         },
         fallow_config::ProductionAnalysis::Health,
     )?;

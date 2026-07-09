@@ -154,17 +154,21 @@ fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> 
 pub(super) fn config_file_fingerprint(
     opts: &AuditOptions<'_>,
 ) -> Result<AuditConfigFingerprint, ExitCode> {
+    let load_options = fallow_config::ConfigLoadOptions {
+        allow_remote_extends: opts.allow_remote_extends,
+    };
     let loaded = if let Some(path) = opts.config_path {
-        let config = fallow_config::FallowConfig::load(path).map_err(|e| {
-            emit_error(
-                &format!("failed to load config '{}': {e}", path.display()),
-                2,
-                opts.output,
-            )
-        })?;
+        let config =
+            fallow_config::FallowConfig::load_with_options(path, load_options).map_err(|e| {
+                emit_error(
+                    &format!("failed to load config '{}': {e}", path.display()),
+                    2,
+                    opts.output,
+                )
+            })?;
         Some((config, path.clone()))
     } else {
-        fallow_config::FallowConfig::find_and_load(opts.root)
+        fallow_config::FallowConfig::find_and_load_with_options(opts.root, load_options)
             .map_err(|e| emit_error(&e, 2, opts.output))?
     };
 

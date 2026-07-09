@@ -3,7 +3,7 @@ use crate::params::FixParams;
 use rmcp::ErrorData as McpError;
 use rmcp::model::CallToolResult;
 
-use super::{push_global, push_scope, run_tool};
+use super::{push_global, push_remote_extends, push_scope, run_tool};
 
 /// Run the read-only fix preview. It is CLI-backed because fix planning shares
 /// the same command-owned mutation safeguards as fix apply.
@@ -37,6 +37,7 @@ pub fn build_fix_preview_args(params: &FixParams) -> Vec<String> {
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_scope(&mut args, params.production, params.workspace.as_deref());
     args
 }
@@ -60,6 +61,7 @@ pub fn build_fix_apply_args(params: &FixParams) -> Vec<String> {
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_scope(&mut args, params.production, params.workspace.as_deref());
     args
 }

@@ -17,6 +17,7 @@ pub fn run(ctx: &RulePackContext<'_>) -> ExitCode {
             threads: ctx.threads.unwrap_or_else(default_threads),
             production: false,
             quiet: ctx.quiet,
+            allow_remote_extends: ctx.allow_remote_extends,
         },
     ) {
         Ok(config) => config,

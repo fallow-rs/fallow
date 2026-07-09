@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use fallow_types::path_util::is_absolute_path_any_platform;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::FallowConfig;
 
@@ -27,6 +27,13 @@ const HTTP_PREFIX: &str = "http://";
 
 /// Default timeout for fetching remote configs via URL extends.
 const DEFAULT_URL_TIMEOUT_SECS: u64 = 5;
+
+/// Host-controlled trust policy for loading a fallow config.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ConfigLoadOptions {
+    /// Permit `https://` entries in the config inheritance graph.
+    pub allow_remote_extends: bool,
+}
 
 /// Detect config format from file extension.
 pub(super) enum ConfigFormat {
@@ -288,26 +295,31 @@ fn resolve_npm_package(
     ))
 }
 
-/// Normalize a URL for deduplication.
+/// Normalize a URL for config resource identity.
 fn normalize_url_for_dedup(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.to_string();
     };
     let scheme = scheme.to_ascii_lowercase();
 
-    let (authority, path) = rest.split_once('/').map_or((rest, ""), |(a, p)| (a, p));
+    let rest = rest.split_once('#').map_or(rest, |(value, _)| value);
+    let authority_end = rest.find(['/', '?']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(authority_end);
     let authority = authority.to_ascii_lowercase();
-
     let authority = authority.strip_suffix(":443").unwrap_or(&authority);
 
-    let path = path.split_once('#').map_or(path, |(p, _)| p);
-    let path = path.split_once('?').map_or(path, |(p, _)| p);
-    let path = path.strip_suffix('/').unwrap_or(path);
+    let tail = if tail == "/" {
+        ""
+    } else if tail.ends_with('/') && !tail.contains('?') {
+        tail.strip_suffix('/').unwrap_or(tail)
+    } else {
+        tail
+    };
 
-    if path.is_empty() {
+    if tail.is_empty() {
         format!("{scheme}://{authority}")
     } else {
-        format!("{scheme}://{authority}/{path}")
+        format!("{scheme}://{authority}{tail}")
     }
 }
 
@@ -365,6 +377,251 @@ fn fetch_url_config(url: &str, source: &str) -> Result<serde_json::Value, miette
     })
 }
 
+trait RemoteConfigFetcher {
+    fn fetch(&mut self, url: &str, source: &str) -> Result<serde_json::Value, miette::Report>;
+}
+
+struct NetworkRemoteConfigFetcher;
+
+impl RemoteConfigFetcher for NetworkRemoteConfigFetcher {
+    fn fetch(&mut self, url: &str, source: &str) -> Result<serde_json::Value, miette::Report> {
+        fetch_url_config(url, source)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ConfigResourceId {
+    Local(PathBuf),
+    Remote(String),
+}
+
+struct ExtendsResolver<'a, Fetcher> {
+    options: ConfigLoadOptions,
+    active: FxHashSet<ConfigResourceId>,
+    resolved: FxHashMap<ConfigResourceId, serde_json::Value>,
+    fetcher: &'a mut Fetcher,
+}
+
+#[derive(Clone, Copy)]
+struct LocalExtendsEntry<'a> {
+    path: &'a Path,
+    config_dir: &'a Path,
+    entry: &'a str,
+    sealed: bool,
+    sealed_dir_canonical: Option<&'a Path>,
+    depth: usize,
+}
+
+impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
+    fn new(options: ConfigLoadOptions, fetcher: &'a mut Fetcher) -> Self {
+        Self {
+            options,
+            active: FxHashSet::default(),
+            resolved: FxHashMap::default(),
+            fetcher,
+        }
+    }
+
+    fn resolve_local(
+        &mut self,
+        path: &Path,
+        depth: usize,
+    ) -> Result<serde_json::Value, miette::Report> {
+        if depth >= MAX_EXTENDS_DEPTH {
+            return Err(miette::miette!(
+                "Config extends chain too deep (>={MAX_EXTENDS_DEPTH} levels) at {}",
+                path.display()
+            ));
+        }
+        let canonical = dunce::canonicalize(path).map_err(|e| {
+            miette::miette!(
+                "Config file not found or unresolvable: {}: {}",
+                path.display(),
+                e
+            )
+        })?;
+        let identity = ConfigResourceId::Local(canonical.clone());
+        if let Some(value) = self.resolved.get(&identity) {
+            return Ok(value.clone());
+        }
+        if !self.active.insert(identity.clone()) {
+            return Err(miette::miette!(
+                "Circular extends detected: {} is already active in the extends chain",
+                path.display()
+            ));
+        }
+
+        let result = self.resolve_local_uncached(&canonical, depth);
+        self.active.remove(&identity);
+        if let Ok(value) = &result {
+            self.resolved.insert(identity, value.clone());
+        }
+        result
+    }
+
+    fn resolve_local_uncached(
+        &mut self,
+        path: &Path,
+        depth: usize,
+    ) -> Result<serde_json::Value, miette::Report> {
+        let mut value = parse_config_to_value(path)?;
+        let extends = extract_extends(&mut value);
+        if extends.is_empty() {
+            return Ok(value);
+        }
+
+        let config_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let sealed = value
+            .get("sealed")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let sealed_dir_canonical = sealed_config_dir(config_dir, sealed)?;
+        let mut merged = serde_json::Value::Object(serde_json::Map::new());
+        for entry in &extends {
+            let base = self.resolve_local_entry(LocalExtendsEntry {
+                path,
+                config_dir,
+                entry,
+                sealed,
+                sealed_dir_canonical: sealed_dir_canonical.as_deref(),
+                depth,
+            })?;
+            deep_merge_json(&mut merged, base);
+        }
+        deep_merge_json(&mut merged, value);
+        Ok(merged)
+    }
+
+    fn resolve_local_entry(
+        &mut self,
+        input: LocalExtendsEntry<'_>,
+    ) -> Result<serde_json::Value, miette::Report> {
+        let LocalExtendsEntry {
+            path,
+            config_dir,
+            entry,
+            sealed,
+            sealed_dir_canonical,
+            depth,
+        } = input;
+        if entry.starts_with(HTTPS_PREFIX) {
+            reject_sealed_remote_extends(path, entry, sealed, "URL")?;
+            return self.resolve_remote(entry, depth + 1);
+        }
+        if entry.starts_with(HTTP_PREFIX) {
+            return Err(miette::miette!(
+                "URL extends must use https://, got http:// URL '{}' (in {}). \
+                 Change the URL to use https:// instead",
+                entry,
+                path.display()
+            ));
+        }
+        if let Some(npm_specifier) = entry.strip_prefix(NPM_PREFIX) {
+            reject_sealed_remote_extends(path, entry, sealed, "npm")?;
+            let npm_path = resolve_npm_package(config_dir, npm_specifier, path)?;
+            return self.resolve_local(&npm_path, depth + 1);
+        }
+        if is_absolute_path_any_platform(Path::new(entry)) {
+            return Err(miette::miette!(
+                "extends paths must be relative, got absolute path: {} (in {})",
+                entry,
+                path.display()
+            ));
+        }
+        let resolved_path = config_dir.join(entry);
+        if !resolved_path.exists() {
+            return Err(miette::miette!(
+                "Extended config file not found: {} (referenced from {})",
+                resolved_path.display(),
+                path.display()
+            ));
+        }
+        validate_sealed_relative_extends(path, entry, &resolved_path, sealed_dir_canonical)?;
+        self.resolve_local(&resolved_path, depth + 1)
+    }
+
+    fn resolve_remote(
+        &mut self,
+        url: &str,
+        depth: usize,
+    ) -> Result<serde_json::Value, miette::Report> {
+        if depth >= MAX_EXTENDS_DEPTH {
+            return Err(miette::miette!(
+                "Config extends chain too deep (>={MAX_EXTENDS_DEPTH} levels) at {url}"
+            ));
+        }
+        if !self.options.allow_remote_extends {
+            return Err(miette::miette!(
+                "Remote config extends '{url}' is disabled by default. \
+                 CLI users can pass --allow-remote-extends. Library callers can use \
+                 ConfigLoadOptions {{ allow_remote_extends: true }}"
+            ));
+        }
+
+        let identity = ConfigResourceId::Remote(normalize_url_for_dedup(url));
+        if let Some(value) = self.resolved.get(&identity) {
+            return Ok(value.clone());
+        }
+        if !self.active.insert(identity.clone()) {
+            return Err(miette::miette!(
+                "Circular extends detected: {url} is already active in the extends chain"
+            ));
+        }
+
+        let result = self.resolve_remote_uncached(url, depth);
+        self.active.remove(&identity);
+        if let Ok(value) = &result {
+            self.resolved.insert(identity, value.clone());
+        }
+        result
+    }
+
+    fn resolve_remote_uncached(
+        &mut self,
+        url: &str,
+        depth: usize,
+    ) -> Result<serde_json::Value, miette::Report> {
+        let mut value = self.fetcher.fetch(url, url)?;
+        let extends = extract_extends(&mut value);
+        if extends.is_empty() {
+            return Ok(value);
+        }
+
+        let mut merged = serde_json::Value::Object(serde_json::Map::new());
+        for entry in &extends {
+            let base = if entry.starts_with(HTTPS_PREFIX) {
+                self.resolve_remote(entry, depth + 1)?
+            } else if entry.starts_with(HTTP_PREFIX) {
+                return Err(miette::miette!(
+                    "URL extends must use https://, got http:// URL '{}' (in remote config {}). \
+                     Change the URL to use https:// instead",
+                    entry,
+                    url
+                ));
+            } else if let Some(npm_specifier) = entry.strip_prefix(NPM_PREFIX) {
+                let cwd = std::env::current_dir().map_err(|e| {
+                    miette::miette!(
+                        "Cannot resolve npm: specifier from URL-sourced config: \
+                         failed to determine current directory: {e}"
+                    )
+                })?;
+                let path_placeholder = PathBuf::from(url);
+                let npm_path = resolve_npm_package(&cwd, npm_specifier, &path_placeholder)?;
+                self.resolve_local(&npm_path, depth + 1)?
+            } else {
+                return Err(miette::miette!(
+                    "Relative paths in 'extends' are not supported when the base config was \
+                     fetched from a URL ('{url}'). Use another https:// URL or npm: reference \
+                     instead. Got: '{entry}'"
+                ));
+            };
+            deep_merge_json(&mut merged, base);
+        }
+        deep_merge_json(&mut merged, value);
+        Ok(merged)
+    }
+}
+
 /// Extract the `extends` array from a parsed JSON config value.
 fn extract_extends(value: &mut serde_json::Value) -> Vec<String> {
     value
@@ -382,135 +639,20 @@ fn extract_extends(value: &mut serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Resolve extends entries from a URL-sourced config.
+#[cfg(test)]
 fn resolve_url_extends(
     url: &str,
-    visited: &mut FxHashSet<String>,
+    _visited: &mut FxHashSet<String>,
     depth: usize,
 ) -> Result<serde_json::Value, miette::Report> {
-    if depth >= MAX_EXTENDS_DEPTH {
-        return Err(miette::miette!(
-            "Config extends chain too deep (>={MAX_EXTENDS_DEPTH} levels) at {url}"
-        ));
-    }
-
-    let normalized = normalize_url_for_dedup(url);
-    if !visited.insert(normalized) {
-        return Err(miette::miette!(
-            "Circular extends detected: {url} was already visited in the extends chain"
-        ));
-    }
-
-    let mut value = fetch_url_config(url, url)?;
-    let extends = extract_extends(&mut value);
-
-    if extends.is_empty() {
-        return Ok(value);
-    }
-
-    let mut merged = serde_json::Value::Object(serde_json::Map::new());
-
-    for entry in &extends {
-        let base = if entry.starts_with(HTTPS_PREFIX) {
-            resolve_url_extends(entry, visited, depth + 1)?
-        } else if entry.starts_with(HTTP_PREFIX) {
-            return Err(miette::miette!(
-                "URL extends must use https://, got http:// URL '{}' (in remote config {}). \
-                 Change the URL to use https:// instead",
-                entry,
-                url
-            ));
-        } else if let Some(npm_specifier) = entry.strip_prefix(NPM_PREFIX) {
-            let cwd = std::env::current_dir().map_err(|e| {
-                miette::miette!(
-                    "Cannot resolve npm: specifier from URL-sourced config: \
-                     failed to determine current directory: {e}"
-                )
-            })?;
-            let path_placeholder = PathBuf::from(url);
-            let npm_path = resolve_npm_package(&cwd, npm_specifier, &path_placeholder)?;
-            resolve_extends_file(&npm_path, visited, depth + 1)?
-        } else {
-            return Err(miette::miette!(
-                "Relative paths in 'extends' are not supported when the base config was \
-                 fetched from a URL ('{url}'). Use another https:// URL or npm: reference \
-                 instead. Got: '{entry}'"
-            ));
-        };
-        deep_merge_json(&mut merged, base);
-    }
-
-    deep_merge_json(&mut merged, value);
-    Ok(merged)
-}
-
-/// Resolve extends from a local config file.
-fn resolve_extends_file(
-    path: &Path,
-    visited: &mut FxHashSet<String>,
-    depth: usize,
-) -> Result<serde_json::Value, miette::Report> {
-    if depth >= MAX_EXTENDS_DEPTH {
-        return Err(miette::miette!(
-            "Config extends chain too deep (>={MAX_EXTENDS_DEPTH} levels) at {}",
-            path.display()
-        ));
-    }
-
-    record_extends_visit(path, visited)?;
-
-    let mut value = parse_config_to_value(path)?;
-    let extends = extract_extends(&mut value);
-
-    if extends.is_empty() {
-        return Ok(value);
-    }
-
-    let config_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let sealed = value
-        .get("sealed")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    let sealed_dir_canonical = sealed_config_dir(config_dir, sealed)?;
-    let mut merged = serde_json::Value::Object(serde_json::Map::new());
-
-    for extend_path_str in &extends {
-        let base = resolve_extends_file_entry(&mut ExtendsFileEntryInput {
-            path,
-            config_dir,
-            entry: extend_path_str,
-            sealed,
-            sealed_dir_canonical: sealed_dir_canonical.as_deref(),
-            visited,
-            depth,
-        })?;
-        deep_merge_json(&mut merged, base);
-    }
-
-    deep_merge_json(&mut merged, value);
-    Ok(merged)
-}
-
-fn record_extends_visit(
-    path: &Path,
-    visited: &mut FxHashSet<String>,
-) -> Result<(), miette::Report> {
-    let canonical = dunce::canonicalize(path).map_err(|e| {
-        miette::miette!(
-            "Config file not found or unresolvable: {}: {}",
-            path.display(),
-            e
-        )
-    })?;
-
-    if visited.insert(canonical.to_string_lossy().into_owned()) {
-        Ok(())
-    } else {
-        Err(miette::miette!(
-            "Circular extends detected: {} was already visited in the extends chain",
-            path.display()
-        ))
-    }
+    let mut fetcher = NetworkRemoteConfigFetcher;
+    ExtendsResolver::new(
+        ConfigLoadOptions {
+            allow_remote_extends: true,
+        },
+        &mut fetcher,
+    )
+    .resolve_remote(url, depth)
 }
 
 fn sealed_config_dir(config_dir: &Path, sealed: bool) -> Result<Option<PathBuf>, miette::Report> {
@@ -523,46 +665,6 @@ fn sealed_config_dir(config_dir: &Path, sealed: bool) -> Result<Option<PathBuf>,
             config_dir.display()
         )
     })
-}
-
-struct ExtendsFileEntryInput<'a> {
-    path: &'a Path,
-    config_dir: &'a Path,
-    entry: &'a str,
-    sealed: bool,
-    sealed_dir_canonical: Option<&'a Path>,
-    visited: &'a mut FxHashSet<String>,
-    depth: usize,
-}
-
-fn resolve_extends_file_entry(
-    input: &mut ExtendsFileEntryInput<'_>,
-) -> Result<serde_json::Value, miette::Report> {
-    if input.entry.starts_with(HTTPS_PREFIX) {
-        reject_sealed_remote_extends(input.path, input.entry, input.sealed, "URL")?;
-        return resolve_url_extends(input.entry, input.visited, input.depth + 1);
-    }
-    if input.entry.starts_with(HTTP_PREFIX) {
-        return Err(miette::miette!(
-            "URL extends must use https://, got http:// URL '{}' (in {}). \
-             Change the URL to use https:// instead",
-            input.entry,
-            input.path.display()
-        ));
-    }
-    if let Some(npm_specifier) = input.entry.strip_prefix(NPM_PREFIX) {
-        reject_sealed_remote_extends(input.path, input.entry, input.sealed, "npm")?;
-        let npm_path = resolve_npm_package(input.config_dir, npm_specifier, input.path)?;
-        return resolve_extends_file(&npm_path, input.visited, input.depth + 1);
-    }
-    resolve_relative_extends_file(
-        input.path,
-        input.config_dir,
-        input.entry,
-        input.sealed_dir_canonical,
-        input.visited,
-        input.depth,
-    )
 }
 
 fn reject_sealed_remote_extends(
@@ -583,33 +685,6 @@ fn reject_sealed_remote_extends(
     } else {
         Ok(())
     }
-}
-
-fn resolve_relative_extends_file(
-    path: &Path,
-    config_dir: &Path,
-    entry: &str,
-    sealed_dir_canonical: Option<&Path>,
-    visited: &mut FxHashSet<String>,
-    depth: usize,
-) -> Result<serde_json::Value, miette::Report> {
-    if is_absolute_path_any_platform(Path::new(entry)) {
-        return Err(miette::miette!(
-            "extends paths must be relative, got absolute path: {} (in {})",
-            entry,
-            path.display()
-        ));
-    }
-    let p = config_dir.join(entry);
-    if !p.exists() {
-        return Err(miette::miette!(
-            "Extended config file not found: {} (referenced from {})",
-            p.display(),
-            path.display()
-        ));
-    }
-    validate_sealed_relative_extends(path, entry, &p, sealed_dir_canonical)?;
-    resolve_extends_file(&p, visited, depth + 1)
 }
 
 fn validate_sealed_relative_extends(
@@ -644,12 +719,14 @@ fn validate_sealed_relative_extends(
 /// Public entry point: resolve a config file with all its extends chain.
 ///
 /// Delegates to [`resolve_extends_file`] with a fresh visited set.
+#[cfg(test)]
 pub(super) fn resolve_extends(
     path: &Path,
-    visited: &mut FxHashSet<String>,
+    _visited: &mut FxHashSet<String>,
     depth: usize,
 ) -> Result<serde_json::Value, miette::Report> {
-    resolve_extends_file(path, visited, depth)
+    let mut fetcher = NetworkRemoteConfigFetcher;
+    ExtendsResolver::new(ConfigLoadOptions::default(), &mut fetcher).resolve_local(path, depth)
 }
 
 /// Collect every unknown key under `rules` or `overrides[].rules` in a merged
@@ -874,6 +951,15 @@ fn warn_on_coexisting_configs(chosen_path: &Path, shadowed: &[&str]) {
     );
 }
 
+fn load_with_fetcher<Fetcher: RemoteConfigFetcher>(
+    path: &Path,
+    options: ConfigLoadOptions,
+    fetcher: &mut Fetcher,
+) -> Result<FallowConfig, miette::Report> {
+    let merged = ExtendsResolver::new(options, fetcher).resolve_local(path, 0)?;
+    FallowConfig::from_merged(path, merged)
+}
+
 impl FallowConfig {
     /// Load config from a fallow config file (TOML or JSON/JSONC).
     ///
@@ -897,9 +983,28 @@ impl FallowConfig {
     /// Returns an error when the config file cannot be read, merged, or
     /// deserialized, or when any user-supplied glob pattern is rejected.
     pub fn load(path: &Path) -> Result<Self, miette::Report> {
-        let mut visited = FxHashSet::default();
-        let merged = resolve_extends(path, &mut visited, 0)?;
+        Self::load_with_options(path, ConfigLoadOptions::default())
+    }
 
+    /// Load config with a host-controlled inheritance trust policy.
+    ///
+    /// Remote `https://` extends are denied unless
+    /// [`ConfigLoadOptions::allow_remote_extends`] is explicitly enabled for
+    /// this call. Local and `npm:` extends are unaffected.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::load`], plus a trust-policy error
+    /// when a remote extends target is encountered without opt-in.
+    pub fn load_with_options(
+        path: &Path,
+        options: ConfigLoadOptions,
+    ) -> Result<Self, miette::Report> {
+        let mut fetcher = NetworkRemoteConfigFetcher;
+        load_with_fetcher(path, options, &mut fetcher)
+    }
+
+    fn from_merged(path: &Path, merged: serde_json::Value) -> Result<Self, miette::Report> {
         warn_on_unknown_rule_keys(path, &merged);
 
         let config: Self = serde_json::from_value(merged).map_err(|e| {
@@ -1100,13 +1205,26 @@ impl FallowConfig {
     ///
     /// Returns an error if a config file is found but cannot be read or parsed.
     pub fn find_and_load(start: &Path) -> Result<Option<(Self, PathBuf)>, String> {
+        Self::find_and_load_with_options(start, ConfigLoadOptions::default())
+    }
+
+    /// Find and load config with a host-controlled inheritance trust policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a config file is found but cannot be read, parsed,
+    /// or is not permitted by `options`.
+    pub fn find_and_load_with_options(
+        start: &Path,
+        options: ConfigLoadOptions,
+    ) -> Result<Option<(Self, PathBuf)>, String> {
         let mut dir = start;
         loop {
             for (idx, name) in CONFIG_NAMES.iter().enumerate() {
                 let candidate = dir.join(name);
                 if candidate.exists() {
                     warn_on_coexisting_configs(&candidate, &shadowed_config_names(dir, idx));
-                    match Self::load(&candidate) {
+                    match Self::load_with_options(&candidate, options) {
                         Ok(config) => return Ok(Some((config, candidate))),
                         Err(e) => {
                             return Err(format!("Failed to parse {}: {e}", candidate.display()));
@@ -1211,6 +1329,29 @@ mod tests {
     /// Create a panic-safe temp directory (RAII cleanup via `tempfile::TempDir`).
     fn test_dir(_name: &str) -> tempfile::TempDir {
         tempfile::tempdir().expect("create temp dir")
+    }
+
+    #[derive(Default)]
+    struct MockRemoteFetcher {
+        responses: rustc_hash::FxHashMap<String, serde_json::Value>,
+        requests: Vec<String>,
+    }
+
+    impl MockRemoteFetcher {
+        fn with_response(mut self, url: &str, value: serde_json::Value) -> Self {
+            self.responses.insert(url.to_string(), value);
+            self
+        }
+    }
+
+    impl RemoteConfigFetcher for MockRemoteFetcher {
+        fn fetch(&mut self, url: &str, _source: &str) -> Result<serde_json::Value, miette::Report> {
+            self.requests.push(url.to_string());
+            self.responses
+                .get(url)
+                .cloned()
+                .ok_or_else(|| miette::miette!("missing mock response for {url}"))
+        }
     }
 
     #[test]
@@ -1739,6 +1880,36 @@ unknown_field = true
     }
 
     #[test]
+    fn extends_local_diamond_reuses_resolved_base() {
+        let dir = test_dir("extends-local-diamond");
+        std::fs::write(
+            dir.path().join("base.json"),
+            r#"{"ignorePatterns": ["generated/**"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("left.json"),
+            r#"{"extends": ["base.json"], "rules": {"unused-files": "warn"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("right.json"),
+            r#"{"extends": ["base.json"], "rules": {"unused-exports": "off"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": ["left.json", "right.json"]}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        assert_eq!(config.ignore_patterns, vec!["generated/**"]);
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+        assert_eq!(config.rules.unused_exports, Severity::Off);
+    }
+
+    #[test]
     fn extends_circular_detected() {
         let dir = test_dir("extends-circular");
 
@@ -1752,6 +1923,183 @@ unknown_field = true
             err_msg.contains("Circular extends"),
             "Expected circular error, got: {err_msg}"
         );
+    }
+
+    #[test]
+    fn remote_extends_are_denied_before_fetch_by_default() {
+        let dir = test_dir("remote-default-denied");
+        let url = "https://config.example/base.json";
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            format!(r#"{{"extends": "{url}"}}"#),
+        )
+        .unwrap();
+        let mut fetcher = MockRemoteFetcher::default().with_response(url, serde_json::json!({}));
+
+        let error = load_with_fetcher(
+            &dir.path().join(".fallowrc.json"),
+            ConfigLoadOptions::default(),
+            &mut fetcher,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains(url), "denial must name the URL: {error}");
+        assert!(
+            error.contains("--allow-remote-extends"),
+            "denial must name the CLI opt-in: {error}"
+        );
+        assert!(
+            error.contains("ConfigLoadOptions"),
+            "denial must name the library opt-in: {error}"
+        );
+        assert!(
+            fetcher.requests.is_empty(),
+            "denial must happen before fetch"
+        );
+    }
+
+    #[test]
+    fn remote_extends_dispatch_when_explicitly_allowed() {
+        let dir = test_dir("remote-explicitly-allowed");
+        let url = "https://config.example/base.json";
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            format!(r#"{{"extends": "{url}"}}"#),
+        )
+        .unwrap();
+        let mut fetcher = MockRemoteFetcher::default()
+            .with_response(url, serde_json::json!({"rules": {"unused-files": "warn"}}));
+
+        let config = load_with_fetcher(
+            &dir.path().join(".fallowrc.json"),
+            ConfigLoadOptions {
+                allow_remote_extends: true,
+            },
+            &mut fetcher,
+        )
+        .unwrap();
+
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+        assert_eq!(fetcher.requests, vec![url]);
+    }
+
+    #[test]
+    fn remote_extends_diamond_reuses_mocked_base() {
+        let dir = test_dir("remote-diamond");
+        let left = "https://config.example/left.json";
+        let right = "https://config.example/right.json";
+        let base = "https://config.example/base.json";
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            format!(r#"{{"extends": ["{left}", "{right}"]}}"#),
+        )
+        .unwrap();
+        let mut fetcher = MockRemoteFetcher::default()
+            .with_response(
+                left,
+                serde_json::json!({
+                    "extends": base,
+                    "rules": {"unused-files": "warn"}
+                }),
+            )
+            .with_response(
+                right,
+                serde_json::json!({
+                    "extends": base,
+                    "rules": {"unused-exports": "off"}
+                }),
+            )
+            .with_response(
+                base,
+                serde_json::json!({"ignorePatterns": ["generated/**"]}),
+            );
+
+        let config = load_with_fetcher(
+            &dir.path().join(".fallowrc.json"),
+            ConfigLoadOptions {
+                allow_remote_extends: true,
+            },
+            &mut fetcher,
+        )
+        .unwrap();
+
+        assert_eq!(config.ignore_patterns, vec!["generated/**"]);
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+        assert_eq!(config.rules.unused_exports, Severity::Off);
+        assert_eq!(
+            fetcher
+                .requests
+                .iter()
+                .filter(|request| *request == base)
+                .count(),
+            1,
+            "the shared remote base should be fetched once"
+        );
+    }
+
+    #[test]
+    fn remote_extends_active_cycle_still_fails() {
+        let dir = test_dir("remote-cycle");
+        let first = "https://config.example/first.json";
+        let second = "https://config.example/second.json";
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            format!(r#"{{"extends": "{first}"}}"#),
+        )
+        .unwrap();
+        let mut fetcher = MockRemoteFetcher::default()
+            .with_response(first, serde_json::json!({"extends": second}))
+            .with_response(second, serde_json::json!({"extends": first}));
+
+        let error = load_with_fetcher(
+            &dir.path().join(".fallowrc.json"),
+            ConfigLoadOptions {
+                allow_remote_extends: true,
+            },
+            &mut fetcher,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("Circular extends"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn query_distinct_remote_extends_remain_distinct() {
+        let dir = test_dir("remote-query-distinct");
+        let first = "https://config.example/base.json?profile=one";
+        let second = "https://config.example/base.json?profile=two";
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            format!(r#"{{"extends": ["{first}", "{second}"]}}"#),
+        )
+        .unwrap();
+        let mut fetcher = MockRemoteFetcher::default()
+            .with_response(
+                first,
+                serde_json::json!({"rules": {"unused-files": "warn"}}),
+            )
+            .with_response(
+                second,
+                serde_json::json!({"rules": {"unused-exports": "off"}}),
+            );
+
+        let config = load_with_fetcher(
+            &dir.path().join(".fallowrc.json"),
+            ConfigLoadOptions {
+                allow_remote_extends: true,
+            },
+            &mut fetcher,
+        )
+        .unwrap();
+
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+        assert_eq!(config.rules.unused_exports, Severity::Off);
+        assert_eq!(fetcher.requests, vec![first, second]);
     }
 
     #[test]
@@ -3534,10 +3882,10 @@ thresholdOverrides = [
     }
 
     #[test]
-    fn normalize_url_strips_query_string() {
+    fn normalize_url_preserves_query_string() {
         assert_eq!(
             normalize_url_for_dedup("https://example.com/config.json?v=1"),
-            "https://example.com/config.json"
+            "https://example.com/config.json?v=1"
         );
     }
 
@@ -3550,10 +3898,10 @@ thresholdOverrides = [
     }
 
     #[test]
-    fn normalize_url_strips_query_and_fragment() {
+    fn normalize_url_preserves_query_and_strips_fragment() {
         assert_eq!(
             normalize_url_for_dedup("https://example.com/config.json?v=1#section"),
-            "https://example.com/config.json"
+            "https://example.com/config.json?v=1"
         );
     }
 
@@ -3675,7 +4023,7 @@ thresholdOverrides = [
     }
 
     #[test]
-    fn extends_https_url_unreachable_errors() {
+    fn extends_https_url_default_denial_has_opt_in_hint() {
         let dir = test_dir("url-unreachable");
         std::fs::write(
             dir.path().join(".fallowrc.json"),
@@ -3691,7 +4039,7 @@ thresholdOverrides = [
             "Expected URL in error, got: {err_msg}"
         );
         assert!(
-            err_msg.contains("local path or npm:"),
+            err_msg.contains("--allow-remote-extends"),
             "Expected remediation hint, got: {err_msg}"
         );
     }
@@ -4630,26 +4978,20 @@ thresholdOverrides = [
     }
 
     // ------------------------------------------------------------------
-    // record_extends_visit: circular file-extends detected
-    // (secondary path: same canonical path inserted twice)
+    // Typed resource identities keep local and remote namespaces disjoint.
     // ------------------------------------------------------------------
 
     #[test]
     #[cfg_attr(miri, ignore)]
-    fn record_extends_visit_circular_same_file() {
+    fn config_resource_identity_cannot_collide_across_kinds() {
         let dir = test_dir("visit-circular");
         let path = dir.path().join("config.json");
         std::fs::write(&path, "{}").unwrap();
 
-        let mut visited = FxHashSet::default();
-        record_extends_visit(&path, &mut visited).unwrap();
-        let result = record_extends_visit(&path, &mut visited);
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("Circular extends"),
-            "second visit of same file must report circular: {err}"
-        );
+        let canonical = dunce::canonicalize(path).unwrap();
+        let local = ConfigResourceId::Local(canonical.clone());
+        let remote = ConfigResourceId::Remote(canonical.to_string_lossy().into_owned());
+        assert_ne!(local, remote);
     }
 
     // ------------------------------------------------------------------

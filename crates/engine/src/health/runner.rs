@@ -47,6 +47,7 @@ pub fn run_ungrouped_health(
             production_override: options.production_override,
             quiet: true,
             analysis: ProductionAnalysis::Health,
+            allow_remote_extends: options.allow_remote_extends,
         },
     )
     .map_err(|_| HealthError::message("failed to load health project config", 2))?;

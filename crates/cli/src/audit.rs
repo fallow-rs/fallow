@@ -12,9 +12,7 @@ pub use fallow_api::{AuditAttribution, AuditSummary, AuditVerdict};
 
 #[cfg(test)]
 use crate::base_worktree::git_rev_parse;
-use crate::base_worktree::{
-    BaseWorktree, git_toplevel, resolve_cache_max_age, sweep_old_reusable_caches,
-};
+use crate::base_worktree::{BaseWorktree, git_toplevel, sweep_old_reusable_caches};
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
 use crate::error::emit_error;
@@ -82,6 +80,7 @@ pub struct AuditOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
     pub changed_since: Option<&'a str>,
     pub production: bool,
     pub production_dead_code: Option<bool>,
@@ -603,6 +602,7 @@ fn build_base_audit_options<'a>(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: true,
+        allow_remote_extends: opts.allow_remote_extends,
         changed_since: None,
         production: opts.production,
         production_dead_code: opts.production_dead_code,
@@ -1211,7 +1211,11 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     // free of worktree-listing IO is both safe and visibly cheaper.
     sweep_old_reusable_caches(
         opts.root,
-        resolve_cache_max_age(opts.root, opts.config_path.as_ref()),
+        crate::base_worktree::resolve_cache_max_age_with_options(
+            opts.root,
+            opts.config_path.as_ref(),
+            opts.allow_remote_extends,
+        ),
         opts.quiet,
     );
 
@@ -1961,6 +1965,7 @@ fn run_audit_check<'a>(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
+        allow_remote_extends: opts.allow_remote_extends,
         fail_on_issues: false,
         filters: &filters,
         changed_since,
@@ -2020,6 +2025,7 @@ fn run_audit_dupes<'a>(
                 .production_dupes
                 .or_else(|| opts.production.then_some(true)),
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
         fallow_config::ProductionAnalysis::Dupes,
     ) {
@@ -2052,6 +2058,7 @@ fn build_audit_dupes_options<'a>(
         no_cache: opts.no_cache,
         threads: opts.threads,
         quiet: opts.quiet,
+        allow_remote_extends: opts.allow_remote_extends,
         mode: Some(DupesMode::from(dupes_cfg.mode)),
         min_tokens: Some(dupes_cfg.min_tokens),
         min_lines: Some(dupes_cfg.min_lines),
@@ -2135,6 +2142,7 @@ fn build_audit_health_options<'a>(
         sort: fallow_engine::health::HealthSort::Cyclomatic,
         production: opts.production_health.unwrap_or(opts.production),
         production_override: opts.production_health,
+        allow_remote_extends: opts.allow_remote_extends,
         changed_since,
         diff_index: None,
         use_shared_diff_index: true,

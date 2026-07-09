@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
+use super::super::process_tree::{ProcessTree, cleanup_std_child, configure_std_command};
+
 const STDERR_LIMIT_BYTES: usize = 64 * 1024;
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
@@ -20,32 +22,31 @@ pub(super) fn run_fallow_sync(
         .map_err(|err| format!("failed to create stdout temp file: {err}"))?;
     let mut stderr_file = tempfile::NamedTempFile::new()
         .map_err(|err| format!("failed to create stderr temp file: {err}"))?;
-    let mut child = Command::new(binary)
+    let mut command = Command::new(binary);
+    command
         .args(args)
-        .stdout(Stdio::from(
-            stdout_file
-                .reopen()
-                .map_err(|err| format!("failed to reopen stdout temp file: {err}"))?,
-        ))
-        .stderr(Stdio::from(
-            stderr_file
-                .reopen()
-                .map_err(|err| format!("failed to reopen stderr temp file: {err}"))?,
-        ))
+        .stdout(Stdio::from(stdout_file.reopen().map_err(|err| {
+            format!("failed to reopen stdout temp file: {err}")
+        })?))
+        .stderr(Stdio::from(stderr_file.reopen().map_err(|err| {
+            format!("failed to reopen stderr temp file: {err}")
+        })?))
         .env("FALLOW_INTEGRATION_SURFACE", "mcp")
-        .env("FALLOW_MCP_TOOL", tool)
-        .spawn()
-        .map_err(|err| {
-            format!(
-                "failed to execute fallow binary '{binary}': {err}. Ensure fallow is installed and available in PATH, or set FALLOW_BIN."
-            )
-        })?;
+        .env("FALLOW_MCP_TOOL", tool);
+    let (mut child, process_tree) = spawn_managed_child(command, binary)?;
 
     loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|err| format!("failed to wait for fallow subprocess: {err}"))?
-        {
+        let status = match child.try_wait() {
+            Ok(status) => status,
+            Err(error) => {
+                let cleanup_errors = cleanup_std_child(Some(&process_tree), &mut child);
+                return Err(with_cleanup_errors(
+                    format!("failed to wait for fallow subprocess: {error}"),
+                    &cleanup_errors,
+                ));
+            }
+        };
+        if let Some(status) = status {
             let stdout_len = file_len(stdout_file.as_file())?;
             if stdout_len > max_output_bytes as u64 {
                 return Err(format!(
@@ -59,19 +60,59 @@ pub(super) fn run_fallow_sync(
         }
 
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("code mode execution timed out while running fallow".to_string());
+            let cleanup_errors = cleanup_std_child(Some(&process_tree), &mut child);
+            return Err(with_cleanup_errors(
+                "code mode execution timed out while running fallow".to_string(),
+                &cleanup_errors,
+            ));
         }
-        if file_len(stdout_file.as_file())? > max_output_bytes as u64 {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!(
-                "code mode host output exceeded {max_output_bytes} bytes"
+        let stdout_len = match file_len(stdout_file.as_file()) {
+            Ok(stdout_len) => stdout_len,
+            Err(error) => {
+                let cleanup_errors = cleanup_std_child(Some(&process_tree), &mut child);
+                return Err(with_cleanup_errors(error, &cleanup_errors));
+            }
+        };
+        if stdout_len > max_output_bytes as u64 {
+            let cleanup_errors = cleanup_std_child(Some(&process_tree), &mut child);
+            return Err(with_cleanup_errors(
+                format!("code mode host output exceeded {max_output_bytes} bytes"),
+                &cleanup_errors,
             ));
         }
 
         thread::sleep(POLL_INTERVAL);
+    }
+}
+
+fn spawn_managed_child(
+    mut command: Command,
+    binary: &str,
+) -> Result<(std::process::Child, ProcessTree), String> {
+    configure_std_command(&mut command);
+    let mut child = command.spawn().map_err(|err| {
+        format!(
+            "failed to execute fallow binary '{binary}': {err}. Ensure fallow is installed and available in PATH, or set FALLOW_BIN."
+        )
+    })?;
+    let process_tree = match ProcessTree::for_std_child(&child) {
+        Ok(process_tree) => process_tree,
+        Err(error) => {
+            let cleanup_errors = cleanup_std_child(None, &mut child);
+            return Err(with_cleanup_errors(
+                format!("failed to configure fallow subprocess tree: {error}"),
+                &cleanup_errors,
+            ));
+        }
+    };
+    Ok((child, process_tree))
+}
+
+fn with_cleanup_errors(message: String, cleanup_errors: &[String]) -> String {
+    if cleanup_errors.is_empty() {
+        message
+    } else {
+        format!("{message}; cleanup errors: {}", cleanup_errors.join("; "))
     }
 }
 

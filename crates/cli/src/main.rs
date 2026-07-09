@@ -212,6 +212,10 @@ struct Cli {
     #[arg(short, long, global = true)]
     config: Option<PathBuf>,
 
+    /// Allow trusted config files to extend HTTPS URLs
+    #[arg(long, global = true)]
+    allow_remote_extends: bool,
+
     /// Output format (alias: --output)
     #[arg(
         short,
@@ -2721,6 +2725,7 @@ fn run_bare_combined(
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet,
+        allow_remote_extends: cli.allow_remote_extends,
         fail_on_issues,
         sarif_file: cli.sarif_file.as_deref(),
         changed_since: cli.changed_since.as_deref(),
@@ -2796,9 +2801,16 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::RulePack { subcommand } => dispatch_rule_pack_command(dispatch, subcommand),
         Command::Guard { files } => dispatch_guard_command(dispatch, &files),
         Command::CiTemplate { subcommand } => dispatch_ci_template_command(subcommand),
-        Command::Config { path } => {
-            config::run_config(root, cli.config.as_deref(), path, output, quiet)
-        }
+        Command::Config { path } => config::run_config_with_options(
+            root,
+            cli.config.as_deref(),
+            path,
+            output,
+            quiet,
+            fallow_config::ConfigLoadOptions {
+                allow_remote_extends: cli.allow_remote_extends,
+            },
+        ),
         Command::Recommend => onboarding::run_recommend(root, output),
         list @ (Command::Workspaces | Command::List { .. }) => {
             dispatch_list_command(&list, dispatch)
@@ -3058,6 +3070,7 @@ fn dispatch_trace_command(
         no_cache: dispatch.cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
+        allow_remote_extends: dispatch.cli.allow_remote_extends,
         target: symbol,
         callers,
         callees,
@@ -3139,6 +3152,7 @@ fn run_security_blind_spots_or_default(
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet,
+        allow_remote_extends: cli.allow_remote_extends,
         fail_on_issues,
         sarif_file: cli.sarif_file.as_deref(),
         summary: cli.summary,
@@ -3428,6 +3442,7 @@ fn dispatch_coverage_command(dispatch: &DispatchContext<'_>, subcommand: &Covera
             no_cache: cli.no_cache,
             threads: dispatch.threads,
             explain: cli.explain,
+            allow_remote_extends: cli.allow_remote_extends,
         },
     )
 }
@@ -3611,6 +3626,7 @@ fn dispatch_flags_command(dispatch: &DispatchContext<'_>, top: Option<usize>) ->
         no_cache: cli.no_cache,
         threads,
         quiet,
+        allow_remote_extends: cli.allow_remote_extends,
         production,
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
@@ -3638,6 +3654,7 @@ fn dispatch_suppressions_command(
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
+        allow_remote_extends: cli.allow_remote_extends,
         production,
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
@@ -3652,6 +3669,7 @@ fn dispatch_guard_command(dispatch: &DispatchContext<'_>, files: &[String]) -> E
         config_path: &dispatch.cli.config,
         output: dispatch.output,
         quiet: dispatch.quiet,
+        allow_remote_extends: dispatch.cli.allow_remote_extends,
         files,
     })
 }
@@ -3664,6 +3682,7 @@ fn dispatch_rule_pack_command(dispatch: &DispatchContext<'_>, subcommand: RulePa
         quiet: dispatch.quiet,
         no_cache: dispatch.cli.no_cache,
         threads: Some(dispatch.threads),
+        allow_remote_extends: dispatch.cli.allow_remote_extends,
     };
     rule_pack::run(&map_rule_pack_subcommand(subcommand), &ctx)
 }
@@ -4062,6 +4081,7 @@ fn dispatch_watch(dispatch: &DispatchContext<'_>, no_clear: bool) -> ExitCode {
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
+        allow_remote_extends: cli.allow_remote_extends,
         production,
         clear_screen: !no_clear,
         explain: cli.explain,
@@ -4089,6 +4109,7 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: FixDispatchArgs) -> ExitCo
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
+        allow_remote_extends: cli.allow_remote_extends,
         dry_run: args.dry_run,
         yes: args.yes,
         production,
@@ -4114,6 +4135,7 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: ListDispatchArgs) -> Exit
         boundaries: args.boundaries,
         workspaces: args.workspaces,
         production,
+        allow_remote_extends: cli.allow_remote_extends,
     })
 }
 
@@ -4131,6 +4153,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet,
+        allow_remote_extends: cli.allow_remote_extends,
         fail_on_issues,
         filters: &args.filters,
         changed_since: cli.changed_since.as_deref(),
@@ -4205,6 +4228,7 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet,
+        allow_remote_extends: cli.allow_remote_extends,
         mode: args.mode,
         min_tokens: args.min_tokens,
         min_lines: args.min_lines,
@@ -4313,6 +4337,7 @@ fn resolve_audit_inputs(
             threads: dispatch.threads,
             production: cli.production,
             quiet: dispatch.quiet,
+            allow_remote_extends: cli.allow_remote_extends,
         },
     )?;
     let cache_dir = config.cache_dir.clone();
@@ -4381,6 +4406,7 @@ fn run_resolved_audit(
             no_cache: cli.no_cache,
             threads: dispatch.threads,
             quiet: dispatch.quiet,
+            allow_remote_extends: cli.allow_remote_extends,
             changed_since: cli.changed_since.as_deref(),
             production: cli.production,
             production_dead_code: Some(inputs.production.dead_code),
@@ -4479,6 +4505,7 @@ fn decision_surface_audit_options<'a>(
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
+        allow_remote_extends: cli.allow_remote_extends,
         changed_since: cli.changed_since.as_deref(),
         production: cli.production,
         production_dead_code: Some(inputs.production.dead_code),
@@ -4571,6 +4598,7 @@ fn resolve_health_coverage_inputs(
                     threads: dispatch.threads,
                     production: dispatch.cli.production,
                     quiet: dispatch.quiet,
+                    allow_remote_extends: dispatch.cli.allow_remote_extends,
                 },
             )?
             .health,
@@ -4770,6 +4798,7 @@ fn run_health_dispatch(
         sort: run.sort,
         production,
         production_override: Some(production),
+        allow_remote_extends: cli.allow_remote_extends,
         changed_since: cli.changed_since.as_deref(),
         diff_index: None,
         use_shared_diff_index: true,
@@ -5114,6 +5143,7 @@ mod tests {
                     name.as_str(),
                     "root"
                         | "config"
+                        | "allow-remote-extends"
                         | "no-cache"
                         | "threads"
                         | "changed-since"

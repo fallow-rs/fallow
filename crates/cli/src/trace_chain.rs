@@ -26,6 +26,7 @@ pub struct TraceChainOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
     /// `FILE:SYMBOL` target.
     pub target: String,
     /// Walk UP to callers.
@@ -69,6 +70,7 @@ pub fn run_trace(opts: &TraceChainOptions<'_>) -> ExitCode {
             threads: opts.threads,
             production_override: None,
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
         ProductionAnalysis::DeadCode,
     ) {

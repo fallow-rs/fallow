@@ -16,7 +16,7 @@ use super::{
         changed_since_from_param, env_diff_file, json_success, non_empty_path, non_empty_string,
         programmatic_error_body, run_api_blocking,
     },
-    push_global, push_scope, validation_error_body,
+    push_global, push_remote_extends, push_scope, validation_error_body,
 };
 
 /// Run `trace_export` through the typed API.
@@ -138,6 +138,7 @@ pub fn build_trace_export_args(params: &TraceExportParams) -> Result<Vec<String>
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_scope(&mut args, params.production, params.workspace.as_deref());
     args.extend([
         "--trace".to_string(),
@@ -164,6 +165,7 @@ pub fn build_trace_file_args(params: &TraceFileParams) -> Result<Vec<String>, St
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_scope(&mut args, params.production, params.workspace.as_deref());
     args.extend(["--trace-file".to_string(), params.file.clone()]);
     Ok(args)
@@ -187,6 +189,7 @@ pub fn build_trace_dependency_args(params: &TraceDependencyParams) -> Result<Vec
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     push_scope(&mut args, params.production, params.workspace.as_deref());
     args.extend([
         "--trace-dependency".to_string(),
@@ -213,6 +216,7 @@ pub fn build_trace_clone_args(params: &TraceCloneParams) -> Result<Vec<String>, 
         params.no_cache,
         params.threads,
     );
+    push_remote_extends(&mut args, params.allow_remote_extends);
     if let Some(ref workspace) = params.workspace {
         args.extend(["--workspace".to_string(), workspace.clone()]);
     }
@@ -329,14 +333,15 @@ fn trace_export_options_from_params(
     require_non_empty("file", &params.file)?;
     require_non_empty("export_name", &params.export_name)?;
     Ok(TraceExportOptions {
-        analysis: dead_code_analysis_options(
-            params.root.as_deref(),
-            params.config.as_deref(),
-            params.production,
-            params.workspace.as_deref(),
-            params.no_cache,
-            params.threads,
-        ),
+        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
+            root: params.root.as_deref(),
+            config: params.config.as_deref(),
+            allow_remote_extends: params.allow_remote_extends,
+            production: params.production,
+            workspace: params.workspace.as_deref(),
+            no_cache: params.no_cache,
+            threads: params.threads,
+        }),
         file: params.file.clone(),
         export_name: params.export_name.clone(),
     })
@@ -345,14 +350,15 @@ fn trace_export_options_from_params(
 fn trace_file_options_from_params(params: &TraceFileParams) -> Result<TraceFileOptions, String> {
     require_non_empty("file", &params.file)?;
     Ok(TraceFileOptions {
-        analysis: dead_code_analysis_options(
-            params.root.as_deref(),
-            params.config.as_deref(),
-            params.production,
-            params.workspace.as_deref(),
-            params.no_cache,
-            params.threads,
-        ),
+        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
+            root: params.root.as_deref(),
+            config: params.config.as_deref(),
+            allow_remote_extends: params.allow_remote_extends,
+            production: params.production,
+            workspace: params.workspace.as_deref(),
+            no_cache: params.no_cache,
+            threads: params.threads,
+        }),
         file: params.file.clone(),
     })
 }
@@ -362,14 +368,15 @@ fn trace_dependency_options_from_params(
 ) -> Result<TraceDependencyOptions, String> {
     require_non_empty("package_name", &params.package_name)?;
     Ok(TraceDependencyOptions {
-        analysis: dead_code_analysis_options(
-            params.root.as_deref(),
-            params.config.as_deref(),
-            params.production,
-            params.workspace.as_deref(),
-            params.no_cache,
-            params.threads,
-        ),
+        analysis: dead_code_analysis_options(DeadCodeAnalysisInput {
+            root: params.root.as_deref(),
+            config: params.config.as_deref(),
+            allow_remote_extends: params.allow_remote_extends,
+            production: params.production,
+            workspace: params.workspace.as_deref(),
+            no_cache: params.no_cache,
+            threads: params.threads,
+        }),
         package_name: params.package_name.clone(),
     })
 }
@@ -380,6 +387,7 @@ fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceClo
             analysis: AnalysisOptions {
                 root: non_empty_path(params.root.as_deref()),
                 config_path: non_empty_path(params.config.as_deref()),
+                allow_remote_extends: params.allow_remote_extends.unwrap_or(false),
                 no_cache: params.no_cache.unwrap_or(false),
                 threads: params.threads,
                 changed_since: changed_since_from_param(None),
@@ -400,24 +408,29 @@ fn trace_clone_options_from_params(params: &TraceCloneParams) -> Result<TraceClo
     })
 }
 
-fn dead_code_analysis_options(
-    root: Option<&str>,
-    config: Option<&str>,
+#[derive(Clone, Copy)]
+struct DeadCodeAnalysisInput<'a> {
+    root: Option<&'a str>,
+    config: Option<&'a str>,
+    allow_remote_extends: Option<bool>,
     production: Option<bool>,
-    workspace: Option<&str>,
+    workspace: Option<&'a str>,
     no_cache: Option<bool>,
     threads: Option<usize>,
-) -> AnalysisOptions {
+}
+
+fn dead_code_analysis_options(input: DeadCodeAnalysisInput<'_>) -> AnalysisOptions {
     AnalysisOptions {
-        root: non_empty_path(root),
-        config_path: non_empty_path(config),
-        no_cache: no_cache.unwrap_or(false),
-        threads,
-        production: production.unwrap_or(false),
-        production_override: production,
+        root: non_empty_path(input.root),
+        config_path: non_empty_path(input.config),
+        allow_remote_extends: input.allow_remote_extends.unwrap_or(false),
+        no_cache: input.no_cache.unwrap_or(false),
+        threads: input.threads,
+        production: input.production.unwrap_or(false),
+        production_override: input.production,
         changed_since: changed_since_from_param(None),
         diff_file: env_diff_file(),
-        workspace: non_empty_string(workspace).map(|value| vec![value]),
+        workspace: non_empty_string(input.workspace).map(|value| vec![value]),
         ..AnalysisOptions::default()
     }
 }
@@ -484,5 +497,54 @@ fn min_occurrences_from_param(value: Option<u32>) -> Result<Option<usize>, Strin
         ))),
         Some(value) => Ok(Some(value as usize)),
         None => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_dead_code_traces_forward_remote_extends_opt_in() {
+        for (value, expected) in [(Some(true), true), (Some(false), false), (None, false)] {
+            let export: TraceExportParams = serde_json::from_value(serde_json::json!({
+                "file": "src/main.ts",
+                "export_name": "main",
+                "allow_remote_extends": value,
+            }))
+            .expect("trace export params");
+            let file: TraceFileParams = serde_json::from_value(serde_json::json!({
+                "file": "src/main.ts",
+                "allow_remote_extends": value,
+            }))
+            .expect("trace file params");
+            let dependency: TraceDependencyParams = serde_json::from_value(serde_json::json!({
+                "package_name": "react",
+                "allow_remote_extends": value,
+            }))
+            .expect("trace dependency params");
+
+            assert_eq!(
+                trace_export_options_from_params(&export)
+                    .expect("trace export options")
+                    .analysis
+                    .allow_remote_extends,
+                expected
+            );
+            assert_eq!(
+                trace_file_options_from_params(&file)
+                    .expect("trace file options")
+                    .analysis
+                    .allow_remote_extends,
+                expected
+            );
+            assert_eq!(
+                trace_dependency_options_from_params(&dependency)
+                    .expect("trace dependency options")
+                    .analysis
+                    .allow_remote_extends,
+                expected
+            );
+        }
     }
 }

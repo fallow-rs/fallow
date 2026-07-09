@@ -278,6 +278,7 @@ fn load_list_project_config(
             production_override: resolved.production_override(),
             quiet: true,
             analysis: fallow_config::ProductionAnalysis::DeadCode,
+            allow_remote_extends: resolved.allow_remote_extends(),
         },
     )
     .map_err(|err| {

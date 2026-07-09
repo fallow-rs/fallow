@@ -19,6 +19,7 @@ pub struct GuardOptions<'a> {
     pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
     pub quiet: bool,
+    pub allow_remote_extends: bool,
     pub files: &'a [String],
 }
 
@@ -33,6 +34,7 @@ pub fn run_guard(opts: &GuardOptions<'_>) -> ExitCode {
             threads: 1,
             production: false,
             quiet: opts.quiet,
+            allow_remote_extends: opts.allow_remote_extends,
         },
     ) {
         Ok(config) => config,

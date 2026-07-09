@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    FallowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic, WorkspaceInfo,
+    ConfigLoadOptions, FallowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic,
+    WorkspaceInfo,
 };
 use fallow_types::output_format::OutputFormat;
 use rustc_hash::FxHashSet;
@@ -29,6 +30,7 @@ pub struct ProjectConfigOptions {
     pub production_override: Option<bool>,
     pub quiet: bool,
     pub analysis: ProductionAnalysis,
+    pub allow_remote_extends: bool,
 }
 
 /// Resolve the analysis config for a project.
@@ -38,7 +40,20 @@ pub struct ProjectConfigOptions {
 /// Returns an error when an explicit config cannot be loaded or automatic
 /// config discovery finds an invalid config.
 pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResult<ProjectConfig> {
-    let user_config = load_user_config(root, config_path)?;
+    config_for_project_with_load_options(root, config_path, ConfigLoadOptions::default())
+}
+
+/// Resolve project config with an explicit inheritance trust policy.
+///
+/// # Errors
+///
+/// Returns an error when config loading or validation fails.
+pub fn config_for_project_with_load_options(
+    root: &Path,
+    config_path: Option<&Path>,
+    load_options: ConfigLoadOptions,
+) -> EngineResult<ProjectConfig> {
+    let user_config = load_user_config(root, config_path, load_options)?;
     let (mut config, path) = match user_config {
         Some((config, path)) => (config, Some(path)),
         None => (FallowConfig::default(), None),
@@ -116,7 +131,13 @@ pub fn config_for_project_analysis(
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
 ) -> EngineResult<ProjectConfig> {
-    let user_config = load_user_config(root, config_path)?;
+    let user_config = load_user_config(
+        root,
+        config_path,
+        ConfigLoadOptions {
+            allow_remote_extends: options.allow_remote_extends,
+        },
+    )?;
     let loaded_user_config = user_config.is_some();
     let (mut config, path) = match user_config {
         Some((config, path)) => (config, Some(path)),
@@ -201,13 +222,14 @@ fn with_undeclared_workspace_diagnostics(
 fn load_user_config(
     root: &Path,
     config_path: Option<&Path>,
+    options: ConfigLoadOptions,
 ) -> EngineResult<Option<(FallowConfig, PathBuf)>> {
     if let Some(path) = config_path {
-        let config = FallowConfig::load(path)
+        let config = FallowConfig::load_with_options(path, options)
             .map_err(|err| EngineError::new(format!("invalid config: {err:#}")))?;
         return Ok(Some((config, path.to_path_buf())));
     }
-    FallowConfig::find_and_load(root)
+    FallowConfig::find_and_load_with_options(root, options)
         .map_err(|err| EngineError::new(format!("invalid config: {err}")))
 }
 
