@@ -6,12 +6,30 @@ import { describeLoadError } from "./errors";
 
 export type Capture = { dataUrl: string; path: string };
 
+/** Only web schemes may be captured; file:, chrome:, data: etc. are rejected. */
+export const isCapturableUrl = (url: string): boolean => {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Load `url` in a hidden window and capture it to a PNG under `.fallow-review/
  * shots/`. Returns a data URL (for the renderer canvas) + the saved path.
  */
 export const captureUrl = async (root: string, url: string, at: number): Promise<Capture> => {
-  const win = new BrowserWindow({ width: 1024, height: 768, show: false });
+  if (!isCapturableUrl(url)) {
+    throw new Error(`Couldn't load ${url}: only http and https URLs can be captured.`);
+  }
+  const win = new BrowserWindow({
+    width: 1024,
+    height: 768,
+    show: false,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+  });
   try {
     await win.loadURL(url).catch((e: unknown) => {
       throw describeLoadError(e, url);
