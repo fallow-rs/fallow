@@ -1,0 +1,69 @@
+name: Fuzz Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'fuzz/**'
+      - 'crates/extract/**'
+      - 'crates/core/**'
+      - 'crates/types/**'
+      - 'crates/graph/**'
+      - 'crates/config/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/fuzz-smoke.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'fuzz/**'
+      - 'crates/extract/**'
+      - 'crates/core/**'
+      - 'crates/types/**'
+      - 'crates/graph/**'
+      - 'crates/config/**'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/fuzz-smoke.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: fuzz-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz-smoke:
+    name: Fuzz harness compile-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Inlined (rather than the shared ./.github/actions/setup-rust
+      # composite) because the fuzz/ crate deliberately excludes itself
+      # from the parent workspace (see fuzz/Cargo.toml): the composite's
+      # cache step is scoped to the root workspace and never sees
+      # fuzz/Cargo.lock or fuzz/target. Toolchain resolution mirrors the
+      # composite's own logic; the action SHA is the same pin it uses.
+      - name: Resolve toolchain
+        id: resolve
+        run: |
+          channel=$(awk -F '"' '/^[[:space:]]*channel[[:space:]]*=/ {print $2; exit}' rust-toolchain.toml)
+          echo "toolchain=${channel:-stable}" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
+        with:
+          toolchain: ${{ steps.resolve.outputs.toolchain }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: fuzz -> target
+          key: fuzz-smoke
+
+      - name: Compile-check fuzz targets
+        run: cargo check --manifest-path fuzz/Cargo.toml
