@@ -25,13 +25,16 @@ pub fn filter_by_workspaces(
     workspace_roots: &[PathBuf],
     root: &Path,
 ) {
-    report.clone_groups.retain(|group| {
-        group.instances.iter().any(|instance| {
+    for group in &mut report.clone_groups {
+        group.instances.retain(|instance| {
             workspace_roots
                 .iter()
                 .any(|workspace_root| instance.file.starts_with(workspace_root))
-        })
-    });
+        });
+    }
+    report
+        .clone_groups
+        .retain(|group| group.instances.len() >= 2);
     rebuild_duplication_derived_fields(report, root);
 }
 

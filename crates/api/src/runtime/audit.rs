@@ -273,13 +273,12 @@ fn run_audit_subanalyses_with_context(
     if production_modes.dead_code == production_modes.dupes
         && production_modes.dead_code == production_modes.health
     {
-        return run_shared_project_audit_subanalyses(&subanalysis_options, resolved, changed_files);
+        return run_shared_project_audit_subanalyses(&subanalysis_options, changed_files);
     }
 
     if production_modes.dead_code == production_modes.health {
         return run_shared_dead_code_health_audit_subanalyses(
             &subanalysis_options,
-            resolved,
             changed_files,
         );
     }
@@ -287,7 +286,6 @@ fn run_audit_subanalyses_with_context(
     if production_modes.dead_code == production_modes.dupes {
         return run_shared_dead_code_dupes_audit_subanalyses(
             &subanalysis_options,
-            resolved,
             changed_files,
         );
     }
@@ -301,16 +299,17 @@ fn run_audit_subanalyses_with_context(
 
 fn run_shared_project_audit_subanalyses(
     options: &AuditSubanalysisOptions,
-    resolved: &ProgrammaticAnalysisContext,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
+    let resolved =
+        resolve_programmatic_analysis_context_deferred_workspace(&options.dead_code.analysis)?;
     resolved.install(|| {
-        let session = super::dead_code::load_dead_code_session(&options.dead_code, resolved)?;
+        let session = super::dead_code::load_dead_code_session(&options.dead_code, &resolved)?;
         run_all_audit_subanalyses_with_project_artifacts(
             &options.dead_code,
             &options.duplication,
             &options.complexity,
-            resolved,
+            &resolved,
             &session,
             changed_files,
         )
@@ -319,18 +318,19 @@ fn run_shared_project_audit_subanalyses(
 
 fn run_shared_dead_code_health_audit_subanalyses(
     options: &AuditSubanalysisOptions,
-    resolved: &ProgrammaticAnalysisContext,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
+    let resolved =
+        resolve_programmatic_analysis_context_deferred_workspace(&options.dead_code.analysis)?;
     resolved.install(|| {
         let dead_code_options = &options.dead_code;
         let duplication_options = &options.duplication;
         let complexity_options = &options.complexity;
-        let session = super::dead_code::load_dead_code_session(dead_code_options, resolved)?;
+        let session = super::dead_code::load_dead_code_session(dead_code_options, &resolved)?;
         let (dead_code, complexity) = run_dead_code_and_health_with_session(
             dead_code_options,
             complexity_options,
-            resolved,
+            &resolved,
             &session,
             changed_files,
         )?;
@@ -344,16 +344,17 @@ fn run_shared_dead_code_health_audit_subanalyses(
 
 fn run_shared_dead_code_dupes_audit_subanalyses(
     options: &AuditSubanalysisOptions,
-    resolved: &ProgrammaticAnalysisContext,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
+    let resolved =
+        resolve_programmatic_analysis_context_deferred_workspace(&options.dead_code.analysis)?;
     resolved.install(|| {
-        let session = super::dead_code::load_dead_code_session(&options.dead_code, resolved)?;
+        let session = super::dead_code::load_dead_code_session(&options.dead_code, &resolved)?;
         let (dead_code, duplication, _, _) =
             run_dead_code_and_duplication_with_project_artifacts(ProjectArtifactAuditInput {
                 dead_code_options: &options.dead_code,
                 duplication_options: &options.duplication,
-                resolved,
+                resolved: &resolved,
                 session: &session,
                 changed_files,
                 retain_dead_code_artifacts: false,
@@ -844,6 +845,60 @@ mod tests {
     }
 
     #[test]
+    fn audit_production_mode_branches_preserve_per_section_workspace_scope() {
+        let project = audit_workspace_modes_fixture();
+
+        for mask in 0_u8..8 {
+            let production_dead_code = mask & 0b001 != 0;
+            let production_health = mask & 0b010 != 0;
+            let production_dupes = mask & 0b100 != 0;
+            let output = run_audit(&AuditOptions {
+                analysis: AnalysisOptions {
+                    root: Some(project.path().to_path_buf()),
+                    workspace: Some(vec!["@audit/a".to_string()]),
+                    no_cache: true,
+                    ..AnalysisOptions::default()
+                },
+                base: Some("HEAD".to_string()),
+                gate: AuditGate::All,
+                production_dead_code: Some(production_dead_code),
+                production_health: Some(production_health),
+                production_dupes: Some(production_dupes),
+                include_entry_exports: true,
+                ..AuditOptions::default()
+            })
+            .unwrap_or_else(|error| panic!("audit mask {mask:03b} failed: {error}"));
+            let json = crate::serialize_audit_programmatic_json(output)
+                .unwrap_or_else(|error| panic!("serialize mask {mask:03b}: {error}"));
+
+            let dead_code = json["dead_code"].to_string();
+            let complexity = json["complexity"].to_string();
+            let duplication = json["duplication"].to_string();
+            assert_eq!(
+                dead_code.contains("mode-sentinel.test.ts"),
+                !production_dead_code,
+                "dead-code scope mismatch for mask {mask:03b}: {dead_code}"
+            );
+            assert_eq!(
+                complexity.contains("mode-sentinel.test.ts"),
+                !production_health,
+                "health scope mismatch for mask {mask:03b}: {complexity}"
+            );
+            assert_eq!(
+                duplication.contains("mode-sentinel.test.ts"),
+                !production_dupes,
+                "duplication scope mismatch for mask {mask:03b}: {duplication}"
+            );
+
+            let rendered = json.to_string();
+            assert!(
+                !rendered.contains("packages/b"),
+                "workspace B leaked into mask {mask:03b}: {rendered}"
+            );
+        }
+    }
+
+    #[test]
     fn empty_audit_output_uses_resolved_root_for_head_sha() {
         let project = audit_fixture();
         let output = empty_audit_output(
@@ -902,6 +957,83 @@ mod tests {
             "export const unused = 1;\n",
         )
         .expect("write changed source");
+        project
+    }
+
+    fn audit_workspace_modes_fixture() -> tempfile::TempDir {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"audit-root","private":true,"workspaces":["packages/*"]}"#,
+        )
+        .expect("write root package");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{
+  "duplicates": {
+    "minTokens": 10,
+    "minLines": 2,
+    "ignoreDefaults": false
+  },
+  "health": {
+    "maxCyclomatic": 2,
+    "maxCognitive": 2,
+    "maxCrap": 2.0,
+    "maxUnitSize": 3
+  }
+}"#,
+        )
+        .expect("write config");
+
+        for name in ["a", "b"] {
+            let package = project.path().join("packages").join(name);
+            std::fs::create_dir_all(package.join("src")).expect("create package source");
+            std::fs::write(
+                package.join("package.json"),
+                format!(r#"{{"name":"@audit/{name}","type":"module","main":"src/index.ts"}}"#),
+            )
+            .expect("write package manifest");
+            std::fs::write(
+                package.join("src/index.ts"),
+                format!("export const {name}Entry = true;\n"),
+            )
+            .expect("write package entry");
+        }
+
+        git(project.path(), &["init"]);
+        git(project.path(), &["add", "."]);
+        git(
+            project.path(),
+            &[
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "initial",
+            ],
+        );
+
+        let sentinel = r"export function auditModeSentinel(value: number) {
+  let result = value;
+  if (value > 0) result += 1;
+  if (value > 1) result += 2;
+  if (value > 2) result += 3;
+  if (value > 3) result += 4;
+  return result;
+}
+";
+        for name in ["a", "b"] {
+            let source = project.path().join("packages").join(name).join("src");
+            std::fs::write(source.join("mode-sentinel.test.ts"), sentinel)
+                .expect("write test sentinel");
+            std::fs::write(source.join("mode-sentinel-copy.test.ts"), sentinel)
+                .expect("write duplicate test sentinel");
+        }
+
         project
     }
 

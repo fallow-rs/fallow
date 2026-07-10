@@ -1027,6 +1027,7 @@ fn workspace_scope_filters_clone_groups() {
         clone_groups: vec![
             group(vec![
                 instance("/repo/packages/app/a.ts", 1, 3),
+                instance("/repo/packages/app/b.ts", 1, 3),
                 instance("/repo/packages/shared/b.ts", 1, 3),
             ]),
             group(vec![
@@ -1035,11 +1036,11 @@ fn workspace_scope_filters_clone_groups() {
             ]),
         ],
         stats: DuplicationStats {
-            total_files: 4,
+            total_files: 5,
             total_lines: 100,
             total_tokens: 100,
             clone_groups: 2,
-            clone_instances: 4,
+            clone_instances: 5,
             ..DuplicationStats::default()
         },
         ..DuplicationReport::default()
@@ -1051,6 +1052,13 @@ fn workspace_scope_filters_clone_groups() {
     assert_eq!(
         report.clone_groups[0].instances[0].file,
         root.join("packages/app/a.ts")
+    );
+    assert_eq!(report.clone_groups[0].instances.len(), 2);
+    assert!(
+        report.clone_groups[0]
+            .instances
+            .iter()
+            .all(|instance| instance.file.starts_with(root.join("packages/app")))
     );
 }
 
