@@ -94,6 +94,7 @@ mod tests {
             "mod.rs",
             "recommend.rs",
             "security.rs",
+            "suppressions.rs",
         ];
         let conditional_cli_backed = [
             "analyze.rs",

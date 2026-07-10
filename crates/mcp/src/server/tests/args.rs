@@ -6,7 +6,8 @@ use crate::tools::{
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
     build_get_importance_args, build_get_token_blast_radius_args, build_guard_args,
     build_health_args, build_impact_all_args, build_impact_args, build_impact_closure_args,
-    build_list_boundaries_args, build_project_info_args, build_security_candidates_args,
+    build_list_boundaries_args, build_list_suppressions_args, build_project_info_args,
+    build_security_candidates_args,
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
     build_trace_file_args,
 };
@@ -1749,6 +1750,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
     let audit = build_audit_args(&AuditParams::default()).expect("default params are valid");
     let list_boundaries = build_list_boundaries_args(&ListBoundariesParams::default());
     let feature_flags = build_feature_flags_args(&FeatureFlagsParams::default());
+    let list_suppressions = build_list_suppressions_args(&ListSuppressionsParams::default());
     let check_runtime_coverage =
         build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
     let impact = build_impact_args(&ImpactParams::default());
@@ -1775,6 +1777,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
         ("audit", &audit),
         ("list_boundaries", &list_boundaries),
         ("feature_flags", &feature_flags),
+        ("list_suppressions", &list_suppressions),
         ("check_runtime_coverage", &check_runtime_coverage),
         ("impact", &impact),
         ("guard", &guard),
@@ -1826,6 +1829,10 @@ fn each_tool_uses_correct_subcommand() {
     assert_eq!(
         build_feature_flags_args(&FeatureFlagsParams::default())[0],
         "flags"
+    );
+    assert_eq!(
+        build_list_suppressions_args(&ListSuppressionsParams::default())[0],
+        "suppressions"
     );
     assert_eq!(
         build_trace_export_args(&TraceExportParams {
@@ -2650,4 +2657,40 @@ fn feature_flags_args_with_all_options() {
     assert!(args.contains(&"4".to_string()));
     assert!(args.contains(&"--top".to_string()));
     assert!(args.contains(&"5".to_string()));
+}
+
+#[test]
+fn list_suppressions_args_minimal_produces_base_args() {
+    let args = build_list_suppressions_args(&ListSuppressionsParams::default());
+    assert_eq!(args, ["suppressions", "--format", "json", "--quiet"]);
+}
+
+#[test]
+fn list_suppressions_args_with_all_options() {
+    let args = build_list_suppressions_args(&ListSuppressionsParams {
+        root: Some("/project".to_string()),
+        config: Some(".fallowrc.json".to_string()),
+        production: Some(true),
+        workspace: Some("@app/core".to_string()),
+        changed_since: Some("main".to_string()),
+        file: Some(vec!["src/a.ts".to_string(), "src/b.ts".to_string()]),
+        no_cache: Some(true),
+        threads: Some(4),
+    });
+    assert!(args.contains(&"--root".to_string()));
+    assert!(args.contains(&"/project".to_string()));
+    assert!(args.contains(&"--config".to_string()));
+    assert!(args.contains(&".fallowrc.json".to_string()));
+    assert!(args.contains(&"--production".to_string()));
+    assert!(args.contains(&"--workspace".to_string()));
+    assert!(args.contains(&"@app/core".to_string()));
+    assert!(args.contains(&"--changed-since".to_string()));
+    assert!(args.contains(&"main".to_string()));
+    assert!(args.contains(&"--no-cache".to_string()));
+    assert!(args.contains(&"--threads".to_string()));
+    assert!(args.contains(&"4".to_string()));
+    // Repeated --file emission: one flag per path, both paths forwarded.
+    assert_eq!(args.iter().filter(|a| *a == "--file").count(), 2);
+    assert!(args.contains(&"src/a.ts".to_string()));
+    assert!(args.contains(&"src/b.ts".to_string()));
 }

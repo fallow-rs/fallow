@@ -19,6 +19,7 @@ mod process_tree;
 mod project_info;
 mod recommend;
 mod security;
+mod suppressions;
 mod trace;
 
 pub use analyze::{build_analyze_args, run_analyze};
@@ -54,6 +55,9 @@ pub use list_boundaries::{build_list_boundaries_args, run_list_boundaries};
 pub use project_info::{build_project_info_args, run_project_info};
 pub use recommend::run_recommend;
 pub use security::{build_security_candidates_args, run_security_candidates};
+#[cfg(test)]
+pub use suppressions::build_list_suppressions_args;
+pub use suppressions::run_list_suppressions;
 pub use trace::{
     build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
     build_trace_file_args, run_trace_clone_tool, run_trace_dependency_tool, run_trace_export_tool,

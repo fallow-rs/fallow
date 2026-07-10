@@ -1016,6 +1016,43 @@ pub struct FeatureFlagsParams {
     pub threads: Option<usize>,
 }
 
+/// Parameters for the `list_suppressions` governance inventory tool. Wraps
+/// `fallow suppressions --format json`, returning the `suppression-inventory`
+/// envelope verbatim. `--changed-workspaces` is deliberately not forwarded in
+/// v1 (niche; `workspace` plus `changed_since` cover the agent use cases).
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct ListSuppressionsParams {
+    /// Root directory of the project to analyze. Defaults to current working directory.
+    pub root: Option<String>,
+
+    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
+    pub config: Option<String>,
+
+    /// Only analyze production code (excludes tests, stories, dev files).
+    pub production: Option<bool>,
+
+    /// Scope analysis to one or more workspaces. Accepts a single package name
+    /// for the common case, or a comma-separated list with globs and `!` negation
+    /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match
+    /// against both the package name and the workspace path relative to the repo
+    /// root. Passed through to the CLI's `--workspace` flag.
+    pub workspace: Option<String>,
+
+    /// Git ref (e.g. "main", "HEAD~5"). Scopes the inventory to files changed
+    /// since the ref, the natural pull-request review scope.
+    pub changed_since: Option<String>,
+
+    /// Only list suppressions in these files. Relative paths resolve against the
+    /// project root; forwarded as a repeated `--file` flag.
+    pub file: Option<Vec<String>>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
+
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct DecisionSurfaceParams {
     /// Root directory of the project to analyze. Defaults to current working directory.

@@ -7,9 +7,9 @@ use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, CodeExecuteParams,
     DecisionSurfaceParams, ExplainParams, FeatureFlagsParams, FindDupesParams, FixParams,
     GetTokenBlastRadiusParams, GuardParams, HealthParams, ImpactAllParams, ImpactClosureParams,
-    ImpactParams, InspectTargetParams, ListBoundariesParams, ProjectInfoParams, RecommendParams,
-    SecurityCandidatesParams, TraceCloneParams, TraceDependencyParams, TraceExportParams,
-    TraceFileParams,
+    ImpactParams, InspectTargetParams, ListBoundariesParams, ListSuppressionsParams,
+    ProjectInfoParams, RecommendParams, SecurityCandidatesParams, TraceCloneParams,
+    TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 use crate::tools::{
     execute_code_mode, inspect_target, run_analyze, run_audit, run_check_changed,
@@ -17,8 +17,8 @@ use crate::tools::{
     run_find_dupes, run_fix_apply, run_fix_preview, run_get_blast_radius,
     run_get_cleanup_candidates, run_get_hot_paths, run_get_importance, run_get_token_blast_radius,
     run_guard, run_health, run_impact, run_impact_all, run_impact_closure, run_list_boundaries,
-    run_project_info, run_recommend, run_security_candidates, run_trace_clone_tool,
-    run_trace_dependency_tool, run_trace_export_tool, run_trace_file_tool,
+    run_list_suppressions, run_project_info, run_recommend, run_security_candidates,
+    run_trace_clone_tool, run_trace_dependency_tool, run_trace_export_tool, run_trace_file_tool,
 };
 
 #[cfg(test)]
@@ -304,6 +304,17 @@ impl FallowMcp {
     }
 
     #[tool(
+        description = "List active fallow-ignore suppression markers grouped per file with line, kind, level, reason, and a stale cross-reference. Runs `fallow suppressions --format json` and returns the `kind: \"suppression-inventory\"` envelope verbatim (a `summary` roll-up plus `files[]`); a governance surface for distrusting a clean verdict by seeing what is suppressed, not a gate, so it always exits 0 even when suppressions exist. Scope with `workspace`, `changed_since` (the natural pull-request review scope), or repeated `file` entries. Read-only. It runs a full analysis to populate the inventory, so on large repos raise `FALLOW_TIMEOUT_SECS` above the default 120s if it times out.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn list_suppressions(
+        &self,
+        params: Parameters<ListSuppressionsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        run_list_suppressions(&self.binary, params.0).await
+    }
+
+    #[tool(
         description = "Read fallow's local value-tracking report. Runs NO analysis: it reads a per-project history file from the user's private config dir (never inside the repo), answering \"what has fallow done for me over time\" rather than \"what is wrong now\" (for live findings use analyze / audit / check_health). LOCAL-DEV ONLY: history accrues only on a developer's machine (local dev, or a persistent pre-commit gate); fallow never records in CI, so in CI / ephemeral runners this returns an empty report (enabled:false) and must NOT be used as a CI metric. Always returns a populated JSON object (never {}): branch on `enabled` and `enabled_source` (`project` = an explicit per-repo enable/disable, `user` = the user-global default, `default` = off). When `enabled:false`, use `explicit_decision` to decide what to say: `explicit_decision:false` means tracking was never set up here, so recommend the user run `fallow impact enable` (do not run it yourself); `explicit_decision:true` means the user deliberately disabled it here, so do NOT nag. Also branch on `record_count` (0 with enabled:true = set up but awaiting gate runs). When enabled with history it returns `surfacing` (issue counts from the most recent recorded run), `trend` (count delta vs the previous run; improving/declining/stable on the wire), `containment_count` + `recent_containment` (pre-commit gate runs that blocked a commit then later cleared), and a short-SHA `latest_git_sha` for correlation. On fallow with impact v1.5+ the report also carries `resolved_total` / `suppressed_total` / `recent_resolved` / `attribution_active`, crediting findings fallow saw genuinely fixed (code removed or refactored) and never counting a fallow-ignore suppression as a win; older fallow binaries omit these fields. On fallow with impact v1.6+ the report also carries `project_surfacing` / `project_trend`: a WHOLE-PROJECT view from the last full `fallow` run (additive optional under the same `schema_version`, omitted by older binaries). Treat changed-file `surfacing` as the actionable count for the current change and `project_surfacing` as whole-repo context, not a to-do list. Read-only; the mutating `fallow impact enable` / `disable` / `default` lifecycle is intentionally not exposed over MCP.",
         annotations(read_only_hint = true, idempotent_hint = true, open_world_hint = false)
     )]
@@ -417,6 +428,7 @@ impl ServerHandler for FallowMcp {
                  fallow_explain (rule rationale and fix guidance without running analysis), \
                  list_boundaries (architecture boundary zones and access rules), \
                  feature_flags (detect feature flag patterns), \
+                 list_suppressions (governance inventory of active fallow-ignore markers grouped per file; read-only, always exits 0), \
                  impact (read the local, opt-in value report: surfacing / trend / gate containment / resolved attribution; local-dev only, runs no analysis). \
                  Picking check_health vs check_runtime_coverage: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want surfaced dead-in-production verdicts; use check_health for general complexity / hotspot / CRAP analysis without a coverage dump.",
             )

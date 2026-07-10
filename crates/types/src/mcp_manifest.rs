@@ -332,6 +332,16 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         read_only: true,
     },
     McpToolInfo {
+        name: "list_suppressions",
+        kind: "analysis",
+        description: "List active fallow-ignore suppression markers grouped per file (line, kind, level, reason, and a stale cross-reference); a read-only governance inventory that always exits 0",
+        cli_command: Some("fallow suppressions --format json --quiet"),
+        key_params: &["workspace", "changed_since", "file"],
+        license: McpToolLicense::Free,
+        license_note: None,
+        read_only: true,
+    },
+    McpToolInfo {
         name: "impact",
         kind: "introspection",
         description: "Read the local Fallow Impact value-tracking report (per-project history in the user config dir, never in the repo; local-dev only)",

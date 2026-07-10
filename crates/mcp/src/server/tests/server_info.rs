@@ -41,6 +41,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"fallow_explain".to_string()));
     assert!(names.contains(&"list_boundaries".to_string()));
     assert!(names.contains(&"feature_flags".to_string()));
+    assert!(names.contains(&"list_suppressions".to_string()));
     assert!(names.contains(&"check_runtime_coverage".to_string()));
     assert!(names.contains(&"get_hot_paths".to_string()));
     assert!(names.contains(&"get_blast_radius".to_string()));
@@ -51,7 +52,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"impact_all".to_string()));
     assert!(names.contains(&"decision_surface".to_string()));
     assert!(names.contains(&"recommend".to_string()));
-    assert_eq!(tools.len(), 30);
+    assert_eq!(tools.len(), 31);
 }
 
 #[test]
@@ -79,6 +80,7 @@ fn read_only_tools_have_annotations() {
         "fallow_explain",
         "list_boundaries",
         "feature_flags",
+        "list_suppressions",
         "check_runtime_coverage",
         "get_hot_paths",
         "get_blast_radius",
@@ -158,6 +160,7 @@ fn open_world_hint_on_analysis_tools() {
         "decision_surface",
         "list_boundaries",
         "feature_flags",
+        "list_suppressions",
         "check_runtime_coverage",
         "impact_all",
         "recommend",
@@ -261,6 +264,7 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("fallow_explain"));
     assert!(instructions.contains("list_boundaries"));
     assert!(instructions.contains("feature_flags"));
+    assert!(instructions.contains("list_suppressions"));
     assert!(instructions.contains("check_runtime_coverage"));
     assert!(instructions.contains("get_hot_paths"));
     assert!(instructions.contains("get_blast_radius"));
@@ -1307,6 +1311,32 @@ fn feature_flags_schema_contains_expected_properties() {
         assert!(
             schema.contains(prop),
             "feature_flags schema should contain property '{prop}'"
+        );
+    }
+}
+
+#[test]
+fn list_suppressions_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools
+        .iter()
+        .find(|t| t.name == "list_suppressions")
+        .unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "root",
+        "config",
+        "production",
+        "workspace",
+        "changed_since",
+        "file",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "list_suppressions schema should contain property '{prop}'"
         );
     }
 }
