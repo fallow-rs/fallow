@@ -44,7 +44,8 @@ fn analyze_project_root_for_test(
         merged_analysis: &mut merged_analysis,
         merged_inline_complexity,
         config_messages,
-    });
+    })
+    .expect("project analysis succeeds");
     *merged_results = merged_analysis.results;
     *merged_duplication = merged_analysis.duplication;
 }
@@ -184,6 +185,144 @@ async fn run_analysis_short_circuits_after_shutdown() {
     assert!(
         backend.analysis.read().await.is_none(),
         "analysis snapshot must stay None when run_analysis short-circuits on cancellation",
+    );
+}
+
+fn write_analysis_failure_fixture(root: &Path, route_file_ignore_pattern: &str) -> PathBuf {
+    let orphan = root.join("src/orphan.ts");
+    std::fs::create_dir_all(orphan.parent().expect("orphan has parent")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "lsp-analysis-failure",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@tanstack/react-router": "1.0.0",
+    "@tanstack/router-plugin": "1.0.0"
+  }
+}"#,
+    )
+    .expect("write package");
+    std::fs::write(root.join("src/index.ts"), "export const ready = 1;\n")
+        .expect("write entry point");
+    std::fs::write(&orphan, "export const orphan = 2;\n").expect("write orphan");
+    std::fs::write(
+        root.join("vite.config.ts"),
+        format!(
+            r#"import {{ tanstackRouter }} from "@tanstack/router-plugin/vite";
+export default {{
+  plugins: [tanstackRouter({{ routeFileIgnorePattern: "{route_file_ignore_pattern}" }})],
+}};
+"#
+        ),
+    )
+    .expect("write Vite config");
+    orphan
+}
+
+#[test]
+fn blocking_analysis_surfaces_project_analysis_errors() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("canonical root");
+    write_analysis_failure_fixture(&root, "^(?!layout\\.tsx$).+$");
+
+    let result = run_blocking_analysis(&BlockingAnalysisInput {
+        project_roots: vec![root.clone()],
+        config_path: None,
+        allow_remote_extends: false,
+        duplication_options: None,
+        production_override: None,
+        inline_complexity_enabled: false,
+        root: root.clone(),
+        toplevel: Some(root.clone()),
+        changed_since: None,
+    });
+
+    let Err(error) = result else {
+        panic!("invalid project analysis must not return a successful output");
+    };
+    let rendered = error.to_string();
+    assert!(rendered.contains(&root.display().to_string()));
+    assert!(rendered.contains("invalid plugin regex configuration"));
+    assert!(rendered.contains("plugin 'tanstack-router'"));
+    assert!(rendered.contains("exclude_segment_regexes"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn failed_analysis_refresh_preserves_last_valid_snapshot_and_diagnostics() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("canonical root");
+    let orphan = write_analysis_failure_fixture(&root, "^__");
+    let orphan_uri = Uri::from_file_path(&orphan).expect("orphan file URI");
+
+    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    *backend.root.write().await = Some(root.clone());
+
+    backend.run_analysis().await;
+
+    assert!(
+        backend
+            .analysis
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|snapshot| snapshot
+                .results
+                .unused_files
+                .iter()
+                .any(|finding| finding.file.path == orphan)),
+        "valid analysis must establish an unused-file snapshot"
+    );
+    assert!(
+        backend
+            .cached_diagnostics
+            .read()
+            .await
+            .contains_key(&orphan_uri),
+        "valid analysis must cache the orphan diagnostic"
+    );
+    assert!(
+        backend
+            .previous_diagnostic_uris
+            .read()
+            .await
+            .contains(&orphan_uri),
+        "valid analysis must record the published diagnostic URI"
+    );
+
+    write_analysis_failure_fixture(&root, "^(?!layout\\.tsx$).+$");
+    backend.run_analysis().await;
+
+    assert!(
+        backend
+            .analysis
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|snapshot| snapshot
+                .results
+                .unused_files
+                .iter()
+                .any(|finding| finding.file.path == orphan)),
+        "failed refresh must preserve the last valid analysis snapshot"
+    );
+    assert!(
+        backend
+            .cached_diagnostics
+            .read()
+            .await
+            .contains_key(&orphan_uri),
+        "failed refresh must not clear the last valid diagnostics"
+    );
+    assert!(
+        backend
+            .previous_diagnostic_uris
+            .read()
+            .await
+            .contains(&orphan_uri),
+        "failed refresh must not clear the last published diagnostic URI"
     );
 }
 
@@ -1751,7 +1890,8 @@ fn run_blocking_analysis_only_stamps_applied_changed_since_scope() {
         root: root.to_path_buf(),
         toplevel: Some(root.to_path_buf()),
         changed_since: Some("HEAD".to_string()),
-    });
+    })
+    .expect("changed-since analysis succeeds");
 
     assert_eq!(output.applied_changed_since.as_deref(), Some("HEAD"));
     assert!(
@@ -1788,7 +1928,8 @@ fn run_blocking_analysis_only_stamps_applied_changed_since_scope() {
         root: root.to_path_buf(),
         toplevel: Some(root.to_path_buf()),
         changed_since: Some("definitely-not-a-ref".to_string()),
-    });
+    })
+    .expect("analysis with ignored changed-since ref succeeds");
 
     assert!(
         invalid.applied_changed_since.is_none(),

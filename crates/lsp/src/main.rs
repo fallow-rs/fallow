@@ -594,8 +594,13 @@ impl FallowLspServer {
         .await;
 
         match join_result {
-            Ok(output) => {
+            Ok(Ok(output)) => {
                 self.apply_analysis_output(output, &root, &version_snapshot)
+                    .await;
+            }
+            Ok(Err(error)) => {
+                self.client
+                    .log_message(MessageType::ERROR, format!("Analysis failed: {error}"))
                     .await;
             }
             Err(e) => {

@@ -49,6 +49,25 @@ pub struct BlockingAnalysisOutput {
     pub applied_changed_since: Option<String>,
 }
 
+#[derive(Debug)]
+pub struct ProjectAnalysisError {
+    project_root: PathBuf,
+    message: String,
+}
+
+impl std::fmt::Display for ProjectAnalysisError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "project analysis failed for {}: {}",
+            self.project_root.display(),
+            self.message
+        )
+    }
+}
+
+impl std::error::Error for ProjectAnalysisError {}
+
 pub struct LspAnalysisSnapshot {
     pub results: AnalysisResults,
     pub duplication: DuplicationReport,
@@ -69,7 +88,9 @@ impl LspAnalysisSnapshot {
     }
 }
 
-pub fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
+pub fn analyze_project_root(
+    input: &mut ProjectRootAnalysisInput<'_>,
+) -> Result<(), ProjectAnalysisError> {
     let session = match AnalysisSession::load_with_config_options(
         input.project_root,
         input.config_path,
@@ -89,8 +110,7 @@ pub fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
     ) {
         Ok(session) => session,
         Err(e) => {
-            analyze_project_root_config_fallback(input, &e);
-            return;
+            return analyze_project_root_config_fallback(input, &e);
         }
     };
 
@@ -113,7 +133,7 @@ pub fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
         || session.config().duplicates.clone(),
         |options| options.merge_with(&session.config().duplicates),
     );
-    run_typed_project_analysis(input, &session, &duplicates_config);
+    run_typed_project_analysis(input, &session, &duplicates_config)
 }
 
 /// Config-load failure path: record the warning, and when no explicit config
@@ -122,14 +142,14 @@ pub fn analyze_project_root(input: &mut ProjectRootAnalysisInput<'_>) {
 fn analyze_project_root_config_fallback(
     input: &mut ProjectRootAnalysisInput<'_>,
     err: &impl std::fmt::Display,
-) {
+) -> Result<(), ProjectAnalysisError> {
     let detail = config_load_error_detail(input.project_root, input.config_path, err);
     input.config_messages.push((MessageType::WARNING, detail));
     if input.config_path.is_some() {
-        return;
+        return Ok(());
     }
     let session = AnalysisSession::load_default(input.project_root);
-    run_typed_project_analysis(input, &session, &DuplicatesConfig::default());
+    run_typed_project_analysis(input, &session, &DuplicatesConfig::default())
 }
 
 /// Run typed project analysis for a loaded config, with the optional
@@ -139,25 +159,32 @@ fn run_typed_project_analysis(
     input: &mut ProjectRootAnalysisInput<'_>,
     session: &AnalysisSession,
     duplicates_config: &DuplicatesConfig,
-) {
-    if let Ok(output) = session.analyze_project_with_changed_files(
-        duplicates_config,
-        input.inline_complexity_enabled,
-        input.changed_files,
-    ) {
-        if input.inline_complexity_enabled {
-            input
-                .merged_inline_complexity
-                .extend(fallow_api::collect_inline_complexity(
-                    session.config(),
-                    &output.dead_code,
-                ));
-        }
-        input.merged_analysis.merge_project_output(output);
+) -> Result<(), ProjectAnalysisError> {
+    let output = session
+        .analyze_project_with_changed_files(
+            duplicates_config,
+            input.inline_complexity_enabled,
+            input.changed_files,
+        )
+        .map_err(|error| ProjectAnalysisError {
+            project_root: input.project_root.to_path_buf(),
+            message: error.to_string(),
+        })?;
+    if input.inline_complexity_enabled {
+        input
+            .merged_inline_complexity
+            .extend(fallow_api::collect_inline_complexity(
+                session.config(),
+                &output.dead_code,
+            ));
     }
+    input.merged_analysis.merge_project_output(output);
+    Ok(())
 }
 
-pub fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisOutput {
+pub fn run_blocking_analysis(
+    input: &BlockingAnalysisInput,
+) -> Result<BlockingAnalysisOutput, ProjectAnalysisError> {
     let mut analysis = EditorAnalysisOutput::default();
     let mut inline_complexity = Vec::new();
     let mut config_messages: Vec<(MessageType, String)> =
@@ -179,7 +206,7 @@ pub fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisO
             merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,
             config_messages: &mut config_messages,
-        });
+        })?;
     }
 
     if let Some(changed_files) = changed_scope.files.as_ref() {
@@ -190,13 +217,13 @@ pub fn run_blocking_analysis(input: &BlockingAnalysisInput) -> BlockingAnalysisO
         );
     }
 
-    BlockingAnalysisOutput {
+    Ok(BlockingAnalysisOutput {
         analysis,
         inline_complexity,
         config_messages,
         changed_message: changed_scope.message,
         applied_changed_since: changed_scope.applied_ref,
-    }
+    })
 }
 
 /// Test helper over the editor API accumulator.
