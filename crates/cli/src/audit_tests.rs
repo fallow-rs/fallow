@@ -744,6 +744,40 @@ fn reuse_or_create_stamps_sidecar_on_fresh_create() {
 }
 
 #[test]
+fn reusable_worktree_without_raw_materialization_marker_is_rebuilt() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-legacy-reusable");
+    let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
+    let initial = BaseWorktree::reuse_or_create(&repo, &base_sha)
+        .expect("initial reusable worktree should be created");
+    let worktree_path = initial.path().to_path_buf();
+    drop(initial);
+    let marker_output = Command::new("git")
+        .args(["rev-parse", "--git-path", "fallow-raw-materialized-v1"])
+        .current_dir(&worktree_path)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .output()
+        .expect("materialization marker path should resolve");
+    assert!(marker_output.status.success());
+    let marker = PathBuf::from(String::from_utf8_lossy(&marker_output.stdout).trim());
+    let _ = fs::remove_file(marker);
+    fs::write(worktree_path.join("README.md"), "tampered\n")
+        .expect("legacy worktree should be mutable");
+
+    let rebuilt = BaseWorktree::reuse_or_create(&repo, &base_sha)
+        .expect("legacy reusable worktree should be rebuilt");
+
+    assert_eq!(rebuilt.path(), worktree_path);
+    assert_eq!(
+        fs::read_to_string(rebuilt.path().join("README.md")).expect("read rebuilt file"),
+        "seed\n",
+        "an unmarked legacy cache must not bypass raw materialization"
+    );
+    cleanup_reusable_worktree(&repo, rebuilt.path());
+}
+
+#[test]
 fn days_to_duration_zero_disables() {
     assert!(days_to_duration(0).is_none());
     assert_eq!(days_to_duration(1), Some(Duration::from_hours(24)));
@@ -871,6 +905,36 @@ fn audit_base_worktree_reuses_current_node_modules_context() {
             .join("node_modules/@react-native/typescript-config/tsconfig.json")
             .is_file(),
         "base worktree should preserve tsconfig extends targets installed in node_modules"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn audit_base_worktree_uses_no_checkout_engine_materializer() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let temp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(temp.path(), "repo-no-checkout");
+    let sentinel = temp.path().join("post-checkout-ran");
+    let hook = repo.join(".git/hooks/post-checkout");
+    fs::write(
+        &hook,
+        format!("#!/bin/sh\nprintf ran > '{}'\n", sentinel.display()),
+    )
+    .expect("post-checkout hook should be written");
+    let mut permissions = fs::metadata(&hook)
+        .expect("hook metadata should be readable")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&hook, permissions).expect("hook should be executable");
+
+    let worktree =
+        BaseWorktree::create(&repo, "HEAD", None).expect("base worktree should be created");
+
+    assert!(worktree.path().join("README.md").is_file());
+    assert!(
+        !sentinel.exists(),
+        "CLI base worktree creation must not execute checkout hooks"
     );
 }
 

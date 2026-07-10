@@ -25,20 +25,16 @@ impl BaseWorktree {
         }
         let path = non_reusable_worktree_path()?;
         let mut guard = WorktreeCleanupGuard::new(repo_root, &path);
-        let mut command = Command::new("git");
-        command
-            .args([
-                "worktree",
-                "add",
-                "--detach",
-                "--quiet",
-                guard.path().to_str()?,
+        if let Err(error) = fallow_engine::repo_refs::create_detached_base_worktree(
+            repo_root,
+            guard.path(),
+            base_ref,
+        ) {
+            tracing::debug!(
                 base_ref,
-            ])
-            .current_dir(repo_root);
-        clear_ambient_git_env(&mut command);
-        let output = crate::signal::scoped_child::output(&mut command).ok()?;
-        if !output.status.success() {
+                error = %error,
+                "could not materialize non-reusable audit base worktree",
+            );
             return None;
         }
         guard.defuse();
@@ -70,20 +66,16 @@ impl BaseWorktree {
         remove_audit_worktree(repo_root, &path);
         let _ = std::fs::remove_dir_all(&path);
         let mut guard = WorktreeCleanupGuard::new(repo_root, &path);
-        let mut command = Command::new("git");
-        command
-            .args([
-                "worktree",
-                "add",
-                "--detach",
-                "--quiet",
-                guard.path().to_string_lossy().as_ref(),
+        if let Err(error) = fallow_engine::repo_refs::create_detached_base_worktree(
+            repo_root,
+            guard.path(),
+            base_sha,
+        ) {
+            tracing::debug!(
                 base_sha,
-            ])
-            .current_dir(repo_root);
-        clear_ambient_git_env(&mut command);
-        let output = crate::signal::scoped_child::output(&mut command).ok()?;
-        if !output.status.success() {
+                error = %error,
+                "could not materialize reusable audit base worktree",
+            );
             return None;
         }
         guard.defuse();
@@ -492,6 +484,7 @@ fn reusable_audit_worktree_is_ready(repo_root: &Path, path: &Path, base_sha: &st
         return false;
     }
     git_rev_parse(path, "HEAD").is_some_and(|head| head == base_sha)
+        && fallow_engine::repo_refs::detached_base_worktree_is_raw_materialized(path)
 }
 
 pub fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
