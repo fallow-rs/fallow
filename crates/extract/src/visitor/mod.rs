@@ -1582,11 +1582,22 @@ impl ModuleInfoExtractor {
     /// A same-file factory binds the class immediately. An imported callee emits the
     /// typed fact the analyze layer resolves through `exported_factory_returns`; any
     /// other callee resolves to no proven factory export and is a no-op there.
+    ///
+    /// The callee is matched by name and not by scope, so a local binding that shadows
+    /// an imported factory is treated as that factory. It can only ADD credit, so the
+    /// worst case is a member that stays unreported.
     fn resolve_factory_inline_accesses(&mut self) {
         if self.factory_inline_accesses.is_empty() {
             return;
         }
         let inline_accesses = std::mem::take(&mut self.factory_inline_accesses);
+        // Indexed once: a file with many `helper().x` reads would otherwise rescan
+        // every import per access.
+        let imported_locals: FxHashSet<&str> = self
+            .imports
+            .iter()
+            .map(|import| import.local_name.as_str())
+            .collect();
         let mut deferred_facts = Vec::new();
         for (callee_name, member) in inline_accesses {
             if let Some(class_name) = self.factory_return_functions.get(&callee_name) {
@@ -1594,11 +1605,7 @@ impl ModuleInfoExtractor {
                 self.member_accesses.push(MemberAccess { object, member });
                 continue;
             }
-            if self
-                .imports
-                .iter()
-                .any(|import| import.local_name == callee_name)
-            {
+            if imported_locals.contains(callee_name.as_str()) {
                 deferred_facts.push((callee_name, member));
             }
         }
@@ -1735,9 +1742,16 @@ impl ModuleInfoExtractor {
     ///
     /// Walk the local `extends` chain to the first name that is NOT a locally declared
     /// class -- the imported or exported base -- and re-emit the access against it.
-    /// Only a bare identifier (or a dotted `ns.Base`) is ever recorded as a superclass;
-    /// `class Sub extends mixin(Base) {}` records `None` and abstains here, which is
-    /// correct because a mixin can redefine what the subclass exposes.
+    ///
+    /// `class Sub extends mixin(Base) {}` records no superclass name and abstains here,
+    /// which is correct: a mixin can redefine what the subclass exposes.
+    ///
+    /// A namespace-qualified base (`class Sub extends ns.Base {}`) re-emits the dotted
+    /// name verbatim. The analyze layer resolves only bare local names, so that access
+    /// is inert and the base's members stay reported. This is NOT a regression: a
+    /// direct `ns.Base.someStatic()` is equally uncredited today, because a
+    /// namespace-imported class is not in the import/export map either. Fixing it means
+    /// resolving namespace aliases in the analyze layer, which is a separate change.
     ///
     /// Crediting a base whose subclass shadows the member is a false negative, never a
     /// false positive, which is the direction this rule must err in.

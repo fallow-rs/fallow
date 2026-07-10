@@ -29,6 +29,10 @@ export class UrlSyncManager {
     return value
   }
 
+  public static viaNamespaceBase(value: string): string {
+    return value
+  }
+
   public static trulyDead(value: string): string {
     return value
   }

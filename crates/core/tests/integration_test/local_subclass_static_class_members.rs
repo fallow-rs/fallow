@@ -90,3 +90,25 @@ fn mixin_superclass_abstains_rather_than_guessing() {
          be revisited: {unused:?}"
     );
 }
+
+/// `class Sub extends ns.UrlSyncManager {}` walks to the dotted name `ns.UrlSyncManager`,
+/// which the analyze layer cannot resolve: its import/export map keys bare local names,
+/// not namespace-qualified ones. `viaNamespaceBase` therefore stays reported.
+///
+/// This is a pre-existing gap, not one this change introduces, and it is wider than
+/// subclassing: a direct `ns.UrlSyncManager.viaNamespaceBase()` is equally uncredited on
+/// `main`. Closing it means resolving namespace aliases in the analyze layer.
+///
+/// Pinned so that a future change to namespace resolution has to decide this case
+/// deliberately rather than flip it by accident.
+#[test]
+fn namespace_qualified_base_is_a_known_uncredited_gap() {
+    let unused = unused_members("local-subclass-static-class-members");
+
+    assert!(
+        unused.contains(&"UrlSyncManager.viaNamespaceBase".to_string()),
+        "a namespace-qualified base resolves to no bare local name, so this member is \
+         expected to stay reported; if it is now credited, namespace resolution changed \
+         and this gap should be closed deliberately: {unused:?}"
+    );
+}

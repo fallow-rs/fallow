@@ -1,3 +1,4 @@
+import * as ns from './base'
 import { UrlSyncManager, mixin } from './base'
 
 class MapUrlSyncManager extends UrlSyncManager {}
@@ -40,6 +41,12 @@ class ShadowUrlSyncManager extends UrlSyncManager {
   }
 }
 
+// A namespace-qualified base. The walk re-emits the dotted `ns.UrlSyncManager`
+// verbatim, and the analyze layer resolves only bare local names, so this is inert
+// and `viaNamespaceBase` stays reported. Pre-existing: a direct
+// `ns.UrlSyncManager.viaNamespaceBase()` is equally uncredited on main.
+class NamespaceUrlSyncManager extends ns.UrlSyncManager {}
+
 const instance = new MapUrlSyncManager()
 
 export const config = {
@@ -52,4 +59,5 @@ export const config = {
   g: Deep17.viaDeepChain('deep'),
   h: MixedUrlSyncManager.viaMixin('mixed'),
   i: ShadowUrlSyncManager.shadowedOnSub('shadow'),
+  j: NamespaceUrlSyncManager.viaNamespaceBase('ns'),
 }
