@@ -289,7 +289,7 @@ pub(crate) struct ModuleInfoExtractor {
     factory_whole_object_candidates: Vec<String>,
     /// `(callee, member)` for a factory result read without ever being named:
     /// `f().member`, `const { member } = f()`.
-    factory_inline_accesses: Vec<(String, String)>,
+    factory_unnamed_result_accesses: Vec<(String, String)>,
     factory_return_candidates: Vec<FactoryReturnCandidate>,
     /// Same-file functions whose body returns a bare identifier (e.g.
     /// `useApi() { return api }`). Resolved against `binding_target_names` at
@@ -1586,11 +1586,11 @@ impl ModuleInfoExtractor {
     /// The callee is matched by name and not by scope, so a local binding that shadows
     /// an imported factory is treated as that factory. It can only ADD credit, so the
     /// worst case is a member that stays unreported.
-    fn resolve_factory_inline_accesses(&mut self) {
-        if self.factory_inline_accesses.is_empty() {
+    fn resolve_factory_unnamed_result_accesses(&mut self) {
+        if self.factory_unnamed_result_accesses.is_empty() {
             return;
         }
-        let inline_accesses = std::mem::take(&mut self.factory_inline_accesses);
+        let inline_accesses = std::mem::take(&mut self.factory_unnamed_result_accesses);
         // Indexed once: a file with many `helper().x` reads would otherwise rescan
         // every import per access.
         let imported_locals: FxHashSet<&str> = self
@@ -2078,7 +2078,7 @@ impl ModuleInfoExtractor {
         self.resolve_factory_return_candidates();
         // Separate from the candidate pass, which early-returns when no member
         // candidate exists: an unnamed factory result records no member candidate.
-        self.resolve_factory_inline_accesses();
+        self.resolve_factory_unnamed_result_accesses();
         self.resolve_factory_whole_object_candidates();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
@@ -2309,6 +2309,10 @@ impl ModuleInfoExtractor {
 /// can expose properties it does not name: a rest element captures every remaining
 /// property, and a computed key names one that cannot be read from source.
 ///
+/// Contrast `extract_destructured_names`, which silently drops a computed key. Here a
+/// single unnameable key makes the WHOLE pattern opaque, because a caller crediting
+/// class members off it must abstain rather than credit only the keys it can see.
+///
 /// A nested pattern (`{ a: { b } }`) yields `a` only. `b` belongs to whatever type
 /// `a` has, not to the factory's class, and crediting it would credit a same-named
 /// member of an unrelated class.
@@ -2323,6 +2327,12 @@ pub(super) fn destructured_factory_keys(obj_pat: &ObjectPattern<'_>) -> Option<V
         .collect()
 }
 
+/// The statically named keys of a destructuring pattern, SKIPPING any it cannot name.
+///
+/// Deliberately not `destructured_factory_keys`: this one drops a computed key and
+/// keeps the rest, which is what callers tracking local bindings want. A caller that
+/// must know the pattern could expose an unnamed property has to abstain instead, and
+/// wants that function.
 pub(super) fn extract_destructured_names(obj_pat: &ObjectPattern<'_>) -> Vec<String> {
     if obj_pat.rest.is_some() {
         return Vec::new();

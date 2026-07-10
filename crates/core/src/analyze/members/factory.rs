@@ -54,27 +54,17 @@ pub(super) fn credit_factory_return_class_member(
     class_local_name: &str,
     member: &str,
 ) {
-    let factory_local_keys = context.indexes.local_keys(factory_origin_file_id);
-    let Some(class_seed_keys) = factory_local_keys.get(class_local_name) else {
-        return;
-    };
-    for class_seed in class_seed_keys {
-        for class_origin in export_key_with_origins(context.graph, class_seed) {
-            let class_has_members = context
-                .indexes
-                .module_by_id
-                .get(&class_origin.file_id)
-                .is_some_and(|class_module| {
-                    export_is_class_with_members(class_module, class_origin.export_name.as_str())
-                });
-            if class_has_members {
-                context
-                    .accessed_members
-                    .entry(class_origin)
-                    .or_default()
-                    .insert(member.to_string());
-            }
-        }
+    for class_origin in factory_return_class_origins(
+        context.graph,
+        context.indexes,
+        factory_origin_file_id,
+        class_local_name,
+    ) {
+        context
+            .accessed_members
+            .entry(class_origin)
+            .or_default()
+            .insert(member.to_string());
     }
 }
 
@@ -99,51 +89,20 @@ pub(super) fn propagate_factory_fn_accesses(
     indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
-    let mut credit_context = FactoryReturnCreditContext {
-        graph,
-        indexes,
-        accessed_members,
-    };
-
     for resolved in resolved_modules {
         let local_to_export_keys = indexes.local_keys(resolved.file_id);
         for access in factory_fn_member_accesses(resolved) {
             let Some(seed_keys) = local_to_export_keys.get(access.callee_name.as_str()) else {
                 continue;
             };
-            for seed_key in seed_keys {
-                for factory_origin in
-                    walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
-                {
-                    let Some(factory_module) = credit_context
-                        .indexes
-                        .module_by_id
-                        .get(&factory_origin.file_id)
-                    else {
-                        continue;
-                    };
-                    // (2) the origin must declare an exported factory-return for
-                    // this export name, the cross-module over-credit gate.
-                    let Some(factory_return) =
-                        factory_module
-                            .exported_factory_returns
-                            .iter()
-                            .find(|factory_return| {
-                                factory_origin.export_name.as_str()
-                                    == factory_return.export_name.as_str()
-                            })
-                    else {
-                        continue;
-                    };
-                    // (3) resolve the returned class's LOCAL name through the
-                    // factory module's own imports/exports to a class export.
-                    credit_factory_return_class_member(
-                        &mut credit_context,
-                        factory_origin.file_id,
-                        factory_return.class_local_name.as_str(),
-                        access.member.as_str(),
-                    );
-                }
+            let classes = seed_keys
+                .iter()
+                .flat_map(|seed_key| factory_return_classes_for_callee(graph, indexes, seed_key));
+            for class_origin in classes {
+                accessed_members
+                    .entry(class_origin)
+                    .or_default()
+                    .insert(access.member.clone());
             }
         }
     }
@@ -177,9 +136,9 @@ fn factory_return_class_origins(
         .collect()
 }
 
-/// The class a callee's proven exported factory returns, resolved across modules.
-/// `None` for any callee that is not an internal exported factory with a strict,
-/// value-proven return.
+/// The classes a callee's proven exported factory returns, resolved across modules.
+/// Empty for any callee that is not an internal exported factory with a strict,
+/// value-proven return: each link of the chain is an over-credit gate.
 fn factory_return_classes_for_callee(
     graph: &ModuleGraph,
     indexes: &MemberPassIndexes<'_>,

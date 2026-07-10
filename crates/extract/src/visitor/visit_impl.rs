@@ -219,13 +219,9 @@ impl ModuleInfoExtractor {
         declarator: &VariableDeclarator<'_>,
         init: &Expression<'_>,
     ) {
-        let Expression::CallExpression(call) = init else {
+        let Some(callee_name) = Self::bare_call_callee_name(init) else {
             return;
         };
-        let Expression::Identifier(callee) = &call.callee else {
-            return;
-        };
-        let callee_name = callee.name.to_string();
 
         match &declarator.id {
             BindingPattern::BindingIdentifier(id) => {
@@ -235,11 +231,10 @@ impl ModuleInfoExtractor {
                         callee_name,
                     });
             }
-            // `const { a, b } = useApi()`. The instance is never named, so stand a
-            // synthetic local in for it and record a member access per key; the
-            // existing candidate resolution then credits the class, same-file or
-            // across modules. Dropping this shape is what reported every member of
-            // a destructured factory result as unused.
+            // `const { a, b } = useApi()`. The instance is never named, so queue one
+            // direct factory-result access per statically named key. Dropping this
+            // shape is what reported every member of a destructured factory result
+            // as unused.
             BindingPattern::ObjectPattern(pattern) => {
                 let Some(keys) = super::destructured_factory_keys(pattern) else {
                     // A rest element or computed key can read any property.
@@ -247,7 +242,7 @@ impl ModuleInfoExtractor {
                     return;
                 };
                 for key in keys {
-                    self.factory_inline_accesses
+                    self.factory_unnamed_result_accesses
                         .push((callee_name.clone(), key));
                 }
             }
@@ -255,12 +250,12 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// The callee of a bare `factory()` used directly as the object of a member
-    /// access (`useApi().member`). A member-expression callee (`obj.f().a`) and a
-    /// call-of-a-call (`f()().a`) are deliberately not matched: neither resolves to
-    /// a proven factory export, so crediting through them would be a guess.
-    fn inline_factory_call_callee(object: &Expression<'_>) -> Option<String> {
-        let Expression::CallExpression(call) = object else {
+    /// The callee of a bare `identifier(...)` call. A member-expression callee
+    /// (`obj.f()`) and a call-of-a-call (`f()()`) are deliberately not matched:
+    /// neither resolves to a proven factory export, so crediting through them would
+    /// be a guess.
+    fn bare_call_callee_name(expression: &Expression<'_>) -> Option<String> {
+        let Expression::CallExpression(call) = expression else {
             return None;
         };
         let Expression::Identifier(callee) = &call.callee else {
@@ -2445,14 +2440,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 member: expr.property.name.to_string(),
             });
         }
-        if let Some(callee_name) = Self::inline_factory_call_callee(&expr.object)
+        if let Some(callee_name) = Self::bare_call_callee_name(&expr.object)
             && Self::inline_store_factory_receiver(&expr.object).is_none()
         {
             // `useApi().member`, with no local ever naming the result. Only this
             // first-level member belongs to the factory's class: in `f().a.b`, `b` is
             // read off whatever type `a` has, and the outer member expression's
             // object is a member expression, not a call, so it never matches here.
-            self.factory_inline_accesses
+            self.factory_unnamed_result_accesses
                 .push((callee_name, expr.property.name.to_string()));
         }
         if let Some(store_factory) = Self::inline_store_factory_receiver(&expr.object) {
