@@ -53,17 +53,17 @@ if FALLOW_PR_COMMENT_ENVELOPE_FILE="fallow-mr-comment-envelope.json" \
    FALLOW_PR_DECISION_FILE="fallow-mr-decision.json" \
    FALLOW_PR_DETAILS_FILE="fallow-mr-details.json" \
    render_with_fallow pr-comment-gitlab fallow-mr-comment.md; then
-  ENVELOPE_ARGS=()
-  [ -f fallow-mr-comment-envelope.json ] && ENVELOPE_ARGS=(--envelope fallow-mr-comment-envelope.json)
-  if ! fallow ci post-pr-comment \
-      --provider gitlab \
-      --mr "$CI_MERGE_REQUEST_IID" \
-      --project-id "$CI_PROJECT_ID" \
-      --api-url "$CI_API_V4_URL" \
-      --body fallow-mr-comment.md \
-      "${ENVELOPE_ARGS[@]}" \
-      --marker-id "${FALLOW_COMMENT_ID:-fallow-results}" \
-      > fallow-mr-comment-plan.json; then
+  POST_COMMENT_ARGS=(
+    ci post-pr-comment
+    --provider gitlab
+    --mr "$CI_MERGE_REQUEST_IID"
+    --project-id "$CI_PROJECT_ID"
+    --api-url "$CI_API_V4_URL"
+    --body fallow-mr-comment.md
+  )
+  [ -f fallow-mr-comment-envelope.json ] && POST_COMMENT_ARGS+=(--envelope fallow-mr-comment-envelope.json)
+  POST_COMMENT_ARGS+=(--marker-id "${FALLOW_COMMENT_ID:-fallow-results}")
+  if ! fallow "${POST_COMMENT_ARGS[@]}" > fallow-mr-comment-plan.json; then
     echo "WARNING: Failed to post MR comment"
     exit 0
   fi

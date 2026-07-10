@@ -94,16 +94,16 @@ if FALLOW_PR_COMMENT_ENVELOPE_FILE="$PR_COMMENT_ENVELOPE_FILE" \
    FALLOW_PR_DETAILS_FILE="$PR_DETAILS_FILE" \
    render_with_fallow pr-comment-github "$PR_COMMENT_FILE"; then
   PLAN_FILE=$(artifact_path fallow-pr-comment-plan.json)
-  ENVELOPE_ARGS=()
-  [ -f "$PR_COMMENT_ENVELOPE_FILE" ] && ENVELOPE_ARGS=(--envelope "$PR_COMMENT_ENVELOPE_FILE")
-  if ! fallow ci post-pr-comment \
-      --provider github \
-      --pr "$PR_NUMBER" \
-      --repo "$GH_REPO" \
-      --body "$PR_COMMENT_FILE" \
-      "${ENVELOPE_ARGS[@]}" \
-      --marker-id "${FALLOW_COMMENT_ID:-fallow-results}" \
-      > "$PLAN_FILE"; then
+  POST_COMMENT_ARGS=(
+    ci post-pr-comment
+    --provider github
+    --pr "$PR_NUMBER"
+    --repo "$GH_REPO"
+    --body "$PR_COMMENT_FILE"
+  )
+  [ -f "$PR_COMMENT_ENVELOPE_FILE" ] && POST_COMMENT_ARGS+=(--envelope "$PR_COMMENT_ENVELOPE_FILE")
+  POST_COMMENT_ARGS+=(--marker-id "${FALLOW_COMMENT_ID:-fallow-results}")
+  if ! fallow "${POST_COMMENT_ARGS[@]}" > "$PLAN_FILE"; then
     echo "::warning::Failed to post PR comment"
     exit 0
   fi
@@ -114,14 +114,15 @@ if FALLOW_PR_COMMENT_ENVELOPE_FILE="$PR_COMMENT_ENVELOPE_FILE" \
   fi
   CHECK_HEAD_SHA="${PR_HEAD_SHA:-${GITHUB_SHA:-}}"
   if [ -f "$PR_DECISION_FILE" ] && [ -n "$CHECK_HEAD_SHA" ]; then
-    CHECK_RUN_ARGS=()
+    CHECK_RUN_ARGS=(
+      ci post-check-run
+      --provider github
+      --decision "$PR_DECISION_FILE"
+      --repo "$GH_REPO"
+      --head-sha "$CHECK_HEAD_SHA"
+    )
     [ -n "${GITHUB_API_URL:-}" ] && CHECK_RUN_ARGS+=(--api-url "$GITHUB_API_URL")
-    if ! fallow ci post-check-run \
-        --provider github \
-        --decision "$PR_DECISION_FILE" \
-        --repo "$GH_REPO" \
-        --head-sha "$CHECK_HEAD_SHA" \
-        "${CHECK_RUN_ARGS[@]}" \
+    if ! fallow "${CHECK_RUN_ARGS[@]}" \
         > "$(artifact_path fallow-check-run.json)" \
         2> "$(artifact_path fallow-check-run-stderr.log)"; then
       echo "::warning::Failed to post Fallow check run"
