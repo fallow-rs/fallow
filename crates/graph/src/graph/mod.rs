@@ -8,11 +8,11 @@ mod cycles;
 mod fan_io;
 mod impact_closure;
 mod namespace_aliases;
+mod namespace_indexes;
 mod namespace_re_exports;
 mod narrowing;
 mod partition_order;
 mod public_exports;
-mod re_export_reachability;
 mod re_exports;
 mod reachability;
 pub mod types;
@@ -160,6 +160,22 @@ const _: () = assert!(std::mem::size_of::<Edge>() == 32);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportedSymbol>() == 64);
 
+#[cold]
+#[inline(never)]
+fn propagate_namespace_references(
+    graph: &mut ModuleGraph,
+    module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+    features: build::NamespaceFeatures,
+) {
+    let indexes = namespace_indexes::NamespacePropagationIndexes::new(graph, module_by_id);
+    if features.has_aliases {
+        namespace_aliases::propagate_cross_package_aliases(graph, module_by_id, &indexes);
+    }
+    if features.has_re_exports {
+        namespace_re_exports::propagate_namespace_re_exports(graph, &indexes);
+    }
+}
+
 impl ModuleGraph {
     fn resolve_entry_point_ids(
         entry_points: &[EntryPoint],
@@ -228,7 +244,7 @@ impl ModuleGraph {
             }
         }
 
-        let mut graph = Self::populate_edges(&build::PopulateEdgesInput {
+        let (mut graph, namespace_features) = Self::populate_edges(&build::PopulateEdgesInput {
             files,
             module_by_id: &module_by_id,
             entry_point_ids: &entry_point_ids,
@@ -240,9 +256,9 @@ impl ModuleGraph {
 
         graph.populate_references(&module_by_id, &entry_point_ids);
 
-        namespace_aliases::propagate_cross_package_aliases(&mut graph, &module_by_id);
-
-        namespace_re_exports::propagate_namespace_re_exports(&mut graph, &module_by_id);
+        if namespace_features.has_aliases || namespace_features.has_re_exports {
+            propagate_namespace_references(&mut graph, &module_by_id, namespace_features);
+        }
 
         graph.mark_reachable(
             &entry_point_ids,

@@ -21,6 +21,12 @@ pub(super) struct PopulateEdgesInput<'a> {
     pub(super) total_capacity: usize,
 }
 
+#[derive(Clone, Copy, Default)]
+pub(super) struct NamespaceFeatures {
+    pub(super) has_aliases: bool,
+    pub(super) has_re_exports: bool,
+}
+
 /// Mutable accumulator state shared across all files during edge population.
 struct EdgeAccumulator {
     package_usage: FxHashMap<String, Vec<FileId>>,
@@ -171,7 +177,7 @@ fn build_module_node(
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     entry_point_ids: &FxHashSet<FileId>,
     edge_range: std::ops::Range<usize>,
-) -> ModuleNode {
+) -> (ModuleNode, NamespaceFeatures) {
     let resolved = module_by_id.get(&file.id).copied();
 
     let mut exports = build_export_symbols(resolved);
@@ -180,16 +186,27 @@ fn build_module_node(
     }
 
     let has_cjs_exports = resolved.is_some_and(|m| m.has_cjs_exports);
-    let re_export_edges = build_re_export_edges(resolved);
+    let (re_export_edges, has_namespace_re_exports) = build_re_export_edges(resolved);
+    let has_namespace_aliases = resolved.is_some_and(|m| !m.namespace_object_aliases.is_empty());
 
-    ModuleNode {
-        file_id: file.id,
-        path: file.path.clone(),
-        edge_range,
-        exports,
-        re_exports: re_export_edges,
-        flags: ModuleNode::flags_from(entry_point_ids.contains(&file.id), false, has_cjs_exports),
-    }
+    (
+        ModuleNode {
+            file_id: file.id,
+            path: file.path.clone(),
+            edge_range,
+            exports,
+            re_exports: re_export_edges,
+            flags: ModuleNode::flags_from(
+                entry_point_ids.contains(&file.id),
+                false,
+                has_cjs_exports,
+            ),
+        },
+        NamespaceFeatures {
+            has_aliases: has_namespace_aliases,
+            has_re_exports: has_namespace_re_exports,
+        },
+    )
 }
 
 /// Copy a resolved module's own exports into fresh `ExportSymbol` entries
@@ -246,23 +263,27 @@ fn append_named_re_export_stubs(exports: &mut Vec<ExportSymbol>, resolved: &Reso
 
 /// Build the internal re-export edge list for a module (external re-export
 /// targets are dropped here; they are handled via package usage).
-fn build_re_export_edges(resolved: Option<&ResolvedModule>) -> Vec<ReExportEdge> {
-    resolved
-        .map(|m| {
-            m.re_exports
-                .iter()
-                .filter_map(|re| {
-                    re.target.internal_file_id().map(|target_id| ReExportEdge {
-                        source_file: target_id,
-                        imported_name: re.info.imported_name.clone(),
-                        exported_name: re.info.exported_name.clone(),
-                        is_type_only: re.info.is_type_only,
-                        span: re.info.span,
-                    })
-                })
-                .collect()
+fn build_re_export_edges(resolved: Option<&ResolvedModule>) -> (Vec<ReExportEdge>, bool) {
+    let Some(resolved) = resolved else {
+        return (Vec::new(), false);
+    };
+    let mut has_namespace_re_exports = false;
+    let edges = resolved
+        .re_exports
+        .iter()
+        .filter_map(|re| {
+            has_namespace_re_exports |=
+                re.info.imported_name == "*" && re.info.exported_name != "*";
+            re.target.internal_file_id().map(|target_id| ReExportEdge {
+                source_file: target_id,
+                imported_name: re.info.imported_name.clone(),
+                exported_name: re.info.exported_name.clone(),
+                is_type_only: re.info.is_type_only,
+                span: re.info.span,
+            })
         })
-        .unwrap_or_default()
+        .collect();
+    (edges, has_namespace_re_exports)
 }
 
 impl ModuleGraph {
@@ -270,7 +291,7 @@ impl ModuleGraph {
     ///
     /// Creates `ModuleNode` entries, flat `Edge` storage, reverse dependency
     /// indices, package usage maps, and the namespace-imported bitset.
-    pub(super) fn populate_edges(input: &PopulateEdgesInput<'_>) -> Self {
+    pub(super) fn populate_edges(input: &PopulateEdgesInput<'_>) -> (Self, NamespaceFeatures) {
         let files = input.files;
         let module_by_id = input.module_by_id;
         let entry_point_ids = input.entry_point_ids;
@@ -281,6 +302,7 @@ impl ModuleGraph {
         let mut all_edges = Vec::new();
         let mut modules = Vec::with_capacity(module_count);
         let mut reverse_deps = vec![Vec::new(); total_capacity];
+        let mut namespace_features = NamespaceFeatures::default();
         let mut acc = EdgeAccumulator {
             package_usage: FxHashMap::default(),
             type_only_package_usage: FxHashMap::default(),
@@ -309,26 +331,28 @@ impl ModuleGraph {
 
             let edge_end = all_edges.len();
 
-            modules.push(build_module_node(
-                file,
-                module_by_id,
-                entry_point_ids,
-                edge_start..edge_end,
-            ));
+            let (module, features) =
+                build_module_node(file, module_by_id, entry_point_ids, edge_start..edge_end);
+            namespace_features.has_aliases |= features.has_aliases;
+            namespace_features.has_re_exports |= features.has_re_exports;
+            modules.push(module);
         }
 
-        Self {
-            modules,
-            edges: all_edges,
-            package_usage: acc.package_usage,
-            type_only_package_usage: acc.type_only_package_usage,
-            entry_points: entry_point_ids.clone(),
-            runtime_entry_points: runtime_entry_point_ids.clone(),
-            test_entry_points: test_entry_point_ids.clone(),
-            reverse_deps,
-            namespace_imported: acc.namespace_imported,
-            re_export_cycles: Vec::new(),
-        }
+        (
+            Self {
+                modules,
+                edges: all_edges,
+                package_usage: acc.package_usage,
+                type_only_package_usage: acc.type_only_package_usage,
+                entry_points: entry_point_ids.clone(),
+                runtime_entry_points: runtime_entry_point_ids.clone(),
+                test_entry_points: test_entry_point_ids.clone(),
+                reverse_deps,
+                namespace_imported: acc.namespace_imported,
+                re_export_cycles: Vec::new(),
+            },
+            namespace_features,
+        )
     }
 
     /// Record which files reference which exports from edges.

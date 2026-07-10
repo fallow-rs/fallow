@@ -219,6 +219,309 @@ struct ReExportInput {
     entry_points: Vec<fallow_core::discover::EntryPoint>,
 }
 
+const NAMESPACE_TARGET_COUNT: u32 = 192;
+const NAMESPACE_CONSUMERS_PER_TARGET: u32 = 6;
+const NAMESPACE_EXPORTS_PER_TARGET: u32 = 8;
+
+fn empty_resolved_module(
+    file_id: fallow_core::discover::FileId,
+    path: PathBuf,
+) -> fallow_core::resolve::ResolvedModule {
+    fallow_core::resolve::ResolvedModule {
+        file_id,
+        path,
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![],
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        semantic_facts: Box::default(),
+        whole_object_uses: Box::default(),
+        has_cjs_exports: false,
+        has_angular_component_template_url: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
+        exported_factory_returns: Box::default(),
+        type_member_types: Box::default(),
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "benchmark fixture setup is intentionally kept together"
+)]
+fn create_namespace_re_export_input() -> ReExportInput {
+    use fallow_core::discover::{DiscoveredFile, FileId};
+    use fallow_core::extract::{
+        ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess, ReExportInfo, VisibilityTag,
+    };
+    use fallow_core::resolve::{ResolveResult, ResolvedImport, ResolvedReExport};
+
+    let barrel_start = NAMESPACE_TARGET_COUNT;
+    let outer_start = barrel_start + NAMESPACE_TARGET_COUNT;
+    let consumer_start = outer_start + NAMESPACE_TARGET_COUNT;
+    let total_files = consumer_start + NAMESPACE_TARGET_COUNT * NAMESPACE_CONSUMERS_PER_TARGET;
+    let mut files = Vec::with_capacity(total_files as usize);
+    let mut resolved_modules = Vec::with_capacity(total_files as usize);
+
+    let mut push_file = |id: u32, path: PathBuf, module: fallow_core::resolve::ResolvedModule| {
+        files.push(DiscoveredFile {
+            id: FileId(id),
+            path,
+            size_bytes: 100,
+        });
+        resolved_modules.push(module);
+    };
+
+    for target in 0..NAMESPACE_TARGET_COUNT {
+        let path = PathBuf::from(format!("/project/src/target-{target}.ts"));
+        let mut module = empty_resolved_module(FileId(target), path.clone());
+        module.exports = (0..NAMESPACE_EXPORTS_PER_TARGET)
+            .map(|member| ExportInfo {
+                name: ExportName::Named(format!("member{member}")),
+                local_name: Some(format!("member{member}")),
+                is_type_only: false,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: oxc_span::Span::new(member * 10, member * 10 + 5),
+                members: vec![],
+                is_side_effect_used: false,
+                super_class: None,
+            })
+            .collect();
+        push_file(target, path, module);
+    }
+
+    for target in 0..NAMESPACE_TARGET_COUNT {
+        let id = barrel_start + target;
+        let path = PathBuf::from(format!("/project/src/namespace-{target}.ts"));
+        let mut module = empty_resolved_module(FileId(id), path.clone());
+        module.re_exports.push(ResolvedReExport {
+            info: ReExportInfo {
+                source: format!("./target-{target}"),
+                imported_name: "*".to_string(),
+                exported_name: format!("Ns{target}"),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(target)),
+        });
+        push_file(id, path, module);
+    }
+
+    for target in 0..NAMESPACE_TARGET_COUNT {
+        let id = outer_start + target;
+        let path = PathBuf::from(format!("/project/src/outer-{target}.ts"));
+        let mut module = empty_resolved_module(FileId(id), path.clone());
+        module.re_exports.push(ResolvedReExport {
+            info: ReExportInfo {
+                source: format!("./namespace-{target}"),
+                imported_name: format!("Ns{target}"),
+                exported_name: format!("PublicNs{target}"),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(barrel_start + target)),
+        });
+        push_file(id, path, module);
+    }
+
+    for target in 0..NAMESPACE_TARGET_COUNT {
+        for consumer in 0..NAMESPACE_CONSUMERS_PER_TARGET {
+            let id = consumer_start + target * NAMESPACE_CONSUMERS_PER_TARGET + consumer;
+            let path = PathBuf::from(format!("/project/src/consumer-{target}-{consumer}.ts"));
+            let local_name = format!("namespace{target}");
+            let mut module = empty_resolved_module(FileId(id), path.clone());
+            module.resolved_imports.push(ResolvedImport {
+                info: ImportInfo {
+                    source: format!("./outer-{target}"),
+                    imported_name: ImportedName::Named(format!("PublicNs{target}")),
+                    local_name: local_name.clone(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 10),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(outer_start + target)),
+            });
+            if consumer == 0 {
+                module.whole_object_uses = vec![local_name].into();
+            } else {
+                module.member_accesses.push(MemberAccess {
+                    object: local_name,
+                    member: format!("member{}", consumer % NAMESPACE_EXPORTS_PER_TARGET),
+                });
+            }
+            push_file(id, path, module);
+        }
+    }
+
+    ReExportInput {
+        files,
+        resolved_modules,
+        entry_points: vec![],
+    }
+}
+
+fn namespace_re_export_propagation(c: &mut Criterion) {
+    c.bench_function("namespace_re_export_propagation", |bencher| {
+        bencher.iter_batched_ref(
+            create_namespace_re_export_input,
+            |input| {
+                fallow_core::graph::ModuleGraph::build(
+                    &input.resolved_modules,
+                    &input.entry_points,
+                    &input.files,
+                );
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "benchmark fixture setup is intentionally kept together"
+)]
+fn create_namespace_object_alias_input() -> ReExportInput {
+    use fallow_core::discover::{DiscoveredFile, FileId};
+    use fallow_core::extract::{
+        ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess, ReExportInfo, VisibilityTag,
+    };
+    use fallow_core::resolve::{ResolveResult, ResolvedImport, ResolvedReExport};
+    use fallow_types::extract::NamespaceObjectAlias;
+
+    let alias_start = NAMESPACE_TARGET_COUNT;
+    let outer_start = alias_start + NAMESPACE_TARGET_COUNT;
+    let consumer_start = outer_start + NAMESPACE_TARGET_COUNT;
+    let total_files = consumer_start + NAMESPACE_TARGET_COUNT * NAMESPACE_CONSUMERS_PER_TARGET;
+    let mut files = Vec::with_capacity(total_files as usize);
+    let mut resolved_modules = Vec::with_capacity(total_files as usize);
+
+    let mut push_file = |id: u32, path: PathBuf, module: fallow_core::resolve::ResolvedModule| {
+        files.push(DiscoveredFile {
+            id: FileId(id),
+            path,
+            size_bytes: 100,
+        });
+        resolved_modules.push(module);
+    };
+
+    for target in 0..NAMESPACE_TARGET_COUNT {
+        let path = PathBuf::from(format!("/project/src/alias-target-{target}.ts"));
+        let mut module = empty_resolved_module(FileId(target), path.clone());
+        module.exports = (0..NAMESPACE_EXPORTS_PER_TARGET)
+            .map(|member| ExportInfo {
+                name: ExportName::Named(format!("member{member}")),
+                local_name: Some(format!("member{member}")),
+                is_type_only: false,
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+                span: oxc_span::Span::new(member * 10, member * 10 + 5),
+                members: vec![],
+                is_side_effect_used: false,
+                super_class: None,
+            })
+            .collect();
+        push_file(target, path, module);
+    }
+
+    for target in 0..NAMESPACE_TARGET_COUNT {
+        let id = alias_start + target;
+        let path = PathBuf::from(format!("/project/src/alias-{target}.ts"));
+        let namespace_local = format!("namespace{target}");
+        let mut module = empty_resolved_module(FileId(id), path.clone());
+        module.resolved_imports.push(ResolvedImport {
+            info: ImportInfo {
+                source: format!("./alias-target-{target}"),
+                imported_name: ImportedName::Namespace,
+                local_name: namespace_local.clone(),
+                is_type_only: false,
+                from_style: false,
+                span: oxc_span::Span::new(0, 10),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(target)),
+        });
+        module.namespace_object_aliases.push(NamespaceObjectAlias {
+            via_export_name: format!("Api{target}"),
+            suffix: "namespace".to_string(),
+            namespace_local,
+        });
+        push_file(id, path, module);
+    }
+
+    for target in 0..NAMESPACE_TARGET_COUNT {
+        let id = outer_start + target;
+        let path = PathBuf::from(format!("/project/src/alias-outer-{target}.ts"));
+        let mut module = empty_resolved_module(FileId(id), path.clone());
+        module.re_exports.push(ResolvedReExport {
+            info: ReExportInfo {
+                source: format!("./alias-{target}"),
+                imported_name: format!("Api{target}"),
+                exported_name: format!("PublicApi{target}"),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(alias_start + target)),
+        });
+        push_file(id, path, module);
+    }
+
+    for target in 0..NAMESPACE_TARGET_COUNT {
+        for consumer in 0..NAMESPACE_CONSUMERS_PER_TARGET {
+            let id = consumer_start + target * NAMESPACE_CONSUMERS_PER_TARGET + consumer;
+            let path = PathBuf::from(format!(
+                "/project/src/alias-consumer-{target}-{consumer}.ts"
+            ));
+            let local_name = format!("api{target}");
+            let mut module = empty_resolved_module(FileId(id), path.clone());
+            module.resolved_imports.push(ResolvedImport {
+                info: ImportInfo {
+                    source: format!("./alias-outer-{target}"),
+                    imported_name: ImportedName::Named(format!("PublicApi{target}")),
+                    local_name: local_name.clone(),
+                    is_type_only: false,
+                    from_style: false,
+                    span: oxc_span::Span::new(0, 10),
+                    source_span: oxc_span::Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(outer_start + target)),
+            });
+            module.member_accesses.push(MemberAccess {
+                object: format!("{local_name}.namespace"),
+                member: format!("member{}", consumer % NAMESPACE_EXPORTS_PER_TARGET),
+            });
+            push_file(id, path, module);
+        }
+    }
+
+    ReExportInput {
+        files,
+        resolved_modules,
+        entry_points: vec![],
+    }
+}
+
+fn namespace_object_alias_propagation(c: &mut Criterion) {
+    c.bench_function("namespace_object_alias_propagation", |bencher| {
+        bencher.iter_batched_ref(
+            create_namespace_object_alias_input,
+            |input| {
+                fallow_core::graph::ModuleGraph::build(
+                    &input.resolved_modules,
+                    &input.entry_points,
+                    &input.files,
+                );
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
 #[expect(
     clippy::cast_possible_truncation,
     reason = "bench file/span counts are trivially small"
@@ -775,6 +1078,8 @@ criterion_group!(
     full_pipeline_100_files,
     full_pipeline_1000_files,
     resolve_re_export_chains,
+    namespace_re_export_propagation,
+    namespace_object_alias_propagation,
     cache_round_trip
 );
 criterion_main!(benches);

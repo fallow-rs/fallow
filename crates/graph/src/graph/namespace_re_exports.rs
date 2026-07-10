@@ -31,18 +31,14 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::discover::FileId;
-use fallow_types::extract::ImportedName;
-
-use crate::resolve::ResolvedModule;
-
 use super::ModuleGraph;
+use super::namespace_indexes::NamespacePropagationIndexes;
 use super::narrowing::{
     create_synthetic_exports_for_star_re_exports, mark_all_exports_referenced,
     mark_member_exports_referenced,
 };
-use super::re_export_reachability::enumerate_reachable_barrels;
 use super::types::ReferenceKind;
+use fallow_types::discover::FileId;
 
 /// Either credit a specific member on the target, or credit every export
 /// (whole-object use, or entry-point exposure where the external accesses
@@ -68,7 +64,7 @@ struct PendingCredit {
 /// Phase 2c: credit `export * as Foo from './bar'` member accesses onto `./bar`.
 pub(super) fn propagate_namespace_re_exports(
     graph: &mut ModuleGraph,
-    module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+    indexes: &NamespacePropagationIndexes<'_>,
 ) {
     let ns_edges: Vec<(FileId, FileId, String)> = graph
         .modules
@@ -96,7 +92,7 @@ pub(super) fn propagate_namespace_re_exports(
             continue;
         };
 
-        let reachable = enumerate_reachable_barrels(graph, *barrel_file_id, exported_name);
+        let reachable = indexes.enumerate_reachable_barrels(*barrel_file_id, exported_name);
 
         if reachable.iter().any(|(file_id, _)| {
             graph
@@ -113,7 +109,7 @@ pub(super) fn propagate_namespace_re_exports(
         }
 
         collect_consumer_credits(
-            module_by_id,
+            indexes,
             *barrel_file_id,
             target_module_idx,
             &reachable,
@@ -136,26 +132,17 @@ fn module_index_for_file(graph: &ModuleGraph, file_id: FileId) -> Option<usize> 
 /// the seed namespace re-export, collect a `PendingCredit` per
 /// `<local>.<member>` access and per whole-object use.
 fn collect_consumer_credits(
-    module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+    indexes: &NamespacePropagationIndexes<'_>,
     seed_barrel_file: FileId,
     target_module_idx: usize,
     reachable: &FxHashSet<(FileId, String)>,
     pending: &mut Vec<PendingCredit>,
 ) {
-    for consumer in module_by_id.values() {
-        if consumer.file_id == seed_barrel_file {
-            continue;
-        }
-        for import in &consumer.resolved_imports {
-            let Some(import_target) = import.target.internal_file_id() else {
-                continue;
-            };
-            let imported_name = match &import.info.imported_name {
-                ImportedName::Named(n) => n.as_str(),
-                ImportedName::Default => "default",
-                _ => continue,
-            };
-            if !reachable.contains(&(import_target, imported_name.to_string())) {
+    for (import_target, imported_name) in reachable {
+        for indexed in indexes.consumers_for(*import_target, imported_name) {
+            let consumer = indexed.consumer;
+            let import = indexed.import;
+            if consumer.file_id == seed_barrel_file {
                 continue;
             }
 
@@ -266,10 +253,10 @@ struct GroupState {
 mod tests {
     use super::*;
     use crate::graph::ModuleGraph;
-    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedReExport};
+    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
     use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
     use fallow_types::extract::{
-        ExportInfo, ExportName, ImportInfo, MemberAccess, ReExportInfo, VisibilityTag,
+        ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess, ReExportInfo, VisibilityTag,
     };
     use std::path::PathBuf;
 

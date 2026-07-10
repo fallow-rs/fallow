@@ -26,10 +26,10 @@ use fallow_types::extract::{ImportedName, NamespaceObjectAlias};
 use crate::resolve::ResolvedModule;
 
 use super::ModuleGraph;
+use super::namespace_indexes::NamespacePropagationIndexes;
 use super::narrowing::{
     create_synthetic_exports_for_star_re_exports, mark_member_exports_referenced,
 };
-use super::re_export_reachability::enumerate_reachable_barrels;
 use super::types::ReferenceKind;
 
 /// One credit operation collected during the scan and applied after the loop
@@ -52,14 +52,16 @@ struct PendingCredit {
 pub(super) fn propagate_cross_package_aliases(
     graph: &mut ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+    indexes: &NamespacePropagationIndexes<'_>,
 ) {
-    let pending = collect_pending_credits(graph, module_by_id);
+    let pending = collect_pending_credits(graph, module_by_id, indexes);
     apply_pending_credits(graph, &pending);
 }
 
 fn collect_pending_credits(
     graph: &ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
+    indexes: &NamespacePropagationIndexes<'_>,
 ) -> Vec<PendingCredit> {
     let mut pending = Vec::new();
 
@@ -76,10 +78,10 @@ fn collect_pending_credits(
                 continue;
             };
             let reachable =
-                enumerate_reachable_barrels(graph, alias_file_id, &alias.via_export_name);
+                indexes.enumerate_reachable_barrels(alias_file_id, &alias.via_export_name);
             collect_credits_for_alias(NamespaceCreditInput {
                 graph,
-                module_by_id,
+                indexes,
                 alias_file_id,
                 alias,
                 target_module_idx,
@@ -120,7 +122,7 @@ fn module_index_for_file(graph: &ModuleGraph, file_id: FileId) -> Option<usize> 
 
 struct NamespaceCreditInput<'a> {
     graph: &'a ModuleGraph,
-    module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
+    indexes: &'a NamespacePropagationIndexes<'a>,
     alias_file_id: FileId,
     alias: &'a NamespaceObjectAlias,
     target_module_idx: usize,
@@ -132,7 +134,6 @@ struct ConsumerCreditInput<'a> {
     graph: &'a ModuleGraph,
     consumer: &'a ResolvedModule,
     import: &'a crate::resolve::ResolvedImport,
-    reachable: &'a FxHashSet<(FileId, String)>,
     prefix_match: &'a str,
     target_module_idx: usize,
     pending: &'a mut Vec<PendingCredit>,
@@ -141,7 +142,7 @@ struct ConsumerCreditInput<'a> {
 fn collect_credits_for_alias(input: NamespaceCreditInput<'_>) {
     let NamespaceCreditInput {
         graph,
-        module_by_id,
+        indexes,
         alias_file_id,
         alias,
         target_module_idx,
@@ -149,16 +150,17 @@ fn collect_credits_for_alias(input: NamespaceCreditInput<'_>) {
         pending,
     } = input;
     let prefix_match = format!(".{}", alias.suffix);
-    for consumer in module_by_id.values() {
-        if consumer.file_id == alias_file_id {
-            continue;
-        }
-        for import in &consumer.resolved_imports {
+    for (target, imported_name) in reachable {
+        for indexed in indexes.consumers_for(*target, imported_name) {
+            let consumer = indexed.consumer;
+            let import = indexed.import;
+            if consumer.file_id == alias_file_id {
+                continue;
+            }
             collect_credits_for_consumer_import(&mut ConsumerCreditInput {
                 graph,
                 consumer,
                 import,
-                reachable,
                 prefix_match: &prefix_match,
                 target_module_idx,
                 pending,
@@ -174,22 +176,10 @@ fn collect_credits_for_consumer_import(input: &mut ConsumerCreditInput<'_>) {
     let graph = input.graph;
     let consumer = input.consumer;
     let import = input.import;
-    let reachable = input.reachable;
     let prefix_match = input.prefix_match;
     let target_module_idx = input.target_module_idx;
     let pending = &mut *input.pending;
 
-    let Some(target_file_id) = import.target.internal_file_id() else {
-        return;
-    };
-    let imported_name = match &import.info.imported_name {
-        ImportedName::Named(n) => n.as_str(),
-        ImportedName::Default => "default",
-        _ => return,
-    };
-    if !reachable.contains(&(target_file_id, imported_name.to_string())) {
-        return;
-    }
     let consumer_local = import.info.local_name.as_str();
     if consumer_local.is_empty() {
         return;
