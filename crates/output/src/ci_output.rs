@@ -1,5 +1,6 @@
 //! Shared CI comment output contracts for CLI and programmatic consumers.
 
+use std::borrow::Cow;
 use std::fmt::Write as _;
 
 use crate::{
@@ -26,6 +27,21 @@ impl CiProvider {
             Self::Gitlab => "GitLab",
         }
     }
+}
+
+/// Prefix prepended to a rendered path so CI platforms, which address files
+/// from the repository root, can find it. Empty when the analysis root already
+/// is the repository root.
+///
+/// This is presentation only. Nothing looks a path up in a diff after it has
+/// been prefixed: matching happens on analysis-root-relative paths, which is
+/// the namespace `DiffIndex::key_for_root_relative` translates from.
+#[must_use]
+pub fn apply_path_prefix(prefix: &str, path: &str) -> String {
+    if prefix.is_empty() {
+        return path.to_owned();
+    }
+    format!("{prefix}/{path}")
 }
 
 /// Normalized CodeClimate issue used by CI comment renderers.
@@ -77,6 +93,8 @@ pub struct ReviewEnvelopeRenderInput<'a> {
     pub provider: CiProvider,
     pub issues: &'a [CiIssue],
     pub diff_index: Option<&'a DiffIndex>,
+    /// Prepended to every emitted path after diff lookups have run.
+    pub path_prefix: &'a str,
     pub max_comments: usize,
     pub gitlab_diff_refs: Option<&'a ReviewGitlabDiffRefs>,
     pub include_guidance: bool,
@@ -357,6 +375,7 @@ pub fn render_review_envelope(input: &ReviewEnvelopeRenderInput<'_>) -> ReviewEn
                 group,
                 gitlab_diff_refs: input.gitlab_diff_refs,
                 diff_index: input.diff_index,
+                path_prefix: input.path_prefix,
                 include_guidance: input.include_guidance,
                 suggestion_block: input.suggestion_block,
                 guidance_block: input.guidance_block,
@@ -475,6 +494,8 @@ pub struct ReviewCommentRenderInput<'a, 'group> {
     pub group: &'a [&'group CiIssue],
     pub gitlab_diff_refs: Option<&'a ReviewGitlabDiffRefs>,
     pub diff_index: Option<&'a DiffIndex>,
+    /// Prepended to every emitted path after diff lookups have run.
+    pub path_prefix: &'a str,
     pub include_guidance: bool,
     pub suggestion_block: &'a dyn Fn(CiProvider, &CiIssue) -> Option<String>,
     pub guidance_block: &'a dyn Fn(&CiIssue) -> Option<String>,
@@ -504,6 +525,7 @@ pub fn render_review_comment_for_group(input: &ReviewCommentRenderInput<'_, '_>)
         representative,
         gitlab_diff_refs: input.gitlab_diff_refs,
         diff_index: input.diff_index,
+        path_prefix: input.path_prefix,
         body,
         fingerprint,
         truncated,
@@ -543,6 +565,7 @@ struct ReviewCommentInput<'a> {
     representative: &'a CiIssue,
     gitlab_diff_refs: Option<&'a ReviewGitlabDiffRefs>,
     diff_index: Option<&'a DiffIndex>,
+    path_prefix: &'a str,
     body: String,
     fingerprint: String,
     truncated: bool,
@@ -554,13 +577,14 @@ fn build_review_comment(input: ReviewCommentInput<'_>) -> ReviewComment {
         representative,
         gitlab_diff_refs,
         diff_index,
+        path_prefix,
         body,
         fingerprint,
         truncated,
     } = input;
     match provider {
         CiProvider::Github => ReviewComment::GitHub(GitHubReviewComment {
-            path: representative.path.clone(),
+            path: apply_path_prefix(path_prefix, &representative.path),
             line: u32::try_from(representative.line).unwrap_or(u32::MAX),
             side: GitHubReviewSide::Right,
             body,
@@ -568,10 +592,13 @@ fn build_review_comment(input: ReviewCommentInput<'_>) -> ReviewComment {
             truncated,
         }),
         CiProvider::Gitlab => {
-            let new_path = representative.path.clone();
-            let old_path = diff_index
-                .and_then(|di| di.old_path_for(&new_path))
-                .map_or_else(|| new_path.clone(), str::to_owned);
+            // Renames resolve on the analysis-root-relative path, before the
+            // presentation prefix goes on: the diff's keys never carry it.
+            let old_rel = diff_index
+                .and_then(|di| di.old_path_for_root_relative(&representative.path))
+                .map_or_else(|| representative.path.clone(), Cow::into_owned);
+            let new_path = apply_path_prefix(path_prefix, &representative.path);
+            let old_path = apply_path_prefix(path_prefix, &old_rel);
             let position = GitLabReviewPosition {
                 base_sha: gitlab_diff_refs.map(|r| r.base_sha.clone()),
                 start_sha: gitlab_diff_refs.map(|r| r.start_sha.clone()),

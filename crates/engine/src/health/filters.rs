@@ -9,7 +9,6 @@ use fallow_output::{
 use fallow_types::discover::DiscoveredFile;
 use rustc_hash::FxHashSet;
 
-use super::runtime_filter::relative_to_root;
 use super::scoring;
 
 /// Drop complexity findings whose function body span does NOT overlap any
@@ -19,15 +18,18 @@ use super::scoring;
 /// of zero collapses to `[line..=line]` so older fixture rows without
 /// extents do not silently match every diff.
 ///
-/// Paths that cannot be expressed relative to `root` are retained rather than
-/// silently dropped: surfacing an unfilterable path is better than hiding it.
+/// Paths are keyed against the diff's own base (the repository toplevel for
+/// `git diff` output), which differs from `root` whenever the analysis root
+/// sits below it. Paths that cannot be expressed relative to that base are
+/// retained rather than silently dropped: surfacing an unfilterable path is
+/// better than hiding it.
 pub(super) fn filter_complexity_findings_by_diff(
     findings: &mut Vec<ComplexityViolation>,
     diff_index: &fallow_output::DiffIndex,
     root: &Path,
 ) {
     findings.retain(|finding| {
-        let Some(rel) = relative_to_root(&finding.path, root) else {
+        let Some(rel) = diff_index.key_for(&finding.path, root) else {
             return true;
         };
         diff_index.range_overlaps_added(
@@ -44,7 +46,7 @@ pub(super) fn filter_hotspots_by_diff(
     diff_index: &fallow_output::DiffIndex,
     root: &Path,
 ) {
-    hotspots.retain(|hotspot| match relative_to_root(&hotspot.path, root) {
+    hotspots.retain(|hotspot| match diff_index.key_for(&hotspot.path, root) {
         Some(rel) => diff_index.touches_file(&rel),
         None => true,
     });
@@ -56,7 +58,7 @@ pub(super) fn filter_refactoring_targets_by_diff(
     diff_index: &fallow_output::DiffIndex,
     root: &Path,
 ) {
-    targets.retain(|target| match relative_to_root(&target.path, root) {
+    targets.retain(|target| match diff_index.key_for(&target.path, root) {
         Some(rel) => diff_index.touches_file(&rel),
         None => true,
     });
@@ -70,7 +72,7 @@ pub(super) fn filter_large_functions_by_diff(
     root: &Path,
 ) {
     entries.retain(|entry| {
-        let Some(rel) = relative_to_root(&entry.path, root) else {
+        let Some(rel) = diff_index.key_for(&entry.path, root) else {
             return true;
         };
         diff_index.range_overlaps_added(

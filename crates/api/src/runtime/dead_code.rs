@@ -9,7 +9,7 @@ use fallow_engine::{
 };
 use fallow_output::{
     CHECK_SCHEMA_VERSION, CheckOutputInput, DeadCodeNextStepsInput, DiffIndex, build_check_output,
-    build_dead_code_next_steps, check_meta, relative_to_diff_path,
+    build_dead_code_next_steps, check_meta,
 };
 use fallow_types::output_format::OutputFormat;
 use fallow_types::path_util::is_absolute_path_any_platform;
@@ -334,10 +334,11 @@ fn apply_dead_code_scope(
 
 fn filter_dead_code_by_diff(results: &mut AnalysisResults, diff: &DiffIndex, root: &Path) {
     let touches_file = |path: &Path| -> bool {
-        relative_to_diff_path(path, root).is_none_or(|rel| diff.touches_file(&rel))
+        diff.key_for(path, root)
+            .is_none_or(|rel| diff.touches_file(&rel))
     };
     let line_in_diff = |path: &Path, line: u32| -> bool {
-        relative_to_diff_path(path, root)
+        diff.key_for(path, root)
             .is_none_or(|rel| diff.line_is_added(&rel, u64::from(line)))
     };
 

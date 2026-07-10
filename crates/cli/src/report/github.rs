@@ -195,8 +195,9 @@ pub fn resolve_package_manager(env_value: Option<&str>, root: &Path) -> PackageM
     }
 }
 
-/// How `file=` paths are rebased onto the git repository root. GitHub
-/// resolves annotation paths against the REPO root, while fallow emits
+/// How report paths are rebased onto the git repository root. CI platforms
+/// address files by repo-root-relative path (GitHub annotations, GitLab's
+/// Code Quality widget, the review-discussion APIs), while fallow emits
 /// analysis-root-relative paths; when the analysis root is a subdirectory
 /// (e.g. `packages/app/`), every path needs the offset prefixed.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -218,8 +219,22 @@ impl PathRebase {
         }
     }
 
-    /// Resolve the rebase: an explicit `--annotations-path-prefix` wins over
+    /// The prefix this rebase prepends, empty when it prepends nothing.
+    ///
+    /// Consumers that resolve ownership from an already-rebased path strip
+    /// this back off to recover the analysis-root-relative path CODEOWNERS
+    /// patterns are written against.
+    #[must_use]
+    pub fn prefix(&self) -> &str {
+        match self {
+            Self::None => "",
+            Self::Prefix(prefix) => prefix,
+        }
+    }
+
+    /// Resolve the rebase: an explicit `--report-path-prefix` wins over
     /// git-toplevel detection; no git and no flag means paths pass through.
+    /// An explicit empty prefix disables rebasing.
     #[must_use]
     pub fn resolve(root: &Path, explicit: Option<&str>) -> Self {
         if let Some(prefix) = explicit {
@@ -254,20 +269,50 @@ impl PathRebase {
     }
 }
 
-/// Process-wide `--annotations-path-prefix` override, set once by `main`
+/// Process-wide `--report-path-prefix` override, set once by `main`
 /// after parse (same ambient pattern as the report sink and the
 /// max-file-size override).
-static ANNOTATIONS_PATH_PREFIX: OnceLock<Option<String>> = OnceLock::new();
+static REPORT_PATH_PREFIX: OnceLock<Option<String>> = OnceLock::new();
 
-/// Record the `--annotations-path-prefix` flag value. Call at most once.
-pub fn set_annotations_path_prefix(prefix: Option<String>) {
-    let _ = ANNOTATIONS_PATH_PREFIX.set(prefix);
+/// Record the `--report-path-prefix` flag value. Call at most once.
+pub fn set_report_path_prefix(prefix: Option<String>) {
+    let _ = REPORT_PATH_PREFIX.set(prefix);
 }
 
-fn annotations_path_prefix() -> Option<&'static str> {
-    ANNOTATIONS_PATH_PREFIX
+fn report_path_prefix() -> Option<&'static str> {
+    REPORT_PATH_PREFIX
         .get()
         .and_then(|prefix| prefix.as_deref())
+}
+
+/// The presentation prefix for this run, resolved once.
+///
+/// `report_rebase` shells out to `git rev-parse --show-toplevel`; the emitters
+/// need the answer on every issue, and the review renderer has no `root` to
+/// re-derive it from.
+static RESOLVED_REPORT_PREFIX: OnceLock<String> = OnceLock::new();
+
+/// Resolve the presentation prefix once, after `--report-path-prefix` is
+/// recorded. Call at most once.
+pub fn init_report_prefix(root: &Path) {
+    let _ = RESOLVED_REPORT_PREFIX.set(report_rebase(root).prefix().to_owned());
+}
+
+/// The prefix prepended to every CI-facing path emitted this run. Empty when
+/// the analysis root is the repository root, or when no CLI run resolved it.
+#[must_use]
+pub fn report_prefix() -> &'static str {
+    RESOLVED_REPORT_PREFIX.get().map_or("", String::as_str)
+}
+
+/// Rebase every CI-facing report path emitted for this run onto the repo root.
+///
+/// Shared by the GitHub renderers and the CodeClimate emitters (which the
+/// review and sticky-summary formats derive their paths from), so all CI
+/// surfaces address files the same way the platform does.
+#[must_use]
+pub fn report_rebase(root: &Path) -> PathRebase {
+    PathRebase::resolve(root, report_path_prefix())
 }
 
 /// Ambient options for the GitHub renderers, resolved once per render at the
@@ -283,7 +328,7 @@ pub struct RenderOptions {
 pub fn resolve_render_options(root: &Path) -> RenderOptions {
     let env_pm = std::env::var("PKG_MANAGER").ok();
     RenderOptions {
-        rebase: PathRebase::resolve(root, annotations_path_prefix()),
+        rebase: report_rebase(root),
         pm: resolve_package_manager(env_pm.as_deref(), root),
     }
 }

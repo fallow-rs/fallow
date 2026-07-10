@@ -1,6 +1,6 @@
 mod badge;
 pub mod ci;
-mod codeclimate;
+pub mod codeclimate;
 mod compact;
 pub mod dupes_grouping;
 pub mod github;
@@ -363,6 +363,9 @@ fn print_results_ci_comment(
     ctx: &ReportContext<'_>,
     output: OutputFormat,
 ) -> ExitCode {
+    // Analysis-root-relative on purpose: the review renderer applies the
+    // presentation prefix after its diff lookups, and rebasing here would
+    // prefix twice and key the filter in the wrong namespace.
     let issues = codeclimate::api_codeclimate_issues(results, ctx.root, ctx.rules);
     let value = fallow_output::codeclimate_issues_to_value(&issues);
     print_ci_comment_format("dead-code", &value, output).unwrap_or_else(|| {

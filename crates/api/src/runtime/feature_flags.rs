@@ -3,7 +3,6 @@ use std::time::Instant;
 use fallow_engine::{project_config::ProjectConfig, session::AnalysisSession};
 use fallow_output::{
     CHECK_SCHEMA_VERSION, FeatureFlagsOutputInput, build_feature_flags_output, feature_flags_meta,
-    relative_to_diff_path,
 };
 use fallow_types::output_format::OutputFormat;
 use fallow_types::results::FeatureFlag;
@@ -115,7 +114,7 @@ fn apply_feature_flags_scope(
     }
     if let Some(diff) = resolved.diff.as_ref() {
         flags.retain(|flag| {
-            relative_to_diff_path(&flag.path, session.root())
+            diff.key_for(&flag.path, session.root())
                 .is_none_or(|rel| diff.touches_file(&rel))
         });
     }

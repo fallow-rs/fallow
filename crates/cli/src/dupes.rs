@@ -217,10 +217,8 @@ fn filter_by_diff(
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &std::path::Path,
 ) {
-    use crate::report::ci::diff_filter::relative_to_diff_path;
-
     let instance_overlaps = |instance: &fallow_types::duplicates::CloneInstance| -> bool {
-        let Some(rel) = relative_to_diff_path(&instance.file, root) else {
+        let Some(rel) = diff_index.key_for(&instance.file, root) else {
             return true;
         };
         let start = u64::try_from(instance.start_line).unwrap_or(u64::MAX);

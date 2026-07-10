@@ -73,6 +73,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every `ModuleInfo`. Existing owned APIs remain compatible, and detector facts
   are prepared before modules become immutable.
 
+- **BREAKING: CI-facing formats now emit repository-root-relative paths when
+  `--root` is a subdirectory.** `codeclimate`, `review-github`, and
+  `review-gitlab` addressed files relative to `--root`, while
+  `github-annotations` already rebased onto the git toplevel. CI platforms
+  address files from the repository root, so GitLab's Code Quality widget
+  matched nothing and every inline review discussion was rejected when the
+  analyzed project lived in a package subdirectory. All CI formats now share
+  one namespace, detected via the git toplevel. Consumers that post-process
+  these paths themselves (prepending the offset in a wrapper script) should
+  drop that step or pass `--report-path-prefix ''` to restore the old output.
+  Single-package repositories, where `--root` is the toplevel, are unaffected.
+
+- **`--annotations-path-prefix` is now `--report-path-prefix`.** It governs
+  every CI-facing format rather than only the GitHub-native ones. The old name
+  keeps working as an alias. An explicit empty value disables rebasing.
+
+### Fixed
+
+- **`--diff-file` no longer silently discards every source-anchored finding
+  when `--root` is a subdirectory.** `git diff` names paths relative to the
+  repository toplevel, but findings were keyed relative to `--root` before the
+  lookup, so in a monorepo package the two namespaces never met: every
+  source-anchored finding was dropped and the run reported a clean diff, exit
+  0, with nothing on stderr. A unified diff does not declare its own base, and
+  both conventions are real (`git diff --relative` writes `--root`-relative
+  paths), so fallow now resolves the base from the diff's paths themselves:
+  whichever candidate directory they actually name files under wins. Both
+  conventions work; when `--root` is the repository toplevel they coincide and
+  output is byte-identical to before.
+
+- **`--diff-file` now scopes inline review comments, not only analysis results.**
+  That filter was gated on `FALLOW_DIFF_FILE`, so the flag rendered every comment
+  while appearing to have applied the diff.
+
+- **A `--diff-file` whose paths name no file under the repository toplevel or
+  the analysis root now warns.** This class of mismatch previously produced a
+  plausible-looking empty report rather than an error. A diff whose paths name
+  real files under *both* candidates is likewise reported as ambiguous rather
+  than silently guessed, since existence alone cannot place it. In both cases the
+  diff is discarded and findings are reported at full scope: a path that cannot be
+  expressed in the diff's namespace is retained, never silently dropped.
+
+- **Renamed files keep their `old_path` in `review-gitlab`.** The rename map is
+  keyed in the diff's namespace, but the lookup used the rendered path, so below
+  the repository toplevel (or under any `--report-path-prefix`) it missed and
+  `old_path` silently fell back to `new_path` -- telling GitLab a moved file had
+  not moved, and getting the discussion rejected.
+
+- **`--report-path-prefix` no longer decides which inline review comments
+  survive the diff filter.** The review and sticky-summary filters keyed issues
+  by their rendered path, so a custom or empty prefix silently stopped matching
+  the diff and dropped every comment. They now key by the analysis-root-relative
+  path and the diff's own base; the prefix only affects how paths are rendered.
+
 ## [3.3.0] - 2026-07-09
 
 ### Added

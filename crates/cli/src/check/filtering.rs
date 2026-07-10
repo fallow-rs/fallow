@@ -39,26 +39,26 @@ pub use fallow_engine::changed_files::{
 /// the PR caused. Mirrors the default `FALLOW_SUMMARY_SCOPE=all` behavior
 /// in typed PR-comment rendering.
 ///
-/// `relative_to_diff_path` normalizes the finding's absolute path to the
-/// forward-slashed key shape `git diff` writes (`+++ b/<path>`). When the
-/// path cannot be expressed relative to `root` (different drive, traversal
-/// escape), the finding is RETAINED rather than silently dropped: an
-/// unfilterable path is better surfaced than silently hidden.
+/// `DiffIndex::key_for` normalizes the finding's absolute path to the
+/// forward-slashed key shape `git diff` writes (`+++ b/<path>`), relative to
+/// the diff's own base rather than to `root` — the two differ whenever the
+/// analysis root sits below the repository toplevel. When the path cannot be
+/// expressed relative to that base (different drive, traversal escape), the
+/// finding is RETAINED rather than silently dropped: an unfilterable path is
+/// better surfaced than silently hidden.
 pub fn filter_results_by_diff(
     results: &mut fallow_types::results::AnalysisResults,
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &Path,
 ) {
-    use crate::report::ci::diff_filter::relative_to_diff_path;
-
     let touches_file = |path: &Path| -> bool {
-        match relative_to_diff_path(path, root) {
+        match diff_index.key_for(path, root) {
             Some(p) => diff_index.touches_file(&p),
             None => true,
         }
     };
     let line_in_diff = |path: &Path, line: u32| -> bool {
-        match relative_to_diff_path(path, root) {
+        match diff_index.key_for(path, root) {
             Some(p) => diff_index
                 .added_lines_in(&p)
                 .is_some_and(|set| set.contains(&u64::from(line))),
@@ -256,11 +256,10 @@ pub fn retain_gate_new(
     diff_index: &crate::report::ci::diff_filter::DiffIndex,
     root: &Path,
 ) {
-    use crate::report::ci::diff_filter::relative_to_diff_path;
     use fallow_types::results::TraceHopRole;
 
     let line_in_diff = |path: &Path, line: u32| -> bool {
-        match relative_to_diff_path(path, root) {
+        match diff_index.key_for(path, root) {
             Some(p) => diff_index
                 .added_lines_in(&p)
                 .is_some_and(|set| set.contains(&u64::from(line))),

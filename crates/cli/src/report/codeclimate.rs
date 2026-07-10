@@ -13,8 +13,39 @@ use fallow_output::{CodeClimateSeverity, codeclimate_fingerprint_hash};
 use fallow_types::duplicates::DuplicationReport;
 use fallow_types::results::AnalysisResults;
 
+use super::github::report_prefix;
 use super::grouping::{self, OwnershipResolver};
 use super::{emit_json, normalize_uri, relative_path};
+
+/// Rebase every issue path onto the repository root.
+///
+/// CI platforms address files by repo-root-relative path: GitLab's Code
+/// Quality widget matches `location.path` against the MR diff, and the review
+/// APIs reject a `new_path` that names no file in the diff. The CodeClimate
+/// builders emit analysis-root-relative paths, which only coincide with the
+/// repo root for a single-package repo.
+///
+/// The review and sticky-summary formats derive their paths from these issues,
+/// so rebasing here covers every CI surface but `github-annotations`, which
+/// renders from JSON and applies the same rebase itself.
+pub fn rebase_codeclimate_paths(issues: &mut [CodeClimateIssue]) {
+    let prefix = report_prefix();
+    if prefix.is_empty() {
+        return;
+    }
+    for issue in issues {
+        issue.location.path = fallow_output::apply_path_prefix(prefix, &issue.location.path);
+    }
+}
+
+/// Rebase, then serialize. The single point where CodeClimate issues leave as
+/// the CodeClimate wire format; everything upstream keeps analysis-root-relative
+/// paths so diff lookups and CODEOWNERS resolution stay in one namespace.
+fn emit_codeclimate(mut issues: Vec<CodeClimateIssue>) -> ExitCode {
+    rebase_codeclimate_paths(&mut issues);
+    let value = codeclimate_issues_to_value(&issues);
+    emit_json(&value, "CodeClimate")
+}
 
 /// Map fallow severity to CodeClimate severity.
 #[cfg(test)]
@@ -134,9 +165,7 @@ pub(super) fn print_codeclimate(
     root: &Path,
     rules: &RulesConfig,
 ) -> ExitCode {
-    let issues = api_codeclimate_issues(results, root, rules);
-    let value = codeclimate_issues_to_value(&issues);
-    emit_json(&value, "CodeClimate")
+    emit_codeclimate(api_codeclimate_issues(results, root, rules))
 }
 
 /// Print CodeClimate output with owner properties added to each issue.
@@ -154,9 +183,7 @@ pub(super) fn print_grouped_codeclimate(
     annotate_codeclimate_issues(&mut issues, CodeClimateAnnotationField::Owner, |path| {
         grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
     });
-    let value = codeclimate_issues_to_value(&issues);
-
-    emit_json(&value, "CodeClimate")
+    emit_codeclimate(issues)
 }
 
 /// Fetch CodeClimate issues from the API-owned health output builder.
@@ -170,9 +197,7 @@ pub(super) fn api_health_codeclimate_issues(
 
 /// Print health analysis results in CodeClimate format.
 pub(super) fn print_health_codeclimate(report: &HealthReport, root: &Path) -> ExitCode {
-    let issues = api_health_codeclimate_issues(report, root);
-    let value = codeclimate_issues_to_value(&issues);
-    emit_json(&value, "CodeClimate")
+    emit_codeclimate(api_health_codeclimate_issues(report, root))
 }
 
 /// Print health CodeClimate output with a per-issue `group` field.
@@ -192,9 +217,7 @@ pub(super) fn print_grouped_health_codeclimate(
     annotate_codeclimate_issues(&mut issues, CodeClimateAnnotationField::Group, |path| {
         grouping::resolve_owner(Path::new(path), Path::new(""), resolver)
     });
-    let value = codeclimate_issues_to_value(&issues);
-
-    emit_json(&value, "CodeClimate")
+    emit_codeclimate(issues)
 }
 
 /// Fetch CodeClimate issues from the API-owned duplication output builder.
@@ -208,9 +231,7 @@ pub(super) fn api_duplication_codeclimate_issues(
 
 /// Print duplication analysis results in CodeClimate format.
 pub(super) fn print_duplication_codeclimate(report: &DuplicationReport, root: &Path) -> ExitCode {
-    let issues = api_duplication_codeclimate_issues(report, root);
-    let value = codeclimate_issues_to_value(&issues);
-    emit_json(&value, "CodeClimate")
+    emit_codeclimate(api_duplication_codeclimate_issues(report, root))
 }
 
 /// Print duplication CodeClimate output with a per-issue `group` field.
@@ -233,8 +254,7 @@ pub(super) fn print_grouped_duplication_codeclimate(
     for group in &report.clone_groups {
         let owner = super::dupes_grouping::largest_owner(group, root, resolver);
         for instance in &group.instances {
-            let path = cc_path(&instance.file, root);
-            path_to_owner.insert(path, owner.clone());
+            path_to_owner.insert(cc_path(&instance.file, root), owner.clone());
         }
     }
 
@@ -244,9 +264,7 @@ pub(super) fn print_grouped_duplication_codeclimate(
             .cloned()
             .unwrap_or_else(|| crate::codeowners::UNOWNED_LABEL.to_string())
     });
-    let value = codeclimate_issues_to_value(&issues);
-
-    emit_json(&value, "CodeClimate")
+    emit_codeclimate(issues)
 }
 
 #[cfg(test)]

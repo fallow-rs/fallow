@@ -1529,8 +1529,8 @@ fn compute_decision_surface(
     // or renames); lets each decision carry a rename-durable `previous_signal_id`.
     let rename_old_path = |rel: &str| -> Option<String> {
         crate::report::ci::diff_filter::shared_diff_index()
-            .and_then(|idx| idx.old_path_for(rel))
-            .map(str::to_string)
+            .and_then(|idx| idx.old_path_for_root_relative(rel))
+            .map(std::borrow::Cow::into_owned)
     };
 
     // Honest per-anchor consumer count, looked up from the map precomputed before

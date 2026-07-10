@@ -946,10 +946,17 @@ fn build_combined_codeclimate(
     dupes: Option<&DupesResult>,
     health: Option<&HealthResult>,
 ) -> serde_json::Value {
-    let all_issues = build_combined_codeclimate_issues(check, dupes, health);
+    let mut all_issues = build_combined_codeclimate_issues(check, dupes, health);
+    // Rebase at the wire boundary only: the same issues feed the sticky summary,
+    // whose diff filter matches on analysis-root-relative paths.
+    crate::report::codeclimate::rebase_codeclimate_paths(&mut all_issues);
     codeclimate_issues_to_value(&all_issues)
 }
 
+/// Analysis-root-relative CodeClimate issues for every enabled analysis.
+///
+/// Deliberately un-rebased: the sticky summary filters these against the diff,
+/// and the presentation prefix belongs at the wire boundary.
 fn build_combined_codeclimate_issues(
     check: Option<&CheckResult>,
     dupes: Option<&DupesResult>,

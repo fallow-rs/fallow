@@ -108,11 +108,11 @@ pub use ci_output::{
     CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
     MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput, ReviewCommentRenderInput,
     ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult, ReviewEnvelopeTruncation,
-    ReviewGitlabDiffRefs, cap_body_with_marker, command_title, composite_fingerprint, escape_md,
-    github_check_conclusion, group_review_issues_by_path_line, is_project_level_rule,
-    issues_from_codeclimate, issues_from_codeclimate_issues, render_pr_comment,
-    render_review_comment_for_group, render_review_envelope, review_label_from_codeclimate,
-    summary_fingerprint, summary_label,
+    ReviewGitlabDiffRefs, apply_path_prefix, cap_body_with_marker, command_title,
+    composite_fingerprint, escape_md, github_check_conclusion, group_review_issues_by_path_line,
+    is_project_level_rule, issues_from_codeclimate, issues_from_codeclimate_issues,
+    render_pr_comment, render_review_comment_for_group, render_review_envelope,
+    review_label_from_codeclimate, summary_fingerprint, summary_label,
 };
 pub use codeclimate::{
     CodeClimateAnnotationField, CodeClimateIssue, CodeClimateIssueInput, CodeClimateIssueKind,
@@ -130,6 +130,7 @@ pub use coverage_envelopes::{
 pub use dead_code_sarif::build_dead_code_sarif;
 pub use diff::{
     DiffIndex, MAX_ADDED_LINES, MAX_DIFF_BYTES, parse_new_hunk_start, relative_to_diff_path,
+    strip_path_component_prefix,
 };
 pub use dupes::{
     CloneFamilyAction, CloneFamilyActionType, CloneGroupAction, CloneGroupActionType,

@@ -2,12 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_output::{DiffIndex, relative_to_diff_path};
+use fallow_output::DiffIndex;
 use fallow_types::duplicates::{CloneInstance, DuplicationReport};
 
 pub fn filter_by_diff(report: &mut DuplicationReport, diff_index: &DiffIndex, root: &Path) {
     let instance_overlaps = |instance: &CloneInstance| -> bool {
-        let Some(rel) = relative_to_diff_path(&instance.file, root) else {
+        let Some(rel) = diff_index.key_for(&instance.file, root) else {
             return true;
         };
         let start = u64::try_from(instance.start_line).unwrap_or(u64::MAX);
