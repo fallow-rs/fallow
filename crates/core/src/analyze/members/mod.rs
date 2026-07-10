@@ -12,10 +12,11 @@ use crate::resolve::ResolvedModule;
 use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
-    FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FluentChainMemberAccessFact,
-    FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
-    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    SemanticFactView, TypedPropertyMemberAccessFact, ordinary_whole_object_uses,
+    FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryFnWholeObjectFact,
+    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, InstanceExportBindingFact,
+    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
+    PlaywrightFixtureUseFact, SemanticFactView, TypedPropertyMemberAccessFact,
+    ordinary_whole_object_uses,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -670,6 +671,11 @@ fn factory_fn_member_accesses(resolved: &ResolvedModule) -> Vec<FactoryFnMemberA
     view.factory_fn_member_accesses()
 }
 
+fn factory_fn_whole_objects(resolved: &ResolvedModule) -> Vec<FactoryFnWholeObjectFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    view.factory_fn_whole_objects()
+}
+
 fn typed_property_member_accesses(resolved: &ResolvedModule) -> Vec<TypedPropertyMemberAccessFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
     view.typed_property_member_accesses()
@@ -1223,6 +1229,14 @@ fn propagate_common_member_accesses(
         input.modules,
         indexes,
         accessed_members,
+        whole_object_used_exports,
+    );
+    // Before the re-export propagation below, so a class suppressed through an
+    // opaque destructure is suppressed at every name it is re-exported under.
+    propagate_factory_fn_whole_object_uses(
+        input.graph,
+        input.resolved_modules,
+        indexes,
         whole_object_used_exports,
     );
     propagate_accesses_through_re_exports(input.graph, accessed_members);

@@ -56,12 +56,13 @@ pub use fallow_types::extract::{
     AngularComponentFieldArrayTypeFact, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
     ClassHeritageInfo, DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern,
     ExportInfo, ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact,
-    FactoryReturnExport, FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo,
-    ImportedName, InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess, MemberInfo,
-    MemberKind, ModuleInfo, ParseResult, PlaywrightFixtureAliasFact,
-    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, SemanticFact, SourceReadFailure,
-    TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag, compute_line_offsets,
+    FactoryFnWholeObjectFact, FactoryReturnExport, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
+    LocalTypeDeclaration, MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult,
+    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
+    PlaywrightFixtureUseFact, PublicSignatureTypeReference, ReExportInfo, RequireCallInfo,
+    SemanticFact, SourceReadFailure, TypeMemberTypeEntry, TypedPropertyMemberAccessFact,
+    VisibilityTag, compute_line_offsets,
 };
 
 pub use astro::{

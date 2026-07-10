@@ -148,3 +148,93 @@ pub(super) fn propagate_factory_fn_accesses(
         }
     }
 }
+
+/// The class exports a proven exported factory returns, resolved from the factory's
+/// own module. Shared by the member-credit and whole-object-suppress passes: each
+/// link is an over-credit gate, so a callee that is not a proven factory yields
+/// nothing.
+fn factory_return_class_origins(
+    graph: &ModuleGraph,
+    indexes: &MemberPassIndexes<'_>,
+    factory_origin_file_id: FileId,
+    class_local_name: &str,
+) -> Vec<ExportKey> {
+    let factory_local_keys = indexes.local_keys(factory_origin_file_id);
+    let Some(class_seed_keys) = factory_local_keys.get(class_local_name) else {
+        return Vec::new();
+    };
+    class_seed_keys
+        .iter()
+        .flat_map(|class_seed| export_key_with_origins(graph, class_seed))
+        .filter(|class_origin| {
+            indexes
+                .module_by_id
+                .get(&class_origin.file_id)
+                .is_some_and(|class_module| {
+                    export_is_class_with_members(class_module, class_origin.export_name.as_str())
+                })
+        })
+        .collect()
+}
+
+/// The class a callee's proven exported factory returns, resolved across modules.
+/// `None` for any callee that is not an internal exported factory with a strict,
+/// value-proven return.
+fn factory_return_classes_for_callee(
+    graph: &ModuleGraph,
+    indexes: &MemberPassIndexes<'_>,
+    seed_key: &ExportKey,
+) -> Vec<ExportKey> {
+    let mut origins = Vec::new();
+    for factory_origin in
+        walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
+    {
+        let Some(factory_module) = indexes.module_by_id.get(&factory_origin.file_id) else {
+            continue;
+        };
+        let Some(factory_return) =
+            factory_module
+                .exported_factory_returns
+                .iter()
+                .find(|factory_return| {
+                    factory_origin.export_name.as_str() == factory_return.export_name.as_str()
+                })
+        else {
+            continue;
+        };
+        origins.extend(factory_return_class_origins(
+            graph,
+            indexes,
+            factory_origin.file_id,
+            factory_return.class_local_name.as_str(),
+        ));
+    }
+    origins
+}
+
+/// Suppress a class whose factory-returned instance is consumed opaquely
+/// (`const { a, ...rest } = importedFactory()`, a computed destructure key).
+///
+/// The consumer can read any property, so no set of member accesses describes what
+/// is used. Crediting only the keys the pattern names would leave every other live
+/// member reported as dead. Mark the export wholly used instead; the member scan
+/// then skips it, exactly as it does for a class whose instance escapes.
+pub(super) fn propagate_factory_fn_whole_object_uses(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
+    whole_object_used_exports: &mut FxHashSet<ExportKey>,
+) {
+    for resolved in resolved_modules {
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
+        for fact in factory_fn_whole_objects(resolved) {
+            let Some(seed_keys) = local_to_export_keys.get(fact.callee_name.as_str()) else {
+                continue;
+            };
+            let classes = seed_keys
+                .iter()
+                .flat_map(|seed_key| factory_return_classes_for_callee(graph, indexes, seed_key));
+            whole_object_used_exports.extend(classes);
+        }
+    }
+}

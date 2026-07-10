@@ -1514,6 +1514,14 @@ pub enum SemanticFact {
     InstanceExportBinding(InstanceExportBindingFact),
     /// A dynamic custom-element tag render that makes static Lit tag credit opaque.
     DynamicCustomElementRender(DynamicCustomElementRenderFact),
+    /// A factory-returned value consumed in a way that can expose ANY property
+    /// (`const { a, ...rest } = importedFactory()`, a computed destructure key).
+    /// The returned class must be treated as wholly used: crediting only the
+    /// visible keys would leave a live member reported as dead.
+    ///
+    /// Appended, never inserted: `bitcode` encodes an enum by ordinal, so moving an
+    /// existing variant would make an old cache decode one fact as another.
+    FactoryFnWholeObject(FactoryFnWholeObjectFact),
 }
 
 /// Iterate Angular template member names from typed semantic facts.
@@ -1646,6 +1654,13 @@ impl<'a> SemanticFactView<'a> {
             .collect()
     }
 
+    /// Collect factory-return whole-object consumption facts.
+    pub fn factory_fn_whole_objects(self) -> Vec<FactoryFnWholeObjectFact> {
+        factory_fn_whole_object_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
     /// Collect typed-property-hop member facts.
     pub fn typed_property_member_accesses(self) -> Vec<TypedPropertyMemberAccessFact> {
         typed_property_member_access_facts(self.semantic_facts)
@@ -1746,6 +1761,18 @@ fn factory_fn_member_access_facts(
     semantic_facts.iter().filter_map(|fact| {
         if let SemanticFact::FactoryFnMemberAccess(access) = fact {
             Some(access)
+        } else {
+            None
+        }
+    })
+}
+
+fn factory_fn_whole_object_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &FactoryFnWholeObjectFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::FactoryFnWholeObject(fact) = fact {
+            Some(fact)
         } else {
             None
         }
@@ -1893,6 +1920,15 @@ pub struct FactoryFnMemberAccessFact {
     pub callee_name: String,
     /// Member accessed on the returned instance-like object.
     pub member: String,
+}
+
+/// A factory-returned value consumed opaquely, so every member of the class it
+/// returns must be treated as used.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FactoryFnWholeObjectFact {
+    /// Local imported function used as the factory callee.
+    pub callee_name: String,
 }
 
 /// A member access reached through a typed property hop that the extraction

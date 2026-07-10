@@ -767,7 +767,13 @@ use crate::MemberKind;
 /// re-emits the access against the class that declares it. A warm 228 cache
 /// carries only the `Sub.member` access, whose object the analyze layer cannot
 /// resolve, leaving the base's members falsely reported as unused.
-pub(super) const CACHE_VERSION: u32 = 229;
+///
+/// Bumped to 230 so a factory result read without a named binding (`f().member`,
+/// `const { member } = f()`) carries the member access, and an opaque destructure
+/// (`{ a, ...rest }`, a computed key) carries the `FactoryFnWholeObject` fact. A warm
+/// 229 cache carries neither, leaving every member of a destructured or chained
+/// factory result falsely reported as unused.
+pub(super) const CACHE_VERSION: u32 = 230;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -354,6 +354,9 @@ mod issue_1707_vue_vfor_class_member;
 #[path = "integration_test/local_subclass_static_class_members.rs"]
 mod local_subclass_static_class_members;
 
+#[path = "integration_test/cross_file_factory_class_members.rs"]
+mod cross_file_factory_class_members;
+
 #[path = "integration_test/issue_1711_vue_props_vfor.rs"]
 mod issue_1711_vue_props_vfor;
 
