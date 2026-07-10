@@ -341,7 +341,10 @@ mod tests {
         assert_eq!(json["kind"], "source-read-failure");
         assert_eq!(
             json["path"],
-            root.join("src/removed.ts").display().to_string()
+            root.join("src/removed.ts")
+                .display()
+                .to_string()
+                .replace('\\', "/")
         );
         assert_eq!(json["error"], "No such file or directory");
         assert!(
