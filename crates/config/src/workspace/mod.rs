@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 pub use diagnostics::capture_workspace_warnings;
 pub use diagnostics::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceLoadError, append_workspace_diagnostics,
-    clear_source_discovery_diagnostics, stash_workspace_diagnostics, workspace_diagnostics_for,
+    clear_source_discovery_diagnostics, record_source_read_failures, stash_workspace_diagnostics,
+    workspace_diagnostics_for,
 };
 use diagnostics::{emit_diagnostics, is_skip_listed_dir};
 pub use package_json::{NapiConfig, PackageJson};

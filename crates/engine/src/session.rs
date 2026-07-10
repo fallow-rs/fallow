@@ -255,6 +255,16 @@ impl AnalysisSession {
         &self.workspace_diagnostics
     }
 
+    /// Current diagnostics, including source read failures discovered lazily
+    /// after the session was created.
+    #[must_use]
+    pub fn current_workspace_diagnostics(&self) -> Vec<WorkspaceDiagnostic> {
+        merge_workspace_diagnostics(
+            self.workspace_diagnostics.clone(),
+            fallow_config::workspace_diagnostics_for(&self.config.root),
+        )
+    }
+
     pub(crate) fn styling_analysis_artifacts(&self) -> crate::health::StylingAnalysisArtifacts {
         if let Ok(cache) = self.styling_cache.lock()
             && let Some(artifacts) = cache.as_ref()
@@ -273,12 +283,13 @@ impl AnalysisSession {
     /// Consume the session and return the resolved config plus discovery data.
     #[must_use]
     pub fn into_parts(self) -> AnalysisSessionParts {
+        let workspace_diagnostics = self.current_workspace_diagnostics();
         AnalysisSessionParts {
             config: self.config,
             config_path: self.config_path,
             files: self.discovery.into_files(),
             workspaces: self.workspaces,
-            workspace_diagnostics: self.workspace_diagnostics,
+            workspace_diagnostics,
         }
     }
 
@@ -292,15 +303,21 @@ impl AnalysisSession {
             workspaces,
             workspace_diagnostics,
         } = self.into_parts();
-        let ParsedModules { modules, metrics } =
-            parse_files_with_config(&config, &files, need_complexity);
+        let ParsedModules {
+            modules,
+            metrics,
+            source_diagnostics,
+        } = parse_files_with_config(&config, &files, need_complexity);
         ParsedAnalysisSessionParts {
             config,
             config_path,
             files,
             modules,
             workspaces,
-            workspace_diagnostics,
+            workspace_diagnostics: merge_workspace_diagnostics(
+                workspace_diagnostics,
+                source_diagnostics,
+            ),
             parse_ms: metrics.parse_ms,
             cache_update_ms: metrics.cache_ms,
             cache_hits: metrics.cache_hits,
@@ -331,8 +348,11 @@ impl AnalysisSession {
     /// output in the session cache.
     #[must_use]
     pub fn parsed_parts_uncached(&self, need_complexity: bool) -> ParsedAnalysisSessionParts {
-        let ParsedModules { modules, metrics } =
-            parse_files_with_config(&self.config, self.files(), need_complexity);
+        let ParsedModules {
+            modules,
+            metrics,
+            source_diagnostics: _,
+        } = parse_files_with_config(&self.config, self.files(), need_complexity);
         self.parsed_parts_from_modules(modules, metrics)
     }
 
@@ -347,7 +367,7 @@ impl AnalysisSession {
             files: self.discovery.files().to_vec(),
             modules,
             workspaces: self.workspaces.clone(),
-            workspace_diagnostics: self.workspace_diagnostics.clone(),
+            workspace_diagnostics: self.current_workspace_diagnostics(),
             parse_ms: metrics.parse_ms,
             cache_update_ms: metrics.cache_ms,
             cache_hits: metrics.cache_hits,
@@ -634,8 +654,11 @@ impl AnalysisSession {
             };
         }
 
-        let ParsedModules { modules, metrics } =
-            parse_files_with_config(&self.config, self.files(), need_complexity);
+        let ParsedModules {
+            modules,
+            metrics,
+            source_diagnostics: _,
+        } = parse_files_with_config(&self.config, self.files(), need_complexity);
         let modules: Arc<[ModuleInfo]> = modules.into();
         if let Some(fingerprints) = fingerprints
             && let Ok(mut cache) = self.parsed_cache.lock()
@@ -684,6 +707,7 @@ fn merge_workspace_diagnostics(
 struct ParsedModules {
     modules: Vec<ModuleInfo>,
     metrics: core_backend::ParseMetrics,
+    source_diagnostics: Vec<WorkspaceDiagnostic>,
 }
 
 struct SharedParsedModules {
@@ -708,6 +732,8 @@ fn parse_files_with_config(
         )
     };
     let parse_result = crate::source::parse_all_files(files, cache.as_ref(), need_complexity);
+    let source_diagnostics =
+        fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
     let mut modules = parse_result.modules;
     for module in &mut modules {
         module.prepare_analysis_facts();
@@ -721,7 +747,11 @@ fn parse_files_with_config(
         cache_misses: parse_result.cache_misses,
         parse_cpu_ms: parse_result.parse_cpu_ms,
     };
-    ParsedModules { modules, metrics }
+    ParsedModules {
+        modules,
+        metrics,
+        source_diagnostics,
+    }
 }
 
 fn reused_parse_metrics() -> core_backend::ParseMetrics {
@@ -1088,6 +1118,56 @@ export default function Home() {
             serde_json::to_vec(&cold.results).expect("serialize cold results"),
             serde_json::to_vec(&warm.results).expect("serialize warm results"),
             "warm route-loader analysis must match cold analysis"
+        );
+    }
+
+    #[test]
+    fn session_parse_surfaces_removed_source_with_sparse_file_ids() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("create source directory");
+        std::fs::write(root.join("package.json"), r#"{"name":"read-failure"}"#)
+            .expect("write package manifest");
+        for name in ["a.ts", "b.ts", "c.ts"] {
+            std::fs::write(
+                root.join("src").join(name),
+                format!("export const {} = 1;\n", name.replace('.', "_")),
+            )
+            .expect("write source");
+        }
+        let session = AnalysisSession::load(root, None).expect("session loads");
+        let removed_path = root.join("src/b.ts");
+        let removed_id = session
+            .files()
+            .iter()
+            .find(|file| file.path == removed_path)
+            .expect("removed source discovered")
+            .id;
+        std::fs::remove_file(&removed_path).expect("remove source after discovery");
+
+        let parts = session.parsed_parts(false);
+
+        assert!(
+            parts
+                .modules
+                .iter()
+                .all(|module| module.file_id != removed_id),
+            "unreadable file must not receive a placeholder module"
+        );
+        let diagnostic = parts
+            .workspace_diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.kind.id() == "source-read-failure")
+            .expect("parsed session parts carry source read failure");
+        assert_eq!(diagnostic.path, removed_path);
+        assert!(
+            session
+                .current_workspace_diagnostics()
+                .iter()
+                .any(|diagnostic| {
+                    diagnostic.kind.id() == "source-read-failure" && diagnostic.path == removed_path
+                }),
+            "session output carries parse-time source diagnostics"
         );
     }
 }

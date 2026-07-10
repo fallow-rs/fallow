@@ -216,7 +216,7 @@ pub fn run_project_info(
             Some(collect_workspace_output(
                 resolved.root(),
                 workspaces,
-                session.workspace_diagnostics(),
+                &session.current_workspace_diagnostics(),
             ))
         } else {
             None

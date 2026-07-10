@@ -99,7 +99,7 @@ fn collect_list_data(
     let session_workspaces = session.as_ref().map(|session| session.workspaces());
     let session_workspace_diagnostics = session
         .as_ref()
-        .map(|session| session.workspace_diagnostics());
+        .map(|session| session.current_workspace_diagnostics());
 
     let plugin_result = collect_plugin_result(
         opts,
@@ -132,7 +132,7 @@ fn collect_list_data(
         config,
         show_all,
         session_workspaces,
-        session_workspace_diagnostics,
+        session_workspace_diagnostics.as_deref(),
     )?;
 
     Ok(ListData {

@@ -3,7 +3,7 @@
 use fallow_types::discover::DiscoveredFile;
 #[cfg(test)]
 pub use fallow_types::extract::{ExportName, MemberKind, VisibilityTag};
-pub use fallow_types::extract::{ModuleInfo, ParseResult};
+pub use fallow_types::extract::{ModuleInfo, ParseResult, SourceReadFailure};
 
 type CacheStore = fallow_extract::cache::CacheStore;
 

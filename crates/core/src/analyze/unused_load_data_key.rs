@@ -108,7 +108,6 @@ pub fn find_unused_load_data_keys(
         findings.extend(collect_unused_load_data_key_findings(
             &LoadDataKeyScanInput {
                 graph,
-                modules,
                 module_indexes: &module_indexes,
                 global_used: &global_used,
                 root,
@@ -121,7 +120,6 @@ pub fn find_unused_load_data_keys(
         findings.extend(collect_unused_route_loader_data_key_findings(
             &LoadDataKeyScanInput {
                 graph,
-                modules,
                 module_indexes: &module_indexes,
                 global_used: &global_used,
                 root,
@@ -143,7 +141,7 @@ fn collect_unused_route_loader_data_key_findings(
     let mut findings = Vec::new();
     for node in &input.graph.modules {
         let Some(candidate) =
-            route_loader_candidate_for_node(node, input.modules, input.module_indexes, input.root)
+            route_loader_candidate_for_node(node, input.module_indexes, input.root)
         else {
             continue;
         };
@@ -171,11 +169,10 @@ fn collect_unused_route_loader_data_key_findings(
 
 fn route_loader_candidate_for_node<'a>(
     node: &ModuleNode,
-    modules: &'a [ModuleInfo],
     module_indexes: &ModuleIndexes<'a>,
     root: &Path,
 ) -> Option<ProducerCandidate<'a>> {
-    let producer = modules.get(node.file_id.0 as usize)?;
+    let producer = module_indexes.module_by_id.get(&node.file_id).copied()?;
     if producer.load_return_keys.is_empty() || producer.has_unharvestable_load {
         return None;
     }
@@ -217,7 +214,6 @@ fn collect_route_loader_used_keys(module: &ModuleInfo) -> Option<FxHashSet<&str>
 /// Inputs for the SvelteKit unused-load-data-key emit pass.
 struct LoadDataKeyScanInput<'a> {
     graph: &'a ModuleGraph,
-    modules: &'a [ModuleInfo],
     module_indexes: &'a ModuleIndexes<'a>,
     global_used: &'a FxHashSet<&'a str>,
     root: &'a Path,
@@ -230,13 +226,9 @@ fn collect_unused_load_data_key_findings(
 ) -> Vec<UnusedLoadDataKey> {
     let mut findings = Vec::new();
     for node in &input.graph.modules {
-        let Some(candidate) = producer_candidate_for_node(
-            node,
-            input.modules,
-            input.module_indexes,
-            input.global_used,
-            input.root,
-        ) else {
+        let Some(candidate) =
+            producer_candidate_for_node(node, input.module_indexes, input.global_used, input.root)
+        else {
             continue;
         };
 
@@ -272,12 +264,11 @@ struct ProducerCandidate<'a> {
 
 fn producer_candidate_for_node<'a>(
     node: &ModuleNode,
-    modules: &'a [ModuleInfo],
     module_indexes: &ModuleIndexes<'a>,
     global_used: &FxHashSet<&'a str>,
     root: &Path,
 ) -> Option<ProducerCandidate<'a>> {
-    let producer = modules.get(node.file_id.0 as usize)?;
+    let producer = module_indexes.module_by_id.get(&node.file_id).copied()?;
     if producer.load_return_keys.is_empty() || producer.has_unharvestable_load {
         return None;
     }
@@ -310,6 +301,8 @@ fn empty_result() -> LoadDataKeyResult {
 }
 
 struct ModuleIndexes<'a> {
+    /// Stable file identity -> module facts. Sparse when a source read failed.
+    module_by_id: FxHashMap<FileId, &'a ModuleInfo>,
     /// Path -> ModuleInfo for sibling lookups, keyed by absolute path.
     module_by_path: FxHashMap<&'a Path, &'a ModuleInfo>,
     path_by_id: FxHashMap<FileId, &'a Path>,
@@ -319,15 +312,20 @@ fn build_module_indexes<'a>(
     graph: &'a ModuleGraph,
     modules: &'a [ModuleInfo],
 ) -> ModuleIndexes<'a> {
+    let module_by_id: FxHashMap<FileId, &ModuleInfo> = modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
     ModuleIndexes {
         module_by_path: graph
             .modules
             .iter()
             .filter_map(|node| {
-                let module = modules.get(node.file_id.0 as usize)?;
+                let module = module_by_id.get(&node.file_id).copied()?;
                 Some((node.path.as_path(), module))
             })
             .collect(),
+        module_by_id,
         path_by_id: graph
             .modules
             .iter()
@@ -656,5 +654,39 @@ mod tests {
             result.findings.is_empty(),
             "an opaque route-loader use must abstain after resolution payload release"
         );
+    }
+
+    #[test]
+    fn sparse_module_ids_do_not_reassign_loader_keys_to_missing_file() {
+        let root = Path::new("/repo");
+        let first_path = root.join("app/routes/first.tsx");
+        let missing_path = root.join("app/routes/missing.tsx");
+        let producer_path = root.join("app/routes/producer.tsx");
+        let graph = graph_for_paths(&[first_path, missing_path.clone(), producer_path.clone()]);
+
+        let mut first = empty_module();
+        first.file_id = FileId(0);
+        let mut producer = empty_module();
+        producer.file_id = FileId(2);
+        producer.load_return_keys = vec![LoadReturnKey {
+            name: "dead".to_string(),
+            span_start: 0,
+            span_end: 4,
+        }];
+
+        let mut declared_deps = FxHashSet::default();
+        declared_deps.insert("react-router".to_string());
+        let result = find_unused_load_data_keys(
+            &graph,
+            &[first, producer],
+            &declared_deps,
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            root,
+        );
+
+        assert_eq!(result.findings.len(), 1);
+        assert_eq!(result.findings[0].path, producer_path);
+        assert_ne!(result.findings[0].path, missing_path);
     }
 }

@@ -60,8 +60,8 @@ pub use fallow_types::extract::{
     ImportedName, InstanceExportBindingFact, LocalTypeDeclaration, MemberAccess, MemberInfo,
     MemberKind, ModuleInfo, ParseResult, PlaywrightFixtureAliasFact,
     PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
-    PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
-    TypedPropertyMemberAccessFact, VisibilityTag, compute_line_offsets,
+    PublicSignatureTypeReference, ReExportInfo, RequireCallInfo, SemanticFact, SourceReadFailure,
+    TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag, compute_line_offsets,
 };
 
 pub use astro::{
@@ -152,6 +152,7 @@ pub fn parse_all_files(
     };
 
     let mut modules = Vec::with_capacity(results.len());
+    let mut read_failures = Vec::new();
     let mut hits = 0usize;
     let mut misses = 0usize;
     let mut parse_cpu_nanos = 0u64;
@@ -162,6 +163,9 @@ pub fn parse_all_files(
         parse_cpu_nanos = parse_cpu_nanos.saturating_add(result.parse_cpu_nanos);
         if let Some(module) = result.module {
             modules.push(module);
+        }
+        if let Some(failure) = result.read_failure {
+            read_failures.push(failure);
         }
     }
 
@@ -175,6 +179,7 @@ pub fn parse_all_files(
 
     ParseResult {
         modules,
+        read_failures,
         cache_hits: hits,
         cache_misses: misses,
         parse_cpu_ms: parse_cpu_nanos as f64 / 1_000_000.0,
@@ -183,6 +188,7 @@ pub fn parse_all_files(
 
 struct ParseFileResult {
     module: Option<ModuleInfo>,
+    read_failure: Option<SourceReadFailure>,
     cache_hits: usize,
     cache_misses: usize,
     parse_cpu_nanos: u64,
@@ -192,6 +198,7 @@ impl ParseFileResult {
     fn cache_hit(module: ModuleInfo) -> Self {
         Self {
             module: Some(module),
+            read_failure: None,
             cache_hits: 1,
             cache_misses: 0,
             parse_cpu_nanos: 0,
@@ -201,15 +208,21 @@ impl ParseFileResult {
     fn cache_miss(module: ModuleInfo, parse_cpu_nanos: u64) -> Self {
         Self {
             module: Some(module),
+            read_failure: None,
             cache_hits: 0,
             cache_misses: 1,
             parse_cpu_nanos,
         }
     }
 
-    const fn skipped() -> Self {
+    fn read_failure(file: &DiscoveredFile, error: &std::io::Error) -> Self {
         Self {
             module: None,
+            read_failure: Some(SourceReadFailure {
+                file_id: file.id,
+                path: file.path.clone(),
+                error: error.to_string(),
+            }),
             cache_hits: 0,
             cache_misses: 0,
             parse_cpu_nanos: 0,
@@ -251,8 +264,9 @@ fn parse_single_file_cached(
         }
     }
 
-    let Ok(raw) = std::fs::read_to_string(&file.path) else {
-        return ParseFileResult::skipped();
+    let raw = match std::fs::read_to_string(&file.path) {
+        Ok(raw) => raw,
+        Err(error) => return ParseFileResult::read_failure(file, &error),
     };
     let source = strip_bom(&raw);
     let content_hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());

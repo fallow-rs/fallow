@@ -3,6 +3,43 @@ use std::path::PathBuf;
 use super::common::{create_config, create_config_with_cache, fixture_path};
 
 #[test]
+fn source_read_failure_preserves_sparse_file_ids() {
+    use fallow_types::discover::{DiscoveredFile, FileId};
+
+    let project = tempfile::tempdir().expect("create project");
+    let files = ["a.ts", "b.ts", "c.ts"].map(|name| project.path().join(name));
+    for (index, path) in files.iter().enumerate() {
+        std::fs::write(path, format!("export const value{index} = {index};\n"))
+            .expect("write source");
+    }
+    let discovered: Vec<DiscoveredFile> = files
+        .iter()
+        .enumerate()
+        .map(|(index, path)| DiscoveredFile {
+            id: FileId(u32::try_from(index).expect("test index fits u32")),
+            path: path.clone(),
+            size_bytes: std::fs::metadata(path).expect("source metadata").len(),
+        })
+        .collect();
+    std::fs::remove_file(&files[1]).expect("remove middle source after discovery");
+
+    let result = fallow_core::extract::parse_all_files(&discovered, None, false);
+
+    assert_eq!(
+        result
+            .modules
+            .iter()
+            .map(|module| module.file_id)
+            .collect::<Vec<_>>(),
+        vec![FileId(0), FileId(2)]
+    );
+    assert_eq!(result.read_failures.len(), 1);
+    assert_eq!(result.read_failures[0].file_id, FileId(1));
+    assert_eq!(result.read_failures[0].path, files[1]);
+    assert!(!result.read_failures[0].error.is_empty());
+}
+
+#[test]
 #[allow(
     clippy::too_many_lines,
     reason = "roundtrip fixture enumerates cache fields"

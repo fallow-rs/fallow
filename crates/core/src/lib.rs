@@ -1378,6 +1378,7 @@ fn parse_analysis_modules(
     };
 
     let parse_result = extract::parse_all_files(files, cache_store.as_ref(), need_complexity);
+    let _ = fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
     let modules = parse_result.modules;
     let parse_ms = start.elapsed().as_secs_f64() * 1000.0;
     let cache_ms = update_parse_cache_if_enabled(
@@ -2541,14 +2542,16 @@ fn num_cpus() -> usize {
 mod tests {
     use super::{
         AnalysisSession, bucket_files_by_workspace, collect_config_search_roots, default_config,
-        format_undeclared_workspace_warning, plugin_config_hash, resolver_options_hash,
-        warn_undeclared_workspaces,
+        format_undeclared_workspace_warning, parse_analysis_modules, plugin_config_hash,
+        resolver_options_hash, warn_undeclared_workspaces,
     };
     use std::path::{Path, PathBuf};
+    use std::time::Instant;
 
     use fallow_config::{
         AutoImportKind, AutoImportRule, WorkspaceDiagnostic, WorkspaceDiagnosticKind,
     };
+    use fallow_types::discover::{DiscoveredFile, FileId};
 
     fn plugin_result() -> crate::plugins::AggregatedPluginResult {
         let mut result = crate::plugins::AggregatedPluginResult::default();
@@ -2686,6 +2689,49 @@ mod tests {
             "session should own discovered project files"
         );
         assert_eq!(session.workspaces().len(), 0);
+    }
+
+    #[test]
+    fn direct_core_parse_surfaces_source_read_failure_diagnostic() {
+        let project = tempfile::tempdir().expect("create project");
+        let root = project.path();
+        let paths = ["a.ts", "b.ts", "c.ts"].map(|name| root.join(name));
+        for (index, path) in paths.iter().enumerate() {
+            std::fs::write(path, format!("export const value{index} = {index};\n"))
+                .expect("write source");
+        }
+        let files: Vec<DiscoveredFile> = paths
+            .iter()
+            .enumerate()
+            .map(|(index, path)| DiscoveredFile {
+                id: FileId(u32::try_from(index).expect("test index fits u32")),
+                path: path.clone(),
+                size_bytes: std::fs::metadata(path).expect("source metadata").len(),
+            })
+            .collect();
+        std::fs::remove_file(&paths[1]).expect("remove source after discovery");
+        let config = session_config(root);
+
+        let parsed = parse_analysis_modules(&config, &files, false, Instant::now());
+
+        assert_eq!(
+            parsed
+                .modules
+                .iter()
+                .map(|module| module.file_id)
+                .collect::<Vec<_>>(),
+            vec![FileId(0), FileId(2)]
+        );
+        let diagnostics = fallow_config::workspace_diagnostics_for(root);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.kind.id() == "source-read-failure")
+            .expect("source read failure diagnostic");
+        assert_eq!(diagnostic.path, paths[1]);
+        assert!(matches!(
+            diagnostic.kind,
+            WorkspaceDiagnosticKind::SourceReadFailure { .. }
+        ));
     }
 
     #[test]

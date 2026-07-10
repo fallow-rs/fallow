@@ -277,17 +277,11 @@ fn run_audit_subanalyses_with_context(
     }
 
     if production_modes.dead_code == production_modes.health {
-        return run_shared_dead_code_health_audit_subanalyses(
-            &subanalysis_options,
-            changed_files,
-        );
+        return run_shared_dead_code_health_audit_subanalyses(&subanalysis_options, changed_files);
     }
 
     if production_modes.dead_code == production_modes.dupes {
-        return run_shared_dead_code_dupes_audit_subanalyses(
-            &subanalysis_options,
-            changed_files,
-        );
+        return run_shared_dead_code_dupes_audit_subanalyses(&subanalysis_options, changed_files);
     }
 
     Ok(AuditSubanalyses {

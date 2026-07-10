@@ -7,7 +7,7 @@
 //! envelopes). Keeping the data types in `fallow-types` lets the output layer
 //! reference the real, schema-bearing type instead of an opaque
 //! `serde_json::Value` newtype, so `workspace_diagnostics[]` keeps its typed
-//! `kind`/`path`/`message` shape (and the 7-variant `kind` oneOf) in
+//! `kind`/`path`/`message` shape (and the typed `kind` oneOf) in
 //! `docs/output-schema.json` without coupling output contracts to config
 //! loading.
 
@@ -75,6 +75,13 @@ pub enum WorkspaceDiagnosticKind {
         /// On-disk size of the skipped file in bytes.
         size_bytes: u64,
     },
+    /// A source discovered with a stable [`FileId`](crate::discover::FileId)
+    /// could not be read before parsing. Analysis continues with the remaining
+    /// sparse module IDs and reports the underlying filesystem or UTF-8 error.
+    SourceReadFailure {
+        /// Filesystem or UTF-8 decoding error from `read_to_string`.
+        error: String,
+    },
 }
 
 impl WorkspaceDiagnosticKind {
@@ -89,6 +96,7 @@ impl WorkspaceDiagnosticKind {
             Self::TsconfigReferenceDirMissing => "tsconfig-reference-dir-missing",
             Self::SkippedLargeFile { .. } => "skipped-large-file",
             Self::SkippedMinifiedFile { .. } => "skipped-minified-file",
+            Self::SourceReadFailure { .. } => "source-read-failure",
         }
     }
 
@@ -104,7 +112,9 @@ impl WorkspaceDiagnosticKind {
     pub const fn is_source_discovery(&self) -> bool {
         matches!(
             self,
-            Self::SkippedLargeFile { .. } | Self::SkippedMinifiedFile { .. }
+            Self::SkippedLargeFile { .. }
+                | Self::SkippedMinifiedFile { .. }
+                | Self::SourceReadFailure { .. }
         )
     }
 }
@@ -168,8 +178,8 @@ impl WorkspaceDiagnostic {
 }
 
 /// Strip the project root from absolute paths embedded inside variant
-/// payloads (today: the `error` field of `MalformedPackageJson` and
-/// `MalformedTsconfig`). Mirrors the per-platform `display()` byte sequence
+/// payloads (the `error` field of malformed-config and source-read failures).
+/// Mirrors the per-platform `display()` byte sequence
 /// so the substring match works on Windows too.
 fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> WorkspaceDiagnosticKind {
     let root_str = root.display().to_string();
@@ -190,6 +200,11 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
         }
         WorkspaceDiagnosticKind::MalformedTsconfig { error } => {
             WorkspaceDiagnosticKind::MalformedTsconfig {
+                error: normalise(error),
+            }
+        }
+        WorkspaceDiagnosticKind::SourceReadFailure { error } => {
+            WorkspaceDiagnosticKind::SourceReadFailure {
                 error: normalise(error),
             }
         }
@@ -243,6 +258,10 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              rename it with a .min.js suffix, or use --max-file-size 0 if this file \
              should be analyzed.",
             size = format_size_mb(*size_bytes)
+        ),
+        WorkspaceDiagnosticKind::SourceReadFailure { error } => format!(
+            "Could not read source '{display}' ({error}). Restore the file or its read permissions, \
+             ensure it contains valid UTF-8 text, or add '{display}' to ignorePatterns."
         ),
     }
 }
@@ -305,6 +324,40 @@ mod tests {
             "message names the opt-out: {}",
             diag.message
         );
+    }
+
+    #[test]
+    fn source_read_failure_serializes_typed_error_payload() {
+        let root = Path::new("/project");
+        let diagnostic = WorkspaceDiagnostic::new(
+            root,
+            root.join("src/removed.ts"),
+            WorkspaceDiagnosticKind::SourceReadFailure {
+                error: "No such file or directory".to_string(),
+            },
+        );
+
+        let json = serde_json::to_value(&diagnostic).expect("diagnostic serializes");
+        assert_eq!(json["kind"], "source-read-failure");
+        assert_eq!(
+            json["path"],
+            root.join("src/removed.ts").display().to_string()
+        );
+        assert_eq!(json["error"], "No such file or directory");
+        assert!(
+            json["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("src/removed.ts"))
+        );
+    }
+
+    #[cfg(feature = "schema")]
+    #[test]
+    fn workspace_diagnostic_schema_includes_source_read_failure() {
+        let schema = schemars::schema_for!(WorkspaceDiagnostic);
+        let json = serde_json::to_string(&schema).expect("schema serializes");
+        assert!(json.contains("source-read-failure"));
+        assert!(json.contains("error"));
     }
 
     #[test]

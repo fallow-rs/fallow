@@ -399,6 +399,45 @@ pub fn append_workspace_diagnostics(root: &Path, additions: Vec<WorkspaceDiagnos
     }
 }
 
+/// Replace source-read-failure diagnostics for `root` with the failures from
+/// the current parse while preserving every workspace and discovery diagnostic
+/// produced by other stages.
+///
+/// Returns the structured diagnostics so session-owned outputs can carry the
+/// exact same values as the process registry used by direct core and CLI paths.
+#[must_use]
+pub fn record_source_read_failures(
+    root: &Path,
+    failures: &[fallow_types::extract::SourceReadFailure],
+) -> Vec<WorkspaceDiagnostic> {
+    let diagnostics: Vec<WorkspaceDiagnostic> = failures
+        .iter()
+        .map(|failure| {
+            WorkspaceDiagnostic::new(
+                root,
+                failure.path.clone(),
+                WorkspaceDiagnosticKind::SourceReadFailure {
+                    error: failure.error.clone(),
+                },
+            )
+        })
+        .collect();
+    let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let registry = WORKSPACE_DIAGNOSTICS.get_or_init(|| Mutex::new(FxHashMap::default()));
+    if let Ok(mut map) = registry.lock() {
+        let existing = map.entry(canonical).or_default();
+        existing.retain(|diagnostic| {
+            !matches!(
+                diagnostic.kind,
+                WorkspaceDiagnosticKind::SourceReadFailure { .. }
+            )
+        });
+        existing.extend(diagnostics.iter().cloned());
+    }
+    emit_diagnostics(root, &diagnostics);
+    diagnostics
+}
+
 /// Remove all source-discovery diagnostics (see
 /// [`WorkspaceDiagnosticKind::is_source_discovery`]) for `root` from the
 /// registry, keeping the workspace-discovery set intact.
@@ -471,6 +510,8 @@ pub(super) fn is_ignored_workspace_dir(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_types::discover::FileId;
+    use fallow_types::extract::SourceReadFailure;
 
     fn glob_diag(root: &Path, pattern: &str, rel_path: &str) -> WorkspaceDiagnostic {
         WorkspaceDiagnostic::new(
@@ -584,6 +625,69 @@ mod tests {
             1,
             "the workspace-discovery diagnostic is replaced, not duplicated"
         );
+    }
+
+    #[test]
+    fn source_read_failures_replace_only_their_previous_parse_set() {
+        let root = Path::new("/fallow-test-source-read-replace");
+        stash_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("pkg"),
+                WorkspaceDiagnosticKind::UndeclaredWorkspace,
+            )],
+        );
+        append_workspace_diagnostics(
+            root,
+            vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("vendor/big.js"),
+                WorkspaceDiagnosticKind::SkippedLargeFile { size_bytes: 99 },
+            )],
+        );
+        let first = SourceReadFailure {
+            file_id: FileId(1),
+            path: root.join("src/first.ts"),
+            error: "removed".to_string(),
+        };
+        let _ = record_source_read_failures(root, &[first]);
+        let second = SourceReadFailure {
+            file_id: FileId(2),
+            path: root.join("src/second.ts"),
+            error: "permission denied".to_string(),
+        };
+
+        let _ = record_source_read_failures(root, std::slice::from_ref(&second));
+
+        let diagnostics = workspace_diagnostics_for(root);
+        let source_failures: Vec<_> = diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                matches!(
+                    diagnostic.kind,
+                    WorkspaceDiagnosticKind::SourceReadFailure { .. }
+                )
+            })
+            .collect();
+        assert_eq!(source_failures.len(), 1);
+        assert_eq!(source_failures[0].path, second.path);
+        assert!(diagnostics.iter().any(|diagnostic| matches!(
+            diagnostic.kind,
+            WorkspaceDiagnosticKind::UndeclaredWorkspace
+        )));
+        assert!(diagnostics.iter().any(|diagnostic| matches!(
+            diagnostic.kind,
+            WorkspaceDiagnosticKind::SkippedLargeFile { .. }
+        )));
+
+        let _ = record_source_read_failures(root, &[]);
+        assert!(workspace_diagnostics_for(root).iter().all(|diagnostic| {
+            !matches!(
+                diagnostic.kind,
+                WorkspaceDiagnosticKind::SourceReadFailure { .. }
+            )
+        }));
     }
 
     #[test]

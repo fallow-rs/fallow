@@ -1137,6 +1137,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn source_read_failure_workspace_diagnostic_serializes_error_payload() {
+        let root = std::path::Path::new("/project");
+        let output = build_check_output(CheckOutputInput {
+            schema_version: 7,
+            version: "0.0.0".to_string(),
+            elapsed: Duration::from_millis(1),
+            results: AnalysisResults::default(),
+            config_fixable: false,
+            meta: None,
+            workspace_diagnostics: vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("src/removed.ts"),
+                WorkspaceDiagnosticKind::SourceReadFailure {
+                    error: "No such file or directory".to_string(),
+                },
+            )],
+            next_steps: Vec::new(),
+        });
+
+        let value = serde_json::to_value(&output).expect("check output serializes");
+        let diagnostic = &value["workspace_diagnostics"][0];
+        assert_eq!(diagnostic["kind"], "source-read-failure");
+        assert_eq!(diagnostic["error"], "No such file or directory");
+        assert!(
+            diagnostic["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("src/removed.ts"))
+        );
+    }
+
     fn suppress_comment(actions: &[IssueAction]) -> Option<&str> {
         actions.iter().find_map(|action| match action {
             IssueAction::SuppressLine(action) => Some(action.comment.as_str()),

@@ -10497,6 +10497,24 @@
             "size_bytes"
           ],
           "description": "A large JavaScript bundle was skipped at discovery because it appears to\nbe minified generated output. The file is never parsed or analyzed,\nguarding against sub-limit bundles that can still create very large ASTs\nand extraction payloads (issue #1086). Use `--max-file-size 0` when the\nbundled file really should be analyzed."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "description": "Filesystem or UTF-8 decoding error from `read_to_string`."
+            },
+            "kind": {
+              "type": "string",
+              "const": "source-read-failure"
+            }
+          },
+          "required": [
+            "kind",
+            "error"
+          ],
+          "description": "A source discovered with a stable [`FileId`](crate::discover::FileId)\ncould not be read before parsing. Analysis continues with the remaining\nsparse module IDs and reports the underlying filesystem or UTF-8 error."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."

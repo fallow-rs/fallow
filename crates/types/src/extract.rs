@@ -1,5 +1,7 @@
 //! Module extraction types.
 
+use std::path::PathBuf;
+
 use oxc_span::Span;
 
 use crate::discover::FileId;
@@ -2532,12 +2534,25 @@ pub struct RequireCallInfo {
 pub struct ParseResult {
     /// Extracted module information for all successfully parsed files.
     pub modules: Vec<ModuleInfo>,
+    /// Files discovered with stable IDs but unreadable by the parser.
+    pub read_failures: Vec<SourceReadFailure>,
     /// Number of files whose parse results were loaded from cache (unchanged).
     pub cache_hits: usize,
     /// Number of files that required a full parse (new or changed).
     pub cache_misses: usize,
     /// Summed wall-clock time of the actual AST parses across all rayon workers.
     pub parse_cpu_ms: f64,
+}
+
+/// A discovered source that could not be read as UTF-8 text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceReadFailure {
+    /// Stable discovery identity retained even though no module was produced.
+    pub file_id: FileId,
+    /// Absolute discovered source path.
+    pub path: PathBuf,
+    /// Underlying filesystem or UTF-8 decoding error.
+    pub error: String,
 }
 
 #[cfg(test)]

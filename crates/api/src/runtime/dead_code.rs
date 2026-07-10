@@ -206,7 +206,7 @@ fn build_dead_code_programmatic_output(
         results,
         config_fixable,
         meta: options.analysis.explain.then(check_meta),
-        workspace_diagnostics: session.workspace_diagnostics().to_vec(),
+        workspace_diagnostics: session.current_workspace_diagnostics(),
         next_steps,
     });
     DeadCodeProgrammaticOutput {

@@ -377,6 +377,12 @@ kind: "skipped-large-file"
  */
 size_bytes: number
 kind: "skipped-minified-file"
+} | {
+/**
+ * Filesystem or UTF-8 decoding error from `read_to_string`.
+ */
+error: string
+kind: "source-read-failure"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types

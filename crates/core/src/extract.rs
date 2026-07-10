@@ -7,7 +7,7 @@
 pub use fallow_extract::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult, ReExportInfo, RequireCallInfo,
-    VisibilityTag,
+    SourceReadFailure, VisibilityTag,
 };
 pub use fallow_types::extract::{SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason};
 
