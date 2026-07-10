@@ -627,7 +627,7 @@ async fn run_fallow_timeout_terminates_and_reaps_windows_job_tree() {
     let direct_pid_path = temp.path().join("direct.pid");
     let descendant_pid_path = temp.path().join("descendant.pid");
     let script_path = temp.path().join("process-tree-fixture.ps1");
-    let script = r#"
+    let script = r"
 param(
     [Parameter(Mandatory = $true)][string]$DirectPidPath,
     [Parameter(Mandatory = $true)][string]$DescendantPidPath
@@ -636,7 +636,7 @@ $PID | Set-Content -NoNewline -LiteralPath $DirectPidPath
 $child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru
 $child.Id | Set-Content -NoNewline -LiteralPath $DescendantPidPath
 Start-Sleep -Seconds 30
-"#;
+";
     std::fs::write(&script_path, script).expect("PowerShell fixture script");
 
     let result = run_fallow_with_timeout(

@@ -34,6 +34,16 @@ test("workflow block parser rejects missing keys", () => {
   assert.throws(() => indentedBlock("root:\n  value: true", "missing", 0), /missing missing block/);
 });
 
+test("Windows lifecycle PR gate lints MCP test code", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const windowsLifecycleJob = indentedBlock(workflow, "windows-audit-smoke", 2);
+
+  assert.match(
+    windowsLifecycleJob,
+    /name: Lint MCP Windows lifecycle code\n\s+run: cargo clippy -p fallow-mcp --bin fallow-mcp --tests -- -D warnings/,
+  );
+});
+
 test("VS Code CI runs the extension-host integration suite with a pinned cached download", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const vscodeJob = indentedBlock(workflow, "vscode", 2);

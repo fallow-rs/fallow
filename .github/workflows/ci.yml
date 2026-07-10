@@ -596,9 +596,9 @@ jobs:
     # WaitForSingleObject implementation, and `ReusableWorktreeLock` uses
     # NTFS LockFileEx whose semantics differ from POSIX flock. This job runs
     # the focused lifecycle tests on every Rust-touching PR so those Windows-only
-    # paths are validated before a release tag is cut. This also exercises MCP
-    # Job Object cleanup for a timed-out process and its descendant. Narrower
-    # than the full Windows matrix (#447). Refs #489, #472.
+    # paths are validated before a release tag is cut. It also lints the MCP test
+    # target and exercises Job Object cleanup for a timed-out process and its
+    # descendant. Narrower than the full Windows matrix (#447). Refs #489, #472.
     if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
     runs-on: windows-latest
     timeout-minutes: 20
@@ -609,6 +609,8 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: windows-audit-smoke
+      - name: Lint MCP Windows lifecycle code
+        run: cargo clippy -p fallow-mcp --bin fallow-mcp --tests -- -D warnings
       - name: Run audit orphan-sweep + lock lifecycle tests
         run: >
           cargo test -p fallow-cli --lib --
