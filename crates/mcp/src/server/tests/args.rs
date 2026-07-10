@@ -7,9 +7,8 @@ use crate::tools::{
     build_get_importance_args, build_get_token_blast_radius_args, build_guard_args,
     build_health_args, build_impact_all_args, build_impact_args, build_impact_closure_args,
     build_list_boundaries_args, build_list_suppressions_args, build_project_info_args,
-    build_security_candidates_args,
-    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
-    build_trace_file_args,
+    build_security_candidates_args, build_trace_clone_args, build_trace_dependency_args,
+    build_trace_export_args, build_trace_file_args,
 };
 
 /// Parse a validation error body into its `message` field. Arg builders emit
