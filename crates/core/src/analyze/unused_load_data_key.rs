@@ -196,10 +196,11 @@ fn route_loader_candidate_for_node<'a>(
 }
 
 fn collect_route_loader_used_keys(module: &ModuleInfo) -> Option<FxHashSet<&str>> {
-    if module
-        .whole_object_uses
-        .iter()
-        .any(|name| name == ROUTE_LOADER_DATA_OBJECT)
+    if module.has_route_loader_data_whole_use
+        || module
+            .whole_object_uses
+            .iter()
+            .any(|name| name == ROUTE_LOADER_DATA_OBJECT)
     {
         return None;
     }
@@ -622,5 +623,38 @@ mod tests {
             .collect();
         assert!(result.global_abstain);
         assert_eq!(keys, vec!["dead"]);
+    }
+
+    #[test]
+    fn released_route_loader_whole_use_still_abstains() {
+        let root = Path::new("/repo");
+        let route_path = root.join("app/routes/home.tsx");
+        let graph = graph_for_paths(std::slice::from_ref(&route_path));
+
+        let mut route = empty_module();
+        route.file_id = FileId(0);
+        route.load_return_keys = vec![LoadReturnKey {
+            name: "opaque".to_string(),
+            span_start: 0,
+            span_end: 6,
+        }];
+        route.whole_object_uses = vec![ROUTE_LOADER_DATA_OBJECT.to_string()].into();
+        route.release_resolution_payload();
+
+        let mut declared_deps = FxHashSet::default();
+        declared_deps.insert("react-router".to_string());
+        let result = find_unused_load_data_keys(
+            &graph,
+            &[route],
+            &declared_deps,
+            &SuppressionContext::empty(),
+            &FxHashMap::default(),
+            root,
+        );
+
+        assert!(
+            result.findings.is_empty(),
+            "an opaque route-loader use must abstain after resolution payload release"
+        );
     }
 }

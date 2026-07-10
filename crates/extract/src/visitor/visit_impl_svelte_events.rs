@@ -11,24 +11,15 @@ use fallow_types::extract::DispatchedEvent;
 use super::{ModuleInfoExtractor, ROUTE_LOADER_DATA_OBJECT};
 
 impl ModuleInfoExtractor {
-    /// FP-1 (unused-load-data-key): `fn(data)` / `fn(...data)` passes the whole
-    /// SvelteKit `data` prop opaquely. Name-gated on the bare `data` identifier
-    /// argument (a `data.x` member access is a credited `.member`, not a whole
-    /// use). Read only by the load-data detector, so capturing it everywhere is
-    /// byte-identity-safe.
+    /// Track the load-data detector's two call-argument exceptions.
+    ///
+    /// Generic call arguments are intentionally not recorded as whole-object
+    /// uses because that would over-credit arbitrary imported objects. The
+    /// SvelteKit `data` prop and a binding proven to come from `useLoaderData()`
+    /// are different: `fn(data)` / `fn(...data)` can consume any returned key,
+    /// so their detector-specific abstention signals are recorded here.
     pub(super) fn record_load_data_whole_arg_use(&mut self, expr: &CallExpression<'_>) {
         for arg in &expr.arguments {
-            let is_whole_data = match arg {
-                Argument::SpreadElement(spread) => {
-                    matches!(&spread.argument, Expression::Identifier(id) if id.name == "data")
-                }
-                Argument::Identifier(id) => id.name == "data",
-                _ => false,
-            };
-            if is_whole_data {
-                self.has_load_data_whole_use = true;
-                return;
-            }
             let route_data_name = match arg {
                 Argument::SpreadElement(spread) => match &spread.argument {
                     Expression::Identifier(id) => Some(id.name.as_str()),
@@ -37,14 +28,15 @@ impl ModuleInfoExtractor {
                 Argument::Identifier(id) => Some(id.name.as_str()),
                 _ => None,
             };
-            if route_data_name.is_some_and(|name| self.route_loader_data_bindings.contains(name)) {
+            if route_data_name.is_some_and(|name| {
+                name == "loaderData" || self.route_loader_data_bindings.contains(name)
+            }) {
                 self.whole_object_uses
                     .push(ROUTE_LOADER_DATA_OBJECT.to_string());
                 return;
             }
-            if route_data_name == Some("loaderData") {
-                self.whole_object_uses
-                    .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+            if route_data_name == Some("data") {
+                self.has_load_data_whole_use = true;
                 return;
             }
         }

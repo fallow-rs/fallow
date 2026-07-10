@@ -114,6 +114,7 @@ pub(crate) mod analyze {
                 has_unharvestable_load: false,
                 has_load_data_whole_use: false,
                 has_page_data_store_whole_use: false,
+                has_route_loader_data_whole_use: false,
                 component_functions: Vec::new(),
                 react_props: Vec::new(),
                 hook_uses: Vec::new(),

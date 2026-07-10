@@ -1,6 +1,6 @@
 use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
 
-use crate::common::fixture_path;
+use crate::common::{create_config_with_cache, fixture_path};
 
 /// Resolve the fixture with the default rule set: `unused-load-data-key` at
 /// `warn` (its default). The detector is gated on the project declaring
@@ -228,5 +228,55 @@ fn route_loader_data_rule_does_not_fire_without_framework_dependency() {
         results.unused_load_data_keys.is_empty(),
         "React Router and Remix loader-data detection must be dependency-gated: {:?}",
         key_names(&results)
+    );
+}
+
+#[test]
+#[allow(
+    deprecated,
+    reason = "regression covers the direct core compatibility path"
+)]
+fn direct_core_route_loader_abstention_matches_cold_and_warm_cache() {
+    let project = tempfile::tempdir().expect("create project");
+    let root = project.path();
+    std::fs::create_dir_all(root.join("app/routes")).expect("create route directory");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"route-core-cache-parity","dependencies":{"react-router":"latest"}}"#,
+    )
+    .expect("write package manifest");
+    std::fs::write(
+        root.join("app/routes/home.tsx"),
+        r#"
+import { useLoaderData } from "react-router";
+export function loader() { return { opaque: "value" }; }
+export default function Home() {
+  const data = useLoaderData<typeof loader>();
+  for (const key in data) console.log(key);
+  return null;
+}
+"#,
+    )
+    .expect("write route module");
+    let config = create_config_with_cache(root.to_path_buf(), root.join("cache"));
+
+    let cold = fallow_core::analyze_with_trace(&config).expect("cold analysis succeeds");
+    let warm = fallow_core::analyze_with_trace(&config).expect("warm analysis succeeds");
+
+    let cold_timings = cold.timings.expect("cold timings retained");
+    let warm_timings = warm.timings.expect("warm timings retained");
+    assert_eq!(cold_timings.cache_hits, 0, "first direct-core run is cold");
+    assert!(
+        warm_timings.cache_hits > 0,
+        "second direct-core run is warm"
+    );
+    assert!(
+        cold.results.unused_load_data_keys.is_empty(),
+        "opaque route-loader iteration must abstain on a cold direct-core run"
+    );
+    assert_eq!(
+        serde_json::to_vec(&cold.results).expect("serialize cold results"),
+        serde_json::to_vec(&warm.results).expect("serialize warm results"),
+        "warm direct-core analysis must match cold analysis"
     );
 }

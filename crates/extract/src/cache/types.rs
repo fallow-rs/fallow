@@ -757,7 +757,12 @@ use crate::MemberKind;
 /// `helper()(...)`) now inherits the const's fixture bindings and emits the
 /// def-sentinel `member_accesses` a warm 226 cache lacks, leaving POM methods
 /// used only through such a helper falsely reported as `unused-class-member`.
-pub(super) const CACHE_VERSION: u32 = 227;
+///
+/// Bumped to 228 so route-loader whole-object uses from generic spread,
+/// `for...in`, and dynamic computed-access paths carry the synthetic
+/// route-loader abstention marker. Warm 227 caches can contain only the raw
+/// local binding and would report loader keys consumed through those paths.
+pub(super) const CACHE_VERSION: u32 = 228;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

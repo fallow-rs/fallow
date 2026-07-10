@@ -1038,4 +1038,56 @@ mod tests {
                 .collect::<Vec<_>>()
         );
     }
+
+    #[test]
+    fn route_loader_whole_use_matches_across_cold_and_warm_sessions() {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir_all(root.join("app/routes")).expect("create route directory");
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"route-cache-parity","dependencies":{"react-router":"latest"}}"#,
+        )
+        .expect("write package manifest");
+        std::fs::write(
+            root.join("app/routes/home.tsx"),
+            r#"
+import { useLoaderData } from "react-router";
+export function loader() { return { opaque: "value" }; }
+export default function Home() {
+  const data = useLoaderData<typeof loader>();
+  const copy = { ...data };
+  return JSON.stringify(copy);
+}
+"#,
+        )
+        .expect("write route module");
+
+        let cold_session = AnalysisSession::load(root, None).expect("cold session loads");
+        let cold_parse = cold_session.parsed_parts(false);
+        assert_eq!(cold_parse.cache_hits, 0, "first parse must be cold");
+        let cold = cold_session
+            .analyze_dead_code()
+            .expect("cold analysis succeeds");
+
+        let warm_session = AnalysisSession::load(root, None).expect("warm session loads");
+        let warm_parse = warm_session.parsed_parts(false);
+        assert!(
+            warm_parse.cache_hits > 0,
+            "second session must use disk cache"
+        );
+        let warm = warm_session
+            .analyze_dead_code()
+            .expect("warm analysis succeeds");
+
+        assert!(
+            cold.results.unused_load_data_keys.is_empty(),
+            "cold analysis must abstain for an opaque route-loader use"
+        );
+        assert_eq!(
+            serde_json::to_vec(&cold.results).expect("serialize cold results"),
+            serde_json::to_vec(&warm.results).expect("serialize warm results"),
+            "warm route-loader analysis must match cold analysis"
+        );
+    }
 }

@@ -18,6 +18,12 @@ fn has_route_data_access(info: &crate::ModuleInfo, member: &str) -> bool {
         .any(|access| access.object == ROUTE_LOADER_DATA_OBJECT && access.member == member)
 }
 
+fn has_route_data_whole_use(info: &crate::ModuleInfo) -> bool {
+    info.whole_object_uses
+        .iter()
+        .any(|name| name == ROUTE_LOADER_DATA_OBJECT)
+}
+
 #[test]
 fn harvests_object_literal_keys_from_arrow_load() {
     let info = parse_at_path(
@@ -192,6 +198,96 @@ fn route_loader_data_rest_destructure_marks_whole_use() {
         info.whole_object_uses
             .iter()
             .any(|name| name == ROUTE_LOADER_DATA_OBJECT)
+    );
+}
+
+#[test]
+fn route_loader_data_spread_marks_synthetic_whole_use() {
+    let info = parse_at_path(
+        "app/routes/home.tsx",
+        "import { useLoaderData as useData } from '@remix-run/react'; const data = useData(); const copy = { ...data };",
+    );
+    assert!(
+        info.whole_object_uses
+            .iter()
+            .any(|name| name == ROUTE_LOADER_DATA_OBJECT),
+        "spreading a tracked route-loader binding must preserve its route-loader identity"
+    );
+}
+
+#[test]
+fn conventional_loader_data_for_in_marks_synthetic_whole_use() {
+    let info = parse_at_path(
+        "app/routes/home.tsx",
+        "function Home({ loaderData }) { for (const key in loaderData) console.log(key); }",
+    );
+    assert!(
+        info.whole_object_uses
+            .iter()
+            .any(|name| name == ROUTE_LOADER_DATA_OBJECT),
+        "iterating conventional loaderData must preserve its route-loader identity"
+    );
+}
+
+#[test]
+fn route_loader_data_object_keys_and_values_mark_synthetic_whole_use() {
+    for method in ["keys", "values"] {
+        let source = format!(
+            "import {{ useLoaderData }} from 'react-router'; const data = useLoaderData(); Object.{method}(data);"
+        );
+        let info = parse_at_path("app/routes/home.tsx", &source);
+        assert!(
+            has_route_data_whole_use(&info),
+            "Object.{method} on route-loader data must preserve its route-loader identity"
+        );
+    }
+}
+
+#[test]
+fn route_loader_data_dynamic_computed_access_marks_synthetic_whole_use() {
+    let info = parse_at_path(
+        "app/routes/home.tsx",
+        "import { useLoaderData } from 'react-router'; const data = useLoaderData(); console.log(data[key]);",
+    );
+    assert!(
+        has_route_data_whole_use(&info),
+        "a dynamic route-loader key can consume any returned key"
+    );
+}
+
+#[test]
+fn route_loader_data_alias_assignment_marks_synthetic_whole_use() {
+    let info = parse_at_path(
+        "app/routes/home.tsx",
+        "import { useLoaderData } from 'react-router'; const data = useLoaderData(); const alias = data; consume(alias);",
+    );
+    assert!(
+        has_route_data_whole_use(&info),
+        "assigning route-loader data to an alias is an opaque whole-object use"
+    );
+}
+
+#[test]
+fn route_loader_data_call_argument_marks_synthetic_whole_use() {
+    let info = parse_at_path(
+        "app/routes/home.tsx",
+        "import { useLoaderData } from 'react-router'; const data = useLoaderData(); consume(data);",
+    );
+    assert!(
+        has_route_data_whole_use(&info),
+        "passing route-loader data to an unknown call can consume any returned key"
+    );
+}
+
+#[test]
+fn ordinary_whole_object_uses_do_not_mark_route_loader_abstention() {
+    let info = parse_at_path(
+        "app/routes/home.tsx",
+        "const ordinary = { used: 1 }; Object.values(ordinary); const copy = { ...ordinary }; for (const key in ordinary) console.log(ordinary[key], copy);",
+    );
+    assert!(
+        !has_route_data_whole_use(&info),
+        "ordinary whole-object uses must not gain route-loader identity"
     );
 }
 

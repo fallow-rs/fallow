@@ -2013,6 +2013,8 @@ impl ModuleInfoExtractor {
             has_load_data_whole_use: self.has_load_data_whole_use,
             // Derived in `release_resolution_payload` from `whole_object_uses`.
             has_page_data_store_whole_use: false,
+            // Derived in `release_resolution_payload` from `whole_object_uses`.
+            has_route_loader_data_whole_use: false,
             component_functions: self.component_functions,
             react_props: self.react_props,
             hook_uses: self.hook_uses,

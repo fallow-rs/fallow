@@ -651,12 +651,16 @@ impl ModuleInfoExtractor {
             )
             && let Some(arg_name) = expr.arguments.first().and_then(static_argument_object_name)
         {
-            if self.route_loader_data_bindings.contains(arg_name.as_str()) {
-                self.whole_object_uses
-                    .push(ROUTE_LOADER_DATA_OBJECT.to_string());
-            }
-            self.whole_object_uses.push(arg_name);
+            self.record_whole_object_identifier_use(arg_name.as_str());
         }
+    }
+
+    fn record_whole_object_identifier_use(&mut self, name: &str) {
+        if name == "loaderData" || self.route_loader_data_bindings.contains(name) {
+            self.whole_object_uses
+                .push(ROUTE_LOADER_DATA_OBJECT.to_string());
+        }
+        self.whole_object_uses.push(name.to_string());
     }
 }
 
@@ -2445,16 +2449,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
         if let Expression::Identifier(obj) = &expr.object {
-            if self.route_loader_data_bindings.contains(obj.name.as_str()) {
-                if let Expression::StringLiteral(lit) = &expr.expression {
-                    self.member_accesses.push(MemberAccess {
-                        object: ROUTE_LOADER_DATA_OBJECT.to_string(),
-                        member: lit.value.to_string(),
-                    });
-                } else {
-                    self.whole_object_uses
-                        .push(ROUTE_LOADER_DATA_OBJECT.to_string());
-                }
+            if (self.route_loader_data_bindings.contains(obj.name.as_str())
+                || obj.name == "loaderData")
+                && let Expression::StringLiteral(lit) = &expr.expression
+            {
+                self.member_accesses.push(MemberAccess {
+                    object: ROUTE_LOADER_DATA_OBJECT.to_string(),
+                    member: lit.value.to_string(),
+                });
             }
             if let Expression::StringLiteral(lit) = &expr.expression {
                 self.member_accesses.push(MemberAccess {
@@ -2462,7 +2464,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     member: lit.value.to_string(),
                 });
             } else {
-                self.whole_object_uses.push(obj.name.to_string());
+                self.record_whole_object_identifier_use(obj.name.as_str());
             }
         }
         walk::walk_computed_member_expression(self, expr);
@@ -2509,7 +2511,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_for_in_statement(&mut self, stmt: &ForInStatement<'a>) {
         if let Expression::Identifier(ident) = &stmt.right {
-            self.whole_object_uses.push(ident.name.to_string());
+            self.record_whole_object_identifier_use(ident.name.as_str());
         }
         walk::walk_for_in_statement(self, stmt);
     }
@@ -2533,7 +2535,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_spread_element(&mut self, elem: &SpreadElement<'a>) {
         match &elem.argument {
             Expression::Identifier(ident) => {
-                self.whole_object_uses.push(ident.name.to_string());
+                self.record_whole_object_identifier_use(ident.name.as_str());
             }
             // `{ ...this }` forwards every member opaquely (the Angular "headless
             // pattern" convention spreads `this` into a behavior pattern). Record
