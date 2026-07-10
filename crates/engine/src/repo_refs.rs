@@ -165,7 +165,13 @@ fn resolve_registered_commit(destination: &Path, base_ref: &str) -> EngineResult
 }
 
 fn populate_worktree_index(destination: &Path, commit: &str) -> EngineResult<()> {
+    let disabled_hooks_path = destination.join(".fallow-disabled-git-hooks");
     let output = git_command(destination)
+        .env("GIT_CONFIG_COUNT", "2")
+        .env("GIT_CONFIG_KEY_0", "core.hooksPath")
+        .env("GIT_CONFIG_VALUE_0", disabled_hooks_path)
+        .env("GIT_CONFIG_KEY_1", "core.fsmonitor")
+        .env("GIT_CONFIG_VALUE_1", "false")
         .args(["read-tree", "--reset", commit])
         .output()
         .map_err(|error| {
@@ -851,6 +857,34 @@ mod tests {
         assert!(
             !sentinel.exists(),
             "creating a base view must not execute post-checkout hooks"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_base_worktree_does_not_run_post_index_change_hook() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        init_repo(&repo);
+        fs::write(repo.join("tracked.txt"), "committed\n").expect("write tracked file");
+        commit_all(&repo, "initial");
+
+        let sentinel = temp.path().join("post-index-change-ran");
+        write_executable(
+            &repo.join(".git/hooks/post-index-change"),
+            &format!("#!/bin/sh\nprintf ran > '{}'\n", sentinel.display()),
+        );
+
+        let worktree = TemporaryBaseWorktree::create(&repo, "HEAD")
+            .expect("temporary worktree should be created");
+
+        assert_eq!(
+            fs::read_to_string(worktree.path().join("tracked.txt")).expect("read tracked file"),
+            "committed\n"
+        );
+        assert!(
+            !sentinel.exists(),
+            "creating a base view must not execute post-index-change hooks"
         );
     }
 
