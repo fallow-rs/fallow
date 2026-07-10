@@ -1248,22 +1248,34 @@ impl ModuleInfoExtractor {
             return;
         }
 
+        let mut references_by_owner: FxHashMap<&str, Vec<&LocalSignatureTypeReference>> =
+            FxHashMap::default();
+        // Appending to each owner bucket preserves collection order. Iterating
+        // exports below preserves export and alias order while avoiding a full
+        // reference scan for every export.
+        for reference in &self.local_signature_type_references {
+            references_by_owner
+                .entry(reference.owner_name.as_str())
+                .or_default()
+                .push(reference);
+        }
+
         for export in &self.exports {
             let export_name = export.name.to_string();
-            let Some(local_name) = export.local_name.as_deref().or(Some(export_name.as_str()))
-            else {
+            let local_name = export.local_name.as_deref().unwrap_or(&export_name);
+            let Some(references) = references_by_owner.get(local_name) else {
                 continue;
             };
-            self.public_signature_type_references.extend(
-                self.local_signature_type_references
-                    .iter()
-                    .filter(|reference| reference.owner_name == local_name)
-                    .map(|reference| PublicSignatureTypeReference {
-                        export_name: export_name.clone(),
-                        type_name: reference.type_name.clone(),
-                        span: reference.span,
-                    }),
-            );
+            self.public_signature_type_references
+                .extend(
+                    references
+                        .iter()
+                        .map(|reference| PublicSignatureTypeReference {
+                            export_name: export_name.clone(),
+                            type_name: reference.type_name.clone(),
+                            span: reference.span,
+                        }),
+                );
         }
     }
 

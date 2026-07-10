@@ -13,4 +13,5 @@ mod load_data;
 mod member_access;
 mod react_structural;
 mod security_sources;
+mod signature_references;
 mod unused_bindings;

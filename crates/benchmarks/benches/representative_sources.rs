@@ -4,15 +4,18 @@
     reason = "benches use unwrap and expect to keep fixture setup concise"
 )]
 
+use std::fmt::Write as _;
+use std::hint::black_box;
 use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_api::{AnalysisOptions, DeadCodeOptions, run_dead_code};
-use fallow_extract::parse_single_file;
+use fallow_extract::{parse_from_content, parse_single_file};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use tempfile::TempDir;
 
 const BENCH_THREADS: usize = 4;
+const SIGNATURE_EXPORT_COUNT: usize = 500;
 const REPRESENTATIVE_TYPES_SOURCE: &str = include_str!("../fixtures/representative-types.ts");
 
 struct RealSourceInput {
@@ -135,6 +138,34 @@ fn representative_types_parse(c: &mut Criterion) {
     });
 }
 
+fn signature_reference_source(export_count: usize) -> String {
+    let mut source = String::from("type Shared = { value: string };\n");
+    for index in 0..export_count {
+        writeln!(source, "type Ref{index} = Shared & {{ id: {index} }};").unwrap();
+        writeln!(
+            source,
+            "function local{index}(value: Ref{index}, fallback: Shared): Ref{index} {{ return value ?? fallback as Ref{index}; }}"
+        )
+        .unwrap();
+        writeln!(source, "export {{ local{index} as exported{index} }};").unwrap();
+    }
+    source
+}
+
+fn signature_reference_mapping_500_exports(c: &mut Criterion) {
+    let source = signature_reference_source(SIGNATURE_EXPORT_COUNT);
+    c.bench_function("signature_reference_mapping_500_exports", |bencher| {
+        bencher.iter(|| {
+            let module = parse_from_content(
+                FileId(0),
+                Path::new("signature-reference-mapping.ts"),
+                black_box(&source),
+            );
+            black_box(module.public_signature_type_references.len())
+        });
+    });
+}
+
 fn representative_types_dead_code(c: &mut Criterion) {
     c.bench_function("representative_types_dead_code", |bencher| {
         bencher.iter_batched_ref(
@@ -160,6 +191,7 @@ fn representative_types_dead_code(c: &mut Criterion) {
 criterion_group!(
     benches,
     representative_types_parse,
+    signature_reference_mapping_500_exports,
     representative_types_dead_code
 );
 criterion_main!(benches);
