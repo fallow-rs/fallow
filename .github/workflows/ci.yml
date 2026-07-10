@@ -253,6 +253,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Run staged subgenerator integration tests
+        if: matrix.os == 'ubuntu-latest'
+        run: node --test scripts/subgenerator-staging.test.mjs
+
       - name: Run contract bundle drift gate
         if: matrix.os == 'ubuntu-latest'
         run: CI=true npm run generate:contracts:check
