@@ -847,7 +847,7 @@ fn list_surfaces_reuse_session_discovery() {
         if source_path == "crates/cli/src/list.rs" {
             assert!(
                 source.contains("session.workspaces()")
-                    && source.contains("session.workspace_diagnostics()"),
+                    && source.contains("session.current_workspace_diagnostics()"),
                 "{source_path} must reuse AnalysisSession workspace metadata when a session already exists"
             );
         }
