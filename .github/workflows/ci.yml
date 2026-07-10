@@ -199,7 +199,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true' || github.event_name == 'push' || github.event_name == 'merge_group'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # Cold Windows test and NAPI builds can take just over 30 minutes.
+    timeout-minutes: 40
     permissions:
       contents: read
     strategy:

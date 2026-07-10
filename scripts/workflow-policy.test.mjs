@@ -44,6 +44,13 @@ test("Windows lifecycle PR gate lints MCP test code", () => {
   );
 });
 
+test("cross-platform check job reserves enough time for a cold Windows build", () => {
+  const workflow = readWorkflow(".github/workflows/ci.yml");
+  const checkJob = indentedBlock(workflow, "check", 2);
+
+  assert.match(checkJob, /timeout-minutes: 40/);
+});
+
 test("VS Code CI runs the extension-host integration suite with a pinned cached download", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const vscodeJob = indentedBlock(workflow, "vscode", 2);
