@@ -3,22 +3,15 @@
  * Regenerate every committed generated contract surface from the Rust and
  * manifest sources of truth.
  *
- * Default mode writes files. `--check` renders into a temp dir where possible
- * and exits non-zero on drift without touching committed files.
+ * Every phase writes to one temporary output root. The complete staged tree is
+ * validated before changed files are promoted as a transaction. `--check`
+ * performs the same generation and validation but never writes destinations.
  */
 
 import { execFileSync } from "node:child_process";
-import {
-  copyFileSync,
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   checkSummaryRowFiles,
@@ -26,12 +19,14 @@ import {
   hasSummaryRowProblems,
 } from "./check-ci-summary-rows.mjs";
 import { checkGithubActionsFile } from "./check-contract-surfaces.mjs";
+import { contractSurfacePaths } from "./contract-surfaces.mjs";
+import { runGenerationTransaction } from "./generation-transaction.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CHECK = process.argv.includes("--check");
-const HELP = process.argv.includes("--help") || process.argv.includes("-h");
 const CAPABILITY_SCHEMA_PATH = "npm/fallow/capabilities.json";
 const ISSUE_REGISTRY_PATH = "npm/fallow/issue-registry.json";
+const OUTPUT_SCHEMA_PATH = "docs/output-schema.json";
+const AGENT_DOCS_TARGET = "npm/fallow/skills/fallow";
 
 const run = (cmd, args, options = {}) =>
   execFileSync(cmd, args, {
@@ -56,14 +51,10 @@ const outputSchema = () =>
     "fallow-schema-emit",
   ]);
 
-const read = (path) => readFileSync(join(REPO_ROOT, path), "utf8");
-const write = (path, content) => writeFileSync(join(REPO_ROOT, path), content);
-
-const assertSame = (path, actual) => {
-  const expected = read(path);
-  if (expected !== actual) {
-    throw new Error(`${path} is stale`);
-  }
+const writeStaged = (stagingRoot, path, content) => {
+  const destination = join(stagingRoot, path);
+  mkdirSync(dirname(destination), { recursive: true });
+  writeFileSync(destination, content);
 };
 
 const ensureTrailingNewline = (text) => (text.endsWith("\n") ? text : `${text}\n`);
@@ -80,7 +71,7 @@ const issueRegistry = (capabilitySchema) => {
     return leftIndex - rightIndex || String(a.id).localeCompare(String(b.id));
   });
   return ensureTrailingNewline(
-    `${JSON.stringify(
+    JSON.stringify(
       {
         schema_version: 1,
         source: "fallow schema issue_types",
@@ -88,11 +79,11 @@ const issueRegistry = (capabilitySchema) => {
       },
       null,
       2,
-    )}`,
+    ),
   );
 };
 
-const generateSchemaFiles = () => {
+const generateSchemaFiles = (stagingRoot) => {
   const configSchema = ensureTrailingNewline(cargoFallow("config-schema"));
   const pluginSchema = ensureTrailingNewline(cargoFallow("plugin-schema"));
   const rulePackSchema = ensureTrailingNewline(cargoFallow("rule-pack-schema"));
@@ -100,58 +91,53 @@ const generateSchemaFiles = () => {
   const registry = issueRegistry(capabilitySchema);
   const output = ensureTrailingNewline(outputSchema());
 
-  if (CHECK) {
-    assertSame("schema.json", configSchema);
-    if (existsSync(join(REPO_ROOT, "npm/fallow/schema.json"))) {
-      assertSame("npm/fallow/schema.json", configSchema);
-    }
-    assertSame("plugin-schema.json", pluginSchema);
-    assertSame("rule-pack-schema.json", rulePackSchema);
-    assertSame(CAPABILITY_SCHEMA_PATH, capabilitySchema);
-    assertSame(ISSUE_REGISTRY_PATH, registry);
-    assertSame("docs/output-schema.json", output);
-    return capabilitySchema;
-  }
-
-  write("schema.json", configSchema);
-  write("plugin-schema.json", pluginSchema);
-  write("rule-pack-schema.json", rulePackSchema);
-  write(CAPABILITY_SCHEMA_PATH, capabilitySchema);
-  write(ISSUE_REGISTRY_PATH, registry);
-  write("docs/output-schema.json", output);
-  if (existsSync(join(REPO_ROOT, "npm/fallow/schema.json"))) {
-    copyFileSync(join(REPO_ROOT, "schema.json"), join(REPO_ROOT, "npm/fallow/schema.json"));
-  }
-  return capabilitySchema;
+  writeStaged(stagingRoot, "schema.json", configSchema);
+  writeStaged(stagingRoot, "plugin-schema.json", pluginSchema);
+  writeStaged(stagingRoot, "rule-pack-schema.json", rulePackSchema);
+  writeStaged(stagingRoot, CAPABILITY_SCHEMA_PATH, capabilitySchema);
+  writeStaged(stagingRoot, ISSUE_REGISTRY_PATH, registry);
+  writeStaged(stagingRoot, OUTPUT_SCHEMA_PATH, output);
 };
 
-const generateExtensionContracts = (capabilityPath) => {
-  run("pnpm", ["--dir", "editors/vscode", "run", CHECK ? "check:contracts" : "codegen:contracts"], {
-    env: { FALLOW_CODEGEN_CAPABILITY_SCHEMA: capabilityPath },
+const generateExtensionContracts = (stagingRoot) => {
+  run("node", ["editors/vscode/scripts/codegen-contracts.mjs"], {
+    env: {
+      FALLOW_CODEGEN_CAPABILITY_SCHEMA: join(stagingRoot, CAPABILITY_SCHEMA_PATH),
+      FALLOW_CODEGEN_OUTPUT_SCHEMA: join(stagingRoot, OUTPUT_SCHEMA_PATH),
+      FALLOW_GENERATION_OUTPUT_ROOT: stagingRoot,
+    },
     stdio: "inherit",
   });
 };
 
-const generateAgentDocs = (capabilityPath) => {
-  const args = [
-    "scripts/generate-agent-docs.mjs",
-    "--schema",
-    capabilityPath,
-    "--target",
-    "npm/fallow/skills/fallow",
-  ];
-  if (CHECK) {
-    args.push("--check");
-  }
-  run("node", args, { stdio: "inherit" });
+const generateAgentDocs = (stagingRoot) => {
+  run(
+    "node",
+    [
+      "scripts/generate-agent-docs.mjs",
+      "--schema",
+      join(stagingRoot, CAPABILITY_SCHEMA_PATH),
+      "--target",
+      AGENT_DOCS_TARGET,
+      "--output-target",
+      join(stagingRoot, AGENT_DOCS_TARGET),
+    ],
+    { stdio: "inherit" },
+  );
 };
 
-const generateNapiTypes = () => {
-  const args = ["crates/napi/scripts/write-dts.mjs"];
-  if (CHECK) {
-    args.push("--check");
-  }
-  run("node", args, { stdio: "inherit" });
+const generateNapiTypes = (stagingRoot) => {
+  run("node", ["crates/napi/scripts/write-dts.mjs"], {
+    env: { FALLOW_GENERATION_OUTPUT_ROOT: stagingRoot },
+    stdio: "inherit",
+  });
+};
+
+const generateAllPhases = (stagingRoot) => {
+  generateSchemaFiles(stagingRoot);
+  generateExtensionContracts(stagingRoot);
+  generateAgentDocs(stagingRoot);
+  generateNapiTypes(stagingRoot);
 };
 
 const checkContractSurfaceCoverage = () => {
@@ -167,48 +153,66 @@ const checkContractSurfaceCoverage = () => {
   }
 };
 
-const checkCiSummaryRows = () => {
+const checkCiSummaryRows = (stagingRoot) => {
   const result = checkSummaryRowFiles({
     githubPath: join(REPO_ROOT, "action/jq/summary-check.jq"),
     gitlabPath: join(REPO_ROOT, "ci/jq/summary-check.jq"),
-    registryPath: join(REPO_ROOT, ISSUE_REGISTRY_PATH),
+    registryPath: join(stagingRoot, ISSUE_REGISTRY_PATH),
   });
   if (hasSummaryRowProblems(result)) {
     throw new Error(`CI summary rows are stale:\n${formatSummaryRowProblems(result)}`);
   }
 };
 
-const withCapabilitySchemaFile = (capabilitySchema, callback) => {
-  const dir = mkdtempSync(join(tmpdir(), "fallow-generate-all-"));
-  const capabilityPath = join(dir, "schema.json");
-  try {
-    writeFileSync(capabilityPath, capabilitySchema);
-    callback(capabilityPath);
-  } finally {
-    rmSync(dir, { force: true, recursive: true });
-  }
+const validateStagedContracts = (stagingRoot) => {
+  checkContractSurfaceCoverage();
+  checkCiSummaryRows(stagingRoot);
 };
 
-const main = () => {
-  if (HELP) {
+const parseArgs = (argv) => {
+  const unknown = argv.filter((arg) => arg !== "--check" && arg !== "--help" && arg !== "-h");
+  if (unknown.length > 0) {
+    throw new Error(`unknown argument: ${unknown[0]}`);
+  }
+  return {
+    check: argv.includes("--check"),
+    help: argv.includes("--help") || argv.includes("-h"),
+  };
+};
+
+export const main = (argv = process.argv.slice(2)) => {
+  const { check, help } = parseArgs(argv);
+  if (help) {
     console.log("Usage: node scripts/generate-all.mjs [--check]");
-    return;
+    return 0;
   }
-  const capabilitySchema = generateSchemaFiles();
-  withCapabilitySchemaFile(capabilitySchema, (capabilityPath) => {
-    generateExtensionContracts(capabilityPath);
-    generateAgentDocs(capabilityPath);
+
+  const { driftedPaths } = runGenerationTransaction({
+    check,
+    generate: generateAllPhases,
+    repoRoot: REPO_ROOT,
+    surfacePaths: contractSurfacePaths(),
+    validate: validateStagedContracts,
   });
-  generateNapiTypes();
-  if (CHECK) {
-    checkContractSurfaceCoverage();
-    checkCiSummaryRows();
+
+  if (check && driftedPaths.length > 0) {
+    throw new Error(
+      `generated contract surfaces are stale:\n${driftedPaths
+        .map((path) => `  - ${path}`)
+        .join("\n")}`,
+    );
   }
+  for (const path of driftedPaths) {
+    console.log(`${check ? "stale" : "regenerated"}: ${path}`);
+  }
+  return 0;
 };
 
-try {
-  main();
-} catch (error) {
-  console.error(`generate-all: ${error.message}`);
-  process.exitCode = 1;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    process.exitCode = main();
+  } catch (error) {
+    console.error(`generate-all: ${error.message}`);
+    process.exitCode = 1;
+  }
 }

@@ -1,11 +1,13 @@
-import { copyFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = join(here, "..");
 const source = join(root, "types", "index.d.ts");
 const target = join(root, "index.d.ts");
+const outputRoot = process.env.FALLOW_GENERATION_OUTPUT_ROOT;
+const outputTarget = outputRoot ? resolve(outputRoot, "crates", "napi", "index.d.ts") : target;
 const check = process.argv.includes("--check");
 
 if (check) {
@@ -16,5 +18,6 @@ if (check) {
     process.exitCode = 1;
   }
 } else {
-  copyFileSync(source, target);
+  mkdirSync(dirname(outputTarget), { recursive: true });
+  copyFileSync(source, outputTarget);
 }

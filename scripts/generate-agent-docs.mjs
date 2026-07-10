@@ -48,6 +48,7 @@
  *     --target <skills-tree-dir> [--target <dir> ...] [--check] \
  *     [--expect-version <x.y.z>]
  *   node scripts/generate-agent-docs.mjs --schema <schema.json> --target <dir>
+ *     [--output-target <staging-dir>]
  *
  * `--check` renders in memory and exits 1 listing drifted sections, writing
  * nothing. `--expect-version` guards against a stale binary: the manifest's
@@ -58,8 +59,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const SKILL_SECTION_IDS = ["commands", "issue-types", "task-matrix"];
@@ -658,8 +659,8 @@ const changedSections = (before, schema, fileLabel, sectionIds) =>
       spliceSection(before, id, schema, fileLabel, sectionIds) !== before,
   );
 
-const processFile = ({ file, before, after, schema, sectionIds, check }) => {
-  if (after === before) {
+const processFile = ({ file, outputFile = file, before, after, schema, sectionIds, check }) => {
+  if (after === before && outputFile === file) {
     console.log(`up to date: ${file}`);
     return false;
   }
@@ -668,8 +669,9 @@ const processFile = ({ file, before, after, schema, sectionIds, check }) => {
     console.error(`DRIFT: ${file} (sections: ${sections.join(", ")})`);
     return true;
   }
-  writeFileSync(file, after);
-  console.log(`regenerated: ${file}`);
+  mkdirSync(dirname(outputFile), { recursive: true });
+  writeFileSync(outputFile, after);
+  console.log(`${outputFile === file ? "regenerated" : "staged"}: ${outputFile}`);
   return false;
 };
 
@@ -700,7 +702,7 @@ export const loadSchema = ({ fallowBin, schemaPath, expectVersion }) => {
 };
 
 const parseArgs = (argv) => {
-  const opts = { targets: [], check: false };
+  const opts = { targets: [], outputTargets: [], check: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => {
@@ -716,6 +718,8 @@ const parseArgs = (argv) => {
       opts.schemaPath = next();
     } else if (arg === "--target") {
       opts.targets.push(next());
+    } else if (arg === "--output-target") {
+      opts.outputTargets.push(next());
     } else if (arg === "--expect-version") {
       opts.expectVersion = next();
     } else if (arg === "--check") {
@@ -727,6 +731,12 @@ const parseArgs = (argv) => {
   if (opts.targets.length === 0) {
     throw new Error("pass at least one --target <skills-tree-dir>");
   }
+  if (opts.outputTargets.length > 0 && opts.outputTargets.length !== opts.targets.length) {
+    throw new Error("pass one --output-target for each --target");
+  }
+  if (opts.check && opts.outputTargets.length > 0) {
+    throw new Error("--check cannot be combined with --output-target");
+  }
   return opts;
 };
 
@@ -735,13 +745,15 @@ export const main = (argv = process.argv.slice(2)) => {
   const schema = loadSchema(opts);
 
   let drifted = 0;
-  for (const target of opts.targets) {
+  for (const [targetIndex, target] of opts.targets.entries()) {
+    const outputTarget = opts.outputTargets[targetIndex] ?? target;
     const skillFile = join(target, "SKILL.md");
     const skillBefore = readFileSync(skillFile, "utf8");
     const skillAfter = regenerateSkillMd(skillBefore, schema, skillFile);
     if (
       processFile({
         file: skillFile,
+        outputFile: join(outputTarget, "SKILL.md"),
         before: skillBefore,
         after: skillAfter,
         schema,
@@ -759,6 +771,7 @@ export const main = (argv = process.argv.slice(2)) => {
       if (
         processFile({
           file: cliReferenceFile,
+          outputFile: join(outputTarget, "references", "cli-reference.md"),
           before: cliBefore,
           after: cliAfter,
           schema,
@@ -777,6 +790,7 @@ export const main = (argv = process.argv.slice(2)) => {
       if (
         processFile({
           file: mcpReferenceFile,
+          outputFile: join(outputTarget, "references", "mcp.md"),
           before: mcpBefore,
           after: mcpAfter,
           schema,

@@ -634,3 +634,37 @@ test("--check exits 1 on drift, writes nothing, and exits 0 when in sync", async
   assert.ok(!readFileSync(join(dir, "SKILL.md"), "utf8").includes("generated:mcp-tools"));
   rmSync(dir, { recursive: true });
 });
+
+test("--output-target stages regenerated docs without changing the source target", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { main } = await import("./generate-agent-docs.mjs");
+
+  const dir = mkdtempSync(join(tmpdir(), "agent-docs-output-target-"));
+  const source = join(dir, "source");
+  const output = join(dir, "output");
+  const sourceReferences = join(source, "references");
+  const schemaPath = join(dir, "schema.json");
+  mkdirSync(sourceReferences, { recursive: true });
+  writeFileSync(schemaPath, JSON.stringify(SCHEMA));
+  writeFileSync(join(source, "SKILL.md"), DOC);
+  writeFileSync(join(sourceReferences, "cli-reference.md"), DOC_CLI_REFERENCE);
+  writeFileSync(join(sourceReferences, "mcp.md"), DOC_MCP_REFERENCE);
+
+  try {
+    assert.equal(main(["--schema", schemaPath, "--target", source, "--output-target", output]), 0);
+    assert.equal(readFileSync(join(source, "SKILL.md"), "utf8"), DOC);
+    assert.notEqual(readFileSync(join(output, "SKILL.md"), "utf8"), DOC);
+    assert.ok(
+      readFileSync(join(output, "references", "cli-reference.md"), "utf8").includes(
+        "--unused-deps",
+      ),
+    );
+    assert.ok(
+      readFileSync(join(output, "references", "mcp.md"), "utf8").includes("list_boundaries"),
+    );
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+});
