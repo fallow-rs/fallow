@@ -326,6 +326,54 @@ async fn failed_analysis_refresh_preserves_last_valid_snapshot_and_diagnostics()
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn explicit_config_failure_preserves_last_valid_snapshot_and_diagnostics() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("canonical root");
+    let orphan = write_analysis_failure_fixture(&root, "^__");
+    let orphan_uri = Uri::from_file_path(&orphan).expect("orphan file URI");
+
+    let (service, _) = LspService::build(FallowLspServer::new).finish();
+    let backend = service.inner();
+    *backend.root.write().await = Some(root.clone());
+    backend.run_analysis().await;
+
+    let invalid_config = root.join("invalid.fallow.jsonc");
+    std::fs::write(&invalid_config, "{ invalid json").expect("write invalid config");
+    *backend.config_path.write().await = Some(invalid_config);
+    backend.run_analysis().await;
+
+    assert!(
+        backend
+            .analysis
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|snapshot| snapshot
+                .results
+                .unused_files
+                .iter()
+                .any(|finding| finding.file.path == orphan)),
+        "explicit config failure must preserve the last valid analysis snapshot"
+    );
+    assert!(
+        backend
+            .cached_diagnostics
+            .read()
+            .await
+            .contains_key(&orphan_uri),
+        "explicit config failure must preserve the last valid diagnostics"
+    );
+    assert!(
+        backend
+            .previous_diagnostic_uris
+            .read()
+            .await
+            .contains(&orphan_uri),
+        "explicit config failure must preserve the last published diagnostic URI"
+    );
+}
+
 fn write_startup_analysis_fixture(root: &Path) -> PathBuf {
     let source = root.join("src/index.ts");
     std::fs::create_dir_all(source.parent().expect("source has parent")).expect("create src dir");
@@ -3145,8 +3193,8 @@ fn config_load_error_detail_with_explicit_config_path() {
         "message must include the original error"
     );
     assert!(
-        msg.contains("no diagnostics will be produced"),
-        "explicit-config failure must warn that no diagnostics will be produced"
+        msg.contains("existing diagnostics remain unchanged"),
+        "explicit-config failure must explain that the failed refresh preserves diagnostics"
     );
 }
 

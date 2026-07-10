@@ -144,10 +144,13 @@ fn analyze_project_root_config_fallback(
     err: &impl std::fmt::Display,
 ) -> Result<(), ProjectAnalysisError> {
     let detail = config_load_error_detail(input.project_root, input.config_path, err);
-    input.config_messages.push((MessageType::WARNING, detail));
     if input.config_path.is_some() {
-        return Ok(());
+        return Err(ProjectAnalysisError {
+            project_root: input.project_root.to_path_buf(),
+            message: detail,
+        });
     }
+    input.config_messages.push((MessageType::WARNING, detail));
     let session = AnalysisSession::load_default(input.project_root);
     run_typed_project_analysis(input, &session, &DuplicatesConfig::default())
 }

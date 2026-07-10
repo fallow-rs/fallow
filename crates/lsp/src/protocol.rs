@@ -158,7 +158,7 @@ pub fn config_load_error_detail(
 ) -> String {
     match explicit_config_path {
         Some(path) => format!(
-            "fallow.configPath '{}' failed to load for {}: {err} (no diagnostics will be produced)",
+            "fallow.configPath '{}' failed to load for {}: {err} (this analysis refresh was skipped; existing diagnostics remain unchanged)",
             path.display(),
             project_root.display()
         ),
