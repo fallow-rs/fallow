@@ -871,6 +871,13 @@
             }
           ]
         },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "Diagnostics collected for the full analysis before issue grouping.\nSee [`CheckOutput::workspace_diagnostics`] for the contract."
+        },
         "next_steps": {
           "type": "array",
           "items": {

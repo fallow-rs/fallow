@@ -83,6 +83,10 @@ pub struct CheckGroupedOutput {
     pub groups: Vec<CheckGroupedEntry>,
     #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
     pub meta: Option<Meta>,
+    /// Diagnostics collected for the full analysis before issue grouping.
+    /// See [`CheckOutput::workspace_diagnostics`] for the contract.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from the full (ungrouped) findings.
     /// See [`CheckOutput::next_steps`] for the contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1080,6 +1084,7 @@ mod tests {
 
     #[test]
     fn grouped_check_json_output_uses_output_owned_root_contract() {
+        let root = std::path::Path::new("/project");
         let output = CheckGroupedOutput {
             schema_version: SchemaVersion(7),
             version: ToolVersion("0.0.0".to_string()),
@@ -1088,6 +1093,13 @@ mod tests {
             total_issues: 0,
             groups: Vec::new(),
             meta: None,
+            workspace_diagnostics: vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("src/unreadable.ts"),
+                WorkspaceDiagnosticKind::SourceReadFailure {
+                    error: "permission denied".to_string(),
+                },
+            )],
             next_steps: Vec::new(),
         };
 
@@ -1100,6 +1112,14 @@ mod tests {
 
         assert_eq!(value["kind"], "dead-code-grouped");
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-group");
+        assert_eq!(
+            value["workspace_diagnostics"][0]["path"],
+            "/project/src/unreadable.ts"
+        );
+        assert_eq!(
+            value["workspace_diagnostics"][0]["kind"],
+            "source-read-failure"
+        );
     }
 
     #[test]

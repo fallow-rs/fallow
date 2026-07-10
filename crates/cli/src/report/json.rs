@@ -79,6 +79,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         grouped_by: group_by_mode_from_label(input.resolver.mode_label()),
         config_fixable: input.config_fixable,
         meta: input.explain.then(fallow_output::check_meta),
+        workspace_diagnostics: workspace_diagnostics_for_output(input.root),
         next_steps: crate::report::suggestions::build_dead_code_next_steps(
             input.original,
             input.root,

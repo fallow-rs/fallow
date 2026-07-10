@@ -74,6 +74,7 @@ pub struct GroupedCheckJsonOutputInput<'a> {
     pub grouped_by: GroupByMode,
     pub config_fixable: bool,
     pub meta: Option<Meta>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub next_steps: Vec<NextStep>,
     pub envelope_mode: RootEnvelopeMode,
     pub telemetry_analysis_run_id: Option<&'a str>,
@@ -184,6 +185,7 @@ pub fn serialize_grouped_check_json(
         total_issues: input.original.total_issues(),
         groups: entries,
         meta: input.meta,
+        workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
     };
 
@@ -192,15 +194,7 @@ pub fn serialize_grouped_check_json(
         input.envelope_mode,
         input.telemetry_analysis_run_id,
     )?;
-    let root_prefix = format!("{}/", input.root.display());
-    if let Some(arr) = output
-        .get_mut("groups")
-        .and_then(serde_json::Value::as_array_mut)
-    {
-        for entry in arr {
-            strip_root_prefix(entry, &root_prefix);
-        }
-    }
+    strip_json_root_prefix(&mut output, input.root);
     Ok(output)
 }
 
@@ -312,5 +306,45 @@ fn group_by_mode_from_label(label: &str) -> GroupByMode {
         "package" => GroupByMode::Package,
         "section" => GroupByMode::Section,
         _ => GroupByMode::Owner,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fallow_types::workspace::WorkspaceDiagnosticKind;
+
+    #[test]
+    fn grouped_check_json_carries_workspace_diagnostics_with_relative_paths() {
+        let root = Path::new("/project");
+        let output = serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+            groups: &[],
+            original: &AnalysisResults::default(),
+            root,
+            elapsed: Duration::ZERO,
+            grouped_by: GroupByMode::Directory,
+            config_fixable: false,
+            meta: None,
+            workspace_diagnostics: vec![WorkspaceDiagnostic::new(
+                root,
+                root.join("src/unreadable.ts"),
+                WorkspaceDiagnosticKind::SourceReadFailure {
+                    error: "permission denied".to_string(),
+                },
+            )],
+            next_steps: Vec::new(),
+            envelope_mode: RootEnvelopeMode::Tagged,
+            telemetry_analysis_run_id: None,
+        })
+        .expect("grouped check JSON serializes");
+
+        assert_eq!(
+            output["workspace_diagnostics"][0]["path"],
+            "src/unreadable.ts"
+        );
+        assert_eq!(
+            output["workspace_diagnostics"][0]["kind"],
+            "source-read-failure"
+        );
     }
 }

@@ -7961,6 +7961,11 @@ total_issues: number
 groups: CheckGroupedEntry[]
 _meta?: (Meta | null)
 /**
+ * Diagnostics collected for the full analysis before issue grouping.
+ * See [`CheckOutput::workspace_diagnostics`] for the contract.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
+/**
  * Read-only follow-up commands computed from the full (ungrouped) findings.
  * See [`CheckOutput::next_steps`] for the contract.
  */
