@@ -232,7 +232,7 @@ fn route_loader_data_rule_does_not_fire_without_framework_dependency() {
 }
 
 #[test]
-#[allow(
+#[expect(
     deprecated,
     reason = "regression covers the direct core compatibility path"
 )]
