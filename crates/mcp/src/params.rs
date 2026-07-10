@@ -1028,6 +1028,10 @@ pub struct ListSuppressionsParams {
     /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
+    /// Allow trusted HTTPS config inheritance for this request.
+    /// Defaults to false and never grants process-global trust.
+    pub allow_remote_extends: Option<bool>,
+
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 

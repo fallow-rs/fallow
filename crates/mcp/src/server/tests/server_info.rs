@@ -1327,6 +1327,7 @@ fn list_suppressions_schema_contains_expected_properties() {
     for prop in [
         "root",
         "config",
+        "allow_remote_extends",
         "production",
         "workspace",
         "changed_since",

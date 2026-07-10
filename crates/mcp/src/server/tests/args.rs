@@ -1749,7 +1749,8 @@ fn all_arg_builders_include_format_json_and_quiet() {
     let audit = build_audit_args(&AuditParams::default()).expect("default params are valid");
     let list_boundaries = build_list_boundaries_args(&ListBoundariesParams::default());
     let feature_flags = build_feature_flags_args(&FeatureFlagsParams::default());
-    let list_suppressions = build_list_suppressions_args(&ListSuppressionsParams::default());
+    let list_suppressions = build_list_suppressions_args(&ListSuppressionsParams::default())
+        .expect("default params are valid");
     let check_runtime_coverage =
         build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
     let impact = build_impact_args(&ImpactParams::default());
@@ -1830,7 +1831,7 @@ fn each_tool_uses_correct_subcommand() {
         "flags"
     );
     assert_eq!(
-        build_list_suppressions_args(&ListSuppressionsParams::default())[0],
+        build_list_suppressions_args(&ListSuppressionsParams::default()).unwrap()[0],
         "suppressions"
     );
     assert_eq!(
@@ -2660,7 +2661,7 @@ fn feature_flags_args_with_all_options() {
 
 #[test]
 fn list_suppressions_args_minimal_produces_base_args() {
-    let args = build_list_suppressions_args(&ListSuppressionsParams::default());
+    let args = build_list_suppressions_args(&ListSuppressionsParams::default()).unwrap();
     assert_eq!(args, ["suppressions", "--format", "json", "--quiet"]);
 }
 
@@ -2669,13 +2670,16 @@ fn list_suppressions_args_with_all_options() {
     let args = build_list_suppressions_args(&ListSuppressionsParams {
         root: Some("/project".to_string()),
         config: Some(".fallowrc.json".to_string()),
+        allow_remote_extends: Some(true),
         production: Some(true),
         workspace: Some("@app/core".to_string()),
         changed_since: Some("main".to_string()),
         file: Some(vec!["src/a.ts".to_string(), "src/b.ts".to_string()]),
         no_cache: Some(true),
         threads: Some(4),
-    });
+    })
+    .unwrap();
+    assert!(args.contains(&"--allow-remote-extends".to_string()));
     assert!(args.contains(&"--root".to_string()));
     assert!(args.contains(&"/project".to_string()));
     assert!(args.contains(&"--config".to_string()));
@@ -2692,4 +2696,15 @@ fn list_suppressions_args_with_all_options() {
     assert_eq!(args.iter().filter(|a| *a == "--file").count(), 2);
     assert!(args.contains(&"src/a.ts".to_string()));
     assert!(args.contains(&"src/b.ts".to_string()));
+}
+
+#[test]
+fn list_suppressions_args_reject_empty_file_entries() {
+    let params = ListSuppressionsParams {
+        file: Some(vec!["src/a.ts".to_string(), "  ".to_string()]),
+        ..Default::default()
+    };
+    let err = build_list_suppressions_args(&params).unwrap_err();
+    let msg = parse_validation_message(&err);
+    assert!(msg.contains("file entries must not be empty"));
 }
