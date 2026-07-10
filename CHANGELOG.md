@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--changed-since`, and `--file` scoping. Read-only governance surface:
   always exits 0.
 
+- **MCP tool `list_suppressions`: the suppression inventory, now reachable by
+  agents.** The `fallow suppressions` inventory was CLI-only, so agents on the
+  MCP surface had to shell out to see what a "clean" verdict was hiding. The
+  new read-only `list_suppressions` tool wraps `fallow suppressions --format
+  json` and returns the `suppression-inventory` envelope verbatim (no new wire
+  contract), forwarding `workspace`, `changed_since`, and repeated `file`
+  scoping (plus `production` and the cache knobs). It runs a full analysis, so
+  raise `FALLOW_TIMEOUT_SECS` on large repos; a governance surface, not a gate,
+  so it always exits 0 even when suppressions exist.
+
 - **Native GitHub workflow output: `--format github-annotations` and
   `--format github-summary`.** Workflows that run fallow directly (without the
   bundled action) previously got no inline PR annotations or job summary; that
