@@ -80,7 +80,16 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
     }
 
     let mut fixes: Vec<serde_json::Value> = Vec::new();
-    let mut plan = FixPlan::new();
+    let mut plan = match FixPlan::for_root(opts.root) {
+        Ok(plan) => plan,
+        Err(error) => {
+            return crate::error::emit_error(
+                &format!("Failed to resolve fix root: {error}"),
+                2,
+                opts.output,
+            );
+        }
+    };
 
     let (had_write_error, catalog_totals) = apply_all_fixes(ApplyAllFixesInput {
         opts,

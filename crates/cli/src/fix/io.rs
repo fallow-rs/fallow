@@ -46,11 +46,18 @@ pub(super) fn read_source(
     root: &Path,
     path: &Path,
 ) -> Result<Option<(String, EncodingMetadata)>, EncodingError> {
-    if !path.starts_with(root) {
+    let Ok(canonical_root) = std::fs::canonicalize(root) else {
+        tracing::warn!(root = %root.display(), "Skipping fix because project root cannot be resolved");
+        return Ok(None);
+    };
+    let Ok(canonical_path) = std::fs::canonicalize(path) else {
+        return Ok(None);
+    };
+    if !canonical_path.starts_with(&canonical_root) {
         tracing::warn!(path = %path.display(), "Skipping fix for path outside project root");
         return Ok(None);
     }
-    let Ok(raw) = std::fs::read_to_string(path) else {
+    let Ok(raw) = std::fs::read_to_string(canonical_path) else {
         return Ok(None);
     };
     classify_source(&raw).map(|(content, metadata)| Some((content, metadata)))
@@ -173,6 +180,21 @@ mod tests {
         std::fs::write(&outside, "content").unwrap();
 
         let result = read_source(&root, &outside).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_source_returns_none_for_symlink_target_outside_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        let outside = dir.path().join("outside.ts");
+        let link = root.join("link.ts");
+        std::fs::write(&outside, "private content").unwrap();
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        let result = read_source(&root, &link).unwrap();
         assert!(result.is_none());
     }
 

@@ -96,13 +96,24 @@ impl CommitOutcome {
 
 /// Accumulator for batched writes during a `fallow fix` run.
 pub(super) struct FixPlan {
+    canonical_root: Option<PathBuf>,
     entries: Vec<PlannedWrite>,
     skipped: Vec<SkippedFile>,
 }
 
 impl FixPlan {
+    pub(super) fn for_root(root: &Path) -> std::io::Result<Self> {
+        Ok(Self {
+            canonical_root: Some(std::fs::canonicalize(root)?),
+            entries: Vec::new(),
+            skipped: Vec::new(),
+        })
+    }
+
+    #[cfg(test)]
     pub(super) fn new() -> Self {
         Self {
+            canonical_root: None,
             entries: Vec::new(),
             skipped: Vec::new(),
         }
@@ -158,7 +169,7 @@ impl FixPlan {
 
         let mut staged: Vec<StagedEntry> = Vec::with_capacity(self.entries.len());
         for entry in self.entries {
-            match stage_one(&entry.path, &entry.content) {
+            match stage_one(self.canonical_root.as_deref(), &entry.path, &entry.content) {
                 Ok(stage) => staged.push(stage),
                 Err(e) => {
                     return CommitOutcome {
@@ -170,6 +181,17 @@ impl FixPlan {
         }
 
         staged.sort_by(|a, b| a.requested.cmp(&b.requested));
+
+        if let Some(root) = self.canonical_root.as_deref() {
+            for stage in &staged {
+                if let Err(error) = revalidate_staged_target(root, stage) {
+                    return CommitOutcome {
+                        written: FxHashSet::default(),
+                        failed: vec![(stage.requested.clone(), error)],
+                    };
+                }
+            }
+        }
 
         let mut written = FxHashSet::default();
         let mut failed = Vec::new();
@@ -200,8 +222,15 @@ struct StagedEntry {
     resolved: PathBuf,
 }
 
-fn stage_one(target: &Path, content: &[u8]) -> std::io::Result<StagedEntry> {
+fn stage_one(
+    canonical_root: Option<&Path>,
+    target: &Path,
+    content: &[u8],
+) -> std::io::Result<StagedEntry> {
     let resolved = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+    if let Some(root) = canonical_root {
+        ensure_within_root(root, &resolved)?;
+    }
     let dir = resolved.parent().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -218,6 +247,32 @@ fn stage_one(target: &Path, content: &[u8]) -> std::io::Result<StagedEntry> {
         requested: target.to_path_buf(),
         resolved,
     })
+}
+
+fn revalidate_staged_target(canonical_root: &Path, stage: &StagedEntry) -> std::io::Result<()> {
+    let current = std::fs::canonicalize(&stage.requested)?;
+    ensure_within_root(canonical_root, &current)?;
+    if current != stage.resolved {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "fix plan target changed while writes were staged",
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_within_root(canonical_root: &Path, target: &Path) -> std::io::Result<()> {
+    if target.starts_with(canonical_root) {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!(
+            "fix plan target {} resolves outside project root {}",
+            target.display(),
+            canonical_root.display()
+        ),
+    ))
 }
 
 /// Map of absolute file path to the xxh3 content hash captured during the
@@ -521,7 +576,7 @@ mod tests {
         std::fs::write(&real, "original").unwrap();
         std::os::unix::fs::symlink(&real, &link).unwrap();
 
-        let mut plan = FixPlan::new();
+        let mut plan = FixPlan::for_root(dir.path()).unwrap();
         plan.stage(link.clone(), b"rewritten".to_vec());
         let outcome = plan.commit();
         assert!(outcome.failed.is_empty());
@@ -534,6 +589,35 @@ mod tests {
             "symlink must survive commit",
         );
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "rewritten");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn commit_rejects_symlink_target_outside_root_without_writing_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+
+        let inside = root.join("inside.ts");
+        let link = root.join("outside-link.ts");
+        let outside = dir.path().join("outside.ts");
+        std::fs::write(&inside, "inside original").unwrap();
+        std::fs::write(&outside, "outside original").unwrap();
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+        let mut plan = FixPlan::for_root(&root).unwrap();
+        plan.stage(inside.clone(), b"inside rewritten".to_vec());
+        plan.stage(link.clone(), b"outside rewritten".to_vec());
+        let outcome = plan.commit();
+
+        assert!(outcome.written.is_empty());
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, link);
+        assert_eq!(std::fs::read_to_string(&inside).unwrap(), "inside original");
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "outside original"
+        );
     }
 
     #[test]
