@@ -51,7 +51,7 @@ const listFiles = (root, directory = root) => {
   return files.toSorted();
 };
 
-export const validateStagedSurfaceSet = (stagingRoot, surfacePaths) => {
+const validateStagedSurfaceSet = (stagingRoot, surfacePaths) => {
   const expected = assertSurfacePaths(surfacePaths);
   const actual = listFiles(stagingRoot);
   const actualSet = new Set(actual);
