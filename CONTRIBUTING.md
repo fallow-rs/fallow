@@ -4,6 +4,8 @@ Thanks for your interest in contributing to fallow! This guide covers everything
 
 ## Getting started
 
+Repository tooling and the published Node packages require Node.js 22 or later.
+
 ```bash
 git clone https://github.com/fallow-rs/fallow.git
 cd fallow
@@ -183,14 +185,19 @@ If you add a new finding type or utility shape, derive `JsonSchema` on the match
 
 ### After editing the schema
 
-If `docs/output-schema.json` changed, regenerate the VS Code extension's TypeScript types:
+Regenerate the complete contract bundle from the repository root after changing
+any schema or generated contract surface:
 
 ```bash
-cd editors/vscode
-pnpm run codegen:contracts   # writes VS Code and npm generated contracts
+npm run generate:contracts
 ```
 
-CI runs `pnpm run check:contracts` to confirm the committed generated files match a fresh regeneration.
+Before opening a pull request, confirm every committed contract matches a fresh
+generation:
+
+```bash
+npm run generate:contracts:check
+```
 
 ## Git conventions
 

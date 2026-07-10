@@ -36,7 +36,7 @@
     "tanstack-intent"
   ],
   "engines": {
-    "node": ">=16"
+    "node": ">=22"
   },
   "bin": {
     "fallow": "bin/fallow",

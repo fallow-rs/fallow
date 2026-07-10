@@ -40,7 +40,7 @@ jobs:
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Run action with SARIF format
         id: fallow
@@ -98,7 +98,7 @@ jobs:
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Run action with JSON format
         id: fallow
@@ -151,7 +151,7 @@ jobs:
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Create clean project
         run: |
@@ -202,7 +202,7 @@ jobs:
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Run action with dupes command
         id: fallow
@@ -253,7 +253,7 @@ jobs:
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Run action with fix command
         id: fallow
@@ -304,7 +304,7 @@ jobs:
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Run action with dead-code command
         id: fallow
@@ -343,7 +343,7 @@ jobs:
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Run action with no command (bare invocation)
         id: fallow
@@ -391,7 +391,7 @@ jobs:
 
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Run action with PR comment
         id: fallow

@@ -48,13 +48,16 @@ fallow plugin-schema
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `detection` | object | Rich activation logic (dependency, fileExists, all/any) |
 | `enablers` | string[] | Package names that activate this plugin |
 | `entryPoints` | string[] | Glob patterns for framework entry point files |
+| `entryPointRole` | string | Reachability role for entry points: runtime, test, or support |
+| `manifestEntries` | object[] | Entry points derived from framework manifest files |
 | `configPatterns` | string[] | Glob patterns for config files (marked always-used) |
 | `alwaysUsed` | string[] | Glob patterns for files always considered used |
 | `toolingDependencies` | string[] | Packages used via CLI, not source imports |
-| `detection` | object | Rich activation logic (dependency, fileExists, all/any) |
 | `usedExports` | object[] | Exports always considered used in matching files |
+| `usedClassMembers` | array | Class members invoked by the framework at runtime |
 
 ### `enablers`
 
@@ -113,6 +116,45 @@ Glob patterns for files that serve as entry points to your application. These fi
 }
 ```
 
+### `entryPointRole`
+
+Controls how every entry from `entryPoints` and `manifestEntries` contributes
+to coverage reachability. Use `runtime` for application roots, `test` for test
+roots, or `support` for setup and configuration roots. The default is
+`support`.
+
+```jsonc
+{
+  "entryPoints": ["src/main.ts"],
+  "entryPointRole": "runtime"
+}
+```
+
+### `manifestEntries`
+
+Derives entry points from matching JSON or JSONC manifest files. Each rule
+selects manifests, can require exact field values through `when`, and resolves
+its `entries` relative to the manifest directory. Entry paths may interpolate a
+dotted manifest field. A string creates one path and an array creates one path
+per value.
+
+```jsonc
+{
+  "entryPointRole": "runtime",
+  "manifestEntries": [
+    {
+      "manifests": "**/framework.jsonc",
+      "format": "jsonc",
+      "when": { "enabled": true },
+      "entries": [
+        { "path": "public/index.{ts,tsx}", "when": { "browser": true } },
+        { "path": "${modules}/index.ts" }
+      ]
+    }
+  ]
+}
+```
+
 ### `configPatterns`
 
 Glob patterns for framework config files. When the plugin is active, these files are marked as always-used (they won't be flagged as unused files).
@@ -164,6 +206,25 @@ Use `"*"` when every export in matching convention files is consumed by the fram
     { "pattern": "src/routes/**/*.{ts,tsx}", "exports": ["default", "loader", "action", "meta"] },
     { "pattern": "src/**/*.stories.{ts,tsx}", "exports": ["*"] },
     { "pattern": "src/middleware.ts", "exports": ["default"] }
+  ]
+}
+```
+
+### `usedClassMembers`
+
+Marks class members that a framework invokes without a visible source-level
+reference. A string or glob applies to every class. Use a scoped object for
+common member names that should apply only when a class extends a named base
+class or implements a named interface. A scoped rule must define `extends` or
+`implements`.
+
+```jsonc
+{
+  "usedClassMembers": [
+    "frameworkInit",
+    "lifecycle*",
+    { "implements": "CellRenderer", "members": ["refresh"] },
+    { "extends": "BaseCommand", "members": ["execute"] }
   ]
 }
 ```

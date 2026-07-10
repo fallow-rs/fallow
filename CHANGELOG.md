@@ -57,6 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The `fallow` npm launcher and Node bindings now require Node.js 22 or
+  later.** Both published manifests use the same supported runtime floor, and
+  the GitHub Action smoke workflow now validates them on Node.js 22.
+
 - **Reusable analysis sessions share immutable parsed-module storage across
   warm queries.** Internal dead-code, feature-flag, and trace paths can retain
   parser artifacts through an `Arc`-backed contract instead of deep-cloning
