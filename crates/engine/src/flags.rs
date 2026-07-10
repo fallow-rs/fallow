@@ -1,6 +1,6 @@
 //! Feature flag analysis owned by the engine boundary.
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use fallow_config::ResolvedConfig;
 use fallow_types::discover::DiscoveredFile;
@@ -21,11 +21,11 @@ pub struct FeatureFlagsAnalysis {
 /// Run feature flag analysis with a reusable analysis session.
 #[must_use]
 pub fn analyze_feature_flags_with_session(session: &AnalysisSession) -> FeatureFlagsAnalysis {
-    let parsed = session.parsed_parts(false);
-    let flags = collect_flags_for_modules(session, &parsed.files, &parsed.modules);
+    let modules = session.shared_parsed_modules(false);
+    let flags = collect_flags_for_modules(session, session.files(), &modules);
     FeatureFlagsAnalysis {
         flags,
-        files_scanned: parsed.files.len(),
+        files_scanned: session.files().len(),
     }
 }
 
@@ -44,7 +44,7 @@ pub fn builtin_sdk_providers() -> Vec<&'static str> {
 fn collect_flags_for_modules(
     session: &AnalysisSession,
     files: &[DiscoveredFile],
-    modules: &[ModuleInfo],
+    modules: &Arc<[ModuleInfo]>,
 ) -> Vec<FeatureFlag> {
     let mut flags = collect_flags_from_modules(session.config(), files, modules);
     correlate_flags_with_dead_code(&mut flags, session, modules);
@@ -54,9 +54,10 @@ fn collect_flags_for_modules(
 fn correlate_flags_with_dead_code(
     flags: &mut [FeatureFlag],
     session: &AnalysisSession,
-    modules: &[ModuleInfo],
+    modules: &Arc<[ModuleInfo]>,
 ) {
-    if let Ok(analysis_output) = session.analyze_dead_code_with_parsed_modules(modules) {
+    if let Ok(analysis_output) = session.analyze_dead_code_with_shared_modules(Arc::clone(modules))
+    {
         correlate_with_dead_code(flags, &analysis_output.results);
     }
 }

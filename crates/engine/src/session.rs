@@ -1,7 +1,7 @@
 //! Engine-owned analysis session orchestration.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use fallow_config::{DuplicatesConfig, ResolvedConfig, WorkspaceInfo};
@@ -19,6 +19,7 @@ use crate::{
     project_config::{ProjectConfig, config_for_project, default_project_config},
     results::{
         DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput, DuplicationAnalysis,
+        SharedDeadCodeAnalysisArtifacts,
     },
 };
 
@@ -42,7 +43,7 @@ pub struct AnalysisSession {
 struct ParsedModuleCache {
     need_complexity: bool,
     fingerprints: Vec<SourceFingerprint>,
-    modules: Vec<ModuleInfo>,
+    modules: Arc<[ModuleInfo]>,
 }
 
 /// Owned session parts for runners that need to continue an existing pipeline.
@@ -311,8 +312,19 @@ impl AnalysisSession {
     /// Parse discovered files without consuming the session.
     #[must_use]
     pub fn parsed_parts(&self, need_complexity: bool) -> ParsedAnalysisSessionParts {
-        let ParsedModules { modules, metrics } = self.parse_modules(need_complexity);
-        self.parsed_parts_from_modules(modules, metrics)
+        let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity);
+        self.parsed_parts_from_modules(modules.to_vec(), metrics)
+    }
+
+    /// Return immutable parsed modules backed by the reusable session cache.
+    ///
+    /// Workspace-owned consumers use this additive path when they only need
+    /// parsed modules and can borrow discovery and config directly from the
+    /// session. Stable owned callers can continue using [`Self::parsed_parts`].
+    #[doc(hidden)]
+    #[must_use]
+    pub fn shared_parsed_modules(&self, need_complexity: bool) -> Arc<[ModuleInfo]> {
+        self.parse_modules(need_complexity).modules
     }
 
     /// Parse discovered files without consuming the session or retaining parser
@@ -380,6 +392,25 @@ impl AnalysisSession {
         need_complexity: bool,
         retain_graph: bool,
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {
+        self.analyze_dead_code_with_shared_artifacts(need_complexity, retain_graph)
+            .map(SharedDeadCodeAnalysisArtifacts::into_owned)
+    }
+
+    /// Run dead-code analysis with shared immutable parser artifacts.
+    ///
+    /// Workspace-owned consumers use this additive path to retain warm parser
+    /// modules without deep-cloning the session cache. External callers can
+    /// continue using [`Self::analyze_dead_code_with_artifacts`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if parsing or analysis fails.
+    #[doc(hidden)]
+    pub fn analyze_dead_code_with_shared_artifacts(
+        &self,
+        need_complexity: bool,
+        retain_graph: bool,
+    ) -> EngineResult<SharedDeadCodeAnalysisArtifacts> {
         self.analyze_dead_code_with_reuse_artifacts(need_complexity, retain_graph, need_complexity)
     }
 
@@ -395,6 +426,7 @@ impl AnalysisSession {
         retain_graph: bool,
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {
         self.analyze_dead_code_with_reuse_artifacts(need_complexity, retain_graph, true)
+            .map(SharedDeadCodeAnalysisArtifacts::into_owned)
     }
 
     /// Run dead-code analysis from modules already parsed through this session.
@@ -409,16 +441,30 @@ impl AnalysisSession {
         &self,
         modules: &[ModuleInfo],
     ) -> EngineResult<DeadCodeAnalysisArtifacts> {
+        self.analyze_dead_code_with_shared_modules(Arc::from(modules))
+    }
+
+    /// Run dead-code analysis from shared immutable parser modules.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if graph construction or analysis fails.
+    #[doc(hidden)]
+    pub fn analyze_dead_code_with_shared_modules(
+        &self,
+        modules: Arc<[ModuleInfo]>,
+    ) -> EngineResult<DeadCodeAnalysisArtifacts> {
         run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
             config: &self.config,
             discovery: &self.discovery,
-            modules: modules.to_vec(),
+            modules,
             metrics: reused_parse_metrics(),
             collect_usages: true,
             retain_graph: true,
             retain_modules: false,
             retain_files: false,
         })
+        .map(SharedDeadCodeAnalysisArtifacts::into_owned)
     }
 
     fn analyze_dead_code_with_reuse_artifacts(
@@ -426,8 +472,8 @@ impl AnalysisSession {
         need_complexity: bool,
         retain_graph: bool,
         retain_files: bool,
-    ) -> EngineResult<DeadCodeAnalysisArtifacts> {
-        let ParsedModules { modules, metrics } = self.parse_modules(need_complexity);
+    ) -> EngineResult<SharedDeadCodeAnalysisArtifacts> {
+        let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity);
         run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
             config: &self.config,
             discovery: &self.discovery,
@@ -571,12 +617,12 @@ impl AnalysisSession {
         )
     }
 
-    fn parse_modules(&self, need_complexity: bool) -> ParsedModules {
+    fn parse_modules(&self, need_complexity: bool) -> SharedParsedModules {
         let fingerprints = source_fingerprints_for_files(self.files());
         if let Some(fingerprints) = fingerprints.as_ref()
             && let Some(modules) = self.cached_modules(need_complexity, fingerprints)
         {
-            return ParsedModules {
+            return SharedParsedModules {
                 modules,
                 metrics: core_backend::ParseMetrics {
                     parse_ms: 0.0,
@@ -588,31 +634,33 @@ impl AnalysisSession {
             };
         }
 
-        let parsed = parse_files_with_config(&self.config, self.files(), need_complexity);
+        let ParsedModules { modules, metrics } =
+            parse_files_with_config(&self.config, self.files(), need_complexity);
+        let modules: Arc<[ModuleInfo]> = modules.into();
         if let Some(fingerprints) = fingerprints
             && let Ok(mut cache) = self.parsed_cache.lock()
         {
             *cache = Some(ParsedModuleCache {
                 need_complexity,
                 fingerprints,
-                modules: parsed.modules.clone(),
+                modules: Arc::clone(&modules),
             });
         }
-        parsed
+        SharedParsedModules { modules, metrics }
     }
 
     fn cached_modules(
         &self,
         need_complexity: bool,
         fingerprints: &[SourceFingerprint],
-    ) -> Option<Vec<ModuleInfo>> {
+    ) -> Option<Arc<[ModuleInfo]>> {
         let Ok(cache) = self.parsed_cache.lock() else {
             return None;
         };
         let cache = cache.as_ref()?;
         let complexity_mode_satisfies_request = cache.need_complexity || !need_complexity;
         if complexity_mode_satisfies_request && cache.fingerprints == fingerprints {
-            return Some(cache.modules.clone());
+            return Some(Arc::clone(&cache.modules));
         }
         None
     }
@@ -638,6 +686,11 @@ struct ParsedModules {
     metrics: core_backend::ParseMetrics,
 }
 
+struct SharedParsedModules {
+    modules: Arc<[ModuleInfo]>,
+    metrics: core_backend::ParseMetrics,
+}
+
 fn parse_files_with_config(
     config: &ResolvedConfig,
     files: &[DiscoveredFile],
@@ -655,8 +708,12 @@ fn parse_files_with_config(
         )
     };
     let parse_result = crate::source::parse_all_files(files, cache.as_ref(), need_complexity);
+    let mut modules = parse_result.modules;
+    for module in &mut modules {
+        module.prepare_analysis_facts();
+    }
     let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
-    let cache_ms = update_parse_cache_if_enabled(config, &mut cache, &parse_result.modules, files);
+    let cache_ms = update_parse_cache_if_enabled(config, &mut cache, &modules, files);
     let metrics = core_backend::ParseMetrics {
         parse_ms,
         cache_ms,
@@ -664,10 +721,7 @@ fn parse_files_with_config(
         cache_misses: parse_result.cache_misses,
         parse_cpu_ms: parse_result.parse_cpu_ms,
     };
-    ParsedModules {
-        modules: parse_result.modules,
-        metrics,
-    }
+    ParsedModules { modules, metrics }
 }
 
 fn reused_parse_metrics() -> core_backend::ParseMetrics {
@@ -759,7 +813,7 @@ fn source_fingerprint(path: &Path) -> SourceFingerprint {
 struct EngineDeadCodePipelineInput<'a> {
     config: &'a ResolvedConfig,
     discovery: &'a crate::discover::AnalysisDiscovery,
-    modules: Vec<ModuleInfo>,
+    modules: Arc<[ModuleInfo]>,
     metrics: core_backend::ParseMetrics,
     collect_usages: bool,
     retain_graph: bool,
@@ -769,11 +823,11 @@ struct EngineDeadCodePipelineInput<'a> {
 
 fn run_engine_owned_dead_code_pipeline(
     input: EngineDeadCodePipelineInput<'_>,
-) -> EngineResult<DeadCodeAnalysisArtifacts> {
+) -> EngineResult<SharedDeadCodeAnalysisArtifacts> {
     let EngineDeadCodePipelineInput {
         config,
         discovery,
-        mut modules,
+        modules,
         metrics,
         collect_usages,
         retain_graph,
@@ -784,10 +838,6 @@ fn run_engine_owned_dead_code_pipeline(
     let prelude_timings = prelude.timings();
     let entry_points = core_backend::discover_dead_code_entry_points(&prelude);
     let (resolved, graph) = resolve_or_build_dead_code_graph(&prelude, &entry_points, &modules);
-
-    for module in &mut modules {
-        module.release_resolution_payload();
-    }
 
     let detector = core_backend::run_dead_code_detectors(
         &prelude,
@@ -815,7 +865,7 @@ fn run_engine_owned_dead_code_pipeline(
     prelude.finish();
     let file_hashes = collect_file_hashes(&modules, discovery.files());
 
-    Ok(DeadCodeAnalysisArtifacts {
+    Ok(SharedDeadCodeAnalysisArtifacts {
         results: detector.results,
         timings: profile.timings,
         graph: retain_graph.then_some(graph.graph),
@@ -868,18 +918,28 @@ pub(crate) fn analyze_dead_code_with_parse_result_from_config(
     run_engine_owned_dead_code_pipeline(EngineDeadCodePipelineInput {
         config,
         discovery: &discovery,
-        modules: modules.to_vec(),
+        modules: Arc::from(modules),
         metrics: reused_parse_metrics(),
         collect_usages: true,
         retain_graph: true,
         retain_modules: false,
         retain_files: false,
     })
+    .map(SharedDeadCodeAnalysisArtifacts::into_owned)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn session_with_source(source: &str) -> (tempfile::TempDir, AnalysisSession) {
+        let project = tempfile::tempdir().expect("project");
+        let root = project.path();
+        std::fs::create_dir(root.join("src")).expect("create source directory");
+        std::fs::write(root.join("src/index.ts"), source).expect("write source");
+        let session = AnalysisSession::load_default(root);
+        (project, session)
+    }
 
     #[test]
     fn session_retains_workspace_metadata_from_config_load() {
@@ -905,6 +965,77 @@ mod tests {
                 .iter()
                 .any(|workspace| workspace.name == "pkg-a"),
             "session must retain workspace metadata discovered during config load"
+        );
+    }
+
+    #[test]
+    fn warm_parse_cache_reuses_module_storage() {
+        let (_project, session) = session_with_source("export function value() { return 1; }\n");
+        let first = session.parse_modules(true);
+        let second = session.parse_modules(false);
+
+        assert!(
+            Arc::ptr_eq(&first.modules, &second.modules),
+            "warm session queries must share parsed module storage"
+        );
+    }
+
+    #[test]
+    fn shared_parsed_modules_reuse_public_session_storage() {
+        let (_project, session) = session_with_source("export const value = 1;\n");
+        let first = session.shared_parsed_modules(true);
+        let second = session.shared_parsed_modules(false);
+
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn warm_complexity_artifacts_reuse_cached_module_storage() {
+        let (_project, session) = session_with_source("export function value() { return 1; }\n");
+        let cached = session.parse_modules(true);
+        let artifacts = session
+            .analyze_dead_code_with_reuse_artifacts(true, true, false)
+            .expect("analysis succeeds");
+        let retained = artifacts.modules.expect("complexity modules retained");
+
+        assert!(
+            Arc::ptr_eq(&cached.modules, &retained),
+            "warm complexity artifacts must share parsed module storage"
+        );
+    }
+
+    #[test]
+    fn shared_and_owned_artifacts_preserve_output_bytes() {
+        let (_project, session) = session_with_source(
+            "export const used = 1;\nexport const unused = 2;\nconsole.log(used);\n",
+        );
+        let owned = session
+            .analyze_dead_code_with_artifacts(true, true)
+            .expect("owned analysis succeeds");
+        let shared = session
+            .analyze_dead_code_with_shared_artifacts(true, true)
+            .expect("shared analysis succeeds");
+
+        assert_eq!(
+            serde_json::to_vec(&owned.results).expect("serialize owned results"),
+            serde_json::to_vec(&shared.results).expect("serialize shared results")
+        );
+        assert_eq!(owned.file_hashes, shared.file_hashes);
+        assert_eq!(
+            owned
+                .modules
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(|module| module.content_hash)
+                .collect::<Vec<_>>(),
+            shared
+                .modules
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .map(|module| module.content_hash)
+                .collect::<Vec<_>>()
         );
     }
 }

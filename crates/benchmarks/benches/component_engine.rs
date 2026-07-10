@@ -14,10 +14,16 @@ use fallow_engine::{project_analysis::ProjectAnalysisArtifactOptions, session::A
 use tempfile::TempDir;
 
 const FILE_COUNT: usize = 32;
+const WARM_FILE_COUNT: usize = 256;
 
 struct EngineFixture {
     _temp_dir: TempDir,
     root: PathBuf,
+}
+
+struct WarmEngineFixture {
+    _fixture: EngineFixture,
+    session: AnalysisSession,
 }
 
 fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
@@ -27,6 +33,10 @@ fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
 }
 
 fn create_engine_fixture() -> EngineFixture {
+    create_engine_fixture_with_file_count(FILE_COUNT)
+}
+
+fn create_engine_fixture_with_file_count(file_count: usize) -> EngineFixture {
     let temp_dir = TempDir::new().unwrap();
     let root = temp_dir.path().to_path_buf();
     write_file(
@@ -37,7 +47,7 @@ fn create_engine_fixture() -> EngineFixture {
 
     let mut imports = String::new();
     let mut uses = String::new();
-    for index in 0..FILE_COUNT {
+    for index in 0..file_count {
         write_file(
             &root,
             &format!("src/module-{index}.ts"),
@@ -68,6 +78,18 @@ export function compute{index}(input: number): number {{
     EngineFixture {
         _temp_dir: temp_dir,
         root,
+    }
+}
+
+fn create_warm_engine_fixture() -> WarmEngineFixture {
+    let fixture = create_engine_fixture_with_file_count(WARM_FILE_COUNT);
+    let session = AnalysisSession::load_default(&fixture.root);
+    session
+        .analyze_dead_code_with_complexity()
+        .expect("warm-up analysis succeeds");
+    WarmEngineFixture {
+        _fixture: fixture,
+        session,
     }
 }
 
@@ -117,10 +139,42 @@ fn component_engine_project_analysis_artifacts(c: &mut Criterion) {
     });
 }
 
+fn component_engine_warm_session_dead_code_large(c: &mut Criterion) {
+    let fixture = create_warm_engine_fixture();
+    c.bench_function("component_engine_warm_session_dead_code_large", |bencher| {
+        bencher.iter(|| fixture.session.analyze_dead_code());
+    });
+}
+
+fn component_engine_warm_session_complexity_owned(c: &mut Criterion) {
+    let fixture = create_warm_engine_fixture();
+    c.bench_function(
+        "component_engine_warm_session_complexity_owned",
+        |bencher| bencher.iter(|| fixture.session.analyze_dead_code_with_complexity()),
+    );
+}
+
+fn component_engine_warm_session_complexity_shared(c: &mut Criterion) {
+    let fixture = create_warm_engine_fixture();
+    c.bench_function(
+        "component_engine_warm_session_complexity_shared",
+        |bencher| {
+            bencher.iter(|| {
+                fixture
+                    .session
+                    .analyze_dead_code_with_shared_artifacts(true, false)
+            });
+        },
+    );
+}
+
 criterion_group!(
     benches,
     component_engine_session_load,
     component_engine_parsed_parts,
-    component_engine_project_analysis_artifacts
+    component_engine_project_analysis_artifacts,
+    component_engine_warm_session_dead_code_large,
+    component_engine_warm_session_complexity_owned,
+    component_engine_warm_session_complexity_shared
 );
 criterion_main!(benches);

@@ -174,11 +174,11 @@ pub struct ModuleInfo {
     pub has_dynamic_provide: bool,
     /// Local names of import bindings that ARE referenced somewhere in this file
     /// (script value/type position OR template/markup). The complement of
-    /// `unused_import_bindings` among `imports`. Derived in
-    /// `release_resolution_payload` (where both `imports` and
-    /// `unused_import_bindings` are still present) so it survives the release and
-    /// is readable by the analyze layer; it is never cached (recomputed on every
-    /// cache load). Consumed by the `unrendered-component` detector to credit a
+    /// `unused_import_bindings` among `imports`. Derived by
+    /// `prepare_analysis_facts` while both source vectors are still present, so
+    /// it remains readable after the owned release path clears them. It is never
+    /// cached and is recomputed on every cache load. Consumed by the
+    /// `unrendered-component` detector to credit a
     /// Vue/Svelte SFC that some file actually imports-and-uses, distinguishing it
     /// from a component reachable only through a barrel re-export.
     pub referenced_import_bindings: Vec<String>,
@@ -292,11 +292,10 @@ pub struct ModuleInfo {
     /// `true` when this file uses the whole `page.data` / `$page.data` store
     /// object opaquely (e.g. `Object.values(page.data)`, `{...$page.data}`), so a
     /// reflective read could consume any route's key. Drives the
-    /// `unused-load-data-key` detector's project-wide abstain. Derived in
-    /// `release_resolution_payload` from `whole_object_uses` BEFORE that vector is
-    /// released (mirroring `referenced_import_bindings`), so it survives the
-    /// release the detector runs after; it is never cached (recomputed each run
-    /// from the cached `whole_object_uses`). Reassignment forms
+    /// `unused-load-data-key` detector's project-wide abstain. Derived by
+    /// `prepare_analysis_facts` from `whole_object_uses` before the owned release
+    /// path clears that vector. It is never cached and is recomputed each run from
+    /// the cached `whole_object_uses`. Reassignment forms
     /// (`const all = $page.data`) are not whole-object-tracked and stay out of
     /// scope, matching the syntactic analyzer's conservative posture.
     pub has_page_data_store_whole_use: bool,
@@ -337,16 +336,15 @@ pub struct ModuleInfo {
 }
 
 impl ModuleInfo {
-    /// Release extraction payload that resolution has already copied into the graph.
+    /// Derive compact detector facts from resolution payload before sharing.
     ///
-    /// This keeps fields needed by analysis, health, security, LSP, coverage,
-    /// and hash drift checks, while dropping vectors that otherwise duplicate
-    /// data owned by `ResolvedModule` or already credited into the module graph.
-    pub fn release_resolution_payload(&mut self) {
-        // Derive the referenced-binding set BEFORE releasing `unused_import_bindings`:
-        // the analyze-layer `unrendered-component` detector needs "which imports are
-        // actually used" but runs after this release, so capture the compact
-        // complement here. Skip empty local names (side-effect imports).
+    /// Shared analysis sessions keep the source payload for later graph runs,
+    /// but detectors still require the same derived facts that the owned
+    /// release path computes before clearing that payload.
+    #[doc(hidden)]
+    pub fn prepare_analysis_facts(&mut self) {
+        // The analyze-layer `unrendered-component` detector needs the compact
+        // complement of imports and unused bindings after resolution.
         self.referenced_import_bindings = self
             .imports
             .iter()
@@ -356,15 +354,21 @@ impl ModuleInfo {
         self.referenced_import_bindings.sort_unstable();
         self.referenced_import_bindings.dedup();
 
-        // Derive the project-wide page-data-store whole-use signal BEFORE
-        // releasing `whole_object_uses`: the `unused-load-data-key` detector runs
-        // after this release and needs to know whether ANY module reflectively
-        // consumes the whole `page.data` / `$page.data` store.
+        // The `unused-load-data-key` detector needs the project-wide signal
+        // after `whole_object_uses` is released from owned artifacts.
         self.has_page_data_store_whole_use = self
             .whole_object_uses
             .iter()
             .any(|name| name == "page.data" || name == "$page.data");
+    }
 
+    /// Release extraction payload that resolution has already copied into the graph.
+    ///
+    /// This keeps fields needed by analysis, health, security, LSP, coverage,
+    /// and hash drift checks, while dropping vectors that otherwise duplicate
+    /// data owned by `ResolvedModule` or already credited into the module graph.
+    pub fn release_resolution_payload(&mut self) {
+        self.prepare_analysis_facts();
         Self::release_vec(&mut self.dynamic_imports);
         Self::release_vec(&mut self.require_calls);
         Self::release_boxed_slice(&mut self.package_path_references);

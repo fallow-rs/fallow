@@ -6,6 +6,7 @@
 )]
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use fallow_config::ResolvedConfig;
@@ -91,6 +92,46 @@ pub struct DeadCodeAnalysisArtifacts {
     pub files: Option<Vec<DiscoveredFile>>,
     pub script_used_packages: FxHashSet<String>,
     pub file_hashes: FxHashMap<PathBuf, u64>,
+}
+
+/// Shared parser artifacts for workspace-internal session consumers.
+///
+/// This additive contract lets internal callers retain immutable parsed
+/// modules without deep-cloning the session cache. Stable owned APIs continue
+/// to return [`DeadCodeAnalysisArtifacts`].
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct SharedDeadCodeAnalysisArtifacts {
+    pub results: AnalysisResults,
+    pub timings: Option<trace::PipelineTimings>,
+    pub graph: Option<module_graph::RetainedModuleGraph>,
+    pub modules: Option<Arc<[ModuleInfo]>>,
+    pub files: Option<Vec<DiscoveredFile>>,
+    pub script_used_packages: FxHashSet<String>,
+    pub file_hashes: FxHashMap<PathBuf, u64>,
+}
+
+impl SharedDeadCodeAnalysisArtifacts {
+    /// Convert shared parser artifacts to the stable owned result contract.
+    #[must_use]
+    pub fn into_owned(self) -> DeadCodeAnalysisArtifacts {
+        let modules = self.modules.map(|modules| {
+            let mut owned = modules.to_vec();
+            for module in &mut owned {
+                module.release_resolution_payload();
+            }
+            owned
+        });
+        DeadCodeAnalysisArtifacts {
+            results: self.results,
+            timings: self.timings,
+            graph: self.graph,
+            modules,
+            files: self.files,
+            script_used_packages: self.script_used_packages,
+            file_hashes: self.file_hashes,
+        }
+    }
 }
 
 /// Typed project analysis result combining dead-code and duplication outputs.

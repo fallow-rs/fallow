@@ -37,7 +37,7 @@ pub fn trace_symbol_chain_with_session(
     session: &AnalysisSession,
     query: SymbolChainQuery<'_>,
 ) -> EngineResult<Option<SymbolChainTrace>> {
-    let output = session.analyze_dead_code_with_artifacts(true, true)?;
+    let output = session.analyze_dead_code_with_shared_artifacts(true, true)?;
     let graph = output
         .graph
         .as_ref()

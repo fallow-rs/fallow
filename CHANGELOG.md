@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--format` run. v1 renders the two GitHub formats and dispatches on the
   envelope's `kind` (dead-code, dupes, health, audit, security, combined).
 
+### Changed
+
+- **Reusable analysis sessions share immutable parsed-module storage across
+  warm queries.** Internal dead-code, feature-flag, and trace paths can retain
+  parser artifacts through an `Arc`-backed contract instead of deep-cloning
+  every `ModuleInfo`. Existing owned APIs remain compatible, and detector facts
+  are prepared before modules become immutable.
+
 ## [3.3.0] - 2026-07-09
 
 ### Added
