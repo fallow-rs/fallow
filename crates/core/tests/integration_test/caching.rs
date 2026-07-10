@@ -39,6 +39,53 @@ fn source_read_failure_preserves_sparse_file_ids() {
     assert!(!result.read_failures[0].error.is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn warm_metadata_cache_reports_source_that_becomes_unreadable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use fallow_core::cache::{CacheStore, module_to_cached};
+    use fallow_types::discover::{DiscoveredFile, FileId};
+    use fallow_types::source_fingerprint::SourceFingerprint;
+
+    let project = tempfile::tempdir().expect("create project");
+    let path = project.path().join("cached.ts");
+    std::fs::write(&path, "export const cached = 1;\n").expect("write source");
+    let metadata = std::fs::metadata(&path).expect("source metadata");
+    let discovered = [DiscoveredFile {
+        id: FileId(0),
+        path: path.clone(),
+        size_bytes: metadata.len(),
+    }];
+
+    let cold = fallow_core::extract::parse_all_files(&discovered, None, false);
+    let mut cache = CacheStore::new();
+    cache.insert(
+        &path,
+        module_to_cached(
+            cold.modules.first().expect("cold parse produces module"),
+            SourceFingerprint::from_metadata(&metadata),
+        ),
+    );
+
+    let original_mode = metadata.permissions().mode();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o0))
+        .expect("make source unreadable");
+    let warm = fallow_core::extract::parse_all_files(&discovered, Some(&cache), false);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(original_mode))
+        .expect("restore source permissions");
+
+    assert!(
+        warm.modules.is_empty(),
+        "stale cached module must not be used"
+    );
+    assert_eq!(warm.cache_hits, 0);
+    assert_eq!(warm.read_failures.len(), 1);
+    assert_eq!(warm.read_failures[0].file_id, FileId(0));
+    assert_eq!(warm.read_failures[0].path, path);
+    assert!(!warm.read_failures[0].error.is_empty());
+}
+
 #[test]
 #[allow(
     clippy::too_many_lines,

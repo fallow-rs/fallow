@@ -233,11 +233,12 @@ impl ParseFileResult {
 /// Parse a single file, consulting the cache first.
 ///
 /// Cache validation strategy (fast path -> slow path):
-/// 1. `stat()` the file to get mtime + size (single syscall, no file read)
-/// 2. If mtime+size match the cached entry -> cache hit, return immediately
-/// 3. If mtime+size differ -> read file, compute content hash
-/// 4. If content hash matches cached entry -> cache hit (file was `touch`ed but unchanged)
-/// 5. Otherwise -> cache miss, full parse
+/// 1. Open the file so unreadable sources cannot use stale cached analysis
+/// 2. Read mtime + size from the open handle
+/// 3. If mtime+size match the cached entry -> cache hit, return immediately
+/// 4. If mtime+size differ -> read file, compute content hash
+/// 5. If content hash matches cached entry -> cache hit (file was `touch`ed but unchanged)
+/// 6. Otherwise -> cache miss, full parse
 fn parse_single_file_cached(
     file: &DiscoveredFile,
     cache: Option<&CacheStore>,
@@ -247,20 +248,26 @@ fn parse_single_file_cached(
 
     if let Some(cached) = cached_by_path
         && cached.file_size == file.size_bytes
-        && let Ok(metadata) = std::fs::metadata(&file.path)
-        && metadata.len() == cached.file_size
     {
-        let fingerprint =
-            fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
-        if cached.source_fingerprint() == fingerprint
-            && fingerprint.has_known_mtime()
-            && (!need_complexity || !cached.complexity.is_empty())
+        let source_file = match std::fs::File::open(&file.path) {
+            Ok(source_file) => source_file,
+            Err(error) => return ParseFileResult::read_failure(file, &error),
+        };
+        if let Ok(metadata) = source_file.metadata()
+            && metadata.len() == cached.file_size
         {
-            return ParseFileResult::cache_hit(cache::cached_to_module_opts(
-                cached,
-                file.id,
-                need_complexity,
-            ));
+            let fingerprint =
+                fallow_types::source_fingerprint::SourceFingerprint::from_metadata(&metadata);
+            if cached.source_fingerprint() == fingerprint
+                && fingerprint.has_known_mtime()
+                && (!need_complexity || !cached.complexity.is_empty())
+            {
+                return ParseFileResult::cache_hit(cache::cached_to_module_opts(
+                    cached,
+                    file.id,
+                    need_complexity,
+                ));
+            }
         }
     }
 
