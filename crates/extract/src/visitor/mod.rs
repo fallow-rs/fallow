@@ -1647,6 +1647,65 @@ impl ModuleInfoExtractor {
             .map(|(_, object_name)| object_name)
     }
 
+    /// Credit a member reached through a local subclass onto the class that declares it.
+    ///
+    /// `class Sub extends Base {}` without an `export` is never an export, so
+    /// `Sub.someStatic` names nothing the analyze layer can resolve: its import/export
+    /// map holds only imports and exports, and the heritage `parent -> children` map is
+    /// built from exports alone. The static is then reported unused even though it is
+    /// called. Exporting the subclass makes the identical code resolve, which is the
+    /// tell.
+    ///
+    /// Walk the local `extends` chain to the first name that is NOT a locally declared
+    /// class -- the imported or exported base -- and re-emit the access against it.
+    /// Only a bare identifier (or a dotted `ns.Base`) is ever recorded as a superclass;
+    /// `class Sub extends mixin(Base) {}` records `None` and abstains here, which is
+    /// correct because a mixin can redefine what the subclass exposes.
+    ///
+    /// Crediting a base whose subclass shadows the member is a false negative, never a
+    /// false positive, which is the direction this rule must err in.
+    fn propagate_local_subclass_member_accesses(&mut self) {
+        if self.local_class_exports.is_empty() {
+            return;
+        }
+        let additional: Vec<MemberAccess> = self
+            .member_accesses
+            .iter()
+            .filter_map(|access| {
+                let base = self.resolve_local_subclass_base(&access.object)?;
+                Some(MemberAccess {
+                    object: base,
+                    member: access.member.clone(),
+                })
+            })
+            .collect();
+        self.member_accesses.extend(additional);
+    }
+
+    /// The nearest ancestor of a locally declared class that is not itself locally
+    /// declared -- the imported or exported base the members actually live on.
+    ///
+    /// `None` when `name` is not a local class, when the chain reaches a class with no
+    /// `extends`, or when it revisits a name. The `visited` set, rather than a depth
+    /// cap, is what terminates a malformed cyclic `extends`: a depth cap would silently
+    /// abstain on a legitimately deep chain and leave its members falsely reported.
+    fn resolve_local_subclass_base(&self, name: &str) -> Option<String> {
+        let mut visited: FxHashSet<&str> = FxHashSet::default();
+        visited.insert(name);
+        let mut current = self.local_class_exports.get(name)?.super_class.as_deref()?;
+        loop {
+            let Some(info) = self.local_class_exports.get(current) else {
+                // Not locally declared, so it is the imported / exported base.
+                return Some(current.to_string());
+            };
+            if !visited.insert(current) {
+                // Cyclic `extends`; malformed source, credit nothing.
+                return None;
+            }
+            current = info.super_class.as_deref()?;
+        }
+    }
+
     fn resolve_bound_member_accesses(&mut self) {
         if self.binding_target_names.is_empty() {
             return;
@@ -1932,6 +1991,12 @@ impl ModuleInfoExtractor {
         self.resolve_playwright_factory_call_definitions();
         self.resolve_structural_class_calls();
         self.resolve_bound_member_accesses();
+        // AFTER `resolve_bound_member_accesses`, which is what materializes the
+        // class-qualified accesses for `const s = new Sub(); s.member`. Running
+        // earlier would only see the statics written as `Sub.member` in source and
+        // would leave every instance member reached through a local subclass
+        // reported as unused.
+        self.propagate_local_subclass_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
         self.resolve_typed_react_props();

@@ -762,7 +762,12 @@ use crate::MemberKind;
 /// `for...in`, and dynamic computed-access paths carry the synthetic
 /// route-loader abstention marker. Warm 227 caches can contain only the raw
 /// local binding and would report loader keys consumed through those paths.
-pub(super) const CACHE_VERSION: u32 = 228;
+///
+/// Bumped to 229 so a member reached through a LOCAL (non-exported) subclass
+/// re-emits the access against the class that declares it. A warm 228 cache
+/// carries only the `Sub.member` access, whose object the analyze layer cannot
+/// resolve, leaving the base's members falsely reported as unused.
+pub(super) const CACHE_VERSION: u32 = 229;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
