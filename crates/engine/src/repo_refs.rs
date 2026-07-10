@@ -394,6 +394,10 @@ fn set_regular_file_mode(path: &Path, executable: bool) -> EngineResult<()> {
 }
 
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "shared cross-platform signature; Unix permission updates are fallible"
+)]
 fn set_regular_file_mode(_path: &Path, _executable: bool) -> EngineResult<()> {
     Ok(())
 }
