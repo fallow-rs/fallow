@@ -323,6 +323,32 @@ fn normalize_url_for_dedup(url: &str) -> String {
     }
 }
 
+/// Format a remote config location for diagnostics without exposing URL secrets.
+fn remote_config_display(location: &str) -> String {
+    let Some((scheme, rest)) = location.split_once("://") else {
+        return location.to_string();
+    };
+
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(authority_end);
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let path_end = tail.find(['?', '#']).unwrap_or(tail.len());
+    let path = &tail[..path_end];
+
+    format!("{scheme}://{authority}{path}")
+}
+
+/// Format a fetch error without trusting the HTTP client's URL rendering.
+fn remote_fetch_error_display(error: &str, url: &str) -> String {
+    if remote_config_display(url) == url {
+        error.to_string()
+    } else {
+        "request failed".to_string()
+    }
+}
+
 /// Read the `FALLOW_EXTENDS_TIMEOUT_SECS` env var, falling back to [`DEFAULT_URL_TIMEOUT_SECS`].
 fn url_timeout() -> Duration {
     url_timeout_from(std::env::var("FALLOW_EXTENDS_TIMEOUT_SECS").ok().as_deref())
@@ -344,6 +370,8 @@ const MAX_URL_CONFIG_BYTES: u64 = 1024 * 1024;
 
 /// Fetch a remote JSON config from an HTTPS URL.
 fn fetch_url_config(url: &str, source: &str) -> Result<serde_json::Value, miette::Report> {
+    let url_display = remote_config_display(url);
+    let source_display = remote_config_display(source);
     let timeout = url_timeout();
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
@@ -352,8 +380,10 @@ fn fetch_url_config(url: &str, source: &str) -> Result<serde_json::Value, miette
         .new_agent();
 
     let mut response = agent.get(url).call().map_err(|e| {
+        let error_display = remote_fetch_error_display(&e.to_string(), url);
         miette::miette!(
-            "Failed to fetch remote config from {url} (referenced from {source}): {e}. \
+            "Failed to fetch remote config from {url_display} \
+             (referenced from {source_display}): {error_display}. \
              If this URL is unavailable, use a local path or npm: specifier instead"
         )
     })?;
@@ -365,13 +395,15 @@ fn fetch_url_config(url: &str, source: &str) -> Result<serde_json::Value, miette
         .read_to_string()
         .map_err(|e| {
             miette::miette!(
-                "Failed to read response body from {url} (referenced from {source}): {e}"
+                "Failed to read response body from {url_display} \
+                 (referenced from {source_display}): {e}"
             )
         })?;
 
     crate::jsonc::parse_to_value(&body).map_err(|e| {
         miette::miette!(
-            "Failed to parse remote config as JSON from {url} (referenced from {source}): {e}. \
+            "Failed to parse remote config as JSON from {url_display} \
+             (referenced from {source_display}): {e}. \
              Only JSON/JSONC is supported for URL-sourced configs"
         )
     })
@@ -509,10 +541,11 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             return self.resolve_remote(entry, depth + 1);
         }
         if entry.starts_with(HTTP_PREFIX) {
+            let entry_display = remote_config_display(entry);
             return Err(miette::miette!(
                 "URL extends must use https://, got http:// URL '{}' (in {}). \
                  Change the URL to use https:// instead",
-                entry,
+                entry_display,
                 path.display()
             ));
         }
@@ -546,13 +579,15 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
         depth: usize,
     ) -> Result<serde_json::Value, miette::Report> {
         if depth >= MAX_EXTENDS_DEPTH {
+            let url_display = remote_config_display(url);
             return Err(miette::miette!(
-                "Config extends chain too deep (>={MAX_EXTENDS_DEPTH} levels) at {url}"
+                "Config extends chain too deep (>={MAX_EXTENDS_DEPTH} levels) at {url_display}"
             ));
         }
         if !self.options.allow_remote_extends {
+            let url_display = remote_config_display(url);
             return Err(miette::miette!(
-                "Remote config extends '{url}' is disabled by default. \
+                "Remote config extends '{url_display}' is disabled by default. \
                  CLI users can pass --allow-remote-extends. Library callers can use \
                  ConfigLoadOptions {{ allow_remote_extends: true }}"
             ));
@@ -563,8 +598,9 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             return Ok(value.clone());
         }
         if !self.active.insert(identity.clone()) {
+            let url_display = remote_config_display(url);
             return Err(miette::miette!(
-                "Circular extends detected: {url} is already active in the extends chain"
+                "Circular extends detected: {url_display} is already active in the extends chain"
             ));
         }
 
@@ -587,16 +623,18 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             return Ok(value);
         }
 
+        let url_display = remote_config_display(url);
         let mut merged = serde_json::Value::Object(serde_json::Map::new());
         for entry in &extends {
             let base = if entry.starts_with(HTTPS_PREFIX) {
                 self.resolve_remote(entry, depth + 1)?
             } else if entry.starts_with(HTTP_PREFIX) {
+                let entry_display = remote_config_display(entry);
                 return Err(miette::miette!(
                     "URL extends must use https://, got http:// URL '{}' (in remote config {}). \
                      Change the URL to use https:// instead",
-                    entry,
-                    url
+                    entry_display,
+                    url_display
                 ));
             } else if let Some(npm_specifier) = entry.strip_prefix(NPM_PREFIX) {
                 let cwd = std::env::current_dir().map_err(|e| {
@@ -605,13 +643,13 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
                          failed to determine current directory: {e}"
                     )
                 })?;
-                let path_placeholder = PathBuf::from(url);
+                let path_placeholder = PathBuf::from(&url_display);
                 let npm_path = resolve_npm_package(&cwd, npm_specifier, &path_placeholder)?;
                 self.resolve_local(&npm_path, depth + 1)?
             } else {
                 return Err(miette::miette!(
                     "Relative paths in 'extends' are not supported when the base config was \
-                     fetched from a URL ('{url}'). Use another https:// URL or npm: reference \
+                     fetched from a URL ('{url_display}'). Use another https:// URL or npm: reference \
                      instead. Got: '{entry}'"
                 ));
             };
@@ -674,13 +712,14 @@ fn reject_sealed_remote_extends(
     kind: &str,
 ) -> Result<(), miette::Report> {
     if sealed {
+        let entry_display = remote_config_display(entry);
         Err(miette::miette!(
             "'sealed: true' config at {} rejects {} extends '{}'. \
              Sealed configs only allow file-relative extends within \
              the config's directory",
             path.display(),
             kind,
-            entry
+            entry_display
         ))
     } else {
         Ok(())
@@ -1929,7 +1968,7 @@ unknown_field = true
     #[test]
     fn remote_extends_are_denied_before_fetch_by_default() {
         let dir = test_dir("remote-default-denied");
-        let url = "https://config.example/base.json";
+        let url = "https://config-user:config-password@config.example:8443/base.json?token=config-token#config-fragment";
         std::fs::write(
             dir.path().join(".fallowrc.json"),
             format!(r#"{{"extends": "{url}"}}"#),
@@ -1945,18 +1984,125 @@ unknown_field = true
         .unwrap_err()
         .to_string();
 
-        assert!(error.contains(url), "denial must name the URL: {error}");
+        assert!(
+            error.contains("https://config.example:8443/base.json"),
+            "denial must name the URL without secrets"
+        );
+        for secret in [
+            "config-user",
+            "config-password",
+            "config-token",
+            "config-fragment",
+        ] {
+            assert!(
+                !error.contains(secret),
+                "denial must not expose a secret value"
+            );
+        }
         assert!(
             error.contains("--allow-remote-extends"),
-            "denial must name the CLI opt-in: {error}"
+            "denial must name the CLI opt-in"
         );
         assert!(
             error.contains("ConfigLoadOptions"),
-            "denial must name the library opt-in: {error}"
+            "denial must name the library opt-in"
         );
         assert!(
             fetcher.requests.is_empty(),
             "denial must happen before fetch"
+        );
+    }
+
+    #[test]
+    fn remote_parent_and_requested_url_secrets_are_redacted_in_errors() {
+        let dir = test_dir("remote-error-redaction");
+        let parent = "https://parent-user:parent-password@[2001:db8::1]:8443/base.json?token=parent-token#parent-fragment";
+        let requested = "http://child-user:child-password@child.example/child.json?token=child-token#child-fragment";
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            format!(r#"{{"extends": "{parent}"}}"#),
+        )
+        .unwrap();
+        let mut fetcher = MockRemoteFetcher::default()
+            .with_response(parent, serde_json::json!({"extends": requested}));
+
+        let error = load_with_fetcher(
+            &dir.path().join(".fallowrc.json"),
+            ConfigLoadOptions {
+                allow_remote_extends: true,
+            },
+            &mut fetcher,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("http://child.example/child.json"),
+            "error must preserve the requested host and path"
+        );
+        assert!(
+            error.contains("https://[2001:db8::1]:8443/base.json"),
+            "error must preserve the remote parent host, port, and path"
+        );
+        for secret in [
+            "parent-user",
+            "parent-password",
+            "parent-token",
+            "parent-fragment",
+            "child-user",
+            "child-password",
+            "child-token",
+            "child-fragment",
+        ] {
+            assert!(
+                !error.contains(secret),
+                "remote error must not expose a secret value"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_fetch_network_error_redacts_requested_url_and_source() {
+        let url = "https://request-user:request-password@127.0.0.1:0/config.json?token=request-token#request-fragment";
+        let source = "https://source-user:source-password@source.example/parent.json?token=source-token#source-fragment";
+
+        let error = fetch_url_config(url, source)
+            .expect_err("the reserved local port must reject the request")
+            .to_string();
+
+        assert!(
+            error.contains("https://127.0.0.1:0/config.json"),
+            "network error must preserve the requested host, port, and path"
+        );
+        assert!(
+            error.contains("https://source.example/parent.json"),
+            "network error must preserve the source host and path"
+        );
+        for secret in [
+            "request-user",
+            "request-password",
+            "request-token",
+            "request-fragment",
+            "source-user",
+            "source-password",
+            "source-token",
+            "source-fragment",
+        ] {
+            assert!(
+                !error.contains(secret),
+                "network error must not expose a secret value"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_fetch_error_detail_does_not_trust_normalized_urls() {
+        let url = "https://request-user:request-password@config.example/config.json?token=request-token#request-fragment";
+        let normalized_error = "bad uri: https://request-user:request-password@config.example/config.json?token=request-token";
+
+        assert!(
+            remote_fetch_error_display(normalized_error, url) == "request failed",
+            "normalized network errors must not bypass URL redaction"
         );
     }
 
@@ -3844,6 +3990,35 @@ thresholdOverrides = [
             normalize_url_for_dedup("https://example.com/config.json"),
             "https://example.com/config.json"
         );
+    }
+
+    #[test]
+    fn remote_config_display_redacts_url_secrets_and_preserves_local_paths() {
+        let cases = [
+            (
+                "https://user:password@example.com/config.json",
+                "https://example.com/config.json",
+            ),
+            (
+                "https://example.com/config.json?token=query-secret#fragment-secret",
+                "https://example.com/config.json",
+            ),
+            (
+                "https://user:password@[2001:db8::1]:8443/config.json?token=query-secret#fragment-secret",
+                "https://[2001:db8::1]:8443/config.json",
+            ),
+            (
+                "/workspace/configs/base.json?literal-query#literal-fragment",
+                "/workspace/configs/base.json?literal-query#literal-fragment",
+            ),
+        ];
+
+        for (case_index, (input, expected)) in cases.into_iter().enumerate() {
+            assert!(
+                remote_config_display(input) == expected,
+                "remote config display case {case_index} must be sanitized"
+            );
+        }
     }
 
     #[test]
