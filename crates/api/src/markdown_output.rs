@@ -34,13 +34,30 @@ fn format_window(seconds: u64) -> String {
     }
 }
 
-/// Escape backticks in user-controlled strings to prevent breaking markdown code spans.
-fn escape_backticks(s: &str) -> String {
+fn escape_markdown_prose(s: &str) -> String {
     s.replace('`', "\\`")
 }
 
-fn escape_table_code_span(s: &str) -> String {
-    escape_backticks(s).replace('|', "\\|")
+/// Render a complete CommonMark code span around an untrusted value.
+fn markdown_code_span(s: &str) -> String {
+    let longest_run = s
+        .split(|c| c != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or_default();
+    let fence = "`".repeat(longest_run + 1);
+    let needs_padding = s.starts_with('`')
+        || s.ends_with('`')
+        || (s.starts_with(' ') && s.ends_with(' ') && !s.chars().all(|c| c == ' '));
+    if needs_padding {
+        format!("{fence} {s} {fence}")
+    } else {
+        format!("{fence}{s}{fence}")
+    }
+}
+
+fn markdown_table_code_span(s: &str) -> String {
+    markdown_code_span(&s.replace('|', "\\|"))
 }
 
 fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
@@ -77,16 +94,14 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
 }
 
 fn markdown_relative_path(path: &Path, root: &Path) -> String {
-    escape_backticks(&normalize_uri(
-        &relative_path(path, root).display().to_string(),
-    ))
+    normalize_uri(&relative_path(path, root).display().to_string())
 }
 
 fn push_markdown_primary_sections(out: &mut String, results: &AnalysisResults, root: &Path) {
     markdown_section(out, &results.unused_files, "Unused files", |file| {
         vec![format!(
-            "- `{}`",
-            markdown_relative_path(&file.file.path, root)
+            "- {}",
+            markdown_code_span(&markdown_relative_path(&file.file.path, root))
         )]
     });
 
@@ -130,9 +145,9 @@ fn push_markdown_import_sections(out: &mut String, results: &AnalysisResults, ro
         |i| i.import.path.as_path(),
         |i| {
             format!(
-                ":{} `{}`",
+                ":{} {}",
                 i.import.line,
-                escape_backticks(&i.import.specifier)
+                markdown_code_span(&i.import.specifier)
             )
         },
     );
@@ -141,7 +156,7 @@ fn push_markdown_import_sections(out: &mut String, results: &AnalysisResults, ro
         out,
         &results.unlisted_dependencies,
         "Unlisted dependencies",
-        |dep| vec![format!("- `{}`", escape_backticks(&dep.dep.package_name))],
+        |dep| vec![format!("- {}", markdown_code_span(&dep.dep.package_name))],
     );
 
     markdown_section(
@@ -153,11 +168,11 @@ fn push_markdown_import_sections(out: &mut String, results: &AnalysisResults, ro
                 .export
                 .locations
                 .iter()
-                .map(|loc| format!("`{}`", markdown_relative_path(&loc.path, root)))
+                .map(|loc| markdown_code_span(&markdown_relative_path(&loc.path, root)))
                 .collect();
             vec![format!(
-                "- `{}` in {}",
-                escape_backticks(&dup.export.export_name),
+                "- {} in {}",
+                markdown_code_span(&dup.export.export_name),
                 locations.join(", ")
             )]
         },
@@ -415,11 +430,11 @@ fn push_markdown_suppression_sections(
         "Stale suppressions",
         |s| {
             vec![format!(
-                "- `{}`:{} `{}` ({})",
-                rel(&s.path),
+                "- {}:{} {} ({})",
+                markdown_code_span(&rel(&s.path)),
                 s.line,
-                escape_backticks(&s.description()),
-                escape_backticks(&s.explanation()),
+                markdown_code_span(&s.description()),
+                escape_markdown_prose(&s.explanation()),
             )]
         },
     );
@@ -443,7 +458,7 @@ fn format_markdown_circular_dependency(
         "- {}{}",
         display_chain
             .iter()
-            .map(|s| format!("`{s}`"))
+            .map(|s| markdown_code_span(s))
             .collect::<Vec<_>>()
             .join(" \u{2192} "),
         cross_pkg_tag
@@ -463,7 +478,7 @@ fn format_markdown_re_export_cycle(
         "- {}{}",
         chain
             .iter()
-            .map(|s| format!("`{s}`"))
+            .map(|s| markdown_code_span(s))
             .collect::<Vec<_>>()
             .join(" <-> "),
         kind_tag
@@ -475,10 +490,10 @@ fn format_markdown_boundary_violation(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{}  \u{2192} `{}` ({} \u{2192} {})",
-        rel(&v.violation.from_path),
+        "- {}:{}  \u{2192} {} ({} \u{2192} {})",
+        markdown_code_span(&rel(&v.violation.from_path)),
         v.violation.line,
-        rel(&v.violation.to_path),
+        markdown_code_span(&rel(&v.violation.to_path)),
         v.violation.from_zone,
         v.violation.to_zone,
     )]
@@ -489,8 +504,8 @@ fn format_markdown_boundary_coverage(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} no matching boundary zone",
-        rel(&v.violation.path),
+        "- {}:{} no matching boundary zone",
+        markdown_code_span(&rel(&v.violation.path)),
         v.violation.line,
     )]
 }
@@ -500,12 +515,12 @@ fn format_markdown_boundary_call(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} `{}` forbidden in zone `{}` (pattern `{}`)",
-        rel(&v.violation.path),
+        "- {}:{} {} forbidden in zone {} (pattern {})",
+        markdown_code_span(&rel(&v.violation.path)),
         v.violation.line,
-        v.violation.callee,
-        v.violation.zone,
-        v.violation.pattern,
+        markdown_code_span(&v.violation.callee),
+        markdown_code_span(&v.violation.zone),
+        markdown_code_span(&v.violation.pattern),
     )]
 }
 
@@ -513,13 +528,13 @@ fn format_markdown_policy_violation(
     v: &fallow_types::output_dead_code::PolicyViolationFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
+    let policy = format!("{}/{}", v.violation.pack, v.violation.rule_id);
     vec![format!(
-        "- `{}`:{} `{}` banned by `{}/{}`{}",
-        rel(&v.violation.path),
+        "- {}:{} {} banned by {}{}",
+        markdown_code_span(&rel(&v.violation.path)),
         v.violation.line,
-        v.violation.matched,
-        v.violation.pack,
-        v.violation.rule_id,
+        markdown_code_span(&v.violation.matched),
+        markdown_code_span(&policy),
         v.violation
             .message
             .as_deref()
@@ -532,12 +547,13 @@ fn format_markdown_invalid_client_export(
     e: &fallow_types::output_dead_code::InvalidClientExportFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
+    let directive = format!("\"{}\"", e.export.directive);
     vec![format!(
-        "- `{}`:{} `{}` (from `\"{}\"`)",
-        rel(&e.export.path),
+        "- {}:{} {} (from {})",
+        markdown_code_span(&rel(&e.export.path)),
         e.export.line,
-        e.export.export_name,
-        e.export.directive,
+        markdown_code_span(&e.export.export_name),
+        markdown_code_span(&directive),
     )]
 }
 
@@ -546,11 +562,11 @@ fn format_markdown_mixed_client_server_barrel(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} re-exports client `{}` and server-only `{}`",
-        rel(&b.barrel.path),
+        "- {}:{} re-exports client {} and server-only {}",
+        markdown_code_span(&rel(&b.barrel.path)),
         b.barrel.line,
-        b.barrel.client_origin,
-        b.barrel.server_origin,
+        markdown_code_span(&b.barrel.client_origin),
+        markdown_code_span(&b.barrel.server_origin),
     )]
 }
 
@@ -558,11 +574,12 @@ fn format_markdown_misplaced_directive(
     d: &fallow_types::output_dead_code::MisplacedDirectiveFinding,
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
+    let directive = format!("\"{}\"", d.directive_site.directive);
     vec![format!(
-        "- `{}`:{} `\"{}\"` is not in the leading position and is ignored",
-        rel(&d.directive_site.path),
+        "- {}:{} {} is not in the leading position and is ignored",
+        markdown_code_span(&rel(&d.directive_site.path)),
         d.directive_site.line,
-        d.directive_site.directive,
+        markdown_code_span(&directive),
     )]
 }
 
@@ -571,11 +588,11 @@ fn format_markdown_unprovided_inject(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} `{}` has no matching provide(`{}`) in this project; at runtime it returns undefined",
-        rel(&i.inject.path),
+        "- {}:{} {} has no matching provide({}) in this project; at runtime it returns undefined",
+        markdown_code_span(&rel(&i.inject.path)),
         i.inject.line,
-        escape_backticks(&i.inject.key_name),
-        escape_backticks(&i.inject.key_name),
+        markdown_code_span(&i.inject.key_name),
+        markdown_code_span(&i.inject.key_name),
     )]
 }
 
@@ -587,18 +604,19 @@ fn format_markdown_unrendered_component(
     // element `<x-foo>` (mirrors the human formatter's `framework == "lit"`
     // branch so the two human-facing surfaces stay consistent).
     if c.component.framework == "lit" {
+        let component = format!("<{}>", c.component.component_name);
         return vec![format!(
-            "- `{}`:{} `<{}>` is a registered custom element but rendered in no template (render it or remove it)",
-            rel(&c.component.path),
+            "- {}:{} {} is a registered custom element but rendered in no template (render it or remove it)",
+            markdown_code_span(&rel(&c.component.path)),
             c.component.line,
-            escape_backticks(&c.component.component_name),
+            markdown_code_span(&component),
         )];
     }
     vec![format!(
-        "- `{}`:{} `{}` is reachable but rendered nowhere in this project (render it somewhere or remove it)",
-        rel(&c.component.path),
+        "- {}:{} {} is reachable but rendered nowhere in this project (render it somewhere or remove it)",
+        markdown_code_span(&rel(&c.component.path)),
         c.component.line,
-        escape_backticks(&c.component.component_name),
+        markdown_code_span(&c.component.component_name),
     )]
 }
 
@@ -607,10 +625,10 @@ fn format_markdown_unused_component_prop(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} `{}` is declared but referenced nowhere in this component (remove it or use it)",
-        rel(&p.prop.path),
+        "- {}:{} {} is declared but referenced nowhere in this component (remove it or use it)",
+        markdown_code_span(&rel(&p.prop.path)),
         p.prop.line,
-        escape_backticks(&p.prop.prop_name),
+        markdown_code_span(&p.prop.prop_name),
     )]
 }
 
@@ -619,10 +637,10 @@ fn format_markdown_unused_component_emit(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} `{}` is declared but emitted nowhere in this component (remove it or emit it)",
-        rel(&e.emit.path),
+        "- {}:{} {} is declared but emitted nowhere in this component (remove it or emit it)",
+        markdown_code_span(&rel(&e.emit.path)),
         e.emit.line,
-        escape_backticks(&e.emit.emit_name),
+        markdown_code_span(&e.emit.emit_name),
     )]
 }
 
@@ -631,10 +649,10 @@ fn format_markdown_unused_svelte_event(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} `{}` is dispatched but listened to nowhere in the project (remove it or listen for it)",
-        rel(&e.event.path),
+        "- {}:{} {} is dispatched but listened to nowhere in the project (remove it or listen for it)",
+        markdown_code_span(&rel(&e.event.path)),
         e.event.line,
-        escape_backticks(&e.event.event_name),
+        markdown_code_span(&e.event.event_name),
     )]
 }
 
@@ -643,10 +661,10 @@ fn format_markdown_unused_component_input(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} `{}` is declared but referenced nowhere in this component (remove it or use it)",
-        rel(&i.input.path),
+        "- {}:{} {} is declared but referenced nowhere in this component (remove it or use it)",
+        markdown_code_span(&rel(&i.input.path)),
         i.input.line,
-        escape_backticks(&i.input.input_name),
+        markdown_code_span(&i.input.input_name),
     )]
 }
 
@@ -655,10 +673,10 @@ fn format_markdown_unused_component_output(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} `{}` is declared but emitted nowhere in this component (remove it or emit it)",
-        rel(&o.output.path),
+        "- {}:{} {} is declared but emitted nowhere in this component (remove it or emit it)",
+        markdown_code_span(&rel(&o.output.path)),
         o.output.line,
-        escape_backticks(&o.output.output_name),
+        markdown_code_span(&o.output.output_name),
     )]
 }
 
@@ -667,10 +685,10 @@ fn format_markdown_unused_server_action(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} `{}` is exported from a \"use server\" file but no code in this project references it",
-        rel(&a.action.path),
+        "- {}:{} {} is exported from a \"use server\" file but no code in this project references it",
+        markdown_code_span(&rel(&a.action.path)),
         a.action.line,
-        escape_backticks(&a.action.action_name),
+        markdown_code_span(&a.action.action_name),
     )]
 }
 
@@ -679,10 +697,10 @@ fn format_markdown_unused_load_data_key(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}`:{} `{}` is returned from load() but no consumer reads it",
-        rel(&k.key.path),
+        "- {}:{} {} is returned from load() but no consumer reads it",
+        markdown_code_span(&rel(&k.key.path)),
         k.key.line,
-        escape_backticks(&k.key.key_name),
+        markdown_code_span(&k.key.key_name),
     )]
 }
 
@@ -691,9 +709,9 @@ fn format_markdown_route_collision(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}` resolves to `{}` (shared with {} other route file(s))",
-        rel(&c.collision.path),
-        c.collision.url,
+        "- {} resolves to {} (shared with {} other route file(s))",
+        markdown_code_span(&rel(&c.collision.path)),
+        markdown_code_span(&c.collision.url),
         c.collision.conflicting_paths.len(),
     )]
 }
@@ -703,11 +721,11 @@ fn format_markdown_dynamic_segment_name_conflict(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     vec![format!(
-        "- `{}` crashes at runtime: different slug names ({}) at the same dynamic path `{}`; \
+        "- {} crashes at runtime: different slug names ({}) at the same dynamic path {}; \
          `next build` passes but the route fails on its first request (rename to one consistent slug)",
-        rel(&c.conflict.path),
+        markdown_code_span(&rel(&c.conflict.path)),
         c.conflict.conflicting_segments.join(" vs "),
-        c.conflict.position,
+        markdown_code_span(&c.conflict.position),
     )]
 }
 
@@ -728,9 +746,9 @@ fn push_markdown_catalog_sections(
         "Empty catalog groups",
         |group| {
             vec![format!(
-                "- `{}` `{}`:{}",
-                escape_backticks(&group.group.catalog_name),
-                rel(&group.group.path),
+                "- {} {}:{}",
+                markdown_code_span(&group.group.catalog_name),
+                markdown_code_span(&rel(&group.group.path)),
                 group.group.line,
             )]
         },
@@ -753,11 +771,11 @@ fn push_markdown_catalog_sections(
         "Misconfigured dependency overrides",
         |finding| {
             vec![format!(
-                "- `{}` -> `{}` (`{}`) `{}`:{} ({})",
-                escape_backticks(&finding.entry.raw_key),
-                escape_backticks(&finding.entry.raw_value),
-                finding.entry.source.as_label(),
-                rel(&finding.entry.path),
+                "- {} -> {} ({}) {}:{} ({})",
+                markdown_code_span(&finding.entry.raw_key),
+                markdown_code_span(&finding.entry.raw_value),
+                markdown_code_span(finding.entry.source.as_label()),
+                markdown_code_span(&rel(&finding.entry.path)),
                 finding.entry.line,
                 finding.entry.reason.describe(),
             )]
@@ -770,10 +788,10 @@ fn format_unused_catalog_entry(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     let mut row = format!(
-        "- `{}` (`{}`) `{}`:{}",
-        escape_backticks(&entry.entry.entry_name),
-        escape_backticks(&entry.entry.catalog_name),
-        rel(&entry.entry.path),
+        "- {} ({}) {}:{}",
+        markdown_code_span(&entry.entry.entry_name),
+        markdown_code_span(&entry.entry.catalog_name),
+        markdown_code_span(&rel(&entry.entry.path)),
         entry.entry.line,
     );
     if !entry.entry.hardcoded_consumers.is_empty() {
@@ -781,7 +799,7 @@ fn format_unused_catalog_entry(
             .entry
             .hardcoded_consumers
             .iter()
-            .map(|p| format!("`{}`", rel(p)))
+            .map(|p| markdown_code_span(&rel(p)))
             .collect::<Vec<_>>()
             .join(", ");
         let _ = write!(row, " (hardcoded in {consumers})");
@@ -794,10 +812,10 @@ fn format_unresolved_catalog_reference(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     let mut row = format!(
-        "- `{}` (`{}`) `{}`:{}",
-        escape_backticks(&finding.reference.entry_name),
-        escape_backticks(&finding.reference.catalog_name),
-        rel(&finding.reference.path),
+        "- {} ({}) {}:{}",
+        markdown_code_span(&finding.reference.entry_name),
+        markdown_code_span(&finding.reference.catalog_name),
+        markdown_code_span(&rel(&finding.reference.path)),
         finding.reference.line,
     );
     if !finding.reference.available_in_catalogs.is_empty() {
@@ -805,7 +823,7 @@ fn format_unresolved_catalog_reference(
             .reference
             .available_in_catalogs
             .iter()
-            .map(|c| format!("`{}`", escape_backticks(c)))
+            .map(|c| markdown_code_span(c))
             .collect::<Vec<_>>()
             .join(", ");
         let _ = write!(row, " (available in: {alts})");
@@ -818,15 +836,15 @@ fn format_unused_dependency_override(
     rel: &dyn Fn(&Path) -> String,
 ) -> Vec<String> {
     let mut row = format!(
-        "- `{}` -> `{}` (`{}`) `{}`:{}",
-        escape_backticks(&finding.entry.raw_key),
-        escape_backticks(&finding.entry.version_range),
-        finding.entry.source.as_label(),
-        rel(&finding.entry.path),
+        "- {} -> {} ({}) {}:{}",
+        markdown_code_span(&finding.entry.raw_key),
+        markdown_code_span(&finding.entry.version_range),
+        markdown_code_span(finding.entry.source.as_label()),
+        markdown_code_span(&rel(&finding.entry.path)),
         finding.entry.line,
     );
     if let Some(hint) = &finding.entry.hint {
-        let _ = write!(row, " (hint: {})", escape_backticks(hint));
+        let _ = write!(row, " (hint: {})", escape_markdown_prose(hint));
     }
     vec![row]
 }
@@ -856,7 +874,7 @@ pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
         let _ = writeln!(
             out,
             "## {} ({count} issue{})\n",
-            escape_backticks(&group.key),
+            escape_markdown_prose(&group.key),
             plural(count)
         );
         if let Some(ref owners) = group.owners
@@ -864,7 +882,7 @@ pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
         {
             let joined = owners
                 .iter()
-                .map(|owner| escape_backticks(owner))
+                .map(|owner| escape_markdown_prose(owner))
                 .collect::<Vec<_>>()
                 .join(" ");
             let _ = writeln!(out, "Owners: {joined}\n");
@@ -882,7 +900,7 @@ pub fn build_grouped_markdown(groups: &[ResultGroup], root: &Path) -> String {
 
 fn format_export(e: &UnusedExport) -> String {
     let re = if e.is_re_export { " (re-export)" } else { "" };
-    format!(":{} `{}`{re}", e.line, escape_backticks(&e.export_name))
+    format!(":{} {}{re}", e.line, markdown_code_span(&e.export_name))
 }
 
 fn format_private_type_leak(
@@ -890,20 +908,16 @@ fn format_private_type_leak(
 ) -> String {
     let e = &entry.leak;
     format!(
-        ":{} `{}` references private type `{}`",
+        ":{} {} references private type {}",
         e.line,
-        escape_backticks(&e.export_name),
-        escape_backticks(&e.type_name)
+        markdown_code_span(&e.export_name),
+        markdown_code_span(&e.type_name)
     )
 }
 
 fn format_member(m: &UnusedMember) -> String {
-    format!(
-        ":{} `{}.{}`",
-        m.line,
-        escape_backticks(&m.parent_name),
-        escape_backticks(&m.member_name)
-    )
+    let member = format!("{}.{}", m.parent_name, m.member_name);
+    format!(":{} {}", m.line, markdown_code_span(&member))
 }
 
 fn format_dependency(
@@ -912,27 +926,27 @@ fn format_dependency(
     used_in_workspaces: &[std::path::PathBuf],
     root: &Path,
 ) -> Vec<String> {
-    let name = escape_backticks(dep_name);
+    let name = markdown_code_span(dep_name);
     let pkg_label = relative_path(pkg_path, root).display().to_string();
     let workspace_context = if used_in_workspaces.is_empty() {
         String::new()
     } else {
         let workspaces = used_in_workspaces
             .iter()
-            .map(|path| escape_backticks(&relative_path(path, root).display().to_string()))
+            .map(|path| escape_markdown_prose(&relative_path(path, root).display().to_string()))
             .collect::<Vec<_>>()
             .join(", ");
         format!("; imported in {workspaces}")
     };
     if pkg_label == "package.json" && workspace_context.is_empty() {
-        vec![format!("- `{name}`")]
+        vec![format!("- {name}")]
     } else {
         let label = if pkg_label == "package.json" {
             workspace_context.trim_start_matches("; ").to_string()
         } else {
-            format!("{}{workspace_context}", escape_backticks(&pkg_label))
+            format!("{}{workspace_context}", escape_markdown_prose(&pkg_label))
         };
-        vec![format!("- `{name}` ({label})")]
+        vec![format!("- {name} ({label})")]
     }
 }
 
@@ -978,7 +992,7 @@ fn markdown_grouped_section<'a, T>(
         let item = &items[i];
         let file_str = rel(get_path(item));
         if file_str != last_file {
-            let _ = writeln!(out, "- `{file_str}`");
+            let _ = writeln!(out, "- {}", markdown_code_span(&file_str));
             last_file = file_str;
         }
         let _ = writeln!(out, "  - {}", format_detail(item));
@@ -1035,11 +1049,8 @@ fn write_duplication_groups(out: &mut String, report: &DuplicationReport, root: 
         );
         for instance in &group.instances {
             let relative = rel(&instance.file);
-            let _ = writeln!(
-                out,
-                "- `{relative}:{}-{}`",
-                instance.start_line, instance.end_line
-            );
+            let location = format!("{relative}:{}-{}", instance.start_line, instance.end_line);
+            let _ = writeln!(out, "- {}", markdown_code_span(&location));
         }
         out.push('\n');
     }
@@ -1063,7 +1074,7 @@ fn write_duplication_families(out: &mut String, report: &DuplicationReport, root
             family.total_duplicated_lines,
             file_names
                 .iter()
-                .map(|s| format!("`{s}`"))
+                .map(|s| markdown_code_span(s))
                 .collect::<Vec<_>>()
                 .join(", "),
         );
@@ -1147,15 +1158,18 @@ fn write_styling_findings_section(
     out.push_str("|:-----|:-----|:---------|:------|\n");
     for finding in report.styling_findings.iter().take(20) {
         let path = markdown_relative_path(Path::new(&finding.path), root);
+        let location = format!("{path}:{}", finding.line);
         let severity = match finding.effective_severity {
             fallow_output::StylingFindingSeverity::Error => "error",
             fallow_output::StylingFindingSeverity::Warn => "warn",
         };
-        let value = escape_table_code_span(&finding.value);
         let _ = writeln!(
             out,
-            "| `{path}:{}` | `{}` / `{}` | {severity} | `{value}` |",
-            finding.line, finding.code, finding.sub_kind
+            "| {} | {} / {} | {severity} | {} |",
+            markdown_table_code_span(&location),
+            markdown_table_code_span(&finding.code),
+            markdown_table_code_span(&finding.sub_kind),
+            markdown_table_code_span(&finding.value),
         );
     }
     if report.styling_findings.len() > 20 {
@@ -1230,7 +1244,7 @@ fn write_css_keyframe_details(out: &mut String, css: &fallow_output::CssAnalytic
             .undefined_keyframes
             .iter()
             .take(5)
-            .map(|kf| format!("`{}` ({})", kf.name, kf.path))
+            .map(|kf| format!("{} ({})", markdown_code_span(&kf.name), kf.path))
             .collect();
         let _ = writeln!(
             out,
@@ -1246,7 +1260,7 @@ fn write_css_tailwind_details(out: &mut String, css: &fallow_output::CssAnalytic
             .tailwind_arbitrary_values
             .iter()
             .take(5)
-            .map(|a| format!("`{}` ({}x)", a.value, a.count))
+            .map(|a| format!("{} ({}x)", markdown_code_span(&a.value), a.count))
             .collect();
         let _ = writeln!(out, "- Top Tailwind arbitrary values: {}", named.join(", "));
     }
@@ -1260,8 +1274,11 @@ fn write_css_class_candidate_details(out: &mut String, css: &fallow_output::CssA
             .take(5)
             .map(|u| {
                 format!(
-                    "`{}` -> `{}` ({}:{})",
-                    u.class, u.suggestion, u.path, u.line
+                    "{} -> {} ({}:{})",
+                    markdown_code_span(&u.class),
+                    markdown_code_span(&u.suggestion),
+                    u.path,
+                    u.line
                 )
             })
             .collect();
@@ -1276,7 +1293,14 @@ fn write_css_class_candidate_details(out: &mut String, css: &fallow_output::CssA
             .unreferenced_css_classes
             .iter()
             .take(5)
-            .map(|u| format!("`.{}` ({}:{})", u.class, u.path, u.line))
+            .map(|u| {
+                format!(
+                    "{} ({}:{})",
+                    markdown_code_span(&format!(".{}", u.class)),
+                    u.path,
+                    u.line
+                )
+            })
             .collect();
         let _ = writeln!(
             out,
@@ -1292,7 +1316,7 @@ fn write_css_font_candidate_details(out: &mut String, css: &fallow_output::CssAn
             .unused_font_faces
             .iter()
             .take(5)
-            .map(|u| format!("`{}` ({})", u.family, u.path))
+            .map(|u| format!("{} ({})", markdown_code_span(&u.family), u.path))
             .collect();
         let _ = writeln!(
             out,
@@ -1305,7 +1329,7 @@ fn write_css_font_candidate_details(out: &mut String, css: &fallow_output::CssAn
             .unused_theme_tokens
             .iter()
             .take(5)
-            .map(|u| format!("`{}` ({}:{})", u.token, u.path, u.line))
+            .map(|u| format!("{} ({}:{})", markdown_code_span(&u.token), u.path, u.line))
             .collect();
         let _ = writeln!(
             out,
@@ -1378,13 +1402,8 @@ fn write_coverage_intelligence_row(
     finding: &fallow_output::CoverageIntelligenceFinding,
     root: &Path,
 ) {
-    let path = escape_backticks(&normalize_uri(
-        &relative_path(&finding.path, root).display().to_string(),
-    ));
-    let identity = finding
-        .identity
-        .as_deref()
-        .map_or_else(|| "-".to_owned(), escape_backticks);
+    let path = normalize_uri(&relative_path(&finding.path, root).display().to_string());
+    let identity = finding.identity.as_deref().unwrap_or("-");
     let signals = finding
         .signals
         .iter()
@@ -1393,11 +1412,11 @@ fn write_coverage_intelligence_row(
         .join(", ");
     let _ = writeln!(
         out,
-        "| `{}` | `{}`:{} | `{}` | {} | {} | {} | {} |",
-        escape_backticks(&finding.id),
-        path,
+        "| {} | {}:{} | {} | {} | {} | {} | {} |",
+        markdown_table_code_span(&finding.id),
+        markdown_table_code_span(&path),
         finding.line,
-        identity,
+        markdown_table_code_span(identity),
         finding.verdict,
         finding.recommendation,
         finding.confidence,
@@ -1469,15 +1488,14 @@ fn write_runtime_coverage_findings(
         let invocations = finding
             .invocations
             .map_or_else(|| "-".to_owned(), |hits| hits.to_string());
+        let path = normalize_uri(&relative_path(&finding.path, root).display().to_string());
         let _ = writeln!(
             out,
-            "| `{}` | `{}`:{} | `{}` | {} | {} | {} |",
-            escape_backticks(&finding.id),
-            escape_backticks(&normalize_uri(
-                &relative_path(&finding.path, root).display().to_string(),
-            )),
+            "| {} | {}:{} | {} | {} | {} | {} |",
+            markdown_table_code_span(&finding.id),
+            markdown_table_code_span(&path),
             finding.line,
-            escape_backticks(&finding.function),
+            markdown_table_code_span(&finding.function),
             finding.verdict,
             invocations,
             finding.confidence,
@@ -1498,15 +1516,14 @@ fn write_runtime_coverage_hot_paths(
     out.push_str("| ID | Hot path | Function | Invocations | Percentile |\n");
     out.push_str("|:---|:---------|:---------|------------:|-----------:|\n");
     for entry in &production.hot_paths {
+        let path = normalize_uri(&relative_path(&entry.path, root).display().to_string());
         let _ = writeln!(
             out,
-            "| `{}` | `{}`:{} | `{}` | {} | {} |",
-            escape_backticks(&entry.id),
-            escape_backticks(&normalize_uri(
-                &relative_path(&entry.path, root).display().to_string(),
-            )),
+            "| {} | {}:{} | {} | {} | {} |",
+            markdown_table_code_span(&entry.id),
+            markdown_table_code_span(&path),
             entry.line,
-            escape_backticks(&entry.function),
+            markdown_table_code_span(&entry.function),
             entry.invocations,
             entry.percentile,
         );
@@ -1703,9 +1720,8 @@ fn write_findings_row(
     report: &fallow_output::HealthReport,
     root: &Path,
 ) {
-    let file_str = escape_backticks(&normalize_uri(
-        &relative_path(&finding.path, root).display().to_string(),
-    ));
+    let file_str = normalize_uri(&relative_path(&finding.path, root).display().to_string());
+    let location = format!("{file_str}:{}", finding.line);
     let thresholds =
         finding
             .effective_thresholds
@@ -1746,9 +1762,9 @@ fn write_findings_row(
     };
     let _ = writeln!(
         out,
-        "| `{file_str}:{line}` | `{name}` | {severity_label} | {cyc}{cyc_marker} | {cog}{cog_marker} | {crap_cell} | {lines} |",
-        line = finding.line,
-        name = escape_backticks(display_complexity_entry_name(&finding.name).as_ref()),
+        "| {} | {} | {severity_label} | {cyc}{cyc_marker} | {cog}{cog_marker} | {crap_cell} | {lines} |",
+        markdown_table_code_span(&location),
+        markdown_table_code_span(display_complexity_entry_name(&finding.name).as_ref()),
         cyc = finding.cyclomatic,
         cog = finding.cognitive,
         lines = finding.line_count,
@@ -1778,13 +1794,11 @@ fn write_threshold_overrides_section(
         let target = entry.path.as_ref().map_or_else(
             || "<no matching file or function>".to_string(),
             |path| {
-                let display = escape_backticks(&normalize_uri(
-                    &relative_path(path, root).display().to_string(),
-                ));
-                entry.function.as_ref().map_or_else(
-                    || display.clone(),
-                    |name| format!("{display}:{}", escape_backticks(name)),
-                )
+                let display = normalize_uri(&relative_path(path, root).display().to_string());
+                entry
+                    .function
+                    .as_ref()
+                    .map_or_else(|| display.clone(), |name| format!("{display}:{name}"))
             },
         );
         let metrics = entry.metrics.map_or_else(
@@ -1801,8 +1815,11 @@ fn write_threshold_overrides_section(
         );
         let _ = writeln!(
             out,
-            "| {} | {} | `{}` | {} |",
-            entry.override_index, status, target, metrics
+            "| {} | {} | {} | {} |",
+            entry.override_index,
+            status,
+            markdown_table_code_span(&target),
+            metrics
         );
     }
     out.push('\n');
@@ -1814,11 +1831,7 @@ fn write_file_scores_section(out: &mut String, report: &fallow_output::HealthRep
         return;
     }
 
-    let rel = |p: &Path| {
-        escape_backticks(&normalize_uri(
-            &relative_path(p, root).display().to_string(),
-        ))
-    };
+    let rel = |p: &Path| normalize_uri(&relative_path(p, root).display().to_string());
 
     out.push('\n');
     let _ = writeln!(
@@ -1833,7 +1846,8 @@ fn write_file_scores_section(out: &mut String, report: &fallow_output::HealthRep
         let file_str = rel(&score.path);
         let _ = writeln!(
             out,
-            "| `{file_str}` | {mi:.1} | {fi} | {fan_out} | {dead:.0}% | {density:.2} | {crap:.1} |",
+            "| {} | {mi:.1} | {fi} | {fan_out} | {dead:.0}% | {density:.2} | {crap:.1} |",
+            markdown_table_code_span(&file_str),
             mi = score.maintainability_index,
             fi = score.fan_in,
             fan_out = score.fan_out,
@@ -1873,12 +1887,12 @@ fn write_coverage_gaps_section(
     if !gaps.files.is_empty() {
         out.push_str("#### Files\n");
         for item in &gaps.files {
-            let file_str = escape_backticks(&normalize_uri(
-                &relative_path(&item.file.path, root).display().to_string(),
-            ));
+            let file_str =
+                normalize_uri(&relative_path(&item.file.path, root).display().to_string());
             let _ = writeln!(
                 out,
-                "- `{file_str}` ({count} value export{})",
+                "- {} ({count} value export{})",
+                markdown_code_span(&file_str),
                 if item.file.value_export_count == 1 {
                     ""
                 } else {
@@ -1893,13 +1907,14 @@ fn write_coverage_gaps_section(
     if !gaps.exports.is_empty() {
         out.push_str("#### Exports\n");
         for item in &gaps.exports {
-            let file_str = escape_backticks(&normalize_uri(
-                &relative_path(&item.export.path, root).display().to_string(),
-            ));
+            let file_str =
+                normalize_uri(&relative_path(&item.export.path, root).display().to_string());
             let _ = writeln!(
                 out,
-                "- `{file_str}`:{} `{}`",
-                item.export.line, item.export.export_name
+                "- {}:{} {}",
+                markdown_code_span(&file_str),
+                item.export.line,
+                markdown_code_span(&item.export.export_name)
             );
         }
     }
@@ -1918,8 +1933,8 @@ fn ownership_md_cells(
     };
     let bus = o.bus_factor.to_string();
     let top = format!(
-        "`{}` ({:.0}%)",
-        o.top_contributor.identifier,
+        "{} ({:.0}%)",
+        markdown_table_code_span(&o.top_contributor.identifier),
         o.top_contributor.share * 100.0,
     );
     let owner = o
@@ -2003,14 +2018,13 @@ fn write_hotspots_row(
     any_ownership: bool,
     root: &Path,
 ) {
-    let file_str = escape_backticks(&normalize_uri(
-        &relative_path(&entry.path, root).display().to_string(),
-    ));
+    let file_str = normalize_uri(&relative_path(&entry.path, root).display().to_string());
+    let file_span = markdown_table_code_span(&file_str);
     if any_ownership {
         let (bus, top, owner, notes) = ownership_md_cells(entry.ownership.as_ref());
         let _ = writeln!(
             out,
-            "| `{file_str}` | {score:.1} | {commits} | {churn} | {density:.2} | {fi} | {trend} | {bus} | {top} | {owner} | {notes} |",
+            "| {file_span} | {score:.1} | {commits} | {churn} | {density:.2} | {fi} | {trend} | {bus} | {top} | {owner} | {notes} |",
             score = entry.score,
             commits = entry.commits,
             churn = entry.lines_added + entry.lines_deleted,
@@ -2021,7 +2035,7 @@ fn write_hotspots_row(
     } else {
         let _ = writeln!(
             out,
-            "| `{file_str}` | {score:.1} | {commits} | {churn} | {density:.2} | {fi} | {trend} |",
+            "| {file_span} | {score:.1} | {commits} | {churn} | {density:.2} | {fi} | {trend} |",
             score = entry.score,
             commits = entry.commits,
             churn = entry.lines_added + entry.lines_deleted,
@@ -2051,8 +2065,10 @@ fn write_targets_section(out: &mut String, report: &fallow_output::HealthReport,
         let confidence = target.confidence.label();
         let _ = writeln!(
             out,
-            "| {:.1} | {category} | {effort} / {confidence} | `{file_str}` | {} |",
-            target.efficiency, target.recommendation,
+            "| {:.1} | {category} | {effort} / {confidence} | {} | {} |",
+            target.efficiency,
+            markdown_table_code_span(&file_str),
+            target.recommendation,
         );
     }
 }
@@ -2228,7 +2244,12 @@ fn push_walkthrough_stage(
         // concrete "why" each row carries (out-of-diff count, importer count), which
         // is also the number the within-stage order follows, so a row's position is
         // explained by the count it shows.
-        let _ = writeln!(out, "- `{rel}`: {}{suffix}", walkthrough_fact(unit, guide));
+        let _ = writeln!(
+            out,
+            "- {}: {}{suffix}",
+            markdown_code_span(&rel),
+            walkthrough_fact(unit, guide)
+        );
     }
     out.push('\n');
 }
@@ -2260,7 +2281,7 @@ fn walkthrough_markdown_badges(
         badges.push("`OUT-OF-DIFF`".to_string());
     }
     if let Some(owner) = unit.expert.first() {
-        badges.push(format!("`OWNER:{}`", escape_backticks(owner)));
+        badges.push(markdown_code_span(&format!("OWNER:{owner}")));
     }
     if walkthrough_bus_factor(&unit.file, guide) {
         badges.push("`BUS-FACTOR-1`".to_string());
@@ -2311,7 +2332,7 @@ fn walkthrough_fact(
         .chain(guide.digest.focus.deprioritized.iter())
         .find(|fu| fu.file == unit.file)
     {
-        return escape_backticks(&fu.reason);
+        return escape_markdown_prose(&fu.reason);
     }
     "orientation only".to_string()
 }
@@ -2368,29 +2389,29 @@ fn push_walkthrough_cleared(
     for unit in deprioritized {
         let _ = writeln!(
             out,
-            "- `{}`: {}",
-            markdown_relative_path_str(&unit.file, root),
-            escape_backticks(&unit.reason),
+            "- {}: {}",
+            markdown_code_span(&markdown_relative_path_str(&unit.file, root)),
+            escape_markdown_prose(&unit.reason),
         );
     }
     for file in viewed_only {
         let _ = writeln!(
             out,
-            "- `{}`: \u{2713} viewed",
-            markdown_relative_path_str(file, root),
+            "- {}: \u{2713} viewed",
+            markdown_code_span(&markdown_relative_path_str(file, root)),
         );
     }
     out.push_str("\n</details>\n");
 }
 
 /// A file-path string already relative to `root` (the guide stores root-relative
-/// paths), normalized + backtick-escaped for a markdown code span.
+/// paths), normalized for a markdown code span.
 fn markdown_relative_path_str(file: &str, root: &Path) -> String {
     let path = Path::new(file);
     if path.is_absolute() {
         return markdown_relative_path(path, root);
     }
-    escape_backticks(&normalize_uri(file))
+    normalize_uri(file)
 }
 
 fn walkthrough_risk_label(risk: fallow_output::RiskClass) -> &'static str {
@@ -2442,6 +2463,66 @@ mod health_markdown_tests {
         assert!(output.contains("## Styling Findings"));
         assert!(output.contains("css-broken-reference"));
         assert!(output.contains("btn-prmary \\| btn-primary"));
+    }
+
+    #[test]
+    fn health_markdown_fences_untrusted_styling_values() {
+        let report = HealthReport {
+            styling_findings: vec![StylingFinding {
+                code: "css-broken-reference".to_string(),
+                sub_kind: "unresolved-class-reference".to_string(),
+                path: "src/app.css".to_string(),
+                line: 9,
+                value: "btn` **injected** | btn``primary".to_string(),
+                effective_severity: StylingFindingSeverity::Warn,
+                blast_radius: None,
+                confidence: None,
+                agent_disposition: None,
+                nearest_token: None,
+                fix_hint: None,
+                actions: Vec::new(),
+            }],
+            ..HealthReport::default()
+        };
+
+        let output = build_health_markdown(&report, Path::new("/project"));
+
+        assert!(output.contains("```btn` **injected** \\| btn``primary```"));
+    }
+}
+
+#[cfg(test)]
+mod markdown_code_span_tests {
+    use std::path::{Path, PathBuf};
+
+    use super::markdown_grouped_section;
+
+    #[test]
+    fn grouped_paths_use_safe_code_span_delimiters_and_padding() {
+        let paths = vec![
+            PathBuf::from("src/ordinary.ts"),
+            PathBuf::from("src/one`# injected.md"),
+            PathBuf::from("src/two``ticks.ts"),
+            PathBuf::from(" leading and trailing "),
+            PathBuf::from("`leading-tick.ts"),
+        ];
+        let mut output = String::new();
+
+        markdown_grouped_section(
+            &mut output,
+            &paths,
+            "Paths",
+            Path::new("/project"),
+            PathBuf::as_path,
+            |_| "detail".to_string(),
+        );
+
+        assert!(output.contains("- `src/ordinary.ts`\n"));
+        assert!(output.contains("- ``src/one`# injected.md``\n"));
+        assert!(output.contains("- ```src/two``ticks.ts```\n"));
+        assert!(output.contains("- `  leading and trailing  `\n"));
+        assert!(output.contains("- `` `leading-tick.ts ``\n"));
+        assert!(!output.contains("\\`"));
     }
 }
 
@@ -2561,6 +2642,19 @@ mod walkthrough_markdown_tests {
             !md.contains("- `src/page.ts` \u{2014} "),
             "no em-dash file separator: {md}"
         );
+    }
+
+    #[test]
+    fn ungrouped_walkthrough_paths_use_safe_code_spans() {
+        let guide = guide_with_question("src/one`# injected.md", "Review this path?");
+
+        let md = build_walkthrough_markdown(&guide, Path::new("/project"), &[]);
+
+        assert!(
+            md.contains("- ``src/one`# injected.md``: "),
+            "path remains inside one code span: {md}"
+        );
+        assert!(!md.contains("\\`"));
     }
 
     // The markdown surface honors `--mark-viewed`: a viewed file collapses out of
