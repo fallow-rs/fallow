@@ -41,7 +41,7 @@ The following dedicated cross-platform jobs will be removed from regular CI:
 - Windows ARM64 native compilation.
 - Windows audit process and lock lifecycle smoke tests.
 
-The aggregate required `CI` job will no longer depend on Windows-only jobs. Branch protection can continue requiring the stable aggregate `CI` check without waiting for cross-platform runners.
+The aggregate required `CI` job will no longer depend on Windows-only jobs. Branch protection will continue requiring the stable aggregate `CI` check without waiting for cross-platform runners. The obsolete separately required `Windows ARM64 Native Compile` context will be removed from branch protection after the workflow lands; every other required context remains unchanged.
 
 Other Ubuntu jobs and specialized scheduled or manual workflows are unchanged.
 
@@ -106,13 +106,14 @@ This change does not:
 - Remove any release artifact target.
 - Add third-party dependencies.
 - Change specialized scheduled or manually dispatched workflows.
-- Change branch protection beyond preserving the existing aggregate `CI` check contract.
+- Change branch protection beyond removing the obsolete `Windows ARM64 Native Compile` context and preserving every other required check.
 - Redesign the release process outside the dependency changes required to gate publication.
 
 ## Acceptance criteria
 
 - Pull request, merge-group, and `main` CI use Ubuntu only for the affected regular checks.
 - The aggregate `CI` check remains stable and includes all regular required jobs.
+- Branch protection no longer requires the removed `Windows ARM64 Native Compile` job and retains every other required context.
 - Release builds all currently supported platform artifacts.
 - Windows correctness, lifecycle, and NAPI smoke checks run before publishing.
 - macOS and Windows Zed checks run before publishing.
