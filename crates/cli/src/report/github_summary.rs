@@ -991,7 +991,8 @@ fn check_tips(env: &Value) -> String {
 #[must_use]
 pub fn render_check_summary(env: &Value) -> String {
     let elapsed = num(env, "elapsed_ms");
-    if u(env, "total_issues") == 0 {
+    let total_issues = u(env, "total_issues");
+    if total_issues == 0 {
         return format!(
             "# Fallow Analysis\n\n> [!NOTE]\n> **No issues found** \u{b7} {elapsed}ms\n\nAll exports are used, all dependencies are declared, and no issues were detected."
         );
@@ -1007,9 +1008,9 @@ pub fn render_check_summary(env: &Value) -> String {
             sections.push_str(&render_check_section(env, spec));
         }
     }
+    let issue_noun = if total_issues == 1 { "issue" } else { "issues" };
     format!(
-        "# Fallow Analysis\n\n> [!WARNING]\n> **{} issues** found \u{b7} {elapsed}ms\n\n| Category | Count |\n|----------|------:|\n{}\n\n---\n{sections}{}",
-        num(env, "total_issues"),
+        "# Fallow Analysis\n\n> [!WARNING]\n> **{total_issues} {issue_noun}** found \u{b7} {elapsed}ms\n\n| Category | Count |\n|----------|------:|\n{}\n\n---\n{sections}{}",
         dead_code_category_table(env),
         check_tips(env),
     )

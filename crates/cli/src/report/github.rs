@@ -129,8 +129,13 @@ pub fn sort_annotations(annotations: &mut [Annotation]) {
 #[must_use]
 pub fn budget_notice(total: usize) -> Option<String> {
     (total > 0).then(|| {
+        let noun = if total == 1 {
+            "annotation"
+        } else {
+            "annotations"
+        };
         format!(
-            "::notice::fallow emitted {total} annotations; GitHub shows at most 10 per type per step"
+            "::notice::fallow emitted {total} {noun}; GitHub shows at most 10 per type per step"
         )
     })
 }
@@ -478,6 +483,16 @@ mod tests {
             budget_notice(12).as_deref(),
             Some(
                 "::notice::fallow emitted 12 annotations; GitHub shows at most 10 per type per step"
+            )
+        );
+    }
+
+    #[test]
+    fn budget_notice_uses_singular_noun_for_one_annotation() {
+        assert_eq!(
+            budget_notice(1).as_deref(),
+            Some(
+                "::notice::fallow emitted 1 annotation; GitHub shows at most 10 per type per step"
             )
         );
     }

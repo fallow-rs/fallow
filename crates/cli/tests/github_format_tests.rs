@@ -419,6 +419,24 @@ fn annotations_end_with_budget_notice() {
 }
 
 #[test]
+fn annotations_single_finding_notice_uses_singular_noun() {
+    let rendered = render_annotations(
+        EnvelopeKind::DeadCode,
+        &json!({
+            "kind": "dead-code",
+            "total_issues": 1,
+            "unused_files": [{ "path": "src/orphan.ts" }]
+        }),
+        &plain_options(),
+    );
+    let last = rendered.lines().last().expect("non-empty");
+    assert_eq!(
+        last,
+        "::notice::fallow emitted 1 annotation; GitHub shows at most 10 per type per step"
+    );
+}
+
+#[test]
 fn annotations_empty_run_renders_nothing() {
     let rendered = render_annotations(
         EnvelopeKind::DeadCode,
@@ -563,6 +581,24 @@ fn github_summary_check_clean_snapshot() {
         &LinkContext::default(),
     );
     insta::assert_snapshot!("github_summary_check_clean", rendered);
+}
+
+#[test]
+fn github_summary_single_issue_uses_singular_noun() {
+    let rendered = render_summary(
+        EnvelopeKind::DeadCode,
+        &json!({
+            "kind": "dead-code",
+            "total_issues": 1,
+            "elapsed_ms": 45,
+            "unused_files": [{ "path": "src/orphan.ts" }]
+        }),
+        &LinkContext::default(),
+    );
+    assert!(
+        rendered.contains("> **1 issue** found"),
+        "headline should use the singular noun: {rendered}"
+    );
 }
 
 #[test]
