@@ -34,21 +34,72 @@ test("workflow block parser rejects missing keys", () => {
   assert.throws(() => indentedBlock("root:\n  value: true", "missing", 0), /missing missing block/);
 });
 
-test("Windows lifecycle PR gate lints MCP test code", () => {
-  const workflow = readWorkflow(".github/workflows/ci.yml");
-  const windowsLifecycleJob = indentedBlock(workflow, "windows-audit-smoke", 2);
-
-  assert.match(
-    windowsLifecycleJob,
-    /name: Lint MCP Windows lifecycle code\n\s+run: cargo clippy -p fallow-mcp --bin fallow-mcp --tests -- -D warnings/,
-  );
-});
-
-test("cross-platform check job reserves enough time for a cold Windows build", () => {
+test("regular CI keeps affected checks on Ubuntu", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const checkJob = indentedBlock(workflow, "check", 2);
+  const zedJob = indentedBlock(workflow, "zed", 2);
+  const aggregateJob = indentedBlock(workflow, "ci-ok", 2);
 
-  assert.match(checkJob, /timeout-minutes: 40/);
+  assert.doesNotMatch(workflow, /windows-latest|windows-11-arm|macos-latest/);
+  assert.match(checkJob, /runs-on: ubuntu-latest/);
+  assert.match(checkJob, /timeout-minutes: 20/);
+  assert.doesNotMatch(checkJob, /matrix\.|windows-latest|macos-latest/);
+  assert.match(zedJob, /runs-on: ubuntu-latest/);
+  assert.doesNotMatch(zedJob, /matrix\.|windows-latest|macos-latest/);
+  assert.throws(() => indentedBlock(workflow, "windows-arm64", 2), /missing windows-arm64 block/);
+  assert.throws(
+    () => indentedBlock(workflow, "windows-audit-smoke", 2),
+    /missing windows-audit-smoke block/,
+  );
+  assert.doesNotMatch(aggregateJob, /windows-audit-smoke|windows-arm64/);
+});
+
+test("release runs Windows correctness and lifecycle verification without credentials", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const job = indentedBlock(workflow, "windows-verify", 2);
+  const buildJob = indentedBlock(workflow, "build", 2);
+
+  assert.match(buildJob, /target: x86_64-pc-windows-msvc/);
+  assert.match(buildJob, /target: aarch64-pc-windows-msvc/);
+  assert.match(buildJob, /os: windows-11-arm/);
+  assert.match(job, /runs-on: windows-latest/);
+  assert.match(job, /permissions:\n\s+contents: read/);
+  assert.doesNotMatch(job, /id-token: write|contents: write|secrets\./);
+  assert.match(job, /cargo test --workspace --lib --bins --tests --examples/);
+  assert.match(job, /cargo clippy --workspace --all-targets -- -D warnings/);
+  assert.match(job, /cargo fmt --all -- --check/);
+  assert.match(job, /npm run publish:prepare/);
+  assert.match(job, /cd crates\/napi && npm test/);
+  assert.match(job, /audit_orphan_sweep_removes_dead_pid_worktree/);
+  assert.match(job, /run_fallow_timeout_terminates_and_reaps_windows_job_tree/);
+});
+
+test("release runs Zed verification on macOS and Windows without credentials", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const job = indentedBlock(workflow, "zed-verify", 2);
+
+  assert.match(job, /os: \[macos-latest, windows-latest\]/);
+  assert.match(job, /permissions:\n\s+contents: read/);
+  assert.doesNotMatch(job, /id-token: write|contents: write|secrets\./);
+  assert.match(job, /cargo test --manifest-path editors\/zed\/Cargo.toml/);
+  assert.match(job, /cargo build --target wasm32-wasip2 --manifest-path editors\/zed\/Cargo.toml/);
+  assert.match(job, /cargo fmt --check --manifest-path editors\/zed\/Cargo.toml/);
+});
+
+test("release publication waits for the aggregate verification gate", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const gate = indentedBlock(workflow, "release-verified", 2);
+  const publishCrates = indentedBlock(workflow, "publish-crates", 2);
+  const release = indentedBlock(workflow, "release", 2);
+  const npmPublish = indentedBlock(workflow, "npm-publish", 2);
+  const vscodePublish = indentedBlock(workflow, "vscode-publish", 2);
+
+  assert.match(gate, /needs: \[build, check-codegen, windows-verify, zed-verify\]/);
+  assert.match(gate, /permissions: \{\}/);
+  assert.match(publishCrates, /needs: release-verified/);
+  assert.match(release, /needs: release-verified/);
+  assert.match(npmPublish, /needs: \[npm-prep, release\]/);
+  assert.match(vscodePublish, /needs: \[vscode-prep, release\]/);
 });
 
 test("VS Code CI runs the extension-host integration suite with a pinned cached download", () => {
