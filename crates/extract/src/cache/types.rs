@@ -779,7 +779,13 @@ use crate::MemberKind;
 /// 230 cache lacks those private-field accesses and would report a member
 /// reached only through a private DI field as `unused-class-member`
 /// cross-module (issue #1821).
-pub(super) const CACHE_VERSION: u32 = 231;
+///
+/// Bumped to 232 for issue #1795: a Playwright helper returning
+/// `mergeTests(...)` (or wrapping an IMPORTED `<base>.extend(...)` const, or
+/// returning a locally-bound `const merge = mergeTests(...)`) now emits
+/// analyze-time fixture-alias facts a warm 231 cache lacks, leaving POM methods
+/// used only through such a helper falsely reported as `unused-class-member`.
+pub(super) const CACHE_VERSION: u32 = 232;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

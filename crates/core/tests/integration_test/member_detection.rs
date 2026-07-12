@@ -368,6 +368,67 @@ fn playwright_factory_wrapping_fixture_const_credits_pom_methods() {
 }
 
 #[test]
+fn playwright_mergetests_wrapping_helper_credits_pom_methods() {
+    // Issue #1795: a helper exported as a function returning `mergeTests(...)` of
+    // two function-wrapped fixtures whose bases are IMPORTED consts, called as
+    // `checkoutTest()(...)`. The chain checkoutTest -> billingTest/ordersUiTest
+    // -> billingBaseFixture/ordersBaseFixture must credit the POM methods used
+    // only through it. Also pins the const-form mergeTests call-arg variant
+    // (fix b) and the imported `.extend` wrap consumed directly (fix a2).
+    let root = fixture_path("issue-1795-playwright-mergetests-helper");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_class_members: Vec<String> = results
+        .unused_class_members
+        .iter()
+        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .collect();
+
+    // Main repro: mergeTests-in-helper (fix a) + local-var return (fix c) +
+    // imported base `.extend` alias fact (fix a2), consumed as checkoutTest()().
+    assert!(
+        !unused_class_members.contains(&"OrdersPage.placeOrder".to_string()),
+        "OrdersPage.placeOrder should be credited through checkoutTest()() (mergeTests helper), found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"OrdersPage.cancelOrder".to_string()),
+        "OrdersPage.cancelOrder should be credited through checkoutTest()() (mergeTests helper), found: {unused_class_members:?}"
+    );
+    assert!(
+        !unused_class_members.contains(&"BillingPage.openInvoice".to_string()),
+        "BillingPage.openInvoice should be credited through checkoutTest()() (mergeTests helper), found: {unused_class_members:?}"
+    );
+
+    // Fix b: `const promoMerged = mergeTests(promoTest())` (call-expression arg),
+    // consumed directly as `promoMerged(title, cb)`.
+    assert!(
+        !unused_class_members.contains(&"PromoPage.applyPromo".to_string()),
+        "PromoPage.applyPromo should be credited through the const-form mergeTests call-arg wrapper (fix b), found: {unused_class_members:?}"
+    );
+
+    // Fix a2: a helper wrapping an IMPORTED base const via `.extend({})`,
+    // consumed directly as `shippingTest()(title, cb)` (no mergeTests).
+    assert!(
+        !unused_class_members.contains(&"ShippingPage.trackShipment".to_string()),
+        "ShippingPage.trackShipment should be credited through the imported `.extend` wrap consumed directly (fix a2), found: {unused_class_members:?}"
+    );
+
+    // Positive controls: POM methods reached by NO fixture path must still report.
+    for genuinely_unused in [
+        "OrdersPage.unusedOrderOnly",
+        "BillingPage.unusedBillingOnly",
+        "PromoPage.unusedPromoOnly",
+        "ShippingPage.unusedShippingOnly",
+    ] {
+        assert!(
+            unused_class_members.contains(&genuinely_unused.to_string()),
+            "genuinely unused POM method {genuinely_unused} should still be reported, found: {unused_class_members:?}"
+        );
+    }
+}
+
+#[test]
 fn playwright_helper_function_with_local_setup_fixture_pom_methods_are_credited() {
     let root = fixture_path("issue-586-playwright-helper-local-setup");
     let config = create_config(root);

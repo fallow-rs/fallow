@@ -137,10 +137,7 @@ impl ModuleInfoExtractor {
         let mut base_names: Vec<String> = call
             .arguments
             .iter()
-            .filter_map(|argument| match argument {
-                Argument::Identifier(ident) => Some(ident.name.to_string()),
-                _ => None,
-            })
+            .filter_map(playwright_merge_argument_base_name)
             .collect();
         base_names.sort();
         base_names.dedup();
@@ -171,6 +168,18 @@ impl ModuleInfoExtractor {
             self.pending_playwright_factory_aliases
                 .push((test_name.to_string(), base_name.clone()));
 
+            // An IMPORTED base const (`billingBaseFixture.extend({})` where
+            // `billingBaseFixture` comes from a sibling file) cannot resolve
+            // through the same-module `resolve_playwright_factory_call_definitions`
+            // pass, so ALSO emit an analyze-time alias fact for any base that is
+            // not the raw `@playwright/test` `test` import (mirror the gate in
+            // `record_playwright_wrapper_aliases`); the #1210 cross-file
+            // expansion then resolves the imported base to its fixture
+            // definitions. The raw `test` base no-ops. Issue #1795.
+            if !self.is_named_import_from(base_name.as_str(), "@playwright/test", "test") {
+                self.record_playwright_fixture_alias(test_name, &base_name);
+            }
+
             let Some(type_arguments) = call.type_arguments.as_deref() else {
                 return;
             };
@@ -189,6 +198,27 @@ impl ModuleInfoExtractor {
                     base_name,
                     type_bindings: bindings,
                 });
+        } else if let Expression::Identifier(callee) = &call.callee
+            && self.is_named_import_from(callee.name.as_str(), "@playwright/test", "mergeTests")
+        {
+            // A helper returning `mergeTests(billingTest(), ordersUiTest())`
+            // (issue #1795): emit an analyze-time alias fact per argument base so
+            // each wrapped fixture's definitions are inherited cross-file via the
+            // #1210 expansion, and push the same pairs for same-file helper
+            // inheritance. The import gate (handles `mergeTests as merge`) keeps a
+            // user-local `mergeTests` function inert.
+            let mut base_names: Vec<String> = call
+                .arguments
+                .iter()
+                .filter_map(playwright_merge_argument_base_name)
+                .collect();
+            base_names.sort();
+            base_names.dedup();
+            for base_name in base_names {
+                self.record_playwright_fixture_alias(test_name, &base_name);
+                self.pending_playwright_factory_aliases
+                    .push((test_name.to_string(), base_name));
+            }
         } else if let Expression::Identifier(ident) = &call.callee {
             self.pending_playwright_factory_aliases
                 .push((test_name.to_string(), ident.name.to_string()));
@@ -219,5 +249,20 @@ impl ModuleInfoExtractor {
                 is_speculative: true,
             });
         }
+    }
+}
+
+/// The base test name a `mergeTests(...)` argument contributes: a bare fixture
+/// identifier (`mergeTests(testA, testB)`, issue #1210) or a factory call with a
+/// bare identifier callee (`mergeTests(billingTest(), ordersUiTest())`, issue
+/// #1795). Other argument shapes (spreads, member-expression callees) abstain.
+fn playwright_merge_argument_base_name(argument: &Argument<'_>) -> Option<String> {
+    match argument {
+        Argument::Identifier(ident) => Some(ident.name.to_string()),
+        Argument::CallExpression(call) => match &call.callee {
+            Expression::Identifier(callee) => Some(callee.name.to_string()),
+            _ => None,
+        },
+        _ => None,
     }
 }

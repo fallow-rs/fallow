@@ -1,0 +1,6 @@
+{
+  "name": "issue-1795-playwright-mergetests-helper",
+  "devDependencies": {
+    "@playwright/test": "^1.0.0"
+  }
+}

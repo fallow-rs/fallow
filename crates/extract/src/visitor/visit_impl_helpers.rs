@@ -879,17 +879,54 @@ pub(super) fn playwright_test_callee_name(expr: &Expression<'_>) -> Option<Strin
     }
 }
 
-/// Find the call expression returned by a function body.
+/// Find the call expression returned by a function body. A direct
+/// `return <call>` yields the call; a `return <ident>` is followed one hop to a
+/// same-body `const <ident> = <call>` declarator, so a helper whose final
+/// statement returns a locally-bound `mergeTests(...)` / `<base>.extend(...)`
+/// result is captured the same as the direct-return form (issue #1795).
 pub(super) fn extract_function_body_final_return_call<'a, 'b>(
     body: &'b oxc_ast::ast::FunctionBody<'a>,
 ) -> Option<&'b CallExpression<'a>> {
     let Statement::ReturnStatement(ret) = body.statements.last()? else {
         return None;
     };
-    let Expression::CallExpression(call) = ret.argument.as_ref()? else {
-        return None;
-    };
-    Some(call.as_ref())
+    match ret.argument.as_ref()? {
+        Expression::CallExpression(call) => Some(call.as_ref()),
+        Expression::Identifier(ident) => {
+            find_returned_const_declarator_call(body, ident.name.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// Follow a `return <ident>` to the same-body `const <ident> = <call>`
+/// initializer. Only `const` declarators are considered so a reassigned `let`
+/// binding is never followed; the last matching declaration wins (issue #1795).
+fn find_returned_const_declarator_call<'a, 'b>(
+    body: &'b oxc_ast::ast::FunctionBody<'a>,
+    ident_name: &str,
+) -> Option<&'b CallExpression<'a>> {
+    let mut found = None;
+    for stmt in &body.statements {
+        let Statement::VariableDeclaration(decl) = stmt else {
+            continue;
+        };
+        if decl.kind != VariableDeclarationKind::Const {
+            continue;
+        }
+        for declarator in &decl.declarations {
+            let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+                continue;
+            };
+            if id.name != ident_name {
+                continue;
+            }
+            if let Some(Expression::CallExpression(call)) = declarator.init.as_ref() {
+                found = Some(call.as_ref());
+            }
+        }
+    }
+    found
 }
 
 /// Find the call expression used as an arrow function body.

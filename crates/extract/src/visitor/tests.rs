@@ -3396,6 +3396,179 @@ fn non_playwright_merge_tests_does_not_record_fixture_aliases() {
 }
 
 #[test]
+fn playwright_helper_returning_merge_tests_records_arg_base_aliases() {
+    // Issue #1795: a helper returning `mergeTests(a(), b())` aliases the wrapped
+    // factory calls' bare identifier callees, so cross-file expansion inherits
+    // each wrapped fixture's definitions.
+    let info = parse(
+        r"
+            import { mergeTests } from '@playwright/test';
+            import { billingTest } from './billing-fixture';
+            import { ordersUiTest } from './orders-fixture';
+
+            export function checkoutTest() {
+                return mergeTests(billingTest(), ordersUiTest());
+            }
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "checkoutTest", "billingTest"),
+        "mergeTests helper should alias the billingTest() call-arg base, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "checkoutTest", "ordersUiTest"),
+        "mergeTests helper should alias the ordersUiTest() call-arg base, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_helper_local_var_return_merge_tests_records_aliases() {
+    // Issue #1795 (fix c): a `const merge = mergeTests(...); return merge;` body
+    // is followed one hop to the const declarator, then aliased like a direct
+    // return.
+    let info = parse(
+        r"
+            import { mergeTests } from '@playwright/test';
+            import { billingTest } from './billing-fixture';
+            import { ordersUiTest } from './orders-fixture';
+
+            export function checkoutTest() {
+                const merge = mergeTests(billingTest(), ordersUiTest());
+                return merge;
+            }
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "checkoutTest", "billingTest"),
+        "local-var-return mergeTests helper should alias billingTest, found: {:?}",
+        info.semantic_facts
+    );
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "checkoutTest", "ordersUiTest"),
+        "local-var-return mergeTests helper should alias ordersUiTest, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_helper_wrapping_imported_base_records_alias_fact() {
+    // Issue #1795 (fix a2): a helper wrapping an IMPORTED base const via
+    // `.extend({})` emits an analyze-time alias fact so the imported base
+    // resolves cross-file.
+    let info = parse(
+        r"
+            import { shippingBaseFixture } from './shipping-base-fixture';
+
+            export function shippingTest() {
+                return shippingBaseFixture.extend({});
+            }
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "shippingTest", "shippingBaseFixture"),
+        "helper wrapping an imported `.extend` base should emit a cross-file alias fact, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_helper_wrapping_raw_test_base_records_no_alias_fact() {
+    // The raw `test` import base carries its fixtures via the type argument, not
+    // an alias; a2 must NOT emit an alias fact for it.
+    let info = parse(
+        r"
+            import { test as base } from '@playwright/test';
+
+            export function rawTest() {
+                return base.extend<{ extra: string }>({});
+            }
+        ",
+    );
+
+    assert!(
+        !has_playwright_fixture_alias_fact(&info, "rawTest", "base"),
+        "the raw `test` base must not emit an alias fact, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_const_merge_tests_with_call_args_records_aliases() {
+    // Issue #1795 (fix b): `export const x = mergeTests(fnA())` aliases the
+    // call-expression argument's bare identifier callee.
+    let info = parse(
+        r"
+            import { mergeTests } from '@playwright/test';
+            import { promoTest } from './promo-fixture';
+
+            export const promoMerged = mergeTests(promoTest());
+        ",
+    );
+
+    assert!(
+        has_playwright_fixture_alias_fact(&info, "promoMerged", "promoTest"),
+        "const-form mergeTests should alias the promoTest() call-arg base, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_user_local_merge_tests_helper_records_no_arg_aliases() {
+    // Negative: a user-local `mergeTests` function (not the @playwright/test
+    // import) must not alias its arguments.
+    let info = parse(
+        r"
+            import { billingTest } from './billing-fixture';
+
+            function mergeTests<T>(a: T): T {
+                return a;
+            }
+
+            export function checkoutTest() {
+                return mergeTests(billingTest());
+            }
+        ",
+    );
+
+    assert!(
+        !has_playwright_fixture_alias_fact(&info, "checkoutTest", "billingTest"),
+        "a user-local mergeTests must not alias its call-arg base, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
+fn playwright_helper_let_return_ident_is_not_followed() {
+    // Negative (fix c guard): a `let`-declared return identifier must not be
+    // followed, so the exported helper never inherits the wrapped fixtures. The
+    // inner `let merge = mergeTests(...)` still records an inert alias keyed on
+    // the local binding `merge` (never used as a test callee), but the exported
+    // `checkoutTest` must carry no alias fact.
+    let info = parse(
+        r"
+            import { mergeTests } from '@playwright/test';
+            import { billingTest } from './billing-fixture';
+
+            export function checkoutTest() {
+                let merge = mergeTests(billingTest());
+                return merge;
+            }
+        ",
+    );
+
+    assert!(
+        !has_playwright_fixture_alias_fact(&info, "checkoutTest", "billingTest"),
+        "a let-declared return ident must not be followed to alias the exported helper, found: {:?}",
+        info.semantic_facts
+    );
+}
+
+#[test]
 fn playwright_test_callback_records_fixture_member_uses() {
     let info = parse(
         r"
