@@ -175,11 +175,40 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let derived = derived_definitions();
+    validate_graph_facts_descriptions(&derived)?;
     let mut merged = merge_with_committed(&derived)?;
     normalize_output_punctuation(&mut merged);
     let pretty = serde_json::to_string_pretty(&merged)
         .map_err(|err| format!("failed to serialize merged schema: {err}"))?;
     println!("{pretty}");
+    Ok(())
+}
+
+fn validate_graph_facts_descriptions(derived: &Map<String, Value>) -> Result<(), String> {
+    const RETIRED_PHRASE: &str = "Stubbed to";
+
+    let graph_facts = derived
+        .get("GraphFacts")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "derived GraphFacts schema is missing".to_string())?;
+    let properties = graph_facts
+        .get("properties")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "derived GraphFacts properties are missing".to_string())?;
+
+    for field in ["exports_added", "api_width_delta"] {
+        let description = properties
+            .get(field)
+            .and_then(|value| value.get("description"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("derived GraphFacts.{field} description is missing"))?;
+        if description.contains(RETIRED_PHRASE) {
+            return Err(format!(
+                "derived GraphFacts.{field} description still contains retired phrase `{RETIRED_PHRASE}`"
+            ));
+        }
+    }
+
     Ok(())
 }
 

@@ -9437,18 +9437,20 @@ review_effort: ReviewEffort
  * `boundaries_touched` is derived from the run's boundary-violation zones;
  * `reachable_from` is populated by the impact closure (the affected-not-shown
  * set: modules the changed code is reachable from / affects, none in the diff).
- * `exports_added` / `api_width_delta` stay honestly stubbed (`0`) until the
- * export-surface delta lands. The fields are present and correctly typed so
- * values fill in later without a schema bump.
+ * `exports_added` and `api_width_delta` both report the exports-aware public API
+ * widening count. Removed exports are not represented in this widening-only
+ * signal.
  */
 export interface GraphFacts {
 /**
- * Number of exports added by the changeset. Stubbed to `0` in v1.
+ * Number of public API exports added by the changeset. Zero means the
+ * changeset adds no public API exports.
  */
 exports_added: number
 /**
- * Change in public API width (added minus removed exports). Stubbed to `0`
- * in v1.
+ * Widening-only public API delta, currently equal to `exports_added`.
+ * Removed exports are not represented, so zero means no public API exports
+ * were added.
  */
 api_width_delta: number
 /**

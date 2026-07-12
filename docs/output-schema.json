@@ -16282,11 +16282,11 @@
       "properties": {
         "exports_added": {
           "type": "integer",
-          "description": "Number of exports added by the changeset. Stubbed to `0` in v1."
+          "description": "Number of public API exports added by the changeset. Zero means the\nchangeset adds no public API exports."
         },
         "api_width_delta": {
           "type": "integer",
-          "description": "Change in public API width (added minus removed exports). Stubbed to `0`\nin v1."
+          "description": "Widening-only public API delta, currently equal to `exports_added`.\nRemoved exports are not represented, so zero means no public API exports\nwere added."
         },
         "reachable_from": {
           "type": "array",
@@ -16309,7 +16309,7 @@
         "reachable_from",
         "boundaries_touched"
       ],
-      "description": "Stage 1 of the brief: graph-derived orientation facts.\n\n`boundaries_touched` is derived from the run's boundary-violation zones;\n`reachable_from` is populated by the impact closure (the affected-not-shown\nset: modules the changed code is reachable from / affects, none in the diff).\n`exports_added` / `api_width_delta` stay honestly stubbed (`0`) until the\nexport-surface delta lands. The fields are present and correctly typed so\nvalues fill in later without a schema bump."
+      "description": "Stage 1 of the brief: graph-derived orientation facts.\n\n`boundaries_touched` is derived from the run's boundary-violation zones;\n`reachable_from` is populated by the impact closure (the affected-not-shown\nset: modules the changed code is reachable from / affects, none in the diff).\n`exports_added` and `api_width_delta` both report the exports-aware public API\nwidening count. Removed exports are not represented in this widening-only\nsignal."
     },
     "ImpactClosureFacts": {
       "type": "object",
