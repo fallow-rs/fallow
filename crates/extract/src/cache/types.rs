@@ -773,7 +773,13 @@ use crate::MemberKind;
 /// (`{ a, ...rest }`, a computed key) carries the `FactoryFnWholeObject` fact. A warm
 /// 229 cache carries neither, leaving every member of a destructured or chained
 /// factory result falsely reported as unused.
-pub(super) const CACHE_VERSION: u32 = 230;
+///
+/// Bumped to 231 so `#`-private field receivers (`this.#dep.m()`) record the
+/// binding-key + `member_accesses` pair public fields already produce. A warm
+/// 230 cache lacks those private-field accesses and would report a member
+/// reached only through a private DI field as `unused-class-member`
+/// cross-module (issue #1821).
+pub(super) const CACHE_VERSION: u32 = 231;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

@@ -1601,36 +1601,40 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    /// Handle `this.member = ...` assignments: record the member access and
-    /// propagate the instance-binding target name from a `new Class()` RHS, an
-    /// identifier bound to a known class, and nested binding targets.
+    /// Handle `this.member = ...` / `this.#member = ...` assignments: record the
+    /// member access and propagate the instance-binding target name from a
+    /// `new Class()` RHS, an identifier bound to a known class, and nested
+    /// binding targets. `member_name` is the property spelling (`dep` for a
+    /// public field, `#dep` for a `#`-private field, issue #1821), so the
+    /// recorded key is `this.<member_name>` and matches the receiver key
+    /// `static_member_object_name` produces for the same field.
     fn handle_this_member_assignment(
         &mut self,
-        member: &StaticMemberExpression<'a>,
+        member_name: &str,
         expr: &AssignmentExpression<'a>,
     ) {
         self.member_accesses.push(MemberAccess {
             object: "this".to_string(),
-            member: member.property.name.to_string(),
+            member: member_name.to_string(),
         });
         if let Expression::NewExpression(new_expr) = &expr.right
             && let Expression::Identifier(callee) = &new_expr.callee
             && !super::helpers::is_builtin_constructor(callee.name.as_str())
         {
             self.insert_class_binding_target(
-                format!("this.{}", member.property.name),
+                format!("this.{member_name}"),
                 callee.name.to_string(),
             );
         } else if let Expression::Identifier(ident) = &expr.right
             && let Some(target_name) = self.binding_target_names.get(ident.name.as_str()).cloned()
         {
             self.binding_target_names
-                .insert(format!("this.{}", member.property.name), target_name);
+                .insert(format!("this.{member_name}"), target_name);
         }
         if let Expression::Identifier(ident) = &expr.right {
             self.copy_nested_binding_targets(
                 ident.name.as_str(),
-                format!("this.{}", member.property.name).as_str(),
+                format!("this.{member_name}").as_str(),
             );
         }
     }
@@ -1848,7 +1852,20 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_property_definition(&mut self, prop: &PropertyDefinition<'a>) {
-        if let Some(name) = prop.key.static_name() {
+        // Effective member key: a static name (`dep`) or a `#`-private field
+        // (`#dep`, spelled with the leading `#` so the binding key is
+        // `this.#dep`). Private-field receivers must record the same
+        // binding-key + member-access pair public fields do, so `this.#dep.m()`
+        // credits the imported class member cross-module (issue #1821).
+        let member_key = prop.key.static_name().map_or_else(
+            || match &prop.key {
+                PropertyKey::PrivateIdentifier(id) => Some(format!("#{}", id.name)),
+                _ => None,
+            },
+            |name| Some(name.to_string()),
+        );
+
+        if let Some(name) = member_key.as_deref() {
             if let Some(type_annotation) = prop.type_annotation.as_deref() {
                 self.record_typed_binding(format!("this.{name}").as_str(), type_annotation);
 
@@ -1883,10 +1900,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     self.insert_class_binding_target(call_key, query.type_arg);
                 }
             }
+        }
 
-            if let Some(value) = prop.value.as_ref() {
-                self.capture_hardcoded_secret_literal_sink(name.as_ref(), value, prop.span);
-            }
+        // The hardcoded-secret sink stays gated on `static_name()` only: a
+        // `#`-private field is never a security-detector secret target, so
+        // widening the sink here is out of scope for the DI-credit fix.
+        if let Some(name) = prop.key.static_name()
+            && let Some(value) = prop.value.as_ref()
+        {
+            self.capture_hardcoded_secret_literal_sink(name.as_ref(), value, prop.span);
         }
 
         walk::walk_property_definition(self, prop);
@@ -2426,8 +2448,17 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         if let AssignmentTarget::StaticMemberExpression(member) = &expr.left {
             self.handle_cjs_member_export(member, expr);
             if matches!(member.object, Expression::ThisExpression(_)) {
-                self.handle_this_member_assignment(member, expr);
+                self.handle_this_member_assignment(member.property.name.as_str(), expr);
             }
+        }
+        // `this.#dep = new Dep()` / `this.#dep = dep`: oxc routes a `#`-private
+        // assignment target through the `PrivateFieldExpression` variant, so it
+        // needs its own arm to reach the same instance-binding propagation as a
+        // public `this.dep = ...` assignment (issue #1821).
+        if let AssignmentTarget::PrivateFieldExpression(member) = &expr.left
+            && matches!(member.object, Expression::ThisExpression(_))
+        {
+            self.handle_this_member_assignment(format!("#{}", member.field.name).as_str(), expr);
         }
         self.capture_member_assign_sink(expr);
         walk::walk_assignment_expression(self, expr);
@@ -3218,6 +3249,15 @@ fn static_member_object_name(expr: &Expression<'_>) -> Option<String> {
             "{}.{}",
             static_member_object_name(&member.object)?,
             member.property.name
+        )),
+        // `#`-private field receiver (`this.#dep`): oxc's `PrivateIdentifier.name`
+        // excludes the leading `#`, so spell the key `this.#dep` to match the
+        // binding key `visit_property_definition` / the assignment arms record
+        // for private fields (issue #1821).
+        Expression::PrivateFieldExpression(member) => Some(format!(
+            "{}.#{}",
+            static_member_object_name(&member.object)?,
+            member.field.name
         )),
         Expression::CallExpression(call) if call.arguments.is_empty() => {
             Some(format!("{}()", static_member_object_name(&call.callee)?))

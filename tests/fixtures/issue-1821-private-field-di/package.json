@@ -1,0 +1,5 @@
+{
+  "name": "issue-1821-private-field-di",
+  "private": true,
+  "main": "src/index.ts"
+}

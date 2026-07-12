@@ -4022,6 +4022,119 @@ fn this_field_builtin_constructor_not_tracked() {
 }
 
 #[test]
+fn private_field_inline_new_maps_member_access() {
+    // Issue #1821: `readonly #dep = new Dep()` + `this.#dep.m()` must record the
+    // same class-qualified access a public `dep = new Dep()` produces.
+    let info = parse(
+        r"
+            import { DepInline } from './dep';
+            class Consumer {
+                readonly #dep = new DepInline();
+                run() { this.#dep.inlineM(); }
+            }
+        ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DepInline" && a.member == "inlineM"),
+        "inline-new private field should map this.#dep.inlineM() to DepInline.inlineM, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn private_field_ctor_new_assignment_maps_member_access() {
+    // Issue #1821 (Fix A3): a bare `#dep` field assigned `this.#dep = new Dep()`
+    // in the constructor must reach the instance-binding propagation, so the
+    // access resolves even with no field type annotation.
+    let info = parse(
+        r"
+            import { DepCtorNew } from './dep';
+            class Consumer {
+                #dep;
+                constructor() { this.#dep = new DepCtorNew(); }
+                run() { this.#dep.ctorNewM(); }
+            }
+        ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DepCtorNew" && a.member == "ctorNewM"),
+        "ctor `this.#dep = new Dep()` should map this.#dep.ctorNewM() to DepCtorNew.ctorNewM, \
+         found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn private_field_interface_typed_maps_to_interface_name() {
+    // Issue #1821 (Fix A2 typed arm): `#dep: IDep` records `this.#dep -> IDep`,
+    // so the extract-time access resolves to the interface name (the analyze
+    // layer then credits every implementer through interface heritage).
+    let info = parse(
+        r"
+            import { IDep } from './dep';
+            class Consumer {
+                readonly #dep: IDep;
+                constructor(dep: IDep) { this.#dep = dep; }
+                run() { this.#dep.ifaceM(); }
+            }
+        ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "IDep" && a.member == "ifaceM"),
+        "interface-typed private field should map this.#dep.ifaceM() to IDep.ifaceM, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn private_field_readonly_new_maps_member_access() {
+    // Issue #1821 (Fix A2 inline-new arm, `readonly` variant): the `readonly`
+    // modifier must not change the binding-key derivation.
+    let info = parse(
+        r"
+            import { DepReadonly } from './dep';
+            class Consumer {
+                readonly #dep = new DepReadonly();
+                run() { this.#dep.roM(); }
+            }
+        ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DepReadonly" && a.member == "roM"),
+        "readonly private field should map this.#dep.roM() to DepReadonly.roM, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn private_field_without_member_call_records_no_access() {
+    // Issue #1821 negative control: a private DI field with no `this.#dep.m()`
+    // call site records the binding but never fabricates a member access.
+    let info = parse(
+        r"
+            import { DepUnused } from './dep';
+            class Consumer {
+                readonly #dep = new DepUnused();
+                run() { return 1; }
+            }
+        ",
+    );
+    assert!(
+        !info.member_accesses.iter().any(|a| a.object == "DepUnused"),
+        "private field with no member call must not record a DepUnused access, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn module_exports_object_extracts_keys() {
     let info = parse("module.exports = { foo: 1, bar: 2 };");
     assert!(info.has_cjs_exports);
