@@ -444,6 +444,9 @@ impl ModuleInfoExtractor {
         let Some(receiver_name) = static_member_object_name(receiver_expr) else {
             return;
         };
+        // A `this.<field>()` / `this.<field>` iteration receiver is class-scoped
+        // so it matches the same class's qualified query-list key (issue #1821).
+        let receiver_name = self.qualify_this_scope(&receiver_name);
         let Some(element_type) = self.iterable_element_type_for(&receiver_name) else {
             return;
         };
@@ -548,6 +551,9 @@ impl ModuleInfoExtractor {
         let Some(receiver_name) = static_member_object_name(&stmt.right) else {
             return;
         };
+        // Class-scope the `for (const x of this.<field>)` receiver so it matches
+        // the same class's qualified query-list key (issue #1821).
+        let receiver_name = self.qualify_this_scope(&receiver_name);
         let Some(element_type) = self.iterable_element_type_for(&receiver_name) else {
             return;
         };
@@ -690,7 +696,11 @@ impl ModuleInfoExtractor {
             self.whole_object_uses
                 .push(ROUTE_LOADER_DATA_OBJECT.to_string());
         }
-        self.whole_object_uses.push(name.to_string());
+        // A `this.<field>` reflective use (`Object.keys(this.opts.c)`) is keyed
+        // per class so it resolves against the same class's binding, then
+        // stripped back to `this.` before emission (issue #1821).
+        let qualified = self.qualify_this_scope(name);
+        self.whole_object_uses.push(qualified);
     }
 }
 
@@ -1729,21 +1739,17 @@ impl<'a> ModuleInfoExtractor {
             && let Expression::Identifier(callee) = &new_expr.callee
             && !super::helpers::is_builtin_constructor(callee.name.as_str())
         {
-            self.insert_class_binding_target(
-                format!("this.{member_name}"),
-                callee.name.to_string(),
-            );
+            let key = self.this_member_key(member_name);
+            self.insert_class_binding_target(key, callee.name.to_string());
         } else if let Expression::Identifier(ident) = &expr.right
             && let Some(target_name) = self.binding_target_names.get(ident.name.as_str()).cloned()
         {
-            self.binding_target_names
-                .insert(format!("this.{member_name}"), target_name);
+            let key = self.this_member_key(member_name);
+            self.binding_target_names.insert(key, target_name);
         }
         if let Expression::Identifier(ident) = &expr.right {
-            self.copy_nested_binding_targets(
-                ident.name.as_str(),
-                format!("this.{member_name}").as_str(),
-            );
+            let target = self.this_member_key(member_name);
+            self.copy_nested_binding_targets(ident.name.as_str(), target.as_str());
         }
     }
 
@@ -1945,7 +1951,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         {
             self.record_typed_binding(id.name.as_str(), type_annotation);
             if param.accessibility.is_some() {
-                self.record_typed_binding(format!("this.{}", id.name).as_str(), type_annotation);
+                let key = self.this_member_key(id.name.as_str());
+                self.record_typed_binding(key.as_str(), type_annotation);
             }
         }
 
@@ -1975,14 +1982,17 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         );
 
         if let Some(name) = member_key.as_deref() {
+            // Class-scoped key so a same-named field on a sibling class does not
+            // collide in the module-flat `binding_target_names` (issue #1821).
+            let this_key = self.this_member_key(name);
             if let Some(type_annotation) = prop.type_annotation.as_deref() {
-                self.record_typed_binding(format!("this.{name}").as_str(), type_annotation);
+                self.record_typed_binding(this_key.as_str(), type_annotation);
 
                 if has_angular_plural_query_decorator(&prop.decorators)
                     && let Some(element_type) = extract_query_list_element_type(type_annotation)
                 {
                     self.iterable_element_types
-                        .insert(format!("this.{name}"), element_type);
+                        .insert(this_key.clone(), element_type);
                 }
             }
 
@@ -1990,19 +2000,19 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 && let Expression::Identifier(callee) = &new_expr.callee
                 && !super::helpers::is_builtin_constructor(callee.name.as_str())
             {
-                self.insert_class_binding_target(format!("this.{name}"), callee.name.to_string());
+                self.insert_class_binding_target(this_key.clone(), callee.name.to_string());
             }
 
             if let Some(Expression::CallExpression(call)) = &prop.value
                 && let Some(type_name) = self.extract_angular_inject_target(call)
             {
-                self.insert_class_binding_target(format!("this.{name}"), type_name);
+                self.insert_class_binding_target(this_key.clone(), type_name);
             }
 
             if let Some(value) = prop.value.as_ref()
                 && let Some(query) = extract_angular_signal_query(value)
             {
-                let call_key = format!("this.{name}()");
+                let call_key = format!("{this_key}()");
                 if query.plural {
                     self.iterable_element_types.insert(call_key, query.type_arg);
                 } else {
@@ -2610,8 +2620,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     member: expr.property.name.to_string(),
                 });
             }
+            // Qualify a `this.<field>` receiver with the enclosing class scope so
+            // it resolves against the same class's binding key (issue #1821);
+            // stripped back to `this.` before emission. A bare `this` object and
+            // any non-`this` receiver pass through unchanged.
             self.member_accesses.push(MemberAccess {
-                object: object_name,
+                object: self.qualify_this_scope(&object_name),
                 member: expr.property.name.to_string(),
             });
         }
@@ -2740,7 +2754,14 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             .push(super::helpers::extract_super_class_name(class));
         self.class_type_param_constraints
             .push(super::helpers::collect_class_type_param_constraints(class));
+        // Assign this class body a unique scope id so its `this.<field>` binding
+        // keys are qualified per-class (issue #1821, Fix B). A nested class
+        // pushes its own id, so `this` inside the inner body binds to the inner
+        // class.
+        self.class_scope_counter += 1;
+        self.class_scope_stack.push(self.class_scope_counter);
         walk::walk_class(self, class);
+        self.class_scope_stack.pop();
         self.class_type_param_constraints.pop();
         self.class_super_stack.pop();
     }

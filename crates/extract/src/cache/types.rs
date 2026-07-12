@@ -791,7 +791,14 @@ use crate::MemberKind;
 /// iteration variable to the element class, so `for...of` / `.map` / `.forEach`
 /// member accesses on the item credit the class. Warm 232 caches lack the added
 /// `member_accesses`, leaving those methods falsely reported as unused.
-pub(super) const CACHE_VERSION: u32 = 233;
+///
+/// Bumped to 234 for issue #1821 (Fix B): `this.<field>` binding keys are now
+/// scoped per enclosing class during extraction, so two classes in one module
+/// that declare a same-named field (e.g. `constructor(private dep: DepA)` and
+/// `readonly dep = new DepB()`) no longer collide via last-write-wins. The
+/// resulting `member_accesses` change for such modules (the previously-losing
+/// class's members are now credited); warm 233 caches keep the collision.
+pub(super) const CACHE_VERSION: u32 = 234;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

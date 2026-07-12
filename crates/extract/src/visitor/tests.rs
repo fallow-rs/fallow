@@ -4308,6 +4308,155 @@ fn private_field_without_member_call_records_no_access() {
 }
 
 #[test]
+fn per_class_this_scoping_credits_both_colliding_public_fields() {
+    // Issue #1821 (Fix B): two classes in one module both name their field
+    // `dep`. Before per-class scoping the module-flat `this.dep` binding key
+    // collided (last-write-wins), so only the class declared last credited its
+    // dep's members. Now BOTH `DepA.aMethod` and `DepB.bMethod` are credited.
+    let info = parse(
+        r"
+            import { DepA, DepB } from './dep';
+            class ConsumerA {
+                constructor(private dep: DepA) {}
+                run() { return this.dep.aMethod(); }
+            }
+            class ConsumerB {
+                readonly dep = new DepB();
+                run() { return this.dep.bMethod(); }
+            }
+        ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DepA" && a.member == "aMethod"),
+        "param-property field should credit DepA.aMethod despite the same-named \
+         `dep` field on ConsumerB, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DepB" && a.member == "bMethod"),
+        "public field should credit DepB.bMethod despite the same-named `dep` \
+         field on ConsumerA, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn per_class_this_scoping_is_declaration_order_independent() {
+    // Issue #1821 (Fix B): reversing the class declaration order must not flip
+    // which class's members are credited (the tell that exposed the collision).
+    let info = parse(
+        r"
+            import { DepA, DepB } from './dep';
+            class ConsumerB {
+                readonly dep = new DepB();
+                run() { return this.dep.bMethod(); }
+            }
+            class ConsumerA {
+                constructor(private dep: DepA) {}
+                run() { return this.dep.aMethod(); }
+            }
+        ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DepA" && a.member == "aMethod"),
+        "DepA.aMethod must be credited regardless of declaration order, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DepB" && a.member == "bMethod"),
+        "DepB.bMethod must be credited regardless of declaration order, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn per_class_this_scoping_credits_both_colliding_private_fields() {
+    // Issue #1821 (Fix B): the same collision through `#`-private fields (the
+    // Fix A receiver shape). Both classes name the field `#dep`; both dep
+    // classes' members must be credited.
+    let info = parse(
+        r"
+            import { DepA, DepB } from './dep';
+            class ConsumerA {
+                readonly #dep = new DepA();
+                run() { return this.#dep.aMethod(); }
+            }
+            class ConsumerB {
+                readonly #dep = new DepB();
+                run() { return this.#dep.bMethod(); }
+            }
+        ",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DepA" && a.member == "aMethod"),
+        "private-field DepA.aMethod must be credited despite the same-named \
+         `#dep` on ConsumerB, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "DepB" && a.member == "bMethod"),
+        "private-field DepB.bMethod must be credited despite the same-named \
+         `#dep` on ConsumerA, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn per_class_this_scoping_strips_internal_qualifier_before_emission() {
+    // Issue #1821 (Fix B): the internal `this@<id>.` per-class qualifier is an
+    // extraction-only disambiguator and must never reach an emitted spelling.
+    // Assert no emitted `member_accesses` or `whole_object_uses` object carries
+    // it, and that the plain `this.dep` receiver spelling survives.
+    let info = parse(
+        r"
+            import { DepA, DepB } from './dep';
+            class ConsumerA {
+                constructor(private dep: DepA) {}
+                run() { return this.dep.aMethod(); }
+            }
+            class ConsumerB {
+                readonly dep = new DepB();
+                run() {
+                    Object.keys(this.dep);
+                    return this.dep.bMethod();
+                }
+            }
+        ",
+    );
+    assert!(
+        info.member_accesses.iter().all(|a| !a.object.contains('@')),
+        "no emitted member-access object may carry the internal per-class \
+         qualifier, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        info.whole_object_uses.iter().all(|w| !w.contains('@')),
+        "no emitted whole-object use may carry the internal per-class \
+         qualifier, found: {:?}",
+        info.whole_object_uses
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "this.dep" && a.member == "bMethod"),
+        "the plain `this.dep` receiver spelling must survive the strip, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn module_exports_object_extracts_keys() {
     let info = parse("module.exports = { foo: 1, bar: 2 };");
     assert!(info.has_cjs_exports);

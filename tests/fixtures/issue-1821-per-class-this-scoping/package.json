@@ -1,0 +1,5 @@
+{
+  "name": "issue-1821-per-class-this-scoping",
+  "private": true,
+  "main": "src/index.ts"
+}

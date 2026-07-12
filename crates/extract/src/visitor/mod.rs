@@ -281,6 +281,19 @@ pub(crate) struct ModuleInfoExtractor {
     /// `toString` coercion for the quasi itself.
     in_tagged_template_quasi: bool,
     pub(crate) class_super_stack: Vec<Option<String>>,
+    /// Monotonic per-module class-scope id source: incremented each time a
+    /// class body is entered so every class gets a unique id, paired with
+    /// `class_scope_stack`. A `this.<field>` binding key is qualified with the
+    /// enclosing class's id (`this@<id>.<field>`) during the walk so two
+    /// classes declaring a same-named field do not collide in the module-flat
+    /// `binding_target_names` map; the qualifier is stripped back to `this.`
+    /// before ModuleInfo emission. See issue #1821 (Fix B).
+    class_scope_counter: u32,
+    /// Stack of active class-scope ids. The top is the enclosing class of the
+    /// current walk position; `this.<field>` keys and receiver spellings are
+    /// qualified with it. Empty at module scope, so module-level `this` stays
+    /// unqualified (behavior unchanged). See issue #1821 (Fix B).
+    class_scope_stack: Vec<u32>,
     pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
     pub(crate) side_effect_registered_class_names: FxHashSet<String>,
     lit_custom_element_candidates: Vec<LitCustomElementCandidate>,
@@ -741,6 +754,56 @@ impl ModuleInfoExtractor {
             .drain(..)
             .filter(|access| element_classes.contains(access.object.as_str()))
             .collect()
+    }
+
+    /// Build the class-scoped `binding_target_names` key for a `this.<suffix>`
+    /// member. Inside a class body the key is qualified with the enclosing
+    /// class's scope id (`this@<id>.<suffix>`) so two classes in one module that
+    /// declare a same-named field do not collide in the module-flat map: without
+    /// this, last-write-wins credits only the class declared last and falsely
+    /// reports the other class's members unused. Module-level `this` (no active
+    /// class scope) keeps the plain `this.<suffix>` spelling. The qualifier is
+    /// stripped back to `this.` by `strip_this_scope_qualifiers` before any
+    /// spelling reaches `ModuleInfo`. See issue #1821 (Fix B).
+    fn this_member_key(&self, suffix: &str) -> String {
+        match self.class_scope_stack.last() {
+            Some(id) => format!("this@{id}.{suffix}"),
+            None => format!("this.{suffix}"),
+        }
+    }
+
+    /// Qualify a `this.`-rooted access / whole-object / iteration-receiver
+    /// spelling with the enclosing class scope id so it resolves against the
+    /// same class's qualified `binding_target_names` keys (issue #1821). A no-op
+    /// for the bare `this` object (single segment, so the per-file self-access
+    /// credit keyed on `object == "this"` is untouched), any non-`this`
+    /// spelling, an already-qualified `this@<id>.` spelling, and module-level
+    /// `this` (no active class scope). Paired with `strip_this_scope_qualifiers`
+    /// at emission.
+    fn qualify_this_scope(&self, spelling: &str) -> String {
+        if let Some(id) = self.class_scope_stack.last()
+            && let Some(rest) = spelling.strip_prefix("this.")
+        {
+            return format!("this@{id}.{rest}");
+        }
+        spelling.to_string()
+    }
+
+    /// Rewrite every internal `this@<id>.` scope qualifier (issue #1821) back to
+    /// a plain `this.` across the emitted `member_accesses` and
+    /// `whole_object_uses`, so no persisted spelling and no downstream consumer
+    /// (core member self-access `== "this"`, heritage `!= "this"`,
+    /// `unused_component_output` `this.<name>`, SFC template `starts_with("this.")`)
+    /// ever sees the qualifier. Called last in `finalize_resolution_phase`, after
+    /// every resolution pass that relies on the per-class keys, so the strip is
+    /// invariant across the `into_module_info` and `merge_into` (SFC) paths.
+    fn strip_this_scope_qualifiers(&mut self) {
+        for access in &mut self.member_accesses {
+            strip_this_scope_qualifier(&mut access.object);
+        }
+        for whole in &mut self.whole_object_uses {
+            strip_this_scope_qualifier(whole);
+        }
     }
 
     fn insert_class_binding_target(&mut self, binding: String, target: String) {
@@ -2101,7 +2164,12 @@ impl ModuleInfoExtractor {
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
         self.resolve_typed_react_props();
-        self.collect_namespace_object_aliases()
+        let namespace_object_aliases = self.collect_namespace_object_aliases();
+        // Last: every resolution pass above relies on the per-class `this@<id>.`
+        // keys, so the qualifier is stripped only once they have run, before any
+        // spelling is emitted into `ModuleInfo`. See issue #1821 (Fix B).
+        self.strip_this_scope_qualifiers();
+        namespace_object_aliases
     }
 
     pub(crate) fn into_module_info(
@@ -2348,6 +2416,26 @@ pub(super) fn extract_destructured_names(obj_pat: &ObjectPattern<'_>) -> Vec<Str
         .iter()
         .filter_map(|prop| prop.key.static_name().map(|n| n.to_string()))
         .collect()
+}
+
+/// Strip a leading `this@<id>` scope qualifier back to `this` (issue #1821),
+/// leaving any non-`this@` spelling untouched. `@` cannot appear in a JS
+/// identifier or dotted member path, so the marker is unambiguous, and it is
+/// only ever produced for multi-segment `this.<path>` spellings, so a `.`
+/// always follows the id. The `else` arm is defensive and unreachable in
+/// practice.
+fn strip_this_scope_qualifier(spelling: &mut String) {
+    let Some(rest) = spelling.strip_prefix("this@") else {
+        return;
+    };
+    if let Some(dot) = rest.find('.') {
+        let mut rebuilt = String::with_capacity("this".len() + rest.len() - dot);
+        rebuilt.push_str("this");
+        rebuilt.push_str(&rest[dot..]);
+        *spelling = rebuilt;
+    } else {
+        *spelling = "this".to_string();
+    }
 }
 
 fn try_extract_require<'a, 'b>(
