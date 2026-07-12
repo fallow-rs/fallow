@@ -893,3 +893,232 @@ fn ambiguous_diff_base_fails_open_and_retains_findings() {
         "an ambiguous base must retain findings, not filter them away"
     );
 }
+
+/// A diff that PARSED but names no analyzable head-side file (deletion-only)
+/// changed nothing a finding can be attributed to. That is a real, EMPTY scope,
+/// not an unplaceable base: it must filter to zero, never fall open to full
+/// scope. The original defect reported such a run at full scope.
+#[test]
+fn deletion_only_diff_filters_to_zero_not_full_scope() {
+    let dir = monorepo();
+    let root = dir.path();
+    let diff_path = root.join("deletion.diff");
+    std::fs::write(
+        &diff_path,
+        "diff --git a/packages/pkg/src/removed.js b/packages/pkg/src/removed.js\n\
+         deleted file mode 100644\n\
+         --- a/packages/pkg/src/removed.js\n\
+         +++ /dev/null\n\
+         @@ -1,3 +0,0 @@\n\
+         -one\n\
+         -two\n\
+         -three\n",
+    )
+    .expect("write diff");
+
+    let unfiltered = run(
+        root,
+        &[
+            "--root",
+            "packages/pkg",
+            "--quiet",
+            "--format",
+            "codeclimate",
+        ],
+    );
+    let filtered = run(
+        root,
+        &[
+            "--root",
+            "packages/pkg",
+            "--quiet",
+            "--format",
+            "codeclimate",
+            "--diff-file",
+            diff_path.to_str().expect("utf8"),
+        ],
+    );
+
+    assert!(
+        !check_names(&unfiltered).is_empty(),
+        "fixture must produce findings at full scope: {}",
+        unfiltered.stdout
+    );
+    assert!(
+        check_names(&filtered).is_empty(),
+        "a deletion-only diff analyzes no head-side file, so every \
+         source-anchored finding must filter out; got {:?}",
+        check_names(&filtered)
+    );
+    assert!(
+        !filtered
+            .stderr
+            .contains("relative to a different directory")
+            && !filtered.stderr.contains("ambiguous"),
+        "an empty-scope diff is not foreign or ambiguous; got stderr: {}",
+        filtered.stderr
+    );
+}
+
+/// An empty diff (nothing staged) is the same empty scope: no head-side file
+/// changed, so it filters to zero rather than falling open.
+#[test]
+fn empty_diff_filters_to_zero_not_full_scope() {
+    let dir = monorepo();
+    let root = dir.path();
+    let diff_path = root.join("empty.diff");
+    std::fs::write(&diff_path, "").expect("write diff");
+
+    let filtered = run(
+        root,
+        &[
+            "--root",
+            "packages/pkg",
+            "--quiet",
+            "--format",
+            "codeclimate",
+            "--diff-file",
+            diff_path.to_str().expect("utf8"),
+        ],
+    );
+
+    assert!(
+        check_names(&filtered).is_empty(),
+        "an empty diff analyzes nothing and must filter to zero; got {:?}",
+        check_names(&filtered)
+    );
+}
+
+/// A binary-only diff names no `+++ b/<path>` head-side text file, so it is the
+/// same empty scope and filters to zero.
+#[test]
+fn binary_only_diff_filters_to_zero_not_full_scope() {
+    let dir = monorepo();
+    let root = dir.path();
+    let diff_path = root.join("binary.diff");
+    std::fs::write(
+        &diff_path,
+        "diff --git a/packages/pkg/logo.png b/packages/pkg/logo.png\n\
+         index 0000000..1111111 100644\n\
+         Binary files a/packages/pkg/logo.png and b/packages/pkg/logo.png differ\n",
+    )
+    .expect("write diff");
+
+    let filtered = run(
+        root,
+        &[
+            "--root",
+            "packages/pkg",
+            "--quiet",
+            "--format",
+            "codeclimate",
+            "--diff-file",
+            diff_path.to_str().expect("utf8"),
+        ],
+    );
+
+    assert!(
+        check_names(&filtered).is_empty(),
+        "a binary-only diff touches no analyzable file and must filter to \
+         zero; got {:?}",
+        check_names(&filtered)
+    );
+}
+
+/// The split's other half: a diff that names files but places them nowhere
+/// (foreign base) is UNATTRIBUTABLE, not empty. It must fall open to full scope,
+/// never collapse to the empty-scope zero. This is the case the empty-scope path
+/// must not swallow.
+#[test]
+fn foreign_namespace_diff_fails_open_to_full_scope() {
+    let dir = monorepo();
+    let root = dir.path();
+    let diff_path = root.join("foreign.diff");
+    std::fs::write(
+        &diff_path,
+        "diff --git a/nowhere/ghost.js b/nowhere/ghost.js\n\
+         --- a/nowhere/ghost.js\n\
+         +++ b/nowhere/ghost.js\n\
+         @@ -0,0 +1,1 @@\n\
+         +  const touched = 1\n",
+    )
+    .expect("write diff");
+
+    let unfiltered = run(
+        root,
+        &[
+            "--root",
+            "packages/pkg",
+            "--quiet",
+            "--format",
+            "codeclimate",
+        ],
+    );
+    let foreign = run(
+        root,
+        &[
+            "--root",
+            "packages/pkg",
+            "--quiet",
+            "--format",
+            "codeclimate",
+            "--diff-file",
+            diff_path.to_str().expect("utf8"),
+        ],
+    );
+
+    assert_eq!(
+        check_names(&foreign).len(),
+        check_names(&unfiltered).len(),
+        "a foreign (unattributable) diff must retain findings at full scope, \
+         never collapse to the empty-scope zero"
+    );
+}
+
+/// The FALLOW_DIFF_FILE env path (the GitHub Action's standard route) must
+/// honour the discard decision. When base detection discards an unplaceable
+/// (foreign) diff and reports at full scope, the env-var comment filter must not
+/// re-read the file and re-filter, which would drop every comment and disagree
+/// with the full-scope decision the finding filter made.
+#[test]
+fn env_diff_file_honours_discard_and_keeps_comments_at_full_scope() {
+    let dir = monorepo();
+    let root = dir.path();
+    let foreign = root.join("foreign.diff");
+    std::fs::write(
+        &foreign,
+        "diff --git a/nowhere/ghost.js b/nowhere/ghost.js\n\
+         --- a/nowhere/ghost.js\n\
+         +++ b/nowhere/ghost.js\n\
+         @@ -0,0 +1,1 @@\n\
+         +  const touched = 1\n",
+    )
+    .expect("write diff");
+
+    let base_args = [
+        "--root",
+        "packages/pkg",
+        "--quiet",
+        "--format",
+        "review-gitlab",
+    ];
+    let no_diff = run(root, &base_args);
+    let expected = review_comment_count(&no_diff);
+    assert!(
+        expected > 0,
+        "fixture should produce comments: {}",
+        no_diff.stdout
+    );
+
+    let with_env = run_with_env(
+        root,
+        &base_args,
+        &[("FALLOW_DIFF_FILE", foreign.to_str().expect("utf8"))],
+    );
+    assert_eq!(
+        review_comment_count(&with_env),
+        expected,
+        "a discarded (foreign) diff reports at full scope; the FALLOW_DIFF_FILE \
+         comment filter must not re-filter and drop comments"
+    );
+}
