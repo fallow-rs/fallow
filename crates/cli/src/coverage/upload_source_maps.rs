@@ -274,6 +274,8 @@ fn validate_git_sha(sha: &str) -> Result<(), UploadSourceMapsError> {
 #[derive(Debug, Clone)]
 struct SourceMapCandidate {
     path: PathBuf,
+    canonical_root: PathBuf,
+    resolved_path: PathBuf,
     rel_path: PathBuf,
     file_name: String,
     /// The map's path relative to the REPO ROOT (e.g.
@@ -295,10 +297,17 @@ fn collect_source_maps(
     exclude: &GlobSet,
     strip_path: bool,
 ) -> Result<Vec<SourceMapCandidate>, UploadSourceMapsError> {
+    let canonical_root = std::fs::canonicalize(dir).map_err(|err| {
+        UploadSourceMapsError::Validation(format!(
+            "failed to resolve selected build directory {}: {err}",
+            dir.display()
+        ))
+    })?;
     let mut maps = Vec::new();
     let mut input = SourceMapWalkInput {
         repo_root,
         root: dir,
+        canonical_root: &canonical_root,
         include,
         exclude,
         strip_path,
@@ -312,6 +321,7 @@ fn collect_source_maps(
 struct SourceMapWalkInput<'a> {
     repo_root: &'a Path,
     root: &'a Path,
+    canonical_root: &'a Path,
     include: &'a GlobSet,
     exclude: &'a GlobSet,
     strip_path: bool,
@@ -344,11 +354,25 @@ fn collect_source_maps_inner(
         if !input.include.is_match(&rel_path) || !path.is_file() {
             continue;
         }
-        let bytes = entry.metadata().map_or(0, |metadata| metadata.len());
+        let resolved_path = std::fs::canonicalize(&path).map_err(|err| {
+            UploadSourceMapsError::Validation(format!(
+                "failed to resolve source map {}: {err}",
+                path.display()
+            ))
+        })?;
+        if !resolved_path.starts_with(input.canonical_root) {
+            return Err(UploadSourceMapsError::Validation(format!(
+                "source map {} resolves outside selected build directory",
+                path.display()
+            )));
+        }
+        let bytes = std::fs::metadata(&resolved_path).map_or(0, |metadata| metadata.len());
         let file_name = map_file_name(&rel_path, input.strip_path)?;
         let map_path = repo_relative_map_path(input.repo_root, &path);
         input.maps.push(SourceMapCandidate {
             path,
+            canonical_root: input.canonical_root.to_path_buf(),
+            resolved_path,
             rel_path,
             file_name,
             map_path,
@@ -425,7 +449,31 @@ fn prepare_source_map(candidate: &SourceMapCandidate) -> MapOutcome {
             ),
         );
     }
-    match std::fs::read_to_string(&candidate.path) {
+    let resolved_path = match std::fs::canonicalize(&candidate.path) {
+        Ok(path) => path,
+        Err(err) => {
+            return MapOutcome::failed(
+                candidate,
+                FailureKind::Validation,
+                format!("read failed: {err}"),
+            );
+        }
+    };
+    if !resolved_path.starts_with(&candidate.canonical_root) {
+        return MapOutcome::failed(
+            candidate,
+            FailureKind::Validation,
+            "source map target is outside selected build directory; skipping".to_owned(),
+        );
+    }
+    if resolved_path != candidate.resolved_path {
+        return MapOutcome::failed(
+            candidate,
+            FailureKind::Validation,
+            "source map target changed since collection; skipping".to_owned(),
+        );
+    }
+    match std::fs::read_to_string(&candidate.resolved_path) {
         Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
             Ok(source_map) => MapOutcome::Ready(PreparedSourceMap {
                 candidate: candidate.clone(),
@@ -990,6 +1038,104 @@ mod tests {
         assert_eq!(file_names, vec!["assets/app.js.map", "root.js.map"]);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn collect_source_maps_rejects_symlink_to_outside_root() {
+        use std::os::unix::fs::symlink;
+
+        let build_dir = tempdir().expect("build dir");
+        let outside_dir = tempdir().expect("outside dir");
+        let outside_map = outside_dir.path().join("outside.js.map");
+        std::fs::write(&outside_map, r#"{"version":3,"sources":[],"mappings":""}"#)
+            .expect("outside map");
+        symlink(&outside_map, build_dir.path().join("app.js.map")).expect("map symlink");
+
+        let include = compile_glob_set(&["**/*.map".to_owned()], "--include").unwrap();
+        let exclude = compile_glob_set(&[], "--exclude").unwrap();
+        let err = collect_source_maps(
+            build_dir.path(),
+            build_dir.path(),
+            &include,
+            &exclude,
+            false,
+        )
+        .expect_err("outside-root symlink must be rejected");
+
+        assert!(
+            matches!(err, UploadSourceMapsError::Validation(ref message) if message.contains("outside selected build directory"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn collect_source_maps_accepts_symlink_to_target_inside_root() {
+        use std::os::unix::fs::symlink;
+
+        let build_dir = tempdir().expect("build dir");
+        let target = build_dir.path().join("source-map.json");
+        std::fs::write(&target, r#"{"version":3,"sources":[],"mappings":""}"#).expect("target map");
+        symlink(&target, build_dir.path().join("app.js.map")).expect("map symlink");
+
+        let include = compile_glob_set(&["**/*.map".to_owned()], "--include").unwrap();
+        let exclude = compile_glob_set(&[], "--exclude").unwrap();
+        let maps = collect_source_maps(
+            build_dir.path(),
+            build_dir.path(),
+            &include,
+            &exclude,
+            false,
+        )
+        .expect("inside-root symlink must be accepted");
+
+        assert_eq!(maps.len(), 1);
+        assert_eq!(maps[0].file_name, "app.js.map");
+        assert!(matches!(prepare_source_map(&maps[0]), MapOutcome::Ready(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_source_map_rejects_symlink_retargeted_after_collection() {
+        use std::os::unix::fs::symlink;
+
+        let build_dir = tempdir().expect("build dir");
+        let original = build_dir.path().join("original.json");
+        let replacement = build_dir.path().join("replacement.json");
+        std::fs::write(
+            &original,
+            r#"{"version":3,"sources":["original"],"mappings":""}"#,
+        )
+        .expect("original map");
+        std::fs::write(
+            &replacement,
+            r#"{"version":3,"sources":["replacement"],"mappings":""}"#,
+        )
+        .expect("replacement map");
+        let link = build_dir.path().join("app.js.map");
+        symlink(&original, &link).expect("original symlink");
+
+        let include = compile_glob_set(&["**/*.map".to_owned()], "--include").unwrap();
+        let exclude = compile_glob_set(&[], "--exclude").unwrap();
+        let maps = collect_source_maps(
+            build_dir.path(),
+            build_dir.path(),
+            &include,
+            &exclude,
+            false,
+        )
+        .expect("initial collection");
+        std::fs::remove_file(&link).expect("remove original symlink");
+        symlink(&replacement, &link).expect("replacement symlink");
+
+        assert!(matches!(
+            prepare_source_map(&maps[0]),
+            MapOutcome::Failed {
+                kind: FailureKind::Validation,
+                ref reason,
+                ..
+            } if reason.contains("changed since collection")
+        ));
+    }
+
     #[test]
     fn resolve_build_dir_joins_relative_paths() {
         let root = Path::new("/repo");
@@ -1083,13 +1229,7 @@ mod tests {
 
     #[test]
     fn all_network_failures_are_reported_as_network_exit() {
-        let candidate = SourceMapCandidate {
-            path: PathBuf::from("dist/app.js.map"),
-            rel_path: PathBuf::from("dist/app.js.map"),
-            file_name: "dist/app.js.map".to_owned(),
-            map_path: Some("dist/app.js.map".to_owned()),
-            bytes: 10,
-        };
+        let candidate = candidate(10, PathBuf::from("dist/app.js.map"));
         let outcomes = [MapOutcome::failed(
             &candidate,
             FailureKind::Network,
@@ -1113,11 +1253,18 @@ mod tests {
     }
 
     fn candidate(bytes: u64, path: PathBuf) -> SourceMapCandidate {
+        let resolved_path = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        let canonical_root = resolved_path
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .to_path_buf();
         SourceMapCandidate {
             rel_path: PathBuf::from("app.js.map"),
             file_name: "app.js.map".to_owned(),
             map_path: Some("app.js.map".to_owned()),
             path,
+            canonical_root,
+            resolved_path,
             bytes,
         }
     }
