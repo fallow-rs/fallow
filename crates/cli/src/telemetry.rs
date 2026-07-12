@@ -1336,7 +1336,7 @@ fn inspect(example: bool, output: OutputFormat) -> ExitCode {
 
 /// Point-in-time copy of every per-run accumulator `build_workflow_event`
 /// consumes. Production snapshots the process globals once per event; tests
-/// pass [`RunAccumulatorSnapshot::UNSET`] so the assertion is deterministic
+/// pass the test-only `RunAccumulatorSnapshot::UNSET` so the assertion is deterministic
 /// even while a PARALLEL test drives a real command path (e.g.
 /// `load_config_for_analysis` -> `note_config_shape`) that mutates the
 /// globals mid-test. A reset-before-read guard cannot close that race.
