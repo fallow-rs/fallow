@@ -340,7 +340,20 @@ pub fn run_pre_dispatch_checks(
         return Err(fail(code, telemetry::FailureReason::Validation));
     }
     report::github::set_report_path_prefix(cli.report_path_prefix.clone());
-    report::github::init_report_prefix(root);
+    // `init_report_prefix` shells out to `git rev-parse --show-toplevel`. Only
+    // the formats that read the resolved global (`report_prefix()`) need it:
+    // codeclimate applies it at the wire boundary, and review-{github,gitlab}
+    // apply it in the renderer, which has no `root` to re-derive it from. The
+    // github-native formats compute their rebase from `root` directly, so skip
+    // the probe for every other format.
+    if matches!(
+        output,
+        fallow_config::OutputFormat::CodeClimate
+            | fallow_config::OutputFormat::ReviewGithub
+            | fallow_config::OutputFormat::ReviewGitlab
+    ) {
+        report::github::init_report_prefix(root);
+    }
 
     parse_cli_tolerance(cli, output)
         .map_err(|code| fail(code, telemetry::FailureReason::Validation))
