@@ -915,8 +915,9 @@ use crate::base_worktree::{
     ReusableWorktreeLock, WorktreeCleanupGuard, audit_worktree_pid, days_to_duration,
     is_fallow_audit_worktree_path, is_reusable_audit_worktree_path, list_audit_worktrees,
     materialize_base_dependency_context, parse_worktree_list, paths_equal, process_is_alive,
-    remove_audit_worktree, reusable_worktree_last_used_path, reusable_worktree_lock_path,
-    sweep_orphan_audit_worktrees, touch_last_used,
+    remove_audit_worktree, reusable_audit_worktree_path, reusable_worktree_last_used_path,
+    reusable_worktree_lock_path, reusable_worktree_sha_path, sweep_orphan_audit_worktrees,
+    touch_last_used, unregister_worktree,
 };
 
 pub use fallow_api::audit_keys as keys;

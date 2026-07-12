@@ -5,12 +5,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 use fallow_engine::changed_files::clear_ambient_git_env;
+use rustc_hash::FxHashSet;
 use xxhash_rust::xxh3::xxh3_64;
 
 use crate::report::plural;
 
 pub struct BaseWorktree {
-    repo_root: PathBuf,
     path: PathBuf,
     persistent: bool,
 }
@@ -37,10 +37,14 @@ impl BaseWorktree {
             );
             return None;
         }
+        // Deregister immediately so a crash before Drop never leaves a git
+        // worktree admin entry behind (issue #1815). No early return runs
+        // between here and the struct binding, so defusing the guard next is
+        // safe: the entry is already unregistered.
+        unregister_worktree(guard.path());
         guard.defuse();
         drop(guard);
         let worktree = Self {
-            repo_root: repo_root.to_path_buf(),
             path,
             persistent: false,
         };
@@ -52,9 +56,10 @@ impl BaseWorktree {
         let path = reusable_audit_worktree_path(repo_root, base_sha);
         let _lock = ReusableWorktreeLock::try_acquire(&path)?;
 
-        if reusable_audit_worktree_is_ready(repo_root, &path, base_sha) {
+        if reusable_audit_worktree_is_ready(&path, base_sha)
+            || try_migrate_legacy_reusable_cache(repo_root, &path, base_sha)
+        {
             let worktree = Self {
-                repo_root: repo_root.to_path_buf(),
                 path,
                 persistent: true,
             };
@@ -63,7 +68,12 @@ impl BaseWorktree {
             return Some(worktree);
         }
 
-        remove_audit_worktree(repo_root, &path);
+        // Only deregister when a stale entry is actually still registered: an
+        // unregistered cache dir (the common case now) would otherwise emit a
+        // spurious `git worktree remove failed` warning on every rebuild.
+        if audit_worktree_is_registered(repo_root, &path) {
+            remove_audit_worktree(repo_root, &path);
+        }
         let _ = std::fs::remove_dir_all(&path);
         let mut guard = WorktreeCleanupGuard::new(repo_root, &path);
         if let Err(error) = fallow_engine::repo_refs::create_detached_base_worktree(
@@ -78,11 +88,16 @@ impl BaseWorktree {
             );
             return None;
         }
+        // Deregister while keeping the directory, then record the base SHA in
+        // the `.sha` sidecar. The sidecar is written strictly AFTER a
+        // successful materialization + deregistration (under the reuse lock),
+        // so a torn snapshot is never advertised as ready to the next run.
+        unregister_worktree(guard.path());
         guard.defuse();
         drop(guard);
+        write_reusable_sha(&path, base_sha);
 
         let worktree = Self {
-            repo_root: repo_root.to_path_buf(),
             path,
             persistent: true,
         };
@@ -204,14 +219,41 @@ impl ReusableWorktreeLock {
 }
 
 pub fn reusable_worktree_lock_path(reusable_path: &Path) -> PathBuf {
+    sidecar_path(reusable_path, REUSABLE_LOCK_SUFFIX)
+}
+
+/// Build a sidecar path `<cache dir name><suffix>` next to (NOT inside) the
+/// reusable cache directory, so the sidecar survives `git worktree`
+/// operations and directory materialization on the cache dir itself.
+fn sidecar_path(reusable_path: &Path, suffix: &str) -> PathBuf {
     let mut name = reusable_path
         .file_name()
         .map(std::ffi::OsString::from)
         .unwrap_or_default();
-    name.push(".lock");
+    name.push(suffix);
     reusable_path
         .parent()
         .map_or_else(|| PathBuf::from(&name), |parent| parent.join(&name))
+}
+
+/// Sidecar path recording the base SHA a reusable cache entry was
+/// materialized at. Lives next to the cache directory like the `.last-used` /
+/// `.lock` sidecars, so readiness can be verified without a `git` subprocess.
+pub fn reusable_worktree_sha_path(reusable_path: &Path) -> PathBuf {
+    sidecar_path(reusable_path, REUSABLE_SHA_SUFFIX)
+}
+
+/// Record the base SHA a reusable cache holds. Failure is non-fatal: this run
+/// proceeds and the next run rebuilds (a missing `.sha` reads as not-ready).
+fn write_reusable_sha(reusable_path: &Path, base_sha: &str) {
+    let sha_path = reusable_worktree_sha_path(reusable_path);
+    if let Err(err) = std::fs::write(&sha_path, format!("{base_sha}\n")) {
+        tracing::debug!(
+            path = %sha_path.display(),
+            error = %err,
+            "failed to write reusable audit worktree .sha sidecar; next run will rebuild",
+        );
+    }
 }
 
 /// Default GC threshold for persistent reusable base-snapshot caches.
@@ -223,19 +265,30 @@ const AUDIT_CACHE_MAX_AGE_ENV: &str = "FALLOW_AUDIT_CACHE_MAX_AGE_DAYS";
 /// Sidecar filename suffix used to track last-use of a reusable worktree.
 const REUSABLE_LAST_USED_SUFFIX: &str = ".last-used";
 
+/// Sidecar filename suffix recording the base SHA a reusable cache holds.
+const REUSABLE_SHA_SUFFIX: &str = ".sha";
+
+/// Sidecar filename suffix of the reuse-lock file.
+const REUSABLE_LOCK_SUFFIX: &str = ".lock";
+
+/// Invalid gitdir pointer written into `<cache>/.git` after deregistering a
+/// transient audit worktree (issue #1815).
+///
+/// The `.git` file is REPLACED, never deleted: both discovery walkers use the
+/// `ignore` crate with `require_git` on, whose gitignore handling is gated on
+/// `<root>/.git` existing. Deleting the gitfile would silently stop the base
+/// pass from honoring `.gitignore`, inflating base findings and skewing
+/// audit's introduced-vs-inherited split. The stub keeps gitignore parity
+/// while pointing at a nonexistent gitdir, so any stray `git` command inside
+/// the snapshot fails loudly instead of operating on the host repo.
+const UNREGISTERED_GITDIR_STUB: &str = "gitdir: fallow-audit-unregistered\n";
+
 /// Sidecar path for the "last used" timestamp of a reusable cache entry.
 ///
 /// Lives next to the cache directory (NOT inside it) so the sidecar is
 /// untouched by `git worktree add/remove` on the cache directory itself.
 pub fn reusable_worktree_last_used_path(reusable_path: &Path) -> PathBuf {
-    let mut name = reusable_path
-        .file_name()
-        .map(std::ffi::OsString::from)
-        .unwrap_or_default();
-    name.push(REUSABLE_LAST_USED_SUFFIX);
-    reusable_path
-        .parent()
-        .map_or_else(|| PathBuf::from(&name), |parent| parent.join(&name))
+    sidecar_path(reusable_path, REUSABLE_LAST_USED_SUFFIX)
 }
 
 /// Stamp the sidecar `.last-used` file's mtime to now.
@@ -350,28 +403,34 @@ fn load_audit_config(
 /// holding a kernel flock on different inodes. Lock files are tens of
 /// bytes; leaking them is harmless.
 pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, quiet: bool) {
-    let Some(worktrees) = list_audit_worktrees(repo_root) else {
-        return;
-    };
+    // Legacy pass: deregister reusable caches left REGISTERED by pre-#1815
+    // fallow (the reporter's `git worktree list` backlog). This is what makes
+    // those entries vanish on the first post-upgrade audit; the `--expire=now`
+    // prune is retained ONLY here to also sweep any admin entry orphaned by a
+    // crash in the transient registration window.
+    if deregister_legacy_reusable_caches(repo_root) {
+        let mut command = Command::new("git");
+        command
+            .args(["worktree", "prune", "--expire=now"])
+            .current_dir(repo_root);
+        clear_ambient_git_env(&mut command);
+        let _ = command.output();
+    }
+
+    // Primary pass: a repo-scoped temp-dir prefix scan (NOT `git worktree
+    // list`, which no longer sees the deregistered caches). Age-out and
+    // sidecar-orphan cleanup run on the unregistered entries.
+    let prefix = reusable_cache_repo_prefix(repo_root);
     let now = SystemTime::now();
     let mut removed: u32 = 0;
-    for path in worktrees {
-        if !is_reusable_audit_worktree_path(&path) {
-            continue;
-        }
-        if reclaim_reusable_cache_entry(repo_root, &path, max_age, now) {
+    for path in scan_reusable_cache_paths(&prefix) {
+        if reclaim_reusable_cache_entry(&path, max_age, now) {
             removed += 1;
         }
     }
     if removed == 0 {
         return;
     }
-    let mut command = Command::new("git");
-    command
-        .args(["worktree", "prune", "--expire=now"])
-        .current_dir(repo_root);
-    clear_ambient_git_env(&mut command);
-    let _ = command.output();
     tracing::info!(
         count = removed,
         "reclaimed stale audit base-snapshot caches",
@@ -385,34 +444,114 @@ pub fn sweep_old_reusable_caches(repo_root: &Path, max_age: Option<Duration>, qu
     }
 }
 
+/// Deregister reusable base-snapshot caches left REGISTERED by fallow versions
+/// before #1815. Seeds the `.sha` sidecar from the entry's HEAD first so a
+/// still-warm legacy cache stays reusable after deregistration. Returns `true`
+/// when at least one entry was deregistered.
+fn deregister_legacy_reusable_caches(repo_root: &Path) -> bool {
+    let Some(worktrees) = list_audit_worktrees(repo_root) else {
+        return false;
+    };
+    let mut deregistered = false;
+    for path in worktrees {
+        if !is_reusable_audit_worktree_path(&path) {
+            continue;
+        }
+        let Some(_lock) = ReusableWorktreeLock::try_acquire(&path) else {
+            continue;
+        };
+        if !audit_worktree_is_registered(repo_root, &path) {
+            continue;
+        }
+        seed_legacy_reusable_sha(&path);
+        unregister_worktree(&path);
+        deregistered = true;
+    }
+    deregistered
+}
+
+/// Seed the `.sha` sidecar for a still-registered legacy cache from its HEAD,
+/// so after deregistration the readiness probe recognizes it as warm. Seeds
+/// only when the snapshot was raw-materialized and no `.sha` exists yet.
+fn seed_legacy_reusable_sha(path: &Path) {
+    if reusable_worktree_sha_path(path).exists()
+        || !fallow_engine::repo_refs::detached_base_worktree_is_raw_materialized(path)
+    {
+        return;
+    }
+    if let Some(head) = git_rev_parse(path, "HEAD") {
+        write_reusable_sha(path, &head);
+    }
+}
+
+/// Enumerate reusable cache DIRECTORY paths for `prefix` by scanning the temp
+/// dir. Sidecar entries (`.last-used` / `.sha` / `.lock`) are folded back to
+/// their owning cache path and deduplicated, so a dir removed out from under
+/// its sidecars is still visited for sidecar-orphan cleanup.
+fn scan_reusable_cache_paths(prefix: &str) -> Vec<PathBuf> {
+    let temp = std::env::temp_dir();
+    let Ok(entries) = std::fs::read_dir(&temp) else {
+        return Vec::new();
+    };
+    let mut seen: FxHashSet<PathBuf> = FxHashSet::default();
+    let mut paths = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(prefix) {
+            continue;
+        }
+        let path = temp.join(strip_cache_sidecar_suffix(name));
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
+/// Strip a known reusable-cache sidecar suffix so a sidecar entry maps to its
+/// owning cache directory name. Cache dir names end in a hex SHA prefix and
+/// never contain these suffixes, so the mapping is unambiguous.
+fn strip_cache_sidecar_suffix(name: &str) -> &str {
+    for suffix in [
+        REUSABLE_LAST_USED_SUFFIX,
+        REUSABLE_SHA_SUFFIX,
+        REUSABLE_LOCK_SUFFIX,
+    ] {
+        if let Some(stripped) = name.strip_suffix(suffix) {
+            return stripped;
+        }
+    }
+    name
+}
+
 /// Reclaim a single reusable-cache entry. Returns `true` when the entry was
-/// removed (either as a prunable orphan or as aged-out past `max_age`).
-fn reclaim_reusable_cache_entry(
-    repo_root: &Path,
-    path: &Path,
-    max_age: Option<Duration>,
-    now: SystemTime,
-) -> bool {
-    // Prunable orphan: an external temp-reaper (macOS `$TMPDIR` cleanup,
+/// removed (either as a sidecar orphan or as aged-out past `max_age`).
+fn reclaim_reusable_cache_entry(path: &Path, max_age: Option<Duration>, now: SystemTime) -> bool {
+    // Sidecar orphan: an external temp-reaper (macOS `$TMPDIR` cleanup,
     // container restart, CI cache eviction) removed the cache directory but
-    // git's admin entry survives. The sidecar lives next to the dir and is
-    // not deleted by such a reaper, so the age branch would re-touch a fresh
-    // sidecar and never reclaim the dead entry. Reclaim eagerly, independent
-    // of `max_age`, so orphans do not accumulate even when age-based GC is
-    // disabled (`cacheMaxAgeDays = 0`).
+    // its sidecars survive next to it. Reclaim the leftover `.last-used` /
+    // `.sha` eagerly, independent of `max_age`, so orphans do not accumulate
+    // even when age-based GC is disabled (`cacheMaxAgeDays = 0`). This also
+    // fixes a leak that predates #1815: a manual `git worktree remove` left
+    // sidecars the old git-scoped sweep could never see.
     if !path.exists() {
-        return reclaim_orphan_cache_entry(repo_root, path);
+        return reclaim_orphan_cache_entry(path);
     }
     let Some(max_age) = max_age else {
         return false;
     };
-    reclaim_aged_cache_entry(repo_root, path, max_age, now)
+    reclaim_aged_cache_entry(path, max_age, now)
 }
 
-/// Reclaim a cache entry whose directory was deleted out from under git's
-/// admin record. Lock-guarded with a re-check so a concurrent rebuild that
-/// recreated the directory is preserved.
-fn reclaim_orphan_cache_entry(repo_root: &Path, path: &Path) -> bool {
+/// Reclaim the leftover sidecars of a cache directory that was deleted out
+/// from under them. Lock-guarded with a re-check so a concurrent rebuild that
+/// recreated the directory is preserved. The `.lock` sidecar is deliberately
+/// never removed (an unlinked-but-flocked inode plus a racer's `open(O_CREAT)`
+/// would split the lock across two inodes).
+fn reclaim_orphan_cache_entry(path: &Path) -> bool {
     let Some(_lock) = ReusableWorktreeLock::try_acquire(path) else {
         return false;
     };
@@ -421,20 +560,22 @@ fn reclaim_orphan_cache_entry(repo_root: &Path, path: &Path) -> bool {
     if path.exists() {
         return false;
     }
-    remove_audit_worktree(repo_root, path);
-    let _ = std::fs::remove_file(reusable_worktree_last_used_path(path));
+    let last_used = reusable_worktree_last_used_path(path);
+    let sha = reusable_worktree_sha_path(path);
+    if !last_used.exists() && !sha.exists() {
+        return false;
+    }
+    let _ = std::fs::remove_file(&last_used);
+    let _ = std::fs::remove_file(&sha);
     true
 }
 
 /// Reclaim a cache entry whose `.last-used` sidecar is older than `max_age`.
 /// Seeds a fresh sidecar for pre-upgrade entries that lack one (returns
-/// `false` so they age from real last-use on the next run).
-fn reclaim_aged_cache_entry(
-    repo_root: &Path,
-    path: &Path,
-    max_age: Duration,
-    now: SystemTime,
-) -> bool {
+/// `false` so they age from real last-use on the next run). Removal is
+/// directory-and-sidecars only: the entry is unregistered, so no `git`
+/// subprocess is involved.
+fn reclaim_aged_cache_entry(path: &Path, max_age: Duration, now: SystemTime) -> bool {
     let sidecar = reusable_worktree_last_used_path(path);
     let sidecar_mtime = std::fs::metadata(&sidecar)
         .ok()
@@ -452,7 +593,6 @@ fn reclaim_aged_cache_entry(
     let Some(_lock) = ReusableWorktreeLock::try_acquire(path) else {
         return false;
     };
-    remove_audit_worktree(repo_root, path);
     let dir_removed = match std::fs::remove_dir_all(path) {
         Ok(()) => true,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
@@ -466,25 +606,129 @@ fn reclaim_aged_cache_entry(
         }
     };
     let _ = std::fs::remove_file(&sidecar);
+    let _ = std::fs::remove_file(reusable_worktree_sha_path(path));
     dir_removed
 }
 
-fn reusable_audit_worktree_path(repo_root: &Path, base_sha: &str) -> PathBuf {
+/// Temp-dir basename prefix shared by every reusable cache entry of `repo_root`.
+///
+/// Scoping GC by this per-repo prefix keeps one repo's sweep from reclaiming
+/// another repo's caches (which would let a sibling repo defeat a
+/// `cacheMaxAgeDays = 0` opt-out). The hash matches
+/// [`reusable_audit_worktree_path`] exactly.
+fn reusable_cache_repo_prefix(repo_root: &Path) -> String {
     let repo_root = git_toplevel(repo_root).unwrap_or_else(|| repo_root.to_path_buf());
     let repo_root = dunce::canonicalize(&repo_root).unwrap_or(repo_root);
     let repo_hash = xxh3_64(repo_root.to_string_lossy().as_bytes());
+    format!("fallow-audit-base-cache-{repo_hash:016x}-")
+}
+
+pub fn reusable_audit_worktree_path(repo_root: &Path, base_sha: &str) -> PathBuf {
     let sha_prefix = base_sha.get(..16).unwrap_or(base_sha);
     std::env::temp_dir().join(format!(
-        "fallow-audit-base-cache-{repo_hash:016x}-{sha_prefix}"
+        "{}{sha_prefix}",
+        reusable_cache_repo_prefix(repo_root)
     ))
 }
 
-fn reusable_audit_worktree_is_ready(repo_root: &Path, path: &Path, base_sha: &str) -> bool {
+/// Readiness for a reusable cache HIT: the directory exists and its `.sha`
+/// sidecar records exactly `base_sha`.
+///
+/// Fidelity is equivalent to the old in-worktree `git rev-parse HEAD` probe:
+/// that probe read the host admin dir's HEAD, never the snapshot's on-disk
+/// content, so neither approach detects content damage. The `.sha` is only
+/// ever written after a successful materialization + deregistration, so a
+/// torn snapshot never presents a matching sidecar. On a hit the `.git` stub
+/// is repaired idempotently so gitignore parity holds even if the stub was
+/// removed out-of-band.
+fn reusable_audit_worktree_is_ready(path: &Path, base_sha: &str) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    let recorded = std::fs::read_to_string(reusable_worktree_sha_path(path))
+        .ok()
+        .map(|contents| contents.trim().to_owned());
+    if recorded.as_deref() != Some(base_sha) {
+        return false;
+    }
+    repair_unregistered_git_stub(path);
+    true
+}
+
+/// Migrate a pre-#1815 reusable cache that is still a REGISTERED git worktree.
+///
+/// Older fallow versions left the base-snapshot worktree registered. On the
+/// first run after upgrade, keep such a cache warm instead of rebuilding: if
+/// the registered worktree's HEAD (read via the one remaining in-worktree
+/// `git rev-parse`) matches `base_sha` and it was raw-materialized, seed the
+/// `.sha` sidecar, deregister it in place, and treat it as ready.
+fn try_migrate_legacy_reusable_cache(repo_root: &Path, path: &Path, base_sha: &str) -> bool {
     if !path.exists() || !audit_worktree_is_registered(repo_root, path) {
         return false;
     }
-    git_rev_parse(path, "HEAD").is_some_and(|head| head == base_sha)
-        && fallow_engine::repo_refs::detached_base_worktree_is_raw_materialized(path)
+    let head_matches = git_rev_parse(path, "HEAD").is_some_and(|head| head == base_sha);
+    if !head_matches || !fallow_engine::repo_refs::detached_base_worktree_is_raw_materialized(path)
+    {
+        return false;
+    }
+    write_reusable_sha(path, base_sha);
+    unregister_worktree(path);
+    true
+}
+
+/// Deregister a freshly-added audit worktree from git while KEEPING its
+/// directory on disk (issue #1815).
+///
+/// Targets the single admin dir this worktree owns via its `.git` gitfile
+/// pointer, rather than a global `git worktree prune`, so a user's unrelated
+/// prunable worktrees are never collaterally deregistered and git's
+/// name-collision admin suffixing (`<name>1`) is handled for free. The `.git`
+/// gitfile is REPLACED with an invalid stub (see [`UNREGISTERED_GITDIR_STUB`]),
+/// never deleted.
+pub fn unregister_worktree(path: &Path) {
+    let gitfile = path.join(".git");
+    if let Ok(contents) = std::fs::read_to_string(&gitfile)
+        && let Some(admin_dir) = parse_worktree_gitdir(&contents)
+        && is_fallow_admin_dir(&admin_dir)
+    {
+        let _ = std::fs::remove_dir_all(&admin_dir);
+    }
+    let _ = std::fs::write(&gitfile, UNREGISTERED_GITDIR_STUB);
+}
+
+/// Ensure a cache hit's `.git` stub stays valid. Recreates the stub if the
+/// gitfile is gone (so gitignore parity holds), and deregisters in place if a
+/// live pointer to a fallow admin dir is found (a mixed-version re-registration
+/// or a torn transient window).
+fn repair_unregistered_git_stub(path: &Path) {
+    let gitfile = path.join(".git");
+    match std::fs::read_to_string(&gitfile) {
+        Ok(contents) => {
+            if parse_worktree_gitdir(&contents).is_some_and(|admin| is_fallow_admin_dir(&admin)) {
+                unregister_worktree(path);
+            }
+        }
+        Err(_) => {
+            let _ = std::fs::write(&gitfile, UNREGISTERED_GITDIR_STUB);
+        }
+    }
+}
+
+/// Parse the `gitdir: <path>` pointer from a linked-worktree `.git` gitfile.
+fn parse_worktree_gitdir(contents: &str) -> Option<PathBuf> {
+    contents
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("gitdir:"))
+        .map(|rest| PathBuf::from(rest.trim()))
+}
+
+/// True when an admin dir basename is one fallow itself created, used as a
+/// safety belt before removing it.
+fn is_fallow_admin_dir(admin_dir: &Path) -> bool {
+    admin_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("fallow-audit-base-"))
 }
 
 pub fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
@@ -612,8 +856,32 @@ pub fn remove_audit_worktree(repo_root: &Path, path: &Path) {
 }
 
 pub fn sweep_orphan_audit_worktrees(repo_root: &Path) {
+    // Legacy pass: deregister dead-pid non-reusable worktrees left REGISTERED
+    // by pre-#1815 fallow (or by a crash in the transient registration
+    // window). The `--expire=now` prune, retained only here, also sweeps any
+    // now-dangling admin entry.
+    if deregister_legacy_orphan_worktrees(repo_root) {
+        let mut command = Command::new("git");
+        command
+            .args(["worktree", "prune", "--expire=now"])
+            .current_dir(repo_root);
+        clear_ambient_git_env(&mut command);
+        let _ = command.output();
+    }
+
+    // Primary pass: remove unregistered dead-pid worktree DIRECTORIES via a
+    // temp-dir prefix scan. A dead PID means the owning process is gone
+    // regardless of repo, so this scan is global (not repo-scoped).
+    for path in scan_non_reusable_orphan_paths() {
+        let _ = std::fs::remove_dir_all(&path);
+    }
+}
+
+/// Deregister dead-pid non-reusable worktrees left REGISTERED by pre-#1815
+/// fallow or by a crash mid-registration. Returns `true` when any were removed.
+fn deregister_legacy_orphan_worktrees(repo_root: &Path) -> bool {
     let Some(worktrees) = list_audit_worktrees(repo_root) else {
-        return;
+        return false;
     };
     let mut removed_any = false;
     for path in worktrees {
@@ -627,14 +895,31 @@ pub fn sweep_orphan_audit_worktrees(repo_root: &Path) {
         let _ = std::fs::remove_dir_all(&path);
         removed_any = true;
     }
-    if removed_any {
-        let mut command = Command::new("git");
-        command
-            .args(["worktree", "prune", "--expire=now"])
-            .current_dir(repo_root);
-        clear_ambient_git_env(&mut command);
-        let _ = command.output();
+    removed_any
+}
+
+/// Enumerate unregistered non-reusable worktree DIRECTORY paths owned by a
+/// dead PID. Reusable caches yield no parseable PID and are skipped.
+fn scan_non_reusable_orphan_paths() -> Vec<PathBuf> {
+    let temp = std::env::temp_dir();
+    let Ok(entries) = std::fs::read_dir(&temp) else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(pid) = audit_worktree_pid(name) else {
+            continue;
+        };
+        if process_is_alive(pid) || !entry.path().is_dir() {
+            continue;
+        }
+        paths.push(temp.join(name));
     }
+    paths
 }
 
 pub fn list_audit_worktrees(repo_root: &Path) -> Option<Vec<PathBuf>> {
@@ -797,7 +1082,9 @@ impl Drop for BaseWorktree {
         if self.persistent {
             return;
         }
-        remove_audit_worktree(&self.repo_root, &self.path);
+        // The non-reusable worktree was deregistered right after creation, so
+        // cleanup is a plain directory removal: no `git` subprocess runs, and
+        // a SIGKILL before this Drop can never leave an admin entry behind.
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }

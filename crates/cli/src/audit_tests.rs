@@ -273,18 +273,18 @@ fn worktree_is_registered_with_git(repo_root: &std::path::Path, worktree_path: &
         .is_some_and(|paths| paths.iter().any(|p| paths_equal(p, worktree_path)))
 }
 
-/// True when `git worktree list --porcelain` still carries an admin entry
-/// whose path ends with `worktree_path`'s basename. Unlike
-/// `worktree_is_registered_with_git`, this matches by basename against the
-/// raw porcelain output, so it stays correct even when the directory has
-/// been deleted (a prunable orphan): `paths_equal` canonicalization cannot
-/// match a missing path across the macOS `/var` -> `/private/var` symlink,
-/// but the unique nanos-suffixed basename is stable.
-fn worktree_admin_entry_present(repo_root: &std::path::Path, worktree_path: &Path) -> bool {
-    let basename = worktree_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .expect("reusable worktree path has a utf-8 basename");
+/// Count fallow-audit worktree entries visible in `git worktree list`. The
+/// #1815 fix keeps this at zero even while a base-snapshot cache exists on
+/// disk, so any fallow-owned entry here is a regression.
+fn registered_fallow_worktree_count(repo_root: &std::path::Path) -> usize {
+    list_audit_worktrees(repo_root).map_or(0, |paths| paths.len())
+}
+
+/// True when `path` appears in the raw `git worktree list --porcelain` output,
+/// regardless of naming. Unlike `worktree_is_registered_with_git` this does
+/// not filter to fallow-owned entries, so it can assert a user's own worktree
+/// stays registered.
+fn git_worktree_list_contains(repo_root: &std::path::Path, path: &Path) -> bool {
     let output = Command::new("git")
         .args(["worktree", "list", "--porcelain"])
         .current_dir(repo_root)
@@ -295,7 +295,7 @@ fn worktree_admin_entry_present(repo_root: &std::path::Path, worktree_path: &Pat
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
-        .any(|p| p.ends_with(basename))
+        .any(|listed| paths_equal(&PathBuf::from(listed), path))
 }
 
 #[test]
@@ -455,20 +455,31 @@ fn audit_orphan_sweep_keeps_live_pid_worktree() {
     let _ = fs::remove_dir_all(&worktree_path);
 }
 
-/// Build a reusable-shaped worktree path inside the system tempdir
-/// (so `is_reusable_audit_worktree_path` and `path_is_inside_temp_dir`
-/// both match), uniquified by nanos so parallel tests do not collide.
-fn make_reusable_path(label: &str) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock should be after epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!("fallow-audit-base-cache-{label}-{nanos:032x}"))
+/// Deterministic fake base SHA for GC tests. Only the first 16 chars form the
+/// cache-path suffix; the repo hash (derived from each test's unique tempdir)
+/// keeps parallel tests from colliding, so the SHA value can be shared.
+const TEST_BASE_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+
+/// Materialize an UNREGISTERED reusable cache directory at the path
+/// `reuse_or_create` computes for `repo`/[`TEST_BASE_SHA`], mirroring the
+/// post-#1815 on-disk layout (a directory, an invalid `.git` stub, and a
+/// `.sha` sidecar). Returns the cache path.
+fn create_unregistered_reusable_cache(repo: &Path) -> PathBuf {
+    let path = reusable_audit_worktree_path(repo, TEST_BASE_SHA);
+    fs::create_dir_all(&path).expect("reusable cache dir should be created");
+    fs::write(path.join(".git"), "gitdir: fallow-audit-unregistered\n")
+        .expect("stub .git should be written");
+    fs::write(
+        reusable_worktree_sha_path(&path),
+        format!("{TEST_BASE_SHA}\n"),
+    )
+    .expect(".sha sidecar should be written");
+    path
 }
 
 /// Register a worktree with the parent repo at `path` checked out at HEAD.
-/// Mirrors what `BaseWorktree::reuse_or_create` does for the fresh-create
-/// path so the GC sweep tests can build real cache entries.
+/// Simulates a pre-#1815 cache entry (left registered) for the legacy
+/// migration / GC deregistration tests.
 fn register_reusable_worktree(repo: &Path, path: &Path) {
     git(
         repo,
@@ -498,12 +509,13 @@ fn write_sidecar_with_age(path: &Path, age: Duration) {
         .expect("set_modified should succeed");
 }
 
-/// Tear down a reusable worktree (git registration + dir + sidecar + lock)
+/// Tear down a reusable worktree (git registration + dir + sidecars + lock)
 /// regardless of which of those the test created. Idempotent.
 fn cleanup_reusable_worktree(repo: &Path, path: &Path) {
     remove_audit_worktree(repo, path);
     let _ = fs::remove_dir_all(path);
     let _ = fs::remove_file(reusable_worktree_last_used_path(path));
+    let _ = fs::remove_file(reusable_worktree_sha_path(path));
     let _ = fs::remove_file(reusable_worktree_lock_path(path));
 }
 
@@ -511,8 +523,7 @@ fn cleanup_reusable_worktree(repo: &Path, path: &Path) {
 fn reusable_cache_gc_removes_old_entry_with_backdated_sidecar() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-gc-remove");
-    let worktree_path = make_reusable_path("gc-remove");
-    register_reusable_worktree(&repo, &worktree_path);
+    let worktree_path = create_unregistered_reusable_cache(&repo);
     write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
 
     sweep_old_reusable_caches(&repo, Some(Duration::from_hours(30 * 24)), true);
@@ -522,12 +533,17 @@ fn reusable_cache_gc_removes_old_entry_with_backdated_sidecar() {
         "sweep should remove worktree dir whose sidecar is older than the threshold",
     );
     assert!(
-        !worktree_is_registered_with_git(&repo, &worktree_path),
-        "sweep should unregister the worktree from git",
-    );
-    assert!(
         !reusable_worktree_last_used_path(&worktree_path).exists(),
         "sweep should remove the sidecar `.last-used` file alongside the worktree",
+    );
+    assert!(
+        !reusable_worktree_sha_path(&worktree_path).exists(),
+        "sweep should remove the `.sha` sidecar alongside the worktree",
+    );
+    assert_eq!(
+        registered_fallow_worktree_count(&repo),
+        0,
+        "an unregistered cache must never appear in git worktree list",
     );
     cleanup_reusable_worktree(&repo, &worktree_path);
 }
@@ -536,8 +552,7 @@ fn reusable_cache_gc_removes_old_entry_with_backdated_sidecar() {
 fn reusable_cache_gc_keeps_fresh_entry() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-gc-keep");
-    let worktree_path = make_reusable_path("gc-keep");
-    register_reusable_worktree(&repo, &worktree_path);
+    let worktree_path = create_unregistered_reusable_cache(&repo);
     write_sidecar_with_age(&worktree_path, Duration::from_mins(1));
 
     sweep_old_reusable_caches(&repo, Some(Duration::from_hours(30 * 24)), true);
@@ -546,10 +561,6 @@ fn reusable_cache_gc_keeps_fresh_entry() {
         worktree_path.is_dir(),
         "sweep must not remove a worktree whose sidecar is fresher than the threshold",
     );
-    assert!(
-        worktree_is_registered_with_git(&repo, &worktree_path),
-        "sweep must not unregister a fresh worktree",
-    );
     cleanup_reusable_worktree(&repo, &worktree_path);
 }
 
@@ -557,8 +568,7 @@ fn reusable_cache_gc_keeps_fresh_entry() {
 fn reusable_cache_gc_skips_locked_entry() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-gc-locked");
-    let worktree_path = make_reusable_path("gc-locked");
-    register_reusable_worktree(&repo, &worktree_path);
+    let worktree_path = create_unregistered_reusable_cache(&repo);
     write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
 
     let lock = ReusableWorktreeLock::try_acquire(&worktree_path)
@@ -570,10 +580,6 @@ fn reusable_cache_gc_skips_locked_entry() {
         worktree_path.is_dir(),
         "sweep must skip a locked entry even when its sidecar is stale",
     );
-    assert!(
-        worktree_is_registered_with_git(&repo, &worktree_path),
-        "sweep must not unregister a locked entry",
-    );
     drop(lock);
     cleanup_reusable_worktree(&repo, &worktree_path);
 }
@@ -582,8 +588,10 @@ fn reusable_cache_gc_skips_locked_entry() {
 fn reusable_cache_gc_grace_when_sidecar_absent() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-gc-grace");
-    let worktree_path = make_reusable_path("gc-grace");
-    register_reusable_worktree(&repo, &worktree_path);
+    // Bare directory with no `.last-used` sidecar, modelling a pre-upgrade
+    // warm cache the sweep sees for the first time.
+    let worktree_path = reusable_audit_worktree_path(&repo, TEST_BASE_SHA);
+    fs::create_dir_all(&worktree_path).expect("cache dir should be created");
     let sidecar = reusable_worktree_last_used_path(&worktree_path);
     assert!(
         !sidecar.exists(),
@@ -614,74 +622,66 @@ fn reusable_cache_gc_grace_when_sidecar_absent() {
 }
 
 #[test]
-fn reusable_cache_gc_reclaims_prunable_orphan_when_dir_missing() {
+fn reusable_cache_gc_reclaims_sidecar_orphan_when_dir_missing() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-gc-orphan");
-    let worktree_path = make_reusable_path("gc-orphan");
-    register_reusable_worktree(&repo, &worktree_path);
+    let worktree_path = create_unregistered_reusable_cache(&repo);
     // Fresh sidecar: the age branch alone would KEEP this entry, so a
     // successful reclaim proves the dir-missing branch drove it.
     write_sidecar_with_age(&worktree_path, Duration::from_mins(1));
-    let sidecar = reusable_worktree_last_used_path(&worktree_path);
+    let last_used = reusable_worktree_last_used_path(&worktree_path);
+    let sha = reusable_worktree_sha_path(&worktree_path);
 
     // Simulate an external temp-reaper: delete only the worktree directory,
-    // leaving git's admin entry and the sidecar behind.
+    // leaving its sidecars behind.
     fs::remove_dir_all(&worktree_path).expect("test should remove the cache dir");
     assert!(
         !worktree_path.exists(),
         "test pre-condition: cache dir should be gone",
     );
     assert!(
-        worktree_admin_entry_present(&repo, &worktree_path),
-        "test pre-condition: git admin entry should still be registered (prunable)",
-    );
-    assert!(
-        sidecar.exists(),
-        "test pre-condition: sidecar survives a dir-only reaper",
+        last_used.exists() && sha.exists(),
+        "test pre-condition: sidecars survive a dir-only reaper",
     );
 
     sweep_old_reusable_caches(&repo, Some(Duration::from_hours(30 * 24)), true);
 
     assert!(
-        !worktree_admin_entry_present(&repo, &worktree_path),
-        "sweep should unregister a prunable orphan whose dir was externally removed",
+        !last_used.exists(),
+        "sweep should remove the stale `.last-used` sidecar for a reclaimed orphan",
     );
     assert!(
-        !sidecar.exists(),
-        "sweep should remove the stale sidecar for a reclaimed orphan",
+        !sha.exists(),
+        "sweep should remove the stale `.sha` sidecar for a reclaimed orphan",
     );
     cleanup_reusable_worktree(&repo, &worktree_path);
 }
 
 #[test]
-fn reusable_cache_gc_reclaims_prunable_orphan_even_when_age_gc_disabled() {
+fn reusable_cache_gc_reclaims_sidecar_orphan_even_when_age_gc_disabled() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-gc-orphan-nogc");
-    let worktree_path = make_reusable_path("gc-orphan-nogc");
-    register_reusable_worktree(&repo, &worktree_path);
+    let worktree_path = create_unregistered_reusable_cache(&repo);
     write_sidecar_with_age(&worktree_path, Duration::from_mins(1));
-    let sidecar = reusable_worktree_last_used_path(&worktree_path);
+    let last_used = reusable_worktree_last_used_path(&worktree_path);
+    let sha = reusable_worktree_sha_path(&worktree_path);
     fs::remove_dir_all(&worktree_path).expect("test should remove the cache dir");
     assert!(
-        worktree_admin_entry_present(&repo, &worktree_path),
-        "test pre-condition: git admin entry should still be registered (prunable)",
-    );
-    assert!(
-        sidecar.exists(),
-        "test pre-condition: sidecar survives a dir-only reaper",
+        last_used.exists() && sha.exists(),
+        "test pre-condition: sidecars survive a dir-only reaper",
     );
 
-    // `None` = age-based GC disabled (`cacheMaxAgeDays = 0`). Orphan reclaim
-    // must still run so dead admin entries do not accumulate forever.
+    // `None` = age-based GC disabled (`cacheMaxAgeDays = 0`). Sidecar-orphan
+    // reclaim must still run so dead sidecars do not accumulate forever.
     sweep_old_reusable_caches(&repo, None, true);
 
     assert!(
-        !worktree_admin_entry_present(&repo, &worktree_path),
+        !last_used.exists(),
         "orphan reclaim must run even when age-based GC is disabled",
     );
     assert!(
-        !sidecar.exists(),
-        "sweep should remove the stale sidecar even when age-based GC is disabled",
+        !sha.exists(),
+        "sweep should remove the stale `.sha` sidecar even when age-based GC is disabled",
     );
     cleanup_reusable_worktree(&repo, &worktree_path);
 }
@@ -690,8 +690,7 @@ fn reusable_cache_gc_reclaims_prunable_orphan_even_when_age_gc_disabled() {
 fn reusable_cache_gc_preserves_lock_file_after_removal() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-gc-lockfile");
-    let worktree_path = make_reusable_path("gc-lockfile");
-    register_reusable_worktree(&repo, &worktree_path);
+    let worktree_path = create_unregistered_reusable_cache(&repo);
     write_sidecar_with_age(&worktree_path, Duration::from_hours(31 * 24));
     let lock_path = reusable_worktree_lock_path(&worktree_path);
     drop(ReusableWorktreeLock::try_acquire(&worktree_path).expect("test should acquire the lock"));
@@ -712,6 +711,26 @@ fn reusable_cache_gc_preserves_lock_file_after_removal() {
     );
     let _ = fs::remove_file(&lock_path);
     cleanup_reusable_worktree(&repo, &worktree_path);
+}
+
+#[test]
+fn reusable_cache_gc_ignores_other_repo_hash_entries() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-gc-scope-self");
+    let other_repo = init_throwaway_repo(tmp.path(), "repo-gc-scope-other");
+    // An aged-out cache belonging to a DIFFERENT repo. `repo`'s sweep is
+    // scoped to `repo`'s hash prefix, so it must not touch this entry (which
+    // would let one repo defeat another's `cacheMaxAgeDays = 0`).
+    let other_path = create_unregistered_reusable_cache(&other_repo);
+    write_sidecar_with_age(&other_path, Duration::from_hours(31 * 24));
+
+    sweep_old_reusable_caches(&repo, Some(Duration::from_hours(30 * 24)), true);
+
+    assert!(
+        other_path.is_dir(),
+        "a repo's sweep must not reclaim another repo's aged cache entry",
+    );
+    cleanup_reusable_worktree(&other_repo, &other_path);
 }
 
 #[test]
@@ -738,43 +757,347 @@ fn reuse_or_create_stamps_sidecar_on_fresh_create() {
         initial_age < Duration::from_mins(1),
         "fresh-create sidecar mtime should be near now(), got age {initial_age:?}",
     );
+    assert_eq!(
+        fs::read_to_string(reusable_worktree_sha_path(&cache_path))
+            .expect(".sha sidecar should exist")
+            .trim(),
+        base_sha,
+        "fresh-create must record the base SHA in the `.sha` sidecar",
+    );
+    assert!(
+        cache_path.join(".git").is_file(),
+        "fresh-create must leave a `.git` stub file (deregistered, gitignore parity)",
+    );
+    assert_eq!(
+        registered_fallow_worktree_count(&repo),
+        0,
+        "fresh-create must not register the cache worktree with git",
+    );
 
     drop(worktree);
     cleanup_reusable_worktree(&repo, &cache_path);
 }
 
+/// Headline regression for issue #1815: a persistent-cache base worktree must
+/// not register with git while its cache dir exists on disk, and a second
+/// create with the same base SHA must reuse the checkout (a marker survives)
+/// WITHOUT ever re-registering.
 #[test]
-fn reusable_worktree_without_raw_materialization_marker_is_rebuilt() {
+fn base_worktree_reusable_create_leaves_no_registered_entry() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-    let repo = init_throwaway_repo(tmp.path(), "repo-legacy-reusable");
+    let repo = init_throwaway_repo(tmp.path(), "repo-1815-headline");
     let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
-    let initial = BaseWorktree::reuse_or_create(&repo, &base_sha)
-        .expect("initial reusable worktree should be created");
-    let worktree_path = initial.path().to_path_buf();
-    drop(initial);
-    let marker_output = Command::new("git")
-        .args(["rev-parse", "--git-path", "fallow-raw-materialized-v1"])
-        .current_dir(&worktree_path)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .output()
-        .expect("materialization marker path should resolve");
-    assert!(marker_output.status.success());
-    let marker = PathBuf::from(String::from_utf8_lossy(&marker_output.stdout).trim());
-    let _ = fs::remove_file(marker);
-    fs::write(worktree_path.join("README.md"), "tampered\n")
-        .expect("legacy worktree should be mutable");
 
-    let rebuilt = BaseWorktree::reuse_or_create(&repo, &base_sha)
-        .expect("legacy reusable worktree should be rebuilt");
-
-    assert_eq!(rebuilt.path(), worktree_path);
-    assert_eq!(
-        fs::read_to_string(rebuilt.path().join("README.md")).expect("read rebuilt file"),
-        "seed\n",
-        "an unmarked legacy cache must not bypass raw materialization"
+    let first = BaseWorktree::create(&repo, "HEAD", Some(&base_sha))
+        .expect("persistent base worktree should be created");
+    let cache_path = first.path().to_path_buf();
+    assert!(cache_path.is_dir(), "cache directory should exist on disk");
+    assert!(
+        cache_path.join(".git").is_file(),
+        "unregistered cache must keep a `.git` stub file for gitignore parity",
     );
-    cleanup_reusable_worktree(&repo, rebuilt.path());
+    assert_eq!(
+        registered_fallow_worktree_count(&repo),
+        0,
+        "a persistent-cache audit must leave zero fallow entries in git worktree list",
+    );
+    let marker = cache_path.join(".fallow-reuse-marker");
+    fs::write(&marker, "keep").expect("marker should be written");
+    drop(first);
+
+    let second = BaseWorktree::create(&repo, "HEAD", Some(&base_sha))
+        .expect("second create should reuse the cache");
+    assert_eq!(
+        second.path(),
+        cache_path,
+        "same base SHA should reuse the same cache dir",
+    );
+    assert!(
+        marker.is_file(),
+        "reuse must preserve the checkout (marker file survives) without a rebuild",
+    );
+    assert_eq!(
+        registered_fallow_worktree_count(&repo),
+        0,
+        "reuse must not re-register the cache worktree",
+    );
+    drop(second);
+    cleanup_reusable_worktree(&repo, &cache_path);
+}
+
+/// The non-reusable pid-named path must also stay unregistered, and its Drop
+/// must remove the directory without a git subprocess.
+#[test]
+fn base_worktree_non_reusable_create_leaves_no_registered_entry() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-1815-nonreusable");
+
+    let worktree = BaseWorktree::create(&repo, "HEAD", None)
+        .expect("non-reusable base worktree should be created");
+    let path = worktree.path().to_path_buf();
+    assert!(path.is_dir());
+    assert!(
+        !is_reusable_audit_worktree_path(&path),
+        "None base_sha must select the pid-named non-reusable path",
+    );
+    assert!(
+        path.join(".git").is_file(),
+        "non-reusable cache must keep a `.git` stub file",
+    );
+    assert_eq!(
+        registered_fallow_worktree_count(&repo),
+        0,
+        "non-reusable create must not register with git",
+    );
+
+    drop(worktree);
+    assert!(
+        !path.exists(),
+        "Drop should remove the non-reusable worktree directory",
+    );
+    assert_eq!(registered_fallow_worktree_count(&repo), 0);
+}
+
+/// Readiness keys off the `.sha` sidecar: a matching SHA reuses the checkout;
+/// a mismatched or missing `.sha` forces a rebuild.
+#[test]
+fn reusable_cache_reuses_on_sha_match_rebuilds_on_mismatch_or_missing() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-sha-readiness");
+    let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
+
+    let first = BaseWorktree::reuse_or_create(&repo, &base_sha)
+        .expect("fresh reusable worktree should be created");
+    let cache_path = first.path().to_path_buf();
+    let sha_path = reusable_worktree_sha_path(&cache_path);
+    let marker = cache_path.join(".fallow-reuse-marker");
+    fs::write(&marker, "keep").expect("marker should be written");
+    drop(first);
+
+    // Matching .sha reuses (marker survives).
+    let reused =
+        BaseWorktree::reuse_or_create(&repo, &base_sha).expect("matching .sha should reuse");
+    assert_eq!(reused.path(), cache_path);
+    assert!(marker.is_file(), "matching .sha must reuse without rebuild");
+    drop(reused);
+
+    // Mismatched .sha -> rebuild wipes the marker and rewrites the sidecar.
+    fs::write(&sha_path, "ffffffffffffffff\n").expect("sha should be overwritable");
+    let rebuilt =
+        BaseWorktree::reuse_or_create(&repo, &base_sha).expect("mismatched .sha should rebuild");
+    assert_eq!(rebuilt.path(), cache_path);
+    assert!(
+        !marker.exists(),
+        "mismatched .sha must force a rebuild (marker wiped)",
+    );
+    assert_eq!(
+        fs::read_to_string(&sha_path).expect("sha rewritten").trim(),
+        base_sha,
+        "rebuild rewrites the .sha to the current base SHA",
+    );
+    fs::write(&marker, "keep2").expect("marker rewrite");
+    drop(rebuilt);
+
+    // Missing .sha -> rebuild wipes the marker.
+    fs::remove_file(&sha_path).expect("sha removable");
+    let rebuilt2 =
+        BaseWorktree::reuse_or_create(&repo, &base_sha).expect("missing .sha should rebuild");
+    assert!(!marker.exists(), "missing .sha must force a rebuild");
+    drop(rebuilt2);
+    cleanup_reusable_worktree(&repo, &cache_path);
+}
+
+/// A cache hit whose `.git` stub was lost out-of-band must be repaired, so
+/// gitignore parity holds on the next base pass.
+#[test]
+fn reusable_cache_stub_git_repaired_on_cache_hit() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-stub-repair");
+    let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
+    let first =
+        BaseWorktree::reuse_or_create(&repo, &base_sha).expect("fresh create should succeed");
+    let cache_path = first.path().to_path_buf();
+    let git_stub = cache_path.join(".git");
+    assert!(git_stub.is_file(), "fresh create writes a .git stub");
+    drop(first);
+    fs::remove_file(&git_stub).expect("stub removable");
+
+    let reused = BaseWorktree::reuse_or_create(&repo, &base_sha).expect("cache hit should succeed");
+    assert_eq!(reused.path(), cache_path);
+    assert!(
+        git_stub.is_file(),
+        "cache hit must repair the missing .git stub for gitignore parity",
+    );
+    assert_eq!(registered_fallow_worktree_count(&repo), 0);
+    drop(reused);
+    cleanup_reusable_worktree(&repo, &cache_path);
+}
+
+/// The load-bearing gitignore-parity guard (issue #1815 risk #1): a
+/// tracked-but-gitignored file is materialized on the snapshot but must be
+/// EXCLUDED from discovery, exactly as in a real worktree. Without the `.git`
+/// stub the `ignore` crate's require_git default would stop applying
+/// `.gitignore` and analyze the file on base but not head.
+#[test]
+fn base_snapshot_discovery_honors_gitignore_via_stub_git() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let root = tmp.path().join("repo");
+    fs::create_dir_all(root.join("src")).expect("src dir should be created");
+    fs::write(root.join(".gitignore"), "secret.ts\n").expect("gitignore should be written");
+    fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("index should be written");
+    fs::write(root.join("src/secret.ts"), "export const secret = 2;\n")
+        .expect("secret should be written");
+    git(&root, &["init", "-b", "main"]);
+    // Force-add the gitignored file so it is TRACKED yet gitignored.
+    git(&root, &["add", "-f", "."]);
+    git(
+        &root,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+    );
+    let base_sha = git_rev_parse(&root, "HEAD").expect("HEAD should resolve");
+
+    let worktree = BaseWorktree::create(&root, "HEAD", Some(&base_sha))
+        .expect("base worktree should be created");
+    let cache_path = worktree.path().to_path_buf();
+    assert!(
+        cache_path.join("src/secret.ts").is_file(),
+        "raw materialization writes the full committed tree, including gitignored tracked files",
+    );
+
+    let project = fallow_engine::project_config::config_for_project(&cache_path, None)
+        .expect("base config should resolve");
+    let (files, _) =
+        fallow_engine::discover::discover_files_and_config_candidates(&project.config, &[]);
+    let names: Vec<String> = files
+        .iter()
+        .filter_map(|file| {
+            file.path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
+        .collect();
+    assert!(
+        names.iter().any(|name| name == "index.ts"),
+        "normal tracked source must be discovered on the base snapshot",
+    );
+    assert!(
+        !names.iter().any(|name| name == "secret.ts"),
+        "gitignored tracked file must be EXCLUDED from base discovery (require_git parity)",
+    );
+    drop(worktree);
+    cleanup_reusable_worktree(&root, &cache_path);
+}
+
+/// `unregister_worktree` targets only the admin entry its own gitfile points
+/// at, so a user's unrelated worktree is never collaterally deregistered.
+#[test]
+fn unregister_worktree_targets_only_its_own_admin_entry() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-unregister-targeted");
+    let fallow_path = reusable_audit_worktree_path(&repo, TEST_BASE_SHA);
+    register_reusable_worktree(&repo, &fallow_path);
+    let user_path = tmp.path().join("user-feature-worktree");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            "--quiet",
+            user_path.to_str().expect("path is utf-8"),
+            "HEAD",
+        ],
+    );
+    assert!(worktree_is_registered_with_git(&repo, &fallow_path));
+    assert!(git_worktree_list_contains(&repo, &user_path));
+
+    unregister_worktree(&fallow_path);
+
+    assert!(
+        !worktree_is_registered_with_git(&repo, &fallow_path),
+        "the fallow worktree must be deregistered",
+    );
+    assert!(
+        fallow_path.is_dir() && fallow_path.join(".git").is_file(),
+        "unregister keeps the directory and writes a stub .git",
+    );
+    assert!(
+        git_worktree_list_contains(&repo, &user_path),
+        "a user's unrelated worktree must NOT be deregistered",
+    );
+    let _ = fs::remove_dir_all(&fallow_path);
+    remove_audit_worktree(&repo, &user_path);
+    let _ = fs::remove_dir_all(&user_path);
+}
+
+/// A pre-#1815 reusable cache left REGISTERED must be deregistered on the
+/// first post-upgrade reuse, with the warm checkout preserved and the `.sha`
+/// sidecar seeded from its HEAD.
+#[test]
+fn legacy_registered_reusable_cache_is_deregistered_and_reused_warm() {
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-legacy-migrate");
+    let base_sha = git_rev_parse(&repo, "HEAD").expect("HEAD should resolve");
+    let cache_path = reusable_audit_worktree_path(&repo, &base_sha);
+    // Materialize via the engine (registers + writes the raw-materialization
+    // marker), mirroring the pre-#1815 on-disk shape.
+    fallow_engine::repo_refs::create_detached_base_worktree(&repo, &cache_path, &base_sha)
+        .expect("legacy worktree should materialize");
+    assert!(worktree_is_registered_with_git(&repo, &cache_path));
+    assert!(
+        !reusable_worktree_sha_path(&cache_path).exists(),
+        "pre-condition: a legacy entry has no .sha sidecar",
+    );
+    let marker = cache_path.join(".fallow-reuse-marker");
+    fs::write(&marker, "warm").expect("marker should be written");
+
+    let migrated = BaseWorktree::reuse_or_create(&repo, &base_sha)
+        .expect("legacy cache should migrate and reuse");
+    assert_eq!(migrated.path(), cache_path);
+    assert!(
+        marker.is_file(),
+        "a warm legacy cache must be reused, not rebuilt",
+    );
+    assert!(
+        !worktree_is_registered_with_git(&repo, &cache_path),
+        "legacy cache must be deregistered on migration",
+    );
+    assert_eq!(
+        fs::read_to_string(reusable_worktree_sha_path(&cache_path))
+            .expect(".sha should be seeded")
+            .trim(),
+        base_sha,
+        ".sha sidecar seeded from the legacy entry's HEAD",
+    );
+    drop(migrated);
+    cleanup_reusable_worktree(&repo, &cache_path);
+}
+
+/// An unregistered dead-pid worktree directory (a crash in the transient
+/// registration window) is swept by the temp-dir prefix scan.
+#[test]
+fn orphan_sweep_removes_unregistered_dead_pid_dir() {
+    const DEAD_PID: u32 = 99_999_998;
+    assert!(!process_is_alive(DEAD_PID));
+    let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+    let repo = init_throwaway_repo(tmp.path(), "repo-unreg-orphan");
+    let dir = std::env::temp_dir().join(format!(
+        "fallow-audit-base-{DEAD_PID}-{}-0",
+        SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("orphan dir should be created");
+    fs::write(dir.join(".git"), "gitdir: fallow-audit-unregistered\n").expect("stub should write");
+
+    sweep_orphan_audit_worktrees(&repo);
+
+    assert!(
+        !dir.exists(),
+        "an unregistered dead-pid worktree dir must be swept",
+    );
 }
 
 #[test]
