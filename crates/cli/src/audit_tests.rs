@@ -378,7 +378,10 @@ fn audit_orphan_sweep_removes_dead_pid_worktree() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo");
 
-    let worktree_path = std::env::temp_dir().join(format!(
+    // Under tmp.path(), NOT std::env::temp_dir(): a fabricated dead-pid dir in
+    // the shared temp dir is legitimate prey for any concurrent sweep (a
+    // parallel test or a spawned fallow binary), which races the asserts below.
+    let worktree_path = tmp.path().join(format!(
         "fallow-audit-base-{}-{}",
         DEAD_PID,
         std::time::SystemTime::now()
@@ -400,7 +403,7 @@ fn audit_orphan_sweep_removes_dead_pid_worktree() {
     assert!(worktree_path.is_dir());
     assert!(worktree_is_registered_with_git(&repo, &worktree_path));
 
-    sweep_orphan_audit_worktrees(&repo);
+    sweep_orphan_audit_worktrees_in(&repo, tmp.path());
 
     assert!(
         !worktree_path.exists(),
@@ -420,7 +423,7 @@ fn audit_orphan_sweep_keeps_live_pid_worktree() {
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo");
 
-    let worktree_path = std::env::temp_dir().join(format!(
+    let worktree_path = tmp.path().join(format!(
         "fallow-audit-base-{}-{}",
         live_pid,
         std::time::SystemTime::now()
@@ -440,7 +443,7 @@ fn audit_orphan_sweep_keeps_live_pid_worktree() {
         ],
     );
 
-    sweep_orphan_audit_worktrees(&repo);
+    sweep_orphan_audit_worktrees_in(&repo, tmp.path());
 
     assert!(
         worktree_path.is_dir(),
@@ -1082,7 +1085,7 @@ fn orphan_sweep_removes_unregistered_dead_pid_dir() {
     assert!(!process_is_alive(DEAD_PID));
     let tmp = tempfile::TempDir::new().expect("temp dir should be created");
     let repo = init_throwaway_repo(tmp.path(), "repo-unreg-orphan");
-    let dir = std::env::temp_dir().join(format!(
+    let dir = tmp.path().join(format!(
         "fallow-audit-base-{DEAD_PID}-{}-0",
         SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1092,7 +1095,7 @@ fn orphan_sweep_removes_unregistered_dead_pid_dir() {
     fs::create_dir_all(&dir).expect("orphan dir should be created");
     fs::write(dir.join(".git"), "gitdir: fallow-audit-unregistered\n").expect("stub should write");
 
-    sweep_orphan_audit_worktrees(&repo);
+    sweep_orphan_audit_worktrees_in(&repo, tmp.path());
 
     assert!(
         !dir.exists(),

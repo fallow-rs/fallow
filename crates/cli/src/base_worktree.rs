@@ -856,6 +856,15 @@ pub fn remove_audit_worktree(repo_root: &Path, path: &Path) {
 }
 
 pub fn sweep_orphan_audit_worktrees(repo_root: &Path) {
+    sweep_orphan_audit_worktrees_in(repo_root, &std::env::temp_dir());
+}
+
+/// `temp_root` is the directory scanned for unregistered dead-pid worktree
+/// directories. Production always passes `std::env::temp_dir()`; tests pass a
+/// private root because a fabricated dead-pid fixture in the SHARED temp dir
+/// is legitimate prey for any concurrent sweep (a parallel test or a spawned
+/// fallow binary), which races the fixture's own assertions.
+pub fn sweep_orphan_audit_worktrees_in(repo_root: &Path, temp_root: &Path) {
     // Legacy pass: deregister dead-pid non-reusable worktrees left REGISTERED
     // by pre-#1815 fallow (or by a crash in the transient registration
     // window). The `--expire=now` prune, retained only here, also sweeps any
@@ -872,7 +881,7 @@ pub fn sweep_orphan_audit_worktrees(repo_root: &Path) {
     // Primary pass: remove unregistered dead-pid worktree DIRECTORIES via a
     // temp-dir prefix scan. A dead PID means the owning process is gone
     // regardless of repo, so this scan is global (not repo-scoped).
-    for path in scan_non_reusable_orphan_paths() {
+    for path in scan_non_reusable_orphan_paths(temp_root) {
         let _ = std::fs::remove_dir_all(&path);
     }
 }
@@ -900,9 +909,8 @@ fn deregister_legacy_orphan_worktrees(repo_root: &Path) -> bool {
 
 /// Enumerate unregistered non-reusable worktree DIRECTORY paths owned by a
 /// dead PID. Reusable caches yield no parseable PID and are skipped.
-fn scan_non_reusable_orphan_paths() -> Vec<PathBuf> {
-    let temp = std::env::temp_dir();
-    let Ok(entries) = std::fs::read_dir(&temp) else {
+fn scan_non_reusable_orphan_paths(temp: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(temp) else {
         return Vec::new();
     };
     let mut paths = Vec::new();
