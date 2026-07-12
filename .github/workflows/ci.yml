@@ -146,7 +146,18 @@ jobs:
       - name: Build image
         run: docker build -t fallow:ci .
       - name: Run version
-        run: docker run --rm fallow:ci --version
+        # Asserts the image reports the version pinned in the Dockerfile's own
+        # ARG default, not just that the binary runs. This is what makes this
+        # required check a real end-to-end proof for a docker-lockstep PR
+        # (release.yml): the new pins download, checksum-verify, and report
+        # the just-released version instead of merely not crashing.
+        shell: bash
+        run: |
+          set -euo pipefail
+          PINNED_VERSION="$(grep -m1 '^ARG FALLOW_VERSION=' Dockerfile | cut -d '=' -f2)"
+          OUTPUT="$(docker run --rm fallow:ci --version)"
+          echo "${OUTPUT}"
+          echo "${OUTPUT}" | grep -qF "${PINNED_VERSION}"
       - name: Check exit code propagation
         shell: bash
         run: |
@@ -388,7 +399,7 @@ jobs:
           NODE
 
       - name: Test release packaging gate
-        run: node --test .github/scripts/verify-pack-contents.test.mjs
+        run: node --test .github/scripts/verify-pack-contents.test.mjs .github/scripts/update-dockerfile-pins.test.mjs
 
       - name: Run npm wrapper unit tests
         run: |

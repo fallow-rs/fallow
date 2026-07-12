@@ -8,6 +8,9 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # The sha256 pins below are bound to FALLOW_VERSION above; bump both together.
+# release.yml's docker-lockstep job keeps them in sync automatically after
+# every release by opening a PR here; a manual edit only needs to preserve
+# the lockstep rule for local review.
 RUN set -eux; \
   case "${TARGETARCH}" in \
     amd64) \
