@@ -163,7 +163,7 @@ pub enum CatalogPrecedingCommentPolicy {
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FallowConfig {
-    /// A string pointing at fallow's JSON Schema URL, used only by editors for autocomplete and validation of the config file; it has no effect on analysis and is stripped before serialization (serde skip_serializing, writeOnly in the schema). Set it to `https://fallow.dev/schema.json` to get editor IntelliSense; any other value is ignored by fallow.
+    /// A string pointing at fallow's JSON Schema URL, used only by editors for autocomplete and validation of the config file; it has no effect on analysis and is stripped before serialization (serde skip_serializing, writeOnly in the schema). Set it to `./node_modules/fallow/schema.json` for npm installs (version-aligned, offline, avoids VS Code's untrusted-remote-schema prompt), or `https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json` for non-npm installs; any other value is ignored by fallow.
     #[serde(rename = "$schema", default, skip_serializing)]
     pub schema: Option<String>,
 
@@ -673,7 +673,7 @@ mod tests {
     #[test]
     fn deserialize_json_with_all_top_level_fields() {
         let json = r#"{
-            "$schema": "https://fallow.dev/schema.json",
+            "$schema": "./node_modules/fallow/schema.json",
             "entry": ["src/main.ts"],
             "ignorePatterns": ["generated/**"],
             "ignoreDependencies": ["postcss"],
@@ -686,7 +686,7 @@ mod tests {
         let config: FallowConfig = serde_json::from_str(json).unwrap();
         assert_eq!(
             config.schema.as_deref(),
-            Some("https://fallow.dev/schema.json")
+            Some("./node_modules/fallow/schema.json")
         );
         assert_eq!(config.entry, vec!["src/main.ts"]);
         assert_eq!(config.ignore_patterns, vec!["generated/**"]);

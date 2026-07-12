@@ -123,7 +123,9 @@ pub fn run_migrate(
 
     let output_content = match format {
         OutputFormat::Toml => generate_toml(&result),
-        OutputFormat::Jsonc | OutputFormat::Json => generate_jsonc(&result),
+        OutputFormat::Jsonc | OutputFormat::Json => {
+            generate_jsonc(&result, crate::init::has_local_schema_file(root))
+        }
     };
 
     if dry_run {

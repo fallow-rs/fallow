@@ -79,6 +79,59 @@ fn init_exits_nonzero_if_config_exists() {
     cleanup(&dir);
 }
 
+/// Issue #1794: without a local `node_modules/fallow/schema.json`, `fallow
+/// init` writes the remote GitHub URL fallback.
+#[test]
+fn init_schema_falls_back_to_remote_without_local_schema() {
+    let dir = init_temp_dir("schema-remote");
+    let output = run_fallow_raw(&["init", "--root", dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "init should succeed, stderr: {}",
+        output.stderr
+    );
+    let config_path = dir.join(".fallowrc.json");
+    let content = fs::read_to_string(&config_path).unwrap();
+    assert!(
+        content.contains(
+            "\"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json\""
+        ),
+        "expected remote schema fallback without node_modules/fallow, got: {content}"
+    );
+    fallow_config::FallowConfig::load(&config_path)
+        .unwrap_or_else(|e| panic!("init output must load as FallowConfig: {e:?}"));
+    cleanup(&dir);
+}
+
+/// Issue #1794: with a local `node_modules/fallow/schema.json` present
+/// (simulating an npm install of fallow), `fallow init` writes the local,
+/// version-aligned schema path instead of the remote URL, and the resulting
+/// config still loads through the real config loader.
+#[test]
+fn init_schema_prefers_local_when_node_modules_fallow_present() {
+    let dir = init_temp_dir("schema-local");
+    fs::create_dir_all(dir.join("node_modules/fallow")).unwrap();
+    fs::write(dir.join("node_modules/fallow/schema.json"), "{}").unwrap();
+
+    let output = run_fallow_raw(&["init", "--root", dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(
+        output.code, 0,
+        "init should succeed, stderr: {}",
+        output.stderr
+    );
+    let config_path = dir.join(".fallowrc.json");
+    let content = fs::read_to_string(&config_path).unwrap();
+    assert!(
+        content.contains("\"$schema\": \"./node_modules/fallow/schema.json\""),
+        "expected local schema path with node_modules/fallow present, got: {content}"
+    );
+    assert!(!content.contains("raw.githubusercontent.com"));
+
+    fallow_config::FallowConfig::load(&config_path)
+        .unwrap_or_else(|e| panic!("init output with local schema must load: {e:?}"));
+    cleanup(&dir);
+}
+
 #[test]
 fn init_created_config_is_valid_json() {
     let dir = init_temp_dir("valid");

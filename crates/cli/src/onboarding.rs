@@ -404,6 +404,17 @@ fn entry_extensions(info: &ProjectInfo) -> &'static str {
     }
 }
 
+/// Local schema path for npm consumers: version-aligned with the installed
+/// `fallow` package, works offline, and does not trigger VS Code's
+/// untrusted-remote-schema prompt (issue #1794). Only emitted when
+/// `ProjectInfo::has_local_schema` confirms the file actually exists.
+pub const LOCAL_SCHEMA_PATH: &str = "./node_modules/fallow/schema.json";
+
+/// Remote schema fallback for installs with no local `node_modules/fallow`
+/// (cargo, homebrew, or a bare binary).
+pub const REMOTE_SCHEMA_URL: &str =
+    "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json";
+
 /// Build the safe, detection-derived proposed config (pure; no filesystem).
 ///
 /// Only settings fallow can decide with confidence go here: entry points (the
@@ -414,8 +425,13 @@ fn entry_extensions(info: &ProjectInfo) -> &'static str {
 /// wrong uniform assumption on a heterogeneous monorepo (panel finding).
 pub fn proposed_config_value(info: &ProjectInfo) -> serde_json::Value {
     let ext = entry_extensions(info);
+    let schema_url = if info.has_local_schema {
+        LOCAL_SCHEMA_PATH
+    } else {
+        REMOTE_SCHEMA_URL
+    };
     let mut config = serde_json::json!({
-        "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+        "$schema": schema_url,
         "entry": [format!("src/index.{ext}"), format!("src/main.{ext}")],
     });
     if info.is_monorepo && !info.workspace_patterns.is_empty() {
@@ -775,6 +791,7 @@ mod tests {
             has_storybook: false,
             package_manager: Some("pnpm".to_owned()),
             test_framework_ambiguous: false,
+            has_local_schema: false,
         }
     }
 
@@ -789,6 +806,7 @@ mod tests {
             has_storybook: true,
             package_manager: Some("pnpm".to_owned()),
             test_framework_ambiguous: false,
+            has_local_schema: false,
         }
     }
 
@@ -813,6 +831,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Issue #1794: when a local `node_modules/fallow/schema.json` is present,
+    /// the proposed config must point `$schema` at it (version-aligned, offline,
+    /// no VS Code untrusted-remote-schema prompt) rather than the remote URL.
+    #[test]
+    fn proposed_config_schema_prefers_local_when_available() {
+        let mut info = ts_lib_info();
+        info.has_local_schema = true;
+        let config = proposed_config_value(&info);
+        assert_eq!(config["$schema"], LOCAL_SCHEMA_PATH);
+    }
+
+    /// Without a detected local schema (cargo, homebrew, or a bare binary
+    /// install), the proposed config must fall back to the remote URL rather
+    /// than emit a local path that fails to resolve.
+    #[test]
+    fn proposed_config_schema_falls_back_to_remote_without_local() {
+        let mut info = ts_lib_info();
+        info.has_local_schema = false;
+        let config = proposed_config_value(&info);
+        assert_eq!(config["$schema"], REMOTE_SCHEMA_URL);
     }
 
     /// Framework rule severities are NEVER written into the config; they

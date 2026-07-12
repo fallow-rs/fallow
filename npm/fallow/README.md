@@ -119,7 +119,7 @@ Create a config file in your project root, or run `fallow init`:
 ```jsonc
 // .fallowrc.json
 {
-  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "$schema": "./node_modules/fallow/schema.json",
   "entry": ["src/workers/*.ts", "scripts/*.ts"],
   "ignorePatterns": ["**/*.generated.ts"],
   "rules": {
@@ -129,6 +129,16 @@ Create a config file in your project root, or run `fallow init`:
   }
 }
 ```
+
+`$schema` gives editors autocomplete and validation and has no effect on
+analysis. As an npm package, `fallow` always ships a version-aligned schema at
+`./node_modules/fallow/schema.json`, which `fallow init` and
+`fallow recommend` point at by default: offline, no editor trust prompt. If
+you install fallow another way (cargo, homebrew, a bare binary) with no
+`node_modules/fallow` to point at, use the remote fallback instead:
+`https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json`. Some
+editors, including VS Code, refuse to load a remote schema URL until you
+explicitly trust the domain.
 
 Also supports TOML (`fallow init --toml` creates `fallow.toml`).
 

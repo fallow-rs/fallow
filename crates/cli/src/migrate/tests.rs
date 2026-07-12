@@ -126,9 +126,40 @@ fn jsonc_output_has_schema() {
         warnings: vec![],
         sources: vec!["knip.json".to_string()],
     };
-    let output = generate_jsonc(&result);
+    let output = generate_jsonc(&result, false);
     assert!(output.contains("$schema"));
     assert!(output.contains("fallow-rs/fallow"));
+}
+
+/// Issue #1794: without a detected local schema, `generate_jsonc` must emit
+/// the remote GitHub URL fallback.
+#[test]
+fn jsonc_output_schema_falls_back_to_remote_without_local() {
+    let result = MigrationResult {
+        config: serde_json::json!({"entry": ["src/index.ts"]}),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let output = generate_jsonc(&result, false);
+    assert!(output.contains(
+        "\"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json\","
+    ));
+}
+
+/// Issue #1794: with a detected local `node_modules/fallow/schema.json`,
+/// `generate_jsonc` must point `$schema` at it rather than the remote URL, so
+/// migrated npm-consumer configs get offline, version-aligned validation
+/// without VS Code's untrusted-remote-schema prompt.
+#[test]
+fn jsonc_output_schema_prefers_local_when_available() {
+    let result = MigrationResult {
+        config: serde_json::json!({"entry": ["src/index.ts"]}),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let output = generate_jsonc(&result, true);
+    assert!(output.contains("\"$schema\": \"./node_modules/fallow/schema.json\","));
+    assert!(!output.contains("raw.githubusercontent.com"));
 }
 
 #[test]
@@ -138,7 +169,7 @@ fn jsonc_output_has_source_comment() {
         warnings: vec![],
         sources: vec!["knip.json".to_string()],
     };
-    let output = generate_jsonc(&result);
+    let output = generate_jsonc(&result, false);
     assert!(output.contains("// Migrated from knip.json"));
 }
 
@@ -246,7 +277,7 @@ fn jsonc_output_deserializes_as_valid_config() {
         warnings: vec![],
         sources: vec!["knip.json".to_string()],
     };
-    let output = generate_jsonc(&result);
+    let output = generate_jsonc(&result, false);
     let config: fallow_config::FallowConfig =
         jsonc_parser::parse_to_serde_value(&output, &jsonc_parser::ParseOptions::default())
             .unwrap();
@@ -949,7 +980,7 @@ fn jsonc_output_keys_ordered_correctly() {
         warnings: vec![],
         sources: vec!["knip.json".to_string(), ".jscpd.json".to_string()],
     };
-    let output = generate_jsonc(&result);
+    let output = generate_jsonc(&result, false);
     let entry_pos = output.find("\"entry\"").unwrap();
     let ignore_pos = output.find("\"ignorePatterns\"").unwrap();
     let ignore_deps_pos = output.find("\"ignoreDependencies\"").unwrap();
@@ -970,7 +1001,7 @@ fn jsonc_output_with_multiple_sources() {
         warnings: vec![],
         sources: vec!["knip.json".to_string(), ".jscpd.json".to_string()],
     };
-    let output = generate_jsonc(&result);
+    let output = generate_jsonc(&result, false);
     assert!(output.contains("// Migrated from knip.json, .jscpd.json"));
 }
 
@@ -1098,7 +1129,7 @@ fn jsonc_full_roundtrip_with_all_fields() {
         warnings: vec![],
         sources: vec!["knip.json".to_string()],
     };
-    let output = generate_jsonc(&result);
+    let output = generate_jsonc(&result, false);
     let config: fallow_config::FallowConfig =
         jsonc_parser::parse_to_serde_value(&output, &jsonc_parser::ParseOptions::default())
             .unwrap();
@@ -1144,7 +1175,7 @@ fn jsonc_output_empty_config() {
         warnings: vec![],
         sources: vec!["knip.json".to_string()],
     };
-    let output = generate_jsonc(&result);
+    let output = generate_jsonc(&result, false);
     assert!(output.contains("$schema"));
     assert!(output.contains("// Migrated from knip.json"));
     assert!(!output.contains("\"entry\""));
@@ -1167,7 +1198,7 @@ fn jsonc_output_only_rules() {
         warnings: vec![],
         sources: vec!["knip.json".to_string()],
     };
-    let output = generate_jsonc(&result);
+    let output = generate_jsonc(&result, false);
     assert!(output.contains("\"rules\""));
     assert!(!output.contains("\"entry\""));
     assert!(!output.contains("\"ignorePatterns\""));

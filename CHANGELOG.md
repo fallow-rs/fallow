@@ -55,6 +55,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--format` run. v1 renders the two GitHub formats and dispatches on the
   envelope's `kind` (dead-code, dupes, health, audit, security, combined).
 
+### Fixed
+
+- **`fallow init`, `fallow recommend`, and `fallow migrate` no longer point
+  `$schema` at a domain that fails to resolve, or a URL VS Code refuses to
+  load without a manual trust grant.** The generated config's `$schema`
+  previously hardcoded the remote `raw.githubusercontent.com` URL, which VS
+  Code treats as an untrusted remote schema location and silently declines to
+  load, and the schema's own doc comment separately recommended
+  `https://fallow.dev/schema.json`, a domain that has never resolved in DNS.
+  When a local, version-aligned `node_modules/fallow/schema.json` is present
+  (any npm install), generated configs now point `$schema` at it: offline, no
+  trust prompt, and always in sync with the installed version. Non-npm
+  installs (cargo, homebrew, a bare binary) keep falling back to the remote
+  URL. (Closes [#1794](https://github.com/fallow-rs/fallow/issues/1794))
+
 ### Changed
 
 - **The `fallow` npm launcher and Node bindings now require Node.js 22 or

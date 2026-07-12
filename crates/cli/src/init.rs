@@ -80,6 +80,13 @@ pub struct ProjectInfo {
     /// first-match value but the AGENTS.md scaffold leaves `- Test:` blank
     /// to avoid a confident mislabel.
     pub test_framework_ambiguous: bool,
+    /// True when `node_modules/fallow/schema.json` exists at the project
+    /// root, meaning a version-aligned local schema is available. Drives the
+    /// `$schema` value emitted by `proposed_config_value` and
+    /// `generate_jsonc` (issue #1794): local path first (offline, no VS Code
+    /// untrusted-remote-schema prompt), falling back to the remote URL when
+    /// absent.
+    pub has_local_schema: bool,
 }
 
 /// Detected workspace shape: monorepo flag, package patterns, and tool name.
@@ -93,6 +100,7 @@ struct WorkspaceShape {
 pub fn detect_project(root: &Path) -> ProjectInfo {
     let has_typescript = root.join("tsconfig.json").exists();
     let has_storybook = root.join(".storybook").is_dir();
+    let has_local_schema = has_local_schema_file(root);
 
     let pkg = PackageJson::load(&root.join("package.json")).ok();
 
@@ -121,7 +129,19 @@ pub fn detect_project(root: &Path) -> ProjectInfo {
         has_storybook,
         package_manager,
         test_framework_ambiguous,
+        has_local_schema,
     }
+}
+
+/// True when a version-aligned local config schema is available at
+/// `node_modules/fallow/schema.json` under `root`. Filesystem-only check
+/// (not the workspace-wide dependency union `collect_dependency_names`
+/// builds): in a pnpm monorepo where `fallow` is declared only in a
+/// workspace member, there is no root `node_modules/fallow`, so keying on
+/// this existence check avoids emitting a root-relative path that fails to
+/// resolve.
+pub fn has_local_schema_file(root: &Path) -> bool {
+    root.join("node_modules/fallow/schema.json").exists()
 }
 
 /// Collect dependency names from the root `package.json` plus, for a monorepo,
@@ -1333,6 +1353,7 @@ mod tests {
             has_storybook: false,
             package_manager: None,
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         let empty_generated = build_agents_guide(&empty_info).to_lowercase();
         assert!(!empty_generated.contains("readiness"));
@@ -1802,6 +1823,27 @@ mod tests {
         assert!(info.workspace_tool.is_none());
         assert!(info.test_framework.is_none());
         assert!(info.ui_framework.is_none());
+        assert!(!info.has_local_schema);
+    }
+
+    /// Issue #1794: `detect_project` must flag a local schema only when
+    /// `node_modules/fallow/schema.json` actually exists, so `fallow init`
+    /// and `fallow recommend` never emit a local `$schema` path that fails
+    /// to resolve in an editor.
+    #[test]
+    fn detect_local_schema_present() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("node_modules/fallow")).unwrap();
+        std::fs::write(dir.path().join("node_modules/fallow/schema.json"), "{}").unwrap();
+        let info = detect_project(dir.path());
+        assert!(info.has_local_schema);
+    }
+
+    #[test]
+    fn detect_local_schema_absent_without_node_modules() {
+        let dir = tempfile::tempdir().unwrap();
+        let info = detect_project(dir.path());
+        assert!(!info.has_local_schema);
     }
 
     #[test]
@@ -1977,6 +2019,7 @@ mod tests {
             has_storybook: false,
             package_manager: None,
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -1985,6 +2028,52 @@ mod tests {
         assert!(parsed["duplicates"].is_object());
         assert!(parsed["rules"].is_object());
         assert!(json.contains("{js,jsx,mjs}"));
+    }
+
+    /// Issue #1794: end-to-end through `build_json_config` (what `fallow init`
+    /// actually writes), without a local schema the emitted `$schema` is the
+    /// remote GitHub URL.
+    #[test]
+    fn json_config_schema_is_remote_without_local_schema() {
+        let info = ProjectInfo {
+            is_monorepo: false,
+            workspace_patterns: Vec::new(),
+            workspace_tool: None,
+            has_typescript: false,
+            test_framework: None,
+            ui_framework: None,
+            has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
+            has_local_schema: false,
+        };
+        let json = build_json_config(&info);
+        let parsed = parse_jsonc_config(&json);
+        assert_eq!(
+            parsed["$schema"],
+            "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json"
+        );
+    }
+
+    /// Issue #1794: end-to-end through `build_json_config`, with a local
+    /// schema detected the emitted `$schema` is the local npm-package path.
+    #[test]
+    fn json_config_schema_is_local_when_detected() {
+        let info = ProjectInfo {
+            is_monorepo: false,
+            workspace_patterns: Vec::new(),
+            workspace_tool: None,
+            has_typescript: false,
+            test_framework: None,
+            ui_framework: None,
+            has_storybook: false,
+            package_manager: None,
+            test_framework_ambiguous: false,
+            has_local_schema: true,
+        };
+        let json = build_json_config(&info);
+        let parsed = parse_jsonc_config(&json);
+        assert_eq!(parsed["$schema"], "./node_modules/fallow/schema.json");
     }
 
     #[test]
@@ -1999,6 +2088,7 @@ mod tests {
             has_storybook: false,
             package_manager: None,
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         let json = build_json_config(&info);
         // Guards against a silent no-op of `insert_json_header_comment` if the
@@ -2022,6 +2112,7 @@ mod tests {
             has_storybook: false,
             package_manager: None,
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         let json = build_json_config(&info);
         assert!(json.contains("{ts,tsx,js,jsx}"));
@@ -2039,6 +2130,7 @@ mod tests {
             has_storybook: false,
             package_manager: None,
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -2059,6 +2151,7 @@ mod tests {
             has_storybook: true,
             package_manager: None,
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -2078,6 +2171,7 @@ mod tests {
             has_storybook: false,
             package_manager: None,
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         let json = build_json_config(&info);
         let parsed = parse_jsonc_config(&json);
@@ -2096,6 +2190,7 @@ mod tests {
             has_storybook: false,
             package_manager: None,
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         let toml = build_toml_config(&info);
         assert!(toml.contains("[workspaces]"));
@@ -2123,6 +2218,7 @@ mod tests {
             has_storybook: true,
             package_manager: Some("pnpm".to_string()),
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         // The filename extension drives format detection, so this MUST be a real
         // config name (`.fallowrc.json`); an arbitrary name would be parsed as TOML.
@@ -2157,6 +2253,7 @@ mod tests {
             has_storybook: false,
             package_manager: None,
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         let path = root.join("fallow.toml");
         std::fs::write(&path, build_toml_config(&info)).unwrap();
@@ -2181,6 +2278,7 @@ mod tests {
             has_storybook: true,
             package_manager: None,
             test_framework_ambiguous: false,
+            has_local_schema: false,
         };
         let toml = build_toml_config(&info);
         assert!(toml.contains("ignorePatterns = [\".storybook/**\"]"));
@@ -2275,6 +2373,18 @@ mod config_schema_drift {
             "\nschema.json drift detected.\n\
              Regenerate: cargo run --bin fallow -- config-schema > schema.json\n\
              Usually triggered by edits to #[derive(JsonSchema)] structs or /// docstrings in crates/config/.\n"
+        );
+    }
+
+    /// Issue #1794: `fallow.dev` never resolved in DNS. Guards against
+    /// reintroducing the dead domain into the `$schema` doc comment (which
+    /// schemars surfaces verbatim into `schema.json`'s description field).
+    #[test]
+    fn schema_json_has_no_dead_fallow_dev_reference() {
+        assert!(
+            !COMMITTED.contains("fallow.dev"),
+            "schema.json must not reference the dead fallow.dev domain; \
+             use ./node_modules/fallow/schema.json or the raw.githubusercontent.com fallback"
         );
     }
 }

@@ -1608,7 +1608,8 @@ unknown_field = true
 
     #[test]
     fn fallow_config_json_with_schema_field() {
-        let json_str = r#"{"$schema": "https://fallow.dev/schema.json", "entry": ["src/main.ts"]}"#;
+        let json_str =
+            r#"{"$schema": "./node_modules/fallow/schema.json", "entry": ["src/main.ts"]}"#;
         let config: FallowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
     }

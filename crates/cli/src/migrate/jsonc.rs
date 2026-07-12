@@ -6,12 +6,15 @@ use super::{MigrationResult, source_head};
     clippy::expect_used,
     reason = "migrated config is always stored as a JSON object"
 )]
-pub(super) fn generate_jsonc(result: &MigrationResult) -> String {
+pub(super) fn generate_jsonc(result: &MigrationResult, has_local_schema: bool) -> String {
+    let schema_url = if has_local_schema {
+        crate::onboarding::LOCAL_SCHEMA_PATH
+    } else {
+        crate::onboarding::REMOTE_SCHEMA_URL
+    };
     let mut output = String::new();
     output.push_str("{\n");
-    output.push_str(
-        "  \"$schema\": \"https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json\",\n",
-    );
+    let _ = writeln!(output, "  \"$schema\": \"{schema_url}\",");
 
     let obj = result
         .config

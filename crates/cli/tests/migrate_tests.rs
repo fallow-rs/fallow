@@ -93,6 +93,35 @@ fn migrate_writes_fallowrc_json_when_source_is_knip_json() {
     cleanup(&dir);
 }
 
+/// Issue #1794: with a local `node_modules/fallow/schema.json` present,
+/// `fallow migrate` writes the local schema path instead of the remote URL,
+/// and the migrated config still loads through the real config loader.
+#[test]
+fn migrate_schema_prefers_local_when_node_modules_fallow_present() {
+    let dir = migrate_temp_dir(
+        "schema-local",
+        "knip.json",
+        r#"{"entry": ["src/index.ts"]}"#,
+    );
+    fs::create_dir_all(dir.join("node_modules/fallow")).unwrap();
+    fs::write(dir.join("node_modules/fallow/schema.json"), "{}").unwrap();
+
+    let output = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+
+    let config_path = dir.join(".fallowrc.json");
+    let content = fs::read_to_string(&config_path).unwrap();
+    assert!(
+        content.contains("\"$schema\": \"./node_modules/fallow/schema.json\""),
+        "expected local schema path with node_modules/fallow present, got: {content}"
+    );
+    assert!(!content.contains("raw.githubusercontent.com"));
+
+    fallow_config::FallowConfig::load(&config_path)
+        .unwrap_or_else(|e| panic!("migrated output with local schema must load: {e:?}"));
+    cleanup(&dir);
+}
+
 #[test]
 fn migrate_auto_writes_fallowrc_jsonc_when_source_is_knip_jsonc() {
     let dir = migrate_temp_dir(
