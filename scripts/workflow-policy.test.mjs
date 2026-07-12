@@ -24,6 +24,14 @@ const indentedBlock = (source, key, indent) => {
   return lines.slice(start, end).join("\n");
 };
 
+const listedPaths = (block) =>
+  Array.from(block.matchAll(/^\s+- '([^']+)'$/gm), (match) => match[1]);
+
+const matchesListedPath = (patterns, path) =>
+  patterns.some((pattern) =>
+    pattern.endsWith("/**") ? path.startsWith(pattern.slice(0, -2)) : path === pattern,
+  );
+
 test("workflow block parser ignores blank lines and comments before a sibling", () => {
   const source = ["root:", "  value: true", "", "# note", "sibling:", "  value: false"].join("\n");
 
@@ -144,6 +152,88 @@ test("coverage floor runs with read-only permissions on pull requests and pushes
   assert.match(coverageJob, /badge_color: \$\{\{ steps\.badge\.outputs\.color \}\}/);
   assert.doesNotMatch(coverageJob, /name: Store coverage metrics/);
   assert.doesNotMatch(coverageJob, /name: Update coverage badge/);
+});
+
+test("coverage path filter contains the complete CI Rust contract", () => {
+  const coverageWorkflow = readWorkflow(".github/workflows/coverage.yml");
+  const coverageJob = indentedBlock(coverageWorkflow, "coverage", 2);
+  const coveragePaths = listedPaths(indentedBlock(coverageJob, "rust", 12));
+  const ciWorkflow = readWorkflow(".github/workflows/ci.yml");
+  const ciChangesJob = indentedBlock(ciWorkflow, "changes", 2);
+  const ciRustPaths = listedPaths(indentedBlock(ciChangesJob, "rust", 12));
+
+  assert.match(coverageJob, /dorny\/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d/);
+  for (const path of ciRustPaths) {
+    assert.ok(coveragePaths.includes(path), `coverage filter is missing CI Rust path ${path}`);
+  }
+  for (const path of [
+    ".github/workflows/ci.yml",
+    ".github/workflows/coverage.yml",
+    "scripts/workflow-policy.test.mjs",
+  ]) {
+    assert.ok(coveragePaths.includes(path), `coverage filter is missing policy path ${path}`);
+  }
+});
+
+test("coverage path filter runs for relevant changes and skips unrelated pull requests", () => {
+  const workflow = readWorkflow(".github/workflows/coverage.yml");
+  const coverageJob = indentedBlock(workflow, "coverage", 2);
+  const coveragePaths = listedPaths(indentedBlock(coverageJob, "rust", 12));
+
+  for (const path of [
+    "crates/core/src/lib.rs",
+    "tests/fixtures/project/src/index.ts",
+    "Cargo.toml",
+    "docs/output-schema.json",
+    ".github/workflows/ci.yml",
+    ".github/workflows/coverage.yml",
+    "scripts/workflow-policy.test.mjs",
+  ]) {
+    assert.ok(matchesListedPath(coveragePaths, path), `coverage must run for ${path}`);
+  }
+  for (const path of ["README.md", "docs/usage.md", "apps/review-electron/src/main/index.ts"]) {
+    assert.ok(!matchesListedPath(coveragePaths, path), `coverage must skip ${path}`);
+  }
+});
+
+test("coverage required check succeeds as a no-op while trusted events still run heavy work", () => {
+  const workflow = readWorkflow(".github/workflows/coverage.yml");
+  const coverageJob = indentedBlock(workflow, "coverage", 2);
+
+  assert.match(workflow, /^  pull_request:$/m);
+  assert.match(workflow, /^  workflow_dispatch:$/m);
+  assert.match(coverageJob, /^    name: Coverage$/m);
+  assert.match(
+    coverageJob,
+    /name: Detect coverage-affecting changes[\s\S]*if: github\.event_name == 'pull_request'/,
+  );
+  assert.match(
+    coverageJob,
+    /name: Determine whether coverage is required[\s\S]*github\.event_name != 'pull_request'[\s\S]*steps\.coverage_filter\.outputs\.rust == 'true'/,
+  );
+  assert.match(
+    coverageJob,
+    /name: Skip coverage for unrelated pull request\n\s+if: steps\.coverage_policy\.outputs\.run != 'true'/,
+  );
+
+  for (const name of [
+    "Set up Rust",
+    "Install cargo-llvm-cov",
+    "Build CLI binary for e2e tests",
+    "Run tests with coverage",
+    "Compute coverage",
+    "Enforce coverage floor",
+    "Compute badge color",
+    "Write coverage metrics",
+  ]) {
+    assert.match(
+      coverageJob,
+      new RegExp(
+        `name: ${name.replaceAll(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\n\\s+if: steps\\.coverage_policy\\.outputs\\.run == 'true'`,
+      ),
+      `${name} must be guarded by the coverage policy`,
+    );
+  }
 });
 
 test("coverage publication is isolated to trusted events and write permissions", () => {

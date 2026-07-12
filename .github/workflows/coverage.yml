@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       badge_color: ${{ steps.badge.outputs.color }}
       percentage: ${{ steps.compute.outputs.percentage }}
@@ -29,16 +30,68 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-rust
+      - name: Detect coverage-affecting changes
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        id: coverage_filter
+        with:
+          filters: |
+            # Keep this list in sync with the CI workflow's `rust` filter.
+            rust:
+              - 'crates/**'
+              - 'tests/**'
+              - 'docs/output-schema.json'
+              - 'schema.json'
+              - 'plugin-schema.json'
+              - 'rule-pack-schema.json'
+              - 'npm/fallow/schema.json'
+              - 'npm/fallow/capabilities.json'
+              - 'npm/fallow/issue-registry.json'
+              - 'npm/fallow/types/output-contract.d.ts'
+              - 'npm/fallow/skills/fallow/**'
+              - 'editors/vscode/src/generated/output-contract.d.ts'
+              - 'editors/vscode/src/generated/lsp-initialization-options.d.ts'
+              - 'editors/vscode/src/generated/issue-types.ts'
+              - 'editors/vscode/package.json'
+              - 'scripts/generate-all.mjs'
+              - 'scripts/generation-transaction.mjs'
+              - 'scripts/contract-surfaces.mjs'
+              - 'scripts/generate-agent-docs.mjs'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'deny.toml'
+              - '.clippy.toml'
+              - 'rust-toolchain.toml'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/coverage.yml'
+              - 'scripts/workflow-policy.test.mjs'
 
-      - uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
+      - name: Determine whether coverage is required
+        id: coverage_policy
+        env:
+          RUN_COVERAGE: ${{ github.event_name != 'pull_request' || steps.coverage_filter.outputs.rust == 'true' }}
+        run: echo "run=$RUN_COVERAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Skip coverage for unrelated pull request
+        if: steps.coverage_policy.outputs.run != 'true'
+        run: echo "Coverage is unaffected by this pull request."
+
+      - name: Set up Rust
+        if: steps.coverage_policy.outputs.run == 'true'
+        uses: ./.github/actions/setup-rust
+
+      - name: Install cargo-llvm-cov
+        if: steps.coverage_policy.outputs.run == 'true'
+        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
         with:
           tool: cargo-llvm-cov
 
       - name: Build CLI binary for e2e tests
+        if: steps.coverage_policy.outputs.run == 'true'
         run: cargo build -p fallow-cli
 
       - name: Run tests with coverage
+        if: steps.coverage_policy.outputs.run == 'true'
         env:
           FALLOW_BIN: ${{ github.workspace }}/target/debug/fallow
         run: |
@@ -46,6 +99,7 @@ jobs:
           cargo llvm-cov --workspace --lcov --output-path coverage/lcov.info
 
       - name: Compute coverage
+        if: steps.coverage_policy.outputs.run == 'true'
         id: compute
         run: |
           COVERAGE=$(awk -F: '
@@ -58,6 +112,7 @@ jobs:
           echo "Coverage: $COVERAGE%"
 
       - name: Enforce coverage floor
+        if: steps.coverage_policy.outputs.run == 'true'
         # Hard gate: fail if workspace line coverage drops below the floor.
         # Ratcheted upward over time; raise only, never lower. Current main ~92.7%.
         run: |
@@ -71,6 +126,7 @@ jobs:
           }'
 
       - name: Compute badge color
+        if: steps.coverage_policy.outputs.run == 'true'
         id: badge
         run: |
           int=${COVERAGE%.*}
@@ -85,6 +141,7 @@ jobs:
           echo "color=$color" >> "$GITHUB_OUTPUT"
 
       - name: Write coverage metrics
+        if: steps.coverage_policy.outputs.run == 'true'
         run: |
           python3 -c "
           import json
