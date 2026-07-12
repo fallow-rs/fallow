@@ -132,28 +132,6 @@ const SCALE_BUCKET_LARGE: u8 = 3;
 const SCALE_BUCKET_XLARGE: u8 = 4;
 const SCALE_BUCKET_UNKNOWN: u8 = 5;
 
-/// Restore every per-run telemetry accumulator to the UNSET state a fresh CLI
-/// process starts with. These accumulators are process-global `static`s because
-/// production runs one analysis batch per process, but the in-process test
-/// binary shares them across tests: any test exercising a real command path
-/// (e.g. `load_config_for_analysis`, which calls `note_config_shape`) leaves
-/// them set for whatever test runs next. A test that reads an accumulator
-/// through `build_workflow_event` must call this first so it observes the same
-/// clean slate a real invocation would, rather than another test's residue.
-#[cfg(test)]
-fn reset_run_accumulators_for_test() {
-    FINDINGS_PRESENT.store(FINDINGS_UNSET, Ordering::Relaxed);
-    FAILURE_REASON.store(FAILURE_REASON_UNSET, Ordering::Relaxed);
-    RESULT_COUNT_CAPPED.store(RESULT_COUNT_UNSET, Ordering::Relaxed);
-    REPORT_TRUNCATED.store(REPORT_TRUNCATION_UNSET, Ordering::Relaxed);
-    TRUNCATION_REASON.store(TRUNCATION_REASON_UNSET, Ordering::Relaxed);
-    CACHE_STATE.store(CACHE_STATE_UNSET, Ordering::Relaxed);
-    CONFIG_SHAPE.store(CONFIG_SHAPE_UNSET, Ordering::Relaxed);
-    FILE_COUNT_BUCKET.store(SCALE_BUCKET_UNSET, Ordering::Relaxed);
-    FUNCTION_COUNT_BUCKET.store(SCALE_BUCKET_UNSET, Ordering::Relaxed);
-    AVG_FAN_OUT_BUCKET.store(SCALE_BUCKET_UNSET, Ordering::Relaxed);
-}
-
 /// Record whether the analysis that just completed surfaced any findings.
 ///
 /// Called from each analysis `execute` path with the real result
@@ -310,10 +288,6 @@ fn config_shape_from_state(state: u8) -> Option<ConfigShape> {
 
 fn noted_config_shape() -> Option<ConfigShape> {
     config_shape_from_state(CONFIG_SHAPE.load(Ordering::Relaxed))
-}
-
-fn config_shape_for_record(record: &WorkflowRecord<'_>) -> ConfigShape {
-    noted_config_shape().unwrap_or(record.context.config_shape)
 }
 
 /// Coarse allowlisted reason for a failed workflow telemetry event.
@@ -1360,9 +1334,67 @@ fn inspect(example: bool, output: OutputFormat) -> ExitCode {
     }
 }
 
+/// Point-in-time copy of every per-run accumulator `build_workflow_event`
+/// consumes. Production snapshots the process globals once per event; tests
+/// pass [`RunAccumulatorSnapshot::UNSET`] so the assertion is deterministic
+/// even while a PARALLEL test drives a real command path (e.g.
+/// `load_config_for_analysis` -> `note_config_shape`) that mutates the
+/// globals mid-test. A reset-before-read guard cannot close that race.
+struct RunAccumulatorSnapshot {
+    failure_reason: Option<FailureReason>,
+    config_shape: Option<ConfigShape>,
+    file_count_bucket: Option<FileCountBucket>,
+    function_count_bucket: Option<FunctionCountBucket>,
+    avg_fan_out_bucket: Option<AvgFanOutBucket>,
+    findings_present: Option<bool>,
+    result_count_bucket: Option<ResultCountBucket>,
+    report_truncated: Option<bool>,
+    truncation_reason: Option<TruncationReason>,
+    cache_state: Option<CacheState>,
+}
+
+impl RunAccumulatorSnapshot {
+    #[cfg(test)]
+    const UNSET: Self = Self {
+        failure_reason: None,
+        config_shape: None,
+        file_count_bucket: None,
+        function_count_bucket: None,
+        avg_fan_out_bucket: None,
+        findings_present: None,
+        result_count_bucket: None,
+        report_truncated: None,
+        truncation_reason: None,
+        cache_state: None,
+    };
+}
+
+fn snapshot_run_accumulators() -> RunAccumulatorSnapshot {
+    RunAccumulatorSnapshot {
+        failure_reason: failure_reason(),
+        config_shape: noted_config_shape(),
+        file_count_bucket: file_count_bucket(),
+        function_count_bucket: function_count_bucket(),
+        avg_fan_out_bucket: avg_fan_out_bucket(),
+        findings_present: findings_present(),
+        result_count_bucket: result_count_bucket(),
+        report_truncated: report_truncated(),
+        truncation_reason: truncation_reason(),
+        cache_state: cache_state(),
+    }
+}
+
 fn build_workflow_event(
     record: &WorkflowRecord<'_>,
     parent_run: &ParentRunContext,
+) -> TelemetryEvent {
+    build_workflow_event_with(record, parent_run, &snapshot_run_accumulators())
+}
+
+fn build_workflow_event_with(
+    record: &WorkflowRecord<'_>,
+    parent_run: &ParentRunContext,
+    accumulators: &RunAccumulatorSnapshot,
 ) -> TelemetryEvent {
     let invocation_context = classify_invocation_context();
     let agent_source = if invocation_context == InvocationContext::Agent {
@@ -1391,28 +1423,28 @@ fn build_workflow_event(
         duration_bucket_ms: duration_bucket(record.elapsed),
         outcome: outcome(record.exit_code),
         exit_code_bucket: exit_code_bucket(record.exit_code),
-        failure_reason: failure_reason_for(record),
+        failure_reason: failure_reason_for_value(record, accumulators.failure_reason),
         run_scope: Some(record.context.run_scope),
-        config_shape: Some(config_shape_for_record(record)),
+        config_shape: Some(
+            accumulators
+                .config_shape
+                .unwrap_or(record.context.config_shape),
+        ),
         output_destination: Some(record.context.output_destination),
         analysis_mode: Some(record.context.analysis_mode),
-        file_count_bucket: file_count_bucket(),
-        function_count_bucket: function_count_bucket(),
-        avg_fan_out_bucket: avg_fan_out_bucket(),
-        findings_present: findings_present(),
-        result_count_bucket: result_count_bucket(),
-        report_truncated: report_truncated(),
-        truncation_reason: truncation_reason(),
-        cache_state: cache_state(),
+        file_count_bucket: accumulators.file_count_bucket,
+        function_count_bucket: accumulators.function_count_bucket,
+        avg_fan_out_bucket: accumulators.avg_fan_out_bucket,
+        findings_present: accumulators.findings_present,
+        result_count_bucket: accumulators.result_count_bucket,
+        report_truncated: accumulators.report_truncated,
+        truncation_reason: accumulators.truncation_reason,
+        cache_state: accumulators.cache_state,
         mcp_tool: mcp_tool(),
         has_parent_run: parent_run.has_parent_run,
         run_role: parent_run.run_role,
         followup_kind: parent_run.followup_kind,
     }
-}
-
-fn failure_reason_for(record: &WorkflowRecord<'_>) -> Option<FailureReason> {
-    failure_reason_for_value(record, failure_reason())
 }
 
 fn failure_reason_for_value(
@@ -2484,10 +2516,6 @@ mod tests {
 
     #[test]
     fn workflow_event_buckets_exit_codes() {
-        // `build_workflow_event` reads process-global accumulators that another
-        // test (any that loads a config and thus calls `note_config_shape`) may
-        // have left set; reset them to the fresh-process state this test asserts.
-        reset_run_accumulators_for_test();
         let record = WorkflowRecord {
             workflow: Workflow::Audit,
             output: OutputFormat::Json,
@@ -2504,7 +2532,9 @@ mod tests {
             },
         };
         let parent_run = parent_run_context(record.parent_run, record.workflow);
-        let event = build_workflow_event(&record, &parent_run);
+        // The pure variant with an UNSET snapshot: the global accumulators are
+        // legitimately mutated by parallel tests driving real command paths.
+        let event = build_workflow_event_with(&record, &parent_run, &RunAccumulatorSnapshot::UNSET);
         assert_eq!(event.event, "workflow_completed");
         assert_eq!(event.duration_bucket_ms, "500-2000");
         assert_eq!(event.outcome, "issues_found");
