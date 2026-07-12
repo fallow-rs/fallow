@@ -12,6 +12,16 @@ use tempfile::NamedTempFile;
 struct PlannedWrite {
     path: PathBuf,
     content: Vec<u8>,
+    expected: ExpectedTargetState,
+}
+
+/// Disk state a fixer based its rewrite on.
+enum ExpectedTargetState {
+    Missing,
+    Present {
+        content_hash: u64,
+        resolved: Option<PathBuf>,
+    },
 }
 
 /// Why a file was skipped during a fix run.
@@ -119,13 +129,52 @@ impl FixPlan {
         }
     }
 
-    /// Queue a write. The last call for a path wins.
-    pub(super) fn stage(&mut self, path: PathBuf, content: Vec<u8>) {
+    /// Queue a replacement for an existing target. The last replacement wins,
+    /// while the first fixer's disk baseline remains authoritative.
+    pub(super) fn stage_existing(
+        &mut self,
+        path: PathBuf,
+        original_content: &[u8],
+        content: Vec<u8>,
+    ) {
+        let expected = ExpectedTargetState::Present {
+            content_hash: xxhash_rust::xxh3::xxh3_64(original_content),
+            resolved: std::fs::canonicalize(&path).ok(),
+        };
+        self.stage_with_expected(path, content, expected);
+    }
+
+    /// Queue creation of a target that was absent when the fixer planned it.
+    pub(super) fn stage_creation(&mut self, path: PathBuf, content: Vec<u8>) {
+        self.stage_with_expected(path, content, ExpectedTargetState::Missing);
+    }
+
+    fn stage_with_expected(
+        &mut self,
+        path: PathBuf,
+        content: Vec<u8>,
+        expected: ExpectedTargetState,
+    ) {
         if let Some(existing) = self.entries.iter_mut().find(|e| e.path == path) {
             existing.content = content;
             return;
         }
-        self.entries.push(PlannedWrite { path, content });
+        self.entries.push(PlannedWrite {
+            path,
+            content,
+            expected,
+        });
+    }
+
+    #[cfg(test)]
+    fn stage(&mut self, path: PathBuf, content: Vec<u8>) {
+        match std::fs::read(&path) {
+            Ok(original) => self.stage_existing(path, &original, content),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                self.stage_creation(path, content);
+            }
+            Err(_) => self.stage_creation(path, content),
+        }
     }
 
     /// Return the currently-staged content for `path`, if any.
@@ -169,12 +218,12 @@ impl FixPlan {
 
         let mut staged: Vec<StagedEntry> = Vec::with_capacity(self.entries.len());
         for entry in self.entries {
-            match stage_one(self.canonical_root.as_deref(), &entry.path, &entry.content) {
+            match stage_one(self.canonical_root.as_deref(), entry) {
                 Ok(stage) => staged.push(stage),
                 Err(e) => {
                     return CommitOutcome {
                         written: FxHashSet::default(),
-                        failed: vec![(entry.path, e)],
+                        failed: vec![(e.0, e.1)],
                     };
                 }
             }
@@ -190,6 +239,14 @@ impl FixPlan {
                         failed: vec![(stage.requested.clone(), error)],
                     };
                 }
+            }
+        }
+        for stage in &staged {
+            if let Err(error) = revalidate_expected_state(stage) {
+                return CommitOutcome {
+                    written: FxHashSet::default(),
+                    failed: vec![(stage.requested.clone(), error)],
+                };
             }
         }
 
@@ -220,37 +277,78 @@ struct StagedEntry {
     handle: NamedTempFile,
     requested: PathBuf,
     resolved: PathBuf,
+    expected: ExpectedTargetState,
 }
 
 fn stage_one(
     canonical_root: Option<&Path>,
-    target: &Path,
-    content: &[u8],
-) -> std::io::Result<StagedEntry> {
-    let resolved = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+    entry: PlannedWrite,
+) -> Result<StagedEntry, (PathBuf, std::io::Error)> {
+    let target = entry.path;
+    let resolved = resolve_target_for_staging(&target).map_err(|error| (target.clone(), error))?;
     if let Some(root) = canonical_root {
-        ensure_within_root(root, &resolved)?;
+        ensure_within_root(root, &resolved).map_err(|error| (target.clone(), error))?;
     }
     let dir = resolved.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "fix plan target has no parent directory",
+        (
+            target.clone(),
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "fix plan target has no parent directory",
+            ),
         )
     })?;
-    let mut handle = NamedTempFile::new_in(dir)?;
+    let mut handle = NamedTempFile::new_in(dir).map_err(|error| (target.clone(), error))?;
     use std::io::Write;
-    handle.write_all(content)?;
-    handle.as_file().sync_all()?;
+    handle
+        .write_all(&entry.content)
+        .map_err(|error| (target.clone(), error))?;
+    handle
+        .as_file()
+        .sync_all()
+        .map_err(|error| (target.clone(), error))?;
     fallow_config::preserve_target_mode(handle.path(), &resolved);
     Ok(StagedEntry {
         handle,
-        requested: target.to_path_buf(),
+        requested: target,
         resolved,
+        expected: entry.expected,
     })
 }
 
+fn resolve_target_for_staging(target: &Path) -> std::io::Result<PathBuf> {
+    match std::fs::canonicalize(target) {
+        Ok(resolved) => Ok(resolved),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = target.parent().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "fix plan target has no parent directory",
+                )
+            })?;
+            let file_name = target.file_name().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "fix plan target has no file name",
+                )
+            })?;
+            Ok(std::fs::canonicalize(parent)?.join(file_name))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn revalidate_staged_target(canonical_root: &Path, stage: &StagedEntry) -> std::io::Result<()> {
-    let current = std::fs::canonicalize(&stage.requested)?;
+    let current = match std::fs::canonicalize(&stage.requested) {
+        Ok(current) => current,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && matches!(stage.expected, ExpectedTargetState::Missing) =>
+        {
+            stage.resolved.clone()
+        }
+        Err(error) => return Err(error),
+    };
     ensure_within_root(canonical_root, &current)?;
     if current != stage.resolved {
         return Err(std::io::Error::new(
@@ -259,6 +357,40 @@ fn revalidate_staged_target(canonical_root: &Path, stage: &StagedEntry) -> std::
         ));
     }
     Ok(())
+}
+
+fn revalidate_expected_state(stage: &StagedEntry) -> std::io::Result<()> {
+    let changed = || {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "fix plan target changed after its rewrite was planned",
+        )
+    };
+    match &stage.expected {
+        ExpectedTargetState::Missing => match std::fs::symlink_metadata(&stage.requested) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Ok(_) => Err(changed()),
+            Err(error) => Err(error),
+        },
+        ExpectedTargetState::Present {
+            content_hash,
+            resolved,
+        } => {
+            let Some(expected_resolved) = resolved else {
+                return Err(changed());
+            };
+            let current_resolved =
+                std::fs::canonicalize(&stage.requested).map_err(|_| changed())?;
+            if &current_resolved != expected_resolved {
+                return Err(changed());
+            }
+            let current = std::fs::read(&stage.requested).map_err(|_| changed())?;
+            if xxhash_rust::xxh3::xxh3_64(&current) != *content_hash {
+                return Err(changed());
+            }
+            Ok(())
+        }
+    }
 }
 
 fn ensure_within_root(canonical_root: &Path, target: &Path) -> std::io::Result<()> {
@@ -363,7 +495,8 @@ pub(super) fn stage_fixed_content(
     } else {
         result.into_bytes()
     };
-    plan.stage(path.to_path_buf(), bytes);
+    let original_bytes = super::io::bytes_with_optional_bom(original_content.to_owned(), meta);
+    plan.stage_existing(path.to_path_buf(), &original_bytes, bytes);
 }
 
 #[cfg(test)]
@@ -408,6 +541,95 @@ mod tests {
             "original_good",
             "the good file must be untouched when any stage in the batch fails"
         );
+    }
+
+    #[test]
+    fn source_change_after_staging_aborts_entire_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("z-source.ts");
+        let other = dir.path().join("a-other.ts");
+        std::fs::write(&source, "original source").unwrap();
+        std::fs::write(&other, "original other").unwrap();
+
+        let mut plan = FixPlan::new();
+        plan.stage(source.clone(), b"fixed source".to_vec());
+        plan.stage(other.clone(), b"fixed other".to_vec());
+        std::fs::write(&source, "external source edit").unwrap();
+
+        let outcome = plan.commit();
+
+        assert!(outcome.written.is_empty(), "no target may be promoted");
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, source);
+        assert!(outcome.failed[0].1.to_string().contains("changed"));
+        assert_eq!(
+            std::fs::read_to_string(&source).unwrap(),
+            "external source edit"
+        );
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), "original other");
+    }
+
+    #[test]
+    fn package_manifest_change_after_staging_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = dir.path().join("package.json");
+        std::fs::write(&manifest, r#"{"dependencies":{"a":"1"}}"#).unwrap();
+
+        let mut plan = FixPlan::new();
+        plan.stage(manifest.clone(), b"{}\n".to_vec());
+        std::fs::write(&manifest, r#"{"dependencies":{"b":"2"}}"#).unwrap();
+
+        let outcome = plan.commit();
+
+        assert!(outcome.written.is_empty());
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, manifest);
+        assert_eq!(
+            std::fs::read_to_string(&manifest).unwrap(),
+            r#"{"dependencies":{"b":"2"}}"#
+        );
+    }
+
+    #[test]
+    fn planned_config_creation_aborts_when_target_appears() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join(".fallowrc.json");
+
+        let mut plan = FixPlan::new();
+        plan.stage(config.clone(), b"{\"rules\":{}}\n".to_vec());
+        std::fs::write(&config, "external config").unwrap();
+
+        let outcome = plan.commit();
+
+        assert!(outcome.written.is_empty());
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, config);
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), "external config");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retargeted_symlink_aborts_before_promotion() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first.ts");
+        let second = dir.path().join("second.ts");
+        let link = dir.path().join("link.ts");
+        std::fs::write(&first, "same content").unwrap();
+        std::fs::write(&second, "same content").unwrap();
+        std::os::unix::fs::symlink(&first, &link).unwrap();
+
+        let mut plan = FixPlan::for_root(dir.path()).unwrap();
+        plan.stage(link.clone(), b"fixed".to_vec());
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(&second, &link).unwrap();
+
+        let outcome = plan.commit();
+
+        assert!(outcome.written.is_empty());
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, link);
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "same content");
+        assert_eq!(std::fs::read_to_string(&second).unwrap(), "same content");
     }
 
     #[test]

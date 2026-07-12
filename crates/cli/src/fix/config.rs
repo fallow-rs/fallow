@@ -42,7 +42,7 @@ use fallow_types::output_dead_code::DuplicateExportFinding;
 use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
-use super::io::atomic_write;
+use super::plan::FixPlan;
 use crate::init;
 
 /// Inputs for [`apply_config_fixes`], bundled so the entry point takes one
@@ -55,6 +55,7 @@ pub(super) struct ConfigFixInput<'a> {
     pub(super) output: OutputFormat,
     pub(super) dry_run: bool,
     pub(super) no_create_config: bool,
+    pub(super) plan: &'a mut FixPlan,
     pub(super) fixes: &'a mut Vec<serde_json::Value>,
 }
 
@@ -66,48 +67,50 @@ pub(super) fn apply_config_fixes(input: ConfigFixInput<'_>) -> bool {
         output,
         dry_run,
         no_create_config,
+        plan,
         fixes,
     } = input;
     if results.duplicate_exports.is_empty() {
         return false;
     }
 
-    let plan = classify_plan(root, config_path, no_create_config);
-    match plan {
-        ResolvedConfigPlan::Edit { config_path } => apply_edit(
-            root,
-            &config_path,
-            &results.duplicate_exports,
-            output,
-            dry_run,
-            fixes,
-        ),
-        ResolvedConfigPlan::Create { target } => apply_create(
-            root,
-            &target,
-            &results.duplicate_exports,
-            output,
-            dry_run,
-            fixes,
-        ),
+    let mut write = ConfigWriteContext {
+        output,
+        dry_run,
+        plan,
+        fixes,
+    };
+    let config_plan = classify_plan(root, config_path, no_create_config);
+    match config_plan {
+        ResolvedConfigPlan::Edit { config_path } => {
+            apply_edit(root, &config_path, &results.duplicate_exports, &mut write)
+        }
+        ResolvedConfigPlan::Create { target } => {
+            apply_create(root, &target, &results.duplicate_exports, &mut write)
+        }
         ResolvedConfigPlan::BlockedMonorepo { workspace_root } => {
-            emit_blocked_monorepo(root, &workspace_root, output, fixes);
+            emit_blocked_monorepo(root, &workspace_root, write.output, write.fixes);
             false
         }
         ResolvedConfigPlan::BlockedNoCreate { target } => {
-            emit_blocked_no_create(root, &target, output, fixes);
+            emit_blocked_no_create(root, &target, write.output, write.fixes);
             false
         }
     }
+}
+
+struct ConfigWriteContext<'a> {
+    output: OutputFormat,
+    dry_run: bool,
+    plan: &'a mut FixPlan,
+    fixes: &'a mut Vec<serde_json::Value>,
 }
 
 fn apply_edit(
     root: &Path,
     config_path: &Path,
     duplicate_exports: &[DuplicateExportFinding],
-    output: OutputFormat,
-    dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
+    write: &mut ConfigWriteContext<'_>,
 ) -> bool {
     let entries = ignore_export_entries(root, config_path, duplicate_exports);
     if entries.is_empty() {
@@ -115,18 +118,40 @@ fn apply_edit(
     }
     let config_file = display_path(root, config_path);
 
-    if dry_run {
-        return apply_edit_dry_run(config_path, &config_file, &entries, output, fixes);
+    if write.dry_run {
+        return apply_edit_dry_run(
+            config_path,
+            &config_file,
+            &entries,
+            write.output,
+            write.fixes,
+        );
     }
 
-    match fallow_config::add_ignore_exports_rule(config_path, &entries) {
-        Ok(()) => {
-            fixes.push(serde_json::json!({
+    let current = match std::fs::read_to_string(config_path) {
+        Ok(content) => content,
+        Err(error) => {
+            eprintln!(
+                "Error: failed to write ignoreExports rules to {}: {error}",
+                config_path.display()
+            );
+            return true;
+        }
+    };
+    match add_ignore_exports_rule_to_string(config_path, &current, &entries) {
+        Ok(proposed) => {
+            write.plan.stage_existing(
+                config_path.to_path_buf(),
+                current.as_bytes(),
+                proposed.into_bytes(),
+            );
+            write.fixes.push(serde_json::json!({
                 "type": "add_ignore_exports",
                 "config_key": "ignoreExports",
                 "file": config_file,
                 "entries": entries,
                 "applied": true,
+                "__target": config_path.display().to_string(),
             }));
             false
         }
@@ -192,9 +217,7 @@ fn apply_create(
     root: &Path,
     target: &Path,
     duplicate_exports: &[DuplicateExportFinding],
-    output: OutputFormat,
-    dry_run: bool,
-    fixes: &mut Vec<serde_json::Value>,
+    write: &mut ConfigWriteContext<'_>,
 ) -> bool {
     let entries = ignore_export_entries(root, target, duplicate_exports);
     if entries.is_empty() {
@@ -212,28 +235,28 @@ fn apply_create(
         }
     };
 
-    if dry_run {
-        apply_create_dry_run(&target_display, &entries, &proposed, output, fixes);
+    if write.dry_run {
+        apply_create_dry_run(
+            &target_display,
+            &entries,
+            &proposed,
+            write.output,
+            write.fixes,
+        );
         return false;
     }
 
-    if let Err(e) = atomic_write(target, proposed.as_bytes()) {
-        eprintln!("Error: failed to create {target_display}: {e}");
-        return true;
-    }
-    if !matches!(output, OutputFormat::Json) {
-        eprintln!(
-            "Created {target_display} with {} ignoreExports rule(s). Check it in alongside the source edits.",
-            entries.len()
-        );
-    }
-    fixes.push(serde_json::json!({
+    write
+        .plan
+        .stage_creation(target.to_path_buf(), proposed.into_bytes());
+    write.fixes.push(serde_json::json!({
         "type": "add_ignore_exports",
         "config_key": "ignoreExports",
         "file": target_display,
         "entries": entries,
         "created_files": [target_display],
         "applied": true,
+        "__target": target.display().to_string(),
     }));
     false
 }
@@ -656,6 +679,7 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
             let err = apply_config_fixes(ConfigFixInput {
                     root,
                     config_path: None,
@@ -663,6 +687,7 @@ mod tests {
                     output: OutputFormat::Human,
                     dry_run: /* dry_run */ true,
                     no_create_config: /* no_create_config */ false,
+                    plan: &mut plan,
                     fixes: &mut fixes,
             });
             assert!(!err);
@@ -696,6 +721,7 @@ mod tests {
 
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
             let err = apply_config_fixes(ConfigFixInput {
                     root,
                     config_path: None,
@@ -703,9 +729,11 @@ mod tests {
                     output: OutputFormat::Human,
                     dry_run: /* dry_run */ false,
                     no_create_config: /* no_create_config */ false,
+                    plan: &mut plan,
                     fixes: &mut fixes,
             });
             assert!(!err);
+            assert!(plan.commit().failed.is_empty());
             assert_eq!(fixes.len(), 1);
             assert_eq!(fixes[0]["applied"], serde_json::json!(true));
             assert_eq!(
@@ -739,11 +767,44 @@ mod tests {
         }
 
         #[test]
+        fn config_fix_preserves_file_created_before_commit() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path();
+            let target = root.join(".fallowrc.json");
+            let results = results_with_duplicate(root, "Card");
+            let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
+            let had_error = apply_config_fixes(ConfigFixInput {
+                root,
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Json,
+                dry_run: false,
+                no_create_config: false,
+                plan: &mut plan,
+                fixes: &mut fixes,
+            });
+            assert!(!had_error);
+            std::fs::write(&target, "external config\n").unwrap();
+
+            let outcome = plan.commit();
+
+            assert!(outcome.written.is_empty());
+            assert_eq!(outcome.failed.len(), 1);
+            assert_eq!(outcome.failed[0].0, target);
+            assert_eq!(
+                std::fs::read_to_string(root.join(".fallowrc.json")).unwrap(),
+                "external config\n"
+            );
+        }
+
+        #[test]
         fn apply_missing_config_with_no_create_flag_refuses() {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
             let err = apply_config_fixes(ConfigFixInput {
                     root,
                     config_path: None,
@@ -751,6 +812,7 @@ mod tests {
                     output: OutputFormat::Human,
                     dry_run: /* dry_run */ false,
                     no_create_config: /* no_create_config */ true,
+                    plan: &mut plan,
                     fixes: &mut fixes,
             });
             assert!(!err);
@@ -773,6 +835,7 @@ mod tests {
             std::fs::create_dir_all(&sub).unwrap();
             let results = results_with_duplicate(&sub, "Card");
             let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
             let err = apply_config_fixes(ConfigFixInput {
                     root: &sub,
                     config_path: None,
@@ -780,6 +843,7 @@ mod tests {
                     output: OutputFormat::Human,
                     dry_run: /* dry_run */ false,
                     no_create_config: /* no_create_config */ false,
+                    plan: &mut plan,
                     fixes: &mut fixes,
             });
             assert!(!err);
@@ -799,6 +863,7 @@ mod tests {
             let before = std::fs::read_to_string(&cfg_path).unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
             apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -806,6 +871,7 @@ mod tests {
                 output: OutputFormat::Human,
                 dry_run: true,
                 no_create_config: false,
+                plan: &mut plan,
                 fixes: &mut fixes,
             });
             assert_eq!(
@@ -820,6 +886,39 @@ mod tests {
         }
 
         #[test]
+        fn config_fix_preserves_existing_file_changed_before_commit() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path();
+            let target = root.join(".fallowrc.json");
+            std::fs::write(&target, "{}\n").unwrap();
+            let results = results_with_duplicate(root, "Card");
+            let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
+            let had_error = apply_config_fixes(ConfigFixInput {
+                root,
+                config_path: None,
+                results: &results,
+                output: OutputFormat::Json,
+                dry_run: false,
+                no_create_config: false,
+                plan: &mut plan,
+                fixes: &mut fixes,
+            });
+            assert!(!had_error);
+            std::fs::write(&target, "{\"external\":true}\n").unwrap();
+
+            let outcome = plan.commit();
+
+            assert!(outcome.written.is_empty());
+            assert_eq!(outcome.failed.len(), 1);
+            assert_eq!(outcome.failed[0].0, target);
+            assert_eq!(
+                std::fs::read_to_string(root.join(".fallowrc.json")).unwrap(),
+                "{\"external\":true}\n"
+            );
+        }
+
+        #[test]
         fn dry_run_existing_toml_renders_diff() {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path();
@@ -827,6 +926,7 @@ mod tests {
             std::fs::write(&cfg_path, "production = true\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
             apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -834,6 +934,7 @@ mod tests {
                 output: OutputFormat::Human,
                 dry_run: true,
                 no_create_config: false,
+                plan: &mut plan,
                 fixes: &mut fixes,
             });
             assert_eq!(
@@ -853,6 +954,7 @@ mod tests {
             std::fs::write(&cfg_path, "").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
             apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -860,6 +962,7 @@ mod tests {
                 output: OutputFormat::Human,
                 dry_run: true,
                 no_create_config: false,
+                plan: &mut plan,
                 fixes: &mut fixes,
             });
             assert_eq!(fixes.len(), 1);
@@ -875,6 +978,7 @@ mod tests {
             std::fs::write(&cfg_path, "{\n}\n").unwrap();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
             apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -882,6 +986,7 @@ mod tests {
                 output: OutputFormat::Human,
                 dry_run: true,
                 no_create_config: false,
+                plan: &mut plan,
                 fixes: &mut fixes,
             });
             assert_eq!(fixes.len(), 1);
@@ -896,6 +1001,7 @@ mod tests {
             let root = dir.path();
             let results = results_with_duplicate(root, "Card");
             let mut fixes = Vec::new();
+            let mut plan = FixPlan::new();
             apply_config_fixes(ConfigFixInput {
                 root,
                 config_path: None,
@@ -903,6 +1009,7 @@ mod tests {
                 output: OutputFormat::Json,
                 dry_run: true,
                 no_create_config: false,
+                plan: &mut plan,
                 fixes: &mut fixes,
             });
             assert_eq!(fixes.len(), 1);

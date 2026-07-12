@@ -228,8 +228,10 @@ fn commit_catalog_entry_removals(input: &mut CatalogEntryCommitInput<'_, '_>) {
         return;
     }
 
-    input.plan.stage(
+    let original_bytes = super::io::bytes_with_optional_bom(input.content.to_owned(), &input.meta);
+    input.plan.stage_existing(
         input.absolute.to_path_buf(),
+        &original_bytes,
         super::io::bytes_with_optional_bom(new_content, &input.meta),
     );
 
@@ -656,8 +658,10 @@ fn commit_empty_catalog_group_removals(input: &mut EmptyCatalogGroupCommitInput<
         return;
     }
 
-    input.plan.stage(
+    let original_bytes = super::io::bytes_with_optional_bom(input.content.to_owned(), &input.meta);
+    input.plan.stage_existing(
         input.absolute.to_path_buf(),
+        &original_bytes,
         super::io::bytes_with_optional_bom(new_content, &input.meta),
     );
 
@@ -1420,6 +1424,43 @@ mod tests {
         assert_eq!(summary.applied, 1);
         let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
         assert_eq!(result, "catalogs:\n  react17:\n    react-dom: ^17.0.2\n");
+    }
+
+    #[test]
+    fn catalog_fix_preserves_workspace_changed_before_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pnpm-workspace.yaml");
+        let content = "catalogs:\n  react17:\n    react: ^17.0.2\n    react-dom: ^17.0.2\n";
+        let external = "packages:\n  - apps/*\n";
+        seed_workspace_file(dir.path(), content);
+        let entries = vec![make_entry("react", "react17", 3)];
+        let hashes = CapturedHashes::default();
+        let mut plan = FixPlan::new();
+        let mut fixes = Vec::new();
+        let summary = apply_catalog_entry_fixes(
+            dir.path(),
+            &entries,
+            CatalogPrecedingCommentPolicy::Auto,
+            CatalogFixContext {
+                hashes: &hashes,
+                plan: &mut plan,
+                output: OutputFormat::Json,
+                dry_run: false,
+                fixes: &mut fixes,
+            },
+        );
+        assert_eq!(summary.applied, 1);
+        std::fs::write(&path, external).unwrap();
+
+        let outcome = plan.commit();
+
+        assert!(outcome.written.is_empty());
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, path);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap(),
+            external
+        );
     }
 
     #[test]

@@ -199,6 +199,7 @@ fn apply_all_fixes(input: ApplyAllFixesInput<'_>) -> (bool, CatalogFixTotals) {
         output: opts.output,
         dry_run: opts.dry_run,
         no_create_config: opts.no_create_config,
+        plan: &mut *plan,
         fixes,
     });
 
@@ -446,7 +447,8 @@ fn commit_fix_plan(
         return CommitOutcome::empty_for_dry_run();
     }
     let outcome = plan.commit();
-    patch_applied_field_on_failure(fixes, opts.root, &outcome.failed);
+    let batch_aborted = outcome.written.is_empty() && !outcome.failed.is_empty();
+    patch_applied_field_on_failure(fixes, opts.root, &outcome.failed, batch_aborted);
     outcome
 }
 
@@ -535,6 +537,7 @@ fn patch_applied_field_on_failure(
     fixes: &mut [serde_json::Value],
     root: &Path,
     failed: &[(PathBuf, std::io::Error)],
+    batch_aborted: bool,
 ) {
     if failed.is_empty() {
         return;
@@ -548,7 +551,7 @@ fn patch_applied_field_on_failure(
     for entry in fixes.iter_mut() {
         let target = entry.get("__target").and_then(|v| v.as_str());
         let Some(target_str) = target else { continue };
-        if failed_paths.contains(&PathBuf::from(target_str)) {
+        if batch_aborted || failed_paths.contains(&PathBuf::from(target_str)) {
             entry["applied"] = serde_json::json!(false);
         }
     }
@@ -584,6 +587,7 @@ struct HumanSummaryInput<'a> {
 }
 
 fn emit_human_summary(input: &HumanSummaryInput<'_>) {
+    emit_created_config_messages(input.fixes);
     emit_fix_count_line(
         input.dry_run,
         input.fixes,
@@ -595,6 +599,31 @@ fn emit_human_summary(input: &HumanSummaryInput<'_>) {
         );
     }
     emit_residual_skip_warnings(input);
+}
+
+fn emit_created_config_messages(fixes: &[serde_json::Value]) {
+    for fix in fixes {
+        if fix.get("type").and_then(serde_json::Value::as_str) != Some("add_ignore_exports")
+            || fix.get("applied").and_then(serde_json::Value::as_bool) != Some(true)
+        {
+            continue;
+        }
+        let Some(target) = fix
+            .get("created_files")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|files| files.first())
+            .and_then(serde_json::Value::as_str)
+        else {
+            continue;
+        };
+        let entry_count = fix
+            .get("entries")
+            .and_then(serde_json::Value::as_array)
+            .map_or(0, Vec::len);
+        eprintln!(
+            "Created {target} with {entry_count} ignoreExports rule(s). Check it in alongside the source edits."
+        );
+    }
 }
 
 /// Print the leading dry-run notice or `Fixed N issue(s)` count line.
@@ -668,5 +697,36 @@ fn emit_residual_skip_warnings(input: &HumanSummaryInput<'_>) {
             "Kept unused exports in {} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, or files with unresolved imports). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
             input.low_confidence_count,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aborted_batch_marks_every_planned_fix_unapplied() {
+        let root = Path::new("/project");
+        let changed = root.join("changed.ts");
+        let untouched = root.join("untouched.ts");
+        let mut fixes = vec![
+            serde_json::json!({
+                "applied": true,
+                "__target": changed.display().to_string(),
+            }),
+            serde_json::json!({
+                "applied": true,
+                "__target": untouched.display().to_string(),
+            }),
+        ];
+        let failed = vec![(
+            changed,
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "target changed"),
+        )];
+
+        patch_applied_field_on_failure(&mut fixes, root, &failed, true);
+
+        assert_eq!(fixes[0]["applied"], false);
+        assert_eq!(fixes[1]["applied"], false);
     }
 }

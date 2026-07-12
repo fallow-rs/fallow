@@ -97,7 +97,7 @@ fn process_package_dependency_removals(
     }
 
     if changed && !input.dry_run {
-        stage_package_dependency_edit(input, pkg_path, &pkg_value);
+        stage_package_dependency_edit(input, pkg_path, &content, &pkg_value);
     }
 }
 
@@ -106,14 +106,17 @@ fn process_package_dependency_removals(
 fn stage_package_dependency_edit(
     input: &mut DependencyFixInput<'_>,
     pkg_path: &Path,
+    original_content: &str,
     pkg_value: &serde_json::Value,
 ) {
     match serde_json::to_string_pretty(pkg_value) {
         Ok(new_json) => {
             let pkg_content = new_json + "\n";
-            input
-                .plan
-                .stage(pkg_path.to_path_buf(), pkg_content.into_bytes());
+            input.plan.stage_existing(
+                pkg_path.to_path_buf(),
+                original_content.as_bytes(),
+                pkg_content.into_bytes(),
+            );
         }
         Err(e) => {
             eprintln!("Error: failed to serialize {}: {e}", pkg_path.display());
@@ -235,6 +238,49 @@ mod tests {
         let deps = parsed["dependencies"].as_object().unwrap();
         assert!(!deps.contains_key("lodash"));
         assert!(deps.contains_key("react"));
+    }
+
+    #[test]
+    fn dependency_fix_preserves_manifest_changed_before_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let pkg_path = root.join("package.json");
+        let original = r#"{"dependencies":{"lodash":"^4.0.0"}}"#;
+        let external = r#"{"dependencies":{"react":"^18.0.0"}}"#;
+        std::fs::write(&pkg_path, original).unwrap();
+
+        let mut results = fallow_types::results::AnalysisResults::default();
+        results.unused_dependencies.push(
+            fallow_types::output_dead_code::UnusedDependencyFinding::with_actions(
+                UnusedDependency {
+                    package_name: "lodash".into(),
+                    location: fallow_types::results::DependencyLocation::Dependencies,
+                    path: pkg_path.clone(),
+                    line: 1,
+                    used_in_workspaces: Vec::new(),
+                },
+            ),
+        );
+        let hashes = CapturedHashes::default();
+        let mut fixes = Vec::new();
+        let mut plan = FixPlan::new();
+        apply_dependency_fixes(&mut DependencyFixInput {
+            root,
+            results: &results,
+            hashes: &hashes,
+            plan: &mut plan,
+            output: OutputFormat::Json,
+            dry_run: false,
+            fixes: &mut fixes,
+        });
+        std::fs::write(&pkg_path, external).unwrap();
+
+        let outcome = plan.commit();
+
+        assert!(outcome.written.is_empty());
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, pkg_path);
+        assert_eq!(std::fs::read_to_string(&pkg_path).unwrap(), external);
     }
 
     #[test]

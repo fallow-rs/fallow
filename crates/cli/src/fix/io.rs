@@ -110,6 +110,7 @@ pub(super) fn bytes_with_optional_bom(body: String, meta: &EncodingMetadata) -> 
     }
 }
 
+#[cfg(test)]
 pub(super) use fallow_config::atomic_write;
 
 #[cfg(test)]
