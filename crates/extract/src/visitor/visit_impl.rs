@@ -29,7 +29,8 @@ use super::helpers::{
     extract_query_list_element_type, extract_super_class_name, extract_type_annotation_name,
     has_angular_class_decorator, has_angular_plural_query_decorator,
     infer_array_binding_element_type, is_meta_url_arg, lit_custom_element_decorator,
-    lit_custom_element_tag, regex_pattern_to_suffix, ts_import_type_qualifier_root,
+    lit_custom_element_tag, regex_pattern_to_suffix, return_type_element_name,
+    ts_import_type_qualifier_root,
 };
 use super::{
     BindingTarget, ModuleInfoExtractor, PendingLocalExportSpecifier, ROUTE_LOADER_DATA_OBJECT,
@@ -1099,6 +1100,112 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
+    /// Pre-pass over top-level declarations recording each local function's
+    /// declared return element class (`Promise<T>` / `T`, non-builtin) keyed by
+    /// name, so `promise_all_map_element_type` resolves a map callback's callee
+    /// even when it is declared AFTER its consumer (declaration-order
+    /// independence: the repro's `createDb` follows `generate`). See issue #1793.
+    fn record_local_function_return_types(&mut self, program: &Program<'a>) {
+        for statement in &program.body {
+            match statement {
+                Statement::FunctionDeclaration(function) => {
+                    self.record_local_function_return_type(function);
+                }
+                Statement::VariableDeclaration(decl) => {
+                    for declarator in &decl.declarations {
+                        self.record_local_const_function_return_type(declarator);
+                    }
+                }
+                Statement::ExportNamedDeclaration(export) if export.source.is_none() => {
+                    match &export.declaration {
+                        Some(Declaration::FunctionDeclaration(function)) => {
+                            self.record_local_function_return_type(function);
+                        }
+                        Some(Declaration::VariableDeclaration(decl)) => {
+                            for declarator in &decl.declarations {
+                                self.record_local_const_function_return_type(declarator);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Statement::ExportDefaultDeclaration(export) => {
+                    if let ExportDefaultDeclarationKind::FunctionDeclaration(function) =
+                        &export.declaration
+                    {
+                        self.record_local_function_return_type(function);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn record_local_function_return_type(&mut self, function: &Function<'_>) {
+        let Some(id) = function.id.as_ref() else {
+            return;
+        };
+        let Some(return_type) = function.return_type.as_deref() else {
+            return;
+        };
+        if let Some(element) = return_type_element_name(&return_type.type_annotation) {
+            self.local_function_return_types
+                .entry(id.name.to_string())
+                .or_insert(element);
+        }
+    }
+
+    fn record_local_const_function_return_type(&mut self, declarator: &VariableDeclarator<'_>) {
+        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+            return;
+        };
+        let return_type = match declarator.init.as_ref() {
+            Some(Expression::ArrowFunctionExpression(arrow)) => arrow.return_type.as_deref(),
+            Some(Expression::FunctionExpression(function)) => function.return_type.as_deref(),
+            _ => None,
+        };
+        let Some(return_type) = return_type else {
+            return;
+        };
+        if let Some(element) = return_type_element_name(&return_type.type_annotation) {
+            self.local_function_return_types
+                .entry(id.name.to_string())
+                .or_insert(element);
+        }
+    }
+
+    /// Infer the element class of `await Promise.all(<expr>.map(cb))` where `cb`
+    /// returns a call to a same-module function whose declared return type is
+    /// `Promise<T>` / `T` for a non-builtin class `T`. `Promise.allSettled` /
+    /// `any` / `race` are excluded (only `all` yields the resolved element
+    /// array). Requires the `local_function_return_types` pre-pass. See #1793.
+    fn promise_all_map_element_type(&self, init: &Expression<'_>) -> Option<String> {
+        let Expression::CallExpression(call) = unwrap_await_paren_expr(init) else {
+            return None;
+        };
+        let Expression::StaticMemberExpression(member) = &call.callee else {
+            return None;
+        };
+        let Expression::Identifier(object) = &member.object else {
+            return None;
+        };
+        if object.name != "Promise" || member.property.name != "all" || call.arguments.len() != 1 {
+            return None;
+        }
+        let map_expr = call.arguments.first()?.as_expression()?;
+        let Expression::CallExpression(map_call) = unwrap_await_paren_expr(map_expr) else {
+            return None;
+        };
+        let Expression::StaticMemberExpression(map_member) = &map_call.callee else {
+            return None;
+        };
+        if map_member.property.name != "map" {
+            return None;
+        }
+        let callee_name = map_callback_returned_call_name(map_call.arguments.first()?)?;
+        self.local_function_return_types.get(&callee_name).cloned()
+    }
+
     /// Record a named import specifier (`import { fork } from ...`), tracking the
     /// `child_process.fork` and `node:url` `fileURLToPath` provenance bindings.
     fn handle_import_specifier(
@@ -1466,6 +1573,7 @@ impl<'a> ModuleInfoExtractor {
         if let BindingPattern::BindingIdentifier(id) = &declarator.id
             && let Some(element) =
                 infer_array_binding_element_type(declarator.type_annotation.as_deref(), Some(init))
+                    .or_else(|| self.promise_all_map_element_type(init))
         {
             let binding = id.name.to_string();
             self.record_vue_ref_value_array_binding_type(&binding, init, &element);
@@ -1827,6 +1935,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         }
         self.record_program_prologue(program);
         self.record_program_sanitizer_functions(program);
+        self.record_local_function_return_types(program);
         walk::walk_program(self, program);
     }
 
@@ -2916,6 +3025,58 @@ fn new_expression_class_name(expr: &Expression<'_>) -> Option<String> {
         return None;
     }
     Some(callee.name.to_string())
+}
+
+/// The callee identifier name of the (optionally awaited) call an iteration map
+/// callback returns: `async (n) => createDb(n)`, `(n) => await createDb(n)`, or
+/// a single-`return` block body. Member-expression callees and multi-statement
+/// bodies (including conditional early returns) yield `None`, keeping the
+/// Promise.all element inference conservative. See issue #1793.
+fn map_callback_returned_call_name(arg: &Argument<'_>) -> Option<String> {
+    let returned = match arg {
+        Argument::ArrowFunctionExpression(arrow) => {
+            if arrow.expression {
+                let Statement::ExpressionStatement(stmt) = arrow.body.statements.first()? else {
+                    return None;
+                };
+                &stmt.expression
+            } else {
+                single_return_expr(&arrow.body)?
+            }
+        }
+        Argument::FunctionExpression(function) => single_return_expr(function.body.as_deref()?)?,
+        _ => return None,
+    };
+    let Expression::CallExpression(call) = unwrap_await_paren_expr(returned) else {
+        return None;
+    };
+    match &call.callee {
+        Expression::Identifier(id) => Some(id.name.to_string()),
+        _ => None,
+    }
+}
+
+/// The single returned expression of a `{ return <expr>; }` block body. Any
+/// other statement count yields `None`, so a multi-statement or conditional
+/// callback body does not credit an element class. See issue #1793.
+fn single_return_expr<'a, 'b>(body: &'b FunctionBody<'a>) -> Option<&'b Expression<'a>> {
+    if body.statements.len() != 1 {
+        return None;
+    }
+    let Statement::ReturnStatement(ret) = body.statements.first()? else {
+        return None;
+    };
+    ret.argument.as_ref()
+}
+
+/// Recursively unwrap `await` and parenthesized wrappers to the inner
+/// expression. Used by the Promise.all element inference. See issue #1793.
+fn unwrap_await_paren_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    match expr {
+        Expression::AwaitExpression(await_expr) => unwrap_await_paren_expr(&await_expr.argument),
+        Expression::ParenthesizedExpression(paren) => unwrap_await_paren_expr(&paren.expression),
+        other => other,
+    }
 }
 
 /// Recursively unwrap parenthesized expressions to reach the inner expression.

@@ -252,6 +252,12 @@ pub(crate) struct ModuleInfoExtractor {
     /// and `for (const util of utils)` in the same lexical scope without leaking
     /// the binding to sibling functions.
     scoped_array_binding_element_types: Vec<FxHashMap<String, String>>,
+    /// Top-level local function name -> declared return element class
+    /// (`Promise<T>` / `T`, non-builtin). Populated by a `visit_program` pre-pass
+    /// so `Promise.all(arr.map(cb))` can type its result from a map callback whose
+    /// callee is declared after the consumer. Transient extractor state, not a
+    /// cached `ModuleInfo` field. See issue #1793.
+    local_function_return_types: FxHashMap<String, String>,
     object_binding_candidates: Vec<ObjectBindingCandidate>,
     local_declaration_names: FxHashSet<String>,
     pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,

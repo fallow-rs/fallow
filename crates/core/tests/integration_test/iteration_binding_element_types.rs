@@ -37,6 +37,34 @@ fn js_iteration_bindings_credit_class_member_accesses() {
     );
 }
 
+/// Issue #1793: the reporter's entry-script repro (Promise.all + for-of over a
+/// class-array), with DISTINCT binding names for the for-of variable and the map
+/// callback param so each part is individually load-bearing. Part 1 (array-typed
+/// `resetSchemas` param + for-of on `dbReset`) credits `resetSchema`; Part 2
+/// (Promise.all element inference + `.map` callback on `dbMapped`) credits
+/// `writeSchemaData` / `writeGraphDiagram` / `writeSchemaTyped`. `deadMethod`
+/// stays flagged, proving the detector still fires.
+#[test]
+fn entry_script_iteration_credits_writer_methods_issue_1793() {
+    let unused = unused_members("issue-1793-entry-script-iteration");
+
+    for member in [
+        "resetSchema",
+        "writeSchemaData",
+        "writeGraphDiagram",
+        "writeSchemaTyped",
+    ] {
+        assert!(
+            !unused.contains(&format!("SyntheticSchemaWriter.{member}")),
+            "SyntheticSchemaWriter.{member} is called through the entry-script iteration and must be credited, found: {unused:?}"
+        );
+    }
+    assert!(
+        unused.contains(&"SyntheticSchemaWriter.deadMethod".to_string()),
+        "SyntheticSchemaWriter.deadMethod is never called and must still report, found: {unused:?}"
+    );
+}
+
 /// Family 1 (#1707 follow-up): a Svelte `{#each utils as util}` item typed to the
 /// element class credits member accesses on the item.
 #[test]

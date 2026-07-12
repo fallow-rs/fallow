@@ -6,6 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::extract::{SanitizerScope, SinkLiteralValue};
 
+use super::super::helpers::array_element_type_from_type;
 use super::super::{ModuleInfoExtractor, SecurityPathSinkBinding};
 use super::{sink_literal_value, static_sink_literal_to_string, unwrap_static_expr};
 
@@ -243,6 +244,14 @@ impl ModuleInfoExtractor {
         }
 
         let mut scope = FxHashSet::default();
+        // Array-typed parameters (`items: Item[]`) mapped to their element class,
+        // so a `for...of` loop or `.map`/`.forEach` callback over the parameter in
+        // the function body credits the item's member accesses onto the class.
+        // Recorded here (before the body walk) rather than in
+        // `visit_formal_parameter`: at param-visit time the function-body scoped
+        // frame is not yet pushed, so a top-level function's array params would be
+        // silently dropped. See issue #1793.
+        let mut array_element_scope: FxHashMap<String, String> = FxHashMap::default();
         for param in &params.items {
             scope.extend(
                 param
@@ -251,6 +260,13 @@ impl ModuleInfoExtractor {
                     .into_iter()
                     .map(|id| id.name.to_string()),
             );
+            if let BindingPattern::BindingIdentifier(id) = &param.pattern
+                && let Some(type_annotation) = param.type_annotation.as_deref()
+                && let Some(element) =
+                    array_element_type_from_type(&type_annotation.type_annotation)
+            {
+                array_element_scope.insert(id.name.to_string(), element);
+            }
         }
         let sanitizer_scope = scope
             .iter()
@@ -273,6 +289,8 @@ impl ModuleInfoExtractor {
             .map(|name| (name.clone(), None))
             .collect::<FxHashMap<_, _>>();
         self.nested_declaration_stack.push(scope);
+        self.scoped_array_binding_element_types
+            .push(array_element_scope);
         self.sanitizer_binding_stack.push(sanitizer_scope);
         self.literal_allowlist_binding_stack.push(allowlist_scope);
         self.risky_regex_binding_stack.push(risky_regex_scope);
@@ -283,6 +301,7 @@ impl ModuleInfoExtractor {
     pub(super) fn pop_function_declaration_scope(&mut self) {
         if self.namespace_depth == 0 {
             self.nested_declaration_stack.pop();
+            self.scoped_array_binding_element_types.pop();
             self.sanitizer_binding_stack.pop();
             self.literal_allowlist_binding_stack.pop();
             self.risky_regex_binding_stack.pop();

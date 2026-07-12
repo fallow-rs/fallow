@@ -1,0 +1,6 @@
+{
+  "name": "issue-1793-entry-script-iteration",
+  "private": true,
+  "type": "module",
+  "main": "src/main.ts"
+}

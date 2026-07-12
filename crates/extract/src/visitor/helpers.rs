@@ -660,8 +660,33 @@ fn infer_array_element_from_init(expr: &Expression<'_>) -> Option<String> {
         Expression::ParenthesizedExpression(paren) => {
             infer_array_element_from_init(&paren.expression)
         }
+        // `const xs = await computed(() => [new Foo()])`: an awaited array-shaped
+        // initializer types the binding to its element class. See issue #1793.
+        Expression::AwaitExpression(await_expr) => {
+            infer_array_element_from_init(&await_expr.argument)
+        }
         Expression::ArrayExpression(arr) => array_literal_element_type(arr),
         Expression::CallExpression(call) => reactivity_wrapper_element_type(call),
+        _ => None,
+    }
+}
+
+/// The non-builtin class name from a function return type annotation of the
+/// shape `Promise<T>` (an async factory) or a direct `T`. Returns `None` for a
+/// builtin element and any non-reference shape. Used by the issue #1793
+/// `Promise.all(arr.map(cb))` inference pre-pass.
+pub(super) fn return_type_element_name(ty: &TSType<'_>) -> Option<String> {
+    match ty {
+        TSType::TSParenthesizedType(paren) => return_type_element_name(&paren.type_annotation),
+        TSType::TSTypeReference(type_ref) => {
+            let name = extract_type_name(&type_ref.type_name)?;
+            if name == "Promise" {
+                let first = type_ref.type_arguments.as_deref()?.params.first()?;
+                return extract_type_reference_name(first)
+                    .filter(|inner| !is_builtin_constructor(inner));
+            }
+            (!is_builtin_constructor(&name)).then_some(name)
+        }
         _ => None,
     }
 }

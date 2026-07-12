@@ -785,7 +785,13 @@ use crate::MemberKind;
 /// returning a locally-bound `const merge = mergeTests(...)`) now emits
 /// analyze-time fixture-alias facts a warm 231 cache lacks, leaving POM methods
 /// used only through such a helper falsely reported as `unused-class-member`.
-pub(super) const CACHE_VERSION: u32 = 232;
+///
+/// Bumped to 233 for issue #1793: an array-typed formal parameter
+/// (`items: Item[]`) and a `Promise.all(arr.map(cb))` result now type their
+/// iteration variable to the element class, so `for...of` / `.map` / `.forEach`
+/// member accesses on the item credit the class. Warm 232 caches lack the added
+/// `member_accesses`, leaving those methods falsely reported as unused.
+pub(super) const CACHE_VERSION: u32 = 233;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

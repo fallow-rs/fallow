@@ -321,3 +321,162 @@ fn nested_plain_template_in_tagged_credits_to_string() {
         info.member_accesses,
     );
 }
+
+// Issue #1793: array-typed formal parameter iteration binding. The TOP-LEVEL
+// function shape is load-bearing: recording the element type from the function
+// declaration scope (not `visit_formal_parameter`) is required because the
+// function-body scoped frame is not yet pushed at param-visit time, so a
+// top-level function's params would otherwise be silently dropped.
+
+#[test]
+fn top_level_fn_array_param_for_of_credits_element_class_member() {
+    let info = parse_source(
+        "class Item { used() {} }\n\
+         function run(items: Item[]) {\n\
+           for (const item of items) {\n\
+             item.used();\n\
+           }\n\
+         }",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Item" && a.member == "used"),
+        "a for-of over an array-typed top-level fn param must credit Item.used; got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn top_level_fn_array_param_map_callback_credits_element_class_member() {
+    let info = parse_source(
+        "class Item { used() {} }\n\
+         function run(items: Item[]) {\n\
+           items.forEach((item) => item.used());\n\
+         }",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Item" && a.member == "used"),
+        "a .forEach callback over an array-typed top-level fn param must credit Item.used; got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn top_level_fn_builtin_array_param_records_no_class_binding() {
+    // `number[]` has a builtin element, so the loop variable must NOT bind to
+    // any class; `Item.used` must not appear.
+    let info = parse_source(
+        "class Item { used() {} }\n\
+         function run(items: number[]) {\n\
+           for (const item of items) {\n\
+             item.used();\n\
+           }\n\
+         }",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Item" && a.member == "used"),
+        "a number[] element must not bind the loop variable to a class; got {:?}",
+        info.member_accesses,
+    );
+}
+
+// Issue #1793: `Promise.all(arr.map(cb))` element inference.
+
+#[test]
+fn promise_all_map_credits_element_from_return_type_declared_after_consumer() {
+    // `makeThing` is declared AFTER `consume`, proving the pre-pass makes the
+    // inference declaration-order independent.
+    let info = parse_source(
+        "class Thing { greet() {} }\n\
+         async function consume() {\n\
+           const xs = await Promise.all(['a', 'b'].map(async (n) => makeThing(n)));\n\
+           xs.forEach((x) => x.greet());\n\
+         }\n\
+         async function makeThing(n: string): Promise<Thing> {\n\
+           return new Thing();\n\
+         }",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Thing" && a.member == "greet"),
+        "Promise.all(arr.map(async n => makeThing(n))) must type xs as Thing[] via makeThing's Promise<Thing> return; got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn promise_all_settled_map_records_no_element_binding() {
+    let info = parse_source(
+        "class Thing { greet() {} }\n\
+         async function consume() {\n\
+           const xs = await Promise.allSettled(['a'].map(async (n) => makeThing(n)));\n\
+           xs.forEach((x) => x.greet());\n\
+         }\n\
+         async function makeThing(n: string): Promise<Thing> {\n\
+           return new Thing();\n\
+         }",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Thing" && a.member == "greet"),
+        "Promise.allSettled must not type xs (only `all` yields the resolved element array); got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn promise_all_map_imported_callee_records_no_element_binding() {
+    // An imported callee has no local return type in the pre-pass map.
+    let info = parse_source(
+        "import { makeThing } from './factory';\n\
+         class Thing { greet() {} }\n\
+         async function consume() {\n\
+           const xs = await Promise.all(['a'].map(async (n) => makeThing(n)));\n\
+           xs.forEach((x) => x.greet());\n\
+         }",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Thing" && a.member == "greet"),
+        "an imported map-callback callee must not credit an element class; got {:?}",
+        info.member_accesses,
+    );
+}
+
+#[test]
+fn promise_all_map_multi_statement_callback_records_no_element_binding() {
+    let info = parse_source(
+        "class Thing { greet() {} }\n\
+         async function consume() {\n\
+           const xs = await Promise.all(['a'].map(async (n) => {\n\
+             if (n) {\n\
+               return makeThing(n);\n\
+             }\n\
+             return makeThing(n);\n\
+           }));\n\
+           xs.forEach((x) => x.greet());\n\
+         }\n\
+         async function makeThing(n: string): Promise<Thing> {\n\
+           return new Thing();\n\
+         }",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Thing" && a.member == "greet"),
+        "a multi-statement conditional-return callback must not credit an element class; got {:?}",
+        info.member_accesses,
+    );
+}
