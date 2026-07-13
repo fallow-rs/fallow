@@ -8,8 +8,9 @@
 //! - `key_params` is a deliberate SUBSET of each tool's input schema; a
 //!   newly added param can lawfully be absent from the manifest. The test
 //!   only rejects manifest params that do not exist on the live schema.
-//! - Descriptions are not drift-tested: the manifest carries fresh one-line
-//!   prose for introspection, distinct from the rmcp wire descriptions.
+//! - Manifest descriptions are concise introspection summaries, not copies of
+//!   the full rmcp wire descriptions. `tool_descriptions` locks the wire prose
+//!   byte for byte; the test here keeps the two roles distinct.
 
 use std::collections::BTreeSet;
 
@@ -30,6 +31,34 @@ fn manifest_names_match_live_tool_router_both_directions() {
         "fallow_types::mcp_manifest::MCP_TOOLS must list exactly the tools the MCP server \
          registers; update the shared manifest when adding, renaming, or removing a tool"
     );
+}
+
+#[test]
+fn manifest_descriptions_are_concise_summaries_not_wire_copies() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+
+    for entry in MCP_TOOLS {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name.as_ref() == entry.name)
+            .unwrap_or_else(|| panic!("manifest tool {} is not registered", entry.name));
+        let wire_description = tool
+            .description
+            .as_deref()
+            .unwrap_or_else(|| panic!("tool {} has no wire description", entry.name));
+
+        assert_ne!(
+            entry.description, wire_description,
+            "manifest description for {} must remain a distinct capability summary",
+            entry.name
+        );
+        assert!(
+            entry.description.len() < wire_description.len(),
+            "manifest description for {} must stay shorter than its full wire description",
+            entry.name
+        );
+    }
 }
 
 #[test]

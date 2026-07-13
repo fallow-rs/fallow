@@ -2,10 +2,10 @@
 //!
 //! Single source of truth shared by `fallow schema` (the agent-facing
 //! capability manifest in `crates/cli`) and the telemetry tool-name
-//! allowlist. The MCP server itself defines tool behavior via rmcp
-//! `#[tool]` attributes in `crates/mcp`; a drift test there (dev-dependency
-//! on this crate) asserts this manifest stays in sync with the live tool
-//! router, so the two cannot diverge silently.
+//! allowlist. The MCP server itself defines full wire descriptions in method
+//! docs consumed by rmcp `#[tool]` attributes in `crates/mcp`; drift tests
+//! there assert this manifest stays in sync with the live tool router while
+//! keeping the two description roles distinct.
 //!
 //! The one-line `description` strings here are intentional, agent-facing
 //! prose authored for the capability manifest. They deliberately do NOT
