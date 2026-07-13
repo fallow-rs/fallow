@@ -20,7 +20,7 @@ Static analysis is open source. An optional runtime layer adds production execut
 npm install --save-dev fallow   # or: pnpm add -D fallow / yarn add -D fallow / bun add -d fallow
 ```
 
-Installs the `fallow` CLI plus the companion `fallow-lsp` and `fallow-mcp` binaries in your project.
+Installs the `fallow` CLI in your project, along with the `fallow-lsp` and `fallow-mcp` launchers that start the LSP and MCP servers from the same binary.
 
 The package also ships a version-matched Agent Skill under `skills/fallow`.
 For tools that need CLI and issue-surface metadata without spawning the binary,
