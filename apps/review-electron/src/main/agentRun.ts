@@ -1,33 +1,36 @@
-import { spawn } from "node:child_process";
 import { runGuide } from "./review";
 import { buildTradeOffPrompt, extractTradeOffJson, resolveBackend } from "./backends";
 import { describeExecError } from "./errors";
 import { writePersistedTradeoffs } from "./tradeoffs";
 import { toTradeOffEnvelope } from "../model/adapter";
 import type { TradeOffEnvelope } from "../model/tradeoff";
+import {
+  AGENT_DEADLINE_MS,
+  STDERR_LIMIT_BYTES,
+  STDOUT_LIMIT_BYTES,
+  ProcessRunError,
+  runProcess,
+} from "./processRun";
 
 export type TradeOffRunResult =
   | { ok: true; tradeoffs: TradeOffEnvelope }
   | { ok: false; error: string };
 
 const spawnAgent = (cmd: string, args: string[], input: string, cwd: string): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd });
-    let out = "";
-    let err = "";
-    child.on("error", (e: unknown) => reject(describeExecError(e, cmd)));
-    child.stdout.on("data", (d: Buffer) => {
-      out += d.toString();
+  runProcess({
+    command: cmd,
+    args,
+    cwd,
+    input,
+    deadlineMs: AGENT_DEADLINE_MS,
+    stdoutLimitBytes: STDOUT_LIMIT_BYTES,
+    stderrLimitBytes: STDERR_LIMIT_BYTES,
+  })
+    .then(({ stdout }) => stdout)
+    .catch((error: unknown) => {
+      if (error instanceof ProcessRunError && error.kind !== "spawn") throw error;
+      throw describeExecError(error, cmd);
     });
-    child.stderr.on("data", (d: Buffer) => {
-      err += d.toString();
-    });
-    child.on("close", (code) =>
-      code === 0 ? resolve(out) : reject(new Error(err.trim() || `exit ${code}`)),
-    );
-    child.stdin.write(input);
-    child.stdin.end();
-  });
 
 /**
  * The trade-off elicitation run: spawn the chosen agent CLI on the deterministic

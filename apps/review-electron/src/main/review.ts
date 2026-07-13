@@ -1,15 +1,17 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { toWalkthroughDocument, type AuditBrief } from "../model/adapter";
 import type { WalkthroughDocument } from "../model/walkthrough";
 import type { AgentWalkthrough, Guide } from "../model/agent";
 import { describeExecError } from "./errors";
-
-const run = promisify(execFile);
+import {
+  FALLOW_DEADLINE_MS,
+  STDERR_LIMIT_BYTES,
+  STDOUT_LIMIT_BYTES,
+  runProcess,
+} from "./processRun";
 
 /**
  * Resolve the fallow binary. Precedence:
@@ -31,13 +33,19 @@ const fallowBin = (): string => {
   return "fallow";
 };
 const at = (root?: string): string => root ?? process.cwd();
-const MAX_BUFFER = 64 * 1024 * 1024;
-
 /** Run the fallow CLI, translating spawn/exit failures into clean messages. */
 const runFallow = async (args: string[], root?: string): Promise<string> => {
   const bin = fallowBin();
   try {
-    const { stdout } = await run(bin, args, { cwd: at(root), maxBuffer: MAX_BUFFER });
+    const { stdout } = await runProcess({
+      command: bin,
+      args,
+      cwd: at(root),
+      input: "",
+      deadlineMs: FALLOW_DEADLINE_MS,
+      stdoutLimitBytes: STDOUT_LIMIT_BYTES,
+      stderrLimitBytes: STDERR_LIMIT_BYTES,
+    });
     return stdout;
   } catch (e) {
     throw describeExecError(e, bin);
@@ -108,9 +116,26 @@ export const runGuide = async (root?: string): Promise<Guide> => {
 export const validateWalkthrough = async (
   payload: AgentWalkthrough,
   root?: string,
-): Promise<unknown> => {
-  const file = join(tmpdir(), `fallow-agent-wt-${process.pid}-${Date.now()}.json`);
-  await writeFile(file, JSON.stringify(payload), "utf8");
-  const stdout = await runFallow(["review", "--walkthrough-file", file, "--format", "json"], root);
-  return parseFallowJson<unknown>(stdout);
+): Promise<unknown> =>
+  withValidationPayloadFile(payload, async (file) => {
+    const stdout = await runFallow(
+      ["review", "--walkthrough-file", file, "--format", "json"],
+      root,
+    );
+    return parseFallowJson<unknown>(stdout);
+  });
+
+/** Uses a private random temp directory and removes the validation payload on every exit path. */
+export const withValidationPayloadFile = async <T>(
+  payload: AgentWalkthrough,
+  validate: (file: string) => Promise<T> | T,
+): Promise<T> => {
+  const directory = await mkdtemp(join(tmpdir(), "fallow-agent-wt-"));
+  const file = join(directory, "payload.json");
+  try {
+    await writeFile(file, JSON.stringify(payload), "utf8");
+    return await validate(file);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 };

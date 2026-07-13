@@ -44,7 +44,7 @@ test("opens a file diff from the walkthrough", async () => {
   await ensureReviewStarted(win);
   await expect(win.getByTestId("review-loaded")).toBeVisible({ timeout: 150_000 });
   await win.getByTestId("file-open").first().click();
-  await expect(win.getByText(/@@|no textual diff/)).toBeVisible({ timeout: 20_000 });
+  await expect(win.getByText(/@@|no textual diff/).first()).toBeVisible({ timeout: 20_000 });
 });
 
 test("inspector bridge pushes a grounded card to the UI", async () => {

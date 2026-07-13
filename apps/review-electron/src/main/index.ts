@@ -16,6 +16,7 @@ import { readReviewContext } from "./reviewContext";
 import { startInspectServer } from "./inspectServer";
 import type { FeedItem } from "../model/agent";
 import type { WalkthroughDocument } from "../model/walkthrough";
+import { cancelActiveProcesses } from "./processRun";
 
 const PROD_CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'";
@@ -162,3 +163,5 @@ if (!app.requestSingleInstanceLock()) {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+app.on("before-quit", () => cancelActiveProcesses());
