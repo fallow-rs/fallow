@@ -88,7 +88,7 @@ inputs:
     required: false
     default: 'https://api.fallow.cloud'
   annotations:
-    description: 'Emit findings as inline PR annotations via workflow commands (no Advanced Security required)'
+    description: 'Emit findings as inline PR annotations via workflow commands (no Advanced Security required). On fallow >= 3.4.2 the action renders these natively via `fallow report --format github-annotations`; older binaries fall back to the bundled jq renderers, and version: latest users flip to the native path silently. The step log line "fallow: annotations rendered via native github-annotations" (or "via jq fallback") tells you which renderer ran.'
     required: false
     default: 'true'
   review-comments:
@@ -100,7 +100,7 @@ inputs:
     required: false
     default: 'false'
   max-annotations:
-    description: 'Maximum number of inline annotations to emit (default: 50)'
+    description: 'Maximum number of inline annotations to emit (default: 50). On the native path the action applies this cap to the rendered stream (GitHub itself displays at most 10 annotations per type per step).'
     required: false
     default: '50'
   max-comments:

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The bundled GitHub Action renders inline annotations and the job summary
+  natively when the installed fallow supports it.** The annotate and summary
+  steps previously rendered both surfaces through the action's bundled jq. On
+  fallow >= 3.4.2 they now call `fallow report --from <results> --format
+  github-annotations|github-summary`, re-rendering the same saved analysis JSON
+  the run already produced (no extra analysis cost) and making the binary the
+  single source of truth for GitHub presentation. Older binaries without
+  `fallow report` stay on the jq renderers automatically via a capability probe
+  (there is no version floor), so nothing changes for them, and `version:
+  latest` users flip to the native path silently. A step log line names which
+  renderer ran. Two behavior deltas on the native path: the annotation stream
+  ends with a `fallow emitted N annotation(s)` budget notice that counts toward
+  `max-annotations`, and the job summary uses fallow's purpose-built
+  step-summary rendering instead of the comment-shaped body. The `fix` command
+  keeps the jq summary (there is no native fix rendering yet), and the jq
+  renderers remain in place as the fallback.
+
 ## [3.4.2] - 2026-07-13
 
 ### Added
