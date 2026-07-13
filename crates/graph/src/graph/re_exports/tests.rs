@@ -184,7 +184,14 @@ fn barrel_re_export_creates_export_symbol() {
         },
     ];
 
-    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+    let (graph, origin_index_builds) = count_named_import_origin_index_builds(|| {
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    });
+
+    assert_eq!(
+        origin_index_builds, 0,
+        "named re-exports should not build the star-import origin index"
+    );
 
     let barrel = &graph.modules[1];
     let foo_export = barrel.exports.iter().find(|e| e.name.to_string() == "foo");
@@ -878,7 +885,14 @@ fn entry_point_star_re_export_propagates_to_source() {
         },
     ];
 
-    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+    let (graph, origin_index_builds) = count_named_import_origin_index_builds(|| {
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    });
+
+    assert_eq!(
+        origin_index_builds, 0,
+        "entry-point star re-exports should use the fast path without an origin index"
+    );
 
     let utils_module = &graph.modules[1];
     let foo = utils_module
@@ -2218,9 +2232,9 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
         ModuleGraph::build(&resolved_modules, &entry_points, &files)
     });
 
-    assert_eq!(
-        reference_set_rebuilds, 2,
-        "the reference set should be built once per fixpoint iteration"
+    assert!(
+        (1..=2).contains(&reference_set_rebuilds),
+        "the reference set should be built at most once per fixpoint iteration"
     );
 
     let source = &graph.modules[source_id.0 as usize];

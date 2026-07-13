@@ -91,7 +91,12 @@ impl ModuleGraph {
 
         let entry_star_targets = self.collect_entry_star_targets();
         let edges_by_target = self.build_edges_by_target();
-        let named_import_origin_index = NamedImportOriginIndex::from_edges(&self.edges);
+        let named_import_origin_index =
+            if self.needs_named_import_origin_index(&re_export_info, &entry_star_targets) {
+                NamedImportOriginIndex::from_edges(&self.edges)
+            } else {
+                NamedImportOriginIndex::default()
+            };
 
         self.run_re_export_fixpoint(
             &re_export_info,
@@ -161,6 +166,22 @@ impl ModuleGraph {
             edges_by_target.entry(edge.target).or_default().push(idx);
         }
         edges_by_target
+    }
+
+    fn needs_named_import_origin_index(
+        &self,
+        re_export_info: &[ReExportTuple],
+        entry_star_targets: &FxHashSet<FileId>,
+    ) -> bool {
+        re_export_info.iter().any(|entry| {
+            if entry.exported_name != "*" || entry_star_targets.contains(&entry.barrel) {
+                return false;
+            }
+
+            self.modules
+                .get(entry.barrel.0 as usize)
+                .is_some_and(|barrel| !barrel.is_entry_point())
+        })
     }
 
     /// Run the monotone fixpoint that propagates references through every chain.

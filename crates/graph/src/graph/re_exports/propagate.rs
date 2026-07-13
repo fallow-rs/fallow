@@ -225,6 +225,7 @@ fn barrel_star_ref(
 
 type ReferenceSite = (FileId, u32, u32);
 
+#[derive(Default)]
 pub(in crate::graph) struct NamedImportOriginIndex(
     FxHashMap<ReferenceSite, FxHashMap<String, StarReferenceOrigin>>,
 );
@@ -689,11 +690,11 @@ fn attach_star_refs_to_exports(
     references: &[SymbolReference],
     existing_files: &mut FxHashSet<FileId>,
 ) -> bool {
-    #[cfg(test)]
-    STAR_REFERENCE_SET_REBUILDS.set(STAR_REFERENCE_SET_REBUILDS.get() + 1);
-
     let mut changed = false;
     for export_idx in export_indices {
+        #[cfg(test)]
+        STAR_REFERENCE_SET_REBUILDS.set(STAR_REFERENCE_SET_REBUILDS.get() + 1);
+
         existing_files.clear();
         existing_files.extend(
             source.exports[*export_idx]
