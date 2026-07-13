@@ -20,6 +20,8 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use colored::Colorize;
+use fallow_types::issue_meta::{issue_meta_by_kind, issue_meta_for_contract_token};
+use fallow_types::suppress::{IssueKind, issue_kind_to_kebab};
 
 use super::{Level, plural, relative_path, split_dir_filename};
 
@@ -246,53 +248,81 @@ fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static 
     }
 }
 
-/// Map section title to the corresponding fallow-ignore rule name.
-fn section_suppress_rule(title: &str) -> Option<&'static str> {
-    match title {
-        "Unused files" => Some("unused-file"),
-        "Unused exports" => Some("unused-exports"),
-        "Unused type exports" => Some("unused-types"),
-        "Private type leaks" => Some("private-type-leak"),
-        "Unused dependencies" | "Unused devDependencies" | "Unused optionalDependencies" => {
-            Some("unused-dependencies")
-        }
-        "Unused enum members" => Some("unused-enum-members"),
-        "Unused class members" => Some("unused-class-members"),
-        "Unused store members" => Some("unused-store-members"),
-        "Unresolved imports" => Some("unresolved-imports"),
-        "Unlisted dependencies" => Some("unlisted-dependencies"),
-        "Duplicate exports" => Some("duplicate-exports"),
-        "Circular dependencies" => Some("circular-dependencies"),
-        "Boundary violations" => Some("boundary-violation"),
-        "Unused catalog entries" => Some("unused-catalog-entry"),
-        "Unresolved catalog references" => Some("unresolved-catalog-reference"),
-        "Unused dependency overrides" => Some("unused-dependency-override"),
-        "Misconfigured dependency overrides" => Some("misconfigured-dependency-override"),
-        "Invalid client exports" => Some("invalid-client-export"),
-        "Mixed client/server barrels" => Some("mixed-client-server-barrel"),
-        "Misplaced directives" => Some("misplaced-directive"),
-        "Unprovided injects" => Some("unprovided-injects"),
-        "Unrendered components" => Some("unrendered-components"),
-        "Unused component props" => Some("unused-component-props"),
-        "Prop drilling" => Some("prop-drilling"),
-        "Thin wrappers" => Some("thin-wrapper"),
-        "Duplicate prop shapes" => Some("duplicate-prop-shape"),
-        "Unused component emits" => Some("unused-component-emits"),
-        "Unused component inputs" => Some("unused-component-inputs"),
-        "Unused component outputs" => Some("unused-component-outputs"),
-        "Unused Svelte events" => Some("unused-svelte-event"),
-        "Unused server actions" => Some("unused-server-actions"),
-        "Unused load data keys" => Some("unused-load-data-keys"),
-        _ => None,
-    }
+/// Map a human-output section title to the issue kind it reports.
+///
+/// This title-to-kind map is the only hand-maintained association; every
+/// suppression token and file-level flag is then derived from the registry in
+/// [`fallow_types::issue_meta::ISSUE_KIND_META`], so the printed hint can never
+/// drift from what [`fallow_types::suppress::parse_suppression_target`] accepts.
+fn section_issue_kind(title: &str) -> Option<IssueKind> {
+    Some(match title {
+        "Unused files" => IssueKind::UnusedFile,
+        "Unused exports" => IssueKind::UnusedExport,
+        "Unused type exports" => IssueKind::UnusedType,
+        "Private type leaks" => IssueKind::PrivateTypeLeak,
+        "Unused dependencies" => IssueKind::UnusedDependency,
+        "Unused devDependencies" => IssueKind::UnusedDevDependency,
+        // "Unused optionalDependencies" has no backing IssueKind and its findings
+        // live in package.json (no inline comment surface), so it maps to nothing
+        // and emits no suppress hint.
+        "Unused enum members" => IssueKind::UnusedEnumMember,
+        "Unused class members" => IssueKind::UnusedClassMember,
+        "Unused store members" => IssueKind::UnusedStoreMember,
+        "Unresolved imports" => IssueKind::UnresolvedImport,
+        "Unlisted dependencies" => IssueKind::UnlistedDependency,
+        "Duplicate exports" => IssueKind::DuplicateExport,
+        "Circular dependencies" => IssueKind::CircularDependency,
+        "Boundary violations" => IssueKind::BoundaryViolation,
+        "Unused catalog entries" => IssueKind::PnpmCatalogEntry,
+        "Unresolved catalog references" => IssueKind::UnresolvedCatalogReference,
+        "Unused dependency overrides" => IssueKind::UnusedDependencyOverride,
+        "Misconfigured dependency overrides" => IssueKind::MisconfiguredDependencyOverride,
+        "Invalid client exports" => IssueKind::InvalidClientExport,
+        "Mixed client/server barrels" => IssueKind::MixedClientServerBarrel,
+        "Misplaced directives" => IssueKind::MisplacedDirective,
+        "Unprovided injects" => IssueKind::UnprovidedInject,
+        "Unrendered components" => IssueKind::UnrenderedComponent,
+        "Unused component props" => IssueKind::UnusedComponentProp,
+        "Prop drilling" => IssueKind::PropDrilling,
+        "Thin wrappers" => IssueKind::ThinWrapper,
+        "Duplicate prop shapes" => IssueKind::DuplicatePropShape,
+        "Unused component emits" => IssueKind::UnusedComponentEmit,
+        "Unused component inputs" => IssueKind::UnusedComponentInput,
+        "Unused component outputs" => IssueKind::UnusedComponentOutput,
+        "Unused Svelte events" => IssueKind::UnusedSvelteEvent,
+        "Unused server actions" => IssueKind::UnusedServerAction,
+        "Unused load data keys" => IssueKind::UnusedLoadDataKey,
+        _ => return None,
+    })
 }
 
-/// Rules that only support file-level suppression (not next-line).
+/// Map a section title to the fallow-ignore suppression token to print, derived
+/// from the issue registry so it always parses back to the same kind.
+///
+/// Returns `None` when the section's findings have no inline suppression surface:
+/// a kind with no dedicated `suppress_token` whose findings live in package.json
+/// (the dependency sections) would otherwise print a token that parses but points
+/// at a comment the user cannot place. Catalog entries (YAML comment surface) and
+/// catalog references / dependency overrides (config-entry surface) keep a hint,
+/// routed through [`is_yaml_comment_only`] / [`is_config_only_suppression`].
+fn section_suppress_rule(title: &str) -> Option<&'static str> {
+    let kind = section_issue_kind(title)?;
+    let meta = issue_meta_by_kind(kind)?;
+    let token = issue_kind_to_kebab(kind);
+    if meta.suppress_token.is_none()
+        && !is_yaml_comment_only(token)
+        && !is_config_only_suppression(token)
+    {
+        return None;
+    }
+    Some(token)
+}
+
+/// Rules that only support file-level suppression (not next-line), derived from
+/// the issue registry's `suppress_file_level` flag so the printed hint form
+/// matches how each kind's detector actually consumes suppressions.
 fn is_file_level_only(rule: &str) -> bool {
-    matches!(
-        rule,
-        "circular-dependencies" | "boundary-violation" | "unused-file"
-    )
+    issue_meta_for_contract_token(rule).is_some_and(|meta| meta.suppress_file_level)
 }
 
 /// Rules whose findings live in YAML files (so the suppression comment must
@@ -612,5 +642,205 @@ mod tests {
                 "Missing title for level {level:?}"
             );
         }
+    }
+
+    /// Every human-output footer section title. Drives the suppression-token
+    /// guards below over the whole surface. A section added to
+    /// `section_footer_text` without an entry here leaves its hint untested; an
+    /// entry here that names no real footer trips `section_footer_text`.
+    const ALL_FOOTER_SECTION_TITLES: &[&str] = &[
+        "Unused files",
+        "Unused exports",
+        "Unused type exports",
+        "Private type leaks",
+        "Unused dependencies",
+        "Unused devDependencies",
+        "Unused optionalDependencies",
+        "Unused enum members",
+        "Unused class members",
+        "Unused store members",
+        "Unresolved imports",
+        "Unlisted dependencies",
+        "Duplicate exports",
+        "Circular dependencies",
+        "Boundary violations",
+        "Stale suppressions",
+        "Unused catalog entries",
+        "Unresolved catalog references",
+        "Unused dependency overrides",
+        "Misconfigured dependency overrides",
+        "Type-only dependencies",
+        "Invalid client exports",
+        "Mixed client/server barrels",
+        "Misplaced directives",
+        "Unprovided injects",
+        "Unrendered components",
+        "Unused component props",
+        "Prop drilling",
+        "Thin wrappers",
+        "Duplicate prop shapes",
+        "Unused component emits",
+        "Unused component inputs",
+        "Unused component outputs",
+        "Unused Svelte events",
+        "Unused server actions",
+        "Unused load data keys",
+    ];
+
+    /// The core issue #1828 guard: every token `section_suppress_rule` can emit
+    /// must parse via `parse_suppression_target`, and its file-level flag must
+    /// match the kind's registry entry. Adding a section whose token does not
+    /// parse (or whose file-level form disagrees with the registry) fails here.
+    #[test]
+    fn every_section_suppress_token_parses_and_matches_registry_file_level() {
+        use fallow_types::suppress::parse_suppression_target;
+
+        for &title in ALL_FOOTER_SECTION_TITLES {
+            assert!(
+                section_footer_text(title).is_some(),
+                "{title:?} is listed as a footer section but section_footer_text does not recognize it",
+            );
+
+            let Some(rule) = section_suppress_rule(title) else {
+                // Sections with no inline suppression surface (dependency sections
+                // whose findings live in package.json, plus stale-suppression and
+                // type-only-dependency, which carry no suppress token) print no hint.
+                continue;
+            };
+
+            assert!(
+                parse_suppression_target(rule).is_some(),
+                "{title:?} prints suppress token {rule:?}, which parse_suppression_target rejects",
+            );
+
+            let kind = section_issue_kind(title)
+                .expect("a section with a suppress rule has a mapped issue kind");
+            let registry_file_level = issue_meta_by_kind(kind)
+                .expect("mapped issue kind has a registry row")
+                .suppress_file_level;
+            assert_eq!(
+                is_file_level_only(rule),
+                registry_file_level,
+                "{title:?} token {rule:?}: is_file_level_only disagrees with registry suppress_file_level",
+            );
+        }
+    }
+
+    /// The rendered footer hint must embed the parseable token and use the
+    /// file-level comment form exactly when the kind is file-level-only.
+    #[test]
+    fn printed_footer_hint_uses_registry_file_level_form() {
+        use fallow_types::suppress::parse_suppression_target;
+
+        for &title in ALL_FOOTER_SECTION_TITLES {
+            let mut lines = Vec::new();
+            // 3 items clears the >= 3 threshold that gates the suppress hint.
+            push_section_footer_with_count(&mut lines, title, 3);
+            let rendered = lines
+                .iter()
+                .map(|l| strip_ansi(l))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let Some(rule) = section_suppress_rule(title) else {
+                assert!(
+                    !rendered.contains("fallow-ignore"),
+                    "{title:?} has no suppress rule but printed a fallow-ignore hint: {rendered:?}",
+                );
+                continue;
+            };
+
+            // Config-only sections print a config-entry hint, not a comment token.
+            if is_config_only_suppression(rule) {
+                assert!(
+                    !rendered.contains("fallow-ignore"),
+                    "{title:?} is config-only but printed a fallow-ignore hint: {rendered:?}",
+                );
+                continue;
+            }
+
+            let hint_line = rendered
+                .lines()
+                .find(|l| l.contains("fallow-ignore"))
+                .unwrap_or_else(|| {
+                    panic!("{title:?} has suppress token {rule:?} but no fallow-ignore hint: {rendered:?}")
+                });
+
+            let printed_token = hint_line
+                .rsplit(' ')
+                .next()
+                .expect("hint line ends with the token");
+            assert_eq!(
+                printed_token, rule,
+                "{title:?} printed token differs from section_suppress_rule",
+            );
+            assert!(
+                parse_suppression_target(printed_token).is_some(),
+                "{title:?} printed token {printed_token:?} does not parse",
+            );
+
+            let uses_file_form = hint_line.contains("fallow-ignore-file");
+            assert_eq!(
+                uses_file_form,
+                is_file_level_only(rule),
+                "{title:?} hint {hint_line:?}: file-level form does not match is_file_level_only",
+            );
+        }
+    }
+
+    /// Regression for the eight sections issue #1828 verified broken: the six with
+    /// an inline comment surface now emit the singular registered token, and the
+    /// two dependency sections emit no hint at all.
+    #[test]
+    fn previously_unparseable_sections_are_fixed() {
+        use fallow_types::suppress::parse_suppression_target;
+
+        let fixed = [
+            ("Unused exports", "unused-export"),
+            ("Unused type exports", "unused-type"),
+            ("Unused enum members", "unused-enum-member"),
+            ("Unused class members", "unused-class-member"),
+            ("Unresolved imports", "unresolved-import"),
+            ("Duplicate exports", "duplicate-export"),
+        ];
+        for (title, expected) in fixed {
+            let rule = section_suppress_rule(title)
+                .unwrap_or_else(|| panic!("{title:?} should still print a suppress token"));
+            assert_eq!(rule, expected, "{title:?} token drifted");
+            assert!(
+                parse_suppression_target(rule).is_some(),
+                "{title:?} token {rule:?} still does not parse",
+            );
+        }
+
+        for title in ["Unused dependencies", "Unlisted dependencies"] {
+            assert!(
+                section_suppress_rule(title).is_none(),
+                "{title:?} should emit no suppress hint (package.json finding)",
+            );
+        }
+    }
+
+    /// Documents the `is_file_level_only` audit against the registry: the
+    /// file-level-only kinds among footer sections, and the multi-file kinds that
+    /// still honor next-line suppression.
+    #[test]
+    fn is_file_level_only_matches_registry_for_footer_kinds() {
+        assert!(is_file_level_only(
+            section_suppress_rule("Unused files").unwrap()
+        ));
+        // duplicate-export is file-level-only (issue #1820 review note): its
+        // detector consumes only file-level suppression.
+        assert!(is_file_level_only(
+            section_suppress_rule("Duplicate exports").unwrap()
+        ));
+        // circular-dependency and boundary-violation honor next-line suppression,
+        // so they are NOT file-level-only despite spanning multiple files.
+        assert!(!is_file_level_only(
+            section_suppress_rule("Circular dependencies").unwrap()
+        ));
+        assert!(!is_file_level_only(
+            section_suppress_rule("Boundary violations").unwrap()
+        ));
     }
 }
