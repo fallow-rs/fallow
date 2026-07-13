@@ -30,7 +30,7 @@
 //!   records the follow-up (schematize the programmatic trace shapes, or keep
 //!   them a separate programmatic-only contract).
 
-#![expect(
+#![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
@@ -322,8 +322,8 @@ fn boundary_violations_document_conforms_as_dead_code() {
         ..DeadCodeOptions::default()
     })
     .expect("boundary-violations runs");
-    let json =
-        serialize_boundary_violations_programmatic_json(run).expect("serialize boundary violations");
+    let json = serialize_boundary_violations_programmatic_json(run)
+        .expect("serialize boundary violations");
     EnvelopeSchema::load().assert_conforms("dead-code", &json);
 }
 

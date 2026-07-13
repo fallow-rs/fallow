@@ -6,11 +6,6 @@
 //! the table exists, and every public runner appears in the table. A new
 //! `run_*` entry point that is not recorded in the parity table fails here.
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "tests use unwrap to keep the source scan concise"
-)]
-
 use std::collections::BTreeSet;
 
 /// Extract the public `run_*` identifiers re-exported from `lib.rs`.
