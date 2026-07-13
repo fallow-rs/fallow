@@ -2,8 +2,8 @@ import { join } from "node:path";
 import { watch } from "node:fs";
 import { app, BrowserWindow, ipcMain, session, type WebContents } from "electron";
 import { electronApp, optimizer } from "@electron-toolkit/utils";
-import { loadConfig, configPath } from "./config";
-import { runReview, runGuide } from "./review";
+import { loadConfig, configPath, type AppConfig } from "./config";
+import { runReview, runGuide, setConfiguredFallowBin } from "./review";
 import { appendFeedItem } from "./feed";
 import { readCapturedFraming } from "./capturedFraming";
 import { captureUrl } from "./capture";
@@ -25,9 +25,11 @@ const rendererDevUrl = (): string | undefined => process.env["ELECTRON_RENDERER_
 
 let mainWindow: BrowserWindow | null = null;
 let latestDoc: WalkthroughDocument | null = null;
-let appConfig = loadConfig();
-// A config-provided binary wins over the ambient PATH for `fallow`.
-if (appConfig.fallowBin) process.env["FALLOW_BIN"] = appConfig.fallowBin;
+const applyConfig = (config: AppConfig): AppConfig => {
+  setConfiguredFallowBin(config.fallowBin);
+  return config;
+};
+let appConfig = applyConfig(loadConfig());
 
 const createWindow = (): BrowserWindow => {
   const win = new BrowserWindow({
@@ -148,7 +150,7 @@ if (!app.requestSingleInstanceLock()) {
     // Hot-reload the JSONC config on change (best-effort; ignored if absent).
     try {
       watch(configPath(), () => {
-        appConfig = loadConfig();
+        appConfig = applyConfig(loadConfig());
       });
     } catch {
       /* no config file to watch */

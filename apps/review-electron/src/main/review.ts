@@ -21,27 +21,57 @@ import {
 
 /**
  * Resolve the fallow binary. Precedence:
- *   1. `FALLOW_BIN` (also carries the JSONC config's `fallowBin`, set in main).
- *   2. The workspace build, when running from source inside the fallow monorepo:
+ *   1. The current JSONC config's `fallowBin` application state.
+ *   2. The ambient `FALLOW_BIN` environment value.
+ *   3. The workspace build, when running from source inside the fallow monorepo:
  *      this app lives at `apps/review-electron`, so the repo root (with
  *      `target/{release,debug}/fallow`) is two levels up from the launch cwd.
  *      This lets `pnpm dev` dogfood the repo's own build with no manual env.
- *   3. `fallow` on PATH (a packaged app or an external install).
+ *   4. `fallow` on PATH (a packaged app or an external install).
  */
-const fallowBin = (): string => {
-  const fromEnv = process.env["FALLOW_BIN"]?.trim();
-  if (fromEnv) return fromEnv;
-  const repoRoot = join(process.cwd(), "..", "..");
+export interface FallowBinaryEnvironment {
+  ambient: string | undefined;
+  cwd: string;
+  exists: (path: string) => boolean;
+}
+
+let configuredFallowBin: string | null = null;
+
+/** Applies the latest config value without changing the ambient environment. */
+export const setConfiguredFallowBin = (value: string | null): void => {
+  configuredFallowBin = value?.trim() || null;
+};
+
+/** Resolves one binary snapshot from explicit config, ambient state, workspace, then PATH. */
+export const resolveFallowBin = (
+  configured: string | null,
+  environment: FallowBinaryEnvironment,
+): string => {
+  const fromConfig = configured?.trim();
+  if (fromConfig) return fromConfig;
+  const fromEnvironment = environment.ambient?.trim();
+  if (fromEnvironment) return fromEnvironment;
+  const repoRoot = join(environment.cwd, "..", "..");
   for (const variant of ["release", "debug"]) {
     const candidate = join(repoRoot, "target", variant, "fallow");
-    if (existsSync(candidate)) return candidate;
+    if (environment.exists(candidate)) return candidate;
   }
   return "fallow";
 };
+
+/** Returns the current binary for a newly starting invocation. */
+export const currentFallowBin = (
+  environment: FallowBinaryEnvironment = {
+    ambient: process.env["FALLOW_BIN"],
+    cwd: process.cwd(),
+    exists: existsSync,
+  },
+): string => resolveFallowBin(configuredFallowBin, environment);
+
 const at = (root?: string): string => root ?? process.cwd();
 /** Run the fallow CLI, translating spawn/exit failures into clean messages. */
 const runFallow = async (args: string[], root?: string): Promise<string> => {
-  const bin = fallowBin();
+  const bin = currentFallowBin();
   try {
     const { stdout } = await runProcess({
       command: bin,

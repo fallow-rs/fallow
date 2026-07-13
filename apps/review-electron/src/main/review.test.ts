@@ -1,10 +1,82 @@
-import { describe, expect, it } from "vitest";
-import { dirname } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { withValidationPayloadFile } from "./review";
+import {
+  currentFallowBin,
+  resolveFallowBin,
+  setConfiguredFallowBin,
+  withValidationPayloadFile,
+  type FallowBinaryEnvironment,
+} from "./review";
 import type { AgentWalkthrough } from "../model/agent";
 
 const payload = { graph_snapshot_hash: "hash", judgments: [] } as unknown as AgentWalkthrough;
+
+const environment = (
+  ambient: string | undefined,
+  existing: string[] = [],
+): FallowBinaryEnvironment => ({
+  ambient,
+  cwd: "/repo/apps/review-electron",
+  exists: (path) => existing.includes(path),
+});
+
+afterEach(() => setConfiguredFallowBin(null));
+
+describe("fallow binary selection", () => {
+  it("applies initial configuration ahead of the ambient environment", () => {
+    setConfiguredFallowBin("/configured/initial");
+
+    expect(currentFallowBin(environment("/ambient/fallow"))).toBe("/configured/initial");
+  });
+
+  it("uses a reloaded replacement for the next selection", () => {
+    setConfiguredFallowBin("/configured/initial");
+    expect(currentFallowBin(environment("/ambient/fallow"))).toBe("/configured/initial");
+
+    setConfiguredFallowBin("/configured/reloaded");
+
+    expect(currentFallowBin(environment("/ambient/fallow"))).toBe("/configured/reloaded");
+  });
+
+  it("restores the independent ambient fallback when configuration is removed", () => {
+    setConfiguredFallowBin("/configured/initial");
+    setConfiguredFallowBin(null);
+
+    expect(currentFallowBin(environment("/ambient/fallow"))).toBe("/ambient/fallow");
+  });
+
+  it("falls back through release build, debug build, then PATH", () => {
+    const release = join("/repo", "target", "release", "fallow");
+    const debug = join("/repo", "target", "debug", "fallow");
+
+    expect(resolveFallowBin(null, environment(undefined, [release, debug]))).toBe(release);
+    expect(resolveFallowBin(null, environment(undefined, [debug]))).toBe(debug);
+    expect(resolveFallowBin(null, environment(undefined))).toBe("fallow");
+  });
+
+  it("does not switch an invocation that already selected its binary", () => {
+    setConfiguredFallowBin("/configured/initial");
+    const selectedForInFlightRun = currentFallowBin(environment("/ambient/fallow"));
+
+    setConfiguredFallowBin("/configured/reloaded");
+
+    expect(selectedForInFlightRun).toBe("/configured/initial");
+    expect(currentFallowBin(environment("/ambient/fallow"))).toBe("/configured/reloaded");
+  });
+
+  it("never persists configured state into the ambient environment", () => {
+    const before = process.env["FALLOW_BIN"];
+    process.env["FALLOW_BIN"] = "/ambient/fallow";
+    try {
+      setConfiguredFallowBin("/configured/initial");
+      expect(process.env["FALLOW_BIN"]).toBe("/ambient/fallow");
+    } finally {
+      if (before === undefined) delete process.env["FALLOW_BIN"];
+      else process.env["FALLOW_BIN"] = before;
+    }
+  });
+});
 
 describe("withValidationPayloadFile", () => {
   it("removes the temporary payload after success", async () => {
