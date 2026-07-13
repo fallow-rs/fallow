@@ -81,7 +81,8 @@ mod cli_telemetry;
 mod watch;
 
 use check::{CheckOptions, IssueFilters, TraceOptions};
-mod error;
+/// Structured error output for CLI and JSON formats.
+pub mod error;
 #[cfg(test)]
 use cli_format::parse_format_arg;
 use cli_format::{Format, FormatConfig, apply_ci_defaults};

@@ -1162,7 +1162,7 @@ fn mcp_tool_description_defaults_match_cli_defaults() {
     let descriptions = mcp_tool_descriptions();
     let reports = default_drift_reports(
         &descriptions,
-        include_str!("../../../../cli/src/main.rs"),
+        include_str!("../../../../cli/src/lib.rs"),
         RUNTIME_DEFAULT_EXPECTATIONS,
     );
 
@@ -1184,7 +1184,7 @@ fn default_drift_gate_trips_on_changed_or_missing_tool_description_default() {
 
     let reports = default_drift_reports(
         &descriptions,
-        include_str!("../../../../cli/src/main.rs"),
+        include_str!("../../../../cli/src/lib.rs"),
         &[
             ToolDefaultExpectation {
                 tool: "check_health",
