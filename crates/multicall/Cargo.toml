@@ -1,0 +1,26 @@
+[package]
+name = "fallow-multicall"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Multicall fallow binary bundling the CLI, LSP, and MCP servers into one engine for npm and VS Code distribution"
+# Never published to crates.io. This crate exists only to produce the packaged
+# `fallow` binary for the npm platform packages and the VS Code extension; the
+# published CLI stays `fallow-cli` (pure Rust, no QuickJS/tower-lsp), so
+# `cargo install fallow-cli` is unchanged. Keeping this `publish = false` also
+# keeps the release.yml crates.io publish list (and its drift test) untouched.
+publish = false
+
+[[bin]]
+name = "fallow-multicall"
+path = "src/main.rs"
+
+[dependencies]
+fallow-cli = { version = "3.4.2", path = "../cli" }
+fallow-lsp = { version = "3.4.2", path = "../lsp" }
+fallow-mcp = { version = "3.4.2", path = "../mcp" }
+
+[lints]
+workspace = true

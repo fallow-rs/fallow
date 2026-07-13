@@ -1263,6 +1263,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fallow-multicall"
+version = "3.4.2"
+dependencies = [
+ "fallow-cli",
+ "fallow-lsp",
+ "fallow-mcp",
+]
+
+[[package]]
 name = "fallow-node"
 version = "3.4.2"
 dependencies = [
