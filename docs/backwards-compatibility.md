@@ -124,6 +124,12 @@ When a stable interface needs to change:
 2. The new behavior is available alongside the old one
 3. The old behavior is removed in the next major version
 
+## Notable behavior changes within v3
+
+These are documented for the rare CI script that depended on the old behavior. None require a config migration.
+
+- **CI-facing formats emit repository-root-relative paths when `--root` is a subdirectory** ([#1808](https://github.com/fallow-rs/fallow/pull/1808)). `codeclimate`, `review-github`, and `review-gitlab` used to address files relative to `--root`, which GitLab's Code Quality widget and the GitHub/GitLab review APIs rejected for package-subdirectory roots; they now rebase onto the git toplevel like `github-annotations`. Single-package repositories are unaffected. Wrapper scripts that prepended the offset themselves should drop that step, or pass `--report-path-prefix ''` to restore the old output. `--annotations-path-prefix` was renamed to `--report-path-prefix` with the old name kept as an alias.
+
 ## Notable behavior changes within v2
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.

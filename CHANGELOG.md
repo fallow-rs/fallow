@@ -88,17 +88,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every `ModuleInfo`. Existing owned APIs remain compatible, and detector facts
   are prepared before modules become immutable.
 
-- **BREAKING: CI-facing formats now emit repository-root-relative paths when
-  `--root` is a subdirectory.** `codeclimate`, `review-github`, and
-  `review-gitlab` addressed files relative to `--root`, while
-  `github-annotations` already rebased onto the git toplevel. CI platforms
-  address files from the repository root, so GitLab's Code Quality widget
-  matched nothing and every inline review discussion was rejected when the
-  analyzed project lived in a package subdirectory. All CI formats now share
-  one namespace, detected via the git toplevel. Consumers that post-process
-  these paths themselves (prepending the offset in a wrapper script) should
-  drop that step or pass `--report-path-prefix ''` to restore the old output.
-  Single-package repositories, where `--root` is the toplevel, are unaffected.
+- **Behavior change (subdirectory roots): CI-facing formats now emit
+  repository-root-relative paths when `--root` is a subdirectory.**
+  `codeclimate`, `review-github`, and `review-gitlab` addressed files
+  relative to `--root`, while `github-annotations` already rebased onto the
+  git toplevel. CI platforms address files from the repository root, so
+  GitLab's Code Quality widget matched nothing and every inline review
+  discussion was rejected when the analyzed project lived in a package
+  subdirectory. All CI formats now share one namespace, detected via the git
+  toplevel. Consumers that post-process these paths themselves (prepending
+  the offset in a wrapper script) should drop that step or pass
+  `--report-path-prefix ''` to restore the old output. Single-package
+  repositories, where `--root` is the toplevel, are unaffected. Classified
+  as a behavior-correcting fix rather than a semver major: for the affected
+  cohort the old paths were rejected by their only consumers, and one flag
+  restores the previous shape.
 
 - **`--annotations-path-prefix` is now `--report-path-prefix`.** It governs
   every CI-facing format rather than only the GitHub-native ones. The old name
