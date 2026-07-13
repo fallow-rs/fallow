@@ -44,12 +44,16 @@ test("workflow block parser rejects missing keys", () => {
 
 test("binary-size workflow isolates incompatible release builds", () => {
   const workflow = readWorkflow(".github/workflows/bloat.yml");
+  const globalEnv = indentedBlock(workflow, "env", 0);
   const cliJob = indentedBlock(workflow, "cli-bloat", 2);
   const shippedJob = indentedBlock(workflow, "shipped-binaries", 2);
   const aggregateJob = indentedBlock(workflow, "bloat", 2);
 
   assert.match(cliJob, /cargo bloat --release -p fallow-cli/);
+  assert.match(cliJob, /CARGO_PROFILE_RELEASE_STRIP: "none"/);
+  assert.match(cliJob, /CARGO_PROFILE_RELEASE_DEBUG: "2"/);
   assert.doesNotMatch(cliJob, /fallow-lsp|fallow-mcp|fallow-multicall/);
+  assert.doesNotMatch(globalEnv, /CARGO_PROFILE_RELEASE_(STRIP|DEBUG)/);
   assert.match(shippedJob, /cargo build --release -p fallow-lsp -p fallow-mcp -p fallow-multicall/);
   assert.doesNotMatch(shippedJob, /cargo bloat/);
   assert.match(aggregateJob, /needs:\n\s+- cli-bloat\n\s+- shipped-binaries/);

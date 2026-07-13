@@ -27,15 +27,17 @@ permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
-  # Keep debug info for cargo-bloat function name resolution
-  CARGO_PROFILE_RELEASE_STRIP: "none"
-  CARGO_PROFILE_RELEASE_DEBUG: "2"
 
 jobs:
   cli-bloat:
     name: CLI size analysis
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Keep debug info only for cargo-bloat function name resolution. The
+    # shipped-binary job uses the stripped production release profile.
+    env:
+      CARGO_PROFILE_RELEASE_STRIP: "none"
+      CARGO_PROFILE_RELEASE_DEBUG: "2"
     permissions:
       contents: read
     outputs:
