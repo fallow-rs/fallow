@@ -12,7 +12,7 @@ cd fallow
 git config core.hooksPath .githooks    # Enable commit-msg/pre-commit/pre-push hooks
 npm install                            # Install repo tooling such as commitlint
 cargo build --workspace
-cargo test --workspace
+npm run verify:fast                   # Canonical local feedback loop
 ```
 
 On Windows, enable symlink checkout support before cloning. If you already
@@ -38,11 +38,23 @@ cargo build --release -p fallow-cli  # Release build (CLI only)
 ### Testing
 
 ```bash
-cargo test --workspace               # All tests
-cargo test -p fallow-core            # Single crate
-cargo clippy --workspace -- -D warnings
-cargo fmt --all -- --check
+npm run verify                        # Alias for the canonical fast checks
+npm run verify:fast                   # Formatting, linting, contracts, boundaries
+npm run verify:full                   # Fast checks plus tests, benches, docs, NAPI
+cargo test -p fallow-core             # Focused single-crate test run
 ```
+
+Run `npm install` at the repository root and `pnpm install` under
+`editors/vscode` before either verification command. Full verification also
+requires `npm ci` under `crates/napi` and a local platform compiler. It is the
+most comprehensive local gate and is recommended before pushing substantial
+changes.
+
+Local verification is deliberately not a simulation of every CI job. Miri,
+MSRV and cross-platform jobs, feature-specific and editor integration jobs,
+release and publish jobs, and network or real-project smoke tests remain
+CI-only. Run `npm run verify:full -- --help` to review the exact local scope and
+exclusions.
 
 ### Running locally
 

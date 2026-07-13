@@ -4,6 +4,9 @@
   "type": "module",
   "scripts": {
     "commitlint": "commitlint",
+    "verify": "node scripts/verify-repo.mjs --fast",
+    "verify:fast": "node scripts/verify-repo.mjs --fast",
+    "verify:full": "node scripts/verify-repo.mjs --full",
     "generate:contracts": "node scripts/generate-all.mjs",
     "generate:contracts:check": "node scripts/generate-all.mjs --check",
     "generate:all": "node scripts/generate-all.mjs",
