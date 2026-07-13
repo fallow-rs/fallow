@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The structured `--format json` error envelope is now part of the published
+  output schema.** When a command fails under `--format json`, fallow emits
+  `{"error": true, "message": ..., "exit_code": ...}` on stdout. This shape was
+  documented in prose but had no schema definition, so agents validating fallow
+  output against `docs/output-schema.json` could not validate error responses.
+  It is now a typed `ErrorOutput` document-root branch (alongside the
+  `kind`-tagged success envelopes and the bare-array Code Climate output),
+  exported from `fallow/types`. The wire output is unchanged.
+
 ### Changed
 
 - **The bundled GitHub Action renders inline annotations and the job summary

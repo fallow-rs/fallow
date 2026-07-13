@@ -329,11 +329,14 @@ fn boundary_violations_document_conforms_as_dead_code() {
 
 /// The programmatic trace serializers are a separate, un-enveloped contract:
 /// they emit no `kind` and are not a `FallowOutput` oneOf branch, so they are
-/// out of the published-envelope schema by design (plan-028 ruling). This guard
-/// fails loudly if a trace serializer ever grows a root `kind`, which would
-/// force a deliberate schema decision (schematize the trace shapes, or keep them
-/// programmatic-only). Follow-up: decide whether to add trace shapes to the
-/// envelope schema.
+/// out of the published-envelope schema by design. This is distinct from the
+/// CLI `fallow trace <file:symbol>` surface, which IS a published
+/// `kind: "trace"` envelope (`SymbolChainTrace`, validated end-to-end in
+/// `crates/cli/tests/schema_conformance.rs`). Decision (plan-028 follow-up,
+/// resolved): keep the api programmatic trace shapes programmatic-only; do NOT
+/// give them a root `kind` (that would be a wire change breaking the MCP trace
+/// tools). This guard fails loudly if a serializer ever grows a root `kind`, so
+/// the distinction cannot erode silently.
 #[test]
 fn trace_family_is_not_a_published_envelope() {
     let project = small_project();

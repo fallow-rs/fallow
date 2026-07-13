@@ -24,9 +24,9 @@
 
 
 /**
- * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.
+ * Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.
  */
-export type FallowJsonOutput = (FallowOutput | CodeClimateOutput)
+export type FallowJsonOutput = (FallowOutput | CodeClimateOutput | ErrorOutput)
 /**
  * Typed root of every fallow JSON envelope shape that serializes as a JSON
  * object and participates in the documented `FallowOutput` contract. The
@@ -10385,6 +10385,29 @@ export interface CodeClimateLines {
  * 1-based start line.
  */
 begin: number
+}
+/**
+ * Structured JSON error emitted on stdout when `--format json` is active and a
+ * command fails. It carries no `kind` discriminator: it is distinguished from
+ * the kind-tagged success envelopes by the required `error: true` field, and is
+ * a document-root branch alongside `FallowOutput` and `CodeClimateOutput` in
+ * `docs/output-schema.json`. Agents that pass `--format json` and observe a
+ * non-zero exit code parse this shape from stdout.
+ */
+export interface ErrorOutput {
+/**
+ * Always `true`. The discriminator that separates an error document from a
+ * success envelope (which instead carries a `kind`).
+ */
+error: boolean
+/**
+ * Human-readable error message.
+ */
+message: string
+/**
+ * The process exit code the CLI returns alongside this document.
+ */
+exit_code: number
 }
 
 /**

@@ -206,4 +206,54 @@ fn cli_json_documents_conform_to_output_schema() {
         &["decision-surface", "--base", "HEAD"],
         "decision-surface",
     );
+
+    // Symbol-level call-chain trace: the CLI `fallow trace` surface IS a
+    // published `kind: "trace"` envelope (unlike the un-enveloped api
+    // programmatic trace serializers, which are guarded out of the contract by
+    // `trace_family_is_not_a_published_envelope` in the api crate).
+    run_and_validate(
+        &schema,
+        root,
+        &["trace", "src/lib.ts:used", "--callers"],
+        "trace",
+    );
+}
+
+/// The structured error envelope (`--format json` failure path) has no `kind`,
+/// so it is a document-root branch (`ErrorOutput`) rather than a `FallowOutput`
+/// variant. Validate a real emitted error document against the whole schema so
+/// the root `oneOf` selects the error branch, and confirm a success document
+/// still validates (the new branch did not break the union).
+#[test]
+fn error_envelope_conforms_to_output_schema() {
+    let schema = load_schema_root();
+    let validator = jsonschema::draft7::new(&schema).expect("compile output schema root");
+
+    // A non-existent root is a validation error (exit 2), emitted as the JSON
+    // error envelope on stdout.
+    let output = Command::new(fallow_bin())
+        .args(["dead-code", "--root", "/nonexistent-fallow-path-xyz"])
+        .args(["--format", "json", "--quiet", "--no-cache"])
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run fallow binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let value: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("error stdout is not JSON: {err}\nstdout:\n{stdout}"));
+
+    assert_eq!(value.get("error").and_then(Value::as_bool), Some(true));
+    assert!(
+        value.get("kind").is_none(),
+        "error envelope carries no kind"
+    );
+    let errors: Vec<String> = validator
+        .iter_errors(&value)
+        .map(|err| format!("  at {} : {err}", err.instance_path()))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "error envelope does not conform to docs/output-schema.json:\n{}",
+        errors.join("\n"),
+    );
 }

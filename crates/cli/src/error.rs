@@ -11,11 +11,7 @@ use fallow_config::OutputFormat;
 )]
 pub fn emit_error(message: &str, exit_code: u8, output: OutputFormat) -> ExitCode {
     if matches!(output, OutputFormat::Json) {
-        let error_obj = serde_json::json!({
-            "error": true,
-            "message": message,
-            "exit_code": exit_code,
-        });
+        let error_obj = fallow_output::ErrorOutput::new(message, exit_code);
         if let Ok(json) = serde_json::to_string_pretty(&error_obj) {
             println!("{json}");
         }

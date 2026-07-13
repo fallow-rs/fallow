@@ -29,6 +29,7 @@ mod coverage_envelopes;
 mod dead_code_sarif;
 mod diff;
 mod dupes;
+mod error_envelope;
 mod feature_flags;
 mod fix;
 mod health;
@@ -137,6 +138,7 @@ pub use dupes::{
     DUPES_SUPPRESS_COMMENT, DUPES_SUPPRESS_DESCRIPTION, DupesOutput, DupesOutputInput,
     build_dupes_output, clone_family_actions, clone_group_actions, serialize_dupes_json_output,
 };
+pub use error_envelope::ErrorOutput;
 pub use fallow_types::envelope;
 pub use fallow_types::output;
 pub use fallow_types::output_dead_code;

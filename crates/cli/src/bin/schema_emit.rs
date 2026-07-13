@@ -882,6 +882,8 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<fallow_types::trace_chain::ChainHop>();
     let _ = generator.subschema_for::<fallow_types::trace_chain::UnresolvedCallee>();
     let _ = generator.subschema_for::<fallow_types::trace_chain::UnresolvedReason>();
+    // Structured error envelope (`--format json` failure path, no `kind`).
+    let _ = generator.subschema_for::<fallow_output::ErrorOutput>();
     let _ = generator.subschema_for::<CodeClimateOutput>();
     let _ = generator.subschema_for::<CodeClimateIssue>();
     let _ = generator.subschema_for::<CodeClimateIssueKind>();
@@ -967,7 +969,9 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
 }
 
 /// Hand-maintained root envelopes that still need top-level `oneOf` entries.
-const HAND_MAINTAINED_ROOT_ENVELOPES: &[&str] = &[];
+/// `ErrorOutput` is the `--format json` failure document: it carries no `kind`,
+/// so it is a document-root branch discriminated by the `error: true` field.
+const HAND_MAINTAINED_ROOT_ENVELOPES: &[&str] = &["ErrorOutput"];
 const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
     (
         "audit",
@@ -1182,7 +1186,10 @@ fn rewrite_document_root_one_of(document: &mut Value) -> Result<(), String> {
              branch on `kind` instead of probing for unique field presence. \
              `CodeClimateOutput` is a bare JSON array (per the Code Climate / \
              GitLab Code Quality spec) and stays a sibling root branch \
-             discriminated by checking whether the document root is an array.",
+             discriminated by checking whether the document root is an array. \
+             `ErrorOutput` is the `--format json` failure document, emitted on \
+             stdout with a non-zero exit; it carries no `kind` and is \
+             discriminated by the `error: true` field.",
             fallow_output_kind_list()
         )),
     );

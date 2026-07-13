@@ -1,13 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array.",
+  "description": "Schemas for the JSON output of fallow commands. Object-shaped envelopes covered by the `FallowOutput` contract carry a top-level `kind` discriminator. Current kind values: `audit`, `explain`, `inspect_target`, `trace`, `review-envelope`, `review-reconcile`, `coverage-setup`, `coverage-analyze`, `list-boundaries`, `list-workspaces`, `health`, `dupes`, `dead-code-grouped`, `impact`, `impact-cross-repo`, `security`, `security-survivors`, `security-blind-spots`, `dead-code`, `combined`, `feature-flags`, `audit-brief`, `decision-surface`, `review-walkthrough-guide`, `review-walkthrough-validation`, `suppression-inventory`. Consumers should branch on `kind` instead of probing for unique field presence. `CodeClimateOutput` is a bare JSON array (per the Code Climate / GitLab Code Quality spec) and stays a sibling root branch discriminated by checking whether the document root is an array. `ErrorOutput` is the `--format json` failure document, emitted on stdout with a non-zero exit; it carries no `kind` and is discriminated by the `error: true` field.",
   "oneOf": [
     {
       "$ref": "#/definitions/FallowOutput"
     },
     {
       "$ref": "#/definitions/CodeClimateOutput"
+    },
+    {
+      "$ref": "#/definitions/ErrorOutput"
     }
   ],
   "definitions": {
@@ -18705,6 +18708,29 @@
       ],
       "title": "fallow audit --brief --format json",
       "description": "Complete `fallow audit --brief --format json` wire envelope.\n\nThis is distinct from [`ReviewBriefOutput`], which is the reusable review\ndigest embedded in walkthrough output. The wire envelope also carries audit\nmetadata, optional telemetry, and the subtract-style analysis subreports."
+    },
+    "ErrorOutput": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "boolean",
+          "description": "Always `true`. The discriminator that separates an error document from a\nsuccess envelope (which instead carries a `kind`)."
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error message."
+        },
+        "exit_code": {
+          "type": "integer",
+          "description": "The process exit code the CLI returns alongside this document."
+        }
+      },
+      "required": [
+        "error",
+        "message",
+        "exit_code"
+      ],
+      "description": "Structured JSON error emitted on stdout when `--format json` is active and a\ncommand fails. It carries no `kind` discriminator: it is distinguished from\nthe kind-tagged success envelopes by the required `error: true` field, and is\na document-root branch alongside `FallowOutput` and `CodeClimateOutput` in\n`docs/output-schema.json`. Agents that pass `--format json` and observe a\nnon-zero exit code parse this shape from stdout."
     }
   }
 }
