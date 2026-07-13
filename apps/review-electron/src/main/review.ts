@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { toWalkthroughDocument, type AuditBrief } from "../model/adapter";
+import { toWalkthroughDocument } from "../model/adapter";
 import type { WalkthroughDocument } from "../model/walkthrough";
 import type { AgentWalkthrough, Guide } from "../model/agent";
 import { describeExecError } from "./errors";
@@ -12,6 +12,12 @@ import {
   STDOUT_LIMIT_BYTES,
   runProcess,
 } from "./processRun";
+import {
+  parseGuideContract,
+  parseReviewContract,
+  parseWalkthroughValidationContract,
+  type WalkthroughValidationContract,
+} from "./fallowContract";
 
 /**
  * Resolve the fallow binary. Precedence:
@@ -52,37 +58,16 @@ const runFallow = async (args: string[], root?: string): Promise<string> => {
   }
 };
 
-/** Parse fallow JSON output, mapping malformed payloads to a clean message. */
-const parseFallowJson = <T>(stdout: string): T => {
-  try {
-    return JSON.parse(stdout) as T;
-  } catch {
-    throw new Error("fallow returned output that couldn't be read as JSON.");
-  }
-};
-
 /** `fallow review --format json` -> normalized W1 document. */
 export const runReview = async (root?: string): Promise<WalkthroughDocument> => {
   const stdout = await runFallow(["review", "--format", "json"], root);
-  return toWalkthroughDocument(parseFallowJson<AuditBrief>(stdout));
+  return toWalkthroughDocument(parseReviewContract(stdout));
 };
 
 /** `fallow review --walkthrough-guide --format json` -> the E5 agent-contract guide. */
 export const runGuide = async (root?: string): Promise<Guide> => {
   const stdout = await runFallow(["review", "--walkthrough-guide", "--format", "json"], root);
-  const g = parseFallowJson<{
-    graph_snapshot_hash?: string;
-    digest?: { decisions?: { emitted_signal_ids?: string[] } };
-    change_anchors?: Array<{
-      change_anchor?: string;
-      file?: string;
-      start_line?: number;
-      line_count?: number;
-      previous_change_anchor?: string;
-    }>;
-    direction?: { order?: string[] };
-    agent_schema?: { judgment_shape?: string };
-  }>(stdout);
+  const g = parseGuideContract(stdout);
   return {
     graphSnapshotHash: g.graph_snapshot_hash ?? "",
     emittedSignalIds: g.digest?.decisions?.emitted_signal_ids ?? [],
@@ -116,13 +101,13 @@ export const runGuide = async (root?: string): Promise<Guide> => {
 export const validateWalkthrough = async (
   payload: AgentWalkthrough,
   root?: string,
-): Promise<unknown> =>
+): Promise<WalkthroughValidationContract> =>
   withValidationPayloadFile(payload, async (file) => {
     const stdout = await runFallow(
       ["review", "--walkthrough-file", file, "--format", "json"],
       root,
     );
-    return parseFallowJson<unknown>(stdout);
+    return parseWalkthroughValidationContract(stdout);
   });
 
 /** Uses a private random temp directory and removes the validation payload on every exit path. */
