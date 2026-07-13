@@ -132,7 +132,7 @@ fn apply_edit(
         Ok(content) => content,
         Err(error) => {
             eprintln!(
-                "Error: failed to write ignoreExports rules to {}: {error}",
+                "Error: failed to read config file {} before adding ignoreExports rules: {error}",
                 config_path.display()
             );
             return true;
@@ -157,7 +157,7 @@ fn apply_edit(
         }
         Err(e) => {
             eprintln!(
-                "Error: failed to write ignoreExports rules to {}: {e}",
+                "Error: failed to add ignoreExports rules to {}: {e}",
                 config_path.display()
             );
             true
@@ -573,6 +573,72 @@ mod tests {
                     }],
                 })],
                 ..AnalysisResults::default()
+            }
+        }
+
+        #[test]
+        fn config_edit_errors_name_failed_operation() {
+            const CHILD_ENV: &str = "FALLOW_CONFIG_EDIT_ERROR_CHILD";
+            if let Ok(case) = std::env::var(CHILD_ENV) {
+                let dir = tempfile::tempdir().unwrap();
+                let root = dir.path();
+                let config_path = match case.as_str() {
+                    "read" => {
+                        let path = root.join("config-as-directory");
+                        std::fs::create_dir(&path).unwrap();
+                        path
+                    }
+                    "add" => {
+                        let path = root.join(".fallowrc.json");
+                        std::fs::write(&path, "[]\n").unwrap();
+                        path
+                    }
+                    other => panic!("unknown child case: {other}"),
+                };
+                let results = results_with_duplicate(root, "Card");
+                let mut fixes = Vec::new();
+                let mut plan = FixPlan::new();
+                let mut write = ConfigWriteContext {
+                    output: OutputFormat::Human,
+                    dry_run: false,
+                    plan: &mut plan,
+                    fixes: &mut fixes,
+                };
+
+                let had_error =
+                    apply_edit(root, &config_path, &results.duplicate_exports, &mut write);
+
+                assert!(had_error);
+                return;
+            }
+
+            let cases: [(&str, &[&str]); 2] = [
+                (
+                    "read",
+                    &[
+                        "Error: failed to read config file",
+                        "before adding ignoreExports rules",
+                    ],
+                ),
+                ("add", &["Error: failed to add ignoreExports rules to"]),
+            ];
+            for (case, expected_parts) in cases {
+                let output = std::process::Command::new(std::env::current_exe().unwrap())
+                    .arg("config_edit_errors_name_failed_operation")
+                    .arg("--nocapture")
+                    .env(CHILD_ENV, case)
+                    .output()
+                    .unwrap();
+                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                assert!(output.status.success(), "child test failed: {stderr}");
+                for expected in expected_parts {
+                    assert!(stderr.contains(expected), "unexpected diagnostic: {stderr}");
+                }
+                assert!(
+                    !stderr.contains("failed to write ignoreExports rules"),
+                    "{case} failure was mislabeled: {stderr}"
+                );
             }
         }
 
