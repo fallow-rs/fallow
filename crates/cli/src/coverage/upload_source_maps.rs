@@ -597,6 +597,10 @@ fn securely_open_source_map(candidate: &SourceMapCandidate) -> std::io::Result<s
 }
 
 #[cfg(windows)]
+#[expect(
+    unsafe_code,
+    reason = "final-path canonicalization requires Win32 FFI calls"
+)]
 fn securely_open_source_map(candidate: &SourceMapCandidate) -> std::io::Result<std::fs::File> {
     use std::os::windows::ffi::OsStrExt as _;
     use std::os::windows::io::AsRawHandle as _;
