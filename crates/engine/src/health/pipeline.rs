@@ -1,6 +1,7 @@
 //! Health pipeline carrier types shared by the engine health executor.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use fallow_config::{ResolvedConfig, WorkspaceInfo};
 use fallow_output::DiffIndex;
@@ -18,7 +19,7 @@ use super::StylingAnalysisArtifacts;
 pub struct HealthPipelineInputs {
     pub config: ResolvedConfig,
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
-    pub modules: Vec<fallow_types::extract::ModuleInfo>,
+    pub modules: Arc<[fallow_types::extract::ModuleInfo]>,
     /// Pre-parse pipeline timings (config / discover / parse milliseconds).
     pub config_ms: f64,
     pub discover_ms: f64,

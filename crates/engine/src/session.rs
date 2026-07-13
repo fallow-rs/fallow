@@ -62,7 +62,7 @@ pub struct ParsedAnalysisSessionParts {
     pub config: ResolvedConfig,
     pub config_path: Option<PathBuf>,
     pub files: Vec<DiscoveredFile>,
-    pub modules: Vec<ModuleInfo>,
+    pub modules: Arc<[ModuleInfo]>,
     pub workspaces: Vec<WorkspaceInfo>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub parse_ms: f64,
@@ -312,7 +312,7 @@ impl AnalysisSession {
             config,
             config_path,
             files,
-            modules,
+            modules: modules.into(),
             workspaces,
             workspace_diagnostics: merge_workspace_diagnostics(
                 workspace_diagnostics,
@@ -330,7 +330,7 @@ impl AnalysisSession {
     #[must_use]
     pub fn parsed_parts(&self, need_complexity: bool) -> ParsedAnalysisSessionParts {
         let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity);
-        self.parsed_parts_from_modules(modules.to_vec(), metrics)
+        self.parsed_parts_from_modules(modules, metrics)
     }
 
     /// Return immutable parsed modules backed by the reusable session cache.
@@ -353,12 +353,12 @@ impl AnalysisSession {
             metrics,
             source_diagnostics: _,
         } = parse_files_with_config(&self.config, self.files(), need_complexity);
-        self.parsed_parts_from_modules(modules, metrics)
+        self.parsed_parts_from_modules(modules.into(), metrics)
     }
 
     fn parsed_parts_from_modules(
         &self,
-        modules: Vec<ModuleInfo>,
+        modules: Arc<[ModuleInfo]>,
         metrics: core_backend::ParseMetrics,
     ) -> ParsedAnalysisSessionParts {
         ParsedAnalysisSessionParts {
@@ -1017,6 +1017,15 @@ mod tests {
         let second = session.shared_parsed_modules(false);
 
         assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn parsed_parts_reuse_public_session_storage() {
+        let (_project, session) = session_with_source("export const value = 1;\n");
+        let cached = session.shared_parsed_modules(true);
+        let parts = session.parsed_parts(false);
+
+        assert!(Arc::ptr_eq(&cached, &parts.modules));
     }
 
     #[test]

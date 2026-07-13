@@ -10,7 +10,15 @@ use std::path::{Path, PathBuf};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use fallow_config::DuplicatesConfig;
-use fallow_engine::{project_analysis::ProjectAnalysisArtifactOptions, session::AnalysisSession};
+use fallow_engine::{
+    health::{
+        HealthCoverageInputs, HealthExecutionOptions, HealthGateOptions, HealthSort,
+        HealthThresholdOverrides, run_ungrouped_health_with_session,
+    },
+    project_analysis::ProjectAnalysisArtifactOptions,
+    session::AnalysisSession,
+};
+use fallow_types::output_format::OutputFormat;
 use tempfile::TempDir;
 
 const FILE_COUNT: usize = 32;
@@ -22,8 +30,9 @@ struct EngineFixture {
 }
 
 struct WarmEngineFixture {
-    _fixture: EngineFixture,
+    fixture: EngineFixture,
     session: AnalysisSession,
+    config_path: Option<PathBuf>,
 }
 
 fn write_file(root: &Path, path: &str, source: impl AsRef<str>) {
@@ -88,8 +97,64 @@ fn create_warm_engine_fixture() -> WarmEngineFixture {
         .analyze_dead_code_with_complexity()
         .expect("warm-up analysis succeeds");
     WarmEngineFixture {
-        _fixture: fixture,
+        fixture,
         session,
+        config_path: None,
+    }
+}
+
+fn warm_health_options(fixture: &WarmEngineFixture) -> HealthExecutionOptions<'_> {
+    HealthExecutionOptions {
+        root: &fixture.fixture.root,
+        config_path: &fixture.config_path,
+        output: OutputFormat::Human,
+        no_cache: false,
+        threads: 1,
+        quiet: true,
+        complexity_breakdown: false,
+        thresholds: HealthThresholdOverrides {
+            max_crap: Some(0.0),
+            ..HealthThresholdOverrides::default()
+        },
+        top: None,
+        sort: HealthSort::Cyclomatic,
+        production: false,
+        production_override: None,
+        allow_remote_extends: false,
+        changed_since: None,
+        diff_index: None,
+        use_shared_diff_index: false,
+        workspace: None,
+        changed_workspaces: None,
+        baseline: None,
+        save_baseline: None,
+        complexity: true,
+        file_scores: false,
+        coverage_gaps: false,
+        config_activates_coverage_gaps: false,
+        hotspots: false,
+        ownership: false,
+        ownership_emails: None,
+        targets: false,
+        css: false,
+        css_deep: false,
+        force_full: false,
+        score_only_output: false,
+        enforce_coverage_gap_gate: true,
+        effort: None,
+        score: false,
+        gates: HealthGateOptions::default(),
+        since: None,
+        min_commits: None,
+        explain: false,
+        summary: false,
+        save_snapshot: None,
+        trend: false,
+        coverage_inputs: HealthCoverageInputs::default(),
+        performance: false,
+        runtime_coverage: None,
+        churn_file: None,
+        group_by: None,
     }
 }
 
@@ -168,6 +233,17 @@ fn component_engine_warm_session_complexity_shared(c: &mut Criterion) {
     );
 }
 
+fn component_engine_warm_session_health(c: &mut Criterion) {
+    let fixture = create_warm_engine_fixture();
+    let options = warm_health_options(&fixture);
+    c.bench_function("component_engine_warm_session_health", |bencher| {
+        bencher.iter(|| {
+            run_ungrouped_health_with_session(&options, None, &fixture.session, None)
+                .expect("warm health analysis succeeds")
+        });
+    });
+}
+
 criterion_group!(
     benches,
     component_engine_session_load,
@@ -175,6 +251,7 @@ criterion_group!(
     component_engine_project_analysis_artifacts,
     component_engine_warm_session_dead_code_large,
     component_engine_warm_session_complexity_owned,
-    component_engine_warm_session_complexity_shared
+    component_engine_warm_session_complexity_shared,
+    component_engine_warm_session_health
 );
 criterion_main!(benches);
