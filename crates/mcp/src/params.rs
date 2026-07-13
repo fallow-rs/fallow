@@ -337,6 +337,10 @@ pub struct InspectTargetParams {
 
     pub threads: Option<usize>,
 
+    /// OPT-IN (default off): attach target-level git churn evidence. Missing
+    /// git history is returned as an explicit unavailable evidence section.
+    pub include_churn: Option<bool>,
+
     /// OPT-IN (default off): also attach the best-effort symbol-level call chain
     /// (`fallow trace`) as the `symbol_chain` evidence section. Only
     /// meaningful for a SYMBOL target. Best-effort, syntactic (ADR-001), and

@@ -664,6 +664,11 @@ enum Command {
         /// syntactic, OFF the ranked path).
         #[arg(long)]
         symbol_chain: bool,
+
+        /// OPT-IN: attach target-level git churn evidence from the health
+        /// hotspot subsystem. Default off to avoid git-history latency.
+        #[arg(long)]
+        churn: bool,
     },
 
     /// Trace a symbol's call chain (best-effort, syntactic; OFF the ranked path)
@@ -2790,7 +2795,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             file,
             symbol,
             symbol_chain,
-        } => dispatch_inspect_command(dispatch, file, symbol, symbol_chain),
+            churn,
+        } => dispatch_inspect_command(dispatch, file, symbol, symbol_chain, churn),
         Command::Trace {
             symbol,
             callers,
@@ -3018,6 +3024,7 @@ fn dispatch_inspect_command(
     file: Option<String>,
     symbol: Option<String>,
     symbol_chain: bool,
+    churn: bool,
 ) -> ExitCode {
     let target = match (file, symbol) {
         (Some(file), None) => inspect::InspectTarget::File { file },
@@ -3047,6 +3054,27 @@ fn dispatch_inspect_command(
         }
     };
 
+    let churn_config = if churn {
+        match load_config_for_analysis(
+            dispatch.root,
+            &dispatch.cli.config,
+            ConfigLoadOptions {
+                output: dispatch.output,
+                no_cache: dispatch.cli.no_cache,
+                threads: dispatch.threads,
+                production_override: None,
+                quiet: dispatch.quiet,
+                allow_remote_extends: dispatch.cli.allow_remote_extends,
+            },
+            fallow_config::ProductionAnalysis::Health,
+        ) {
+            Ok(config) => Some(config),
+            Err(code) => return code,
+        }
+    } else {
+        None
+    };
+
     inspect::run_inspect(&inspect::InspectOptions {
         root: dispatch.root,
         config_path: dispatch.cli.config.as_ref(),
@@ -3059,6 +3087,9 @@ fn dispatch_inspect_command(
         production: dispatch.cli.production,
         workspace: dispatch.cli.workspace.as_ref(),
         target,
+        churn_cache_dir: churn_config
+            .as_ref()
+            .map(|config| config.cache_dir.as_path()),
         symbol_chain,
     })
 }

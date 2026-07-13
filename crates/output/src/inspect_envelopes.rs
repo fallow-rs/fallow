@@ -102,6 +102,10 @@ pub struct InspectEvidence {
     /// Impact closure scoped to the inspected file as the seed: the transitive
     /// affected-but-not-in-diff set + coordination gap.
     pub impact_closure: InspectEvidenceSection,
+    /// OPT-IN target-level git churn. Omitted unless historical evidence was
+    /// explicitly requested by the caller.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub churn: Option<InspectEvidenceSection>,
     /// OPT-IN symbol-level call chain. Present only when `--symbol-chain` was
     /// requested AND the target is a SYMBOL (best-effort, syntactic, OFF the
     /// ranked path). `None` (omitted) by default: symbol-level chains are
@@ -141,6 +145,16 @@ impl InspectEvidenceSection {
             data: None,
         }
     }
+
+    #[must_use]
+    pub fn unavailable(scope: InspectEvidenceScope, message: String) -> Self {
+        Self {
+            status: InspectSectionStatus::Unavailable,
+            scope,
+            message: Some(message),
+            data: None,
+        }
+    }
 }
 
 /// Serialize the `fallow inspect --format json` envelope.
@@ -163,6 +177,7 @@ pub fn serialize_inspect_json_output(
 #[serde(rename_all = "snake_case")]
 pub enum InspectSectionStatus {
     Ok,
+    Unavailable,
     Error,
 }
 
@@ -242,6 +257,7 @@ mod tests {
                     InspectEvidenceScope::ProjectFilteredToFile,
                     "not run".to_string(),
                 ),
+                churn: None,
                 symbol_chain: None,
             },
             warnings: Vec::new(),
@@ -255,6 +271,36 @@ mod tests {
         assert_eq!(
             value["_meta"]["telemetry"]["analysis_run_id"],
             "run-inspect"
+        );
+        assert!(value["evidence"].get("churn").is_none());
+    }
+
+    #[test]
+    fn inspect_churn_section_serializes_success_unavailable_and_error_states() {
+        let ok = InspectEvidenceSection::ok(
+            InspectEvidenceScope::ProjectFilteredToFile,
+            serde_json::json!({"file": "src/app.ts", "commits": 4}),
+        );
+        let unavailable = InspectEvidenceSection::unavailable(
+            InspectEvidenceScope::ProjectFilteredToFile,
+            "git repository unavailable".to_string(),
+        );
+        let error = InspectEvidenceSection::error(
+            InspectEvidenceScope::ProjectFilteredToFile,
+            "git log failed".to_string(),
+        );
+
+        assert_eq!(
+            serde_json::to_value(ok).expect("ok section should serialize")["status"],
+            "ok"
+        );
+        assert_eq!(
+            serde_json::to_value(unavailable).expect("unavailable section should serialize")["status"],
+            "unavailable"
+        );
+        assert_eq!(
+            serde_json::to_value(error).expect("error section should serialize")["status"],
+            "error"
         );
     }
 }

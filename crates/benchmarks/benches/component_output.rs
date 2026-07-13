@@ -76,6 +76,7 @@ fn create_inspect_output() -> InspectOutput {
             complexity: section.clone(),
             security: section.clone(),
             impact_closure: section,
+            churn: None,
             symbol_chain: None,
         },
         warnings: Vec::new(),

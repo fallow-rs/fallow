@@ -29,6 +29,109 @@ pub struct ChurnFetchResult {
     pub git_log_ms: f64,
 }
 
+/// Focused inputs for target-level churn evidence.
+///
+/// This reuses the health hotspot churn cache without running project parsing,
+/// file scoring, or any other health section.
+pub struct TargetChurnOptions<'a> {
+    pub root: &'a std::path::Path,
+    pub target: &'a std::path::Path,
+    pub cache_dir: std::path::PathBuf,
+    pub no_cache: bool,
+    pub since: Option<&'a str>,
+    pub min_commits: Option<u32>,
+}
+
+/// Qualifying target-level churn returned by the focused health API.
+#[derive(Debug)]
+pub struct TargetChurnEvidence {
+    pub file: crate::churn::FileChurn,
+    pub since: crate::churn::SinceDuration,
+    pub min_commits: u32,
+    pub shallow_clone: bool,
+}
+
+/// Result states that do not represent a churn-analysis failure.
+#[derive(Debug)]
+pub enum TargetChurnOutcome {
+    Found(TargetChurnEvidence),
+    NoQualifyingChurn {
+        observed_commits: Option<u32>,
+        since: crate::churn::SinceDuration,
+        min_commits: u32,
+        shallow_clone: bool,
+    },
+    Unavailable {
+        message: String,
+    },
+}
+
+/// Analyze git churn for one normalized project-relative target.
+///
+/// The call is intentionally independent of the full health pipeline. Missing
+/// git is an explicit unavailable outcome, while a failed git analysis remains
+/// an error so callers can preserve partial-evidence warnings.
+pub fn analyze_target_churn(
+    options: &TargetChurnOptions<'_>,
+) -> Result<TargetChurnOutcome, String> {
+    analyze_target_churn_with(
+        options,
+        crate::churn::is_git_repo,
+        crate::churn::analyze_churn_cached,
+    )
+}
+
+fn analyze_target_churn_with<GitAvailable, Analyze>(
+    options: &TargetChurnOptions<'_>,
+    git_available: GitAvailable,
+    analyze: Analyze,
+) -> Result<TargetChurnOutcome, String>
+where
+    GitAvailable: FnOnce(&std::path::Path) -> bool,
+    Analyze: FnOnce(
+        &std::path::Path,
+        &crate::churn::SinceDuration,
+        &std::path::Path,
+        bool,
+    ) -> Option<(crate::churn::ChurnResult, bool)>,
+{
+    if !git_available(options.root) {
+        return Ok(TargetChurnOutcome::Unavailable {
+            message: "git repository unavailable at project root".to_string(),
+        });
+    }
+
+    let since = crate::churn::parse_since(options.since.unwrap_or("6m"))?;
+    let min_commits = options.min_commits.unwrap_or(3);
+    let Some((result, _cache_hit)) =
+        analyze(options.root, &since, &options.cache_dir, options.no_cache)
+    else {
+        return Err("git churn analysis failed".to_string());
+    };
+    let shallow_clone = result.shallow_clone;
+    let target = options.root.join(options.target);
+    let file = result.files.get(&target).cloned();
+
+    let observed_commits = file.as_ref().map(|file| file.commits);
+    if let Some(file) = file
+        && file.commits >= min_commits
+    {
+        return Ok(TargetChurnOutcome::Found(TargetChurnEvidence {
+            file,
+            since,
+            min_commits,
+            shallow_clone,
+        }));
+    }
+
+    Ok(TargetChurnOutcome::NoQualifyingChurn {
+        observed_commits,
+        since,
+        min_commits,
+        shallow_clone,
+    })
+}
+
 /// Validate git prerequisites and return churn data for hotspot analysis.
 ///
 /// Uses disk cache when available. Returns `None` if the repo is missing,
@@ -375,6 +478,108 @@ fn collect_hotspot_entries(ctx: &HotspotEntryCtx<'_>) -> (Vec<HotspotEntry>, usi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn target_churn_options(root: &std::path::Path) -> TargetChurnOptions<'_> {
+        TargetChurnOptions {
+            root,
+            target: std::path::Path::new("src/app.ts"),
+            cache_dir: root.join(".fallow"),
+            no_cache: true,
+            since: None,
+            min_commits: None,
+        }
+    }
+
+    fn churn_result(root: &std::path::Path, commits: u32) -> crate::churn::ChurnResult {
+        let path = root.join("src/app.ts");
+        let mut files = rustc_hash::FxHashMap::default();
+        files.insert(
+            path.clone(),
+            crate::churn::FileChurn {
+                path,
+                commits,
+                weighted_commits: 2.5,
+                lines_added: 20,
+                lines_deleted: 5,
+                trend: crate::churn::ChurnTrend::Accelerating,
+                authors: rustc_hash::FxHashMap::default(),
+            },
+        );
+        crate::churn::ChurnResult {
+            files,
+            shallow_clone: false,
+            author_pool: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn target_churn_returns_only_the_requested_qualifying_file() {
+        let root = std::path::Path::new("/project");
+        let options = target_churn_options(root);
+
+        let outcome = analyze_target_churn_with(
+            &options,
+            |_| true,
+            |_, _, _, _| Some((churn_result(root, 4), false)),
+        )
+        .unwrap();
+
+        let TargetChurnOutcome::Found(evidence) = outcome else {
+            panic!("expected qualifying churn evidence");
+        };
+        assert_eq!(evidence.file.path, root.join("src/app.ts"));
+        assert_eq!(evidence.file.commits, 4);
+        assert_eq!(evidence.min_commits, 3);
+        assert_eq!(evidence.since.display, "6 months");
+    }
+
+    #[test]
+    fn target_churn_distinguishes_no_qualifying_history() {
+        let root = std::path::Path::new("/project");
+        let options = target_churn_options(root);
+
+        let outcome = analyze_target_churn_with(
+            &options,
+            |_| true,
+            |_, _, _, _| Some((churn_result(root, 2), false)),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            outcome,
+            TargetChurnOutcome::NoQualifyingChurn {
+                observed_commits: Some(2),
+                min_commits: 3,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn target_churn_distinguishes_git_unavailable() {
+        let root = std::path::Path::new("/project");
+        let options = target_churn_options(root);
+
+        let outcome = analyze_target_churn_with(
+            &options,
+            |_| false,
+            |_, _, _, _| panic!("churn analysis must not run without git"),
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, TargetChurnOutcome::Unavailable { .. }));
+    }
+
+    #[test]
+    fn target_churn_surfaces_analysis_failure() {
+        let root = std::path::Path::new("/project");
+        let options = target_churn_options(root);
+
+        let error = analyze_target_churn_with(&options, |_| true, |_, _, _, _| None)
+            .expect_err("failed git analysis must remain explicit");
+
+        assert!(error.contains("git churn analysis failed"));
+    }
 
     #[test]
     fn hotspot_score_both_maxima_zero() {

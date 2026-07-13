@@ -8,6 +8,7 @@
 mod common;
 
 use common::{parse_json, run_fallow_in_root};
+use std::process::Command;
 use tempfile::tempdir;
 
 fn write_project(root: &std::path::Path) {
@@ -29,6 +30,27 @@ fn write_project(root: &std::path::Path) {
         "export const fetchUser = (id: string) => ({ id });\n",
     )
     .unwrap();
+}
+
+fn git(root: &std::path::Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .expect("git command should run");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn commit_all(root: &std::path::Path, message: &str) {
+    git(root, &["add", "."]);
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-m", message],
+    );
 }
 
 #[test]
@@ -60,6 +82,88 @@ fn inspect_file_outputs_typed_evidence_bundle() {
         json["evidence"]["duplication"]["scope"].as_str(),
         Some("project_filtered_to_file")
     );
+    assert!(json["evidence"].get("churn").is_none());
+}
+
+#[test]
+fn inspect_churn_reports_explicit_unavailable_status_outside_git() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+
+    let output = run_fallow_in_root(
+        "inspect",
+        dir.path(),
+        &[
+            "--file",
+            "src/api.ts",
+            "--churn",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "inspect should exit 0: {}", output.stderr);
+
+    let json = parse_json(&output);
+    assert_eq!(
+        json["evidence"]["churn"]["status"].as_str(),
+        Some("unavailable")
+    );
+    assert!(
+        json["warnings"]
+            .as_array()
+            .is_some_and(|warnings| warnings.iter().any(|warning| warning
+                .as_str()
+                .is_some_and(|warning| warning.contains("churn evidence unavailable"))))
+    );
+}
+
+#[test]
+fn inspect_churn_returns_only_normalized_target_evidence() {
+    let dir = tempdir().unwrap();
+    write_project(dir.path());
+    git(dir.path(), &["init", "-q"]);
+    git(
+        dir.path(),
+        &["config", "user.email", "inspect@example.test"],
+    );
+    git(dir.path(), &["config", "user.name", "Inspect Test"]);
+    commit_all(dir.path(), "initial");
+    std::fs::write(
+        dir.path().join("src/api.ts"),
+        "export const fetchUser = (id: string) => ({ id, revision: 2 });\n",
+    )
+    .unwrap();
+    commit_all(dir.path(), "update api once");
+    std::fs::write(
+        dir.path().join("src/api.ts"),
+        "export const fetchUser = (id: string) => ({ id, revision: 3 });\n",
+    )
+    .unwrap();
+    commit_all(dir.path(), "update api twice");
+
+    let output = run_fallow_in_root(
+        "inspect",
+        dir.path(),
+        &[
+            "--file",
+            "src/api.ts",
+            "--churn",
+            "--no-cache",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "inspect should exit 0: {}", output.stderr);
+
+    let json = parse_json(&output);
+    let churn = &json["evidence"]["churn"];
+    assert_eq!(churn["status"].as_str(), Some("ok"));
+    assert_eq!(churn["scope"].as_str(), Some("project_filtered_to_file"));
+    assert_eq!(churn["data"]["file"].as_str(), Some("src/api.ts"));
+    assert_eq!(churn["data"]["matched_count"].as_u64(), Some(1));
+    assert_eq!(churn["data"]["commits"].as_u64(), Some(3));
 }
 
 #[test]

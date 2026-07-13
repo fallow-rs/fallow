@@ -478,6 +478,7 @@ fn inspect_target_schema_contains_expected_properties() {
         "config",
         "production",
         "workspace",
+        "include_churn",
         "no_cache",
         "threads",
     ] {
@@ -518,6 +519,7 @@ fn inspect_target_description_frames_scope_and_timeout() {
         "trace_file",
         "trace_export",
         "file-scoped",
+        "include_churn",
         "FALLOW_TIMEOUT_SECS",
     ] {
         assert!(

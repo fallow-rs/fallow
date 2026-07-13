@@ -651,7 +651,7 @@ export_name: string
 type: "symbol"
 })
 export type InspectIdentity = (InspectFileIdentity | InspectSymbolIdentity)
-export type InspectSectionStatus = ("ok" | "error")
+export type InspectSectionStatus = ("ok" | "unavailable" | "error")
 export type InspectEvidenceScope = ("symbol" | "file" | "project_filtered_to_file")
 /**
  * Best-effort classification of why a callee did not resolve to an edge.
@@ -7206,6 +7206,11 @@ duplication: InspectEvidenceSection
 complexity: InspectEvidenceSection
 security: InspectEvidenceSection
 impact_closure: InspectEvidenceSection
+/**
+ * OPT-IN target-level git churn. Omitted unless historical evidence was
+ * explicitly requested by the caller.
+ */
+churn?: (InspectEvidenceSection | null)
 /**
  * OPT-IN symbol-level call chain. Present only when `--symbol-chain` was
  * requested AND the target is a SYMBOL (best-effort, syntactic, OFF the

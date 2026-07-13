@@ -1185,6 +1185,7 @@ Compose one evidence bundle before editing a file or exported symbol. This is th
 ```bash
 fallow inspect --file src/api.ts --format json --quiet
 fallow inspect --symbol src/api.ts:fetchUser --format json --quiet
+fallow inspect --file src/api.ts --churn --format json --quiet
 ```
 
 ### Target Flags
@@ -1193,6 +1194,7 @@ fallow inspect --symbol src/api.ts:fetchUser --format json --quiet
 |------|-------------|
 | `--file <PATH>` | Inspect one project-relative file |
 | `--symbol <FILE:EXPORT>` | Inspect one exported symbol. Supporting dead-code, duplication, complexity, and security evidence is file-scoped in the first version |
+| `--churn` | Add target-level git churn evidence. Off by default; missing git history is reported as `unavailable` |
 
 Common global flags: `--format`, `--quiet`, `--root`, `--config`, `--workspace`, `--production`, `--no-cache`, `--threads`.
 
@@ -1215,13 +1217,14 @@ Common global flags: `--format`, `--quiet`, `--root`, `--config`, `--workspace`,
     "dead_code": { "status": "ok", "scope": "file", "data": {} },
     "duplication": { "status": "ok", "scope": "project_filtered_to_file", "data": {} },
     "complexity": { "status": "ok", "scope": "project_filtered_to_file", "data": {} },
-    "security": { "status": "ok", "scope": "file", "data": {} }
+    "security": { "status": "ok", "scope": "file", "data": {} },
+    "churn": { "status": "ok", "scope": "project_filtered_to_file", "data": {} }
   },
   "warnings": []
 }
 ```
 
-Each evidence section carries `status` and `scope`. Non-fatal child-analysis failures become section-level errors and warnings, so callers can still use the remaining evidence.
+Each evidence section carries `status` and `scope`. The optional churn section can report `ok`, `unavailable`, or `error`. Non-fatal analysis failures become section-level errors and warnings, so callers can still use the remaining evidence.
 
 ---
 

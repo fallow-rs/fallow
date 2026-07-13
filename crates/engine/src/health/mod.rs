@@ -72,6 +72,9 @@ use file_scores::{
 };
 use finding_sort::sort_findings;
 pub use health_error::HealthError;
+pub use hotspots::{
+    TargetChurnEvidence, TargetChurnOptions, TargetChurnOutcome, analyze_target_churn,
+};
 pub use pipeline::{HealthPipelineInputs, HealthScopeInputs};
 pub use runner::{
     run_ungrouped_health, run_ungrouped_health_with_session,

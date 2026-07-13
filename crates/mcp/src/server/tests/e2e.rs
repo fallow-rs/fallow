@@ -389,6 +389,7 @@ async fn e2e_inspect_target_file_returns_evidence_bundle() {
             no_cache: None,
             threads: None,
             symbol_chain: None,
+            include_churn: None,
         },
     )
     .await
@@ -408,6 +409,7 @@ async fn e2e_inspect_target_file_returns_evidence_bundle() {
     );
     assert_eq!(json["evidence"]["dead_code"]["status"].as_str(), Some("ok"));
     assert!(json["evidence"]["trace_export"].is_null());
+    assert!(json["evidence"].get("churn").is_none());
 }
 
 #[tokio::test]
@@ -429,6 +431,7 @@ async fn e2e_inspect_target_symbol_returns_symbol_and_file_evidence() {
             no_cache: None,
             threads: None,
             symbol_chain: None,
+            include_churn: None,
         },
     )
     .await

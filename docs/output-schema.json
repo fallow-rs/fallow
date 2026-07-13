@@ -15939,6 +15939,17 @@
           "description": "Impact closure scoped to the inspected file as the seed: the transitive\naffected-but-not-in-diff set + coordination gap.",
           "$ref": "#/definitions/InspectEvidenceSection"
         },
+        "churn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InspectEvidenceSection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "OPT-IN target-level git churn. Omitted unless historical evidence was\nexplicitly requested by the caller."
+        },
         "symbol_chain": {
           "anyOf": [
             {
@@ -16122,6 +16133,7 @@
       "type": "string",
       "enum": [
         "ok",
+        "unavailable",
         "error"
       ]
     },

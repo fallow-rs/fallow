@@ -854,6 +854,16 @@
             "true",
             "false"
           ]
+        },
+        {
+          "name": "--churn",
+          "type": "bool",
+          "required": false,
+          "description": "OPT-IN: attach target-level git churn evidence from the health hotspot subsystem. Default off to avoid git-history latency",
+          "possible_values": [
+            "true",
+            "false"
+          ]
         }
       ]
     },
@@ -6380,7 +6390,8 @@
         "cli_command": "fallow inspect --format json --quiet",
         "key_params": [
           "target",
-          "production"
+          "production",
+          "include_churn"
         ],
         "license": "free",
         "license_note": null,

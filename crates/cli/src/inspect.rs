@@ -31,6 +31,9 @@ pub struct InspectOptions<'a> {
     pub production: bool,
     pub workspace: Option<&'a Vec<String>>,
     pub target: InspectTarget,
+    /// OPT-IN cache location for in-process target churn evidence. `None`
+    /// keeps git-history analysis entirely off the default path.
+    pub churn_cache_dir: Option<&'a Path>,
     /// OPT-IN: also run the best-effort symbol-level call chain
     /// (`fallow trace`) and attach it as the `symbol_chain` evidence section.
     /// Only meaningful for a SYMBOL target. Default off (best-effort, off the
@@ -151,6 +154,7 @@ fn build_inspect_evidence(
         complexity: child_evidence.complexity,
         security: child_evidence.security,
         impact_closure: child_evidence.impact_closure,
+        churn: child_evidence.churn,
         symbol_chain: build_symbol_chain_section(opts, target, optional_threads),
     }
 }
@@ -161,6 +165,7 @@ struct InspectChildEvidence {
     complexity: InspectEvidenceSection,
     security: InspectEvidenceSection,
     impact_closure: InspectEvidenceSection,
+    churn: Option<InspectEvidenceSection>,
 }
 
 fn collect_inspect_child_evidence(
@@ -216,8 +221,18 @@ fn collect_inspect_child_evidence(
                 |value| value,
             )
         });
+        let churn = opts.churn_cache_dir.map(|cache_dir| {
+            scope.spawn(|| collect_target_churn_section(opts, target_file, cache_dir))
+        });
 
-        join_inspect_child_evidence(dead_code, duplication, complexity, security, impact_closure)
+        join_inspect_child_evidence(
+            dead_code,
+            duplication,
+            complexity,
+            security,
+            impact_closure,
+            churn,
+        )
     })
 }
 
@@ -232,6 +247,7 @@ fn join_inspect_child_evidence(
     complexity: std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>,
     security: std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>,
     impact_closure: std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>,
+    churn: Option<std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>>,
 ) -> InspectChildEvidence {
     InspectChildEvidence {
         dead_code: join_inspect_section(dead_code, InspectEvidenceScope::File),
@@ -242,7 +258,15 @@ fn join_inspect_child_evidence(
             impact_closure,
             InspectEvidenceScope::ProjectFilteredToFile,
         ),
+        churn: join_optional_inspect_section(churn, InspectEvidenceScope::ProjectFilteredToFile),
     }
+}
+
+fn join_optional_inspect_section(
+    handle: Option<std::thread::ScopedJoinHandle<'_, InspectEvidenceSection>>,
+    scope: InspectEvidenceScope,
+) -> Option<InspectEvidenceSection> {
+    handle.map(|handle| join_inspect_section(handle, scope))
 }
 
 fn join_inspect_section(
@@ -254,6 +278,71 @@ fn join_inspect_section(
         Err(_) => {
             InspectEvidenceSection::error(scope, "inspect evidence worker panicked".to_string())
         }
+    }
+}
+
+fn collect_target_churn_section(
+    opts: &InspectOptions<'_>,
+    target_file: &str,
+    cache_dir: &Path,
+) -> InspectEvidenceSection {
+    let options = fallow_engine::health::TargetChurnOptions {
+        root: opts.root,
+        target: Path::new(target_file),
+        cache_dir: cache_dir.to_path_buf(),
+        no_cache: opts.no_cache,
+        since: None,
+        min_commits: None,
+    };
+    churn_section_from_result(
+        target_file,
+        fallow_engine::health::analyze_target_churn(&options),
+    )
+}
+
+fn churn_section_from_result(
+    target_file: &str,
+    result: Result<fallow_engine::health::TargetChurnOutcome, String>,
+) -> InspectEvidenceSection {
+    let scope = InspectEvidenceScope::ProjectFilteredToFile;
+    match result {
+        Ok(fallow_engine::health::TargetChurnOutcome::Found(evidence)) => {
+            InspectEvidenceSection::ok(
+                scope,
+                json!({
+                    "file": target_file,
+                    "matched_count": 1,
+                    "commits": evidence.file.commits,
+                    "weighted_commits": evidence.file.weighted_commits,
+                    "lines_added": evidence.file.lines_added,
+                    "lines_deleted": evidence.file.lines_deleted,
+                    "trend": evidence.file.trend,
+                    "window": evidence.since.display,
+                    "minimum_commits": evidence.min_commits,
+                    "shallow_clone": evidence.shallow_clone,
+                }),
+            )
+        }
+        Ok(fallow_engine::health::TargetChurnOutcome::NoQualifyingChurn {
+            observed_commits,
+            since,
+            min_commits,
+            shallow_clone,
+        }) => InspectEvidenceSection::ok(
+            scope,
+            json!({
+                "file": target_file,
+                "matched_count": 0,
+                "observed_commits": observed_commits,
+                "window": since.display,
+                "minimum_commits": min_commits,
+                "shallow_clone": shallow_clone,
+            }),
+        ),
+        Ok(fallow_engine::health::TargetChurnOutcome::Unavailable { message }) => {
+            InspectEvidenceSection::unavailable(scope, message)
+        }
+        Err(message) => InspectEvidenceSection::error(scope, message),
     }
 }
 
@@ -359,6 +448,9 @@ fn print_human(bundle: &InspectOutput, quiet: bool) {
     print_evidence_summary("complexity", &bundle.evidence.complexity);
     print_evidence_summary("security", &bundle.evidence.security);
     print_evidence_summary("impact_closure", &bundle.evidence.impact_closure);
+    if let Some(section) = bundle.evidence.churn.as_ref() {
+        print_evidence_summary("churn", section);
+    }
     if let Some(section) = bundle.evidence.symbol_chain.as_ref() {
         print_evidence_summary("symbol_chain", section);
     }
@@ -377,6 +469,7 @@ fn json_display(value: &impl serde::Serialize) -> String {
 fn print_evidence_summary(name: &str, section: &InspectEvidenceSection) {
     let status = match section.status {
         InspectSectionStatus::Ok => "ok",
+        InspectSectionStatus::Unavailable => "unavailable",
         InspectSectionStatus::Error => "error",
     };
     let detail = evidence_detail(section)
@@ -681,10 +774,13 @@ fn push_inspect_warnings(warnings: &mut Vec<String>, evidence: &InspectEvidence)
     push_warning(warnings, "complexity", &evidence.complexity);
     push_warning(warnings, "security", &evidence.security);
     push_warning(warnings, "impact_closure", &evidence.impact_closure);
+    if let Some(churn) = evidence.churn.as_ref() {
+        push_warning(warnings, "churn", churn);
+    }
 }
 
 fn push_warning(warnings: &mut Vec<String>, section: &str, evidence: &InspectEvidenceSection) {
-    if matches!(evidence.status, InspectSectionStatus::Error)
+    if !matches!(evidence.status, InspectSectionStatus::Ok)
         && let Some(message) = evidence.message.as_ref()
     {
         warnings.push(format!("{section} evidence unavailable: {message}"));
@@ -719,6 +815,7 @@ mod tests {
             production: false,
             workspace: None,
             target,
+            churn_cache_dir: None,
             symbol_chain: false,
         }
     }
@@ -802,5 +899,53 @@ mod tests {
         assert_eq!(parallel_child_threads(1), 1);
         assert_eq!(parallel_child_threads(4), 1);
         assert_eq!(parallel_child_threads(8), 2);
+    }
+
+    #[test]
+    fn churn_section_distinguishes_no_history_unavailable_and_failure() {
+        let since = fallow_engine::churn::parse_since("6m").unwrap();
+        let no_history = churn_section_from_result(
+            "src/api.ts",
+            Ok(
+                fallow_engine::health::TargetChurnOutcome::NoQualifyingChurn {
+                    observed_commits: Some(2),
+                    since,
+                    min_commits: 3,
+                    shallow_clone: false,
+                },
+            ),
+        );
+        let unavailable = churn_section_from_result(
+            "src/api.ts",
+            Ok(fallow_engine::health::TargetChurnOutcome::Unavailable {
+                message: "git repository unavailable".to_string(),
+            }),
+        );
+        let failed =
+            churn_section_from_result("src/api.ts", Err("git churn analysis failed".to_string()));
+
+        assert_eq!(no_history.status, InspectSectionStatus::Ok);
+        assert_eq!(no_history.data.unwrap()["matched_count"], 0);
+        assert_eq!(unavailable.status, InspectSectionStatus::Unavailable);
+        assert_eq!(failed.status, InspectSectionStatus::Error);
+    }
+
+    #[test]
+    fn churn_worker_failure_remains_a_partial_evidence_section() {
+        std::thread::scope(|scope| {
+            let churn = scope
+                .spawn(|| -> InspectEvidenceSection { panic!("simulated churn worker failure") });
+            let section = join_optional_inspect_section(
+                Some(churn),
+                InspectEvidenceScope::ProjectFilteredToFile,
+            )
+            .expect("requested churn must retain a section");
+
+            assert_eq!(section.status, InspectSectionStatus::Error);
+            assert_eq!(
+                section.message.as_deref(),
+                Some("inspect evidence worker panicked")
+            );
+        });
     }
 }

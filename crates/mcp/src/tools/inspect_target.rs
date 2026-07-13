@@ -41,6 +41,9 @@ fn build_inspect_args(params: &InspectTargetParams) -> Result<Vec<String>, Strin
     } else {
         push_scope(&mut args, params.production, params.workspace.as_deref());
     }
+    if params.include_churn == Some(true) {
+        args.push("--churn".to_string());
+    }
 
     match &params.target {
         InspectTarget::File { file } => {
@@ -87,6 +90,7 @@ mod tests {
                 file: "src/api.ts".to_string(),
             },
             symbol_chain: None,
+            include_churn: None,
         };
 
         let args = build_inspect_args(&params).unwrap();
@@ -111,6 +115,7 @@ mod tests {
                 export_name: "handler".to_string(),
             },
             symbol_chain: Some(true),
+            include_churn: None,
         };
 
         let args = build_inspect_args(&params).unwrap();
@@ -136,6 +141,7 @@ mod tests {
                 export_name: "handler".to_string(),
             },
             symbol_chain: None,
+            include_churn: None,
         };
 
         let args = build_inspect_args(&params).unwrap();
@@ -156,10 +162,33 @@ mod tests {
                 file: "src/api.ts".to_string(),
             },
             symbol_chain: Some(true),
+            include_churn: None,
         };
 
         let args = build_inspect_args(&params).unwrap();
         // A file target carries no symbol, so the chain flag is never forwarded.
         assert!(!args.contains(&"--symbol-chain".to_string()));
+    }
+
+    #[test]
+    fn churn_opt_in_forwards_flag_for_any_target() {
+        let params = InspectTargetParams {
+            root: None,
+            config: None,
+            allow_remote_extends: None,
+            no_cache: None,
+            threads: None,
+            production: None,
+            workspace: None,
+            target: InspectTarget::File {
+                file: "src/api.ts".to_string(),
+            },
+            symbol_chain: None,
+            include_churn: Some(true),
+        };
+
+        let args = build_inspect_args(&params).unwrap();
+
+        assert!(args.contains(&"--churn".to_string()));
     }
 }

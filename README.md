@@ -244,7 +244,7 @@ For full adoption instead of one-off review, see the [Fallow compliance happy pa
 
 See [Agent integration](https://docs.fallow.tools/integrations/mcp) for MCP setup and the full list of structured tools.
 
-Use `fallow inspect --file <path>` or `fallow inspect --symbol <file>:<export>` when an agent needs one evidence bundle before editing. The MCP server exposes the same flow as `inspect_target`, combining trace, dead-code, duplication, complexity, and security signals without inventing a new analysis pass.
+Use `fallow inspect --file <path>` or `fallow inspect --symbol <file>:<export>` when an agent needs one evidence bundle before editing. Add `--churn` only when target-level git history is worth the extra latency. The MCP server exposes the same flow as `inspect_target`, with `include_churn: true` as the opt-in equivalent, combining trace, dead-code, duplication, complexity, security, and optional churn signals without inventing a new analysis pass.
 
 The MCP server also exposes `code_execute`, a bounded read-only Code Mode tool for composing multiple fallow analysis calls in one JavaScript snippet. It can call analysis helpers such as `fallow.projectInfo`, `fallow.audit`, and `fallow.checkHealth`, but it does not expose mutating fix tools.
 

@@ -116,6 +116,7 @@ fn inspect_target_params_file_deserialize() {
         "config": "fallow.toml",
         "production": true,
         "workspace": "apps/web",
+        "include_churn": true,
         "no_cache": true,
         "threads": 4
     }"#;
@@ -128,6 +129,7 @@ fn inspect_target_params_file_deserialize() {
     assert_eq!(params.config.as_deref(), Some("fallow.toml"));
     assert_eq!(params.production, Some(true));
     assert_eq!(params.workspace.as_deref(), Some("apps/web"));
+    assert_eq!(params.include_churn, Some(true));
     assert_eq!(params.no_cache, Some(true));
     assert_eq!(params.threads, Some(4));
 }

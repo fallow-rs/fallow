@@ -120,7 +120,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
         kind: "analysis",
         description: "One evidence bundle for a file or exported symbol: trace, dead-code actions, duplication, complexity, and security candidates",
         cli_command: Some("fallow inspect --format json --quiet"),
-        key_params: &["target", "production"],
+        key_params: &["target", "production", "include_churn"],
         license: McpToolLicense::Free,
         license_note: None,
         read_only: true,
