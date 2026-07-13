@@ -521,10 +521,10 @@ fn prepare_source_map_with_open(
     }
 
     match serde_json::from_str::<serde_json::Value>(&content) {
-        Ok(source_map) => MapOutcome::Ready(PreparedSourceMap {
+        Ok(source_map) => MapOutcome::Ready(Box::new(PreparedSourceMap {
             candidate: candidate.clone(),
             source_map,
-        }),
+        })),
         Err(err) => MapOutcome::failed(
             candidate,
             FailureKind::Validation,
@@ -702,7 +702,7 @@ fn prepare_source_maps_for_upload(
     for candidate in maps {
         warn_large_source_map(candidate);
         match prepare_source_map(candidate) {
-            MapOutcome::Ready(prepared) => ready.push(prepared),
+            MapOutcome::Ready(prepared) => ready.push(*prepared),
             failed => {
                 outcomes.push(failed);
                 if args.fail_fast {
@@ -1037,7 +1037,7 @@ enum FailureKind {
 
 #[derive(Debug, Clone)]
 enum MapOutcome {
-    Ready(PreparedSourceMap),
+    Ready(Box<PreparedSourceMap>),
     Success,
     Failed {
         file_name: String,
