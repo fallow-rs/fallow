@@ -42,6 +42,15 @@ test("workflow block parser rejects missing keys", () => {
   assert.throws(() => indentedBlock("root:\n  value: true", "missing", 0), /missing missing block/);
 });
 
+test("binary-size workflow budgets time for every shipped binary", () => {
+  const workflow = readWorkflow(".github/workflows/bloat.yml");
+  const job = indentedBlock(workflow, "bloat", 2);
+  const timeout = Number(job.match(/timeout-minutes: (\d+)/)?.[1]);
+
+  assert.match(job, /cargo build --release -p fallow-lsp -p fallow-mcp -p fallow-multicall/);
+  assert.ok(timeout >= 30, `multi-binary size tracking needs at least 30 minutes, got ${timeout}`);
+});
+
 test("regular CI keeps affected checks on Ubuntu", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const checkJob = indentedBlock(workflow, "check", 2);
