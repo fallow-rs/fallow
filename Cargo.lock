@@ -1294,6 +1294,7 @@ name = "fallow-node"
 version = "3.4.2"
 dependencies = [
  "fallow-api",
+ "fallow-types",
  "napi",
  "napi-build",
  "napi-derive",

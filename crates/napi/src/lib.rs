@@ -1301,4 +1301,42 @@ mod tests {
             })
             .collect()
     }
+
+    /// Drift guard: the addon's `#[napi(js_name = ...)]` exports must match the
+    /// `napi_export` column of the cross-surface capability parity table
+    /// (`fallow_types::mcp_manifest::CAPABILITY_PARITY`). A new export that is
+    /// not recorded in the table, or a stale table entry, fails here. Mirrors
+    /// the include_str source-scan the schemars-alias guards use.
+    #[test]
+    fn napi_exports_match_capability_parity_table() {
+        use std::collections::BTreeSet;
+
+        let source = include_str!("lib.rs");
+        let mut scanned: BTreeSet<String> = BTreeSet::new();
+        for line in source.lines() {
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix("#[napi(js_name = \"") {
+                let name = rest.split('"').next().expect("js_name literal is closed");
+                scanned.insert(name.to_string());
+            }
+        }
+        assert_eq!(
+            scanned.len(),
+            7,
+            "expected seven #[napi(js_name = ...)] exports, scanned {scanned:?}"
+        );
+
+        let table: BTreeSet<String> = fallow_types::mcp_manifest::CAPABILITY_PARITY
+            .iter()
+            .filter_map(|row| row.napi_export)
+            .map(str::to_string)
+            .collect();
+
+        assert_eq!(
+            scanned, table,
+            "the #[napi(js_name = ...)] exports must equal the CAPABILITY_PARITY napi_export \
+             column exactly (missing => a new export is not in the table; extra => a stale \
+             table entry)"
+        );
+    }
 }
