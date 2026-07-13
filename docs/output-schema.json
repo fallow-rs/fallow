@@ -16252,14 +16252,14 @@
             "integer",
             "null"
           ],
-          "description": "Number of diff hunks. `None` in v1 (no diff index threaded yet)."
+          "description": "Number of diff hunks, or `None` when no diff evidence was supplied."
         },
         "net_lines": {
           "type": [
             "integer",
             "null"
           ],
-          "description": "Net added-minus-removed lines. `None` in v1 (no diff index threaded yet)."
+          "description": "Net added-minus-removed lines, or `None` without diff evidence."
         },
         "risk_class": {
           "description": "Coarse risk class derived from the change size.",
@@ -16275,7 +16275,7 @@
         "risk_class",
         "review_effort"
       ],
-      "description": "Stage 0 of the brief: triage facts derived purely from the diff size.\n\n`hunks` and `net_lines` are `None` in v1: the file-level audit does not yet\nthread a `DiffIndex` (from `report/ci/diff_filter.rs`). They populate later,\non `--diff-file` / `--diff-stdin`, without a schema bump."
+      "description": "Stage 0 of the brief: triage facts derived purely from the diff size.\n\n`hunks` and `net_lines` are populated when the caller supplies parsed diff\nevidence. They remain absent when no diff is available."
     },
     "GraphFacts": {
       "type": "object",

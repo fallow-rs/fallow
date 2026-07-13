@@ -48,18 +48,17 @@ pub enum ReviewEffort {
 
 /// Stage 0 of the brief: triage facts derived purely from the diff size.
 ///
-/// `hunks` and `net_lines` are `None` in v1: the file-level audit does not yet
-/// thread a `DiffIndex` (from `report/ci/diff_filter.rs`). They populate later,
-/// on `--diff-file` / `--diff-stdin`, without a schema bump.
+/// `hunks` and `net_lines` are populated when the caller supplies parsed diff
+/// evidence. They remain absent when no diff is available.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct DiffTriage {
     /// Number of changed files in the audit scope.
     pub files: usize,
-    /// Number of diff hunks. `None` in v1 (no diff index threaded yet).
+    /// Number of diff hunks, or `None` when no diff evidence was supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hunks: Option<usize>,
-    /// Net added-minus-removed lines. `None` in v1 (no diff index threaded yet).
+    /// Net added-minus-removed lines, or `None` without diff evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub net_lines: Option<i64>,
     /// Coarse risk class derived from the change size.

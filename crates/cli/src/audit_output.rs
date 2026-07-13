@@ -956,6 +956,7 @@ mod tests {
             decision_surface: None,
             graph_snapshot_hash: None,
             change_anchors: Vec::new(),
+            diff_index: None,
         }
     }
 

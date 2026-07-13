@@ -9411,9 +9411,8 @@ decisions: DecisionSurface
 /**
  * Stage 0 of the brief: triage facts derived purely from the diff size.
  *
- * `hunks` and `net_lines` are `None` in v1: the file-level audit does not yet
- * thread a `DiffIndex` (from `report/ci/diff_filter.rs`). They populate later,
- * on `--diff-file` / `--diff-stdin`, without a schema bump.
+ * `hunks` and `net_lines` are populated when the caller supplies parsed diff
+ * evidence. They remain absent when no diff is available.
  */
 export interface DiffTriage {
 /**
@@ -9421,11 +9420,11 @@ export interface DiffTriage {
  */
 files: number
 /**
- * Number of diff hunks. `None` in v1 (no diff index threaded yet).
+ * Number of diff hunks, or `None` when no diff evidence was supplied.
  */
 hunks?: (number | null)
 /**
- * Net added-minus-removed lines. `None` in v1 (no diff index threaded yet).
+ * Net added-minus-removed lines, or `None` without diff evidence.
  */
 net_lines?: (number | null)
 risk_class: RiskClass

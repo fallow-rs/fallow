@@ -30,9 +30,7 @@ pub type ReviewBriefOutput = fallow_output::StandardReviewBriefOutput;
 /// A file count at or above which a changeset is classified [`RiskClass::High`].
 const RISK_HIGH_FILES: usize = 20;
 /// A net-line count at or above which a changeset is classified
-/// [`RiskClass::High`]. Stub-only in v1 (net lines are not yet threaded); kept
-/// as a named constant so the threshold is documented where the classifier
-/// lives.
+/// [`RiskClass::High`].
 const RISK_HIGH_LINES: i64 = 500;
 /// A file count at or above which a changeset is classified
 /// [`RiskClass::Medium`].
@@ -67,7 +65,7 @@ pub fn build_review_deltas(
 }
 
 /// Classify a changeset's risk purely from its size. `net_lines` is consulted
-/// when present (it is `None` on the v1 file-level audit path).
+/// when diff evidence is available.
 #[must_use]
 pub fn classify_risk(files: usize, net_lines: Option<i64>) -> RiskClass {
     let lines = net_lines.unwrap_or(0).abs();
@@ -92,12 +90,13 @@ pub fn review_effort_for(risk: RiskClass) -> ReviewEffort {
 
 /// Build the Stage 0 triage facts from the audit result.
 #[must_use]
-pub fn build_triage(result: &AuditResult) -> DiffTriage {
+pub fn build_triage(
+    result: &AuditResult,
+    diff_index: Option<&fallow_output::DiffIndex>,
+) -> DiffTriage {
     let files = result.changed_files_count;
-    // v1: no diff index is threaded into the file-level audit, so hunks and net
-    // lines are honestly absent. They populate on `--diff-file`/`--diff-stdin`.
-    let hunks = None;
-    let net_lines = None;
+    let hunks = diff_index.map(fallow_output::DiffIndex::hunk_count);
+    let net_lines = diff_index.map(fallow_output::DiffIndex::net_lines);
     let risk_class = classify_risk(files, net_lines);
     DiffTriage {
         files,
@@ -401,7 +400,17 @@ fn taint_touched_files(check: Option<&crate::check::CheckResult>) -> Vec<String>
 /// byte-identically.
 #[must_use]
 pub fn build_brief_output(result: &AuditResult) -> ReviewBriefOutput {
-    let triage = build_triage(result);
+    build_brief_output_with_diff(result, result.diff_index.as_ref())
+}
+
+/// Assemble the structured [`ReviewBriefOutput`] with optional diff evidence.
+/// The caller owns diff discovery so this reusable builder stays pure.
+#[must_use]
+pub fn build_brief_output_with_diff(
+    result: &AuditResult,
+    diff_index: Option<&fallow_output::DiffIndex>,
+) -> ReviewBriefOutput {
+    let triage = build_triage(result, diff_index);
     let closure = result
         .check
         .as_ref()
@@ -466,8 +475,11 @@ fn build_brief_subtract_sections(
 /// Build the complete brief JSON value: the versioned brief header, the
 /// informational audit verdict header, the triage + graph-facts stages, and the
 /// reused subtract section.
-fn build_brief_json(result: &AuditResult) -> Result<serde_json::Value, ExitCode> {
-    let brief = build_brief_output(result);
+fn build_brief_json(
+    result: &AuditResult,
+    diff_index: Option<&fallow_output::DiffIndex>,
+) -> Result<serde_json::Value, ExitCode> {
+    let brief = build_brief_output_with_diff(result, diff_index);
     let audit_header = fallow_api::build_audit_header_map(crate::audit::audit_json_header_input(
         result,
     ))
@@ -490,8 +502,11 @@ fn build_brief_json(result: &AuditResult) -> Result<serde_json::Value, ExitCode>
 
 /// Render the brief as JSON. Always returns `SUCCESS`; a serialization failure
 /// surfaces the error but the brief contract still exits 0.
-fn print_brief_json(result: &AuditResult) -> ExitCode {
-    match build_brief_json(result) {
+fn print_brief_json(
+    result: &AuditResult,
+    diff_index: Option<&fallow_output::DiffIndex>,
+) -> ExitCode {
+    match build_brief_json(result, diff_index) {
         Ok(output) => {
             let Ok(output) = fallow_output::serialize_review_brief_json_output(
                 output,
@@ -510,8 +525,14 @@ fn print_brief_json(result: &AuditResult) -> ExitCode {
 /// Render the brief in human / compact / markdown form: a short orientation
 /// header (scope, risk, effort, boundaries) followed by the same findings
 /// sections `fallow audit` prints.
-fn print_brief_human(result: &AuditResult, quiet: bool, explain: bool, show_deprioritized: bool) {
-    let brief = build_brief_output(result);
+fn print_brief_human(
+    result: &AuditResult,
+    diff_index: Option<&fallow_output::DiffIndex>,
+    quiet: bool,
+    explain: bool,
+    show_deprioritized: bool,
+) {
+    let brief = build_brief_output_with_diff(result, diff_index);
 
     if !quiet {
         eprintln!();
@@ -783,6 +804,7 @@ fn effort_label(effort: ReviewEffort) -> &'static str {
 #[must_use]
 pub fn print_brief_result(
     result: &AuditResult,
+    diff_index: Option<&fallow_output::DiffIndex>,
     quiet: bool,
     explain: bool,
     show_deprioritized: bool,
@@ -790,9 +812,9 @@ pub fn print_brief_result(
     use fallow_config::OutputFormat;
 
     match result.output {
-        OutputFormat::Json => print_brief_json(result),
+        OutputFormat::Json => print_brief_json(result, diff_index),
         OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown => {
-            print_brief_human(result, quiet, explain, show_deprioritized);
+            print_brief_human(result, diff_index, quiet, explain, show_deprioritized);
             ExitCode::SUCCESS
         }
         _ => {
@@ -1069,6 +1091,7 @@ mod tests {
             decision_surface: None,
             graph_snapshot_hash: None,
             change_anchors: Vec::new(),
+            diff_index: None,
         }
     }
 
@@ -1077,14 +1100,14 @@ mod tests {
         // Human path.
         let human = audit_result(AuditVerdict::Fail, OutputFormat::Human);
         assert_eq!(
-            print_brief_result(&human, true, false, false),
+            print_brief_result(&human, None, true, false, false),
             ExitCode::SUCCESS
         );
 
         // JSON path.
         let json = audit_result(AuditVerdict::Fail, OutputFormat::Json);
         assert_eq!(
-            print_brief_result(&json, true, false, false),
+            print_brief_result(&json, None, true, false, false),
             ExitCode::SUCCESS
         );
     }
@@ -1093,7 +1116,7 @@ mod tests {
     fn brief_json_validates_against_audit_brief_schema_variant() {
         let result = audit_result(AuditVerdict::Fail, OutputFormat::Json);
         let value = fallow_output::serialize_review_brief_json_output(
-            build_brief_json(&result).expect("brief json must build"),
+            build_brief_json(&result, None).expect("brief json must build"),
             crate::output_runtime::current_root_envelope_mode(),
             crate::output_runtime::telemetry_analysis_run_id().as_deref(),
         )
@@ -1109,8 +1132,8 @@ mod tests {
         // `elapsed: Duration::ZERO` and no telemetry: the brief JSON carries no
         // timestamps or randomness, so two builds serialize byte-identically.
         let result = audit_result(AuditVerdict::Warn, OutputFormat::Json);
-        let first = build_brief_json(&result).expect("first build");
-        let second = build_brief_json(&result).expect("second build");
+        let first = build_brief_json(&result, None).expect("first build");
+        let second = build_brief_json(&result, None).expect("second build");
         let first_str = serde_json::to_string_pretty(&first).expect("serialize first");
         let second_str = serde_json::to_string_pretty(&second).expect("serialize second");
         assert_eq!(first_str, second_str);
@@ -1126,11 +1149,42 @@ mod tests {
     }
 
     #[test]
+    fn triage_uses_supplied_diff_metrics_and_existing_risk_thresholds() {
+        let mut result = audit_result(AuditVerdict::Warn, OutputFormat::Json);
+        result.changed_files_count = 1;
+        let mut diff = String::from(
+            "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -0,0 +1,100 @@\n",
+        );
+        for _ in 0..RISK_MEDIUM_LINES {
+            diff.push_str("+added\n");
+        }
+        let index = fallow_output::DiffIndex::from_unified_diff(&diff);
+        result.diff_index = Some(index);
+
+        let triage = build_brief_output(&result).triage;
+
+        assert_eq!(triage.hunks, Some(1));
+        assert_eq!(triage.net_lines, Some(RISK_MEDIUM_LINES));
+        assert_eq!(triage.risk_class, RiskClass::Medium);
+        assert_eq!(triage.review_effort, ReviewEffort::Review);
+    }
+
+    #[test]
+    fn no_diff_brief_keeps_optional_triage_fields_absent() {
+        let result = audit_result(AuditVerdict::Warn, OutputFormat::Json);
+        let value = serde_json::to_value(build_brief_output_with_diff(&result, None))
+            .expect("brief serializes");
+
+        assert!(value["triage"].get("hunks").is_none());
+        assert!(value["triage"].get("net_lines").is_none());
+    }
+
+    #[test]
     fn brief_json_includes_empty_impact_closure_when_no_graph_retained() {
         // check: None -> no closure; the impact_closure object must still be
         // present and empty so consumers can rely on its presence.
         let result = audit_result(AuditVerdict::Warn, OutputFormat::Json);
-        let value = build_brief_json(&result).expect("brief json must build");
+        let value = build_brief_json(&result, None).expect("brief json must build");
         assert!(value.get("impact_closure").is_some(), "{value}");
         assert_eq!(
             value["impact_closure"]["affected_not_shown"],

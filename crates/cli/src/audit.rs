@@ -70,6 +70,9 @@ pub struct AuditResult {
     /// (and have it post-validated). Also folded into `graph_snapshot_hash` so a
     /// moved region refuses a stale payload. Populated only on the brief path.
     pub change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
+    /// Parsed metrics from the exact diff used by the brief path. Retained so
+    /// rendering does not re-run git or consult process-global state.
+    pub diff_index: Option<fallow_output::DiffIndex>,
 }
 
 pub struct AuditOptions<'a> {
@@ -997,6 +1000,7 @@ struct AuditResultParts {
     decision_surface: Option<crate::audit_decision_surface::DecisionSurface>,
     graph_snapshot_hash: Option<String>,
     change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
+    diff_index: Option<fallow_output::DiffIndex>,
 }
 
 #[derive(Default)]
@@ -1007,6 +1011,7 @@ struct AuditBriefData {
     decision_surface: Option<crate::audit_decision_surface::DecisionSurface>,
     graph_snapshot_hash: Option<String>,
     change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
+    diff_index: Option<fallow_output::DiffIndex>,
 }
 
 #[derive(Clone, Copy)]
@@ -1334,6 +1339,7 @@ fn assemble_audit_result(input: AuditAssemblyInput<'_>) -> Result<AuditResult, E
         decision_surface: brief.decision_surface,
         graph_snapshot_hash: brief.graph_snapshot_hash,
         change_anchors: brief.change_anchors,
+        diff_index: brief.diff_index,
     }))
 }
 
@@ -1365,8 +1371,10 @@ fn compute_audit_brief_data(input: AuditBriefDataInput<'_>) -> AuditBriefData {
         routing.as_ref(),
     ));
 
-    // Per-hunk change anchors come from the same diff source as the audit run.
-    let change_anchors = compute_change_anchors(input.opts.root, input.base_ref);
+    // Change anchors and triage metrics come from the same diff source as the
+    // audit run and are parsed together from one retained diff.
+    let diff_evidence = compute_brief_diff_evidence(input.opts.root, input.base_ref);
+    let change_anchors = diff_evidence.change_anchors;
 
     // Graph-snapshot hash pins key sets, resolved base, head sha, and anchors.
     let graph_snapshot_hash = Some(compute_graph_snapshot_hash(
@@ -1385,6 +1393,7 @@ fn compute_audit_brief_data(input: AuditBriefDataInput<'_>) -> AuditBriefData {
         decision_surface,
         graph_snapshot_hash,
         change_anchors,
+        diff_index: diff_evidence.diff_index,
     }
 }
 
@@ -1448,23 +1457,33 @@ fn compute_graph_snapshot_hash(
     format!("graph:{:016x}", xxh3_64(&bytes))
 }
 
-/// Derive the per-hunk change anchors for this run from the SAME diff source the
-/// run used: the opt-in shared diff (`--diff-stdin` / `--diff-file`) when present,
-/// else the committed merge-base diff `base_ref...HEAD`. Using one source for both
-/// the guide emission and the `--walkthrough-file` validation keeps the emitted
-/// anchor set equal to the set validated on reentry (a committed-vs-staged
-/// mismatch would otherwise reject every staged region's anchor). A diff that
-/// cannot be computed yields an empty set (no anchors, never a panic).
-fn compute_change_anchors(
-    root: &std::path::Path,
-    base_ref: &str,
-) -> Vec<crate::audit_walkthrough::ChangeAnchor> {
-    if let Some(raw) = crate::report::ci::diff_filter::shared_diff_raw() {
-        return crate::audit_walkthrough::parse_change_anchors(raw);
+#[derive(Default)]
+struct BriefDiffEvidence {
+    change_anchors: Vec<crate::audit_walkthrough::ChangeAnchor>,
+    diff_index: Option<fallow_output::DiffIndex>,
+}
+
+/// Derive anchors and triage metrics from the SAME diff source the run used:
+/// the opt-in shared diff when present, else the committed merge-base diff.
+/// The normal git diff is fetched once and parsed into both representations.
+fn compute_brief_diff_evidence(root: &std::path::Path, base_ref: &str) -> BriefDiffEvidence {
+    if let (Some(raw), Some(index)) = (
+        crate::report::ci::diff_filter::shared_diff_raw(),
+        crate::report::ci::diff_filter::shared_diff_index(),
+    ) {
+        return BriefDiffEvidence {
+            change_anchors: crate::audit_walkthrough::parse_change_anchors(raw),
+            diff_index: Some(index.clone()),
+        };
     }
-    fallow_engine::changed_files::try_get_changed_diff(root, base_ref)
-        .map(|diff| crate::audit_walkthrough::parse_change_anchors(&diff))
-        .unwrap_or_default()
+
+    let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) else {
+        return BriefDiffEvidence::default();
+    };
+    BriefDiffEvidence {
+        change_anchors: crate::audit_walkthrough::parse_change_anchors(&diff),
+        diff_index: Some(fallow_output::DiffIndex::from_unified_diff(&diff)),
+    }
 }
 
 /// Compute the decision surface from the assembled brief inputs: gather the
@@ -1875,6 +1894,7 @@ fn build_audit_result(parts: AuditResultParts) -> AuditResult {
         decision_surface: parts.decision_surface,
         graph_snapshot_hash: parts.graph_snapshot_hash,
         change_anchors: parts.change_anchors,
+        diff_index: parts.diff_index,
     }
 }
 
@@ -1937,6 +1957,7 @@ fn empty_audit_result(
         decision_surface: None,
         graph_snapshot_hash,
         change_anchors: Vec::new(),
+        diff_index: None,
     }
 }
 
@@ -2286,6 +2307,7 @@ fn print_audit_command_result(opts: &AuditOptions<'_>, result: &AuditResult) -> 
     if opts.brief {
         return crate::audit_brief::print_brief_result(
             result,
+            result.diff_index.as_ref(),
             opts.quiet,
             opts.explain,
             opts.show_deprioritized,
