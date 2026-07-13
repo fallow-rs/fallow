@@ -427,15 +427,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update stable action tags
-        env:
-          # GH_TOKEN is interpolated only into the git push URL below, never
-          # into shell metacharacters, and the checkout step does not persist
-          # credentials, so this token's lifetime is scoped to this step.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git tag -f v1 "${GITHUB_SHA}"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" refs/tags/v1 --force
+      # The rolling v1/v3 action tags are pushed by the maintainer's release
+      # flow, not from here: GITHUB_TOKEN can never update a ref whose diff
+      # touches .github/workflows/ (GitHub requires the workflows permission,
+      # which GITHUB_TOKEN cannot be granted), so the in-workflow push failed
+      # on the first release after any workflow edit (v3.4.2).
 
   # The Dockerfile pins ARG FALLOW_VERSION plus two per-arch sha256 digests by
   # hand. Nothing kept them in sync with releases: the pin sat on 2.94.0 for
