@@ -32,19 +32,20 @@ env:
   CARGO_PROFILE_RELEASE_DEBUG: "2"
 
 jobs:
-  bloat:
-    name: Binary size tracking
+  cli-bloat:
+    name: CLI size analysis
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+    outputs:
+      bytes: ${{ steps.binary-size.outputs.bytes }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: ./.github/actions/setup-rust
         with:
-          cache-key: bloat
+          cache-key: bloat-cli
 
       - name: Install cargo-bloat
         run: cargo install cargo-bloat --locked
@@ -67,30 +68,83 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Build the remaining shipped binaries so the tracker records each one.
-      # fallow-cli is already built by the cargo bloat steps above; these reuse
-      # the same release profile (strip=none, debug=2 from the job env) so the
-      # sizes stay comparable across binaries. fallow-multicall links the CLI +
-      # LSP + MCP libs into the single engine the npm packages ship, so tracking
-      # it (and lsp/mcp) catches an engine-linking regression the CLI number
-      # alone misses (the 5x fallow-mcp jump in v2.104.0 went unseen because
-      # only fallow was tracked).
+      - name: Capture CLI binary size
+        id: binary-size
+        run: echo "bytes=$(stat --format=%s target/release/fallow)" >> "$GITHUB_OUTPUT"
+
+  shipped-binaries:
+    name: Shipped binary sizes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      lsp_bytes: ${{ steps.binary-sizes.outputs.lsp_bytes }}
+      mcp_bytes: ${{ steps.binary-sizes.outputs.mcp_bytes }}
+      multicall_bytes: ${{ steps.binary-sizes.outputs.multicall_bytes }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: bloat-shipped
+
+      # Keep the normal release build separate from cargo-bloat's instrumented
+      # build. Running both artifact sets in one job exceeds the runner budget.
       - name: Build the LSP, MCP, and multicall binaries
         run: cargo build --release -p fallow-lsp -p fallow-mcp -p fallow-multicall
 
+      - name: Capture shipped binary sizes
+        id: binary-sizes
+        run: |
+          {
+            echo "lsp_bytes=$(stat --format=%s target/release/fallow-lsp)"
+            echo "mcp_bytes=$(stat --format=%s target/release/fallow-mcp)"
+            echo "multicall_bytes=$(stat --format=%s target/release/fallow-multicall)"
+          } >> "$GITHUB_OUTPUT"
+
+  bloat:
+    name: Binary size tracking
+    needs:
+      - cli-bloat
+      - shipped-binaries
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Require successful size builds
+        env:
+          CLI_RESULT: ${{ needs.cli-bloat.result }}
+          SHIPPED_RESULT: ${{ needs.shipped-binaries.result }}
+        run: |
+          if [ "$CLI_RESULT" != "success" ] || [ "$SHIPPED_RESULT" != "success" ]; then
+            echo "::error::Binary size prerequisites failed: cli=$CLI_RESULT, shipped=$SHIPPED_RESULT"
+            exit 1
+          fi
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
       - name: Track total binary size
+        env:
+          FALLOW_BYTES: ${{ needs.cli-bloat.outputs.bytes }}
+          FALLOW_LSP_BYTES: ${{ needs.shipped-binaries.outputs.lsp_bytes }}
+          FALLOW_MCP_BYTES: ${{ needs.shipped-binaries.outputs.mcp_bytes }}
+          FALLOW_MULTICALL_BYTES: ${{ needs.shipped-binaries.outputs.multicall_bytes }}
         run: |
           python3 -c "
           import json, os
-          binaries = {
-              'fallow': 'target/release/fallow',
-              'fallow-lsp': 'target/release/fallow-lsp',
-              'fallow-mcp': 'target/release/fallow-mcp',
-              'fallow-multicall': 'target/release/fallow-multicall',
+          sizes = {
+              'fallow': int(os.environ['FALLOW_BYTES']),
+              'fallow-lsp': int(os.environ['FALLOW_LSP_BYTES']),
+              'fallow-mcp': int(os.environ['FALLOW_MCP_BYTES']),
+              'fallow-multicall': int(os.environ['FALLOW_MULTICALL_BYTES']),
           }
           data = [
-              {'name': f'Binary Size ({name})', 'unit': 'bytes', 'value': os.path.getsize(path)}
-              for name, path in binaries.items()
+              {'name': f'Binary Size ({name})', 'unit': 'bytes', 'value': size}
+              for name, size in sizes.items()
           ]
           print(json.dumps(data, indent=2))
           " > bloat-bench.json

@@ -42,13 +42,33 @@ test("workflow block parser rejects missing keys", () => {
   assert.throws(() => indentedBlock("root:\n  value: true", "missing", 0), /missing missing block/);
 });
 
-test("binary-size workflow budgets time for every shipped binary", () => {
+test("binary-size workflow isolates incompatible release builds", () => {
   const workflow = readWorkflow(".github/workflows/bloat.yml");
-  const job = indentedBlock(workflow, "bloat", 2);
-  const timeout = Number(job.match(/timeout-minutes: (\d+)/)?.[1]);
+  const cliJob = indentedBlock(workflow, "cli-bloat", 2);
+  const shippedJob = indentedBlock(workflow, "shipped-binaries", 2);
+  const aggregateJob = indentedBlock(workflow, "bloat", 2);
 
-  assert.match(job, /cargo build --release -p fallow-lsp -p fallow-mcp -p fallow-multicall/);
-  assert.ok(timeout >= 30, `multi-binary size tracking needs at least 30 minutes, got ${timeout}`);
+  assert.match(cliJob, /cargo bloat --release -p fallow-cli/);
+  assert.doesNotMatch(cliJob, /fallow-lsp|fallow-mcp|fallow-multicall/);
+  assert.match(shippedJob, /cargo build --release -p fallow-lsp -p fallow-mcp -p fallow-multicall/);
+  assert.doesNotMatch(shippedJob, /cargo bloat/);
+  assert.match(aggregateJob, /needs:\n\s+- cli-bloat\n\s+- shipped-binaries/);
+  assert.match(aggregateJob, /if: \$\{\{ always\(\) \}\}/);
+  assert.match(aggregateJob, /needs\.cli-bloat\.result/);
+  assert.match(aggregateJob, /needs\.shipped-binaries\.result/);
+  assert.match(aggregateJob, /exit 1/);
+  assert.match(aggregateJob, /needs\.cli-bloat\.outputs\.bytes/);
+  for (const output of ["lsp_bytes", "mcp_bytes", "multicall_bytes"]) {
+    assert.match(aggregateJob, new RegExp(`needs\\.shipped-binaries\\.outputs\\.${output}`));
+  }
+
+  for (const job of [cliJob, shippedJob]) {
+    const timeout = Number(job.match(/timeout-minutes: (\d+)/)?.[1]);
+    assert.ok(
+      timeout <= 20,
+      `binary build job must fit the 20 minute runner budget, got ${timeout}`,
+    );
+  }
 });
 
 test("regular CI keeps affected checks on Ubuntu", () => {
