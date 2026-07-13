@@ -7,6 +7,10 @@ repository.workspace = true
 description = "LSP server for fallow codebase intelligence (diagnostics, code actions, hover, code lens)"
 publish = false
 
+[lib]
+name = "fallow_lsp"
+path = "src/lib.rs"
+
 [[bin]]
 name = "fallow-lsp"
 path = "src/main.rs"

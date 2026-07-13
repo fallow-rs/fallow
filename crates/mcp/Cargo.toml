@@ -12,6 +12,10 @@ categories.workspace = true
 description = "MCP server for fallow codebase intelligence (exposes fallow as typed tools to AI agents)"
 readme = "../../README.md"
 
+[lib]
+name = "fallow_mcp"
+path = "src/lib.rs"
+
 [[bin]]
 name = "fallow-mcp"
 path = "src/main.rs"
