@@ -1,0 +1,164 @@
+# Every release-gating validation job, extracted so it can run BEFORE a
+# version number exists anywhere. Three consumers:
+#   1. release.yml `uses:` this workflow (workflow_call), so tag runs gate
+#      publishes on exactly this set;
+#   2. the /fallow-release pre-flight dispatches it on main and waits for
+#      green BEFORE bumping any version (workflow_dispatch), so a failing
+#      check can never burn a release tag again (v3.4.0 and v3.4.1 were both
+#      lost to a Windows-only CRLF byte-comparison failure that had never run
+#      pre-tag);
+#   3. a weekly cron surfaces runner-image or dependency drift between
+#      releases instead of at the next release.
+name: Release Validation
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * 1'
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-verify:
+    name: Windows correctness and lifecycle
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy, rustfmt
+          cache-key: release-windows-verify
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+
+      - name: Run workspace tests
+        run: cargo test --workspace --lib --bins --tests --examples
+
+      - name: Run runtime-coverage integration tests
+        run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests
+
+      - name: Run schema drift gate
+        run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
+
+      - name: Install contract bundle dependencies
+        run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Run staged subgenerator integration tests
+        run: node --test scripts/subgenerator-staging.test.mjs
+
+      - name: Run contract bundle drift gate
+        run: npm run generate:contracts:check
+        env:
+          CI: true
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Clippy (test-sidecar-key feature)
+        run: cargo clippy -p fallow-cli --features test-sidecar-key --all-targets -- -D warnings
+
+      - name: Clippy (schema-emit feature)
+        run: cargo clippy -p fallow-cli --features schema-emit --bin fallow-schema-emit --tests -- -D warnings
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Install NAPI package dependencies
+        run: cd crates/napi && npm ci --omit=optional --ignore-scripts
+
+      - name: Build NAPI package
+        run: cd crates/napi && npx napi build --platform --profile napi-release && npm run publish:prepare
+
+      - name: Run NAPI smoke test
+        run: cd crates/napi && npm test
+
+      - name: Run audit orphan-sweep and lock lifecycle tests
+        run: >
+          cargo test -p fallow-cli --lib --
+          --exact
+          audit::tests::audit_orphan_sweep_removes_dead_pid_worktree
+          audit::tests::audit_orphan_sweep_keeps_live_pid_worktree
+          audit::tests::reusable_worktree_lock_excludes_concurrent_acquires
+
+      - name: Run MCP timeout process-tree lifecycle test
+        run: >
+          cargo test -p fallow-mcp --bin fallow-mcp
+          server::tests::run::run_fallow_timeout_terminates_and_reaps_windows_job_tree
+          -- --exact
+
+      - name: Check for uncommitted changes
+        run: git diff --exit-code
+
+  zed-verify:
+    name: Zed verification (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: rustfmt
+          targets: wasm32-wasip2
+      - name: Run tests
+        run: cargo test --manifest-path editors/zed/Cargo.toml
+      - name: Build wasm extension
+        run: cargo build --target wasm32-wasip2 --manifest-path editors/zed/Cargo.toml
+      - name: Format
+        run: cargo fmt --check --manifest-path editors/zed/Cargo.toml
+
+  check-codegen:
+    name: Check codegen drift
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          components: clippy, rustfmt
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: editors/vscode/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: cd editors/vscode && pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Verify generated contract bundle
+        run: CI=true npm run generate:contracts:check
+
