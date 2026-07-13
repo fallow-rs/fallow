@@ -12,9 +12,12 @@
 //! comma/colon/percent/CRLF, `kind_known == false` stale suppressions,
 //! notice-level security candidates, and report-from round-trip parity.
 
+use std::collections::BTreeSet;
+
 use fallow_cli::report::github::{PackageManager, PathRebase, RenderOptions};
 use fallow_cli::report::github_annotations::{EnvelopeKind, render_annotations};
 use fallow_cli::report::github_summary::{LinkContext, render_summary};
+use fallow_types::issue_meta::{ISSUE_RESULT_META, IssueResultMeta};
 use serde_json::{Value, json};
 
 fn plain_options() -> RenderOptions {
@@ -678,6 +681,144 @@ fn summary_has_no_em_dashes() {
         assert!(
             !annotations.contains('\u{2014}'),
             "em dash in {kind:?} annotations"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Per-IssueKind drift guard (advisor plan 027 Phase A)
+//
+// The bundled action's shell drift guard (`action/tests/issuekind-drift-guard.sh`,
+// `assert_issuekind_summary_coverage`) asserts that every counted dead-code
+// IssueKind's serialized `result_key` reaches the GitHub summary + annotation
+// surfaces. Those surfaces render natively since v3.4.2, but no Rust test held
+// the same line: a new `counts_in_total` IssueKind could land in
+// `ISSUE_RESULT_META` and silently miss `render_summary` / `render_annotations`.
+// These tests iterate the registry (the `counts_in_total == true` rows the shell
+// guard gates) and assert each kind renders in BOTH github-summary and
+// github-annotations.
+// ---------------------------------------------------------------------------
+
+/// The counted dead-code result rows: exactly the set the shell guard gates
+/// (`counts_in_total == true`). The three `counts_in_total == false` rows
+/// (prop-drilling, thin-wrapper, duplicate-prop-shape) are CLI/JSON-only
+/// advisory signals the PR surfaces deliberately do not carry, and the shell
+/// guard skips them the same way.
+fn counted_dead_code_metas() -> impl Iterator<Item = &'static IssueResultMeta> {
+    ISSUE_RESULT_META.iter().filter(|meta| meta.counts_in_total)
+}
+
+/// Number of counted dead-code IssueKinds the GitHub surfaces must carry. This
+/// mirrors the shell drift guard's gated set size (verified equal by running
+/// `action/tests/issuekind-drift-guard.sh`); bump it in lockstep when a counted
+/// IssueKind lands so the Rust guard and the shell guard keep agreeing.
+const COUNTED_DEAD_CODE_KINDS: usize = 42;
+
+/// Sentinel path embedded per kind so an annotation for that kind is uniquely
+/// identifiable in the rendered stream. `snt/` + the unique `result_key` +
+/// `.ts` carries no workflow-command reserved character, so it renders verbatim
+/// in the annotation `file=` property.
+fn kind_sentinel(result_key: &str) -> String {
+    format!("snt/{result_key}.ts")
+}
+
+/// One finding for `result_key`, shaped so the annotation renderer emits the
+/// kind's sentinel path in `file=`. Most kinds read a top-level `path`; the
+/// handful that anchor on a nested location carry the sentinel there instead.
+fn dead_code_finding(result_key: &str) -> Value {
+    let path = kind_sentinel(result_key);
+    match result_key {
+        "unlisted_dependencies" => json!({
+            "package_name": "pkg",
+            "imported_from": [{ "path": path, "line": 1, "col": 0 }],
+        }),
+        "duplicate_exports" => json!({
+            "export_name": "dup",
+            "locations": [{ "path": path, "line": 1, "col": 0 }],
+        }),
+        "circular_dependencies" => json!({ "files": [path], "line": 0, "col": 0, "length": 1 }),
+        "re_export_cycles" => json!({ "files": [path], "kind": "cycle" }),
+        "boundary_violations" => json!({
+            "from_path": path, "to_path": "src/to.ts",
+            "from_zone": "ui", "to_zone": "db", "line": 1, "col": 0,
+        }),
+        _ => json!({ "path": path, "line": 1, "col": 0 }),
+    }
+}
+
+/// A dead-code envelope carrying exactly one finding of every counted kind.
+fn every_dead_code_kind_envelope() -> Value {
+    let mut env = serde_json::Map::new();
+    env.insert("kind".to_owned(), json!("dead-code"));
+    let mut total = 0u64;
+    for meta in counted_dead_code_metas() {
+        env.insert(
+            meta.result_key.to_owned(),
+            json!([dead_code_finding(meta.result_key)]),
+        );
+        total += 1;
+    }
+    env.insert("total_issues".to_owned(), json!(total));
+    env.insert("elapsed_ms".to_owned(), json!(1));
+    Value::Object(env)
+}
+
+/// Trip-wire that keeps the two coverage tests honest: the fixture must carry
+/// one finding array per counted `result_key`, no more, no fewer. A new counted
+/// IssueKind that is not added here fails this before the coverage tests even
+/// run, and the count pins agreement with the shell guard's gated set.
+#[test]
+fn fixture_tracks_the_counted_registry_exactly() {
+    let env = every_dead_code_kind_envelope();
+    let obj = env.as_object().expect("object envelope");
+    let registry: BTreeSet<&str> = counted_dead_code_metas()
+        .map(|meta| meta.result_key)
+        .collect();
+    let fixture: BTreeSet<&str> = obj
+        .iter()
+        .filter(|(_, value)| value.is_array())
+        .map(|(key, _)| key.as_str())
+        .collect();
+    assert_eq!(
+        fixture, registry,
+        "fixture drifted from the counted ISSUE_RESULT_META set"
+    );
+    assert_eq!(
+        registry.len(),
+        COUNTED_DEAD_CODE_KINDS,
+        "counted dead-code kind count changed; update COUNTED_DEAD_CODE_KINDS and re-run action/tests/issuekind-drift-guard.sh to keep the Rust and shell guards in sync"
+    );
+}
+
+/// Every counted dead-code IssueKind must surface a category row in
+/// github-summary. Mirrors the shell guard over `summary-check.jq`.
+#[test]
+fn summary_covers_every_counted_dead_code_kind() {
+    let env = every_dead_code_kind_envelope();
+    let rendered = render_summary(EnvelopeKind::DeadCode, &env, &LinkContext::default());
+    for meta in counted_dead_code_metas() {
+        let marker = format!("[{}](", meta.summary_label);
+        assert!(
+            rendered.contains(&marker),
+            "github-summary omits the dead-code category row for `{}` (label {:?}): a counted IssueKind is not wired into render_summary",
+            meta.result_key,
+            meta.summary_label,
+        );
+    }
+}
+
+/// Every counted dead-code IssueKind must surface an annotation in
+/// github-annotations. Mirrors the shell guard over `annotations-check.jq`.
+#[test]
+fn annotations_cover_every_counted_dead_code_kind() {
+    let env = every_dead_code_kind_envelope();
+    let rendered = render_annotations(EnvelopeKind::DeadCode, &env, &plain_options());
+    for meta in counted_dead_code_metas() {
+        let marker = kind_sentinel(meta.result_key);
+        assert!(
+            rendered.contains(&marker),
+            "github-annotations omits an annotation for `{}`: a counted IssueKind is not wired into render_annotations",
+            meta.result_key,
         );
     }
 }
