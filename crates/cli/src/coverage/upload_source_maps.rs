@@ -5,6 +5,7 @@
 //! cloud resolver map those positions back to original source files.
 
 use std::fmt::Write as _;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::SystemTime;
@@ -438,16 +439,16 @@ struct PreparedSourceMap {
 }
 
 fn prepare_source_map(candidate: &SourceMapCandidate) -> MapOutcome {
-    if candidate.bytes > MAX_MAP_BYTES {
-        return MapOutcome::failed(
-            candidate,
-            FailureKind::Validation,
-            format!(
-                "source map is too large ({}); maximum is {}",
-                format_bytes(candidate.bytes),
-                format_bytes(MAX_MAP_BYTES)
-            ),
-        );
+    prepare_source_map_with_open(candidate, securely_open_source_map, MAX_MAP_BYTES)
+}
+
+fn prepare_source_map_with_open(
+    candidate: &SourceMapCandidate,
+    open: impl FnOnce(&SourceMapCandidate) -> std::io::Result<std::fs::File>,
+    max_bytes: u64,
+) -> MapOutcome {
+    if candidate.bytes > max_bytes {
+        return map_too_large(candidate, candidate.bytes, max_bytes);
     }
     let resolved_path = match std::fs::canonicalize(&candidate.path) {
         Ok(path) => path,
@@ -473,24 +474,202 @@ fn prepare_source_map(candidate: &SourceMapCandidate) -> MapOutcome {
             "source map target changed since collection; skipping".to_owned(),
         );
     }
-    match std::fs::read_to_string(&candidate.resolved_path) {
-        Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
-            Ok(source_map) => MapOutcome::Ready(PreparedSourceMap {
-                candidate: candidate.clone(),
-                source_map,
-            }),
-            Err(err) => MapOutcome::failed(
+    let file = match open(candidate) {
+        Ok(file) => file,
+        Err(err) => {
+            return MapOutcome::failed(
                 candidate,
                 FailureKind::Validation,
-                format!("not valid JSON ({err}); skipping"),
-            ),
-        },
-        Err(err) => MapOutcome::failed(
+                format!("secure open failed: {err}"),
+            );
+        }
+    };
+    let opened_bytes = match file.metadata() {
+        Ok(metadata) if metadata.is_file() => metadata.len(),
+        Ok(_) => {
+            return MapOutcome::failed(
+                candidate,
+                FailureKind::Validation,
+                "source map target is not a regular file; skipping".to_owned(),
+            );
+        }
+        Err(err) => {
+            return MapOutcome::failed(
+                candidate,
+                FailureKind::Validation,
+                format!("read failed: {err}"),
+            );
+        }
+    };
+    if opened_bytes > max_bytes {
+        return map_too_large(candidate, opened_bytes, max_bytes);
+    }
+
+    let mut content = String::new();
+    if let Err(err) = file
+        .take(max_bytes.saturating_add(1))
+        .read_to_string(&mut content)
+    {
+        return MapOutcome::failed(
             candidate,
             FailureKind::Validation,
             format!("read failed: {err}"),
+        );
+    }
+    if u64::try_from(content.len()).map_or(true, |bytes| bytes > max_bytes) {
+        return map_too_large(candidate, max_bytes.saturating_add(1), max_bytes);
+    }
+
+    match serde_json::from_str::<serde_json::Value>(&content) {
+        Ok(source_map) => MapOutcome::Ready(PreparedSourceMap {
+            candidate: candidate.clone(),
+            source_map,
+        }),
+        Err(err) => MapOutcome::failed(
+            candidate,
+            FailureKind::Validation,
+            format!("not valid JSON ({err}); skipping"),
         ),
     }
+}
+
+fn map_too_large(candidate: &SourceMapCandidate, bytes: u64, max_bytes: u64) -> MapOutcome {
+    MapOutcome::failed(
+        candidate,
+        FailureKind::Validation,
+        format!(
+            "source map is too large ({}); maximum is {}",
+            format_bytes(bytes),
+            format_bytes(max_bytes)
+        ),
+    )
+}
+
+#[cfg(unix)]
+fn securely_open_source_map(candidate: &SourceMapCandidate) -> std::io::Result<std::fs::File> {
+    use rustix::fs::{Mode, OFlags, open, openat};
+
+    let relative = candidate
+        .resolved_path
+        .strip_prefix(&candidate.canonical_root)
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "source map target is outside selected build directory",
+            )
+        })?;
+    let mut components = relative.components().peekable();
+    let mut directory = open(
+        &candidate.canonical_root,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )?;
+
+    while let Some(component) = components.next() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "source map target contains an invalid path component",
+            ));
+        };
+        if components.peek().is_some() {
+            directory = openat(
+                &directory,
+                name,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+                Mode::empty(),
+            )?;
+        } else {
+            let file = openat(
+                &directory,
+                name,
+                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+                Mode::empty(),
+            )?;
+            return Ok(file.into());
+        }
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "source map target must name a file below the selected build directory",
+    ))
+}
+
+#[cfg(windows)]
+fn securely_open_source_map(candidate: &SourceMapCandidate) -> std::io::Result<std::fs::File> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use std::os::windows::io::AsRawHandle as _;
+    use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_NAME_NORMALIZED, GetFinalPathNameByHandleW, VOLUME_NAME_DOS,
+    };
+
+    let file = std::fs::File::open(&candidate.resolved_path)?;
+    let handle = file.as_raw_handle().cast();
+    let flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;
+    // SAFETY: the handle stays valid for both calls. The first call requests
+    // the required UTF-16 buffer length and writes no bytes through a null pointer.
+    let required = unsafe { GetFinalPathNameByHandleW(handle, std::ptr::null_mut(), 0, flags) };
+    if required == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let capacity = required.checked_add(1).ok_or_else(|| {
+        std::io::Error::other("opened source map final path is too long to validate")
+    })?;
+    let mut buffer = vec![
+        0_u16;
+        usize::try_from(capacity).map_err(|_| {
+            std::io::Error::other("opened source map final path exceeds platform limits")
+        })?
+    ];
+    // SAFETY: `buffer` is writable for the advertised length and `handle`
+    // remains owned by `file` for the duration of the call.
+    let written =
+        unsafe { GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), capacity, flags) };
+    if written == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if written >= capacity {
+        return Err(std::io::Error::other(
+            "opened source map final path changed while it was being validated",
+        ));
+    }
+    buffer.truncate(usize::try_from(written).map_err(|_| {
+        std::io::Error::other("opened source map final path exceeds platform limits")
+    })?);
+    let expected: Vec<u16> = candidate.resolved_path.as_os_str().encode_wide().collect();
+    let expected_len = i32::try_from(expected.len())
+        .map_err(|_| std::io::Error::other("expected source map path exceeds platform limits"))?;
+    let final_len = i32::try_from(buffer.len()).map_err(|_| {
+        std::io::Error::other("opened source map final path exceeds platform limits")
+    })?;
+    // SAFETY: both UTF-16 buffers remain alive for the duration of the call,
+    // and their checked lengths describe the initialized contents exactly.
+    let comparison = unsafe {
+        CompareStringOrdinal(
+            buffer.as_ptr(),
+            final_len,
+            expected.as_ptr(),
+            expected_len,
+            1,
+        )
+    };
+    if comparison == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if comparison != CSTR_EQUAL {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "opened source map target changed or escaped the selected build directory",
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn securely_open_source_map(candidate: &SourceMapCandidate) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(&candidate.resolved_path)
 }
 
 fn upload_maps(
@@ -1133,6 +1312,99 @@ mod tests {
                 ref reason,
                 ..
             } if reason.contains("changed since collection")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_source_map_rejects_final_symlink_swap_during_validation_open_gap() {
+        use std::os::unix::fs::symlink;
+
+        let build_dir = tempdir().expect("build dir");
+        let outside_dir = tempdir().expect("outside dir");
+        let map = build_dir.path().join("app.js.map");
+        let outside_map = outside_dir.path().join("outside.js.map");
+        std::fs::write(&map, r#"{"version":3,"sources":["inside"],"mappings":""}"#)
+            .expect("inside map");
+        std::fs::write(
+            &outside_map,
+            r#"{"version":3,"sources":["outside"],"mappings":""}"#,
+        )
+        .expect("outside map");
+        let candidate = candidate(48, map.clone());
+
+        let outcome = prepare_source_map_with_open(
+            &candidate,
+            |candidate| {
+                std::fs::remove_file(&map).expect("remove collected target");
+                symlink(&outside_map, &map).expect("swap final target to outside symlink");
+                securely_open_source_map(candidate)
+            },
+            MAX_MAP_BYTES,
+        );
+
+        assert!(matches!(
+            outcome,
+            MapOutcome::Failed {
+                kind: FailureKind::Validation,
+                ..
+            }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_source_map_rejects_parent_symlink_swap_during_validation_open_gap() {
+        use std::os::unix::fs::symlink;
+
+        let build_dir = tempdir().expect("build dir");
+        let outside_dir = tempdir().expect("outside dir");
+        let assets = build_dir.path().join("assets");
+        let moved_assets = build_dir.path().join("assets-collected");
+        std::fs::create_dir(&assets).expect("assets dir");
+        let map = assets.join("app.js.map");
+        std::fs::write(&map, r#"{"version":3,"sources":["inside"],"mappings":""}"#)
+            .expect("inside map");
+        std::fs::write(
+            outside_dir.path().join("app.js.map"),
+            r#"{"version":3,"sources":["outside"],"mappings":""}"#,
+        )
+        .expect("outside map");
+        let candidate = candidate(48, map);
+
+        let outcome = prepare_source_map_with_open(
+            &candidate,
+            |candidate| {
+                std::fs::rename(&assets, &moved_assets).expect("move collected parent");
+                symlink(outside_dir.path(), &assets).expect("swap parent to outside symlink");
+                securely_open_source_map(candidate)
+            },
+            MAX_MAP_BYTES,
+        );
+
+        assert!(matches!(
+            outcome,
+            MapOutcome::Failed {
+                kind: FailureKind::Validation,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn prepare_source_map_enforces_limit_from_opened_file_metadata() {
+        let dir = tempdir().expect("tempdir");
+        let map = dir.path().join("app.js.map");
+        std::fs::write(&map, r#"{"version":3,"sources":[],"mappings":""}"#).expect("map");
+        let candidate = candidate(1, map);
+
+        assert!(matches!(
+            prepare_source_map_with_open(&candidate, securely_open_source_map, 10),
+            MapOutcome::Failed {
+                kind: FailureKind::Validation,
+                ref reason,
+                ..
+            } if reason.contains("too large")
         ));
     }
 

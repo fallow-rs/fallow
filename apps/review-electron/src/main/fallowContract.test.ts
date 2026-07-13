@@ -44,6 +44,10 @@ const minimumValidation = (): Record<string, unknown> => ({
   rejected: [],
 });
 
+it("tracks the current Review Brief schema version", () => {
+  expect(REVIEW_BRIEF_SCHEMA_VERSION).toBe(6);
+});
+
 describe("parseReviewContract", () => {
   it("preserves the existing unreadable-output error for non-JSON", () => {
     expect(() => parseReviewContract("{")).toThrow(

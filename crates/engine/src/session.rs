@@ -62,13 +62,24 @@ pub struct ParsedAnalysisSessionParts {
     pub config: ResolvedConfig,
     pub config_path: Option<PathBuf>,
     pub files: Vec<DiscoveredFile>,
-    pub modules: Arc<[ModuleInfo]>,
+    pub modules: Vec<ModuleInfo>,
     pub workspaces: Vec<WorkspaceInfo>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     pub parse_ms: f64,
     pub cache_update_ms: f64,
     pub cache_hits: usize,
     pub cache_misses: usize,
+    pub parse_cpu_ms: f64,
+}
+
+#[derive(Debug)]
+pub(crate) struct SharedParsedAnalysisSessionParts {
+    pub(crate) config: ResolvedConfig,
+    pub(crate) files: Vec<DiscoveredFile>,
+    pub(crate) modules: Arc<[ModuleInfo]>,
+    pub workspaces: Vec<WorkspaceInfo>,
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    pub parse_ms: f64,
     pub parse_cpu_ms: f64,
 }
 
@@ -312,7 +323,7 @@ impl AnalysisSession {
             config,
             config_path,
             files,
-            modules: modules.into(),
+            modules,
             workspaces,
             workspace_diagnostics: merge_workspace_diagnostics(
                 workspace_diagnostics,
@@ -330,7 +341,25 @@ impl AnalysisSession {
     #[must_use]
     pub fn parsed_parts(&self, need_complexity: bool) -> ParsedAnalysisSessionParts {
         let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity);
-        self.parsed_parts_from_modules(modules, metrics)
+        self.parsed_parts_from_modules(modules.to_vec(), metrics)
+    }
+
+    /// Parse discovered files while retaining shared immutable module storage.
+    #[must_use]
+    pub(crate) fn shared_parsed_parts(
+        &self,
+        need_complexity: bool,
+    ) -> SharedParsedAnalysisSessionParts {
+        let SharedParsedModules { modules, metrics } = self.parse_modules(need_complexity);
+        SharedParsedAnalysisSessionParts {
+            config: self.config.clone(),
+            files: self.discovery.files().to_vec(),
+            modules,
+            workspaces: self.workspaces.clone(),
+            workspace_diagnostics: self.current_workspace_diagnostics(),
+            parse_ms: metrics.parse_ms,
+            parse_cpu_ms: metrics.parse_cpu_ms,
+        }
     }
 
     /// Return immutable parsed modules backed by the reusable session cache.
@@ -353,12 +382,12 @@ impl AnalysisSession {
             metrics,
             source_diagnostics: _,
         } = parse_files_with_config(&self.config, self.files(), need_complexity);
-        self.parsed_parts_from_modules(modules.into(), metrics)
+        self.parsed_parts_from_modules(modules, metrics)
     }
 
     fn parsed_parts_from_modules(
         &self,
-        modules: Arc<[ModuleInfo]>,
+        modules: Vec<ModuleInfo>,
         metrics: core_backend::ParseMetrics,
     ) -> ParsedAnalysisSessionParts {
         ParsedAnalysisSessionParts {
@@ -1020,10 +1049,18 @@ mod tests {
     }
 
     #[test]
-    fn parsed_parts_reuse_public_session_storage() {
+    fn parsed_parts_keep_owned_module_compatibility() {
+        let (_project, session) = session_with_source("export const value = 1;\n");
+        let parts: ParsedAnalysisSessionParts = session.parsed_parts(false);
+
+        let _: Vec<ModuleInfo> = parts.modules;
+    }
+
+    #[test]
+    fn shared_parsed_parts_reuse_public_session_storage() {
         let (_project, session) = session_with_source("export const value = 1;\n");
         let cached = session.shared_parsed_modules(true);
-        let parts = session.parsed_parts(false);
+        let parts = session.shared_parsed_parts(false);
 
         assert!(Arc::ptr_eq(&cached, &parts.modules));
     }

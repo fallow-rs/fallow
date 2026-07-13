@@ -11,13 +11,13 @@ use crate::{
     duplicates::DuplicationReport,
     project_config::{ProjectConfigOptions, config_for_project_analysis},
     results::DeadCodeAnalysisArtifacts,
-    session::{AnalysisSession, ParsedAnalysisSessionParts},
+    session::AnalysisSession,
 };
 
+use super::pipeline::HealthPipelineRunInputs;
 use super::{
-    HealthAnalysisResult, HealthError, HealthExecutionOptions, HealthPipelineInputs,
-    HealthScopeInputs, HealthSeams, NoGroupResolver, RuntimeCoverageOptions,
-    RuntimeCoverageSeamInput, validate_health_churn_file,
+    HealthAnalysisResult, HealthError, HealthExecutionOptions, HealthScopeInputs, HealthSeams,
+    NoGroupResolver, RuntimeCoverageOptions, RuntimeCoverageSeamInput, validate_health_churn_file,
 };
 
 /// Run health analysis without a presentation grouping resolver.
@@ -67,7 +67,13 @@ pub fn run_ungrouped_health(
     run_ungrouped_health_from_parts(HealthRunPartsInput {
         options,
         ws_roots,
-        parts,
+        config: parts.config,
+        files: parts.files,
+        modules: parts.modules,
+        workspaces: parts.workspaces,
+        workspace_diagnostics: parts.workspace_diagnostics,
+        parse_ms: parts.parse_ms,
+        parse_cpu_ms: parts.parse_cpu_ms,
         changed_files,
         config_ms,
         shared_parse: false,
@@ -122,14 +128,20 @@ pub fn run_ungrouped_health_with_session_artifacts(
             .changed_since
             .and_then(|git_ref| session.changed_files_since(git_ref).ok())
     });
-    let parts = session.parsed_parts(true);
+    let parts = session.shared_parsed_parts(true);
     let shared_parse = parts.parse_ms == 0.0;
 
     let styling_artifacts = options.css.then(|| session.styling_analysis_artifacts());
     run_ungrouped_health_from_parts(HealthRunPartsInput {
         options,
         ws_roots,
-        parts,
+        config: parts.config,
+        files: parts.files,
+        modules: parts.modules,
+        workspaces: parts.workspaces,
+        workspace_diagnostics: parts.workspace_diagnostics,
+        parse_ms: parts.parse_ms,
+        parse_cpu_ms: parts.parse_cpu_ms,
         changed_files,
         config_ms: 0.0,
         shared_parse,
@@ -139,10 +151,16 @@ pub fn run_ungrouped_health_with_session_artifacts(
     })
 }
 
-struct HealthRunPartsInput<'a> {
+struct HealthRunPartsInput<'a, M> {
     options: &'a HealthExecutionOptions<'a>,
     ws_roots: Option<Vec<PathBuf>>,
-    parts: ParsedAnalysisSessionParts,
+    config: fallow_config::ResolvedConfig,
+    files: Vec<fallow_types::discover::DiscoveredFile>,
+    modules: M,
+    workspaces: Vec<fallow_config::WorkspaceInfo>,
+    workspace_diagnostics: Vec<fallow_types::workspace::WorkspaceDiagnostic>,
+    parse_ms: f64,
+    parse_cpu_ms: f64,
     changed_files: Option<FxHashSet<PathBuf>>,
     config_ms: f64,
     shared_parse: bool,
@@ -151,13 +169,19 @@ struct HealthRunPartsInput<'a> {
     styling_artifacts: Option<super::StylingAnalysisArtifacts>,
 }
 
-fn run_ungrouped_health_from_parts(
-    input: HealthRunPartsInput<'_>,
+fn run_ungrouped_health_from_parts<M: AsRef<[fallow_types::extract::ModuleInfo]>>(
+    input: HealthRunPartsInput<'_, M>,
 ) -> Result<HealthAnalysisResult<NoGroupResolver>, HealthError> {
     let HealthRunPartsInput {
         options,
         ws_roots,
-        parts,
+        config,
+        files,
+        modules,
+        workspaces,
+        workspace_diagnostics,
+        parse_ms,
+        parse_cpu_ms,
         changed_files,
         config_ms,
         shared_parse,
@@ -165,14 +189,6 @@ fn run_ungrouped_health_from_parts(
         pre_computed_duplication,
         styling_artifacts,
     } = input;
-    let config = parts.config;
-    let files = parts.files;
-    let modules = parts.modules;
-    let workspaces = parts.workspaces;
-    let workspace_diagnostics = parts.workspace_diagnostics;
-    let parse_ms = parts.parse_ms;
-    let parse_cpu_ms = parts.parse_cpu_ms;
-
     let scope_inputs = HealthScopeInputs::<NoGroupResolver> {
         changed_files,
         diff_index: options.diff_index,
@@ -184,9 +200,9 @@ fn run_ungrouped_health_from_parts(
         note_graph_structure: &|_module_count, _edge_count| {},
     };
 
-    super::execute_health_inner(
+    super::execute::execute_health_inner_shared(
         options,
-        HealthPipelineInputs {
+        HealthPipelineRunInputs {
             config,
             files,
             modules,

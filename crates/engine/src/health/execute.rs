@@ -18,7 +18,9 @@ use super::output_build::{
     HealthOutputContext, HealthOutputContextInput, build_health_output_parts,
     prepare_health_output_context,
 };
-use super::pipeline::{HealthPipelineInputs, HealthPipelineTimings, HealthScopeInputs};
+use super::pipeline::{
+    HealthPipelineInputs, HealthPipelineRunInputs, HealthPipelineTimings, HealthScopeInputs,
+};
 use super::result::{HealthFinalizeInput, finalize_health_result};
 use super::scope::prepare_health_scope;
 
@@ -46,8 +48,34 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
     scope_inputs: HealthScopeInputs<'a, R>,
     seams: &HealthSeams<'_>,
 ) -> Result<HealthResultGeneric<R>, HealthError> {
+    execute_health_inner_impl(opts, input.into(), scope_inputs, seams)
+}
+
+pub(super) fn execute_health_inner_shared<'a, R, M>(
+    opts: &HealthOptions<'a>,
+    input: HealthPipelineRunInputs<M>,
+    scope_inputs: HealthScopeInputs<'a, R>,
+    seams: &HealthSeams<'_>,
+) -> Result<HealthResultGeneric<R>, HealthError>
+where
+    R: super::HealthGroupResolver,
+    M: AsRef<[fallow_types::extract::ModuleInfo]>,
+{
+    execute_health_inner_impl(opts, input, scope_inputs, seams)
+}
+
+fn execute_health_inner_impl<'a, R, M>(
+    opts: &HealthOptions<'a>,
+    input: HealthPipelineRunInputs<M>,
+    scope_inputs: HealthScopeInputs<'a, R>,
+    seams: &HealthSeams<'_>,
+) -> Result<HealthResultGeneric<R>, HealthError>
+where
+    R: super::HealthGroupResolver,
+    M: AsRef<[fallow_types::extract::ModuleInfo]>,
+{
     let start = Instant::now();
-    let HealthPipelineInputs {
+    let HealthPipelineRunInputs {
         config,
         files,
         modules,
@@ -63,6 +91,7 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
         workspaces,
         workspace_diagnostics,
     } = input;
+    let modules = modules.as_ref();
     let timings = HealthPipelineTimings {
         config: config_ms,
         discover: discover_ms,
@@ -86,7 +115,7 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
         opts,
         config: &config,
         files: &files,
-        modules: &modules,
+        modules,
         scope: &scope,
         pre_computed_analysis,
         pre_computed_duplication,
@@ -96,7 +125,7 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
     let HealthOutputContext { build, sections } =
         prepare_health_output_context(HealthOutputContextInput {
             config: &config,
-            modules: &modules,
+            modules,
             scope: &scope,
             needs_file_scores,
             report_coverage_gaps,
@@ -116,7 +145,7 @@ pub fn execute_health_inner<'a, R: super::HealthGroupResolver>(
         opts,
         config,
         files: &files,
-        modules: &modules,
+        modules,
         scope,
         output,
         elapsed: start.elapsed(),

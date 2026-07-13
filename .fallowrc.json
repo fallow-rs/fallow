@@ -3,7 +3,8 @@
   "ignorePatterns": [
     "tests/fixtures/**",
     "tests/conformance/fixtures/**",
-    "editors/vscode/test/integration/fixtures/**"
+    "editors/vscode/test/integration/fixtures/**",
+    "apps/review-electron/test/fixtures/**"
   ],
   "ignoreUnresolvedImports": [
     "./generated/lsp-initialization-options.js",
@@ -19,7 +20,9 @@
   },
   "duplicates": {
     "ignore": [
-      "npm/fallow/scripts/**"
+      "npm/fallow/scripts/**",
+      "editors/vscode/src/generated/output-contract.d.ts",
+      "npm/fallow/types/output-contract.d.ts"
     ]
   }
 }

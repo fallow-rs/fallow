@@ -1,10 +1,7 @@
 import { Scale, ShieldCheck, ShieldAlert } from "lucide-react";
 import type { Severity, TradeOff, TradeOffEnvelope } from "../../../model/tradeoff";
 import type { FeedTarget } from "../../../model/agent";
-import type {
-  TradeOffAnchorStatus,
-  TradeOffValidation,
-} from "../../../main/tradeoffValidation";
+import type { TradeOffAnchorStatus, TradeOffValidation } from "../../../main/tradeoffValidation";
 import { shortAnchor } from "@/lib/anchor";
 import { NoteComposer } from "./NoteComposer";
 
@@ -19,7 +16,10 @@ const ANCHOR_CROSS_CUTTING = "cross-cutting";
 const AnchorStatus = ({ status }: { status: TradeOffAnchorStatus | undefined }) => {
   if (status === "anchored") {
     return (
-      <span className="flex items-center gap-1 text-[11px] text-fallow-green" title="fallow confirmed this region changed">
+      <span
+        className="flex items-center gap-1 text-[11px] text-fallow-green"
+        title="fallow confirmed this region changed"
+      >
         <ShieldCheck className="size-3" />
         anchored in fallow
       </span>
@@ -27,14 +27,19 @@ const AnchorStatus = ({ status }: { status: TradeOffAnchorStatus | undefined }) 
   }
   if (status === "unanchored") {
     return (
-      <span className="flex items-center gap-1 text-[11px] text-fallow-amber" title="the anchor is not a changed region in the current diff">
+      <span
+        className="flex items-center gap-1 text-[11px] text-fallow-amber"
+        title="the anchor is not a changed region in the current diff"
+      >
         <ShieldAlert className="size-3" />
         anchor not in diff
       </span>
     );
   }
   if (status === "not-anchorable") {
-    return <span className="text-[11px] text-muted-foreground/70">model-inferred (cross-cutting)</span>;
+    return (
+      <span className="text-[11px] text-muted-foreground/70">model-inferred (cross-cutting)</span>
+    );
   }
   return null;
 };

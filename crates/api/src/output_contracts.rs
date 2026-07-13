@@ -54,6 +54,23 @@ pub type SecurityOutput = fallow_output::SecurityOutput<SecurityOutputConfig, Se
 
 #[allow(
     clippy::type_complexity,
+    reason = "the concrete review brief contract names every typed wire section"
+)]
+pub type ReviewBriefWireOutput = fallow_output::ReviewBriefWireOutput<
+    fallow_output::FocusMap,
+    fallow_output::WeakeningSignal,
+    fallow_output::RoutingFacts,
+    fallow_output::DecisionSurface,
+    crate::AuditVerdict,
+    crate::AuditSummary,
+    crate::AuditAttribution,
+    fallow_output::CheckOutput,
+    crate::DupesReportPayload,
+    fallow_output::HealthReport,
+>;
+
+#[allow(
+    clippy::type_complexity,
     reason = "concrete root union intentionally fills every output payload slot"
 )]
 pub type FallowOutput = fallow_output::FallowOutput<
@@ -79,7 +96,7 @@ pub type FallowOutput = fallow_output::FallowOutput<
     fallow_output::CheckOutput,
     CombinedOutput,
     fallow_output::FeatureFlagsOutput,
-    fallow_output::StandardReviewBriefOutput,
+    ReviewBriefWireOutput,
     fallow_output::DecisionSurfaceOutput,
     fallow_output::StandardWalkthroughGuide,
     fallow_output::WalkthroughValidation,

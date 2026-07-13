@@ -1038,6 +1038,7 @@ dependencies = [
  "proptest",
  "rayon",
  "rustc-hash 2.1.2",
+ "rustix",
  "schemars",
  "semver",
  "serde",

@@ -73,9 +73,9 @@ pub use analysis_sarif::{
 };
 pub use audit_brief::{
     CoordinationGapFact, DiffTriage, GraphFacts, ImpactClosureFacts, PartitionFacts,
-    REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefOutput, ReviewBriefSchemaVersion,
-    ReviewBriefSubtractSections, ReviewDeltas, ReviewEffort, ReviewUnitFact, RiskClass,
-    StandardReviewBriefOutput, build_review_brief_json_output,
+    REVIEW_BRIEF_SCHEMA_VERSION, ReviewBriefHeader, ReviewBriefOutput, ReviewBriefSchemaVersion,
+    ReviewBriefSubtractSections, ReviewBriefWireOutput, ReviewDeltas, ReviewEffort, ReviewUnitFact,
+    RiskClass, StandardReviewBriefOutput, build_review_brief_json_output,
     serialize_decision_surface_json_output, serialize_review_brief_json_output,
     serialize_walkthrough_guide_json_output, serialize_walkthrough_validation_json_output,
 };

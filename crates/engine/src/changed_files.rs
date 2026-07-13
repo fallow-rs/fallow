@@ -198,9 +198,27 @@ pub fn try_get_changed_files_with_toplevel(
     Ok(files)
 }
 
-/// Return the raw git diff for a ref.
+/// Return the raw git diff from a ref's merge base through the working tree.
+///
+/// The result includes committed, staged, unstaged, and untracked changes so it
+/// covers the same scope as [`try_get_changed_files`].
 pub fn try_get_changed_diff(root: &Path, git_ref: &str) -> Result<String, ChangedFilesError> {
     validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
+    let toplevel = resolve_git_toplevel(root)?;
+    let merge_base_output = spawn_output(&mut git_command(root, &["merge-base", git_ref, "HEAD"]))
+        .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+    if !merge_base_output.status.success() {
+        return Err(changed_files_error_from_output(&merge_base_output));
+    }
+    let merge_base = String::from_utf8_lossy(&merge_base_output.stdout)
+        .trim()
+        .to_owned();
+    if merge_base.is_empty() {
+        return Err(ChangedFilesError::GitFailed(
+            "git merge-base returned empty output".to_owned(),
+        ));
+    }
+
     let output = spawn_output(&mut git_command(
         root,
         &[
@@ -208,21 +226,68 @@ pub fn try_get_changed_diff(root: &Path, git_ref: &str) -> Result<String, Change
             "--relative",
             "--unified=0",
             "--end-of-options",
-            &format!("{git_ref}...HEAD"),
+            &merge_base,
         ],
     ))
     .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(if stderr.contains("not a git repository") {
-            ChangedFilesError::NotARepository
-        } else {
-            ChangedFilesError::GitFailed(stderr.trim().to_owned())
-        });
+        return Err(changed_files_error_from_output(&output));
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    let mut diff = String::from_utf8_lossy(&output.stdout).into_owned();
+    append_untracked_diffs(root, &toplevel, &mut diff)?;
+    Ok(diff)
+}
+
+fn append_untracked_diffs(
+    root: &Path,
+    toplevel: &Path,
+    diff: &mut String,
+) -> Result<(), ChangedFilesError> {
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut untracked: Vec<PathBuf> = collect_git_paths(
+        root,
+        toplevel,
+        &["ls-files", "--full-name", "--others", "--exclude-standard"],
+    )?
+    .into_iter()
+    .filter_map(|path| {
+        path.strip_prefix(&canonical_root)
+            .ok()
+            .map(Path::to_path_buf)
+    })
+    .collect();
+    untracked.sort_unstable();
+
+    #[cfg(windows)]
+    let empty_file = "NUL";
+    #[cfg(not(windows))]
+    let empty_file = "/dev/null";
+
+    for path in untracked {
+        let mut command = git_command(root, &["diff", "--no-index", "--unified=0", "--"]);
+        command.arg(empty_file).arg(&path);
+        let output =
+            spawn_output(&mut command).map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+        if !output.status.success() && output.status.code() != Some(1) {
+            return Err(changed_files_error_from_output(&output));
+        }
+        if !diff.is_empty() && !diff.ends_with('\n') {
+            diff.push('\n');
+        }
+        diff.push_str(&String::from_utf8_lossy(&output.stdout));
+    }
+    Ok(())
+}
+
+fn changed_files_error_from_output(output: &Output) -> ChangedFilesError {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("not a git repository") {
+        ChangedFilesError::NotARepository
+    } else {
+        ChangedFilesError::GitFailed(stderr.trim().to_owned())
+    }
 }
 
 /// Get changed files if git can resolve them, otherwise return `None`.
@@ -749,6 +814,54 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let result = try_get_changed_files(temp.path(), "main");
         assert!(matches!(result, Err(ChangedFilesError::NotARepository)));
+    }
+
+    #[test]
+    fn changed_diff_covers_staged_unstaged_and_untracked_files() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        for args in [
+            &["init", "--quiet"][..],
+            &["config", "user.email", "test@example.com"][..],
+            &["config", "user.name", "Test User"][..],
+        ] {
+            run_git(repo.path(), args);
+        }
+        std::fs::write(repo.path().join("staged.ts"), "old\n").expect("staged fixture");
+        std::fs::write(repo.path().join("unstaged.ts"), "old\n").expect("unstaged fixture");
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "--quiet", "-m", "initial"]);
+        run_git(repo.path(), &["tag", "base"]);
+
+        std::fs::write(repo.path().join("committed.ts"), "committed\n").expect("committed fixture");
+        run_git(repo.path(), &["add", "committed.ts"]);
+        run_git(
+            repo.path(),
+            &["commit", "--quiet", "-m", "committed change"],
+        );
+
+        std::fs::write(repo.path().join("staged.ts"), "staged\n").expect("staged edit");
+        run_git(repo.path(), &["add", "staged.ts"]);
+        std::fs::write(repo.path().join("unstaged.ts"), "unstaged\n").expect("unstaged edit");
+        std::fs::write(repo.path().join("untracked.ts"), "untracked\n").expect("untracked edit");
+
+        let diff = try_get_changed_diff(repo.path(), "base").expect("complete changeset diff");
+        let index = fallow_output::DiffIndex::from_unified_diff(&diff);
+
+        assert!(diff.contains("b/committed.ts"), "{diff}");
+        assert!(diff.contains("b/staged.ts"), "{diff}");
+        assert!(diff.contains("b/unstaged.ts"), "{diff}");
+        assert!(diff.contains("b/untracked.ts"), "{diff}");
+        assert_eq!(index.hunk_count(), 4);
+        assert_eq!(index.net_lines(), 2);
+    }
+
+    fn run_git(root: &Path, args: &[&str]) {
+        let output = spawn_output(&mut git_command(root, args)).expect("git command");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]

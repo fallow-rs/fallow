@@ -82,6 +82,9 @@ export const CI_ONLY_GATES = [
   },
 ];
 
+const VALID_ARGS = new Set(["--fast", "--full", "--help", "-h"]);
+const HELP_ARGS = ["--help", "-h"];
+
 const ciOnlyGateList = () => CI_ONLY_GATES.map(({ label }) => `  - ${label}`).join("\n");
 
 export const commandsForMode = (mode) => {
@@ -95,17 +98,19 @@ export const commandsForMode = (mode) => {
 };
 
 export const parseArgs = (args) => {
-  const unknown = args.find((arg) => !["--fast", "--full", "--help", "-h"].includes(arg));
+  const requested = new Set(args);
+  const unknown = args.find((arg) => !VALID_ARGS.has(arg));
   if (unknown !== undefined) {
     throw new Error(`Unknown argument: ${unknown}`);
   }
-  if (args.includes("--fast") && args.includes("--full")) {
+  const modeCount = Number(requested.has("--fast")) + Number(requested.has("--full"));
+  if (modeCount > 1) {
     throw new Error("--fast and --full cannot be combined");
   }
 
   return {
-    mode: args.includes("--full") ? "full" : "fast",
-    help: args.includes("--help") || args.includes("-h"),
+    mode: requested.has("--full") ? "full" : "fast",
+    help: HELP_ARGS.some((arg) => requested.has(arg)),
   };
 };
 

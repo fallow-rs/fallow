@@ -1,12 +1,10 @@
 //! Health pipeline carrier types shared by the engine health executor.
 
-use std::path::PathBuf;
-use std::sync::Arc;
-
 use fallow_config::{ResolvedConfig, WorkspaceInfo};
 use fallow_output::DiffIndex;
 use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::path::PathBuf;
 
 use crate::{
     duplicates::DuplicationReport,
@@ -19,7 +17,7 @@ use super::StylingAnalysisArtifacts;
 pub struct HealthPipelineInputs {
     pub config: ResolvedConfig,
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
-    pub modules: Arc<[fallow_types::extract::ModuleInfo]>,
+    pub modules: Vec<fallow_types::extract::ModuleInfo>,
     /// Pre-parse pipeline timings (config / discover / parse milliseconds).
     pub config_ms: f64,
     pub discover_ms: f64,
@@ -33,6 +31,46 @@ pub struct HealthPipelineInputs {
     pub pre_computed_duplication: Option<DuplicationReport>,
     pub workspaces: Vec<WorkspaceInfo>,
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+}
+
+pub(super) struct HealthPipelineRunInputs<M> {
+    pub(super) config: ResolvedConfig,
+    pub(super) files: Vec<fallow_types::discover::DiscoveredFile>,
+    pub(super) modules: M,
+    pub(super) config_ms: f64,
+    pub(super) discover_ms: f64,
+    pub(super) parse_ms: f64,
+    pub(super) parse_cpu_ms: f64,
+    pub(super) shared_parse: bool,
+    pub(super) pre_computed_analysis: Option<DeadCodeAnalysisArtifacts>,
+    pub(super) dead_code_results: Option<AnalysisResults>,
+    pub(super) styling_artifacts: Option<StylingAnalysisArtifacts>,
+    pub(super) pre_computed_duplication: Option<DuplicationReport>,
+    pub(super) workspaces: Vec<WorkspaceInfo>,
+    pub(super) workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+}
+
+impl From<HealthPipelineInputs>
+    for HealthPipelineRunInputs<Vec<fallow_types::extract::ModuleInfo>>
+{
+    fn from(input: HealthPipelineInputs) -> Self {
+        Self {
+            config: input.config,
+            files: input.files,
+            modules: input.modules,
+            config_ms: input.config_ms,
+            discover_ms: input.discover_ms,
+            parse_ms: input.parse_ms,
+            parse_cpu_ms: input.parse_cpu_ms,
+            shared_parse: input.shared_parse,
+            pre_computed_analysis: input.pre_computed_analysis,
+            dead_code_results: input.dead_code_results,
+            styling_artifacts: input.styling_artifacts,
+            pre_computed_duplication: input.pre_computed_duplication,
+            workspaces: input.workspaces,
+            workspace_diagnostics: input.workspace_diagnostics,
+        }
+    }
 }
 
 /// Scope inputs the CLI resolves before calling the engine.

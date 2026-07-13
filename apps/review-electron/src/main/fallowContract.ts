@@ -1,9 +1,10 @@
 import type { AuditBrief } from "../model/adapter";
 
-export const REVIEW_BRIEF_SCHEMA_VERSION = 5;
+export const REVIEW_BRIEF_SCHEMA_VERSION = 6;
 
 type JsonRecord = Record<string, unknown>;
 type Guard<T> = (value: unknown) => value is T;
+type OptionalField = readonly [key: string, guard: Guard<unknown>];
 
 export type ReviewContract = AuditBrief & {
   kind: "audit-brief";
@@ -61,6 +62,8 @@ const isArrayOf = <T>(value: unknown, guard: Guard<T>): value is T[] =>
   Array.isArray(value) && value.every(guard);
 const isOptional = <T>(value: unknown, guard: Guard<T>): boolean =>
   value === undefined || guard(value);
+const hasOptionalFields = (value: JsonRecord, fields: readonly OptionalField[]): boolean =>
+  fields.every(([key, guard]) => isOptional(value[key], guard));
 
 const hasHeader = (value: unknown, kind: string): value is JsonRecord =>
   isRecord(value) &&
@@ -125,22 +128,23 @@ const isImpactClosure = (value: unknown): value is JsonRecord =>
   isRecord(value) &&
   isOptional(value["coordination_gap"], (gaps): gaps is JsonRecord[] => isArrayOf(gaps, isRecord));
 
+const reviewFields: readonly OptionalField[] = [
+  ["verdict", isString],
+  ["changed_files_count", isNumber],
+  ["base_ref", isString],
+  ["base_description", isString],
+  ["triage", isTriage],
+  ["summary", isSummary],
+  ["decisions", isDecisions],
+  ["partition", isPartition],
+  ["focus", isFocus],
+  ["impact_closure", isImpactClosure],
+  ["weakening", (entries): entries is JsonRecord[] => isArrayOf(entries, isRecord)],
+  ["graph_snapshot_hash", isString],
+];
+
 const isReviewContract = (value: unknown): value is ReviewContract =>
-  hasHeader(value, "audit-brief") &&
-  isOptional(value["verdict"], isString) &&
-  isOptional(value["changed_files_count"], isNumber) &&
-  isOptional(value["base_ref"], isString) &&
-  isOptional(value["base_description"], isString) &&
-  isOptional(value["triage"], isTriage) &&
-  isOptional(value["summary"], isSummary) &&
-  isOptional(value["decisions"], isDecisions) &&
-  isOptional(value["partition"], isPartition) &&
-  isOptional(value["focus"], isFocus) &&
-  isOptional(value["impact_closure"], isImpactClosure) &&
-  isOptional(value["weakening"], (entries): entries is JsonRecord[] =>
-    isArrayOf(entries, isRecord),
-  ) &&
-  isOptional(value["graph_snapshot_hash"], isString);
+  hasHeader(value, "audit-brief") && hasOptionalFields(value, reviewFields);
 
 const isGuideDigest = (value: unknown): value is GuideContract["digest"] =>
   isRecord(value) && isOptional(value["decisions"], isDecisions);

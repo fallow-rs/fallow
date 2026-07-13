@@ -1,4 +1,10 @@
-import { test, expect, _electron as electron, type ElectronApplication } from "@playwright/test";
+import {
+  test,
+  expect,
+  _electron as electron,
+  type ElectronApplication,
+  type Page,
+} from "@playwright/test";
 import { resolve } from "node:path";
 import { ensureReviewStarted } from "./review";
 
@@ -22,6 +28,14 @@ const launch = async (): Promise<ElectronApplication> =>
     } as Record<string, string>,
   });
 
+const launchLoadedReview = async (): Promise<Page> => {
+  app = await launch();
+  const win = await app.firstWindow();
+  await ensureReviewStarted(win);
+  await expect(win.getByTestId("review-loaded")).toBeVisible({ timeout: 150_000 });
+  return win;
+};
+
 test("boots and renders the review shell", async () => {
   app = await launch();
   const win = await app.firstWindow();
@@ -31,27 +45,18 @@ test("boots and renders the review shell", async () => {
 });
 
 test("loads a grounded walkthrough from the real engine", async () => {
-  app = await launch();
-  const win = await app.firstWindow();
-  await ensureReviewStarted(win);
   // `fallow review` runs on the worktree; wait for the focus headline to render.
-  await expect(win.getByTestId("review-loaded")).toBeVisible({ timeout: 150_000 });
+  await launchLoadedReview();
 });
 
 test("opens a file diff from the walkthrough", async () => {
-  app = await launch();
-  const win = await app.firstWindow();
-  await ensureReviewStarted(win);
-  await expect(win.getByTestId("review-loaded")).toBeVisible({ timeout: 150_000 });
+  const win = await launchLoadedReview();
   await win.getByTestId("file-open").first().click();
   await expect(win.getByText(/@@|no textual diff/).first()).toBeVisible({ timeout: 20_000 });
 });
 
 test("inspector bridge pushes a grounded card to the UI", async () => {
-  app = await launch();
-  const win = await app.firstWindow();
-  await ensureReviewStarted(win);
-  await expect(win.getByTestId("review-loaded")).toBeVisible({ timeout: 150_000 });
+  const win = await launchLoadedReview();
 
   // Simulate the in-page picker posting a selection to the localhost bridge.
   const res = await fetch("http://127.0.0.1:7787/fallow-select", {

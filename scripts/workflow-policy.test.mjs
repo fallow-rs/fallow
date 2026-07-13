@@ -63,9 +63,10 @@ test("regular CI keeps affected checks on Ubuntu", () => {
 });
 
 test("release runs Windows correctness and lifecycle verification without credentials", () => {
-  const workflow = readWorkflow(".github/workflows/release.yml");
-  const job = indentedBlock(workflow, "windows-verify", 2);
-  const buildJob = indentedBlock(workflow, "build", 2);
+  const releaseWorkflow = readWorkflow(".github/workflows/release.yml");
+  const validationWorkflow = readWorkflow(".github/workflows/release-validation.yml");
+  const job = indentedBlock(validationWorkflow, "windows-verify", 2);
+  const buildJob = indentedBlock(releaseWorkflow, "build", 2);
 
   assert.match(buildJob, /target: x86_64-pc-windows-msvc/);
   assert.match(buildJob, /target: aarch64-pc-windows-msvc/);
@@ -83,7 +84,7 @@ test("release runs Windows correctness and lifecycle verification without creden
 });
 
 test("release runs Zed verification on macOS and Windows without credentials", () => {
-  const workflow = readWorkflow(".github/workflows/release.yml");
+  const workflow = readWorkflow(".github/workflows/release-validation.yml");
   const job = indentedBlock(workflow, "zed-verify", 2);
 
   assert.match(job, /os: \[macos-latest, windows-latest\]/);
@@ -102,7 +103,7 @@ test("release publication waits for the aggregate verification gate", () => {
   const npmPublish = indentedBlock(workflow, "npm-publish", 2);
   const vscodePublish = indentedBlock(workflow, "vscode-publish", 2);
 
-  assert.match(gate, /needs: \[build, check-codegen, windows-verify, zed-verify\]/);
+  assert.match(gate, /needs: \[build, validate\]/);
   assert.match(gate, /permissions: \{\}/);
   assert.match(publishCrates, /needs: release-verified/);
   assert.match(release, /needs: release-verified/);
@@ -167,6 +168,7 @@ test("coverage path filter contains the complete CI Rust contract", () => {
     assert.ok(coveragePaths.includes(path), `coverage filter is missing CI Rust path ${path}`);
   }
   for (const path of [
+    ".github/actions/setup-rust/**",
     ".github/workflows/ci.yml",
     ".github/workflows/coverage.yml",
     "scripts/workflow-policy.test.mjs",
@@ -185,6 +187,7 @@ test("coverage path filter runs for relevant changes and skips unrelated pull re
     "tests/fixtures/project/src/index.ts",
     "Cargo.toml",
     "docs/output-schema.json",
+    ".github/actions/setup-rust/action.yml",
     ".github/workflows/ci.yml",
     ".github/workflows/coverage.yml",
     "scripts/workflow-policy.test.mjs",

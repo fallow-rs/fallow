@@ -480,18 +480,10 @@ fn build_brief_json(
     diff_index: Option<&fallow_output::DiffIndex>,
 ) -> Result<serde_json::Value, ExitCode> {
     let brief = build_brief_output_with_diff(result, diff_index);
-    let audit_header = fallow_api::build_audit_header_map(crate::audit::audit_json_header_input(
-        result,
-    ))
-    .map_err(|err| {
-        crate::error::emit_error(
-            &format!("JSON serialization error: {err}"),
-            2,
-            fallow_config::OutputFormat::Json,
-        )
-    })?;
+    let audit_header =
+        fallow_api::build_review_brief_header(crate::audit::audit_json_header_input(result));
     let subtract = build_brief_subtract_sections(result)?;
-    fallow_output::build_review_brief_json_output(&brief, audit_header, subtract).map_err(|err| {
+    fallow_output::build_review_brief_json_output(brief, audit_header, subtract).map_err(|err| {
         crate::error::emit_error(
             &format!("JSON serialization error: {err}"),
             2,

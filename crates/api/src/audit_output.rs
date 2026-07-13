@@ -150,6 +150,25 @@ pub fn build_audit_header_map(
     }
 }
 
+/// Build the typed audit metadata carried by a review brief envelope.
+#[must_use]
+pub fn build_review_brief_header(
+    input: AuditJsonHeaderInput,
+) -> fallow_output::ReviewBriefHeader<AuditVerdict, AuditSummary, AuditAttribution> {
+    fallow_output::ReviewBriefHeader {
+        version: input.version,
+        verdict: input.verdict,
+        changed_files_count: input.changed_files_count,
+        base_ref: input.base_ref,
+        base_description: input.base_description,
+        head_sha: input.head_sha,
+        elapsed_ms: input.elapsed_ms,
+        base_snapshot_skipped: input.base_snapshot_skipped,
+        summary: input.summary,
+        attribution: input.attribution,
+    }
+}
+
 /// Serialize a typed audit JSON output envelope.
 ///
 /// # Errors

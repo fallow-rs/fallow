@@ -495,9 +495,18 @@ fn compute_base_snapshot(
     let check_production = opts.production_dead_code.unwrap_or(opts.production);
     let health_production = opts.production_health.unwrap_or(opts.production);
     let share_dead_code_parse_with_health = check_production == health_production;
+    let empty_changed_files = FxHashSet::default();
+    let base_changed_files_ref = base_changed_files.as_ref().unwrap_or(&empty_changed_files);
 
     let (check_res, dupes_res) = rayon::join(
-        || run_audit_check(&base_opts, None, share_dead_code_parse_with_health),
+        || {
+            run_audit_check(
+                &base_opts,
+                None,
+                base_changed_files_ref,
+                share_dead_code_parse_with_health,
+            )
+        },
         || run_audit_dupes(&base_opts, None, base_changed_files.as_ref(), None),
     );
     let mut check = check_res?;
@@ -1044,7 +1053,12 @@ fn run_audit_head_analyses(
     let share_dead_code_files_with_dupes =
         share_dead_code_parse_with_health && check_production == dupes_production;
 
-    let mut check = run_audit_check(opts, changed_since, share_dead_code_parse_with_health)?;
+    let mut check = run_audit_check(
+        opts,
+        changed_since,
+        changed_files,
+        share_dead_code_parse_with_health,
+    )?;
     let dupes_files = if share_dead_code_files_with_dupes {
         check
             .as_ref()
@@ -1192,7 +1206,7 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
 
     let (base_ref, base_description) = resolve_base_ref(opts)?;
 
-    let Some(changed_files) = crate::check::get_changed_files(opts.root, &base_ref) else {
+    let Some(mut changed_files) = crate::check::get_changed_files(opts.root, &base_ref) else {
         return Err(emit_error(
             &format!(
                 "could not determine changed files for base ref '{base_ref}'. Verify the ref exists in this git repository"
@@ -1201,6 +1215,11 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
             opts.output,
         ));
     };
+    if let Some(walkthrough_file) = opts.walkthrough_file
+        && let Ok(walkthrough_file) = dunce::canonicalize(walkthrough_file)
+    {
+        changed_files.remove(&walkthrough_file);
+    }
     let changed_files_count = changed_files.len();
 
     if changed_files.is_empty() {
@@ -1373,7 +1392,8 @@ fn compute_audit_brief_data(input: AuditBriefDataInput<'_>) -> AuditBriefData {
 
     // Change anchors and triage metrics come from the same diff source as the
     // audit run and are parsed together from one retained diff.
-    let diff_evidence = compute_brief_diff_evidence(input.opts.root, input.base_ref);
+    let diff_evidence =
+        compute_brief_diff_evidence(input.opts.root, input.base_ref, input.opts.walkthrough_file);
     let change_anchors = diff_evidence.change_anchors;
 
     // Graph-snapshot hash pins key sets, resolved base, head sha, and anchors.
@@ -1466,13 +1486,22 @@ struct BriefDiffEvidence {
 /// Derive anchors and triage metrics from the SAME diff source the run used:
 /// the opt-in shared diff when present, else the committed merge-base diff.
 /// The normal git diff is fetched once and parsed into both representations.
-fn compute_brief_diff_evidence(root: &std::path::Path, base_ref: &str) -> BriefDiffEvidence {
+fn compute_brief_diff_evidence(
+    root: &std::path::Path,
+    base_ref: &str,
+    walkthrough_file: Option<&std::path::Path>,
+) -> BriefDiffEvidence {
+    let excluded_file = walkthrough_file_relative_to_root(root, walkthrough_file);
     if let (Some(raw), Some(index)) = (
         crate::report::ci::diff_filter::shared_diff_raw(),
         crate::report::ci::diff_filter::shared_diff_index(),
     ) {
+        let mut change_anchors = crate::audit_walkthrough::parse_change_anchors(raw);
+        if let Some(excluded) = excluded_file.as_deref() {
+            change_anchors.retain(|anchor| anchor.file != excluded);
+        }
         return BriefDiffEvidence {
-            change_anchors: crate::audit_walkthrough::parse_change_anchors(raw),
+            change_anchors,
             diff_index: Some(index.clone()),
         };
     }
@@ -1480,10 +1509,24 @@ fn compute_brief_diff_evidence(root: &std::path::Path, base_ref: &str) -> BriefD
     let Ok(diff) = fallow_engine::changed_files::try_get_changed_diff(root, base_ref) else {
         return BriefDiffEvidence::default();
     };
+    let mut change_anchors = crate::audit_walkthrough::parse_change_anchors(&diff);
+    if let Some(excluded) = excluded_file.as_deref() {
+        change_anchors.retain(|anchor| anchor.file != excluded);
+    }
     BriefDiffEvidence {
-        change_anchors: crate::audit_walkthrough::parse_change_anchors(&diff),
+        change_anchors,
         diff_index: Some(fallow_output::DiffIndex::from_unified_diff(&diff)),
     }
+}
+
+fn walkthrough_file_relative_to_root(
+    root: &Path,
+    walkthrough_file: Option<&Path>,
+) -> Option<String> {
+    let root = dunce::canonicalize(root).ok()?;
+    let file = dunce::canonicalize(walkthrough_file?).ok()?;
+    let relative = file.strip_prefix(root).ok()?;
+    Some(relative.to_string_lossy().replace('\\', "/"))
 }
 
 /// Compute the decision surface from the assembled brief inputs: gather the
@@ -1667,23 +1710,18 @@ fn compute_brief_e3_data(
     Vec<weakening::WeakeningSignal>,
     Option<routing::RoutingFacts>,
 ) {
-    let deltas = check.map(|check| {
+    let deltas = check.zip(base_snapshot).map(|(check, base)| {
         let head_boundary = review_deltas::boundary_edge_keys(&check.results.boundary_violations);
         let head_cycles =
             review_deltas::cycle_keys(&check.results.circular_dependencies, &check.config.root);
         let head_public_api = check.public_api_keys.clone().unwrap_or_default();
-        let empty = FxHashSet::default();
-        let (base_boundary, base_cycles, base_public_api) = base_snapshot
-            .map_or((&empty, &empty, &empty), |b| {
-                (&b.boundary_edges, &b.cycles, &b.public_api)
-            });
         crate::audit_brief::build_review_deltas(
             &head_boundary,
-            base_boundary,
+            &base.boundary_edges,
             &head_cycles,
-            base_cycles,
+            &base.cycles,
             &head_public_api,
-            base_public_api,
+            &base.public_api,
         )
     });
 
@@ -1965,6 +2003,7 @@ fn empty_audit_result(
 fn run_audit_check<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
+    changed_files: &FxHashSet<PathBuf>,
     retain_modules_for_health: bool,
 ) -> Result<Option<CheckResult>, ExitCode> {
     let filters = IssueFilters::default();
@@ -2020,7 +2059,13 @@ fn run_audit_check<'a>(
         retain_modules_for_health,
         defer_performance: false,
     }) {
-        Ok(r) => Ok(Some(r)),
+        Ok(mut result) => {
+            fallow_engine::changed_files::filter_results_by_changed_files(
+                &mut result.results,
+                changed_files,
+            );
+            Ok(Some(result))
+        }
         Err(code) => Err(code),
     }
 }

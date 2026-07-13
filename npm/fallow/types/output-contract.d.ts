@@ -86,7 +86,7 @@ kind: "dead-code"
 kind: "combined"
 }) | (FeatureFlagsOutput & {
 kind: "feature-flags"
-}) | (ReviewBriefOutput & {
+}) | (ReviewBriefWireOutput & {
 kind: "audit-brief"
 }) | (DecisionSurfaceOutput & {
 kind: "decision-surface"
@@ -836,6 +836,12 @@ export type FeatureFlagActionType = ("investigate-flag" | "suppress-line")
  */
 export type ReviewBriefSchemaVersion = number
 /**
+ * The exactly-three shippable decision categories (the SOLID-3). No cut category
+ * (abstraction / deletion / convention / irreversibility) is representable: this
+ * enum is the structural guarantee that confirmed-noise categories never ship.
+ */
+export type DecisionCategory = ("coupling-boundary" | "public-api-contract" | "dependency")
+/**
  * Coarse risk classification for a changeset, a pure function of the change
  * size (file count plus, once threaded, net lines).
  */
@@ -864,12 +870,6 @@ export type ConfidenceFlag = ("dynamic-dispatch" | "re-export-indirection")
  * The category of a single weakening signal.
  */
 export type WeakeningKind = ("test-weakened" | "threshold-lowered" | "suppression-added" | "security-check-removed")
-/**
- * The exactly-three shippable decision categories (the SOLID-3). No cut category
- * (abstraction / deletion / convention / irreversibility) is representable: this
- * enum is the structural guarantee that confirmed-noise categories never ship.
- */
-export type DecisionCategory = ("coupling-boundary" | "public-api-contract" | "dependency")
 /**
  * Independently-versioned wire-version newtype. Serializes as the integer
  * [`DECISION_SURFACE_SCHEMA_VERSION`].
@@ -9383,21 +9383,48 @@ medium: string
 low: string
 }
 /**
- * The full `fallow audit --brief --format json` envelope. Carries the
- * informational verdict, the triage and graph-facts orientation stages, plus
- * the reused "subtract" section (the same dead-code / duplication / complexity
- * payload `fallow audit --format json` emits).
+ * Complete `fallow audit --brief --format json` wire envelope.
+ *
+ * This is distinct from [`ReviewBriefOutput`], which is the reusable review
+ * digest embedded in walkthrough output. The wire envelope also carries audit
+ * metadata, optional telemetry, and the subtract-style analysis subreports.
  */
-export interface ReviewBriefOutput {
+export interface ReviewBriefWireOutput {
 schema_version: ReviewBriefSchemaVersion
-/**
- * Fallow CLI version that produced this output.
- */
-version: string
+version: ToolVersion
 /**
  * Command discriminator singleton: always `"audit-brief"`.
  */
 command: string
+verdict: AuditVerdict
+/**
+ * Number of changed files in the audit scope.
+ */
+changed_files_count: number
+/**
+ * Base ref used to determine the changeset.
+ */
+base_ref: string
+/**
+ * Human-readable description of the resolved base, when available.
+ */
+base_description?: (string | null)
+/**
+ * Head commit SHA, when available.
+ */
+head_sha?: (string | null)
+elapsed_ms: ElapsedMs
+/**
+ * Whether base-snapshot analysis was skipped for this run.
+ */
+base_snapshot_skipped?: (boolean | null)
+summary: AuditSummary
+attribution: AuditAttribution
+/**
+ * Optional metric definitions and local telemetry correlation metadata.
+ */
+_meta?: (Meta | null)
+decisions: DecisionSurface
 triage: DiffTriage
 graph_facts: GraphFacts
 partition: PartitionFacts
@@ -9405,13 +9432,124 @@ impact_closure: ImpactClosureFacts
 focus: FocusMap
 deltas: ReviewDeltas
 /**
- * 6.F, headline: reviewer-private weakening signals (tests
- * removed/skipped, thresholds lowered, suppressions added, security steps
- * removed). Advisory, never gates, never auto-posted.
+ * Reviewer-private weakening signals.
  */
 weakening: WeakeningSignal[]
 routing: RoutingFacts
-decisions: DecisionSurface
+/**
+ * Dead-code findings scoped to the audit changeset.
+ */
+dead_code?: (CheckOutput | null)
+/**
+ * Duplication findings scoped to the audit changeset.
+ */
+duplication?: (DupesReportPayload | null)
+/**
+ * Complexity findings scoped to the audit changeset.
+ */
+complexity?: (HealthReport | null)
+}
+/**
+ * The ranked, capped decision surface plus the set of signal_ids the
+ * deterministic layer emitted (the anti-hallucination allowlist).
+ */
+export interface DecisionSurface {
+/**
+ * Ranked decisions, highest consequence first.
+ */
+decisions: Decision[]
+/**
+ * Present when more than the cap were extracted.
+ */
+truncated?: (TruncationNote | null)
+/**
+ * Every signal_id the deterministic layer emitted, INCLUDING those whose
+ * decision was collapsed below the cap or suppressed. The anti-hallucination
+ * allowlist: an agent decision whose id is absent is rejected.
+ */
+emitted_signal_ids: string[]
+}
+/**
+ * One consequential structural decision, framed as a judgment question for a
+ * human with taste, anchored to a fallow-emitted signal.
+ */
+export interface Decision {
+/**
+ * Deterministic anchor to the fallow-emitted candidate this decision frames.
+ * `accept_signal_id` rejects any id not in the emitted set.
+ */
+signal_id: string
+category: DecisionCategory
+/**
+ * The decision framed as a judgment question for the human.
+ */
+question: string
+/**
+ * Root-relative file the decision is anchored at.
+ */
+anchor_file: string
+/**
+ * 1-based anchor line, when the underlying signal carries one (0 = file head).
+ */
+anchor_line: number
+/**
+ * The raw fallow-emitted candidate key the `signal_id` hashes.
+ */
+signal_key: string
+/**
+ * The `signal_id` this decision WOULD have had before any rename in this
+ * change (the anchor file's pre-rename path). Present only when the anchor was
+ * renamed. A review-memory layer carries a dismissal across a `git mv`: if
+ * `previous_signal_id` was dismissed in an earlier PR, treat this decision as
+ * dismissed too. Keeps `signal_id` itself exact + deterministic.
+ */
+previous_signal_id?: (string | null)
+/**
+ * Blast radius: count of modules affected beyond the diff by this decision.
+ */
+blast: number
+/**
+ * `blast * reversibility_weight`: the rank key (sorted descending).
+ */
+consequence: number
+/**
+ * The routed expert(s) to ask, from ownership routing. Empty when no
+ * ownership signal is available for the anchor file.
+ */
+expert: string[]
+/**
+ * Whether the anchor file's only qualified owner is one person.
+ */
+bus_factor_one?: boolean
+/**
+ * Honest per-decision count: in-repo modules OUTSIDE the diff that already
+ * depend on this decision's anchor. This is the DISPLAY number (taste
+ * ownership: the human reads reversibility from the count itself), distinct
+ * from `blast` (the project-wide proxy used only for ranking). Never a door
+ * label. Internal-only by construction, so it cannot see a published library's
+ * external consumers; the public-API trade-off clause names that risk in prose.
+ */
+internal_consumer_count: number
+/**
+ * The named structural sacrifice this change makes, stated as a fact, never a
+ * recommendation (e.g. "Couples `app` to `infra`; 4 in-repo modules already
+ * depend on this anchor."). A sibling fact to `question`; it never tells the
+ * human what to choose.
+ */
+tradeoff: string
+}
+/**
+ * A note for decisions collapsed below the cap.
+ */
+export interface TruncationNote {
+/**
+ * How many decisions were collapsed below the cap.
+ */
+collapsed: number
+/**
+ * Human-readable collapse reason.
+ */
+reason: string
 }
 /**
  * Stage 0 of the brief: triage facts derived purely from the diff size.
@@ -9703,108 +9841,6 @@ expert: string[]
 bus_factor_one?: boolean
 }
 /**
- * The ranked, capped decision surface plus the set of signal_ids the
- * deterministic layer emitted (the anti-hallucination allowlist).
- */
-export interface DecisionSurface {
-/**
- * Ranked decisions, highest consequence first.
- */
-decisions: Decision[]
-/**
- * Present when more than the cap were extracted.
- */
-truncated?: (TruncationNote | null)
-/**
- * Every signal_id the deterministic layer emitted, INCLUDING those whose
- * decision was collapsed below the cap or suppressed. The anti-hallucination
- * allowlist: an agent decision whose id is absent is rejected.
- */
-emitted_signal_ids: string[]
-}
-/**
- * One consequential structural decision, framed as a judgment question for a
- * human with taste, anchored to a fallow-emitted signal.
- */
-export interface Decision {
-/**
- * Deterministic anchor to the fallow-emitted candidate this decision frames.
- * `accept_signal_id` rejects any id not in the emitted set.
- */
-signal_id: string
-category: DecisionCategory
-/**
- * The decision framed as a judgment question for the human.
- */
-question: string
-/**
- * Root-relative file the decision is anchored at.
- */
-anchor_file: string
-/**
- * 1-based anchor line, when the underlying signal carries one (0 = file head).
- */
-anchor_line: number
-/**
- * The raw fallow-emitted candidate key the `signal_id` hashes.
- */
-signal_key: string
-/**
- * The `signal_id` this decision WOULD have had before any rename in this
- * change (the anchor file's pre-rename path). Present only when the anchor was
- * renamed. A review-memory layer carries a dismissal across a `git mv`: if
- * `previous_signal_id` was dismissed in an earlier PR, treat this decision as
- * dismissed too. Keeps `signal_id` itself exact + deterministic.
- */
-previous_signal_id?: (string | null)
-/**
- * Blast radius: count of modules affected beyond the diff by this decision.
- */
-blast: number
-/**
- * `blast * reversibility_weight`: the rank key (sorted descending).
- */
-consequence: number
-/**
- * The routed expert(s) to ask, from ownership routing. Empty when no
- * ownership signal is available for the anchor file.
- */
-expert: string[]
-/**
- * Whether the anchor file's only qualified owner is one person.
- */
-bus_factor_one?: boolean
-/**
- * Honest per-decision count: in-repo modules OUTSIDE the diff that already
- * depend on this decision's anchor. This is the DISPLAY number (taste
- * ownership: the human reads reversibility from the count itself), distinct
- * from `blast` (the project-wide proxy used only for ranking). Never a door
- * label. Internal-only by construction, so it cannot see a published library's
- * external consumers; the public-API trade-off clause names that risk in prose.
- */
-internal_consumer_count: number
-/**
- * The named structural sacrifice this change makes, stated as a fact, never a
- * recommendation (e.g. "Couples `app` to `infra`; 4 in-repo modules already
- * depend on this anchor."). A sibling fact to `question`; it never tells the
- * human what to choose.
- */
-tradeoff: string
-}
-/**
- * A note for decisions collapsed below the cap.
- */
-export interface TruncationNote {
-/**
- * How many decisions were collapsed below the cap.
- */
-collapsed: number
-/**
- * Human-readable collapse reason.
- */
-reason: string
-}
-/**
  * The separable `decision-surface` envelope: the single call that puts taste-
  * decisions in front of a human, callable WITHOUT the full pipeline (the
  * `decision_surface` MCP tool's output). Carries `kind`/`schema_version` plus
@@ -9959,6 +9995,37 @@ agent_schema: AgentSchema
  * The injection-resistance note (digest is graph-only; PR prose untrusted).
  */
 injection_note: string
+}
+/**
+ * The full `fallow audit --brief --format json` envelope. Carries the
+ * informational verdict, the triage and graph-facts orientation stages, plus
+ * the reused "subtract" section (the same dead-code / duplication / complexity
+ * payload `fallow audit --format json` emits).
+ */
+export interface ReviewBriefOutput {
+schema_version: ReviewBriefSchemaVersion
+/**
+ * Fallow CLI version that produced this output.
+ */
+version: string
+/**
+ * Command discriminator singleton: always `"audit-brief"`.
+ */
+command: string
+triage: DiffTriage
+graph_facts: GraphFacts
+partition: PartitionFacts
+impact_closure: ImpactClosureFacts
+focus: FocusMap
+deltas: ReviewDeltas
+/**
+ * 6.F, headline: reviewer-private weakening signals (tests
+ * removed/skipped, thresholds lowered, suppressions added, security steps
+ * removed). Advisory, never gates, never auto-posted.
+ */
+weakening: WeakeningSignal[]
+routing: RoutingFacts
+decisions: DecisionSurface
 }
 /**
  * The review direction artifact: the order to review in, the coherent units,

@@ -226,7 +226,7 @@ pub fn execute_health_with_shared_parse(
         HealthPipelineInputs {
             config,
             files: shared.files,
-            modules: shared.modules.into(),
+            modules: shared.modules,
             config_ms,
             discover_ms: 0.0,
             parse_ms: 0.0,

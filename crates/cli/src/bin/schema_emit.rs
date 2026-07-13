@@ -29,7 +29,8 @@ use fallow_api::{
     AttributedCloneGroup, AttributedCloneGroupFinding, AttributedInstance, AuditOutput,
     BoundariesListLogicalGroup, BoundariesListing, CloneFamilyFinding, CloneGroupFinding,
     CombinedOutput, DupesReportPayload, DuplicationGroup, FallowOutput, ListBoundariesOutput,
-    SecurityGate, SecurityGateMode, SecurityOutput, SecuritySummaryOutput, WorkspacesOutput,
+    ReviewBriefWireOutput, SecurityGate, SecurityGateMode, SecurityOutput, SecuritySummaryOutput,
+    WorkspacesOutput,
 };
 use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_output::{
@@ -176,11 +177,41 @@ fn main() -> ExitCode {
 fn run() -> Result<(), String> {
     let derived = derived_definitions();
     validate_graph_facts_descriptions(&derived)?;
+    validate_review_brief_wire_contract(&derived)?;
     let mut merged = merge_with_committed(&derived)?;
     normalize_output_punctuation(&mut merged);
     let pretty = serde_json::to_string_pretty(&merged)
         .map_err(|err| format!("failed to serialize merged schema: {err}"))?;
     println!("{pretty}");
+    Ok(())
+}
+
+fn validate_review_brief_wire_contract(derived: &Map<String, Value>) -> Result<(), String> {
+    let properties = derived
+        .get("ReviewBriefWireOutput")
+        .and_then(Value::as_object)
+        .and_then(|schema| schema.get("properties"))
+        .and_then(Value::as_object)
+        .ok_or_else(|| "derived ReviewBriefWireOutput properties are missing".to_string())?;
+
+    for field in [
+        "verdict",
+        "changed_files_count",
+        "base_ref",
+        "summary",
+        "attribution",
+        "_meta",
+        "dead_code",
+        "duplication",
+        "complexity",
+    ] {
+        if !properties.contains_key(field) {
+            return Err(format!(
+                "derived ReviewBriefWireOutput is missing `{field}`"
+            ));
+        }
+    }
+
     Ok(())
 }
 
@@ -331,6 +362,7 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
     "CodeClimateOutput",
     "CombinedOutput",
     "ReviewBriefOutput",
+    "ReviewBriefWireOutput",
     "ReviewBriefSchemaVersion",
     "RiskClass",
     "ReviewEffort",
@@ -694,6 +726,7 @@ fn register_audit_brief_definitions(generator: &mut schemars::SchemaGenerator) {
     let _ = generator.subschema_for::<FocusUnit>();
     let _ = generator.subschema_for::<FocusMap>();
     let _ = generator.subschema_for::<ReviewBriefOutput>();
+    let _ = generator.subschema_for::<ReviewBriefWireOutput>();
     let _ = generator.subschema_for::<DecisionCategory>();
     let _ = generator.subschema_for::<Decision>();
     let _ = generator.subschema_for::<DecisionAction>();
@@ -1039,8 +1072,8 @@ const FALLOW_OUTPUT_VARIANTS: &[(&str, &[&str], &str)] = &[
     ),
     (
         "audit-brief",
-        &["ReviewBriefOutput"],
-        "`fallow audit --brief --format json` (alias `fallow review`). Required\n`schema_version`, `version`, `command: \"audit-brief\"`, `triage`, and\n`graph_facts`. Independently versioned via `ReviewBriefSchemaVersion`;\nalways emitted with exit 0.",
+        &["ReviewBriefWireOutput"],
+        "`fallow audit --brief --format json` (alias `fallow review`). Required\n`schema_version`, `version`, `command: \"audit-brief\"`, audit metadata,\n`triage`, and `graph_facts`, with optional analysis subreports. Independently\nversioned via `ReviewBriefSchemaVersion`; always emitted with exit 0.",
     ),
     (
         "decision-surface",
@@ -1405,7 +1438,7 @@ mod drift_tests {
             ("Check", "CheckOutput"),
             ("Combined", "CombinedOutput"),
             ("FeatureFlags", "FeatureFlagsOutput"),
-            ("AuditBrief", "ReviewBriefOutput"),
+            ("AuditBrief", "ReviewBriefWireOutput"),
             ("DecisionSurface", "DecisionSurfaceOutput"),
             ("WalkthroughGuide", "WalkthroughGuide"),
             ("WalkthroughValidation", "WalkthroughValidation"),

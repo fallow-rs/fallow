@@ -67,7 +67,7 @@ pub use audit_output::{
     AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
     AuditSarifOutputInput, AuditSummary, AuditVerdict, build_audit_codeclimate,
     build_audit_codeclimate_issues, build_audit_header_json, build_audit_header_map,
-    build_audit_sarif, serialize_audit_json,
+    build_audit_sarif, build_review_brief_header, serialize_audit_json,
 };
 pub use ci_output::{
     CiIssue, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
@@ -143,8 +143,8 @@ pub use markdown_output::{
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
     BoundariesListing, CombinedOutput, FallowOutput, ListBoundariesOutput, ListEntryPointOutput,
-    ListOutput, ListPluginOutput, SecurityGate, SecurityOutput, SecurityOutputConfig,
-    SecuritySummaryOutput, WorkspacesOutput,
+    ListOutput, ListPluginOutput, ReviewBriefWireOutput, SecurityGate, SecurityOutput,
+    SecurityOutputConfig, SecuritySummaryOutput, WorkspacesOutput,
 };
 pub use runtime::{
     AuditProgrammaticKeySnapshot, AuditProgrammaticOutput, BoundaryViolationsOutput,

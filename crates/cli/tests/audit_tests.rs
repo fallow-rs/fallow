@@ -3001,9 +3001,8 @@ fn e5_change_anchor_judgment_accepts_anchor_kind_change() {
         "graph_snapshot_hash": guide["graph_snapshot_hash"],
         "judgments": [ { "change_anchor": "chg:deadbeefdeadbeef", "framing": "made up" } ]
     });
-    let bogus_path = tmp.path().join("agent_bogus.json");
-    fs::write(&bogus_path, serde_json::to_string(&bogus).unwrap()).unwrap();
-    let rejected = run_walkthrough_file(tmp.path(), &bogus_path);
+    fs::write(&agent_path, serde_json::to_string(&bogus).unwrap()).unwrap();
+    let rejected = run_walkthrough_file(tmp.path(), &agent_path);
     assert_eq!(rejected["rejected_count"], 1, "fabricated region rejects");
     assert_eq!(rejected["rejected"][0]["reason"], "unknown-change-anchor");
 }
@@ -3031,7 +3030,9 @@ fn e5_clean_agent_json_is_accepted_zero_unanchored() {
             { "signal_id": real_id, "framing": "Intended coupling.", "concern": "coupling" }
         ]
     });
-    let agent_path = tmp.path().join("agent.json");
+    // The response artifact is command input, not part of the reviewed change,
+    // even if its filename has an otherwise analyzable extension.
+    let agent_path = tmp.path().join("agent.ts");
     fs::write(&agent_path, serde_json::to_string(&agent).unwrap()).unwrap();
 
     let validation = run_walkthrough_file(tmp.path(), &agent_path);

@@ -1779,11 +1779,11 @@ fn audit_gate_all_skips_base_snapshot() {
         root,
         &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
     );
-    fs::write(
-        root.join("src/index.ts"),
-        "export const legacy = 1;\nexport const changed = 2;\n",
-    )
-    .expect("changed module should be written");
+    let mut changed_module = "export const legacy = 1;\nexport const changed = 2;\n".to_string();
+    for _ in 0..500 {
+        changed_module.push_str("// expanded working-tree change\n");
+    }
+    fs::write(root.join("src/index.ts"), changed_module).expect("changed module should be written");
 
     let config_path = None;
     let cache_root = root.join(".fallow");
@@ -1819,7 +1819,7 @@ fn audit_gate_all_skips_base_snapshot() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
-        brief: false,
+        brief: true,
         max_decisions: 4,
         walkthrough_guide: false,
         walkthrough: false,
@@ -1834,6 +1834,21 @@ fn audit_gate_all_skips_base_snapshot() {
     assert_eq!(result.attribution.gate, AuditGate::All);
     assert_eq!(result.attribution.dead_code_introduced, 0);
     assert_eq!(result.attribution.dead_code_inherited, 0);
+    let deltas = result.review_deltas.clone().unwrap_or_default();
+    assert!(deltas.boundary_introduced.is_empty());
+    assert!(deltas.cycle_introduced.is_empty());
+    assert!(deltas.public_api_added.is_empty());
+
+    let brief = crate::audit_brief::build_brief_output(&result);
+    assert_eq!(brief.graph_facts.exports_added, 0);
+    assert_eq!(brief.graph_facts.api_width_delta, 0);
+    assert!(brief.deltas.public_api_added.is_empty());
+    assert_eq!(brief.triage.hunks, Some(1));
+    assert!(brief.triage.net_lines.is_some_and(|lines| lines >= 500));
+    assert_eq!(brief.triage.risk_class, fallow_output::RiskClass::High);
+    assert!(brief.decisions.decisions.iter().all(|decision| {
+        decision.category != fallow_output::DecisionCategory::PublicApiContract
+    }));
 }
 
 #[test]
