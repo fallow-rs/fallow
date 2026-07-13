@@ -324,6 +324,22 @@ if { [ "$INPUT_COMMAND" = "dead-code" ] || [ "$INPUT_COMMAND" = "check" ] || [ -
   rm -f "$HELP_TMP"
 fi
 
+# --- Check for native `fallow report` support ---
+# `fallow report --from <results.json> --format github-annotations|github-summary`
+# lets the annotate / summary steps re-render the saved envelope instead of the
+# bundled jq. One probe covers both formats (they shipped together). The
+# annotate / summary steps run in separate step processes, so the result flows
+# through $GITHUB_ENV like the other analyze outputs above; unset on older
+# binaries keeps those steps on the jq fallback.
+
+HAS_NATIVE_REPORT=false
+if fallow report --help > /dev/null 2>&1; then
+  HAS_NATIVE_REPORT=true
+fi
+if [ -n "${GITHUB_ENV:-}" ]; then
+  echo "HAS_NATIVE_REPORT=${HAS_NATIVE_REPORT}" >> "$GITHUB_ENV"
+fi
+
 # --- Auto-detect changed-since in PR context ---
 
 AUTO_CHANGED_SINCE=false
