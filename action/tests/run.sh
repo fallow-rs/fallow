@@ -2149,6 +2149,107 @@ assert_contains "$OUT" "::" "annotate.sh: custom artifacts path emits annotation
 
 rm -rf "$WORK_DIR"
 
+# --- Native report fastpath (annotate.sh / summary.sh) ---
+# Exercise the native github-annotations / github-summary fastpath. These need a
+# report-capable fallow binary (on PATH or at $FALLOW_BIN); without one the whole
+# section skips, and older binaries keep the jq path covered by the tests above.
+
+echo ""
+echo "=== Native report fastpath ==="
+
+FASTPATH_SCRIPTS="$DIR/../scripts"
+FASTPATH_ENVELOPE="$FIXTURES/dead-code-envelope.json"
+
+# Resolve a report-capable binary the same way issuekind-drift-guard.sh does:
+# explicit $FALLOW_BIN, else a locally built target/{release,debug}/fallow, else
+# a PATH lookup. Absolute so the check survives the cwd changes above.
+FASTPATH_REPO_ROOT="$(cd "$DIR/../.." && pwd)"
+FASTPATH_BIN="${FALLOW_BIN:-}"
+if [ -z "$FASTPATH_BIN" ]; then
+  for FASTPATH_CAND in "$FASTPATH_REPO_ROOT/target/release/fallow" "$FASTPATH_REPO_ROOT/target/debug/fallow"; do
+    if [ -x "$FASTPATH_CAND" ]; then FASTPATH_BIN="$FASTPATH_CAND"; break; fi
+  done
+fi
+[ -n "$FASTPATH_BIN" ] || FASTPATH_BIN="fallow"
+
+if ! command -v "$FASTPATH_BIN" > /dev/null 2>&1 || ! "$FASTPATH_BIN" report --help > /dev/null 2>&1; then
+  echo "  (skipped: no fallow binary with 'report' support on PATH or at \$FALLOW_BIN)"
+else
+  FASTPATH_WORK=$(mktemp -d)
+
+  # (a) byte-equality: the action layers only the cap on the native stream.
+  FASTPATH_EXPECTED=$("$FASTPATH_BIN" report --from "$FASTPATH_ENVELOPE" --format github-annotations | head -n 999)
+  FASTPATH_ACTUAL=$(
+    HAS_NATIVE_REPORT=true \
+      FALLOW_BIN="$FASTPATH_BIN" \
+      FALLOW_COMMAND="dead-code" \
+      MAX_ANNOTATIONS="999" \
+      ACTION_JQ_DIR="$JQ_DIR" \
+      FALLOW_RESULTS_FILE="$FASTPATH_ENVELOPE" \
+      bash "$FASTPATH_SCRIPTS/annotate.sh" 2>/dev/null
+  )
+  if [ "$FASTPATH_ACTUAL" = "$FASTPATH_EXPECTED" ]; then
+    pass "annotate.sh native fastpath is byte-identical to report --from | head"
+  else
+    fail "annotate.sh native fastpath is byte-identical to report --from | head" "diverged from the native render"
+  fi
+
+  # (b) truncation notice fires with a small cap.
+  FASTPATH_TRUNC=$(
+    HAS_NATIVE_REPORT=true \
+      FALLOW_BIN="$FASTPATH_BIN" \
+      FALLOW_COMMAND="dead-code" \
+      MAX_ANNOTATIONS="2" \
+      ACTION_JQ_DIR="$JQ_DIR" \
+      FALLOW_RESULTS_FILE="$FASTPATH_ENVELOPE" \
+      bash "$FASTPATH_SCRIPTS/annotate.sh" 2>/dev/null
+  )
+  assert_contains "$FASTPATH_TRUNC" "Showing 2 of " "annotate.sh native fastpath honors max-annotations"
+
+  # (c) summary fastpath writes the native heading.
+  FASTPATH_SUMMARY="$FASTPATH_WORK/summary.md"
+  HAS_NATIVE_REPORT=true \
+    FALLOW_BIN="$FASTPATH_BIN" \
+    FALLOW_COMMAND="dead-code" \
+    ACTION_JQ_DIR="$JQ_DIR" \
+    GITHUB_STEP_SUMMARY="$FASTPATH_SUMMARY" \
+    FALLOW_RESULTS_FILE="$FASTPATH_ENVELOPE" \
+    bash "$FASTPATH_SCRIPTS/summary.sh" > /dev/null 2>&1
+  assert_contains "$(cat "$FASTPATH_SUMMARY")" "# Fallow Analysis" "summary.sh native fastpath writes the native heading"
+
+  # (d) fix has no report kind: the fastpath is bypassed for the jq summary.
+  FASTPATH_FIX_SUMMARY="$FASTPATH_WORK/fix-summary.md"
+  FASTPATH_FIX_LOG=$(
+    HAS_NATIVE_REPORT=true \
+      FALLOW_BIN="$FASTPATH_BIN" \
+      FALLOW_COMMAND="fix" \
+      ACTION_JQ_DIR="$JQ_DIR" \
+      GITHUB_STEP_SUMMARY="$FASTPATH_FIX_SUMMARY" \
+      FALLOW_RESULTS_FILE="$FIXTURES/fix.json" \
+      bash "$FASTPATH_SCRIPTS/summary.sh" 2>&1
+  )
+  assert_contains "$FASTPATH_FIX_LOG" "summary rendered via jq fallback" "summary.sh routes fix to jq even with native support"
+  assert_not_contains "$FASTPATH_FIX_LOG" "rendered via native" "summary.sh never renders fix natively"
+
+  # (e) probe-false pins the exact jq behavior for older binaries.
+  FASTPATH_PROBE_FALSE=$(
+    HAS_NATIVE_REPORT=false \
+      FALLOW_COMMAND="dead-code" \
+      MAX_ANNOTATIONS="50" \
+      ACTION_JQ_DIR="$JQ_DIR" \
+      FALLOW_RESULTS_FILE="$FIXTURES/check.json" \
+      bash "$FASTPATH_SCRIPTS/annotate.sh" 2>/dev/null
+  )
+  FASTPATH_JQ_ONLY=$(jq -r -f "$JQ_DIR/annotations-check.jq" "$FIXTURES/check.json" 2>/dev/null | head -n 50)
+  if [ "$FASTPATH_PROBE_FALSE" = "$FASTPATH_JQ_ONLY" ]; then
+    pass "annotate.sh probe-false keeps the exact jq annotation output"
+  else
+    fail "annotate.sh probe-false keeps the exact jq annotation output" "diverged from the jq render"
+  fi
+
+  rm -rf "$FASTPATH_WORK"
+fi
+
 # --- Code Scanning availability gate (check-code-scanning.sh) ---
 
 echo ""
