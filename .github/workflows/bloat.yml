@@ -67,12 +67,31 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Build the remaining shipped binaries so the tracker records each one.
+      # fallow-cli is already built by the cargo bloat steps above; these reuse
+      # the same release profile (strip=none, debug=2 from the job env) so the
+      # sizes stay comparable across binaries. fallow-multicall links the CLI +
+      # LSP + MCP libs into the single engine the npm packages ship, so tracking
+      # it (and lsp/mcp) catches an engine-linking regression the CLI number
+      # alone misses (the 5x fallow-mcp jump in v2.104.0 went unseen because
+      # only fallow was tracked).
+      - name: Build the LSP, MCP, and multicall binaries
+        run: cargo build --release -p fallow-lsp -p fallow-mcp -p fallow-multicall
+
       - name: Track total binary size
         run: |
-          SIZE=$(stat -c%s target/release/fallow)
-          SIZE="$SIZE" python3 -c "
+          python3 -c "
           import json, os
-          data = [{'name': 'Binary Size (fallow)', 'unit': 'bytes', 'value': int(os.environ['SIZE'])}]
+          binaries = {
+              'fallow': 'target/release/fallow',
+              'fallow-lsp': 'target/release/fallow-lsp',
+              'fallow-mcp': 'target/release/fallow-mcp',
+              'fallow-multicall': 'target/release/fallow-multicall',
+          }
+          data = [
+              {'name': f'Binary Size ({name})', 'unit': 'bytes', 'value': os.path.getsize(path)}
+              for name, path in binaries.items()
+          ]
           print(json.dumps(data, indent=2))
           " > bloat-bench.json
 

@@ -26,6 +26,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps the jq summary (there is no native fix rendering yet), and the jq
   renderers remain in place as the fallback.
 
+- **npm platform packages now carry a single `fallow` binary instead of
+  three.** Since the MCP server gained in-process analysis, every
+  `@fallow-cli/<platform>` package bundled three binaries (`fallow`,
+  `fallow-lsp`, `fallow-mcp`) that each statically linked the full analysis
+  engine, roughly 50 MB unpacked per platform. Each package now contains one
+  multicall `fallow` binary that serves the CLI, the LSP (`fallow lsp-server`),
+  and the MCP server (`fallow mcp-server`) from a single linked engine, roughly
+  halving the install to about 25 MB per platform. Nothing changes for
+  consumers: `npx fallow-mcp` and the `fallow-lsp` launcher keep working (they
+  now spawn the bundled binary), and the standalone `fallow` / `fallow-lsp` /
+  `fallow-mcp` GitHub release assets, `cargo install fallow-cli`, Homebrew, the
+  GitHub Action, and the GitLab template are unchanged. Editors that
+  auto-download the standalone `fallow-lsp` from GitHub releases, including an
+  older VS Code extension paired with a newer npm package, keep working via
+  that path.
+
 ## [3.4.2] - 2026-07-13
 
 ### Added
