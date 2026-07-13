@@ -93,6 +93,39 @@ describe("buildStatusBarTooltipMarkdown", () => {
     expect(markdown).toContain("Scoped to changes since fallow\\-baseline");
   });
 
+  it("uses the server-applied changedSince scope when present", () => {
+    const markdown = buildStatusBarTooltipMarkdown(
+      baseParams({
+        changedSinceScope: {
+          requestedRef: "origin/main",
+          state: "applied",
+        },
+      }),
+      "configured-ref",
+    );
+
+    expect(markdown).toContain("Scoped to changes since origin/main");
+    expect(markdown).not.toContain("configured\\-ref");
+  });
+
+  it("warns that dropped changedSince results are full-scope", () => {
+    const markdown = buildStatusBarTooltipMarkdown(
+      baseParams({
+        changedSinceScope: {
+          requestedRef: "missing-ref",
+          state: "dropped",
+          reason: "git ref was not found",
+        },
+      }),
+      "missing-ref",
+    );
+
+    expect(markdown).toContain("Scope since missing\\-ref was dropped");
+    expect(markdown).toContain("results are full-scope");
+    expect(markdown).toContain("git ref was not found");
+    expect(markdown).not.toContain("Scoped to changes since");
+  });
+
   it("escapes changedSince markdown in trusted tooltip text", () => {
     const markdown = buildStatusBarTooltipMarkdown(
       baseParams(),
@@ -159,6 +192,25 @@ describe("renderStatusBarText", () => {
     expect(renderStatusBarText("$(search) Fallow: 3 issues", ref)).toBe(
       "$(search) Fallow: 3 issues (since fallow-baseline)"
     );
+  });
+
+  it("preserves the applied suffix from the completion notification", () => {
+    expect(
+      renderStatusBarText("$(search) Fallow: 3 issues", "configured-ref", {
+        requestedRef: "origin/main",
+        state: "applied",
+      }),
+    ).toBe("$(search) Fallow: 3 issues (since origin/main)");
+  });
+
+  it("marks dropped scope without claiming the filter is active", () => {
+    expect(
+      renderStatusBarText("$(search) Fallow: 3 issues", "missing-ref", {
+        requestedRef: "missing-ref",
+        state: "dropped",
+        reason: "git ref was not found",
+      }),
+    ).toBe("$(search) Fallow: 3 issues (since missing-ref: scope dropped)");
   });
 
   it("delegates to formatChangedSinceRefForStatusBar for truncation", () => {

@@ -11,7 +11,7 @@ import {
 } from "./statusBar-utils.js";
 import type { FallowCheckResult, FallowDupesResult, HealthOutput } from "./types.js";
 export type { AnalysisCompleteParams } from "./statusBar-utils.js";
-import type { AnalysisCompleteParams } from "./statusBar-utils.js";
+import type { AnalysisCompleteParams, ChangedSinceScopeStatus } from "./statusBar-utils.js";
 
 let statusBarItem: vscode.StatusBarItem | null = null;
 
@@ -66,7 +66,7 @@ export const updateStatusBarFromLsp = (params: AnalysisCompleteParams): void => 
   }
 
   applyTooltipAndSeverity(params);
-  applyStatusBarText(buildStatusBarPartsFromLsp(params));
+  applyStatusBarText(buildStatusBarPartsFromLsp(params), params.changedSinceScope);
 };
 
 const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
@@ -96,15 +96,17 @@ const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
  * a fresh analysis run.
  */
 let lastBaseParts: string[] = [];
+let lastChangedSinceScope: ChangedSinceScopeStatus | undefined;
 
-const applyStatusBarText = (parts: string[]): void => {
+const applyStatusBarText = (parts: string[], changedSinceScope?: ChangedSinceScopeStatus): void => {
   if (!statusBarItem) {
     return;
   }
   lastBaseParts = parts;
+  lastChangedSinceScope = changedSinceScope;
   const joined = parts.length > 0 ? `$(search) Fallow: ${parts.join(" | ")}` : "$(search) Fallow";
   const base = `${joined}${healthSuffix()}`;
-  statusBarItem.text = renderStatusBarText(base, liveChangedSince());
+  statusBarItem.text = renderStatusBarText(base, liveChangedSince(), changedSinceScope);
 };
 
 /**
@@ -120,7 +122,7 @@ export const updateStatusBarHealth = (report: HealthOutput | null): void => {
   }
   // Re-render against the cached analysis parts so the health segment appends
   // without clobbering the issue/duplication counts.
-  applyStatusBarText(lastBaseParts);
+  applyStatusBarText(lastBaseParts, lastChangedSinceScope);
 };
 
 export const setStatusBarAnalyzing = (): void => {
@@ -145,4 +147,5 @@ export const disposeStatusBar = (): void => {
   }
   healthPart = null;
   lastBaseParts = [];
+  lastChangedSinceScope = undefined;
 };

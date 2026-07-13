@@ -131,6 +131,55 @@ fn analysis_complete_params_collapses_boundary_subresults() {
 }
 
 #[test]
+fn analysis_complete_changed_since_scope_is_additive_and_structured() {
+    let results = AnalysisResults::default();
+    let duplication = DuplicationReport::default();
+    let legacy = analysis_complete_params_for_test(&results, &duplication);
+    let legacy_json = serde_json::to_value(&legacy).expect("legacy completion serializes");
+    assert!(
+        legacy_json.get("changedSinceScope").is_none(),
+        "omitted scope status must preserve the legacy payload"
+    );
+    let _: protocol::AnalysisCompleteParams =
+        serde_json::from_value(legacy_json).expect("legacy completion remains accepted");
+
+    let applied_status = protocol::ChangedSinceScopeStatus {
+        requested_ref: "origin/main".to_string(),
+        state: protocol::ChangedSinceScopeState::Applied,
+        reason: None,
+    };
+    let applied = protocol::analysis_complete_params_with_scope_for_test(
+        &results,
+        &duplication,
+        Some(&applied_status),
+    );
+    let applied_json = serde_json::to_value(applied).expect("applied completion serializes");
+    assert_eq!(
+        applied_json["changedSinceScope"]["requestedRef"],
+        "origin/main"
+    );
+    assert_eq!(applied_json["changedSinceScope"]["state"], "applied");
+    assert!(applied_json["changedSinceScope"].get("reason").is_none());
+
+    let dropped_status = protocol::ChangedSinceScopeStatus {
+        requested_ref: "missing-ref".to_string(),
+        state: protocol::ChangedSinceScopeState::Dropped,
+        reason: Some("git ref was not found".to_string()),
+    };
+    let dropped = protocol::analysis_complete_params_with_scope_for_test(
+        &results,
+        &duplication,
+        Some(&dropped_status),
+    );
+    let dropped_json = serde_json::to_value(dropped).expect("dropped completion serializes");
+    assert_eq!(dropped_json["changedSinceScope"]["state"], "dropped");
+    assert_eq!(
+        dropped_json["changedSinceScope"]["reason"],
+        "git ref was not found"
+    );
+}
+
+#[test]
 fn server_capabilities_keep_existing_providers() {
     let caps = build_server_capabilities(true);
     assert!(caps.text_document_sync.is_some());
@@ -1897,8 +1946,7 @@ fn git(root: &Path, args: &[&str]) {
     assert!(status.success(), "git command failed: {args:?}");
 }
 
-#[test]
-fn run_blocking_analysis_only_stamps_applied_changed_since_scope() {
+fn changed_since_fixture() -> tempfile::TempDir {
     let temp = tempfile::tempdir().expect("temp project");
     let root = temp.path();
     let src = root.join("src");
@@ -1924,24 +1972,53 @@ fn run_blocking_analysis_only_stamps_applied_changed_since_scope() {
     std::fs::write(src.join("changed.ts"), "export const changedUnused = 1;\n")
         .expect("changed source");
 
-    let output = run_blocking_analysis(&BlockingAnalysisInput {
+    temp
+}
+
+fn changed_since_input(
+    root: &Path,
+    changed_since: &str,
+    duplication_options: Option<LspDuplicationOptions>,
+) -> BlockingAnalysisInput {
+    BlockingAnalysisInput {
         project_roots: vec![root.to_path_buf()],
         config_path: None,
         allow_remote_extends: false,
-        duplication_options: Some(LspDuplicationOptions {
-            min_tokens: Some(1),
-            min_lines: Some(1),
-            ..LspDuplicationOptions::default()
-        }),
+        duplication_options,
         production_override: None,
         inline_complexity_enabled: false,
         root: root.to_path_buf(),
         toplevel: Some(root.to_path_buf()),
-        changed_since: Some("HEAD".to_string()),
-    })
+        changed_since: Some(changed_since.to_string()),
+    }
+}
+
+#[test]
+fn run_blocking_analysis_retains_applied_changed_since_scope() {
+    let temp = changed_since_fixture();
+    let root = temp.path();
+
+    let output = run_blocking_analysis(&changed_since_input(
+        root,
+        "HEAD",
+        Some(LspDuplicationOptions {
+            min_tokens: Some(1),
+            min_lines: Some(1),
+            ..LspDuplicationOptions::default()
+        }),
+    ))
     .expect("changed-since analysis succeeds");
 
     assert_eq!(output.applied_changed_since.as_deref(), Some("HEAD"));
+    assert_eq!(
+        output.changed_since_scope.as_ref(),
+        Some(&protocol::ChangedSinceScopeStatus {
+            requested_ref: "HEAD".to_string(),
+            state: protocol::ChangedSinceScopeState::Applied,
+            reason: None,
+        }),
+        "valid refs must retain applied scope for the completion notification"
+    );
     assert!(
         output
             .analysis
@@ -1965,19 +2042,17 @@ fn run_blocking_analysis_only_stamps_applied_changed_since_scope() {
             }),
         "changedSince must exclude clone groups that only touch unchanged files"
     );
+}
 
-    let invalid = run_blocking_analysis(&BlockingAnalysisInput {
-        project_roots: vec![root.to_path_buf()],
-        config_path: None,
-        allow_remote_extends: false,
-        duplication_options: None,
-        production_override: None,
-        inline_complexity_enabled: false,
-        root: root.to_path_buf(),
-        toplevel: Some(root.to_path_buf()),
-        changed_since: Some("definitely-not-a-ref".to_string()),
-    })
-    .expect("analysis with ignored changed-since ref succeeds");
+#[test]
+fn run_blocking_analysis_reports_dropped_changed_since_scope() {
+    let temp = changed_since_fixture();
+    let invalid = run_blocking_analysis(&changed_since_input(
+        temp.path(),
+        "definitely-not-a-ref",
+        None,
+    ))
+    .expect("analysis with dropped changed-since ref succeeds");
 
     assert!(
         invalid.applied_changed_since.is_none(),
@@ -1990,6 +2065,101 @@ fn run_blocking_analysis_only_stamps_applied_changed_since_scope() {
             .is_some_and(|(_, message)| message.contains("ignored")),
         "invalid refs should still report a warning message"
     );
+    assert!(
+        invalid
+            .analysis
+            .results
+            .unused_files
+            .iter()
+            .any(|finding| finding.file.path.ends_with("old.ts")),
+        "ignored changedSince refs must retain full-scope findings"
+    );
+    let completion = protocol::analysis_complete_params_with_scope_for_test(
+        &invalid.analysis.results,
+        &invalid.analysis.duplication,
+        invalid.changed_since_scope.as_ref(),
+    );
+    assert_eq!(
+        completion
+            .changed_since_scope
+            .as_ref()
+            .map(|status| status.state),
+        Some(protocol::ChangedSinceScopeState::Dropped),
+        "invalid refs must report dropped scope in the completion notification"
+    );
+    assert!(
+        completion
+            .changed_since_scope
+            .as_ref()
+            .and_then(|status| status.reason.as_deref())
+            .is_some_and(|reason| !reason.is_empty()),
+        "dropped scope must include a concise reason"
+    );
+    let reason = completion
+        .changed_since_scope
+        .as_ref()
+        .and_then(|status| status.reason.as_deref())
+        .expect("dropped scope reason");
+    assert_eq!(
+        reason.lines().count(),
+        1,
+        "scope reason must stay on one line"
+    );
+    assert!(
+        reason.chars().count() <= 160,
+        "scope reason must remain concise for editor tooltips"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn analysis_complete_notification_reports_dropped_changed_since_scope() {
+    use futures::StreamExt;
+
+    let temp = changed_since_fixture();
+    let root = temp.path();
+    let invalid = run_blocking_analysis(&changed_since_input(root, "definitely-not-a-ref", None))
+        .expect("analysis with dropped changed-since ref succeeds");
+
+    let full_scope_issue_count = invalid.analysis.results.total_issues();
+    let (mut service, socket) = LspService::build(FallowLspServer::new).finish();
+    let initialize = Request::build("initialize")
+        .params(json!({"capabilities": {}}))
+        .id(1)
+        .finish();
+    service
+        .ready()
+        .await
+        .expect("service ready")
+        .call(initialize)
+        .await
+        .expect("initialize call")
+        .expect("initialize response");
+
+    let backend = service.inner();
+    let mut socket = socket;
+    let receive_completion = async {
+        loop {
+            let next = tokio::time::timeout(Duration::from_millis(500), socket.next())
+                .await
+                .expect("analysisComplete notification must arrive within timeout")
+                .expect("ClientSocket stream ended before analysisComplete");
+            if next.method() == "fallow/analysisComplete" {
+                break next;
+            }
+        }
+    };
+    let version_snapshot = VersionSnapshot::default();
+    let apply_output = backend.apply_analysis_output(invalid, root, &version_snapshot);
+    let ((), notification) = tokio::join!(apply_output, receive_completion);
+    let params = notification
+        .params()
+        .expect("analysisComplete notification carries params");
+    assert_eq!(
+        params["changedSinceScope"]["requestedRef"],
+        "definitely-not-a-ref"
+    );
+    assert_eq!(params["changedSinceScope"]["state"], "dropped");
+    assert_eq!(params["totalIssues"], full_scope_issue_count);
 }
 
 #[test]

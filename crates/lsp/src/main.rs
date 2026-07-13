@@ -664,10 +664,10 @@ impl FallowLspServer {
         self.publish_collected_diagnostics(all_diagnostics, version_snapshot)
             .await;
 
-        let complete_params = analysis_complete_params(AnalysisCompleteInput::new(
-            &output.analysis.results,
-            &output.analysis.duplication,
-        ));
+        let complete_params = analysis_complete_params(
+            AnalysisCompleteInput::new(&output.analysis.results, &output.analysis.duplication)
+                .with_changed_since_scope(output.changed_since_scope.as_ref()),
+        );
         *self.analysis.write().await = Some(LspAnalysisSnapshot::new(
             output.analysis.results,
             output.analysis.duplication,

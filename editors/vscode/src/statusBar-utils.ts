@@ -2,6 +2,16 @@ import { countCheckIssues } from "./analysis-utils.js";
 import { escapeMarkdownText, normalizeInlineText } from "./markdown-utils.js";
 import type { FallowCheckResult, FallowDupesResult } from "./types.js";
 
+/** Whether the LSP server applied or dropped a requested changed-since scope. */
+export type ChangedSinceScopeState = "applied" | "dropped";
+
+/** Structured changed-since status reported by the LSP server. */
+export interface ChangedSinceScopeStatus {
+  readonly requestedRef: string;
+  readonly state: ChangedSinceScopeState;
+  readonly reason?: string;
+}
+
 export interface AnalysisCompleteParams {
   totalIssues: number;
   unusedFiles: number;
@@ -29,6 +39,7 @@ export interface AnalysisCompleteParams {
   misconfiguredDependencyOverrides: number;
   duplicationPercentage: number;
   cloneGroups: number;
+  changedSinceScope?: ChangedSinceScopeStatus;
 }
 
 /**
@@ -211,11 +222,20 @@ export const formatChangedSinceRefForStatusBar = (ref: string): string => {
  * Pure: takes the resolved ref so it can be unit-tested without a vscode
  * mock. Callers in `statusBar.ts` pass `getChangedSince()` or `null`.
  */
-export const renderStatusBarText = (base: string, changedSince: string | null): string => {
-  if (!changedSince) {
+export const renderStatusBarText = (
+  base: string,
+  changedSince: string | null,
+  scope?: ChangedSinceScopeStatus,
+): string => {
+  const requestedRef = scope?.requestedRef || changedSince;
+  if (!requestedRef) {
     return base;
   }
-  return `${base} (since ${formatChangedSinceRefForStatusBar(changedSince)})`;
+  const formattedRef = formatChangedSinceRefForStatusBar(requestedRef);
+  if (scope?.state === "dropped") {
+    return `${base} (since ${formattedRef}: scope dropped)`;
+  }
+  return `${base} (since ${formattedRef})`;
 };
 
 export const buildStatusBarTooltipMarkdown = (
@@ -225,8 +245,19 @@ export const buildStatusBarTooltipMarkdown = (
   const lines: string[] = ["**Fallow** - Analysis Results\n"];
   const duplicationPercentage = getDuplicationPercentage(params.duplicationPercentage);
 
-  if (changedSinceRef) {
-    lines.push(`$(git-branch) Scoped to changes since ${escapeMarkdownText(changedSinceRef)}`);
+  const scope = params.changedSinceScope;
+  if (scope?.state === "dropped") {
+    lines.push(
+      `$(warning) Scope since ${escapeMarkdownText(scope.requestedRef)} was dropped; results are full-scope.`,
+    );
+    if (scope.reason) {
+      lines.push(`Reason: ${escapeMarkdownText(scope.reason)}`);
+    }
+  } else {
+    const appliedRef = scope?.requestedRef || changedSinceRef;
+    if (appliedRef) {
+      lines.push(`$(git-branch) Scoped to changes since ${escapeMarkdownText(appliedRef)}`);
+    }
   }
 
   for (const line of BREAKDOWN_LINES) {

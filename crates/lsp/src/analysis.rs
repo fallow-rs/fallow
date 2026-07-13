@@ -10,7 +10,7 @@ use ls_types::MessageType;
 use rustc_hash::FxHashSet;
 
 use crate::initialization::LspDuplicationOptions;
-use crate::protocol::config_load_error_detail;
+use crate::protocol::{ChangedSinceScopeState, ChangedSinceScopeStatus, config_load_error_detail};
 
 /// Run dead-code + duplicates analysis for a single project root, appending
 /// findings to the merged accumulators and a status message to
@@ -47,6 +47,7 @@ pub struct BlockingAnalysisOutput {
     pub config_messages: Vec<(MessageType, String)>,
     pub changed_message: Option<(MessageType, String)>,
     pub applied_changed_since: Option<String>,
+    pub changed_since_scope: Option<ChangedSinceScopeStatus>,
 }
 
 #[derive(Debug)]
@@ -226,6 +227,7 @@ pub fn run_blocking_analysis(
         config_messages,
         changed_message: changed_scope.message,
         applied_changed_since: changed_scope.applied_ref,
+        changed_since_scope: changed_scope.status,
     })
 }
 
@@ -250,6 +252,23 @@ struct ChangedSinceScope {
     files: Option<FxHashSet<PathBuf>>,
     message: Option<(MessageType, String)>,
     applied_ref: Option<String>,
+    status: Option<ChangedSinceScopeStatus>,
+}
+
+const MAX_CHANGED_SINCE_REASON_CHARS: usize = 160;
+
+fn concise_changed_since_reason(raw: &str) -> String {
+    let normalized = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.chars().count() <= MAX_CHANGED_SINCE_REASON_CHARS {
+        return normalized;
+    }
+
+    let mut truncated = normalized
+        .chars()
+        .take(MAX_CHANGED_SINCE_REASON_CHARS - 3)
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 fn resolve_changed_since_scope(
@@ -262,6 +281,7 @@ fn resolve_changed_since_scope(
             files: None,
             message: None,
             applied_ref: None,
+            status: None,
         };
     };
 
@@ -271,22 +291,35 @@ fn resolve_changed_since_scope(
             ChangedSinceScope {
                 files: Some(changed),
                 applied_ref: Some(git_ref.to_string()),
+                status: Some(ChangedSinceScopeStatus {
+                    requested_ref: git_ref.to_string(),
+                    state: ChangedSinceScopeState::Applied,
+                    reason: None,
+                }),
                 message: Some((
                     MessageType::INFO,
                     format!("changedSince '{git_ref}': scoped to {count} changed file(s)"),
                 )),
             }
         }
-        Err(err) => ChangedSinceScope {
-            files: None,
-            applied_ref: None,
-            message: Some((
-                MessageType::WARNING,
-                format!(
-                    "changedSince '{git_ref}' ignored: {} (showing full-scope results)",
-                    err.describe()
-                ),
-            )),
-        },
+        Err(err) => {
+            let message_reason = err.describe();
+            let reason = concise_changed_since_reason(&message_reason);
+            ChangedSinceScope {
+                files: None,
+                applied_ref: None,
+                status: Some(ChangedSinceScopeStatus {
+                    requested_ref: git_ref.to_string(),
+                    state: ChangedSinceScopeState::Dropped,
+                    reason: Some(reason),
+                }),
+                message: Some((
+                    MessageType::WARNING,
+                    format!(
+                        "changedSince '{git_ref}' ignored: {message_reason} (showing full-scope results)"
+                    ),
+                )),
+            }
+        }
     }
 }

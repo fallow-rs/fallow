@@ -17,6 +17,29 @@ impl notification::Notification for AnalysisComplete {
     const METHOD: &'static str = "fallow/analysisComplete";
 }
 
+/// Whether the server applied or dropped the requested changed-since scope.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangedSinceScopeState {
+    /// Analysis findings were filtered to the requested ref.
+    Applied,
+    /// Analysis fell back to full scope because the requested ref was unusable.
+    Dropped,
+}
+
+/// Structured status for a requested changed-since scope.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedSinceScopeStatus {
+    /// Git ref requested by the client.
+    pub requested_ref: String,
+    /// Whether the server applied or dropped the scope.
+    pub state: ChangedSinceScopeState,
+    /// Concise explanation when the scope was dropped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisCompleteParams {
@@ -57,12 +80,15 @@ pub struct AnalysisCompleteParams {
     pub misconfigured_dependency_overrides: usize,
     pub duplication_percentage: f64,
     pub clone_groups: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed_since_scope: Option<ChangedSinceScopeStatus>,
 }
 
 #[derive(Clone, Copy)]
 pub struct AnalysisCompleteInput<'a> {
     results: &'a AnalysisResults,
     duplication: &'a DuplicationReport,
+    changed_since_scope: Option<&'a ChangedSinceScopeStatus>,
 }
 
 impl<'a> AnalysisCompleteInput<'a> {
@@ -70,7 +96,16 @@ impl<'a> AnalysisCompleteInput<'a> {
         Self {
             results,
             duplication,
+            changed_since_scope: None,
         }
+    }
+
+    pub const fn with_changed_since_scope(
+        mut self,
+        changed_since_scope: Option<&'a ChangedSinceScopeStatus>,
+    ) -> Self {
+        self.changed_since_scope = changed_since_scope;
+        self
     }
 }
 
@@ -78,6 +113,7 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
     let AnalysisCompleteInput {
         results,
         duplication,
+        changed_since_scope,
     } = input;
     let boundary_violations = results.boundary_violations.len()
         + results.boundary_coverage_violations.len()
@@ -120,6 +156,7 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
         misconfigured_dependency_overrides: results.misconfigured_dependency_overrides.len(),
         duplication_percentage: duplication.stats.duplication_percentage,
         clone_groups: duplication.stats.clone_groups,
+        changed_since_scope: changed_since_scope.cloned(),
     }
 }
 
@@ -129,6 +166,18 @@ pub fn analysis_complete_params_for_test(
     duplication: &DuplicationReport,
 ) -> AnalysisCompleteParams {
     analysis_complete_params(AnalysisCompleteInput::new(results, duplication))
+}
+
+#[cfg(test)]
+pub fn analysis_complete_params_with_scope_for_test(
+    results: &AnalysisResults,
+    duplication: &DuplicationReport,
+    changed_since_scope: Option<&ChangedSinceScopeStatus>,
+) -> AnalysisCompleteParams {
+    analysis_complete_params(
+        AnalysisCompleteInput::new(results, duplication)
+            .with_changed_since_scope(changed_since_scope),
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
