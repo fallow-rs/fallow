@@ -107,6 +107,44 @@ export const findLocalBinary = (name: string): string | null => {
 };
 
 /**
+ * The resolved LSP server invocation: a directly-spawnable `command` plus any
+ * leading `args`. Older platform packages shipped a standalone `fallow-lsp`
+ * (`args: []`); the current single-binary packages ship only the multicall
+ * `fallow`, which serves the LSP as `fallow lsp-server` (`args: ["lsp-server"]`).
+ */
+export type ResolvedLspBinary = { readonly command: string; readonly args: readonly string[] };
+
+/**
+ * Resolve the LSP server from the workspace's `node_modules` platform package,
+ * preferring a real `fallow-lsp` binary and falling back to the multicall
+ * `fallow lsp-server` when the package ships only the bundled `fallow`. The
+ * Unix `.bin/fallow-lsp` launcher shim (which itself spawns `fallow lsp-server`)
+ * is the last resort. Returns null when nothing spawnable is installed.
+ *
+ * This is the only resolution path that produces the multicall form; configured
+ * paths, PATH lookups, and the GitHub auto-download still point at real
+ * `fallow-lsp` binaries, so old and new installs coexist.
+ */
+export const findLocalLspBinary = (): ResolvedLspBinary | null => {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) {
+    return null;
+  }
+  const nodeModules = path.join(folders[0].uri.fsPath, "node_modules");
+
+  const lsp = findNativeInNodeModules(nodeModules, "fallow-lsp");
+  if (lsp) {
+    return { command: lsp, args: [] };
+  }
+  const multicall = findNativeInNodeModules(nodeModules, "fallow");
+  if (multicall) {
+    return { command: multicall, args: ["lsp-server"] };
+  }
+  const shim = findBinShim(path.join(nodeModules, ".bin"), "fallow-lsp");
+  return shim ? { command: shim, args: [] } : null;
+};
+
+/**
  * Candidate file names to probe for `name` on a PATH directory, most-specific
  * first. On Windows a global `npm i -g fallow` puts `<name>.exe` (rare) or the
  * `<name>.cmd` / `<name>.ps1` launcher shims on PATH; a Cargo/Homebrew/manual

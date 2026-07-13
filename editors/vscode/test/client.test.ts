@@ -104,7 +104,10 @@ vi.mock("vscode-languageclient/node", () => ({
 }));
 
 vi.mock("../src/binary-utils.js", () => ({
-  findLocalBinary: () => mockBinaryResolution.localBinary,
+  findLocalLspBinary: () =>
+    mockBinaryResolution.localBinary
+      ? { command: mockBinaryResolution.localBinary, args: [] }
+      : null,
   findBinaryInPath: () => mockBinaryResolution.pathBinary,
   resolveConfiguredBinaryPath: (configured: string) => mockBinaryResolution.configuredBinary ?? configured,
 }));

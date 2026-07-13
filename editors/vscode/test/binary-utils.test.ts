@@ -55,6 +55,7 @@ import * as vscode from "vscode";
 import {
   findBinaryInPath,
   findLocalBinary,
+  findLocalLspBinary,
   findNativeInNodeModules,
   getExecutableExtension,
   platformPackageNames,
@@ -213,6 +214,65 @@ describe("findLocalBinary - unix", () => {
     mockExistsSync = (p) => p === musl;
 
     expect(findLocalBinary("fallow")).toBe(musl);
+  });
+});
+
+describe("findLocalLspBinary", () => {
+  beforeEach(() => {
+    mockPlatform = "linux";
+    mockArch = "x64";
+    setWorkspace("/workspace/project");
+  });
+
+  it("prefers a real fallow-lsp binary when present (no args)", () => {
+    const lsp = nativePath("/workspace/project", "@fallow-cli/linux-x64-gnu", "fallow-lsp", "");
+    mockExistsSync = (p) => p === lsp;
+
+    expect(findLocalLspBinary()).toEqual({ command: lsp, args: [] });
+  });
+
+  it("falls back to the multicall fallow binary as `fallow lsp-server`", () => {
+    // Single-binary platform package: only `fallow` is present, so the LSP is
+    // served by the multicall subcommand.
+    const fallow = nativePath("/workspace/project", "@fallow-cli/linux-x64-gnu", "fallow", "");
+    mockExistsSync = (p) => p === fallow;
+
+    expect(findLocalLspBinary()).toEqual({ command: fallow, args: ["lsp-server"] });
+  });
+
+  it("prefers a real fallow-lsp over the multicall form when both exist", () => {
+    const lsp = nativePath("/workspace/project", "@fallow-cli/linux-x64-gnu", "fallow-lsp", "");
+    const fallow = nativePath("/workspace/project", "@fallow-cli/linux-x64-gnu", "fallow", "");
+    mockExistsSync = (p) => p === lsp || p === fallow;
+
+    expect(findLocalLspBinary()).toEqual({ command: lsp, args: [] });
+  });
+
+  it("falls back to the extensionless .bin shim (spawnable on unix) with no args", () => {
+    const shim = path().join("/workspace/project", "node_modules", ".bin", "fallow-lsp");
+    mockExistsSync = (p) => p === shim;
+
+    expect(findLocalLspBinary()).toEqual({ command: shim, args: [] });
+  });
+
+  it("resolves the multicall fallow on win32 as fallow.exe lsp-server", () => {
+    mockPlatform = "win32";
+    setWorkspace("C:\\project");
+    const fallow = nativePath("C:\\project", "@fallow-cli/win32-x64-msvc", "fallow", ".exe");
+    mockExistsSync = (p) => p === fallow;
+
+    expect(findLocalLspBinary()).toEqual({ command: fallow, args: ["lsp-server"] });
+  });
+
+  it("returns null when nothing is installed", () => {
+    mockExistsSync = () => false;
+    expect(findLocalLspBinary()).toBeNull();
+  });
+
+  it("returns null when no workspace folder is open", () => {
+    setWorkspace(null);
+    mockExistsSync = () => true;
+    expect(findLocalLspBinary()).toBeNull();
   });
 });
 

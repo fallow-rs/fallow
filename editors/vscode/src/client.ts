@@ -30,7 +30,12 @@ import {
   getMutedDiagnosticCategories,
 } from "./config.js";
 import { showBinarySkewToastOnce } from "./binary-skew.js";
-import { findBinaryInPath, findLocalBinary, resolveConfiguredBinaryPath } from "./binary-utils.js";
+import {
+  findBinaryInPath,
+  findLocalLspBinary,
+  resolveConfiguredBinaryPath,
+  type ResolvedLspBinary,
+} from "./binary-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
 // fallow-ignore-next-line unresolved-import
 import type { LspInitializationOptions } from "./generated/lsp-initialization-options.js";
@@ -91,10 +96,13 @@ const warnIfVersionMismatch = async (
   }
 };
 
+/** Wrap a bare, directly-spawnable binary path as a zero-arg LSP invocation. */
+const bareLsp = (command: string): ResolvedLspBinary => ({ command, args: [] });
+
 const resolveBinaryPath = async (
   context: vscode.ExtensionContext,
   outputChannel?: vscode.OutputChannel,
-): Promise<string | null> => {
+): Promise<ResolvedLspBinary | null> => {
   const configPath = getLspPath();
   if (configPath) {
     // Honor `fallow.lspPath` as the user typed it, tolerating a missing Windows
@@ -103,7 +111,7 @@ const resolveBinaryPath = async (
     const resolved = resolveConfiguredBinaryPath(configPath, "fallow-lsp");
     if (resolved) {
       outputChannel?.appendLine(`Binary resolution: using fallow.lspPath setting: ${resolved}`);
-      return resolved;
+      return bareLsp(resolved);
     }
     void vscode.window.showWarningMessage(
       `Fallow: configured LSP path "${configPath}" does not point to a fallow-lsp binary.`,
@@ -111,12 +119,17 @@ const resolveBinaryPath = async (
     return null;
   }
 
-  const local = findLocalBinary("fallow-lsp");
+  // The only branch that can produce the multicall `fallow lsp-server` form,
+  // when the workspace platform package ships the single bundled binary.
+  const local = findLocalLspBinary();
   if (local) {
-    outputChannel?.appendLine(`Binary resolution: using local node_modules/.bin: ${local}`);
+    const suffix = local.args.length > 0 ? ` ${local.args.join(" ")}` : "";
+    outputChannel?.appendLine(
+      `Binary resolution: using local node_modules: ${local.command}${suffix}`,
+    );
     return local;
   }
-  outputChannel?.appendLine("Binary resolution: no local node_modules/.bin/fallow-lsp found");
+  outputChannel?.appendLine("Binary resolution: no local node_modules fallow-lsp found");
 
   const inPath = findBinaryInPath("fallow-lsp");
   if (inPath) {
@@ -124,7 +137,7 @@ const resolveBinaryPath = async (
     // Fire-and-forget: the skew toast must not block binary resolution on the
     // up-to-5s `--version` spawn (the reason getBinaryVersion is async).
     void warnIfVersionMismatch(inPath, outputChannel);
-    return inPath;
+    return bareLsp(inPath);
   }
   outputChannel?.appendLine("Binary resolution: fallow-lsp not found in PATH");
 
@@ -133,11 +146,12 @@ const resolveBinaryPath = async (
     outputChannel?.appendLine(
       `Binary resolution: using previously downloaded binary: ${installed}`,
     );
-    return installed;
+    return bareLsp(installed);
   }
 
   if (getAutoDownload()) {
-    return downloadBinary(context);
+    const downloaded = await downloadBinary(context);
+    return downloaded ? bareLsp(downloaded) : null;
   }
 
   const choice = await vscode.window.showErrorMessage(
@@ -148,7 +162,8 @@ const resolveBinaryPath = async (
   );
 
   if (choice === "Download") {
-    return downloadBinary(context);
+    const downloaded = await downloadBinary(context);
+    return downloaded ? bareLsp(downloaded) : null;
   }
 
   if (choice === "Set Path") {
@@ -251,15 +266,18 @@ export const startClient = async (
   diagnosticFilter?: DiagnosticFilter,
   onAnalysisComplete?: (params: AnalysisCompleteParams) => void,
 ): Promise<LanguageClient | null> => {
-  const binaryPath = await resolveBinaryPath(context, outputChannel);
-  if (!binaryPath) {
+  const resolved = await resolveBinaryPath(context, outputChannel);
+  if (!resolved) {
     return null;
   }
 
-  outputChannel.appendLine(`Using fallow-lsp binary: ${binaryPath}`);
+  const invocation =
+    resolved.args.length > 0 ? `${resolved.command} ${resolved.args.join(" ")}` : resolved.command;
+  outputChannel.appendLine(`Using fallow-lsp binary: ${invocation}`);
 
   const serverOptions: ServerOptions = {
-    command: binaryPath,
+    command: resolved.command,
+    args: [...resolved.args],
     transport: TransportKind.stdio,
   };
 
