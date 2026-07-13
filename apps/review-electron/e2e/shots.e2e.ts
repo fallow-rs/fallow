@@ -1,6 +1,7 @@
 import { test, _electron as electron, type ElectronApplication } from "@playwright/test";
 import { chmodSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { ensureReviewStarted } from "./review";
 
 const appDir = resolve(__dirname, "..");
 const worktreeRoot = resolve(appDir, "..", "..");
@@ -27,7 +28,7 @@ test("capture screens for design QA", async () => {
   });
   const win = await app.firstWindow();
 
-  await win.getByRole("button", { name: "Load review" }).click();
+  await ensureReviewStarted(win);
   await safe(async () => {
     // The real review takes a beat; capture the loading state before it resolves.
     await win.getByText(/running fallow review/).waitFor({ timeout: 3000 });
@@ -156,7 +157,7 @@ test("capture the review error state", async () => {
   });
   const win = await app.firstWindow();
   await safe(async () => {
-    await win.getByRole("button", { name: "Load review" }).click();
+    await ensureReviewStarted(win, { allowError: true });
     await win.getByTestId("review-error").waitFor({ timeout: 30_000 });
     await win.screenshot({ path: `${shots}/13-review-error.png` });
   });
@@ -177,7 +178,7 @@ test("capture the decision surface", async () => {
   });
   const win = await app.firstWindow();
   await safe(async () => {
-    await win.getByRole("button", { name: "Load review" }).click();
+    await ensureReviewStarted(win);
     await win.getByTestId("review-loaded").waitFor({ timeout: 60_000 });
     await win.screenshot({ path: `${shots}/17-decisions.png` });
   });
