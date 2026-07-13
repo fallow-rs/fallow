@@ -20,6 +20,7 @@ pub const MAX_ADDED_LINES: usize = 1_000_000;
 #[derive(Debug, Default, Clone)]
 pub struct DiffIndex {
     added_lines: FxHashMap<String, FxHashSet<u64>>,
+    changed_paths: FxHashSet<String>,
     touched_files: FxHashSet<String>,
     added_line_count: usize,
     total_added_lines: usize,
@@ -69,6 +70,7 @@ impl DiffIndex {
         if let Some(rest) = line.strip_prefix("rename to ") {
             if let Some(from) = state.pending_rename_from.take() {
                 self.rename_pairs.insert(rest.to_owned(), from);
+                self.changed_paths.insert(rest.to_owned());
                 self.touched_files.insert(rest.to_owned());
             }
             return true;
@@ -84,13 +86,14 @@ impl DiffIndex {
         if let Some(path) = line.strip_prefix("+++ b/") {
             state.pending_old_path = None;
             state.current_file = Some(path.to_string());
+            self.changed_paths.insert(path.to_string());
             self.touched_files.insert(path.to_string());
             return true;
         }
         if line.starts_with("+++ /dev/null") {
             state.current_file = state.pending_old_path.take();
             if let Some(path) = state.current_file.as_ref() {
-                self.touched_files.insert(path.clone());
+                self.changed_paths.insert(path.clone());
             }
             return true;
         }
@@ -150,6 +153,18 @@ impl DiffIndex {
         added.saturating_sub(removed)
     }
 
+    /// Whether this diff changes the path, including when the path is deleted.
+    #[must_use]
+    pub fn changes_path(&self, path: &str) -> bool {
+        self.changed_paths.contains(path)
+    }
+
+    /// Paths changed by the diff, using the old path for deleted files.
+    pub fn changed_paths(&self) -> impl Iterator<Item = &str> {
+        self.changed_paths.iter().map(String::as_str)
+    }
+
+    /// Whether this diff touches an analyzable path in the head tree.
     #[must_use]
     pub fn touches_file(&self, path: &str) -> bool {
         self.touched_files.contains(path)
@@ -339,6 +354,7 @@ diff --git a/src/a.ts b/src/a.ts
 
         assert_eq!(index.hunk_count(), 2);
         assert_eq!(index.net_lines(), 0);
+        assert!(index.changes_path("src/a.ts"));
         assert!(index.touches_file("src/a.ts"));
     }
 
@@ -354,6 +370,7 @@ rename to src/new.ts
 
         assert_eq!(index.hunk_count(), 0);
         assert_eq!(index.net_lines(), 0);
+        assert!(index.changes_path("src/new.ts"));
         assert!(index.touches_file("src/new.ts"));
     }
 
@@ -400,7 +417,7 @@ rename to src/new.ts
     }
 
     #[test]
-    fn delete_only_diff_records_removal_and_touched_file() {
+    fn delete_only_diff_records_removal_without_touching_head_file() {
         let diff = "\
 diff --git a/src/a.ts b/src/a.ts
 --- a/src/a.ts
@@ -412,7 +429,8 @@ diff --git a/src/a.ts b/src/a.ts
         assert_eq!(index.added_line_count(), 0);
         assert_eq!(index.hunk_count(), 1);
         assert_eq!(index.net_lines(), -1);
-        assert!(index.touches_file("src/a.ts"));
+        assert!(index.changes_path("src/a.ts"));
+        assert!(!index.touches_file("src/a.ts"));
     }
 
     #[test]

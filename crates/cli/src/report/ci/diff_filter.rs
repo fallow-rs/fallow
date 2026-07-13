@@ -879,7 +879,7 @@ diff --git a/b b/b
     }
 
     #[test]
-    fn delete_only_diff_records_removals_and_touched_file() {
+    fn delete_only_diff_records_removals_without_touching_head_file() {
         let diff = "\
 diff --git a/dead.ts b/dead.ts
 deleted file mode 100644
@@ -894,7 +894,8 @@ deleted file mode 100644
         assert_eq!(index.added_line_count(), 0);
         assert_eq!(index.hunk_count(), 1);
         assert_eq!(index.net_lines(), -3);
-        assert!(index.touches_file("dead.ts"));
+        assert!(index.changes_path("dead.ts"));
+        assert!(!index.touches_file("dead.ts"));
         assert!(!index.range_overlaps_added("dead.ts", 1, 3));
     }
 
