@@ -15,10 +15,6 @@
   ],
   "files": [
     "fallow",
-    "fallow.sig",
-    "fallow-lsp",
-    "fallow-lsp.sig",
-    "fallow-mcp",
-    "fallow-mcp.sig"
+    "fallow.sig"
   ]
 }

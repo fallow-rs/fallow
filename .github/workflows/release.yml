@@ -111,12 +111,14 @@ jobs:
           - target: x86_64-apple-darwin
             os: macos-latest
             binary: fallow
+            multicall_binary: fallow-multicall
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: darwin-x64
           - target: aarch64-apple-darwin
             os: macos-latest
             binary: fallow
+            multicall_binary: fallow-multicall
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: darwin-arm64
@@ -124,6 +126,7 @@ jobs:
             os: ubuntu-latest
             container: rust:1.95-bullseye
             binary: fallow
+            multicall_binary: fallow-multicall
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: linux-x64-gnu
@@ -131,30 +134,35 @@ jobs:
             os: ubuntu-latest
             container: rust:1.95-bullseye
             binary: fallow
+            multicall_binary: fallow-multicall
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: linux-arm64-gnu
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             binary: fallow
+            multicall_binary: fallow-multicall
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: linux-x64-musl
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             binary: fallow
+            multicall_binary: fallow-multicall
             lsp_binary: fallow-lsp
             mcp_binary: fallow-mcp
             npm_dir: linux-arm64-musl
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             binary: fallow.exe
+            multicall_binary: fallow-multicall.exe
             lsp_binary: fallow-lsp.exe
             mcp_binary: fallow-mcp.exe
             npm_dir: win32-x64-msvc
           - target: aarch64-pc-windows-msvc
             os: windows-11-arm
             binary: fallow.exe
+            multicall_binary: fallow-multicall.exe
             lsp_binary: fallow-lsp.exe
             mcp_binary: fallow-mcp.exe
             npm_dir: win32-arm64-msvc
@@ -230,6 +238,23 @@ jobs:
         if: matrix.target == 'aarch64-unknown-linux-musl'
         run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-mcp
 
+      # The multicall binary bundles the CLI plus the LSP and MCP server libs
+      # into the single `fallow` binary the npm platform packages ship. Because
+      # it links the MCP lib, it pulls rquickjs (QuickJS, C) exactly like the
+      # standalone MCP binary, so the aarch64-musl leg needs cargo-zigbuild for
+      # the same reason (the glibc cross-gcc cannot link C into a musl binary).
+      # Every other target keeps the plain cargo build.
+      - name: Build multicall release binary
+        if: matrix.target != 'aarch64-unknown-linux-musl'
+        run: cargo build --release --target ${{ matrix.target }} -p fallow-multicall
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Build multicall release binary (aarch64-musl, QuickJS C via zig)
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p fallow-multicall
+
       - name: Install NAPI package dependencies
         run: cd crates/napi && npm ci --omit=optional --ignore-scripts
 
@@ -277,6 +302,7 @@ jobs:
           }
 
           check_glibc_floor "target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          check_glibc_floor "target/${{ matrix.target }}/release/${{ matrix.multicall_binary }}"
           check_glibc_floor "target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}"
           check_glibc_floor "target/${{ matrix.target }}/release/${{ matrix.mcp_binary }}"
           check_glibc_floor "crates/napi/fallow-node.${{ matrix.npm_dir }}.node"
@@ -299,17 +325,24 @@ jobs:
           name: fallow-${{ matrix.target }}
           path: fallow-${{ matrix.target }}.*
 
-      - name: Rename CLI, LSP, and MCP binaries with target identifier (unix)
+      # `fallow-<npm_dir>` (standalone CLI), `fallow-lsp-<npm_dir>`, and
+      # `fallow-mcp-<npm_dir>` are the per-platform signed GitHub release assets
+      # (unchanged). `fallow-multicall-<npm_dir>` is the bundled binary the npm
+      # platform packages ship (as `fallow`); it is signed alongside the others
+      # below and staged into the npm payload, but is NOT a GitHub release asset.
+      - name: Rename CLI, LSP, MCP, and multicall binaries with target identifier (unix)
         if: runner.os != 'Windows'
         run: |
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} fallow-${{ matrix.npm_dir }}
+          cp target/${{ matrix.target }}/release/${{ matrix.multicall_binary }} fallow-multicall-${{ matrix.npm_dir }}
           cp target/${{ matrix.target }}/release/${{ matrix.lsp_binary }} fallow-lsp-${{ matrix.npm_dir }}
           cp target/${{ matrix.target }}/release/${{ matrix.mcp_binary }} fallow-mcp-${{ matrix.npm_dir }}
 
-      - name: Rename CLI, LSP, and MCP binaries with target identifier (windows)
+      - name: Rename CLI, LSP, MCP, and multicall binaries with target identifier (windows)
         if: runner.os == 'Windows'
         run: |
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} fallow-${{ matrix.npm_dir }}.exe
+          cp target/${{ matrix.target }}/release/${{ matrix.multicall_binary }} fallow-multicall-${{ matrix.npm_dir }}.exe
           cp target/${{ matrix.target }}/release/${{ matrix.lsp_binary }} fallow-lsp-${{ matrix.npm_dir }}.exe
           cp target/${{ matrix.target }}/release/${{ matrix.mcp_binary }} fallow-mcp-${{ matrix.npm_dir }}.exe
 
@@ -326,6 +359,7 @@ jobs:
 
           for bin in \
             "fallow-${{ matrix.npm_dir }}${ext}" \
+            "fallow-multicall-${{ matrix.npm_dir }}${ext}" \
             "fallow-lsp-${{ matrix.npm_dir }}${ext}" \
             "fallow-mcp-${{ matrix.npm_dir }}${ext}"
           do
@@ -333,22 +367,26 @@ jobs:
             node .github/scripts/verify-binary.mjs "$bin" "${bin}.sig"
           done
 
-      # Stage signatures next to the release binaries so the "Upload npm binary"
-      # step below carries them into the npm-<platform> artifact alongside each
-      # binary. The platform packages then ship `<binary>.sig` next to each
-      # `<binary>`, which lets `npm/fallow/scripts/postinstall.js` and the
-      # GitHub Action installer verify Ed25519 signatures before they
-      # cross-check SHA-256 against the GitHub Release asset digest. Refs #465.
-      - name: Stage signatures next to release binaries (for npm packaging)
+      # The npm platform packages ship ONE binary: the multicall `fallow`
+      # (CLI + LSP + MCP linked into a single engine). Stage it plus its
+      # signature under the package's `fallow(.exe)` name so the "Upload npm
+      # binary" step carries exactly those two files into the npm-<platform>
+      # artifact, which `npm-prep` copies into `@fallow-cli/<platform>/`. The
+      # standalone per-binary GitHub release assets (`fallow-<npm_dir>`,
+      # `fallow-lsp-<npm_dir>`, `fallow-mcp-<npm_dir>`) are uploaded separately
+      # above and are unchanged. `npm/fallow/scripts/verify-binary.js` and the
+      # GitHub Action installer verify the Ed25519 signature, then cross-check
+      # SHA-256 against the release asset digest. Refs #465.
+      - name: Stage npm platform payload (multicall binary as fallow)
         shell: bash
         run: |
           ext=""
           if [ "${{ runner.os }}" = "Windows" ]; then
             ext=".exe"
           fi
-          cp "fallow-${{ matrix.npm_dir }}${ext}.sig"     "target/${{ matrix.target }}/release/${{ matrix.binary }}.sig"
-          cp "fallow-lsp-${{ matrix.npm_dir }}${ext}.sig" "target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}.sig"
-          cp "fallow-mcp-${{ matrix.npm_dir }}${ext}.sig" "target/${{ matrix.target }}/release/${{ matrix.mcp_binary }}.sig"
+          mkdir -p npm-payload
+          cp "fallow-multicall-${{ matrix.npm_dir }}${ext}"     "npm-payload/fallow${ext}"
+          cp "fallow-multicall-${{ matrix.npm_dir }}${ext}.sig" "npm-payload/fallow${ext}.sig"
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -379,12 +417,8 @@ jobs:
         with:
           name: npm-${{ matrix.npm_dir }}
           path: |
-            target/${{ matrix.target }}/release/${{ matrix.binary }}
-            target/${{ matrix.target }}/release/${{ matrix.binary }}.sig
-            target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}
-            target/${{ matrix.target }}/release/${{ matrix.lsp_binary }}.sig
-            target/${{ matrix.target }}/release/${{ matrix.mcp_binary }}
-            target/${{ matrix.target }}/release/${{ matrix.mcp_binary }}.sig
+            npm-payload/fallow${{ runner.os == 'Windows' && '.exe' || '' }}
+            npm-payload/fallow${{ runner.os == 'Windows' && '.exe' || '' }}.sig
 
       - name: Upload NAPI addon
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -583,7 +617,10 @@ jobs:
 
       - name: Set binary permissions
         run: |
-          for bin in npm/*/fallow npm/*/fallow-lsp npm/*/fallow-mcp; do
+          # Platform packages now ship a single multicall `fallow` binary; the
+          # bundled lsp/mcp launcher shims in the wrapper spawn it. Windows
+          # `fallow.exe` needs no +x bit.
+          for bin in npm/*/fallow; do
             [ -f "$bin" ] && chmod +x "$bin"
           done
 

@@ -146,7 +146,15 @@ function guardBrokenStdout() {
   });
 }
 
-function runBinary(binaryBaseName) {
+// Run the resolved platform binary. `options.prependArgs` (default none) is a
+// list of leading arguments inserted before the process argv, used by the
+// `fallow-lsp` / `fallow-mcp` launcher shims to spawn the multicall binary as
+// `fallow lsp-server` / `fallow mcp-server`. Because the platform packages ship
+// a single `fallow` binary, those shims pass `binaryBaseName = "fallow"` and
+// the subcommand via `prependArgs`; signal, exit-code, and version-line
+// handling stay identical to a bare `fallow` invocation.
+function runBinary(binaryBaseName, options = {}) {
+  const prependArgs = Array.isArray(options.prependArgs) ? options.prependArgs : [];
   guardBrokenStdout();
   const { pkg, manifestPath, platformPkgDir } = resolvePlatformPaths();
   const resolvedVersion = readResolvedVersion(manifestPath);
@@ -166,7 +174,7 @@ function runBinary(binaryBaseName) {
   }
 
   try {
-    execFileSync(binaryPath, process.argv.slice(2), { stdio: "inherit" });
+    execFileSync(binaryPath, [...prependArgs, ...process.argv.slice(2)], { stdio: "inherit" });
   } catch (e) {
     if (e.status === undefined) throw e;
     if (e.status === null) {

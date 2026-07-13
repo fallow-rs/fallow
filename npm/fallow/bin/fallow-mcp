@@ -1,4 +1,7 @@
 #!/usr/bin/env node
 
+// Launcher shim: the platform packages ship a single multicall `fallow`
+// binary, so `fallow-mcp` spawns `fallow mcp-server` with the same stdio,
+// signal, and exit-code forwarding as a bare `fallow` invocation.
 const { runBinary } = require('../scripts/run-binary');
-runBinary('fallow-mcp');
+runBinary('fallow', { prependArgs: ['mcp-server'] });

@@ -293,11 +293,15 @@ function binaryTargetsForPlatform(platformId) {
   // and tests can synthesize a Windows verify without running on Windows.
   const isWindows = typeof platformId === "string" && platformId.startsWith("win32");
   const ext = isWindows ? ".exe" : "";
-  return [
-    { binary: `fallow${ext}`, asset: `fallow-${platformId}${ext}` },
-    { binary: `fallow-lsp${ext}`, asset: `fallow-lsp-${platformId}${ext}` },
-    { binary: `fallow-mcp${ext}`, asset: `fallow-mcp-${platformId}${ext}` },
-  ];
+  // Platform packages ship ONE binary now: the multicall `fallow` (CLI + LSP +
+  // MCP in one engine). The bundled `fallow-lsp` / `fallow-mcp` launchers live
+  // in the wrapper and spawn `fallow lsp-server` / `fallow mcp-server`. The
+  // authoritative digest is the `fallowDigests.fallow` field the release
+  // pipeline embeds for every bundled package; the `asset` below is only the
+  // legacy GitHub-release fallback for pre-embedded-digest packages, which
+  // never shipped this bundled binary, so it is inert for bundled installs and
+  // fails closed (digest-mismatch) in the impossible case it is ever reached.
+  return [{ binary: `fallow${ext}`, asset: `fallow-${platformId}${ext}` }];
 }
 
 function isSkipRequested() {

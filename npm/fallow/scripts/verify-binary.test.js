@@ -243,7 +243,7 @@ function makePlatformDir(privateKey, options) {
   const opts = options || {};
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vbtest-"));
   const ext = process.platform === "win32" ? ".exe" : "";
-  for (const base of ["fallow", "fallow-lsp", "fallow-mcp"]) {
+  for (const base of ["fallow"]) {
     const binaryPath = path.join(dir, `${base}${ext}`);
     const content = Buffer.from(`mock ${base} contents`);
     fs.writeFileSync(binaryPath, content);
@@ -349,7 +349,7 @@ test("verifyInstalled resolves a global npm install from the fallow package dire
   );
 
   const ext = process.platform === "win32" ? ".exe" : "";
-  for (const base of ["fallow", "fallow-lsp", "fallow-mcp"]) {
+  for (const base of ["fallow"]) {
     const binaryPath = path.join(platformDir, `${base}${ext}`);
     const content = Buffer.from(`global install ${base}`);
     fs.writeFileSync(binaryPath, content);
@@ -367,9 +367,9 @@ test("verifyInstalled resolves a global npm install from the fallow package dire
   assert.equal(result.version, "9.9.9");
 });
 
-test("verifyInstalled with dirOverride fails fast on the first bad signature", async (t) => {
+test("verifyInstalled with dirOverride fails on a bad signature", async (t) => {
   const { privateKey, rawPub } = makeKeypair();
-  const dir = makePlatformDir(privateKey, { corruptSigFor: "fallow-lsp" });
+  const dir = makePlatformDir(privateKey, { corruptSigFor: "fallow" });
   t.after(() => cleanup(dir));
   const result = await verifyInstalled({
     dirOverride: dir,
@@ -378,12 +378,12 @@ test("verifyInstalled with dirOverride fails fast on the first bad signature", a
   });
   assert.equal(result.ok, false);
   assert.equal(result.code, "sig-invalid");
-  assert.match(result.binary, /fallow-lsp/);
+  assert.match(result.binary, /fallow/);
 });
 
 test("verifyInstalled with dirOverride reports sig-missing when a .sig is absent", async (t) => {
   const { privateKey, rawPub } = makeKeypair();
-  const dir = makePlatformDir(privateKey, { skipSigFor: "fallow-mcp" });
+  const dir = makePlatformDir(privateKey, { skipSigFor: "fallow" });
   t.after(() => cleanup(dir));
   const result = await verifyInstalled({
     dirOverride: dir,
@@ -392,13 +392,13 @@ test("verifyInstalled with dirOverride reports sig-missing when a .sig is absent
   });
   assert.equal(result.ok, false);
   assert.equal(result.code, "sig-missing");
-  assert.match(result.binary, /fallow-mcp/);
+  assert.match(result.binary, /fallow/);
 });
 
 test("verifyInstalled threads the resolved version into the sig-missing message", async (t) => {
   const { privateKey, rawPub } = makeKeypair();
-  const preDir = makePlatformDir(privateKey, { skipSigFor: "fallow-mcp" });
-  const eraDir = makePlatformDir(privateKey, { skipSigFor: "fallow-mcp" });
+  const preDir = makePlatformDir(privateKey, { skipSigFor: "fallow" });
+  const eraDir = makePlatformDir(privateKey, { skipSigFor: "fallow" });
   t.after(() => {
     cleanup(preDir);
     cleanup(eraDir);
@@ -463,7 +463,7 @@ test("verifyInstalled honors FALLOW_SKIP_BINARY_VERIFY", async (t) => {
 function computeDigestsForDir(dir) {
   const ext = process.platform === "win32" ? ".exe" : "";
   const out = {};
-  for (const base of ["fallow", "fallow-lsp", "fallow-mcp"]) {
+  for (const base of ["fallow"]) {
     const fileName = `${base}${ext}`;
     const full = path.join(dir, fileName);
     out[fileName] =
@@ -549,7 +549,7 @@ test("verifyInstalled falls back to the provider when the embedded digest is mis
     },
   });
   assert.equal(result.ok, true);
-  assert.equal(providerCalls, 3);
+  assert.equal(providerCalls, 1);
 });
 
 test("verifyInstalled falls back to the provider when fallowDigests is partial / malformed", async (t) => {
@@ -573,8 +573,8 @@ test("verifyInstalled falls back to the provider when fallowDigests is partial /
     },
   });
   assert.equal(result.ok, true);
-  // One call per binary because all three entries fail to normalize.
-  assert.equal(providerCalls, 3);
+  // One call for the single shipped binary because its entry fails to normalize.
+  assert.equal(providerCalls, 1);
 });
 
 test("verifyInstalled returns digest-mismatch when the embedded digest disagrees with the binary", async (t) => {
@@ -587,8 +587,6 @@ test("verifyInstalled returns digest-mismatch when the embedded digest disagrees
     version: "1.0.0",
     fallowDigests: {
       [`fallow${ext}`]: "sha256:" + "a".repeat(64),
-      [`fallow-lsp${ext}`]: "sha256:" + "a".repeat(64),
-      [`fallow-mcp${ext}`]: "sha256:" + "a".repeat(64),
     },
   });
   const result = await verifyInstalled({
@@ -644,9 +642,9 @@ test("verifyInstalledSync with embedded digests returns ok end-to-end", (t) => {
   assert.equal(result.package, "<override>");
 });
 
-test("verifyInstalledSync fails fast on first bad signature", (t) => {
+test("verifyInstalledSync fails on a bad signature", (t) => {
   const { privateKey, rawPub } = makeKeypair();
-  const dir = makePlatformDir(privateKey, { corruptSigFor: "fallow-lsp" });
+  const dir = makePlatformDir(privateKey, { corruptSigFor: "fallow" });
   t.after(() => cleanup(dir));
   writeManifest(dir, {
     name: "@fallow-cli/x",
@@ -659,7 +657,7 @@ test("verifyInstalledSync fails fast on first bad signature", (t) => {
   });
   assert.equal(result.ok, false);
   assert.equal(result.code, "sig-invalid");
-  assert.match(result.binary, /fallow-lsp/);
+  assert.match(result.binary, /fallow/);
 });
 
 test("verifyInstalledSync reports digest-mismatch when bytes diverge from embedded digest", (t) => {
@@ -671,11 +669,7 @@ test("verifyInstalledSync reports digest-mismatch when bytes diverge from embedd
     version: "9.9.9",
     fallowDigests: {
       fallow: "sha256:" + "a".repeat(64),
-      "fallow-lsp": "sha256:" + "a".repeat(64),
-      "fallow-mcp": "sha256:" + "a".repeat(64),
       "fallow.exe": "sha256:" + "a".repeat(64),
-      "fallow-lsp.exe": "sha256:" + "a".repeat(64),
-      "fallow-mcp.exe": "sha256:" + "a".repeat(64),
     },
   });
   const result = verifyInstalledSync({

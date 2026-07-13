@@ -66,8 +66,11 @@ function emitVerifyLog(env, payload) {
 }
 
 function binaryTargetsForPlatform(platform) {
+  // Platform packages ship one binary: the multicall `fallow`. The bundled
+  // lsp/mcp launchers spawn `fallow lsp-server` / `fallow mcp-server`, so there
+  // is only one binary to sentinel-track and verify.
   const ext = platform === "win32" ? ".exe" : "";
-  return [`fallow${ext}`, `fallow-lsp${ext}`, `fallow-mcp${ext}`];
+  return [`fallow${ext}`];
 }
 
 function statMtimeMs(absPath) {

@@ -157,6 +157,25 @@ test("passes a fully-signed CLI platform package", () => {
   }
 });
 
+test("passes a single-binary (multicall) CLI platform package", () => {
+  // The shipping shape since the multicall change: platform packages carry one
+  // signed `fallow` binary; the bundled lsp/mcp launchers live in the wrapper.
+  const files = ["fallow", "fallow.sig"];
+  const { tgz, cleanup } = makeNamedTarball({
+    name: "@fallow-cli/linux-x64-gnu",
+    files,
+    present: [...files, "README.md"],
+  });
+  try {
+    const result = verifyTarball(tgz);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.missing, []);
+    assert.deepEqual(result.missingSignatures, []);
+  } finally {
+    cleanup();
+  }
+});
+
 test("requires .exe.sig siblings on win32 platform packages", () => {
   const files = ["fallow.exe", "fallow-lsp.exe", "fallow-mcp.exe"]; // sigs dropped
   const { tgz, cleanup } = makeNamedTarball({

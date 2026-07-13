@@ -306,7 +306,7 @@ const rawPub = der.subarray(der.length - 32);
 const dir = '$VERIFY_TMP/node_modules/$PLATFORM_PKG';
 fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '$PLATFORM_PKG', version: '0.0.0' }));
 const ext = process.platform === 'win32' ? '.exe' : '';
-for (const base of ['fallow', 'fallow-lsp', 'fallow-mcp']) {
+for (const base of ['fallow']) {
   const bin = path.join(dir, base + ext);
   const data = Buffer.from('mock ' + base);
   fs.writeFileSync(bin, data);
@@ -338,12 +338,12 @@ const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binar
     fail "install verify: good signatures succeed" "exit $good_status, output: $GOOD"
   fi
 
-  # Corrupt the fallow-lsp sig and confirm verifyInstalled returns a failure.
+  # Corrupt the fallow sig and confirm verifyInstalled returns a failure.
   ext=""
   if [ "$(node -p 'process.platform')" = "win32" ]; then ext=".exe"; fi
   node -e "
 const fs = require('node:fs');
-const p = '$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-lsp${ext}.sig';
+const p = '$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow${ext}.sig';
 const sig = fs.readFileSync(p);
 sig[0] ^= 0xff;
 fs.writeFileSync(p, sig);
@@ -371,13 +371,13 @@ const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binar
     fail "install verify: bad signature aborts with non-zero exit" "exit $bad_status, output: $BAD"
   fi
   assert_contains "$BAD" "FAILED sig-invalid" "install verify: bad signature reports sig-invalid"
-  assert_contains "$BAD" "fallow-lsp" "install verify: bad signature names the offending binary"
+  assert_contains "$BAD" "fallow" "install verify: bad signature names the offending binary"
 
   node -e "
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const privateKey = crypto.createPrivateKey(fs.readFileSync('$VERIFY_TMP/testkey.pem', 'utf8'));
-const bin = '$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-lsp${ext}';
+const bin = '$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow${ext}';
 fs.writeFileSync(bin + '.sig', crypto.sign(null, fs.readFileSync(bin), privateKey));
 "
 
@@ -391,7 +391,7 @@ const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binar
     verifyFn: (p) => _verifyWithKey(p, rawPub),
     digestProvider: ({ binaryPath }) => {
       const digest = crypto.createHash('sha256').update(fs.readFileSync(binaryPath)).digest('hex');
-      return /fallow-mcp/.test(binaryPath) ? '0'.repeat(64) : digest;
+      return /fallow/.test(binaryPath) ? '0'.repeat(64) : digest;
     },
   });
   if (result.ok) { console.error('FAIL: expected ok=false'); process.exit(2); }
@@ -406,11 +406,11 @@ const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binar
     fail "install verify: digest mismatch aborts with non-zero exit" "exit $digest_bad_status, output: $DIGEST_BAD"
   fi
   assert_contains "$DIGEST_BAD" "FAILED digest-mismatch" "install verify: digest mismatch reports digest-mismatch"
-  assert_contains "$DIGEST_BAD" "fallow-mcp" "install verify: digest mismatch names the offending binary"
+  assert_contains "$DIGEST_BAD" "fallow" "install verify: digest mismatch names the offending binary"
 
   # sig-missing: binary present, .sig file absent (partial-deploy scenario,
   # most likely real-world failure mode after a botched release).
-  rm -f "$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-mcp${ext}.sig"
+  rm -f "$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow${ext}.sig"
   MISSING=$(cd "$VERIFY_TMP" && node -e "
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -433,13 +433,13 @@ const { verifyInstalled, _verifyWithKey } = require('fallow/scripts/verify-binar
     fail "install verify: missing .sig file aborts with non-zero exit" "exit $missing_status, output: $MISSING"
   fi
   assert_contains "$MISSING" "FAILED sig-missing" "install verify: missing .sig reports sig-missing"
-  assert_contains "$MISSING" "fallow-mcp" "install verify: missing .sig names the offending binary"
+  assert_contains "$MISSING" "fallow" "install verify: missing .sig names the offending binary"
 
   # Restore a valid-length .sig so the skip-env test sees an otherwise
   # intact-but-wrong setup.
   node -e "
 const fs = require('node:fs');
-fs.writeFileSync('$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow-mcp${ext}.sig', Buffer.alloc(64));
+fs.writeFileSync('$VERIFY_TMP/node_modules/$PLATFORM_PKG/fallow${ext}.sig', Buffer.alloc(64));
 "
 
   # FALLOW_SKIP_BINARY_VERIFY=1 with intact-but-wrong setup short-circuits.

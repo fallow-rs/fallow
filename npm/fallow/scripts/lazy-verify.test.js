@@ -28,7 +28,8 @@ function ext() {
 }
 
 function binaryNames() {
-  return [`fallow${ext()}`, `fallow-lsp${ext()}`, `fallow-mcp${ext()}`];
+  // Platform packages ship a single multicall `fallow` binary.
+  return [`fallow${ext()}`];
 }
 
 function computeDigestsForDir(dir) {
@@ -116,7 +117,7 @@ test("ensureVerified verifies on cache miss and writes the sentinel", (t) => {
   assert.equal(sentinel.schemaVersion, SENTINEL_SCHEMA_VERSION);
   assert.equal(sentinel.packageVersion, "2.81.0");
   assert.equal(sentinel.packageName, "@fallow-cli/test-platform");
-  assert.equal(Object.keys(sentinel.binaries).length, 3);
+  assert.equal(Object.keys(sentinel.binaries).length, 1);
 });
 
 test("ensureVerified returns cached:true on a valid sentinel", (t) => {
@@ -164,7 +165,7 @@ test("ensureVerified invalidates sentinel on mtime drift", (t) => {
   );
   assert.equal(result.ok, true);
   assert.equal(result.cached, false);
-  assert.equal(verifyCallCount, 3, "verify should rerun for all three binaries");
+  assert.equal(verifyCallCount, 1, "verify should rerun for the single binary");
 });
 
 test("ensureVerified invalidates sentinel on packageVersion drift", (t) => {
@@ -215,12 +216,6 @@ test("ensureVerified invalidates sentinel on packageName drift", (t) => {
       packageName: "@fallow-cli/wrong-name",
       binaries: {
         [`fallow${ext()}`]: { mtimeMs: fs.statSync(path.join(dir, `fallow${ext()}`)).mtimeMs },
-        [`fallow-lsp${ext()}`]: {
-          mtimeMs: fs.statSync(path.join(dir, `fallow-lsp${ext()}`)).mtimeMs,
-        },
-        [`fallow-mcp${ext()}`]: {
-          mtimeMs: fs.statSync(path.join(dir, `fallow-mcp${ext()}`)).mtimeMs,
-        },
       },
     }),
   );
@@ -266,13 +261,13 @@ test("ensureVerified invalidates sentinel on schemaVersion drift", (t) => {
 test("ensureVerified returns sig-invalid on a tampered signature", (t) => {
   _resetWarningState();
   const { privateKey, rawPub } = makeKeypair();
-  const dir = mkPlatformDir(privateKey, { corruptSigFor: `fallow-lsp${ext()}` });
+  const dir = mkPlatformDir(privateKey, { corruptSigFor: `fallow${ext()}` });
   t.after(() => cleanup(dir));
 
   const result = ensureVerified(baseInput(dir, (p) => _verifyWithKey(p, rawPub)));
   assert.equal(result.ok, false);
   assert.equal(result.code, "sig-invalid");
-  assert.match(result.binary, /fallow-lsp/);
+  assert.match(result.binary, /fallow/);
   // Sentinel must NOT have been written on failure
   assert.equal(fs.existsSync(path.join(dir, SENTINEL_FILENAME)), false);
 });
