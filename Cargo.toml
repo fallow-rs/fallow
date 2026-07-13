@@ -107,6 +107,7 @@ notify = "8"
 criterion2 = { version = "3.0.3", default-features = false }
 dhat = "0.3"
 insta = { version = "1", features = ["yaml"] }
+jsonschema = { version = "0.47", default-features = false }
 proptest = "1"
 tempfile = "3"
 libc = "0.2"
