@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Dead-code analysis no longer repeats quadratic allocation work across deep
+  `export *` barrel chains.** Star re-export propagation now builds its
+  named-import origin index once per graph and batches reference deduplication
+  per export instead of rebuilding a growing set for every incoming reference.
+  This bounds memory churn and materially reduces graph-build time on projects
+  with deep barrels and wide named-import fan-in. Thanks @zirodev23 for the
+  report in #1843.
+
 - **`fallow flags --format json` now conforms to the published output schema.**
   The default (no `--explain`) feature-flags document injects a
   `_meta.telemetry` block for run correlation, but the schema modeled

@@ -5,12 +5,37 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ExportName, VisibilityTag};
 
 use crate::graph::types::{ExportSymbol, ModuleNode, ReferenceKind, SymbolReference};
 use crate::graph::{Edge, ImportedName};
 use crate::resolve::ResolvedModule;
+
+#[cfg(test)]
+thread_local! {
+    static NAMED_IMPORT_ORIGIN_INDEX_BUILDS: Cell<usize> = const { Cell::new(0) };
+    static STAR_REFERENCE_SET_REBUILDS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn count_named_import_origin_index_builds<T>(run: impl FnOnce() -> T) -> (T, usize) {
+    NAMED_IMPORT_ORIGIN_INDEX_BUILDS.set(0);
+    let result = run();
+    let builds = NAMED_IMPORT_ORIGIN_INDEX_BUILDS.get();
+    (result, builds)
+}
+
+#[cfg(test)]
+pub(super) fn count_star_reference_set_rebuilds<T>(run: impl FnOnce() -> T) -> (T, usize) {
+    STAR_REFERENCE_SET_REBUILDS.set(0);
+    let result = run();
+    let rebuilds = STAR_REFERENCE_SET_REBUILDS.get();
+    (result, rebuilds)
+}
 
 /// Handle `export * from './source'`: propagate named imports through to the source module.
 ///
@@ -23,6 +48,7 @@ pub(in crate::graph) struct StarReExportPropagation<'a> {
     pub(in crate::graph) modules: &'a mut [ModuleNode],
     pub(in crate::graph) edges: &'a [Edge],
     pub(in crate::graph) edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
+    pub(in crate::graph) named_import_origin_index: &'a NamedImportOriginIndex,
     pub(in crate::graph) module_by_id: &'a FxHashMap<FileId, &'a ResolvedModule>,
     pub(in crate::graph) barrel_id: FileId,
     pub(in crate::graph) barrel_idx: usize,
@@ -38,6 +64,7 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
         modules,
         edges,
         edges_by_target,
+        named_import_origin_index,
         module_by_id,
         barrel_id,
         barrel_idx,
@@ -55,8 +82,14 @@ pub(in crate::graph) fn propagate_star_re_export(input: StarReExportPropagation<
     }
 
     let barrel_file_id = modules[barrel_idx].file_id;
-    let refs_by_name =
-        collect_star_refs_by_name(modules, edges, edges_by_target, barrel_file_id, barrel_idx);
+    let refs_by_name = collect_star_refs_by_name(
+        modules,
+        edges,
+        edges_by_target,
+        named_import_origin_index,
+        barrel_file_id,
+        barrel_idx,
+    );
 
     let source_has_star_re_exports = modules[source_idx]
         .re_exports
@@ -89,12 +122,12 @@ fn collect_star_refs_by_name(
     modules: &[ModuleNode],
     edges: &[Edge],
     edges_by_target: &FxHashMap<FileId, Vec<usize>>,
+    named_import_origin_index: &NamedImportOriginIndex,
     barrel_file_id: FileId,
     barrel_idx: usize,
 ) -> FxHashMap<String, Vec<StarReference>> {
-    let named_import_origin_by_reference = named_import_origin_by_reference(edges);
     let named_refs = named_star_refs(edges, edges_by_target, barrel_file_id);
-    let barrel_refs = barrel_star_refs(&modules[barrel_idx], &named_import_origin_by_reference);
+    let barrel_refs = barrel_star_refs(&modules[barrel_idx], named_import_origin_index);
 
     let mut refs_by_name: FxHashMap<String, Vec<StarReference>> = FxHashMap::default();
     for (name, ref_item) in named_refs {
@@ -149,7 +182,7 @@ fn named_refs_for_edge(edge: &Edge) -> Vec<(String, StarReference)> {
 
 fn barrel_star_refs(
     module: &ModuleNode,
-    named_import_origin_by_reference: &FxHashMap<(FileId, u32, u32, String), StarReferenceOrigin>,
+    named_import_origin_index: &NamedImportOriginIndex,
 ) -> Vec<(String, Vec<StarReference>)> {
     module
         .exports
@@ -166,7 +199,7 @@ fn barrel_star_refs(
                         reference,
                         &name,
                         export.is_type_only,
-                        named_import_origin_by_reference,
+                        named_import_origin_index,
                     )
                 })
                 .collect();
@@ -179,47 +212,59 @@ fn barrel_star_ref(
     reference: SymbolReference,
     name: &str,
     is_type_only: bool,
-    named_import_origin_by_reference: &FxHashMap<(FileId, u32, u32, String), StarReferenceOrigin>,
+    named_import_origin_index: &NamedImportOriginIndex,
 ) -> StarReference {
     StarReference {
         reference,
-        origin: named_import_origin_by_reference
-            .get(&(
-                reference.from_file,
-                reference.import_span.start,
-                reference.import_span.end,
-                name.to_string(),
-            ))
+        origin: named_import_origin_index
+            .get(reference, name)
             .cloned()
             .unwrap_or(StarReferenceOrigin::BarrelExport { is_type_only }),
     }
 }
 
-fn named_import_origin_by_reference(
-    edges: &[Edge],
-) -> FxHashMap<(FileId, u32, u32, String), StarReferenceOrigin> {
-    edges
-        .iter()
-        .flat_map(|edge| {
-            edge.symbols.iter().filter_map(move |sym| {
+type ReferenceSite = (FileId, u32, u32);
+
+pub(in crate::graph) struct NamedImportOriginIndex(
+    FxHashMap<ReferenceSite, FxHashMap<String, StarReferenceOrigin>>,
+);
+
+impl NamedImportOriginIndex {
+    pub(in crate::graph) fn from_edges(edges: &[Edge]) -> Self {
+        #[cfg(test)]
+        NAMED_IMPORT_ORIGIN_INDEX_BUILDS.set(NAMED_IMPORT_ORIGIN_INDEX_BUILDS.get() + 1);
+
+        let mut index: FxHashMap<ReferenceSite, FxHashMap<String, StarReferenceOrigin>> =
+            FxHashMap::default();
+        for edge in edges {
+            for sym in &edge.symbols {
                 let ImportedName::Named(name) = &sym.imported_name else {
-                    return None;
+                    continue;
                 };
-                Some((
-                    (
-                        edge.source,
-                        sym.import_span.start,
-                        sym.import_span.end,
+                index
+                    .entry((edge.source, sym.import_span.start, sym.import_span.end))
+                    .or_default()
+                    .insert(
                         name.clone(),
-                    ),
-                    StarReferenceOrigin::NamedImport {
-                        local_name: sym.local_name.clone(),
-                        is_type_only: sym.is_type_only,
-                    },
-                ))
-            })
-        })
-        .collect()
+                        StarReferenceOrigin::NamedImport {
+                            local_name: sym.local_name.clone(),
+                            is_type_only: sym.is_type_only,
+                        },
+                    );
+            }
+        }
+        Self(index)
+    }
+
+    fn get(&self, reference: SymbolReference, name: &str) -> Option<&StarReferenceOrigin> {
+        self.0
+            .get(&(
+                reference.from_file,
+                reference.import_span.start,
+                reference.import_span.end,
+            ))
+            .and_then(|origins| origins.get(name))
+    }
 }
 
 #[derive(Clone)]
@@ -478,7 +523,8 @@ fn attach_matching_star_refs(input: AttachMatchingStarRefs<'_>) -> bool {
         existing_files,
     } = input;
 
-    let mut changed = false;
+    let mut type_refs = Vec::new();
+    let mut value_refs = Vec::new();
     for star_ref in refs {
         let (attach_type_exports, attach_value_exports) = star_ref.attach_targets(
             module_by_id,
@@ -487,21 +533,25 @@ fn attach_matching_star_refs(input: AttachMatchingStarRefs<'_>) -> bool {
             triggering_is_type_only,
         );
         if attach_type_exports {
-            changed |= attach_star_ref_to_exports(
-                source,
-                &exports.type_indices,
-                star_ref.reference,
-                existing_files,
-            );
+            type_refs.push(star_ref.reference);
         }
         if attach_value_exports {
-            changed |= attach_star_ref_to_exports(
-                source,
-                &exports.value_indices,
-                star_ref.reference,
-                existing_files,
-            );
+            value_refs.push(star_ref.reference);
         }
+    }
+
+    let mut changed = false;
+    if !type_refs.is_empty() {
+        changed |=
+            attach_star_refs_to_exports(source, &exports.type_indices, &type_refs, existing_files);
+    }
+    if !value_refs.is_empty() {
+        changed |= attach_star_refs_to_exports(
+            source,
+            &exports.value_indices,
+            &value_refs,
+            existing_files,
+        );
     }
     changed
 }
@@ -633,12 +683,15 @@ fn create_synthetic_export(input: CreateSyntheticExport<'_>) -> bool {
     true
 }
 
-fn attach_star_ref_to_exports(
+fn attach_star_refs_to_exports(
     source: &mut ModuleNode,
     export_indices: &[usize],
-    reference: SymbolReference,
+    references: &[SymbolReference],
     existing_files: &mut FxHashSet<FileId>,
 ) -> bool {
+    #[cfg(test)]
+    STAR_REFERENCE_SET_REBUILDS.set(STAR_REFERENCE_SET_REBUILDS.get() + 1);
+
     let mut changed = false;
     for export_idx in export_indices {
         existing_files.clear();
@@ -648,9 +701,11 @@ fn attach_star_ref_to_exports(
                 .iter()
                 .map(|r| r.from_file),
         );
-        if existing_files.insert(reference.from_file) {
-            source.exports[*export_idx].references.push(reference);
-            changed = true;
+        for reference in references {
+            if existing_files.insert(reference.from_file) {
+                source.exports[*export_idx].references.push(*reference);
+                changed = true;
+            }
         }
     }
     changed
