@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   older VS Code extension paired with a newer npm package, keep working via
   that path.
 
+### Fixed
+
+- **`fallow flags --format json` now conforms to the published output schema.**
+  The default (no `--explain`) feature-flags document injects a
+  `_meta.telemetry` block for run correlation, but the schema modeled
+  `_meta` as requiring the explain-only `feature_flags` field and did not model
+  `telemetry`, so the emitted document failed validation against
+  `docs/output-schema.json`. This affected the MCP `feature_flags` tool and Code
+  Mode, which emit the same shape. `FeatureFlagsMeta` now models both fields as
+  optional, mirroring the `Meta` and `CombinedMeta` envelopes. The wire output
+  is unchanged (this is a schema-correctness fix); no `schema_version` bump.
+
 ## [3.4.2] - 2026-07-13
 
 ### Added

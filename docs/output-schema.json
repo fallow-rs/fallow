@@ -17666,13 +17666,29 @@
       "type": "object",
       "properties": {
         "feature_flags": {
-          "$ref": "#/definitions/FeatureFlagsMetaDetails"
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FeatureFlagsMetaDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Feature-flag detection explanations, emitted only with `--explain`."
+        },
+        "telemetry": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TelemetryMeta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Local telemetry correlation metadata for agent follow-up runs."
         }
       },
-      "required": [
-        "feature_flags"
-      ],
-      "description": "`_meta.feature_flags` details emitted with `--explain`."
+      "description": "Optional `_meta` block for [`FeatureFlagsOutput`]. Both fields are optional\nbecause the two contributors are independent: `feature_flags` details are\npresent only with `--explain`, and `telemetry` is injected post-pass by\n[`attach_telemetry_meta`] whenever an analysis run id is available (which is\nthe default path). Mirrors `Meta` / `CombinedMeta`, which also model\n`telemetry` as an optional, never-required property."
     },
     "FeatureFlagsMetaDetails": {
       "type": "object",

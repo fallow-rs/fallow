@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use fallow_types::envelope::{ElapsedMs, SchemaVersion, ToolVersion};
+use fallow_types::envelope::{ElapsedMs, SchemaVersion, TelemetryMeta, ToolVersion};
 use fallow_types::results::{FeatureFlag, FlagConfidence, FlagKind};
 use serde::Serialize;
 
@@ -100,11 +100,21 @@ pub struct FeatureFlagDeadCodeOverlap {
     pub dead_exports: Vec<String>,
 }
 
-/// `_meta.feature_flags` details emitted with `--explain`.
+/// Optional `_meta` block for [`FeatureFlagsOutput`]. Both fields are optional
+/// because the two contributors are independent: `feature_flags` details are
+/// present only with `--explain`, and `telemetry` is injected post-pass by
+/// [`attach_telemetry_meta`] whenever an analysis run id is available (which is
+/// the default path). Mirrors `Meta` / `CombinedMeta`, which also model
+/// `telemetry` as an optional, never-required property.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct FeatureFlagsMeta {
-    pub feature_flags: FeatureFlagsMetaDetails,
+    /// Feature-flag detection explanations, emitted only with `--explain`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feature_flags: Option<FeatureFlagsMetaDetails>,
+    /// Local telemetry correlation metadata for agent follow-up runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telemetry: Option<TelemetryMeta>,
 }
 
 /// Feature flag explanatory metadata.
@@ -173,7 +183,8 @@ pub fn serialize_feature_flags_json_output(
 #[must_use]
 pub const fn feature_flags_meta() -> FeatureFlagsMeta {
     FeatureFlagsMeta {
-        feature_flags: FeatureFlagsMetaDetails {
+        telemetry: None,
+        feature_flags: Some(FeatureFlagsMetaDetails {
             description: "Feature flag patterns detected via AST analysis",
             kinds: FeatureFlagsKindMeta {
                 environment_variable: "process.env.FEATURE_* pattern (high confidence)",
@@ -186,7 +197,7 @@ pub const fn feature_flags_meta() -> FeatureFlagsMeta {
                 low: "Heuristic match (config objects), may produce false positives",
             },
             docs: "https://docs.fallow.tools/cli/flags",
-        },
+        }),
     }
 }
 
@@ -309,5 +320,34 @@ mod tests {
             "https://docs.fallow.tools/cli/flags"
         );
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-flags");
+    }
+
+    #[test]
+    fn feature_flags_json_output_without_explain_emits_telemetry_only_meta() {
+        // The default path (no --explain) leaves `meta` as None, so the only
+        // `_meta` contributor is the post-pass telemetry injection. The typed
+        // `FeatureFlagsMeta` must model this telemetry-only shape (both fields
+        // optional) so the emitted document conforms to the published schema.
+        let output = build_feature_flags_output(FeatureFlagsOutputInput {
+            schema_version: 7,
+            version: "0.0.0".to_string(),
+            elapsed: Duration::from_millis(4),
+            flags: &[flag()],
+            root: Path::new("/repo"),
+            meta: None,
+        });
+
+        let value = serialize_feature_flags_json_output(
+            output,
+            RootEnvelopeMode::Tagged,
+            Some("run-flags"),
+        )
+        .expect("feature flags output should serialize");
+
+        assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-flags");
+        assert!(
+            value["_meta"].get("feature_flags").is_none(),
+            "feature_flags details are absent without --explain"
+        );
     }
 }

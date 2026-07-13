@@ -9352,10 +9352,22 @@ dead_export_count: number
 dead_exports: string[]
 }
 /**
- * `_meta.feature_flags` details emitted with `--explain`.
+ * Optional `_meta` block for [`FeatureFlagsOutput`]. Both fields are optional
+ * because the two contributors are independent: `feature_flags` details are
+ * present only with `--explain`, and `telemetry` is injected post-pass by
+ * [`attach_telemetry_meta`] whenever an analysis run id is available (which is
+ * the default path). Mirrors `Meta` / `CombinedMeta`, which also model
+ * `telemetry` as an optional, never-required property.
  */
 export interface FeatureFlagsMeta {
-feature_flags: FeatureFlagsMetaDetails
+/**
+ * Feature-flag detection explanations, emitted only with `--explain`.
+ */
+feature_flags?: (FeatureFlagsMetaDetails | null)
+/**
+ * Local telemetry correlation metadata for agent follow-up runs.
+ */
+telemetry?: (TelemetryMeta | null)
 }
 /**
  * Feature flag explanatory metadata.
