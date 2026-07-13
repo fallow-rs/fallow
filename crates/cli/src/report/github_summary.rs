@@ -70,8 +70,10 @@ pub fn print_summary(kind: EnvelopeKind, envelope: &Value, root: &Path) -> ExitC
     ExitCode::SUCCESS
 }
 
-/// Render the fix envelope's job summary (the fix envelope has no `kind`
-/// field, so it does not route through [`EnvelopeKind`]).
+/// Render the fix envelope's job summary directly from `fallow fix`. The fix
+/// envelope has no `kind` field; `fallow report --from` reaches the same
+/// renderer via [`EnvelopeKind::Fix`] (resolved by field detection), while the
+/// live `fallow fix` command calls this entry point.
 pub fn print_fix_summary(envelope: &Value) -> ExitCode {
     outln!("{}", render_fix_summary(envelope));
     ExitCode::SUCCESS
@@ -87,6 +89,7 @@ pub fn render_summary(kind: EnvelopeKind, envelope: &Value, links: &LinkContext)
         EnvelopeKind::Audit => render_audit_summary(envelope),
         EnvelopeKind::Security => render_security_summary(envelope),
         EnvelopeKind::Combined => render_combined_summary(envelope, links),
+        EnvelopeKind::Fix => render_fix_summary(envelope),
     }
 }
 

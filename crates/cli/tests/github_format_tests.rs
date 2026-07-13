@@ -545,6 +545,7 @@ fn report_from_round_trip_parity() {
         (EnvelopeKind::Audit, audit_envelope()),
         (EnvelopeKind::Security, security_envelope()),
         (EnvelopeKind::Combined, combined_envelope()),
+        (EnvelopeKind::Fix, fix_envelope()),
     ] {
         let direct = render_annotations(kind, &envelope, &plain_options());
         let serialized = serde_json::to_string_pretty(&envelope).expect("serialize");
@@ -650,6 +651,68 @@ fn github_summary_fix_snapshot() {
     insta::assert_snapshot!("github_summary_fix", rendered);
 }
 
+/// `report --from <fix-results.json> --format github-summary` routes the
+/// kind-less fix envelope through `EnvelopeKind::Fix`, which must reach the
+/// same renderer as the live `fallow fix` command (`render_fix_summary`) and
+/// carry `summary-fix.jq`'s sections.
+#[test]
+fn render_summary_fix_mirrors_render_fix_summary() {
+    let env = fix_envelope();
+    let via_dispatch = render_summary(EnvelopeKind::Fix, &env, &LinkContext::default());
+    let direct = fallow_cli::report::github_summary::render_fix_summary(&env);
+    assert_eq!(
+        via_dispatch, direct,
+        "EnvelopeKind::Fix must reach render_fix_summary"
+    );
+    // The summary-fix.jq sections: heading, headline, count table, details.
+    assert!(
+        via_dispatch.starts_with("## Fallow - Auto-fix"),
+        "{via_dispatch}"
+    );
+    assert!(
+        via_dispatch.contains("**Dry run**: would apply **3 fixes**"),
+        "{via_dispatch}"
+    );
+    assert!(
+        via_dispatch.contains("skipped 1 file(s) that changed since analysis"),
+        "{via_dispatch}"
+    );
+    assert!(
+        via_dispatch.contains(
+            "kept exports in 2 file(s) where consumers may be hidden from static analysis"
+        ),
+        "{via_dispatch}"
+    );
+    assert!(
+        via_dispatch.contains("| Export removals | 2 |"),
+        "{via_dispatch}"
+    );
+    assert!(
+        via_dispatch.contains("| Dependency removals | 1 |"),
+        "{via_dispatch}"
+    );
+    assert!(
+        via_dispatch.contains("<summary>View details</summary>"),
+        "{via_dispatch}"
+    );
+    assert!(
+        via_dispatch.contains("- `src/api/client.ts:42` - `unusedFn`"),
+        "{via_dispatch}"
+    );
+    assert!(
+        via_dispatch.contains("- `left-pad` from dependencies in `package.json`"),
+        "{via_dispatch}"
+    );
+}
+
+/// The bundled action no-ops annotations for the fix command, so the native
+/// `EnvelopeKind::Fix` annotation renderer must emit nothing.
+#[test]
+fn render_annotations_fix_is_empty() {
+    let rendered = render_annotations(EnvelopeKind::Fix, &fix_envelope(), &plain_options());
+    assert_eq!(rendered, "", "fix annotations must be empty: {rendered}");
+}
+
 #[test]
 fn github_summary_combined_snapshot() {
     // Populated link context exercises the blob-URL branch of the dupes file
@@ -674,6 +737,7 @@ fn summary_has_no_em_dashes() {
         (EnvelopeKind::Audit, audit_envelope()),
         (EnvelopeKind::Security, security_envelope()),
         (EnvelopeKind::Combined, combined_envelope()),
+        (EnvelopeKind::Fix, fix_envelope()),
     ] {
         let summary = render_summary(kind, &envelope, &LinkContext::default());
         assert!(!summary.contains('\u{2014}'), "em dash in {kind:?} summary");

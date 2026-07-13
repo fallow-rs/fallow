@@ -7,7 +7,9 @@
 //! re-rendering from a saved envelope is a recorded follow-up. Dispatch is on
 //! the envelope's `kind` field, so any envelope produced by `--format json`
 //! (dead-code, dupes, health, audit, security, or the bare combined run)
-//! renders byte-identically to the direct `--format` run.
+//! renders byte-identically to the direct `--format` run. The `fallow fix`
+//! envelope carries no `kind`; it is detected by its top-level fields and
+//! rendered via [`EnvelopeKind::Fix`].
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -76,6 +78,13 @@ fn envelope_kind(
     output: OutputFormat,
 ) -> Result<EnvelopeKind, ExitCode> {
     let Some(kind) = envelope.get("kind").and_then(serde_json::Value::as_str) else {
+        // The `fallow fix --format json` envelope is the only kind-less document
+        // fallow emits (crates/output/src/fix.rs: no top-level `kind`). Resolve it
+        // by field detection so `report --from <fix-results.json>` renders the fix
+        // job summary natively; genuinely unrecognized documents keep erroring.
+        if is_fix_envelope(envelope) {
+            return Ok(EnvelopeKind::Fix);
+        }
         return Err(crate::emit_known_failure(
             &format!(
                 "{} is not a fallow results envelope (missing top-level `kind`); \
@@ -102,8 +111,8 @@ fn envelope_kind(
 }
 
 /// Map the `--format json` root `kind` onto the renderer dispatch. The fix
-/// envelope has no `kind` field, so fix output is not re-renderable here (use
-/// `fallow fix --format github-summary` directly).
+/// envelope has no `kind` field; it is resolved separately via
+/// [`is_fix_envelope`] field detection (see [`envelope_kind`]).
 fn parse_envelope_kind(kind: &str) -> Option<EnvelopeKind> {
     match kind {
         "dead-code" => Some(EnvelopeKind::DeadCode),
@@ -114,6 +123,20 @@ fn parse_envelope_kind(kind: &str) -> Option<EnvelopeKind> {
         "combined" => Some(EnvelopeKind::Combined),
         _ => None,
     }
+}
+
+/// Recognize a kind-less `fallow fix --format json` envelope by its stable
+/// top-level keys. The fix root always carries both a `fixes` array and a
+/// numeric `total_fixed` (see `crates/output/src/fix.rs::FixJsonOutput`); no
+/// other fallow envelope is kind-less, so the two keys together are an
+/// unambiguous signal.
+fn is_fix_envelope(envelope: &serde_json::Value) -> bool {
+    envelope
+        .get("fixes")
+        .is_some_and(serde_json::Value::is_array)
+        && envelope
+            .get("total_fixed")
+            .is_some_and(serde_json::Value::is_number)
 }
 
 #[cfg(test)]
@@ -144,5 +167,35 @@ mod tests {
         assert_eq!(parse_envelope_kind("dead-code-grouped"), None);
         assert_eq!(parse_envelope_kind("feature-flags"), None);
         assert_eq!(parse_envelope_kind(""), None);
+    }
+
+    #[test]
+    fn is_fix_envelope_detects_kindless_fix_document() {
+        let fix = serde_json::json!({
+            "dry_run": false,
+            "total_fixed": 3,
+            "skipped": 0,
+            "fixes": [{ "type": "remove_export", "applied": true }],
+        });
+        assert!(is_fix_envelope(&fix));
+    }
+
+    #[test]
+    fn is_fix_envelope_rejects_other_kindless_documents() {
+        // A dead-code envelope stripped of its `kind` must NOT masquerade as
+        // fix: it has neither `fixes` nor `total_fixed`.
+        assert!(!is_fix_envelope(&serde_json::json!({
+            "total_issues": 4,
+            "unused_files": [{ "path": "src/a.ts" }],
+        })));
+        // `fixes` alone (no `total_fixed`) is not enough.
+        assert!(!is_fix_envelope(&serde_json::json!({ "fixes": [] })));
+        // `total_fixed` alone (no `fixes` array) is not enough.
+        assert!(!is_fix_envelope(&serde_json::json!({ "total_fixed": 0 })));
+        // A `fixes` value that is not an array is rejected.
+        assert!(!is_fix_envelope(&serde_json::json!({
+            "fixes": "nope",
+            "total_fixed": 0,
+        })));
     }
 }

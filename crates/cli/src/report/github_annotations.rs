@@ -32,6 +32,10 @@ pub enum EnvelopeKind {
     Audit,
     Combined,
     Security,
+    /// The `fallow fix --format json` envelope. It carries no top-level `kind`
+    /// field (see `crates/output/src/fix.rs`), so `fallow report --from`
+    /// detects it by its stable top-level keys rather than a `kind` string.
+    Fix,
 }
 
 /// Render and print the annotation stream for one envelope, resolving the
@@ -84,6 +88,10 @@ fn collect_annotations(
             collect_value_section(envelope, "health", &mut out, collect_health);
             collect_value_section(envelope, "dupes", &mut out, collect_dupes);
         }
+        // The bundled action no-ops annotations for the fix command
+        // (`action/scripts/annotate.sh` skips fix), so the native renderer
+        // matches by emitting nothing.
+        EnvelopeKind::Fix => {}
     }
     out
 }
