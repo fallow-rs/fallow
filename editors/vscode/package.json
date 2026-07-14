@@ -874,7 +874,7 @@
   },
   "dependencies": {
     "vscode-languageclient": "10.0.1",
-    "vscode-languageserver-protocol": "3.18.1"
+    "vscode-languageserver-protocol": "3.18.2"
   },
   "devDependencies": {
     "@types/node": "26.0.1",
