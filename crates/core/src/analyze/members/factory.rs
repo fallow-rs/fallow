@@ -108,6 +108,83 @@ pub(super) fn propagate_factory_fn_accesses(
     }
 }
 
+/// Credit member accesses produced by cross-module OBJECT-LITERAL factory bindings
+/// (`const ui = importedFactory(); ui.orders.member`) onto the class the factory's
+/// returned object literal exposes at that property path. Mirrors
+/// `propagate_factory_fn_accesses` with an extra property-path lookup dimension;
+/// every link (callee resolves to an export, the export's factory module declares
+/// an object shape with that path, the path's class resolves to a class-with-members
+/// export) is an over-credit gate, so a wrong or unresolvable chain is a silent
+/// false-negative, never a false positive. See issue #1858.
+pub(super) fn propagate_factory_return_object_accesses(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) {
+    for resolved in resolved_modules {
+        let local_to_export_keys = indexes.local_keys(resolved.file_id);
+        for access in factory_return_object_property_accesses(resolved) {
+            let Some(seed_keys) = local_to_export_keys.get(access.callee_name.as_str()) else {
+                continue;
+            };
+            let classes = seed_keys.iter().flat_map(|seed_key| {
+                factory_return_object_property_classes(
+                    graph,
+                    indexes,
+                    seed_key,
+                    access.property_path.as_str(),
+                )
+            });
+            let mut context = FactoryReturnCreditContext {
+                graph,
+                indexes,
+                accessed_members,
+            };
+            for (factory_origin_file_id, class_local_name) in classes {
+                credit_factory_return_class_member(
+                    &mut context,
+                    factory_origin_file_id,
+                    &class_local_name,
+                    access.member.as_str(),
+                );
+            }
+        }
+    }
+}
+
+/// The `(factory-module, class-local-name)` pairs a callee's exported object-literal
+/// factory exposes at `property_path`, resolved across re-export barrels. Empty for
+/// any callee that is not an internal exported object-factory declaring that path.
+fn factory_return_object_property_classes(
+    graph: &ModuleGraph,
+    indexes: &MemberPassIndexes<'_>,
+    seed_key: &ExportKey,
+    property_path: &str,
+) -> Vec<(FileId, String)> {
+    let mut out = Vec::new();
+    for factory_origin in
+        walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
+    {
+        let Some(factory_module) = indexes.module_by_id.get(&factory_origin.file_id) else {
+            continue;
+        };
+        let Some(shape) = factory_module
+            .exported_factory_return_object_shapes
+            .iter()
+            .find(|shape| shape.export_name.as_str() == factory_origin.export_name.as_str())
+        else {
+            continue;
+        };
+        for property in &shape.properties {
+            if property.property_path == property_path {
+                out.push((factory_origin.file_id, property.class_local_name.clone()));
+            }
+        }
+    }
+    out
+}
+
 /// The class exports a proven exported factory returns, resolved from the factory's
 /// own module. Shared by the member-credit and whole-object-suppress passes: each
 /// link is an over-credit gate, so a callee that is not a proven factory yields

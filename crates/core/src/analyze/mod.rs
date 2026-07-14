@@ -3031,6 +3031,7 @@ mod tests {
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
                 exported_factory_returns: Box::default(),
+                exported_factory_return_object_shapes: Box::default(),
                 type_member_types: Box::default(),
             }];
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
@@ -3089,6 +3090,7 @@ mod tests {
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
                 exported_factory_returns: Box::default(),
+                exported_factory_return_object_shapes: Box::default(),
                 type_member_types: Box::default(),
             }];
             let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
@@ -3173,6 +3175,7 @@ mod tests {
                 value_referenced_import_bindings: vec![],
                 namespace_object_aliases: vec![],
                 exported_factory_returns: Box::default(),
+                exported_factory_return_object_shapes: Box::default(),
                 type_member_types: Box::default(),
             }];
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
@@ -3231,6 +3234,7 @@ mod tests {
                     value_referenced_import_bindings: vec![],
                     namespace_object_aliases: vec![],
                     exported_factory_returns: Box::default(),
+                    exported_factory_return_object_shapes: Box::default(),
                     type_member_types: Box::default(),
                 })
                 .collect::<Vec<_>>();
@@ -3261,6 +3265,7 @@ mod tests {
                 flag_uses: vec![],
                 class_heritage: vec![],
                 exported_factory_returns: Box::default(),
+                exported_factory_return_object_shapes: Box::default(),
                 type_member_types: Box::default(),
                 injection_tokens: vec![],
                 local_type_declarations: Vec::new(),

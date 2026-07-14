@@ -46,6 +46,7 @@ fn unresolved_import_detected() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -93,6 +94,7 @@ fn ignore_unresolved_imports_filters_raw_specifier_globs() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -160,6 +162,7 @@ fn unresolved_dynamic_import_detected_with_real_location() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -234,6 +237,7 @@ fn unresolved_platform_builtins_not_reported() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -292,6 +296,7 @@ fn unresolved_virtual_module_not_reported() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -346,6 +351,7 @@ fn unresolved_import_with_virtual_prefix_not_reported() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -407,6 +413,7 @@ fn unresolved_tanstack_start_virtual_imports_not_reported() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -490,6 +497,7 @@ fn unresolved_import_suppressed_by_generated_import_pattern() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -570,6 +578,7 @@ fn unresolved_import_suppressed_by_generated_type_import_prefix() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -630,6 +639,7 @@ fn generated_type_import_prefix_is_plugin_gated() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -682,6 +692,7 @@ fn unresolved_import_suppressed_by_inline_comment() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -743,6 +754,7 @@ fn unresolved_dynamic_import_suppressed_by_inline_comment() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -806,6 +818,7 @@ fn unresolved_import_file_level_suppression() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -881,6 +894,7 @@ fn resolved_import_not_reported_as_unresolved() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -958,6 +972,7 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 

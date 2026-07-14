@@ -223,6 +223,8 @@ mod issue_1788_local_class_options;
 mod issue_1821_per_class_this_scoping;
 #[path = "integration_test/issue_1821_private_field_di.rs"]
 mod issue_1821_private_field_di;
+#[path = "integration_test/issue_1858_object_literal_factory_return.rs"]
+mod issue_1858_object_literal_factory_return;
 #[path = "integration_test/issue_346_static_factory_method.rs"]
 mod issue_346_static_factory_method;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]

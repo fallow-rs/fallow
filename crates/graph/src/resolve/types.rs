@@ -179,6 +179,11 @@ pub struct ResolvedModule {
     /// Exported free-function factories that provably return one class instance.
     /// See `fallow_types::extract::FactoryReturnExport` and issue #1441 (Part A).
     pub exported_factory_returns: Box<[fallow_types::extract::FactoryReturnExport]>,
+    /// Object-literal factory-return shapes (`export function createUi() {
+    /// return { orders: factory.ordersPage } }`), threaded from `ModuleInfo` for
+    /// the analyze-layer member-crediting join. See issue #1858.
+    pub exported_factory_return_object_shapes:
+        Box<[fallow_types::extract::FactoryReturnObjectShapeExport]>,
     /// Named-type property types declared by this module's top-level interfaces
     /// and type-literal aliases. See `fallow_types::extract::TypeMemberTypeEntry`
     /// and issue #1785.
@@ -205,6 +210,7 @@ impl Default for ResolvedModule {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            exported_factory_return_object_shapes: Box::default(),
             type_member_types: Box::default(),
         }
     }

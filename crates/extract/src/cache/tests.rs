@@ -107,6 +107,36 @@ fn cache_omits_empty_exported_factory_returns_but_roundtrips_non_empty() {
 }
 
 #[test]
+fn cache_omits_empty_object_shapes_but_roundtrips_non_empty() {
+    // Issue #1858: the object-literal factory-return shape is compacted to `None`
+    // when empty and roundtrips byte-identically when populated. Without this a
+    // warm cache would drop the shape and re-flag the credited members.
+    let empty = parse_from_content(
+        FileId(7),
+        Path::new("src/plain.ts"),
+        "export const value = 1;",
+    );
+    assert!(empty.exported_factory_return_object_shapes.is_empty());
+    let cached_empty = module_to_cached_from_parts(&empty, 10, 20);
+    assert!(cached_empty.exported_factory_return_object_shapes.is_none());
+
+    let module = parse_from_content(
+        FileId(8),
+        Path::new("src/factory.ts"),
+        "class D { m() {} }\nexport class F { readonly p: D = new D() }\nexport function createUi() { const f = new F(); return { orders: f.p } }",
+    );
+    assert_eq!(module.exported_factory_return_object_shapes.len(), 1);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    assert!(cached.exported_factory_return_object_shapes.is_some());
+    let restored = cached_to_module(&cached, FileId(8));
+
+    assert_eq!(
+        restored.exported_factory_return_object_shapes,
+        module.exported_factory_return_object_shapes
+    );
+}
+
+#[test]
 fn cache_omits_empty_type_member_types_but_roundtrips_non_empty() {
     let empty = parse_from_content(
         FileId(7),
@@ -160,6 +190,7 @@ fn cache_store_insert_and_get() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -245,6 +276,7 @@ fn cache_store_hash_mismatch_returns_none() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -338,6 +370,7 @@ fn cache_store_overwrite_entry() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -414,6 +447,7 @@ fn cache_store_overwrite_entry() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -511,6 +545,7 @@ fn module_to_cached_roundtrip_named_export() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -628,6 +663,7 @@ fn module_to_cached_roundtrip_side_effect_used_export() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -730,6 +766,7 @@ fn module_to_cached_roundtrip_default_export() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -858,6 +895,7 @@ fn module_to_cached_roundtrip_imports() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -965,6 +1003,7 @@ fn module_to_cached_roundtrip_re_exports() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -1118,6 +1157,7 @@ fn module_to_cached_roundtrip_dynamic_imports() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -1305,6 +1345,7 @@ fn module_to_cached_roundtrip_members() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -1418,6 +1459,7 @@ fn cache_save_and_load_roundtrip() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -1514,6 +1556,7 @@ fn cache_version_mismatch_returns_none() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -1615,6 +1658,7 @@ fn module_to_cached_roundtrip_type_only_import() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -1706,6 +1750,7 @@ fn get_by_path_only_returns_entry_regardless_of_hash() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -1809,6 +1854,7 @@ fn retain_paths_removes_stale_entries() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -1915,6 +1961,7 @@ fn retain_paths_with_empty_files_clears_cache() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2002,6 +2049,7 @@ fn get_by_metadata_returns_entry_on_match() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2088,6 +2136,7 @@ fn get_by_metadata_returns_none_on_mtime_mismatch() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2176,6 +2225,7 @@ fn get_by_metadata_returns_none_on_size_mismatch() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2264,6 +2314,7 @@ fn get_by_metadata_returns_none_for_zero_mtime() {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2362,6 +2413,7 @@ fn module_to_cached_stores_mtime_and_size() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2448,6 +2500,7 @@ fn module_to_cached_roundtrip_line_offsets() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2543,6 +2596,7 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2666,6 +2720,7 @@ fn module_to_cached_roundtrip_unknown_suppression_kinds() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2771,6 +2826,7 @@ fn module_to_cached_roundtrip_visibility() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2867,6 +2923,7 @@ fn module_to_cached_roundtrip_visibility_internal() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -2963,6 +3020,7 @@ fn module_to_cached_roundtrip_visibility_beta() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -3059,6 +3117,7 @@ fn module_to_cached_roundtrip_visibility_alpha() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -3119,6 +3178,10 @@ fn module_to_cached_roundtrip_visibility_alpha() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "exhaustive CachedModule field roundtrip literal"
+)]
 fn module_to_cached_roundtrip_dynamic_import_patterns() {
     let module = ModuleInfo {
         file_id: FileId(0),
@@ -3156,6 +3219,7 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -3251,6 +3315,7 @@ fn module_to_cached_roundtrip_unused_import_bindings() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -3383,6 +3448,7 @@ fn module_to_cached_roundtrip_complexity() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -3482,6 +3548,7 @@ fn module_to_cached_roundtrip_require_with_destructured() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -3580,6 +3647,7 @@ fn module_to_cached_roundtrip_dynamic_import_with_local() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -3677,6 +3745,7 @@ fn module_to_cached_roundtrip_source_span() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -3738,6 +3807,10 @@ fn module_to_cached_roundtrip_source_span() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "exhaustive CachedModule field roundtrip literal"
+)]
 fn module_to_cached_roundtrip_member_decorators() {
     let module = ModuleInfo {
         file_id: FileId(0),
@@ -3782,6 +3855,7 @@ fn module_to_cached_roundtrip_member_decorators() {
         flag_uses: Vec::new(),
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),
@@ -3875,6 +3949,7 @@ fn synthetic_module(content_hash: u64, last_access_secs: u64, payload_kb: usize)
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: None,
+        exported_factory_return_object_shapes: None,
         type_member_types: None,
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),

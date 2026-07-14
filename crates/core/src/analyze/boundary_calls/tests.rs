@@ -92,6 +92,7 @@ fn build_graph(root: &std::path::Path, file_names: &[&str]) -> ModuleGraph {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            exported_factory_return_object_shapes: Box::default(),
             type_member_types: Box::default(),
         })
         .collect();
@@ -125,6 +126,7 @@ fn module(file_id: u32, callee_uses: Vec<CalleeUse>, imports: Vec<ImportInfo>) -
         flag_uses: Vec::new(),
         class_heritage: Vec::new(),
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: Vec::new(),
         local_type_declarations: Vec::new(),

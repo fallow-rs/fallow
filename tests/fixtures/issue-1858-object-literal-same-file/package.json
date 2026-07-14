@@ -1,0 +1,5 @@
+{
+  "name": "issue-1858-object-literal-same-file",
+  "private": true,
+  "main": "src/index.ts"
+}

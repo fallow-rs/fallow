@@ -109,6 +109,7 @@ fn builtin_modules_not_reported_as_unlisted() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -172,6 +173,7 @@ fn virtual_modules_not_reported_as_unlisted() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -362,6 +364,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            exported_factory_return_object_shapes: Box::default(),
             type_member_types: Box::default(),
         },
         ResolvedModule {
@@ -393,6 +396,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            exported_factory_return_object_shapes: Box::default(),
             type_member_types: Box::default(),
         },
     ];
@@ -460,6 +464,7 @@ fn dynamic_import_unlisted_dep_has_import_site() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -941,6 +946,7 @@ fn workspace_import_case(
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

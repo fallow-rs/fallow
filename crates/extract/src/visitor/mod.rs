@@ -15,10 +15,11 @@ use crate::{
     AngularComponentFieldArrayTypeFact, AngularTemplateMemberAccessFact, AngularThisSpreadFact,
     DynamicCustomElementRenderFact, DynamicImportInfo, DynamicImportPattern, ExportInfo,
     ExportName, FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryFnWholeObjectFact,
-    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, ImportInfo, ImportedName,
-    InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind, ModuleInfo,
-    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
-    PlaywrightFixtureUseFact, ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
+    FactoryReturnObjectPropertyAccessFact, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, ImportInfo, ImportedName, InstanceExportBindingFact,
+    MemberAccess, MemberInfo, MemberKind, ModuleInfo, PlaywrightFixtureAliasFact,
+    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
+    ReExportInfo, RequireCallInfo, SemanticFact, TypeMemberTypeEntry,
     TypedPropertyMemberAccessFact, VisibilityTag,
 };
 use fallow_types::extract::{
@@ -120,6 +121,32 @@ pub(crate) struct FactoryCallCandidate {
 pub(crate) struct FactoryReturnCandidate {
     pub(crate) local_name: String,
     pub(crate) callee_name: String,
+}
+
+/// An unresolved object-literal property value captured while visiting a factory
+/// function's `return { ... }`. Resolved to a terminal class local name at finalize
+/// time (after `binding_target_names` / `local_class_exports` are populated). See #1858.
+#[derive(Debug, Clone)]
+pub(crate) enum ObjectPropValueRef {
+    /// A `new Class()` leaf: the class local name is known now.
+    Class(String),
+    /// A flattened identifier / member-expression leaf (`o`, `factory.ordersPage`),
+    /// resolved against `binding_target_names` (+ typed-property expansion) at finalize.
+    Path(String),
+}
+
+/// A factory function returning an object literal, captured at visit time with
+/// per-property value refs and its dotted path. Resolved into
+/// `strict_factory_return_object_shapes` / `factory_return_object_shapes` at finalize.
+/// See issue #1858.
+#[derive(Debug, Clone)]
+pub(crate) struct FactoryReturnObjectCandidate {
+    pub(crate) fn_name: String,
+    /// Whether this function qualifies for the cross-module (strict) map: sync,
+    /// non-generator, unanimous-terminal object-literal return.
+    pub(crate) is_strict_eligible: bool,
+    /// `(dotted_property_path, value_ref)` for each statically-known property.
+    pub(crate) properties: Vec<(String, ObjectPropValueRef)>,
 }
 
 /// The classified right-hand side of a module-local assignment, used to build a
@@ -324,6 +351,19 @@ pub(crate) struct ModuleInfoExtractor {
     /// `ModuleInfo.exported_factory_returns`, bounding the cross-module
     /// over-credit blast radius. See issue #1441 (Part A).
     strict_factory_return_functions: FxHashMap<String, String>,
+    /// Factory functions returning an object literal, captured at visit time and
+    /// resolved at finalize (`resolve_factory_return_object_shapes`). See #1858.
+    factory_return_object_candidates: Vec<FactoryReturnObjectCandidate>,
+    /// Resolved object-literal factory-return shapes, LOOSE (same-file) form:
+    /// `fn_name -> [(property_path, class_local_name)]`. Feeds the same-file
+    /// consumer arm in `resolve_factory_return_candidates`. See issue #1858.
+    factory_return_object_shapes:
+        FxHashMap<String, Vec<fallow_types::extract::FactoryReturnObjectProperty>>,
+    /// Resolved object-literal factory-return shapes, STRICT (cross-module) form:
+    /// only sync/non-generator/unanimous-terminal factories. Joined against exports
+    /// into `ModuleInfo.exported_factory_return_object_shapes`. See issue #1858.
+    strict_factory_return_object_shapes:
+        FxHashMap<String, Vec<fallow_types::extract::FactoryReturnObjectProperty>>,
     /// Alias factory functions (by local name) whose body is eligible for STRICT
     /// (cross-module) promotion: it returns synchronously (not async/generator)
     /// and cannot fall through to `undefined` (terminal last statement). The
@@ -890,6 +930,22 @@ impl ModuleInfoExtractor {
         self.semantic_facts.push(SemanticFact::FactoryFnWholeObject(
             FactoryFnWholeObjectFact { callee_name },
         ));
+    }
+
+    fn record_factory_return_object_property_fact(
+        &mut self,
+        callee_name: String,
+        property_path: String,
+        member: String,
+    ) {
+        self.semantic_facts
+            .push(SemanticFact::FactoryReturnObjectPropertyAccess(
+                FactoryReturnObjectPropertyAccessFact {
+                    callee_name,
+                    property_path,
+                    member,
+                },
+            ));
     }
 
     fn record_typed_property_member_fact(
@@ -1602,6 +1658,8 @@ impl ModuleInfoExtractor {
         }
         let candidates = std::mem::take(&mut self.factory_return_candidates);
         let mut deferred_factory_facts: Vec<(String, String)> = Vec::new();
+        let mut deferred_object_property_facts: Vec<(String, String, String)> = Vec::new();
+        let mut deferred_member_accesses: Vec<MemberAccess> = Vec::new();
         for candidate in candidates {
             // Same-file factory returning `new Class()`: bind the local to the
             // class so `resolve_bound_member_accesses` credits `x.member` directly.
@@ -1610,6 +1668,30 @@ impl ModuleInfoExtractor {
                 self.binding_target_names
                     .entry(candidate.local_name)
                     .or_insert(BindingTarget::Class(class_name));
+                continue;
+            }
+            // Same-file factory returning an OBJECT LITERAL (`const ui = createUi();
+            // ui.orders.member`): resolve each `<local>.<property-path>` access
+            // through the captured shape and credit the property's class member
+            // directly. The `<local>.` prefix is a segment boundary, so `uiExtra`
+            // is not captured by `ui`. See issue #1858.
+            if let Some(shape) = self
+                .factory_return_object_shapes
+                .get(&candidate.callee_name)
+            {
+                let prefix = format!("{}.", candidate.local_name);
+                for access in &self.member_accesses {
+                    let Some(property_path) = access.object.strip_prefix(&prefix) else {
+                        continue;
+                    };
+                    if let Some(property) = shape.iter().find(|p| p.property_path == property_path)
+                    {
+                        deferred_member_accesses.push(MemberAccess {
+                            object: property.class_local_name.clone(),
+                            member: access.member.clone(),
+                        });
+                    }
+                }
                 continue;
             }
             // Cross-module: `const x = importedFactory()`. We do NOT route through
@@ -1628,15 +1710,29 @@ impl ModuleInfoExtractor {
             if !callee_is_imported {
                 continue;
             }
+            let object_prefix = format!("{}.", candidate.local_name);
             for access in &self.member_accesses {
                 if access.object == candidate.local_name {
                     deferred_factory_facts
                         .push((candidate.callee_name.clone(), access.member.clone()));
+                } else if let Some(property_path) = access.object.strip_prefix(&object_prefix) {
+                    // `const ui = importedObjectFactory(); ui.orders.member`: emit a
+                    // fact the analyze layer joins against the factory's exported
+                    // object shape. The `<local>.` prefix is a segment boundary. #1858.
+                    deferred_object_property_facts.push((
+                        candidate.callee_name.clone(),
+                        property_path.to_string(),
+                        access.member.clone(),
+                    ));
                 }
             }
         }
+        self.member_accesses.extend(deferred_member_accesses);
         for (callee_name, member) in deferred_factory_facts {
             self.record_factory_fn_member_fact(callee_name, member);
+        }
+        for (callee_name, property_path, member) in deferred_object_property_facts {
+            self.record_factory_return_object_property_fact(callee_name, property_path, member);
         }
     }
 
@@ -1738,6 +1834,109 @@ impl ModuleInfoExtractor {
                 out.push(fallow_types::extract::FactoryReturnExport {
                     export_name: export.name.to_string(),
                     class_local_name: class_local_name.clone(),
+                });
+            }
+        }
+        out
+    }
+
+    /// Resolve each captured object-literal factory-return candidate's property
+    /// values to terminal LOCAL class names, populating the same-file (loose) and
+    /// cross-module (strict) shape maps. Reuses `resolve_bound_object_name` +
+    /// `expand_typed_property_compound` (the proven receiver-type resolution) to turn
+    /// a `new X()` / local-alias / `factory.prop` value into the class it instances.
+    /// A value that does not resolve to a same-file terminal class is dropped (a
+    /// conservative false negative, never an over-credit).
+    ///
+    /// I1 (issue #1858 FP-safety): this pass READS `binding_target_names` /
+    /// `local_class_exports` / `interface_property_types` only; it never mutates
+    /// `member_accesses` or `binding_target_names`. Must run after those maps are
+    /// populated and before `resolve_factory_return_candidates` (the same-file
+    /// consumer arm reads `factory_return_object_shapes`).
+    fn resolve_factory_return_object_shapes(&mut self) {
+        if self.factory_return_object_candidates.is_empty() {
+            return;
+        }
+        let candidates = std::mem::take(&mut self.factory_return_object_candidates);
+        for candidate in candidates {
+            let mut resolved: Vec<fallow_types::extract::FactoryReturnObjectProperty> = Vec::new();
+            for (property_path, value) in &candidate.properties {
+                let Some(class_local_name) = self.resolve_object_property_value_class(value) else {
+                    continue;
+                };
+                resolved.push(fallow_types::extract::FactoryReturnObjectProperty {
+                    property_path: property_path.clone(),
+                    class_local_name,
+                });
+            }
+            if resolved.is_empty() {
+                continue;
+            }
+            if candidate.is_strict_eligible {
+                self.strict_factory_return_object_shapes
+                    .insert(candidate.fn_name.clone(), resolved.clone());
+            }
+            self.factory_return_object_shapes
+                .insert(candidate.fn_name, resolved);
+        }
+    }
+
+    /// Resolve one object-literal property value to a terminal local class name.
+    ///
+    /// A `new X()` leaf names the class directly. A `Path` leaf (`o`,
+    /// `factory.ordersPage`) resolves through `binding_target_names`: a bare local
+    /// bound to `new X()` yields `Class("X")` (no dot) taken directly; a compound
+    /// (`OrdersInvokerFactory.ordersPage`) hops through the class's typed-property
+    /// binding via `expand_typed_property_compound`. A cross-module factory class,
+    /// an opaque hop, or an unbound path drops. See issue #1858.
+    fn resolve_object_property_value_class(&self, value: &ObjectPropValueRef) -> Option<String> {
+        match value {
+            ObjectPropValueRef::Class(name) => Some(name.clone()),
+            ObjectPropValueRef::Path(path) => match self.resolve_bound_object_name(path)? {
+                // A bare local (`o` bound to `new X()`) resolves to a plain class
+                // name with no `.`; take it directly. Piping a no-dot name through
+                // `expand_typed_property_compound` returns `Opaque` (it early-returns
+                // on an empty remaining path), silently dropping the alias shape.
+                BindingTarget::Class(class) if !class.contains('.') => Some(class),
+                // A compound (`OrdersInvokerFactory.ordersPage`) hops through the
+                // class's typed-property binding to the terminal property class.
+                BindingTarget::Class(compound) => {
+                    match self.expand_typed_property_compound(&compound) {
+                        TypedPropertyExpansion::Resolved(terminal) => Some(terminal),
+                        TypedPropertyExpansion::CrossModule { .. }
+                        | TypedPropertyExpansion::Opaque => None,
+                    }
+                }
+                BindingTarget::FactoryCall { .. } => None,
+            },
+        }
+    }
+
+    /// Join the STRICT object-literal factory-return shapes against this module's
+    /// exports (mirrors `collect_exported_factory_returns`): honors
+    /// `export { createUi as createOrdersUi }`, skips type-only and default exports.
+    /// Class names stay local to this module; resolution is deferred to the
+    /// analyze-layer join. See issue #1858.
+    fn collect_exported_factory_return_object_shapes(
+        &self,
+    ) -> Vec<fallow_types::extract::FactoryReturnObjectShapeExport> {
+        if self.strict_factory_return_object_shapes.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for export in &self.exports {
+            if export.is_type_only {
+                continue;
+            }
+            let local_name = match (export.local_name.as_deref(), &export.name) {
+                (Some(local), _) => local,
+                (None, ExportName::Named(name)) => name.as_str(),
+                (None, ExportName::Default) => continue,
+            };
+            if let Some(properties) = self.strict_factory_return_object_shapes.get(local_name) {
+                out.push(fallow_types::extract::FactoryReturnObjectShapeExport {
+                    export_name: export.name.to_string(),
+                    properties: properties.clone().into_boxed_slice(),
                 });
             }
         }
@@ -2144,6 +2343,11 @@ impl ModuleInfoExtractor {
         // Aliases first: promote `useApi(){ return api }` to a factory-return via
         // the typed local, so the `const x = useApi()` candidate below resolves.
         self.resolve_factory_return_aliases();
+        // Before `resolve_factory_return_candidates`: it reads
+        // `factory_return_object_shapes` for the same-file object-literal consumer
+        // arm. Needs `enrich_local_class_exports` (above) for the typed-property
+        // hop on `factory.prop` values. See issue #1858.
+        self.resolve_factory_return_object_shapes();
         self.resolve_factory_return_candidates();
         // Separate from the candidate pass, which early-returns when no member
         // candidate exists: an unnamed factory result records no member candidate.
@@ -2184,6 +2388,8 @@ impl ModuleInfoExtractor {
         } = parsed;
         let namespace_object_aliases = self.finalize_resolution_phase();
         let exported_factory_returns = self.collect_exported_factory_returns();
+        let exported_factory_return_object_shapes =
+            self.collect_exported_factory_return_object_shapes();
         let type_member_types = self.collect_type_member_types();
         ModuleInfo {
             file_id,
@@ -2210,6 +2416,8 @@ impl ModuleInfoExtractor {
             flag_uses: Vec::new(),
             class_heritage: self.class_heritage,
             exported_factory_returns: exported_factory_returns.into_boxed_slice(),
+            exported_factory_return_object_shapes: exported_factory_return_object_shapes
+                .into_boxed_slice(),
             type_member_types: type_member_types.into_boxed_slice(),
             injection_tokens: self.injection_tokens,
             local_type_declarations: self.local_type_declarations,
@@ -2292,6 +2500,8 @@ impl ModuleInfoExtractor {
     ) {
         // Compute before `self.exports` is drained below; the join reads exports.
         let mut exported_factory_returns = self.collect_exported_factory_returns();
+        let mut exported_factory_return_object_shapes =
+            self.collect_exported_factory_return_object_shapes();
         let mut type_member_types = self.collect_type_member_types();
         info.imports.append(&mut self.imports);
         info.exports.append(&mut self.exports);
@@ -2323,6 +2533,12 @@ impl ModuleInfoExtractor {
             let mut merged = std::mem::take(&mut info.exported_factory_returns).into_vec();
             merged.append(&mut exported_factory_returns);
             info.exported_factory_returns = merged.into_boxed_slice();
+        }
+        if !exported_factory_return_object_shapes.is_empty() {
+            let mut merged =
+                std::mem::take(&mut info.exported_factory_return_object_shapes).into_vec();
+            merged.append(&mut exported_factory_return_object_shapes);
+            info.exported_factory_return_object_shapes = merged.into_boxed_slice();
         }
         if !type_member_types.is_empty() {
             let mut merged = std::mem::take(&mut info.type_member_types).into_vec();

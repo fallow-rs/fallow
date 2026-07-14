@@ -798,7 +798,16 @@ use crate::MemberKind;
 /// `readonly dep = new DepB()`) no longer collide via last-write-wins. The
 /// resulting `member_accesses` change for such modules (the previously-losing
 /// class's members are now credited); warm 233 caches keep the collision.
-pub(super) const CACHE_VERSION: u32 = 234;
+///
+/// Bumped to 235 for issue #1858: a factory returning an object literal whose
+/// property values are class instances (`export function createUi() { return {
+/// orders: factory.ordersPage } }`) now persists the returned shape on the new
+/// `exported_factory_return_object_shapes` field + emits a new
+/// `FactoryReturnObjectPropertyAccess` semantic fact, so a cross-module
+/// `const ui = createUi(); ui.orders.member` consumer credits the class member.
+/// Warm 234 caches lack the field and the fact, leaving those methods falsely
+/// reported as unused.
+pub(super) const CACHE_VERSION: u32 = 235;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -857,7 +866,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1336);
+assert_cached_type_size!(CachedModule, 1352);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 56);
@@ -950,6 +959,11 @@ pub struct CachedModule {
     /// (`export function useApi() { return new RESTApi() }`). Compacted to `None`
     /// when empty so the common no-factory module pays no payload. See #1441 Part A.
     pub exported_factory_returns: Option<Box<[fallow_types::extract::FactoryReturnExport]>>,
+    /// Object-literal factory-return shapes (`export function createUi() {
+    /// return { orders: factory.ordersPage } }`). Compacted to `None` when empty
+    /// so the common no-object-factory module pays no payload. See issue #1858.
+    pub exported_factory_return_object_shapes:
+        Option<Box<[fallow_types::extract::FactoryReturnObjectShapeExport]>>,
     /// Named-type property types declared by top-level interfaces and
     /// type-literal aliases (`interface Opts { c: OptDep }`). Compacted to
     /// `None` when empty so the common no-interface module pays no payload.

@@ -245,6 +245,7 @@ fn empty_resolved_module(
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }
 }
@@ -590,6 +591,7 @@ fn create_re_export_input() -> ReExportInput {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     });
 
@@ -666,6 +668,7 @@ fn create_re_export_input() -> ReExportInput {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            exported_factory_return_object_shapes: Box::default(),
             type_member_types: Box::default(),
         });
     }
@@ -725,6 +728,7 @@ fn create_re_export_input() -> ReExportInput {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            exported_factory_return_object_shapes: Box::default(),
             type_member_types: Box::default(),
         });
     }
@@ -1000,6 +1004,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
         flag_uses: vec![],
         class_heritage: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: vec![],
         local_type_declarations: Vec::new(),

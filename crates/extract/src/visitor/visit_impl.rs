@@ -86,7 +86,7 @@ pub(super) use visit_factory_returns::count_returns_in_statements;
 use visit_factory_returns::{
     FactoryReturnFunctionInput, classify_factory_assigned_value, collect_self_scope_assignments,
     function_body_is_terminal, function_body_returns_identifier, function_body_returns_new_class,
-    function_body_returns_new_class_unanimous,
+    function_body_returns_new_class_unanimous, function_body_returns_object_shape,
 };
 use visit_helpers::*;
 use visit_object_helpers::*;
@@ -204,6 +204,24 @@ impl ModuleInfoExtractor {
                 .insert(name.to_string(), class_name.clone());
             self.factory_return_functions
                 .insert(name.to_string(), class_name);
+        }
+
+        // Object-literal return (`return { orders: factory.ordersPage }`): capture
+        // the shape for the object-property member-crediting join. Orthogonal to
+        // the single-class arms above (a function returns one or the other), so it
+        // is checked unconditionally. Strict (cross-module) eligibility additionally
+        // requires a terminal body, so `const ui = createUi()` cannot bind a value
+        // the factory only returns on some paths. See issue #1858.
+        if let Some(properties) = function_body_returns_object_shape(body, input.is_expression_body)
+        {
+            let is_strict_eligible =
+                strict_eligible && function_body_is_terminal(body, input.is_expression_body);
+            self.factory_return_object_candidates
+                .push(super::FactoryReturnObjectCandidate {
+                    fn_name: name.to_string(),
+                    is_strict_eligible,
+                    properties,
+                });
         }
     }
 

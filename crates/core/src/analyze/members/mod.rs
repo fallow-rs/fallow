@@ -13,10 +13,10 @@ use crate::results::UnusedMember;
 use crate::suppress::{IssueKind, SuppressionContext};
 use fallow_types::extract::{
     FactoryCallMemberAccessFact, FactoryFnMemberAccessFact, FactoryFnWholeObjectFact,
-    FluentChainMemberAccessFact, FluentChainNewMemberAccessFact, InstanceExportBindingFact,
-    PlaywrightFixtureAliasFact, PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact,
-    PlaywrightFixtureUseFact, SemanticFactView, TypedPropertyMemberAccessFact,
-    ordinary_whole_object_uses,
+    FactoryReturnObjectPropertyAccessFact, FluentChainMemberAccessFact,
+    FluentChainNewMemberAccessFact, InstanceExportBindingFact, PlaywrightFixtureAliasFact,
+    PlaywrightFixtureDefinitionFact, PlaywrightFixtureTypeFact, PlaywrightFixtureUseFact,
+    SemanticFactView, TypedPropertyMemberAccessFact, ordinary_whole_object_uses,
 };
 
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
@@ -676,6 +676,13 @@ fn factory_fn_whole_objects(resolved: &ResolvedModule) -> Vec<FactoryFnWholeObje
     view.factory_fn_whole_objects()
 }
 
+fn factory_return_object_property_accesses(
+    resolved: &ResolvedModule,
+) -> Vec<FactoryReturnObjectPropertyAccessFact> {
+    let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
+    view.factory_return_object_property_accesses()
+}
+
 fn typed_property_member_accesses(resolved: &ResolvedModule) -> Vec<TypedPropertyMemberAccessFact> {
     let view = SemanticFactView::new(&resolved.semantic_facts, &resolved.member_accesses);
     view.typed_property_member_accesses()
@@ -1200,6 +1207,12 @@ fn propagate_common_member_accesses(
         accessed_members,
     );
     propagate_factory_fn_accesses(
+        input.graph,
+        input.resolved_modules,
+        indexes,
+        accessed_members,
+    );
+    propagate_factory_return_object_accesses(
         input.graph,
         input.resolved_modules,
         indexes,

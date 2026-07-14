@@ -73,6 +73,13 @@ pub struct ModuleInfo {
     /// `const x = useApi(); x.member` consumer can credit the returned class.
     /// See issue #1441 (Part A).
     pub exported_factory_returns: Box<[FactoryReturnExport]>,
+    /// Exported factories that return an OBJECT LITERAL whose property values are
+    /// class instances (`export function createUi() { return { orders: factory.ordersPage } }`).
+    /// Each entry maps a dotted property path (`orders`, `invoke.dashboard`) to the
+    /// returned class's local name within the factory module, so a cross-module
+    /// `const ui = createUi(); ui.orders.member` consumer can credit the class. Names
+    /// are local to this module; resolution is deferred to analyze time. See issue #1858.
+    pub exported_factory_return_object_shapes: Box<[FactoryReturnObjectShapeExport]>,
     /// Named-type property types declared by this module's top-level interfaces
     /// and type-literal aliases (`interface Opts { c: OptDep }`). Names are
     /// local to this module; resolution is deferred to analyze time. Consumed
@@ -1344,6 +1351,54 @@ pub struct FactoryReturnExport {
     pub class_local_name: String,
 }
 
+/// One resolved property of an object-literal factory return: a dotted property
+/// path mapped to the class the value at that path is an instance of.
+///
+/// `return { invoke: { orders: factory.ordersPage } }` records
+/// `{ property_path: "invoke.orders", class_local_name: "OrdersPage" }`. The class
+/// name is the factory module's own LOCAL name, resolved at analyze time through the
+/// factory module's imports to the real class export. See issue #1858.
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+    PartialEq,
+    Eq,
+)]
+pub struct FactoryReturnObjectProperty {
+    /// Dotted property path from the returned object literal (`orders`, `invoke.orders`).
+    pub property_path: String,
+    /// The property value's class local name within the factory module.
+    pub class_local_name: String,
+}
+
+/// An exported factory function that returns an object literal whose property
+/// values are class instances, joined to its public export name.
+///
+/// A cross-module `const ui = createUi(); ui.orders.member` consumer emits a
+/// `FactoryReturnObjectPropertyAccess` fact; the analyze layer resolves `export_name`
+/// through the consumer's imports to this module, matches `property_path`, and credits
+/// `member` on the resolved class (gated on it being a class with members). See issue #1858.
+#[derive(
+    Debug,
+    Clone,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+    PartialEq,
+    Eq,
+)]
+pub struct FactoryReturnObjectShapeExport {
+    /// Public export name (honors `export { createUi as createOrdersUi }`).
+    pub export_name: String,
+    /// Resolved `(property_path -> class_local_name)` entries for the returned literal.
+    pub properties: Box<[FactoryReturnObjectProperty]>,
+}
+
 /// A named-type property whose declared type is a named type reference.
 ///
 /// `interface Opts { c: OptDep }` (or `type Opts = { c: OptDep }`) records
@@ -1522,6 +1577,11 @@ pub enum SemanticFact {
     /// Appended, never inserted: `bitcode` encodes an enum by ordinal, so moving an
     /// existing variant would make an old cache decode one fact as another.
     FactoryFnWholeObject(FactoryFnWholeObjectFact),
+    /// A member access reached through a property of a value returned by an
+    /// imported factory that returns an object literal (`const ui = createUi();
+    /// ui.orders.member`). Appended after `FactoryFnWholeObject`, never inserted
+    /// (bitcode encodes by ordinal). See issue #1858.
+    FactoryReturnObjectPropertyAccess(FactoryReturnObjectPropertyAccessFact),
 }
 
 /// Iterate Angular template member names from typed semantic facts.
@@ -1661,6 +1721,15 @@ impl<'a> SemanticFactView<'a> {
             .collect()
     }
 
+    /// Collect object-literal factory-return property member facts.
+    pub fn factory_return_object_property_accesses(
+        self,
+    ) -> Vec<FactoryReturnObjectPropertyAccessFact> {
+        factory_return_object_property_access_facts(self.semantic_facts)
+            .cloned()
+            .collect()
+    }
+
     /// Collect typed-property-hop member facts.
     pub fn typed_property_member_accesses(self) -> Vec<TypedPropertyMemberAccessFact> {
         typed_property_member_access_facts(self.semantic_facts)
@@ -1773,6 +1842,19 @@ fn factory_fn_whole_object_facts(
     semantic_facts.iter().filter_map(|fact| {
         if let SemanticFact::FactoryFnWholeObject(fact) = fact {
             Some(fact)
+        } else {
+            None
+        }
+    })
+}
+
+/// Iterate object-literal factory-return property member facts.
+fn factory_return_object_property_access_facts(
+    semantic_facts: &[SemanticFact],
+) -> impl Iterator<Item = &FactoryReturnObjectPropertyAccessFact> {
+    semantic_facts.iter().filter_map(|fact| {
+        if let SemanticFact::FactoryReturnObjectPropertyAccess(access) = fact {
+            Some(access)
         } else {
             None
         }
@@ -1929,6 +2011,28 @@ pub struct FactoryFnMemberAccessFact {
 pub struct FactoryFnWholeObjectFact {
     /// Local imported function used as the factory callee.
     pub callee_name: String,
+}
+
+/// A member access reached through a property of a value returned by an imported
+/// factory that returns an object literal.
+///
+/// `const ui = createUi(); ui.orders.member` emits one fact per member read on a
+/// factory-result property. The analyze layer resolves `callee_name` through the
+/// consumer's imports to the factory's origin module, reads that module's
+/// `exported_factory_return_object_shapes` to find the property whose path equals
+/// `property_path` and its class local name, resolves THAT through the factory
+/// module's own imports to the class export, and credits `member` on the class
+/// (gated on the export actually being a class with members). See issue #1858.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct FactoryReturnObjectPropertyAccessFact {
+    /// Local imported function used as the factory callee.
+    pub callee_name: String,
+    /// Dotted property path between the factory-result local and the final member
+    /// (e.g. `"orders"` for `ui.orders.member`, `"invoke.orders"` for `ui.invoke.orders.member`).
+    pub property_path: String,
+    /// Member accessed on the terminal property's instance.
+    pub member: String,
 }
 
 /// A member access reached through a typed property hop that the extraction
@@ -2510,7 +2614,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 96);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1336);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1352);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
@@ -2999,6 +3103,13 @@ mod tests {
             exported_factory_returns: Box::from([FactoryReturnExport {
                 export_name: "useApi".to_string(),
                 class_local_name: "RESTApi".to_string(),
+            }]),
+            exported_factory_return_object_shapes: Box::from([FactoryReturnObjectShapeExport {
+                export_name: "createUi".to_string(),
+                properties: Box::from([FactoryReturnObjectProperty {
+                    property_path: "orders".to_string(),
+                    class_local_name: "OrdersPage".to_string(),
+                }]),
             }]),
             type_member_types: Box::from([TypeMemberTypeEntry {
                 type_name: "Opts".to_string(),
@@ -4245,6 +4356,7 @@ mod tests {
             flag_uses: Vec::new(),
             class_heritage: Vec::new(),
             exported_factory_returns: Box::default(),
+            exported_factory_return_object_shapes: Box::default(),
             type_member_types: Box::default(),
             injection_tokens: Vec::new(),
             local_type_declarations: Vec::new(),

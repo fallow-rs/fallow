@@ -6,7 +6,7 @@
 )]
 use oxc_ast::ast::*;
 
-use super::super::{FactoryAssignedValue, helpers::is_builtin_constructor};
+use super::super::{FactoryAssignedValue, ObjectPropValueRef, helpers::is_builtin_constructor};
 use super::unwrap_static_expr;
 
 #[derive(Clone, Copy)]
@@ -380,6 +380,141 @@ pub(super) fn function_body_returns_identifier(
         return None;
     }
     Some(returned)
+}
+
+/// The properties of an object literal a function returns, flattened to dotted
+/// paths with per-property value refs. `Some(props)` when the function's single
+/// (or expression-body) return is an object literal, or a bare identifier bound
+/// to a same-scope `const x = { ... }` initializer (assigned-then-returned).
+/// Nested object literals recurse with a dotted prefix; spread, computed-key, and
+/// dynamic-value (call / await / …) properties are skipped (a conservative gap,
+/// never an over-credit). A property value that is `new Class()` records the class
+/// directly; an identifier or a static-member expression records a `Path` the
+/// finalize resolver hops through `binding_target_names`. See issue #1858.
+pub(super) fn function_body_returns_object_shape(
+    body: &FunctionBody<'_>,
+    is_expression_body: bool,
+) -> Option<Vec<(String, ObjectPropValueRef)>> {
+    let object = object_literal_from_return(body, is_expression_body)?;
+    let mut out = Vec::new();
+    flatten_object_shape(object, "", &mut out);
+    (!out.is_empty()).then_some(out)
+}
+
+/// The object literal a function returns: the sole expression of an
+/// expression-bodied arrow, the argument of a block body's single `return`, or
+/// the same-scope `const <id> = { ... }` initializer of a returned identifier.
+fn object_literal_from_return<'a>(
+    body: &'a FunctionBody<'a>,
+    is_expression_body: bool,
+) -> Option<&'a ObjectExpression<'a>> {
+    if is_expression_body {
+        let [Statement::ExpressionStatement(stmt)] = body.statements.as_slice() else {
+            return None;
+        };
+        return object_expression_of(&stmt.expression);
+    }
+    // A single return keeps the shape unambiguous; a branchy / multi-return
+    // factory abstains (conservative, matching `function_body_returns_identifier`).
+    if count_returns_in_statements(&body.statements) != 1 {
+        return None;
+    }
+    let arg = first_return_arg_in_statements(&body.statements)?;
+    if let Some(object) = object_expression_of(arg) {
+        return Some(object);
+    }
+    // Assigned-then-returned: `const ui = { ... }; return ui;`.
+    let Expression::Identifier(id) = unwrap_static_expr(arg) else {
+        return None;
+    };
+    object_declarator_init(&body.statements, id.name.as_str())
+}
+
+/// The object-literal initializer of a top-level `const <name> = { ... }`
+/// declarator in `statements` (assigned-then-returned support). First match wins.
+fn object_declarator_init<'a>(
+    statements: &'a [Statement<'a>],
+    name: &str,
+) -> Option<&'a ObjectExpression<'a>> {
+    for stmt in statements {
+        let Statement::VariableDeclaration(decl) = stmt else {
+            continue;
+        };
+        for declarator in &decl.declarations {
+            let BindingPattern::BindingIdentifier(binding) = &declarator.id else {
+                continue;
+            };
+            if binding.name.as_str() != name {
+                continue;
+            }
+            if let Some(init) = declarator.init.as_ref() {
+                return object_expression_of(init);
+            }
+        }
+    }
+    None
+}
+
+/// The object expression an expression unwraps to (through paren / `as` /
+/// `satisfies` / `!`), or `None`.
+fn object_expression_of<'a>(expr: &'a Expression<'a>) -> Option<&'a ObjectExpression<'a>> {
+    match unwrap_static_expr(expr) {
+        Expression::ObjectExpression(object) => Some(object),
+        _ => None,
+    }
+}
+
+/// Recursively flatten an object literal into `(dotted_path, value_ref)` entries.
+fn flatten_object_shape(
+    object: &ObjectExpression<'_>,
+    prefix: &str,
+    out: &mut Vec<(String, ObjectPropValueRef)>,
+) {
+    for property in &object.properties {
+        let ObjectPropertyKind::ObjectProperty(property) = property else {
+            continue; // spread element: unknown keys, skip
+        };
+        let Some(key) = property.key.static_name() else {
+            continue; // computed key: skip
+        };
+        let path = if prefix.is_empty() {
+            key.to_string()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        let value = unwrap_static_expr(&property.value);
+        match value {
+            Expression::NewExpression(_) => {
+                if let Some(class) = new_expression_class_name(value) {
+                    out.push((path, ObjectPropValueRef::Class(class)));
+                }
+            }
+            Expression::Identifier(id) => {
+                out.push((path, ObjectPropValueRef::Path(id.name.to_string())));
+            }
+            Expression::StaticMemberExpression(_) => {
+                if let Some(flat) = flatten_member_path(value) {
+                    out.push((path, ObjectPropValueRef::Path(flat)));
+                }
+            }
+            Expression::ObjectExpression(nested) => flatten_object_shape(nested, &path, out),
+            _ => {} // dynamic value (call, await, ternary, …): skip
+        }
+    }
+}
+
+/// Flatten an identifier / static-member chain (`factory.ordersPage`) to a dotted
+/// path string, or `None` for any non-static-member shape.
+fn flatten_member_path(expr: &Expression<'_>) -> Option<String> {
+    match unwrap_static_expr(expr) {
+        Expression::Identifier(id) => Some(id.name.to_string()),
+        Expression::StaticMemberExpression(member) => Some(format!(
+            "{}.{}",
+            flatten_member_path(&member.object)?,
+            member.property.name
+        )),
+        _ => None,
+    }
 }
 
 /// The argument of the single `return` reachable in `statements` (through

@@ -489,6 +489,10 @@ pub fn cached_to_module_opts(
         flag_uses: cached.flag_uses.clone(),
         class_heritage: cached.class_heritage.clone(),
         exported_factory_returns: cached.exported_factory_returns.clone().unwrap_or_default(),
+        exported_factory_return_object_shapes: cached
+            .exported_factory_return_object_shapes
+            .clone()
+            .unwrap_or_default(),
         type_member_types: cached.type_member_types.clone().unwrap_or_default(),
         injection_tokens: cached.injection_tokens.clone(),
         local_type_declarations: cached_local_types_to_module(&cached.local_type_declarations),
@@ -591,6 +595,10 @@ pub fn module_to_cached(
         class_heritage: module.class_heritage.clone(),
         exported_factory_returns: (!module.exported_factory_returns.is_empty())
             .then(|| module.exported_factory_returns.clone()),
+        exported_factory_return_object_shapes: (!module
+            .exported_factory_return_object_shapes
+            .is_empty())
+        .then(|| module.exported_factory_return_object_shapes.clone()),
         type_member_types: (!module.type_member_types.is_empty())
             .then(|| module.type_member_types.clone()),
         injection_tokens: module.injection_tokens.clone(),

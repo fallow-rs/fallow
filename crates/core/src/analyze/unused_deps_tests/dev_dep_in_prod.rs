@@ -45,6 +45,7 @@ fn graph_with_import_from(
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -278,6 +279,7 @@ fn dev_dep_not_flagged_when_importing_file_is_unreachable() {
             value_referenced_import_bindings: vec![],
             namespace_object_aliases: vec![],
             exported_factory_returns: Box::default(),
+            exported_factory_return_object_shapes: Box::default(),
             type_member_types: Box::default(),
         }];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

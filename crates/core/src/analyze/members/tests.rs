@@ -692,6 +692,7 @@ fn make_module_with_class_heritage(
             instance_bindings: Vec::new(),
         }],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
         injection_tokens: Vec::new(),
         local_type_declarations: vec![],

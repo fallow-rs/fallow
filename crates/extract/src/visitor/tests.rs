@@ -546,6 +546,148 @@ fn exported_factory_returns_skips_unexported_factory() {
     );
 }
 
+fn has_exported_object_shape(
+    info: &crate::ModuleInfo,
+    export: &str,
+    property_path: &str,
+    class_local: &str,
+) -> bool {
+    info.exported_factory_return_object_shapes
+        .iter()
+        .any(|shape| {
+            shape.export_name == export
+                && shape.properties.iter().any(|property| {
+                    property.property_path == property_path
+                        && property.class_local_name == class_local
+                })
+        })
+}
+
+#[test]
+fn object_literal_factory_return_records_field_member_read_shape() {
+    // Issue #1858: `export function createUi() { const f = new F(); return { orders: f.p } }`
+    // where `F.p: D` records the exported shape `orders -> D` so a cross-module
+    // `const ui = createUi(); ui.orders.member` consumer can credit `D`.
+    let info = parse(
+        "class D { m() {} }\nexport class F { readonly p: D = new D() }\nexport function createUi() { const f = new F(); return { orders: f.p } }",
+    );
+    assert!(
+        has_exported_object_shape(&info, "createUi", "orders", "D"),
+        "object-literal factory return should record orders -> D: {:?}",
+        info.exported_factory_return_object_shapes
+    );
+}
+
+#[test]
+fn object_literal_factory_return_alias_leaf_credits_same_file() {
+    // Rec 2: `const o = new D(); return { orders: o }` resolves the leaf to
+    // Class("D") with NO dot; it must be taken directly. Piping a no-dot name
+    // through `expand_typed_property_compound` returns Opaque and would silently
+    // drop this shape. Consumed same-file, `ui.orders.m()` must credit `D.m`.
+    let info = parse(
+        "class D { m() {} }\nfunction createUi() { const o = new D(); return { orders: o } }\nconst ui = createUi()\nui.orders.m()",
+    );
+    assert!(
+        has_member_access(&info, "D", "m"),
+        "alias-leaf object-literal factory should credit the member on the class: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn object_literal_factory_return_nested_credits_same_file() {
+    // Nested literal consumed as `ui.invoke.orders.m()` credits `D.m` via the
+    // dotted property path `invoke.orders`.
+    let info = parse(
+        "class D { m() {} }\nfunction createUi() { const o = new D(); return { invoke: { orders: o } } }\nconst ui = createUi()\nui.invoke.orders.m()",
+    );
+    assert!(
+        has_member_access(&info, "D", "m"),
+        "nested object-literal factory should credit the member: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn object_literal_factory_return_assigned_then_returned_credits() {
+    // `const ui = { orders: o }; return ui` traces the returned identifier to its
+    // same-scope object-literal initializer.
+    let info = parse(
+        "class D { m() {} }\nfunction createUi() { const o = new D(); const ui = { orders: o }; return ui }\nconst c = createUi()\nc.orders.m()",
+    );
+    assert!(
+        has_member_access(&info, "D", "m"),
+        "assigned-then-returned object-literal factory should credit the member: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn object_literal_factory_return_unwraps_satisfies() {
+    // `return { orders: new D() } satisfies UI` is unwrapped before classification.
+    let info = parse(
+        "type UI = { orders: D }\nclass D { m() {} }\nexport function createUi() { return { orders: new D() } satisfies UI }",
+    );
+    assert!(
+        has_exported_object_shape(&info, "createUi", "orders", "D"),
+        "satisfies-wrapped return should still record the shape: {:?}",
+        info.exported_factory_return_object_shapes
+    );
+}
+
+#[test]
+fn object_literal_factory_return_skips_spread_keeps_known_keys() {
+    // `{ ...base, orders: new D() }`: the spread is skipped (unknown keys), the
+    // statically-known `orders` key still credits. A spread never adds a false credit.
+    let info = parse(
+        "class D { m() {} }\nconst base = {}\nfunction createUi() { return { ...base, orders: new D() } }\nconst ui = createUi()\nui.orders.m()",
+    );
+    assert!(
+        has_member_access(&info, "D", "m"),
+        "spread in the returned literal should keep the known keys: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn object_literal_factory_return_shape_pass_does_not_fabricate_accesses() {
+    // I1 (issue #1858): the factory-side classifier + finalize resolver write ONLY
+    // the shape field, never `member_accesses`. A factory with no consumer records
+    // the shape but the resolver adds no `D.*` member access (crediting is the
+    // analyze layer's job, gated on a real consumer). The whole false-positive
+    // safety proof rests on this invariant.
+    let info = parse(
+        "class D { m() {} }\nexport class F { readonly p: D = new D() }\nexport function createUi() { const f = new F(); return { orders: f.p } }",
+    );
+    assert!(
+        has_exported_object_shape(&info, "createUi", "orders", "D"),
+        "the shape must be recorded (proving the pass ran)"
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "D"),
+        "the factory-side shape pass must not fabricate a member access on the resolved \
+         class (I1): {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn object_literal_factory_return_does_not_credit_wrong_property() {
+    // A consumer reading a property that is NOT in the shape credits nothing: only
+    // the declared `orders -> D` path resolves.
+    let info = parse(
+        "class D { m() {} }\nfunction createUi() { return { orders: new D() } }\nconst ui = createUi()\nui.checkout.m()",
+    );
+    assert!(
+        !has_member_access(&info, "D", "m"),
+        "an undeclared property path must not credit the class: {:?}",
+        info.member_accesses
+    );
+}
+
 #[test]
 fn into_module_info_transfers_member_accesses() {
     let info = parse("import { Obj } from './x';\nObj.method();");

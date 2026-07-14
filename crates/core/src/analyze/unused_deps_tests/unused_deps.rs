@@ -455,6 +455,7 @@ fn path_alias_imports_not_reported_as_unlisted() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -523,6 +524,7 @@ fn multiple_unresolved_imports_collected() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
 
@@ -604,6 +606,7 @@ fn workspace_dep_used_within_workspace_not_flagged() {
         value_referenced_import_bindings: vec![],
         namespace_object_aliases: vec![],
         exported_factory_returns: Box::default(),
+        exported_factory_return_object_shapes: Box::default(),
         type_member_types: Box::default(),
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
