@@ -2165,7 +2165,8 @@ pub fn render_fix_summary(env: &Value) -> String {
     } else {
         "Applied"
     });
-    let _ = write!(out, " **{fix_attempts} fixes**");
+    let fix_noun = if fix_attempts == 1 { "fix" } else { "fixes" };
+    let _ = write!(out, " **{fix_attempts} {fix_noun}**");
     if !dry_run {
         let _ = write!(out, " ({} succeeded)", num(env, "total_fixed"));
     }

@@ -55,6 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The `--format github-summary` auto-fix headline uses the singular noun for a
+  single fix.** It read "would apply **1 fixes**" for one fix; it now reads
+  "1 fix". Same wording via `fallow fix --format github-summary` and
+  `fallow report --from`.
+
 - **Dead-code analysis no longer repeats quadratic allocation work across deep
   `export *` barrel chains.** Star re-export propagation now builds its
   named-import origin index once per graph and batches reference deduplication

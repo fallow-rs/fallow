@@ -705,6 +705,32 @@ fn render_summary_fix_mirrors_render_fix_summary() {
     );
 }
 
+/// A single fix uses the singular noun in the headline (`1 fix`, not
+/// `1 fixes`). One fix is the common PR case.
+#[test]
+fn fix_summary_single_fix_uses_singular_noun() {
+    let env = json!({
+        "dry_run": true,
+        "total_fixed": 0,
+        "skipped": 0,
+        "skipped_content_changed": 0,
+        "skipped_mixed_line_endings": 0,
+        "skipped_low_confidence_exports": 0,
+        "fixes": [
+            { "type": "remove_export", "path": "src/lib.ts", "line": 2, "name": "dead", "applied": false }
+        ]
+    });
+    let rendered = fallow_cli::report::github_summary::render_fix_summary(&env);
+    assert!(
+        rendered.contains("would apply **1 fix**"),
+        "single fix should read '1 fix', got: {rendered}"
+    );
+    assert!(
+        !rendered.contains("1 fixes"),
+        "must not use the plural noun for one fix: {rendered}"
+    );
+}
+
 /// The bundled action no-ops annotations for the fix command, so the native
 /// `EnvelopeKind::Fix` annotation renderer must emit nothing.
 #[test]
