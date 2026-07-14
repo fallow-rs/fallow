@@ -54,6 +54,13 @@ fn process_exists(pid: u32) -> bool {
 #[cfg(windows)]
 struct ProcessCleanup(Vec<u32>);
 
+#[cfg(any(unix, windows))]
+impl ProcessCleanup {
+    fn disarm(&mut self, pid: u32) {
+        self.0.retain(|candidate| *candidate != pid);
+    }
+}
+
 #[cfg(windows)]
 #[expect(
     unsafe_code,
@@ -126,6 +133,38 @@ async fn wait_for_process_exit(pid: u32) -> bool {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     false
+}
+
+#[cfg(unix)]
+#[test]
+fn process_cleanup_disarm_does_not_signal_reused_pid() {
+    let mut replacement = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("replacement process");
+    let replacement_pid = replacement.id();
+    let mut cleanup = ProcessCleanup(vec![replacement_pid]);
+
+    cleanup.disarm(replacement_pid);
+    drop(cleanup);
+
+    let mut replacement_status = None;
+    for _ in 0..20 {
+        replacement_status = replacement.try_wait().expect("replacement status");
+        if replacement_status.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if replacement_status.is_none() {
+        replacement.kill().expect("terminate replacement process");
+        replacement.wait().expect("reap replacement process");
+    }
+
+    assert!(
+        replacement_status.is_none(),
+        "disarmed cleanup signaled a reused PID"
+    );
 }
 
 #[tokio::test]
@@ -229,7 +268,8 @@ async fn run_fallow_exit_code_2_with_stderr_returns_structured_json_error() {
         parsed["message"]
             .as_str()
             .unwrap()
-            .contains("invalid config")
+            .contains("invalid config"),
+        "unexpected subprocess error body: {text}"
     );
 }
 
@@ -444,7 +484,10 @@ async fn run_fallow_unicode_in_stderr_error() {
     let text = extract_text(&result);
     let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
     let msg = parsed["message"].as_str().unwrap();
-    assert!(msg.contains("ungültige Konfiguration"));
+    assert!(
+        msg.contains("ungültige Konfiguration"),
+        "unexpected subprocess error body: {text}"
+    );
 }
 
 #[cfg(unix)]
@@ -491,7 +534,12 @@ async fn run_fallow_stdout_preserves_content() {
     )
     .await
     .unwrap();
-    assert_eq!(result.is_error, Some(false));
+    assert_eq!(
+        result.is_error,
+        Some(false),
+        "unexpected subprocess result: {}",
+        extract_text(&result)
+    );
     let text = extract_text(&result);
     assert!(text.contains(r#""key": "value""#));
 }
@@ -547,9 +595,13 @@ async fn run_fallow_completed_child_cleans_descendant_process_tree() {
 
     assert_eq!(result.is_error, Some(false));
     let descendant_pid = read_pid(&descendant_pid_path).await;
-    let _cleanup = ProcessCleanup(vec![descendant_pid]);
+    let mut cleanup = ProcessCleanup(vec![descendant_pid]);
+    let descendant_exited = wait_for_process_exit(descendant_pid).await;
+    if descendant_exited {
+        cleanup.disarm(descendant_pid);
+    }
     assert!(
-        wait_for_process_exit(descendant_pid).await,
+        descendant_exited,
         "completed subprocess descendant {descendant_pid} survived"
     );
 }
@@ -576,13 +628,17 @@ async fn run_fallow_completed_child_cleanup_closes_inherited_pipes_without_timeo
     .expect("completed subprocess should stay a tool result");
 
     let descendant_pid = read_pid(&descendant_pid_path).await;
-    let _cleanup = ProcessCleanup(vec![descendant_pid]);
+    let mut cleanup = ProcessCleanup(vec![descendant_pid]);
+    let descendant_exited = wait_for_process_exit(descendant_pid).await;
+    if descendant_exited {
+        cleanup.disarm(descendant_pid);
+    }
     assert_eq!(result.is_error, Some(false));
     assert!(
         started.elapsed() < Duration::from_secs(1),
         "completed child waited for the timeout before cleaning inherited pipes"
     );
-    assert!(wait_for_process_exit(descendant_pid).await);
+    assert!(descendant_exited);
 }
 
 #[cfg(windows)]
@@ -618,9 +674,13 @@ Write-Output '{}'
 
     assert_eq!(result.is_error, Some(false));
     let descendant_pid = read_pid(&descendant_pid_path).await;
-    let _cleanup = ProcessCleanup(vec![descendant_pid]);
+    let mut cleanup = ProcessCleanup(vec![descendant_pid]);
+    let descendant_exited = wait_for_process_exit(descendant_pid).await;
+    if descendant_exited {
+        cleanup.disarm(descendant_pid);
+    }
     assert!(
-        wait_for_process_exit(descendant_pid).await,
+        descendant_exited,
         "completed Windows job descendant {descendant_pid} survived"
     );
 }
@@ -674,9 +734,15 @@ async fn run_fallow_timeout_terminates_and_reaps_process_tree() {
     assert_eq!(result.is_error, Some(true));
     let direct_pid = read_pid(&direct_pid_path).await;
     let descendant_pid = read_pid(&descendant_pid_path).await;
-    let _cleanup = ProcessCleanup(vec![direct_pid, descendant_pid]);
+    let mut cleanup = ProcessCleanup(vec![direct_pid, descendant_pid]);
     let direct_exited = wait_for_process_exit(direct_pid).await;
     let descendant_exited = wait_for_process_exit(descendant_pid).await;
+    if direct_exited {
+        cleanup.disarm(direct_pid);
+    }
+    if descendant_exited {
+        cleanup.disarm(descendant_pid);
+    }
 
     assert!(
         direct_exited && descendant_exited,
@@ -761,9 +827,15 @@ Start-Sleep -Seconds 30
     assert_eq!(result.is_error, Some(true));
     let direct_pid = read_pid(&direct_pid_path).await;
     let descendant_pid = read_pid(&descendant_pid_path).await;
-    let _cleanup = ProcessCleanup(vec![direct_pid, descendant_pid]);
+    let mut cleanup = ProcessCleanup(vec![direct_pid, descendant_pid]);
     let direct_exited = wait_for_process_exit(direct_pid).await;
     let descendant_exited = wait_for_process_exit(descendant_pid).await;
+    if direct_exited {
+        cleanup.disarm(direct_pid);
+    }
+    if descendant_exited {
+        cleanup.disarm(descendant_pid);
+    }
 
     assert!(
         direct_exited && descendant_exited,
@@ -827,6 +899,9 @@ async fn run_fallow_exit_code_2_prefers_json_stdout_over_stderr() {
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
     let parsed: serde_json::Value = serde_json::from_str(text).expect("should be valid JSON");
-    assert_eq!(parsed["message"], "structured error");
+    assert_eq!(
+        parsed["message"], "structured error",
+        "unexpected subprocess error body: {text}"
+    );
     assert!(!text.contains("raw stderr msg"));
 }

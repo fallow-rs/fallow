@@ -258,28 +258,28 @@ async fn spawn_fallow(
     let process_tree = match ProcessTree::for_tokio_child(&child) {
         Ok(process_tree) => process_tree,
         Err(error) => {
-            let cleanup_errors = cleanup_tokio_child(None, &mut child).await;
+            let cleanup = cleanup_tokio_child(None, &mut child).await;
             return Err(subprocess_error_with_cleanup(
                 binary,
                 error,
-                &cleanup_errors,
+                &cleanup.errors,
             ));
         }
     };
     let Some(stdout) = child.stdout.take() else {
-        let cleanup_errors = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+        let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
         return Err(subprocess_error_with_cleanup(
             binary,
             io::Error::other("stdout pipe unavailable"),
-            &cleanup_errors,
+            &cleanup.errors,
         ));
     };
     let Some(stderr) = child.stderr.take() else {
-        let cleanup_errors = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+        let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
         return Err(subprocess_error_with_cleanup(
             binary,
             io::Error::other("stderr pipe unavailable"),
-            &cleanup_errors,
+            &cleanup.errors,
         ));
     };
     let stdout_task = tokio::spawn(drain_pipe(stdout, max_output_bytes));
@@ -314,25 +314,60 @@ async fn complete_fallow_process(
     } = process;
     let deadline = tokio::time::Instant::now() + timeout;
 
-    let status = match tokio::time::timeout_at(deadline, child.wait()).await {
-        Ok(Ok(status)) => status,
+    #[cfg(unix)]
+    let (status, cleanup_errors) =
+        match tokio::time::timeout_at(deadline, process_tree.wait_for_exit_without_reaping()).await
+        {
+            Ok(Ok(())) => {
+                let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+                let Some(status) = cleanup.status else {
+                    abort_drain_tasks(&stdout_task, &stderr_task);
+                    return Err(subprocess_error_with_cleanup(
+                        binary,
+                        io::Error::other("completed subprocess status unavailable"),
+                        &cleanup.errors,
+                    ));
+                };
+                (status, cleanup.errors)
+            }
+            Ok(Err(error)) => {
+                let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+                abort_drain_tasks(&stdout_task, &stderr_task);
+                return Err(subprocess_error_with_cleanup(
+                    binary,
+                    error,
+                    &cleanup.errors,
+                ));
+            }
+            Err(_) => {
+                let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+                abort_drain_tasks(&stdout_task, &stderr_task);
+                return Ok(timeout_result(timeout, &cleanup.errors));
+            }
+        };
+
+    #[cfg(not(unix))]
+    let (status, cleanup_errors) = match tokio::time::timeout_at(deadline, child.wait()).await {
+        Ok(Ok(status)) => {
+            let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+            (status, cleanup.errors)
+        }
         Ok(Err(error)) => {
-            let cleanup_errors = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+            let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
             abort_drain_tasks(&stdout_task, &stderr_task);
             return Err(subprocess_error_with_cleanup(
                 binary,
                 error,
-                &cleanup_errors,
+                &cleanup.errors,
             ));
         }
         Err(_) => {
-            let cleanup_errors = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+            let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
             abort_drain_tasks(&stdout_task, &stderr_task);
-            return Ok(timeout_result(timeout, &cleanup_errors));
+            return Ok(timeout_result(timeout, &cleanup.errors));
         }
     };
 
-    let cleanup_errors = cleanup_tokio_child(Some(&process_tree), &mut child).await;
     let drain_output = async {
         let stdout = (&mut stdout_task).await.map_err(io::Error::other)??;
         let stderr = (&mut stderr_task).await.map_err(io::Error::other)??;

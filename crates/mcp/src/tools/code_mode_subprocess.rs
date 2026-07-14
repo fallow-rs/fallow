@@ -36,18 +36,36 @@ pub(super) fn run_fallow_sync(
     let (mut child, process_tree) = spawn_managed_child(command, binary)?;
 
     loop {
-        let status = match child.try_wait() {
-            Ok(status) => status,
+        #[cfg(unix)]
+        let (completed, status) = match process_tree.has_exited_without_reaping() {
+            Ok(completed) => (completed, None),
             Err(error) => {
-                let cleanup_errors = cleanup_std_child(Some(&process_tree), &mut child);
+                let cleanup = cleanup_std_child(Some(&process_tree), &mut child);
                 return Err(with_cleanup_errors(
                     format!("failed to wait for fallow subprocess: {error}"),
-                    &cleanup_errors,
+                    &cleanup.errors,
                 ));
             }
         };
-        if let Some(status) = status {
-            let cleanup_errors = cleanup_std_child(Some(&process_tree), &mut child);
+        #[cfg(not(unix))]
+        let (completed, status) = match child.try_wait() {
+            Ok(status) => (status.is_some(), status),
+            Err(error) => {
+                let cleanup = cleanup_std_child(Some(&process_tree), &mut child);
+                return Err(with_cleanup_errors(
+                    format!("failed to wait for fallow subprocess: {error}"),
+                    &cleanup.errors,
+                ));
+            }
+        };
+        if completed {
+            let cleanup = cleanup_std_child(Some(&process_tree), &mut child);
+            let status = status.or(cleanup.status).ok_or_else(|| {
+                with_cleanup_errors(
+                    "completed fallow subprocess status unavailable".to_string(),
+                    &cleanup.errors,
+                )
+            })?;
             let result = (|| {
                 let stdout_len = file_len(stdout_file.as_file())?;
                 if stdout_len > max_output_bytes as u64 {
@@ -60,28 +78,28 @@ pub(super) fn run_fallow_sync(
                 let stderr = read_limited_file(stderr_file.as_file_mut(), STDERR_LIMIT_BYTES)?;
                 normalize_output(status.code().unwrap_or(-1), &stdout, &stderr)
             })();
-            return with_completed_cleanup(result, &cleanup_errors);
+            return with_completed_cleanup(result, &cleanup.errors);
         }
 
         if Instant::now() >= deadline {
-            let cleanup_errors = cleanup_std_child(Some(&process_tree), &mut child);
+            let cleanup = cleanup_std_child(Some(&process_tree), &mut child);
             return Err(with_cleanup_errors(
                 "code mode execution timed out while running fallow".to_string(),
-                &cleanup_errors,
+                &cleanup.errors,
             ));
         }
         let stdout_len = match file_len(stdout_file.as_file()) {
             Ok(stdout_len) => stdout_len,
             Err(error) => {
-                let cleanup_errors = cleanup_std_child(Some(&process_tree), &mut child);
-                return Err(with_cleanup_errors(error, &cleanup_errors));
+                let cleanup = cleanup_std_child(Some(&process_tree), &mut child);
+                return Err(with_cleanup_errors(error, &cleanup.errors));
             }
         };
         if stdout_len > max_output_bytes as u64 {
-            let cleanup_errors = cleanup_std_child(Some(&process_tree), &mut child);
+            let cleanup = cleanup_std_child(Some(&process_tree), &mut child);
             return Err(with_cleanup_errors(
                 format!("code mode host output exceeded {max_output_bytes} bytes"),
-                &cleanup_errors,
+                &cleanup.errors,
             ));
         }
 
@@ -102,10 +120,10 @@ fn spawn_managed_child(
     let process_tree = match ProcessTree::for_std_child(&child) {
         Ok(process_tree) => process_tree,
         Err(error) => {
-            let cleanup_errors = cleanup_std_child(None, &mut child);
+            let cleanup = cleanup_std_child(None, &mut child);
             return Err(with_cleanup_errors(
                 format!("failed to configure fallow subprocess tree: {error}"),
-                &cleanup_errors,
+                &cleanup.errors,
             ));
         }
     };

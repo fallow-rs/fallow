@@ -1,4 +1,5 @@
 use std::io;
+use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
 const CLEANUP_GRACE: Duration = Duration::from_secs(1);
@@ -100,6 +101,8 @@ impl Drop for WindowsJobGuard {
 pub(super) struct ProcessTree {
     #[cfg(unix)]
     process_group_id: i32,
+    #[cfg(unix)]
+    leader_exit_observed: std::sync::atomic::AtomicBool,
     #[cfg(windows)]
     job: WindowsHandle,
 }
@@ -150,7 +153,10 @@ impl ProcessTree {
     fn for_pid(pid: u32) -> io::Result<Self> {
         let process_group_id = i32::try_from(pid)
             .map_err(|_| io::Error::other(format!("invalid fallow subprocess PID {pid}")))?;
-        Ok(Self { process_group_id })
+        Ok(Self {
+            process_group_id,
+            leader_exit_observed: std::sync::atomic::AtomicBool::new(false),
+        })
     }
 
     #[cfg(windows)]
@@ -194,7 +200,58 @@ impl ProcessTree {
         if error.raw_os_error() == Some(libc::ESRCH) {
             return Ok(());
         }
+        #[cfg(target_vendor = "apple")]
+        // macOS returns EPERM when the reserved process group contains only
+        // the observed zombie leader, so there are no live members to signal.
+        if error.raw_os_error() == Some(libc::EPERM)
+            && self
+                .leader_exit_observed
+                .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(());
+        }
         Err(error)
+    }
+
+    #[cfg(unix)]
+    pub(super) async fn wait_for_exit_without_reaping(&self) -> io::Result<()> {
+        loop {
+            if self.has_exited_without_reaping()? {
+                return Ok(());
+            }
+            tokio::time::sleep(CLEANUP_POLL_INTERVAL).await;
+        }
+    }
+
+    #[cfg(unix)]
+    #[expect(
+        unsafe_code,
+        reason = "non-reaping POSIX child observation requires waitid"
+    )]
+    pub(super) fn has_exited_without_reaping(&self) -> io::Result<bool> {
+        let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+        // SAFETY: `info` points to writable storage for a siginfo_t. WNOWAIT
+        // observes the dedicated child without releasing its PID or PGID.
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                self.process_group_id as libc::id_t,
+                info.as_mut_ptr(),
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result != 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        // SAFETY: waitid initialized the siginfo_t on success. A zero si_pid
+        // means WNOHANG observed no state change yet.
+        let exited = unsafe { info.assume_init().si_pid() } != 0;
+        if exited {
+            self.leader_exit_observed
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        Ok(exited)
     }
 
     #[cfg(windows)]
@@ -221,10 +278,15 @@ impl ProcessTree {
     }
 }
 
+pub(super) struct ChildCleanup {
+    pub(super) status: Option<ExitStatus>,
+    pub(super) errors: Vec<String>,
+}
+
 pub(super) async fn cleanup_tokio_child(
     process_tree: Option<&ProcessTree>,
     child: &mut tokio::process::Child,
-) -> Vec<String> {
+) -> ChildCleanup {
     let mut errors = Vec::new();
     if !request_tree_termination(process_tree, &mut errors)
         && let Err(error) = child.start_kill()
@@ -232,40 +294,55 @@ pub(super) async fn cleanup_tokio_child(
         errors.push(format!("failed to kill direct subprocess: {error}"));
     }
 
-    match tokio::time::timeout(CLEANUP_GRACE, child.wait()).await {
-        Ok(Ok(_)) => return errors,
+    let status = match tokio::time::timeout(CLEANUP_GRACE, child.wait()).await {
+        Ok(Ok(status)) => {
+            return ChildCleanup {
+                status: Some(status),
+                errors,
+            };
+        }
         Ok(Err(error)) => {
             errors.push(format!("failed to reap direct subprocess: {error}"));
-            return errors;
+            return ChildCleanup {
+                status: None,
+                errors,
+            };
         }
-        Err(_) => errors.push(format!(
-            "direct subprocess did not exit within {}ms cleanup grace",
-            CLEANUP_GRACE.as_millis()
-        )),
-    }
+        Err(_) => {
+            errors.push(format!(
+                "direct subprocess did not exit within {}ms cleanup grace",
+                CLEANUP_GRACE.as_millis()
+            ));
+            None
+        }
+    };
 
     if let Err(error) = child.start_kill() {
         errors.push(format!("failed to retry direct subprocess kill: {error}"));
     }
-    match tokio::time::timeout(REAP_RETRY_GRACE, child.wait()).await {
-        Ok(Ok(_)) => {}
+    let status = match tokio::time::timeout(REAP_RETRY_GRACE, child.wait()).await {
+        Ok(Ok(status)) => Some(status),
         Ok(Err(error)) => {
             errors.push(format!(
                 "failed to reap direct subprocess after retry: {error}"
             ));
+            status
         }
-        Err(_) => errors.push(format!(
-            "direct subprocess still did not exit after {}ms kill retry",
-            REAP_RETRY_GRACE.as_millis()
-        )),
-    }
-    errors
+        Err(_) => {
+            errors.push(format!(
+                "direct subprocess still did not exit after {}ms kill retry",
+                REAP_RETRY_GRACE.as_millis()
+            ));
+            status
+        }
+    };
+    ChildCleanup { status, errors }
 }
 
 pub(super) fn cleanup_std_child(
     process_tree: Option<&ProcessTree>,
     child: &mut std::process::Child,
-) -> Vec<String> {
+) -> ChildCleanup {
     let mut errors = Vec::new();
     if !request_tree_termination(process_tree, &mut errors)
         && let Err(error) = child.kill()
@@ -273,32 +350,49 @@ pub(super) fn cleanup_std_child(
         errors.push(format!("failed to kill direct subprocess: {error}"));
     }
 
-    match poll_std_child(child, CLEANUP_GRACE) {
-        Ok(true) => return errors,
-        Ok(false) => errors.push(format!(
-            "direct subprocess did not exit within {}ms cleanup grace",
-            CLEANUP_GRACE.as_millis()
-        )),
+    let status = match poll_std_child(child, CLEANUP_GRACE) {
+        Ok(Some(status)) => {
+            return ChildCleanup {
+                status: Some(status),
+                errors,
+            };
+        }
+        Ok(None) => {
+            errors.push(format!(
+                "direct subprocess did not exit within {}ms cleanup grace",
+                CLEANUP_GRACE.as_millis()
+            ));
+            None
+        }
         Err(error) => {
             errors.push(format!("failed to reap direct subprocess: {error}"));
-            return errors;
+            return ChildCleanup {
+                status: None,
+                errors,
+            };
         }
-    }
+    };
 
     if let Err(error) = child.kill() {
         errors.push(format!("failed to retry direct subprocess kill: {error}"));
     }
-    match poll_std_child(child, REAP_RETRY_GRACE) {
-        Ok(true) => {}
-        Ok(false) => errors.push(format!(
-            "direct subprocess still did not exit after {}ms kill retry",
-            REAP_RETRY_GRACE.as_millis()
-        )),
-        Err(error) => errors.push(format!(
-            "failed to reap direct subprocess after retry: {error}"
-        )),
-    }
-    errors
+    let status = match poll_std_child(child, REAP_RETRY_GRACE) {
+        Ok(Some(status)) => Some(status),
+        Ok(None) => {
+            errors.push(format!(
+                "direct subprocess still did not exit after {}ms kill retry",
+                REAP_RETRY_GRACE.as_millis()
+            ));
+            status
+        }
+        Err(error) => {
+            errors.push(format!(
+                "failed to reap direct subprocess after retry: {error}"
+            ));
+            status
+        }
+    };
+    ChildCleanup { status, errors }
 }
 
 fn request_tree_termination(process_tree: Option<&ProcessTree>, errors: &mut Vec<String>) -> bool {
@@ -314,18 +408,55 @@ fn request_tree_termination(process_tree: Option<&ProcessTree>, errors: &mut Vec
     }
 }
 
-fn poll_std_child(child: &mut std::process::Child, grace: Duration) -> io::Result<bool> {
+fn poll_std_child(
+    child: &mut std::process::Child,
+    grace: Duration,
+) -> io::Result<Option<ExitStatus>> {
     let deadline = Instant::now() + grace;
     loop {
-        if child.try_wait()?.is_some() {
-            return Ok(true);
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
         }
 
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Ok(false);
+            return Ok(None);
         }
         std::thread::sleep(CLEANUP_POLL_INTERVAL.min(remaining));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[expect(
+        unsafe_code,
+        reason = "the regression test verifies that the observed PID remains reserved"
+    )]
+    async fn non_reaping_exit_observation_reserves_process_group_identity() {
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.args(["-c", "exit 0"]);
+        configure_tokio_command(&mut command);
+        let mut child = command.spawn().expect("test subprocess");
+        let pid = child.id().expect("test subprocess PID");
+        let process_tree = ProcessTree::for_tokio_child(&child).expect("test process tree");
+
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            process_tree.wait_for_exit_without_reaping(),
+        )
+        .await
+        .expect("test subprocess exit")
+        .expect("non-reaping exit observation");
+        // SAFETY: Signal zero only checks whether the captured PID still exists.
+        let leader_is_reserved = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
+        let cleanup = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+
+        assert!(leader_is_reserved, "subprocess leader was reaped too early");
+        assert!(cleanup.errors.is_empty(), "{:?}", cleanup.errors);
+        assert!(cleanup.status.is_some_and(|status| status.success()));
     }
 }
 
