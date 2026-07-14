@@ -81,19 +81,19 @@ Auto-fix pass with `--dry-run` preview. Applies catalog-driven fix actions to a 
 Watch mode. Re-runs analysis on file changes.
 
 **`fallow coverage`**
-Runtime coverage subcommand family (paid feature). Subcommands: `coverage setup`, `coverage analyze`, `coverage explain`. Combines static analysis with V8 runtime coverage.
+Runtime coverage subcommand family (Fallow Runtime; continuous and cloud use is licensed, a single local capture is free). Subcommands: `coverage setup`, `coverage analyze`, `coverage upload-inventory`, `coverage upload-source-maps`, `coverage upload-static-findings`. Combines static analysis with V8 runtime coverage.
 
 **`fallow explain`**
 Per-issue explanation. Tells the user why an Issue was raised and what the fix options are.
 
-**`fallow regression`**
-Regression-state evaluation against a baseline.
+**Regression gating** (`--fail-on-regression`, `--tolerance`, `--baseline` / `--save-baseline`)
+Regression-state evaluation against a baseline. Flags on the analysis commands, not a subcommand.
 
 **`fallow license`**
 License lifecycle: `license activate`, `license status`, `license refresh`, `license deactivate`. Offline Ed25519 JWT verification.
 
-**`fallow init`**, **`fallow validate`**, **`fallow schema`**, **`fallow migrate`**
-Config bootstrap, validation, schema emission, and migration from knip / jscpd configs.
+**`fallow init`**, **`fallow schema`**, **`fallow migrate`**
+Config bootstrap, capability-manifest emission, and migration from knip / jscpd / stylelint configs.
 
 ## Plugin and workspace concepts
 
