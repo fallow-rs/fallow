@@ -47,7 +47,7 @@ Audit scope: 19 changed files vs HEAD~15 (8fbfcb054..HEAD)
   audit gate excluded 163 inherited findings (run with --gate all to enforce)
 ```
 
-*Excerpt from `fallow audit` on the vitest monorepo, auditing its last 15 commits. fallow 3.5.0, warm base-snapshot cache. The same run with `--format json` returns one typed JSON document.*
+*Excerpt from `fallow audit` on the vitest monorepo, auditing its last 15 commits. fallow 3.5.0, warm base-snapshot cache. The gate passed: the 163 inherited findings are pre-existing and excluded by design, so they do not block the change. The same run with `--format json` returns one typed JSON document.*
 
 ## Quick start
 
@@ -61,8 +61,9 @@ npx fallow audit
 # Install as a devDependency
 npm install --save-dev fallow
 
-# For agents and scripts: exit 1 means findings, not failure
-npx fallow audit --format json --quiet 2>/dev/null || true
+# For agents and scripts: exit 0 and 1 both mean the run succeeded (1 = findings);
+# exit 2 is a real error, reported as a JSON envelope on stdout
+npx fallow audit --format json --quiet 2>/dev/null
 ```
 
 The npm package ships the `fallow`, `fallow-lsp`, and `fallow-mcp` launchers plus a version-matched agent skill, so the editor and agent integrations resolve the project-local binary instead of whatever happens to be on `PATH`. Runs are deterministic: the same input produces the same output with stable fingerprints. Re-running to verify an edit is safe. Other channels (pnpm, yarn, `cargo install fallow-cli`, and a local Docker build with a Compose example at [`examples/docker/compose.yaml`](examples/docker/compose.yaml)) are covered in the [installation guide](https://docs.fallow.tools/installation).
@@ -96,12 +97,14 @@ You do not have to author that config yourself. [`npx fallow recommend`](https:/
 
 Patterns are relative to the project root and add to fallow's built-in ignore defaults (node_modules, dist, coverage, minified bundles). Config precedence is first match wins per directory, with no merging: `.fallowrc.json` (JSONC accepted) > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`. The full reference is the [configuration overview](https://docs.fallow.tools/configuration/overview); known limits (syntactic analysis, no type resolution) are documented in [limitations](https://docs.fallow.tools/analysis/limitations); for a hung or failed run, see [debugging](https://docs.fallow.tools/analysis/debugging).
 
+Adopting on an existing codebase? `fallow audit` fails only on findings a change introduces, so a legacy backlog does not block day one, and `--save-baseline` / `--baseline` quarantine the existing findings for the standalone commands. The [adoption guide](https://docs.fallow.tools/adoption) covers the staged path.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `npx fallow` | Full pipeline: dead code, duplication, health |
-| [`npx fallow audit`](https://docs.fallow.tools/cli/audit) | Changed-file gate over dead code, complexity, duplication, and styling drift: verdict pass/warn/fail against a base ref |
+| [`npx fallow audit`](https://docs.fallow.tools/cli/audit) | Changed-file gate over dead code, complexity, duplication, and styling drift: verdict pass/warn/fail against a base ref. Fails only on findings the change introduced (`--gate all` widens) |
 | [`npx fallow dead-code`](https://docs.fallow.tools/cli/dead-code) | Unused code and circular dependencies (alias: `check`) |
 | `npx fallow dead-code --trace src/file.ts:symbol` | Prove a symbol is unused before deleting it |
 | [`npx fallow dupes`](https://docs.fallow.tools/cli/dupes) | Duplication; modes `strict`, `mild` (default), `weak`, `semantic` |
@@ -115,7 +118,8 @@ Patterns are relative to the project root and add to fallow's built-in ignore de
 | `npx fallow migrate` | Migrate from knip, jscpd, or stylelint config |
 | `npx fallow schema` | Machine-readable capability manifest (always JSON) |
 
-Every other command, one line each:
+<details>
+<summary>Every other command, one line each</summary>
 
 | Command | Purpose |
 |---|---|
@@ -141,11 +145,13 @@ Every other command, one line each:
 | `fallow telemetry status` | Opt-in telemetry, off by default (`enable`, `disable`, `inspect --example`) |
 | `fallow coverage setup` | Runtime coverage workflow (`analyze`, `upload-inventory`, `upload-source-maps`, `upload-static-findings`) |
 
+</details>
+
 Per-command flags come from `fallow schema` (machine-readable) or the [CLI reference](https://docs.fallow.tools/cli/global-flags).
 
 ## Output and exit codes
 
-For machine consumption, add `--format json --quiet` to any command, discard stderr, and append `|| true` in shells that treat exit code 1 as failure.
+For machine consumption, add `--format json --quiet` to any command and read the JSON on stdout. Exit 0 and 1 both mean the run succeeded (1 signals findings); exit 2 is a real error and still writes a JSON envelope to stdout. Branch on the code, treating 0 and 1 as success and 2 as failure, rather than blanket-suppressing with `|| true` (which hides real errors from anything that checks the exit code).
 
 | `--format` | What you get |
 |---|---|
@@ -157,7 +163,10 @@ For machine consumption, add `--format json --quiet` to any command, discard std
 | `codeclimate` (aliases `gitlab-codequality`, `gitlab-code-quality`) | GitLab Code Quality report |
 | `github-annotations` | Workflow-command annotations; render on fork PRs without a write token |
 | `github-summary` | Job-summary markdown for `$GITHUB_STEP_SUMMARY` |
-| `pr-comment-github`, `pr-comment-gitlab`, `review-github`, `review-gitlab`, `badge` | Typed CI feedback envelopes, plus a shields.io-compatible SVG health badge |
+| `pr-comment-github`, `pr-comment-gitlab`, `review-github`, `review-gitlab` | Typed CI feedback envelopes for the bundled CI scripts |
+| `badge` | shields.io-compatible SVG health badge; `fallow health` only (`fallow health --format badge > badge.svg`) |
+
+`human`, `json`, `sarif`, `compact`, and `markdown` apply to every analysis command; the CI envelopes and `badge` belong to the command that produces them, as documented per format in the [CI guide](https://docs.fallow.tools/integrations/ci).
 
 | Exit code | Meaning |
 |---|---|
@@ -218,7 +227,7 @@ GitHub Actions:
 - uses: fallow-rs/fallow@v3
 ```
 
-The Action defaults to the full pipeline with SARIF output and PR-scoped analysis via automatic base detection. Annotations, sticky comments, and review comments are inputs documented in the [CI guide](https://docs.fallow.tools/integrations/ci).
+The Action defaults to the full pipeline with PR-scoped analysis via automatic base detection, and it is a blocking gate out of the box: `fail-on-issues` defaults to true, so any finding fails the job. For a staged rollout, start report-only with `fail-on-issues: false`, or use `command: audit` so only findings a PR introduces can fail CI. A SARIF file is generated by default but uploading it to GitHub Code Scanning is opt-in (`sarif: true` plus `permissions: security-events: write`); inline annotations render without any of that. The `@v3` tag floats within major version 3; pin an exact tag when the fleet needs reproducible runs. Sticky comments and review comments are inputs documented in the [CI guide](https://docs.fallow.tools/integrations/ci).
 
 GitLab:
 
@@ -261,7 +270,7 @@ Details: [runtime coverage](https://docs.fallow.tools/analysis/runtime-coverage)
 
 On the dead-code benchmark set, fallow analyzes fastify in 64ms where knip 6 takes 205ms, and preact in 74ms against 2.01s (27.1x). The counterweight is real too: knip measures faster on astro and TypeScript, and jscpd remains faster at raw duplication scanning. fallow also completes analysis on three projects in the set where knip's runs errored on those projects' own config files (next.js at 20,558 files, vite, and vue/core).
 
-Measured on fallow 2.100.0, Apple M5, medians of 5 cold runs. Methodology and full tables live in [BENCHMARKS.md](BENCHMARKS.md), with reproduction scripts under [`benchmarks/`](benchmarks/). For how fallow relates to lint tooling, see [fallow vs linters](https://docs.fallow.tools/explanations/fallow-vs-linters).
+Measured on fallow 2.100.0 (the most recent full benchmark capture), Apple M5, medians of 5 cold runs. Methodology, full tables, and reproduction scripts live in [BENCHMARKS.md](BENCHMARKS.md) and [`benchmarks/`](benchmarks/); rerun them against any version. For how fallow relates to lint tooling, see [fallow vs linters](https://docs.fallow.tools/explanations/fallow-vs-linters).
 
 ## Documentation
 
