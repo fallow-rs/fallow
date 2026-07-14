@@ -983,6 +983,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed. The extraction pipeline now exposes typed semantic facts while
   domain-specific adapters remain where the analysis still needs them.
 
+### Removed
+
+- **The `--legacy-envelope` compatibility flag is gone, along with the NAPI
+  `legacyEnvelope` option.** Both were introduced next to the top-level `kind`
+  discriminator as a one-cycle migration escape hatch that stripped only the
+  document-root `kind` field from JSON output. That cycle is over: every
+  object-shaped JSON root now carries `kind`, and the published schema,
+  generated TypeScript contracts, MCP tools, and Node bindings speak tagged
+  envelopes only. Consumers still passing `--legacy-envelope` get a CLI
+  argument error; drop the flag and select on the root `kind` field instead.
+
 ### Fixed
 
 - **Astro template `.map()` callbacks over a typed class array no longer report
