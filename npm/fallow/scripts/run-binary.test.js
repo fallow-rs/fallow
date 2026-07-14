@@ -13,8 +13,13 @@ function currentPlatformPackage() {
   if (process.platform !== "linux") {
     return getPlatformPackage(process.platform, process.arch);
   }
-  const { familySync } = require("detect-libc");
-  return getPlatformPackage(process.platform, process.arch, familySync());
+  let libcFamily;
+  try {
+    libcFamily = require("detect-libc").familySync();
+  } catch {
+    libcFamily = undefined;
+  }
+  return getPlatformPackage(process.platform, process.arch, libcFamily);
 }
 
 function runLauncher(t, launcher, args) {
