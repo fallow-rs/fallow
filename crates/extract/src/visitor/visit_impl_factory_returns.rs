@@ -432,6 +432,13 @@ fn object_literal_from_return<'a>(
 
 /// The object-literal initializer of a top-level `const <name> = { ... }`
 /// declarator in `statements` (assigned-then-returned support). First match wins.
+///
+/// Restricted to `const`: a `let` / `var` binding can be reassigned to a DIFFERENT
+/// object before the `return` (`let ui = { p: new Ghost() }; ui = { p: new Real() };
+/// return ui`), and this classifier only sees the first initializer, so trusting a
+/// mutable binding would record a stale shape and credit a class that never flows to
+/// the consumer (a false positive). A `const` binding cannot be reassigned, so its
+/// initializer definitively describes the returned object. See issue #1858.
 fn object_declarator_init<'a>(
     statements: &'a [Statement<'a>],
     name: &str,
@@ -440,6 +447,9 @@ fn object_declarator_init<'a>(
         let Statement::VariableDeclaration(decl) = stmt else {
             continue;
         };
+        if decl.kind != VariableDeclarationKind::Const {
+            continue;
+        }
         for declarator in &decl.declarations {
             let BindingPattern::BindingIdentifier(binding) = &declarator.id else {
                 continue;

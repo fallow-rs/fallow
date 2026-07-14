@@ -675,6 +675,23 @@ fn object_literal_factory_return_shape_pass_does_not_fabricate_accesses() {
 }
 
 #[test]
+fn object_literal_factory_return_ignores_let_reassignment() {
+    // A `let` binding reassigned to a DIFFERENT object before the return must NOT
+    // credit the stale first-initializer's class: the classifier only sees the
+    // first initializer, so a mutable binding is untrustworthy. Restricted to
+    // `const` (which cannot be reassigned). Ghost never flows to the consumer at
+    // runtime, so `Ghost.m` must stay flaggable. (rust-reviewer #1858 BLOCK)
+    let info = parse(
+        "class Ghost { m() {} }\nfunction createUi() { let ui = { orders: new Ghost() }; ui = { orders: 1 }; return ui }\nconst c = createUi()\nc.orders.m()",
+    );
+    assert!(
+        !has_member_access(&info, "Ghost", "m"),
+        "a let-reassigned object-literal return must not credit the stale shape's class: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
 fn object_literal_factory_return_does_not_credit_wrong_property() {
     // A consumer reading a property that is NOT in the shape credits nothing: only
     // the declared `orders -> D` path resolves.
