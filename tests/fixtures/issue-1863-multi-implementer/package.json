@@ -1,0 +1,5 @@
+{
+  "name": "issue-1863-multi-implementer",
+  "private": true,
+  "main": "src/index.ts"
+}

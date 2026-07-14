@@ -66,13 +66,17 @@ pub(super) fn typed_property_declaring_sites<'a>(
 ///   3. the terminal property type resolves through the last declaring
 ///      module's own imports/exports and must be a class with members
 ///      (`export_is_class_with_members`, reused via
-///      `credit_factory_return_class_member`).
+///      `credit_factory_return_class_member`), OR (issue #1863) an INTERFACE
+///      with implementers, in which case the member is credited on the
+///      interface's export key so the later `propagate_interface_member_accesses`
+///      pass carries it to every implementing class.
 ///
-/// See issue #1785.
+/// See issues #1785 and #1863.
 pub(super) fn propagate_typed_property_accesses(
     graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     indexes: &MemberPassIndexes<'_>,
+    interface_to_implementers: &FxHashMap<ExportKey, Vec<ExportKey>>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
     // Phase 1: walk every fact's property path to its terminal
@@ -143,5 +147,52 @@ pub(super) fn propagate_typed_property_accesses(
             terminal_name.as_str(),
             member.as_str(),
         );
+        credit_typed_property_interface_terminal(
+            &mut credit_context,
+            interface_to_implementers,
+            declaring_file_id,
+            terminal_name.as_str(),
+            member.as_str(),
+        );
+    }
+}
+
+/// Credit a typed-property-hop TERMINAL whose type is an INTERFACE (issue #1863).
+///
+/// `credit_factory_return_class_member` above resolves only class-with-members
+/// terminals; an interface terminal (`deps.greeter: GreeterPort` where
+/// `GreeterPort` is an interface) is filtered out by `export_is_class_with_members`
+/// and would credit nothing. Resolving the interface to its canonical export key
+/// (the same `local_keys` + `export_key_with_origins` resolution the
+/// `interface_to_implementers` map is keyed by) and inserting the member there
+/// makes the property-hop terminal behave exactly like the direct-parameter case:
+/// the interface access is carried to every implementing class by the later
+/// `propagate_interface_member_accesses` pass, which runs after this one (both
+/// sit inside `collect_propagated_member_accesses`, the typed-property pass in
+/// `propagate_common_member_accesses` first, then the interface pass). Purely
+/// additive; a terminal that is not an interface with implementers credits
+/// nothing, so it can only suppress a false positive, never create one.
+fn credit_typed_property_interface_terminal(
+    context: &mut FactoryReturnCreditContext<'_, '_>,
+    interface_to_implementers: &FxHashMap<ExportKey, Vec<ExportKey>>,
+    declaring_file_id: FileId,
+    terminal_name: &str,
+    member: &str,
+) {
+    let graph = context.graph;
+    let indexes = context.indexes;
+    let Some(seed_keys) = indexes.local_keys(declaring_file_id).get(terminal_name) else {
+        return;
+    };
+    for seed_key in seed_keys {
+        for interface_origin in export_key_with_origins(graph, seed_key) {
+            if interface_to_implementers.contains_key(&interface_origin) {
+                context
+                    .accessed_members
+                    .entry(interface_origin)
+                    .or_default()
+                    .insert(member.to_string());
+            }
+        }
     }
 }
