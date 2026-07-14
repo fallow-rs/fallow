@@ -83,7 +83,7 @@ Over 100 built-in framework plugins covering Next.js, Nuxt, Remix, Qwik, SvelteK
 
 ## Configuration
 
-Works out of the box. To customize, run `fallow init` or create a config file in your project root:
+Works out of the box. To customize, let [`fallow recommend`](https://docs.fallow.tools/cli/recommend) propose a config from the detected stack (read-only; `--format json` returns the full decision set for agents), run `fallow init`, or create a config file in your project root:
 
 ```jsonc
 // .fallowrc.json

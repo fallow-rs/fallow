@@ -92,6 +92,8 @@ Findings on a first run usually mean fallow is missing an entry point or a frame
 }
 ```
 
+You do not have to author that config yourself. [`npx fallow recommend`](https://docs.fallow.tools/cli/recommend) detects the stack (frameworks, workspace layout, test runner, package manager), prints a proposed config as a safe starting point, and ends with the few genuinely subjective choices it will not decide for you. It is read-only and always exits 0; nothing changes until you save the config.
+
 Patterns are relative to the project root and add to fallow's built-in ignore defaults (node_modules, dist, coverage, minified bundles). Config precedence is first match wins per directory, with no merging: `.fallowrc.json` (JSONC accepted) > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`. The full reference is the [configuration overview](https://docs.fallow.tools/configuration/overview); known limits (syntactic analysis, no type resolution) are documented in [limitations](https://docs.fallow.tools/analysis/limitations); for a hung or failed run, see [debugging](https://docs.fallow.tools/analysis/debugging).
 
 ## Commands
@@ -108,6 +110,7 @@ Patterns are relative to the project root and add to fallow's built-in ignore de
 | `npx fallow guard src/file.ts` | Which boundary rules apply to a file before editing |
 | `npx fallow security` | Opt-in security candidates; `--gate new --changed-since <ref>` fails only on introduced ones |
 | `npx fallow explain <issue-type>` | Explain a rule without analyzing |
+| [`npx fallow recommend`](https://docs.fallow.tools/cli/recommend) | Detect the stack and propose a config; subjective choices stay open questions |
 | [`npx fallow init`](https://docs.fallow.tools/cli/init) | Scaffold config; `--agents` scaffolds an AGENTS.md |
 | `npx fallow migrate` | Migrate from knip, jscpd, or stylelint config |
 | `npx fallow schema` | Machine-readable capability manifest (always JSON) |
@@ -125,7 +128,6 @@ Every other command, one line each:
 | `fallow list` | Entry points, files, plugins, and boundaries (`--boundaries`) |
 | `fallow workspaces` | Monorepo workspace discovery diagnostics |
 | `fallow config` | Resolved configuration and which file provided it |
-| `fallow recommend` | Read-only config recommendation, JSON-first for agents |
 | `fallow decision-surface` | Ranked structural decisions a change embeds |
 | `fallow impact` | Opt-in, local-only report of what fallow caught; `--all` spans repos |
 | `fallow report --from results.json` | Re-render a saved JSON result in another output format |
@@ -186,6 +188,7 @@ The JSON contract and exit codes above are the agent interface.
 
 The [MCP server](https://docs.fallow.tools/integrations/mcp) covers analysis, audit, health, duplication, tracing, fix preview and apply, boundary guard checks, and target inspection; every tool documents its nearest CLI fallback, and a bounded read-only Code Mode sandbox composes analysis calls without filesystem or network access.
 
+- [`npx fallow recommend --format json`](https://docs.fallow.tools/cli/recommend) is the onboarding entry point: it returns the detected stack, a proposed config, and every decision with its tier and rationale, and it ships the subjective choices as ready-to-ask questions with options and tradeoffs. An agent authors `.fallowrc.json` from evidence and asks the user only what fallow will not decide
 - A version-matched agent skill ships in the npm package under `node_modules/fallow/skills/fallow` ([agent skills](https://docs.fallow.tools/integrations/agent-skills), companion repo [fallow-skills](https://github.com/fallow-rs/fallow-skills))
 - `npx fallow init --agents` scaffolds an AGENTS.md with a task-to-command matrix
 - `npx fallow hooks install --target agent` gates `git commit` and `git push` on `fallow audit` ([hooks](https://docs.fallow.tools/integrations/claude-hooks))
