@@ -15,11 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Star re-exports no longer make a source module's default export appear
   used.** ECMAScript `export *` excludes `default`, so fallow now keeps an
   unused source default visible unless it is explicitly re-exported.
+  ([#1864](https://github.com/fallow-rs/fallow/pull/1864))
 
 - **Stored license tokens are private from the moment they are created.**
   License activation and refresh now write through an owner-only temporary
   file and atomically replace the destination instead of briefly creating a
   broadly readable bearer-token file before restricting it.
+  ([#1864](https://github.com/fallow-rs/fallow/pull/1864))
 
 ### Performance
 
@@ -27,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   indexed lookups at scale.** Repeated named exports retain their original
   metadata and ordering, while nested and duplicate workspace roots retain the
   existing first-declaration-wins behavior.
+  ([#1864](https://github.com/fallow-rs/fallow/pull/1864))
 
 ## [3.5.0] - 2026-07-14
 
