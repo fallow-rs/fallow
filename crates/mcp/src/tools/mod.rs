@@ -282,21 +282,40 @@ async fn spawn_fallow(
             &cleanup_errors,
         ));
     };
-    let mut stdout_task = tokio::spawn(drain_pipe(stdout, max_output_bytes));
-    let mut stderr_task = tokio::spawn(drain_pipe(stderr, max_output_bytes));
-
-    let completion = async {
-        let status = child.wait().await?;
-        let stdout = (&mut stdout_task).await.map_err(io::Error::other)??;
-        let stderr = (&mut stderr_task).await.map_err(io::Error::other)??;
-        Ok::<_, io::Error>(CapturedOutput {
-            status,
-            stdout,
-            stderr,
-        })
+    let stdout_task = tokio::spawn(drain_pipe(stdout, max_output_bytes));
+    let stderr_task = tokio::spawn(drain_pipe(stderr, max_output_bytes));
+    let process = RunningFallowProcess {
+        child,
+        process_tree,
+        stdout_task,
+        stderr_task,
     };
-    let output = match tokio::time::timeout(timeout, completion).await {
-        Ok(Ok(output)) => output,
+    complete_fallow_process(binary, process, timeout, max_output_bytes).await
+}
+
+struct RunningFallowProcess {
+    child: tokio::process::Child,
+    process_tree: ProcessTree,
+    stdout_task: tokio::task::JoinHandle<io::Result<CapturedPipe>>,
+    stderr_task: tokio::task::JoinHandle<io::Result<CapturedPipe>>,
+}
+
+async fn complete_fallow_process(
+    binary: &str,
+    process: RunningFallowProcess,
+    timeout: Duration,
+    max_output_bytes: usize,
+) -> Result<CallToolResult, McpError> {
+    let RunningFallowProcess {
+        mut child,
+        process_tree,
+        mut stdout_task,
+        mut stderr_task,
+    } = process;
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    let status = match tokio::time::timeout_at(deadline, child.wait()).await {
+        Ok(Ok(status)) => status,
         Ok(Err(error)) => {
             let cleanup_errors = cleanup_tokio_child(Some(&process_tree), &mut child).await;
             abort_drain_tasks(&stdout_task, &stderr_task);
@@ -313,6 +332,46 @@ async fn spawn_fallow(
         }
     };
 
+    let cleanup_errors = cleanup_tokio_child(Some(&process_tree), &mut child).await;
+    let drain_output = async {
+        let stdout = (&mut stdout_task).await.map_err(io::Error::other)??;
+        let stderr = (&mut stderr_task).await.map_err(io::Error::other)??;
+        Ok::<_, io::Error>((stdout, stderr))
+    };
+    let (stdout, stderr) = match tokio::time::timeout_at(deadline, drain_output).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            abort_drain_tasks(&stdout_task, &stderr_task);
+            return Err(subprocess_error_with_cleanup(
+                binary,
+                error,
+                &cleanup_errors,
+            ));
+        }
+        Err(_) => {
+            abort_drain_tasks(&stdout_task, &stderr_task);
+            return Ok(timeout_result(timeout, &cleanup_errors));
+        }
+    };
+    if !cleanup_errors.is_empty() {
+        let error_json = serde_json::json!({
+            "error": true,
+            "message": "failed to clean completed fallow subprocess tree",
+            "exit_code": 2,
+            "code": "FALLOW_MCP_SUBPROCESS_CLEANUP",
+            "context": "subprocess",
+            "cleanup_errors": cleanup_errors,
+        });
+        return Ok(CallToolResult::error(vec![ContentBlock::text(
+            error_json.to_string(),
+        )]));
+    }
+
+    let output = CapturedOutput {
+        status,
+        stdout,
+        stderr,
+    };
     Ok(captured_output_result(&output, max_output_bytes))
 }
 

@@ -527,6 +527,106 @@ async fn run_fallow_stdin_is_not_inherited() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn run_fallow_completed_child_cleans_descendant_process_tree() {
+    let temp = tempfile::tempdir().expect("temp directory");
+    let descendant_pid_path = temp.path().join("descendant.pid");
+    let script = r#"sleep 30 >/dev/null 2>&1 & echo $! > "$1"; printf '{}'"#;
+
+    let result = run_fallow_with_timeout(
+        "/bin/sh",
+        &[
+            "-c".to_string(),
+            script.to_string(),
+            "fallow-mcp-completed-test".to_string(),
+            descendant_pid_path.to_string_lossy().into_owned(),
+        ],
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("completed subprocess should stay a tool result");
+
+    assert_eq!(result.is_error, Some(false));
+    let descendant_pid = read_pid(&descendant_pid_path).await;
+    let _cleanup = ProcessCleanup(vec![descendant_pid]);
+    assert!(
+        wait_for_process_exit(descendant_pid).await,
+        "completed subprocess descendant {descendant_pid} survived"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn run_fallow_completed_child_cleanup_closes_inherited_pipes_without_timeout() {
+    let temp = tempfile::tempdir().expect("temp directory");
+    let descendant_pid_path = temp.path().join("descendant.pid");
+    let script = r#"sleep 30 & echo $! > "$1"; printf '{}'"#;
+    let started = std::time::Instant::now();
+
+    let result = run_fallow_with_timeout(
+        "/bin/sh",
+        &[
+            "-c".to_string(),
+            script.to_string(),
+            "fallow-mcp-completed-pipe-test".to_string(),
+            descendant_pid_path.to_string_lossy().into_owned(),
+        ],
+        Duration::from_secs(2),
+    )
+    .await
+    .expect("completed subprocess should stay a tool result");
+
+    let descendant_pid = read_pid(&descendant_pid_path).await;
+    let _cleanup = ProcessCleanup(vec![descendant_pid]);
+    assert_eq!(result.is_error, Some(false));
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "completed child waited for the timeout before cleaning inherited pipes"
+    );
+    assert!(wait_for_process_exit(descendant_pid).await);
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn run_fallow_completed_success_cleans_descendant_process_tree_windows_job() {
+    let temp = tempfile::tempdir().expect("temp directory");
+    let descendant_pid_path = temp.path().join("descendant.pid");
+    let script_path = temp.path().join("completed-process-tree-fixture.ps1");
+    let script = r"
+param([Parameter(Mandatory = $true)][string]$DescendantPidPath)
+$child = Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru
+$child.Id | Set-Content -NoNewline -LiteralPath $DescendantPidPath
+Write-Output '{}'
+";
+    std::fs::write(&script_path, script).expect("PowerShell fixture script");
+
+    let result = run_fallow_with_timeout(
+        "powershell.exe",
+        &[
+            "-NoProfile".to_string(),
+            "-NonInteractive".to_string(),
+            "-ExecutionPolicy".to_string(),
+            "Bypass".to_string(),
+            "-File".to_string(),
+            script_path.to_string_lossy().into_owned(),
+            "-DescendantPidPath".to_string(),
+            descendant_pid_path.to_string_lossy().into_owned(),
+        ],
+        WINDOWS_FIXTURE_STARTUP_TIMEOUT,
+    )
+    .await
+    .expect("completed subprocess should stay a tool result");
+
+    assert_eq!(result.is_error, Some(false));
+    let descendant_pid = read_pid(&descendant_pid_path).await;
+    let _cleanup = ProcessCleanup(vec![descendant_pid]);
+    assert!(
+        wait_for_process_exit(descendant_pid).await,
+        "completed Windows job descendant {descendant_pid} survived"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn run_fallow_timeout_returns_mcp_error() {
     let result = run_fallow_with_timeout(
         "/bin/sh",

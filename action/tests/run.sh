@@ -1756,6 +1756,44 @@ else
     "got: $(cat "$API_CHANGED_FILE" 2>/dev/null || echo absent)"
 fi
 
+# --- Test 2a: API fallback scopes repo-relative paths for an absolute root ---
+
+mkdir -p "$API_FAIL_WORK/packages/app"
+cat > "$API_FAIL_BIN/gh" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = "api" ]; then
+  printf '%s\n' \
+    '"packages/app/src/a.ts"' \
+    '"packages/other/src/ignored.ts"'
+  exit 0
+fi
+exit 0
+SH
+chmod +x "$API_FAIL_BIN/gh"
+
+: > "$API_FAIL_OUTPUT"
+(cd "$API_FAIL_WORK" \
+  && PATH="$API_FAIL_BIN:$PATH" \
+  GITHUB_WORKSPACE="$API_FAIL_WORK" \
+  GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
+  INPUT_ROOT="$API_FAIL_WORK/packages/app" \
+  INPUT_COMMAND="check" \
+  INPUT_FORMAT="json" \
+  INPUT_CHANGED_SINCE="0000000000000000000000000000000000000000" \
+  PR_NUMBER="123" \
+  GH_REPO="owner/repo" \
+  GH_TOKEN="test" \
+  FALLOW_API_RETRIES=1 \
+  FALLOW_API_RETRY_DELAY=0 \
+  bash "$SCRIPTS_DIR/analyze.sh" >/dev/null 2>&1) || true
+
+if jq -e 'length == 1 and .[0] == "src/a.ts"' "$API_CHANGED_FILE" >/dev/null; then
+  pass "analyze: API fallback scopes changed files for an absolute root"
+else
+  fail "analyze: API fallback scopes changed files for an absolute root" \
+    "got: $(cat "$API_CHANGED_FILE" 2>/dev/null || echo absent)"
+fi
+
 # --- Test 2b: analyze.sh emits changed_files_unavailable=false even without INPUT_CHANGED_SINCE ---
 # The marker must be unconditional so downstream `if:` gates can match on it
 # as a positive signal (== 'false') without seeing an absent-vs-false ambiguity.

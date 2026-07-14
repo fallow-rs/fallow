@@ -1,10 +1,56 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const os = require("node:os");
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
 
 const RUN_BINARY = path.join(__dirname, "run-binary.js");
+const BIN_DIR = path.join(__dirname, "..", "bin");
+
+function currentPlatformPackage() {
+  const { getPlatformPackage } = require("./platform-package");
+  if (process.platform !== "linux") {
+    return getPlatformPackage(process.platform, process.arch);
+  }
+  const { familySync } = require("detect-libc");
+  return getPlatformPackage(process.platform, process.arch, familySync());
+}
+
+function runLauncher(t, launcher, args) {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-launcher-"));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+
+  const pkg = currentPlatformPackage();
+  assert.ok(pkg, "the test host must map to a supported platform package");
+  const pkgDir = path.join(work, "node_modules", ...pkg.split("/"));
+  fs.mkdirSync(pkgDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(pkgDir, "package.json"),
+    JSON.stringify({ name: pkg, version: "3.5.0" }),
+  );
+
+  const binary = path.join(pkgDir, "fallow");
+  fs.writeFileSync(
+    binary,
+    "#!/usr/bin/env node\n" +
+      'require("node:fs").writeFileSync(process.env.FALLOW_TEST_ARGS, JSON.stringify(process.argv.slice(2)));\n',
+  );
+  fs.chmodSync(binary, 0o755);
+
+  const argsFile = path.join(work, "args.json");
+  const result = spawnSync(process.execPath, [path.join(BIN_DIR, launcher), ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_PATH: path.join(work, "node_modules"),
+      FALLOW_SKIP_BINARY_VERIFY: "1",
+      FALLOW_TEST_ARGS: argsFile,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  return JSON.parse(fs.readFileSync(argsFile, "utf8"));
+}
 
 // Run a child that installs guardBrokenStdout, then emits a synthetic stdout
 // 'error' with the given code. Node delivers a broken-pipe failure as exactly
@@ -91,3 +137,23 @@ test("exitCodeForChildFailure preserves status codes and maps signal deaths", ()
   assert.equal(exitCodeForChildFailure({ status: null, signal: undefined }), 1);
   assert.equal(exitCodeForChildFailure({ status: null, signal: "NOT_A_SIGNAL" }), 1);
 });
+
+test(
+  "fallow-lsp executes the multicall binary with the lsp-server subcommand",
+  { skip: process.platform === "win32" },
+  (t) => {
+    assert.deepEqual(runLauncher(t, "fallow-lsp", ["--stdio"]), ["lsp-server", "--stdio"]);
+  },
+);
+
+test(
+  "fallow-mcp executes the multicall binary with the mcp-server subcommand",
+  { skip: process.platform === "win32" },
+  (t) => {
+    assert.deepEqual(runLauncher(t, "fallow-mcp", ["--transport", "stdio"]), [
+      "mcp-server",
+      "--transport",
+      "stdio",
+    ]);
+  },
+);

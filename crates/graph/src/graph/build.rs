@@ -234,31 +234,76 @@ fn build_export_symbols(resolved: Option<&ResolvedModule>) -> Vec<ExportSymbol> 
 /// Add a synthetic `ExportSymbol` for each named re-export that does not already
 /// have a same-named local export. Star re-exports are skipped.
 fn append_named_re_export_stubs(exports: &mut Vec<ExportSymbol>, resolved: &ResolvedModule) {
+    const LINEAR_SCAN_LIMIT: usize = 8;
+    if resolved.re_exports.len() <= LINEAR_SCAN_LIMIT {
+        append_named_re_export_stubs_linear(exports, resolved);
+        return;
+    }
+
+    let mut named_exports: FxHashSet<&str> = FxHashSet::default();
+    let mut has_default = false;
+    for export in &resolved.exports {
+        match &export.name {
+            ExportName::Named(name) => {
+                named_exports.insert(name.as_str());
+            }
+            ExportName::Default => has_default = true,
+        }
+    }
+
     for re in &resolved.re_exports {
         if re.info.exported_name == "*" {
             continue;
         }
 
         let export_name = if re.info.exported_name == "default" {
+            if std::mem::replace(&mut has_default, true) {
+                continue;
+            }
+            ExportName::Default
+        } else {
+            if !named_exports.insert(re.info.exported_name.as_str()) {
+                continue;
+            }
+            ExportName::Named(re.info.exported_name.clone())
+        };
+
+        push_re_export_stub(exports, export_name, re);
+    }
+}
+
+fn append_named_re_export_stubs_linear(exports: &mut Vec<ExportSymbol>, resolved: &ResolvedModule) {
+    for re in &resolved.re_exports {
+        if re.info.exported_name == "*" {
+            continue;
+        }
+        let export_name = if re.info.exported_name == "default" {
             ExportName::Default
         } else {
             ExportName::Named(re.info.exported_name.clone())
         };
-        if exports.iter().any(|e| e.name == export_name) {
+        if exports.iter().any(|export| export.name == export_name) {
             continue;
         }
-
-        exports.push(ExportSymbol {
-            name: export_name,
-            is_type_only: re.info.is_type_only,
-            is_side_effect_used: false,
-            visibility: VisibilityTag::None,
-            expected_unused_reason: None,
-            span: re.info.span,
-            references: Vec::new(),
-            members: Vec::new(),
-        });
+        push_re_export_stub(exports, export_name, re);
     }
+}
+
+fn push_re_export_stub(
+    exports: &mut Vec<ExportSymbol>,
+    name: ExportName,
+    re_export: &crate::resolve::ResolvedReExport,
+) {
+    exports.push(ExportSymbol {
+        name,
+        is_type_only: re_export.info.is_type_only,
+        is_side_effect_used: false,
+        visibility: VisibilityTag::None,
+        expected_unused_reason: None,
+        span: re_export.info.span,
+        references: Vec::new(),
+        members: Vec::new(),
+    });
 }
 
 /// Build the internal re-export edge list for a module (external re-export
@@ -1032,5 +1077,45 @@ mod tests {
             1,
             "duplicate export name from re-export should be skipped"
         );
+    }
+
+    #[test]
+    fn duplicate_named_re_exports_keep_first_metadata_and_source_order() {
+        let make_re_export =
+            |name: &str, is_type_only: bool, start: u32| crate::resolve::ResolvedReExport {
+                info: fallow_types::extract::ReExportInfo {
+                    source: "./source".to_string(),
+                    imported_name: name.to_string(),
+                    exported_name: name.to_string(),
+                    is_type_only,
+                    span: oxc_span::Span::new(start, start + 1),
+                },
+                target: ResolveResult::Unresolvable("./source".to_string()),
+            };
+        let resolved = ResolvedModule {
+            file_id: FileId(0),
+            path: std::path::PathBuf::from("/project/barrel.ts"),
+            re_exports: vec![
+                make_re_export("first", true, 10),
+                make_re_export("first", false, 20),
+                make_re_export("second", false, 30),
+                make_re_export("third", false, 40),
+                make_re_export("fourth", false, 50),
+                make_re_export("fifth", false, 60),
+                make_re_export("sixth", false, 70),
+                make_re_export("seventh", false, 80),
+                make_re_export("eighth", false, 90),
+            ],
+            ..Default::default()
+        };
+        let mut exports = Vec::new();
+
+        append_named_re_export_stubs(&mut exports, &resolved);
+
+        assert_eq!(exports.len(), 8);
+        assert_eq!(exports[0].name, ExportName::Named("first".to_string()));
+        assert!(exports[0].is_type_only);
+        assert_eq!(exports[0].span, oxc_span::Span::new(10, 11));
+        assert_eq!(exports[1].name, ExportName::Named("second".to_string()));
     }
 }

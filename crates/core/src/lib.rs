@@ -2340,40 +2340,63 @@ fn bucket_files_by_workspace(
     workspace_pkgs: &[LoadedWorkspacePackage],
     file_paths: &[std::path::PathBuf],
 ) -> Vec<Vec<(std::path::PathBuf, String)>> {
+    let workspace_roots: Vec<_> = workspace_pkgs
+        .iter()
+        .map(|(workspace, _)| workspace.root.as_path())
+        .collect();
+    bucket_files_by_workspace_roots(&workspace_roots, file_paths)
+}
+
+fn bucket_files_by_workspace_roots(
+    workspace_roots: &[&Path],
+    file_paths: &[std::path::PathBuf],
+) -> Vec<Vec<(std::path::PathBuf, String)>> {
     use rayon::prelude::*;
 
-    // Assign each file to its first matching workspace in parallel. On large
-    // monorepos this is O(files x workspaces) prefix scans plus a path clone and
-    // a relative-path allocation per file; doing it per file on one thread was a
-    // measurable slice of the plugins stage. The assignment is independent per
-    // file, so the only ordering contract to preserve is first-match-by-workspace-
-    // declaration-order (the original `break`) and per-bucket file order, both of
-    // which hold because the parallel map keeps file indexing and the bucket fill
-    // below walks the assignments in original file order.
+    // A file may match nested or duplicate workspace roots. Keep the original
+    // first-declaration-wins contract by storing the first index for each root
+    // and selecting the lowest index among the file's matching ancestors.
+    let mut workspace_by_root: rustc_hash::FxHashMap<&Path, usize> =
+        rustc_hash::FxHashMap::default();
+    for (idx, root) in workspace_roots.iter().enumerate() {
+        workspace_by_root.entry(root).or_insert(idx);
+    }
+
     let assignments: Vec<Option<(usize, std::path::PathBuf, String)>> = file_paths
         .par_iter()
         .map(|file_path| {
-            workspace_pkgs
-                .iter()
-                .enumerate()
-                .find_map(|(idx, (ws, _))| {
-                    file_path.strip_prefix(&ws.root).ok().map(|relative| {
-                        (
-                            idx,
-                            file_path.clone(),
-                            relative.to_string_lossy().into_owned(),
-                        )
-                    })
-                })
+            let idx = file_path
+                .ancestors()
+                .filter_map(|ancestor| workspace_by_root.get(ancestor).copied())
+                .min()?;
+            let relative = file_path.strip_prefix(workspace_roots[idx]).ok()?;
+            Some((
+                idx,
+                file_path.clone(),
+                relative.to_string_lossy().into_owned(),
+            ))
         })
         .collect();
 
-    let mut buckets = vec![Vec::new(); workspace_pkgs.len()];
+    let mut buckets = vec![Vec::new(); workspace_roots.len()];
     for (idx, file_path, relative) in assignments.into_iter().flatten() {
         buckets[idx].push((file_path, relative));
     }
 
     buckets
+}
+
+/// Benchmark hook for workspace file assignment. This is not a supported API.
+#[doc(hidden)]
+pub fn benchmark_bucket_files_by_workspace(
+    workspace_roots: &[std::path::PathBuf],
+    file_paths: &[std::path::PathBuf],
+) -> Vec<Vec<(std::path::PathBuf, String)>> {
+    let workspace_roots: Vec<_> = workspace_roots
+        .iter()
+        .map(std::path::PathBuf::as_path)
+        .collect();
+    bucket_files_by_workspace_roots(&workspace_roots, file_paths)
 }
 
 fn collect_config_search_roots(
@@ -2541,9 +2564,10 @@ fn num_cpus() -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        AnalysisSession, bucket_files_by_workspace, collect_config_search_roots, default_config,
-        format_undeclared_workspace_warning, parse_analysis_modules, plugin_config_hash,
-        resolver_options_hash, warn_undeclared_workspaces,
+        AnalysisSession, bucket_files_by_workspace, bucket_files_by_workspace_roots,
+        collect_config_search_roots, default_config, format_undeclared_workspace_warning,
+        parse_analysis_modules, plugin_config_hash, resolver_options_hash,
+        warn_undeclared_workspaces,
     };
     use std::path::{Path, PathBuf};
     use std::time::Instant;
@@ -2870,6 +2894,64 @@ mod tests {
                 "src/server.ts".to_string()
             )]
         );
+    }
+
+    #[test]
+    fn workspace_bucketing_preserves_first_declared_match_and_file_order() {
+        let root = PathBuf::from("/repo");
+        let parent = root.join("apps");
+        let child = parent.join("web");
+        let nested_first = child.join("src/first.ts");
+        let nested_second = child.join("src/second.ts");
+        let unmatched = root.join("tools/build.ts");
+        let files = vec![nested_first.clone(), unmatched, nested_second.clone()];
+
+        let parent_first = bucket_files_by_workspace_roots(&[&parent, &child, &child], &files);
+        assert_eq!(
+            parent_first[0],
+            vec![
+                (
+                    nested_first.clone(),
+                    PathBuf::from("web")
+                        .join("src")
+                        .join("first.ts")
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                (
+                    nested_second.clone(),
+                    PathBuf::from("web")
+                        .join("src")
+                        .join("second.ts")
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+            ]
+        );
+        assert!(parent_first[1].is_empty());
+        assert!(parent_first[2].is_empty());
+
+        let child_first = bucket_files_by_workspace_roots(&[&child, &parent], &files);
+        assert_eq!(
+            child_first[0],
+            vec![
+                (
+                    nested_first,
+                    PathBuf::from("src")
+                        .join("first.ts")
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                (
+                    nested_second,
+                    PathBuf::from("src")
+                        .join("second.ts")
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+            ]
+        );
+        assert!(child_first[1].is_empty());
     }
 
     #[test]

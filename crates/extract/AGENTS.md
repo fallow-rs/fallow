@@ -5,8 +5,9 @@ Use this file when editing `crates/extract/**`.
 ## Ownership
 
 - `lib.rs`: parse entry points, cache-aware dispatch, source normalization.
-- `visitor.rs`: import, export, re-export, member, and dynamic import extraction.
+- `visitor/`: import, export, re-export, member, and dynamic import extraction.
 - `parse.rs`: Oxc parser setup and semantic pass handling.
+- `cache/`: incremental parse-cache types, conversion, storage, and eviction.
 - `complexity.rs`: cyclomatic and cognitive complexity extraction.
 - `sfc.rs`, `astro.rs`, `mdx.rs`, `css.rs`, `graphql.rs`: embedded language extraction.
 - `sfc_template/`: Vue and Svelte template-visible usage tracking.

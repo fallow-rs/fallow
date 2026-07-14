@@ -1,0 +1,4 @@
+{
+  "name": "explicit-default-with-star",
+  "main": "src/index.ts"
+}

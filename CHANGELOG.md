@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`unused-class-members` no longer false-flags a method reached through a factory that returns an object literal.** A factory function returning an inferred object literal whose property values are class instances (`export function createUi() { const factory = new InvokerFactory(); return { orders: factory.ordersPage } }`), consumed cross-module as `const ui = createUi(); ui.orders.placeOrder()`, now credits `OrdersPage.placeOrder`. Every property-value shape resolves: a direct `new Class()`, a local `const` alias to one, and a member read of a separately-constructed instance (`factory.ordersPage`, whether a typed field or a getter). Nested object literals (`ui.invoke.dashboard.method()`), the assigned-then-returned form (`const ui = {...}; return ui`), and same-file consumption are all covered. A genuinely-unused method on the returned class still reports. This is the general root cause behind the Playwright page-object-factory pattern; it is not Playwright-specific. Thanks [@committedpazz](https://github.com/committedpazz) for the precise bisection. (Closes [#1858](https://github.com/fallow-rs/fallow/issues/1858))
 
+- **Star re-exports no longer make a source module's default export appear
+  used.** ECMAScript `export *` excludes `default`, so fallow now keeps an
+  unused source default visible unless it is explicitly re-exported.
+
+- **Stored license tokens are private from the moment they are created.**
+  License activation and refresh now write through an owner-only temporary
+  file and atomically replace the destination instead of briefly creating a
+  broadly readable bearer-token file before restricting it.
+
+### Performance
+
+- **Named re-export stub creation and workspace plugin bucketing now use
+  indexed lookups at scale.** Repeated named exports retain their original
+  metadata and ordering, while nested and duplicate workspace roots retain the
+  existing first-declaration-wins behavior.
+
 ## [3.5.0] - 2026-07-14
 
 ### Added

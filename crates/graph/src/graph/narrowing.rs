@@ -114,16 +114,11 @@ pub(super) fn create_synthetic_exports_for_star_re_exports(
         return;
     }
     for member in accessed_members {
-        if found_members.contains(member) {
+        if member == "default" || found_members.contains(member) {
             continue;
         }
-        let export_name = if member == "default" {
-            fallow_types::extract::ExportName::Default
-        } else {
-            fallow_types::extract::ExportName::Named(member.clone())
-        };
         exports.push(ExportSymbol {
-            name: export_name,
+            name: fallow_types::extract::ExportName::Named(member.clone()),
             is_type_only: false,
             is_side_effect_used: false,
             visibility: VisibilityTag::None,
@@ -1278,7 +1273,7 @@ mod tests {
     }
 
     #[test]
-    fn create_synthetic_exports_default_member() {
+    fn create_synthetic_exports_skips_default_member() {
         let mut exports = Vec::new();
         let re_exports = vec![ReExportEdge {
             source_file: FileId(2),
@@ -1299,7 +1294,6 @@ mod tests {
             oxc_span::Span::new(0, 10),
         );
 
-        assert_eq!(exports.len(), 1);
-        assert!(matches!(exports[0].name, ExportName::Default));
+        assert!(exports.is_empty());
     }
 }

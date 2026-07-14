@@ -10,7 +10,7 @@
 
 use std::path::PathBuf;
 
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use rustc_hash::FxHashSet;
 use tempfile::TempDir;
 
@@ -217,6 +217,119 @@ struct ReExportInput {
     files: Vec<fallow_core::discover::DiscoveredFile>,
     resolved_modules: Vec<fallow_core::resolve::ResolvedModule>,
     entry_points: Vec<fallow_core::discover::EntryPoint>,
+}
+
+fn create_named_re_export_stub_input(re_export_count: u32) -> ReExportInput {
+    use fallow_core::discover::{DiscoveredFile, FileId};
+    use fallow_core::extract::ReExportInfo;
+    use fallow_core::resolve::{ResolveResult, ResolvedReExport};
+
+    let path = PathBuf::from("/project/src/barrel.ts");
+    let mut module = empty_resolved_module(FileId(0), path.clone());
+    module.re_exports = (0..re_export_count)
+        .map(|idx| ResolvedReExport {
+            info: ReExportInfo {
+                source: "./unresolved-source".to_string(),
+                imported_name: format!("value{idx}"),
+                exported_name: format!("value{idx}"),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::Unresolvable("./unresolved-source".to_string()),
+        })
+        .collect();
+
+    ReExportInput {
+        files: vec![DiscoveredFile {
+            id: FileId(0),
+            path,
+            size_bytes: 100,
+        }],
+        resolved_modules: vec![module],
+        entry_points: Vec::new(),
+    }
+}
+
+fn named_re_export_stub_build_5000(c: &mut Criterion) {
+    c.bench_function("named_re_export_stub_build_5000", |bencher| {
+        bencher.iter_batched_ref(
+            || create_named_re_export_stub_input(5_000),
+            |input| {
+                std::hint::black_box(fallow_core::graph::ModuleGraph::build(
+                    &input.resolved_modules,
+                    &input.entry_points,
+                    &input.files,
+                ));
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+fn named_re_export_stub_build_9(c: &mut Criterion) {
+    c.bench_function("named_re_export_stub_build_9", |bencher| {
+        bencher.iter_batched_ref(
+            || create_named_re_export_stub_input(9),
+            |input| {
+                std::hint::black_box(fallow_core::graph::ModuleGraph::build(
+                    &input.resolved_modules,
+                    &input.entry_points,
+                    &input.files,
+                ));
+            },
+            BatchSize::LargeInput,
+        );
+    });
+}
+
+struct WorkspaceBucketInput {
+    roots: Vec<PathBuf>,
+    files: Vec<PathBuf>,
+}
+
+fn create_workspace_bucket_input(
+    workspace_count: usize,
+    files_per_workspace: usize,
+    unmatched_files: usize,
+) -> WorkspaceBucketInput {
+    let roots: Vec<_> = (0..workspace_count)
+        .map(|idx| PathBuf::from(format!("/repo/packages/workspace-{idx}")))
+        .collect();
+    let mut files = Vec::with_capacity(workspace_count * files_per_workspace + unmatched_files);
+    for (idx, root) in roots.iter().enumerate() {
+        for file_idx in 0..files_per_workspace {
+            files.push(root.join(format!("src/feature-{idx}/file-{file_idx}.ts")));
+        }
+    }
+    for file_idx in 0..unmatched_files {
+        files.push(PathBuf::from(format!("/repo/tools/file-{file_idx}.ts")));
+    }
+    WorkspaceBucketInput { roots, files }
+}
+
+fn workspace_file_bucketing(c: &mut Criterion) {
+    let mut group = c.benchmark_group("workspace_file_bucketing");
+    for (name, workspace_count, files_per_workspace, unmatched_files) in [
+        ("small", 8, 16, 0),
+        ("flat", 256, 100, 0),
+        ("unmatched", 256, 0, 10_000),
+    ] {
+        let input =
+            create_workspace_bucket_input(workspace_count, files_per_workspace, unmatched_files);
+        group.bench_with_input(
+            BenchmarkId::new(name, input.files.len()),
+            &input,
+            |b, input| {
+                b.iter(|| {
+                    std::hint::black_box(fallow_core::benchmark_bucket_files_by_workspace(
+                        &input.roots,
+                        &input.files,
+                    ));
+                });
+            },
+        );
+    }
+    group.finish();
 }
 
 const NAMESPACE_TARGET_COUNT: u32 = 192;
@@ -761,6 +874,113 @@ fn resolve_re_export_chains(c: &mut Criterion) {
     });
 }
 
+fn create_reverse_re_export_chain_input(chain_length: u32) -> ReExportInput {
+    use fallow_core::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use fallow_core::extract::{
+        ExportInfo, ExportName, ImportInfo, ImportedName, ReExportInfo, VisibilityTag,
+    };
+    use fallow_core::resolve::{ResolveResult, ResolvedImport, ResolvedReExport};
+
+    let mut files = Vec::with_capacity(chain_length as usize + 2);
+    let mut resolved_modules = Vec::with_capacity(chain_length as usize + 2);
+
+    let leaf_path = PathBuf::from("/project/src/leaf.ts");
+    files.push(DiscoveredFile {
+        id: FileId(0),
+        path: leaf_path.clone(),
+        size_bytes: 50,
+    });
+    let mut leaf = empty_resolved_module(FileId(0), leaf_path);
+    leaf.exports.push(ExportInfo {
+        name: ExportName::Named("value".to_string()),
+        local_name: Some("value".to_string()),
+        is_type_only: false,
+        visibility: VisibilityTag::None,
+        expected_unused_reason: None,
+        span: oxc_span::Span::default(),
+        members: Vec::new(),
+        is_side_effect_used: false,
+        super_class: None,
+    });
+    resolved_modules.push(leaf);
+
+    for idx in 1..=chain_length {
+        let path = PathBuf::from(format!("/project/src/barrel-{idx}.ts"));
+        files.push(DiscoveredFile {
+            id: FileId(idx),
+            path: path.clone(),
+            size_bytes: 50,
+        });
+        let mut barrel = empty_resolved_module(FileId(idx), path);
+        barrel.re_exports.push(ResolvedReExport {
+            info: ReExportInfo {
+                source: format!("./barrel-{}", idx - 1),
+                imported_name: "value".to_string(),
+                exported_name: "value".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::InternalModule(FileId(idx - 1)),
+        });
+        resolved_modules.push(barrel);
+    }
+
+    let consumer_id = FileId(chain_length + 1);
+    let consumer_path = PathBuf::from("/project/src/consumer.ts");
+    files.push(DiscoveredFile {
+        id: consumer_id,
+        path: consumer_path.clone(),
+        size_bytes: 50,
+    });
+    let mut consumer = empty_resolved_module(consumer_id, consumer_path.clone());
+    consumer.resolved_imports.push(ResolvedImport {
+        info: ImportInfo {
+            source: format!("./barrel-{chain_length}"),
+            imported_name: ImportedName::Named("value".to_string()),
+            local_name: "value".to_string(),
+            is_type_only: false,
+            from_style: false,
+            span: oxc_span::Span::default(),
+            source_span: oxc_span::Span::default(),
+        },
+        target: ResolveResult::InternalModule(FileId(chain_length)),
+    });
+    resolved_modules.push(consumer);
+
+    ReExportInput {
+        files,
+        resolved_modules,
+        entry_points: vec![EntryPoint {
+            path: consumer_path,
+            source: EntryPointSource::PackageJsonMain,
+        }],
+    }
+}
+
+fn reverse_re_export_chain(c: &mut Criterion) {
+    let mut group = c.benchmark_group("reverse_re_export_chain");
+    for chain_length in [64_u32, 256] {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(chain_length),
+            &chain_length,
+            |b, &chain_length| {
+                b.iter_batched_ref(
+                    || create_reverse_re_export_chain_input(chain_length),
+                    |input| {
+                        std::hint::black_box(fallow_core::graph::ModuleGraph::build(
+                            &input.resolved_modules,
+                            &input.entry_points,
+                            &input.files,
+                        ));
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "benchmark with extensive fixture setup"
@@ -1082,7 +1302,11 @@ criterion_group!(
     full_pipeline_10_files,
     full_pipeline_100_files,
     full_pipeline_1000_files,
+    named_re_export_stub_build_5000,
+    named_re_export_stub_build_9,
+    workspace_file_bucketing,
     resolve_re_export_chains,
+    reverse_re_export_chain,
     namespace_re_export_propagation,
     namespace_object_alias_propagation,
     cache_round_trip

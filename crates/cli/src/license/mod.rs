@@ -10,7 +10,7 @@
 //!
 //! The Ed25519 verification key is compiled in at `PUBLIC_KEY_BYTES`.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -309,10 +309,22 @@ fn write_jwt(jwt: &str) -> Result<PathBuf, String> {
         std::fs::create_dir_all(parent)
             .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
     }
-    std::fs::write(&path, jwt)
-        .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
-    restrict_license_permissions(&path)?;
+    write_jwt_to_path(&path, jwt)?;
     Ok(path)
+}
+
+fn write_jwt_to_path(path: &Path, jwt: &str) -> Result<(), String> {
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|err| format!("failed to create private license file: {err}"))?;
+    restrict_license_permissions(temp.path())?;
+    temp.write_all(jwt.as_bytes())
+        .and_then(|()| temp.as_file().sync_all())
+        .map_err(|err| format!("failed to write {}: {err}", target.display()))?;
+    temp.persist(&target)
+        .map_err(|err| format!("failed to replace {}: {}", target.display(), err.error))?;
+    Ok(())
 }
 
 /// Restrict the license file to owner-only read/write on Unix platforms.
@@ -798,6 +810,33 @@ mod tests {
         assert!(
             error.contains(&format!("failed to read {}", path.display())),
             "got: {error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_jwt_to_path_replaces_broad_file_with_private_atomic_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let path = dir.path().join("license.jwt");
+        std::fs::write(&path, "old-token").expect("broad fixture should be written");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("fixture permissions should be set");
+
+        write_jwt_to_path(&path, "new-token").expect("private JWT write should succeed");
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("JWT should be readable"),
+            "new-token"
+        );
+        assert_eq!(
+            std::fs::metadata(&path)
+                .expect("JWT metadata should exist")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
         );
     }
 

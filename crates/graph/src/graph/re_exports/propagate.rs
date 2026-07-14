@@ -162,6 +162,9 @@ fn named_refs_for_edge(edge: &Edge) -> Vec<(String, StarReference)> {
             let ImportedName::Named(name) = &sym.imported_name else {
                 return None;
             };
+            if name == "default" {
+                return None;
+            }
             Some((
                 name.clone(),
                 StarReference {
@@ -313,11 +316,11 @@ fn apply_star_refs_to_source(input: ApplyStarRefs<'_>) -> bool {
         synthetic_stubs,
     } = input;
 
-    let export_name = if name == "default" {
-        ExportName::Default
-    } else {
-        ExportName::Named(name.to_string())
-    };
+    if name == "default" {
+        return false;
+    }
+
+    let export_name = ExportName::Named(name.to_string());
 
     let matching_exports: Vec<usize> = source
         .exports

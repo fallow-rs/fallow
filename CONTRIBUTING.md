@@ -40,7 +40,7 @@ cargo build --release -p fallow-cli  # Release build (CLI only)
 ```bash
 npm run verify                        # Alias for the canonical fast checks
 npm run verify:fast                   # Formatting, linting, contracts, boundaries
-npm run verify:full                   # Fast checks plus script/Rust tests, benches, docs, NAPI
+npm run verify:full                   # Fast checks plus script/npm/Rust tests, benches, docs, NAPI
 cargo test -p fallow-core             # Focused single-crate test run
 ```
 

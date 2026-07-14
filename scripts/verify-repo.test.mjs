@@ -22,6 +22,7 @@ const FAST_COMMANDS = [
 
 const FULL_ONLY_COMMANDS = [
   ["node", ["--test", "scripts/*.test.mjs"]],
+  ["npm", ["--prefix", "npm/fallow", "test"]],
   ["cargo", ["test", "--workspace", "--lib", "--bins", "--tests", "--examples"]],
   ["cargo", ["check", "--workspace", "--benches"]],
   ["cargo", ["doc", "--workspace", "--no-deps", "--document-private-items"]],
@@ -99,6 +100,7 @@ test("help documents prerequisites and gates intentionally left to CI", () => {
   assert.match(help, /Rust toolchain/i);
   assert.match(help, /editors\/vscode.*pnpm install/is);
   assert.match(help, /crates\/napi.*npm ci/is);
+  assert.match(help, /npm wrapper tests/i);
   assert.match(help, /CI-only gates/i);
   for (const gate of CI_ONLY_GATES) {
     assert.match(help, new RegExp(gate.helpPattern, "i"));

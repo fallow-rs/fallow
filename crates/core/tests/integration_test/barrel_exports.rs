@@ -490,3 +490,68 @@ fn barrel_default_reexport_no_unused_files() {
         "components/index.ts barrel should NOT be unused, found: {unused_file_paths:?}"
     );
 }
+
+#[test]
+fn star_barrel_does_not_forward_or_credit_default_export() {
+    let root = fixture_path("star-barrel-default-isolation");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_exports.iter().any(|finding| {
+            finding.export.export_name == "default"
+                && finding
+                    .export
+                    .path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .ends_with("src/source.ts")
+        }),
+        "a default import from an export-star barrel must not credit the source default: {:?}",
+        results
+            .unused_exports
+            .iter()
+            .map(|finding| (&finding.export.path, &finding.export.export_name))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn star_barrel_namespace_default_access_does_not_credit_source_default() {
+    let root = fixture_path("star-barrel-namespace-default-isolation");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unused_exports.iter().any(|finding| {
+            finding.export.export_name == "default"
+                && finding
+                    .export
+                    .path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .ends_with("src/source.ts")
+        }),
+        "ns.default on an export-star barrel must not credit the source default"
+    );
+}
+
+#[test]
+fn explicit_default_reexport_alongside_star_still_credits_source_default() {
+    let root = fixture_path("explicit-default-with-star");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        !results.unused_exports.iter().any(|finding| {
+            finding.export.export_name == "default"
+                && finding
+                    .export
+                    .path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .ends_with("src/source.ts")
+        }),
+        "an explicit default re-export must still credit the source default"
+    );
+}

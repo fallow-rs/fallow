@@ -99,6 +99,7 @@ jobs:
               - 'crates/engine/src/churn.rs'
               - 'crates/engine/Cargo.toml'
               - 'crates/mcp/src/tools/code_mode_subprocess.rs'
+              - 'crates/mcp/src/tools/mod.rs'
               - 'crates/mcp/src/tools/process_tree.rs'
               - 'crates/mcp/Cargo.toml'
               - '.github/actions/setup-rust/**'
@@ -442,12 +443,7 @@ jobs:
         run: node --test .github/scripts/verify-pack-contents.test.mjs .github/scripts/update-dockerfile-pins.test.mjs
 
       - name: Run npm wrapper unit tests
-        run: |
-          cd npm/fallow
-          npm run test:platform
-          npm run test:verify
-          npm run test:sentinel-path
-          npm run test:lazy-verify
+        run: npm --prefix npm/fallow test
 
       - name: Smoke that no postinstall runs on install
         # Phase 2 of RFC 868 will block postinstall hooks by default. fallow
@@ -482,6 +478,24 @@ jobs:
           test -x node_modules/fallow/bin/fallow
           test -x node_modules/fallow/bin/fallow-lsp
           test -x node_modules/fallow/bin/fallow-mcp
+          test -x node_modules/.bin/fallow-lsp
+          test -x node_modules/.bin/fallow-mcp
+          PLATFORM_DIR=node_modules/@fallow-cli/linux-x64-gnu
+          mkdir -p "$PLATFORM_DIR"
+          printf '%s' '{"name":"@fallow-cli/linux-x64-gnu","version":"3.5.0"}' > "$PLATFORM_DIR/package.json"
+          cat > "$PLATFORM_DIR/fallow" <<'NODE'
+          #!/usr/bin/env node
+          require('node:fs').writeFileSync(process.env.FALLOW_TEST_ARGS, JSON.stringify(process.argv.slice(2)));
+          NODE
+          chmod +x "$PLATFORM_DIR/fallow"
+          FALLOW_SKIP_BINARY_VERIFY=1 FALLOW_TEST_ARGS=/tmp/fallow-lsp-args.json node_modules/.bin/fallow-lsp --stdio
+          FALLOW_SKIP_BINARY_VERIFY=1 FALLOW_TEST_ARGS=/tmp/fallow-mcp-args.json node_modules/.bin/fallow-mcp --transport stdio
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const assert = require('node:assert/strict');
+          assert.deepEqual(JSON.parse(fs.readFileSync('/tmp/fallow-lsp-args.json', 'utf8')), ['lsp-server', '--stdio']);
+          assert.deepEqual(JSON.parse(fs.readFileSync('/tmp/fallow-mcp-args.json', 'utf8')), ['mcp-server', '--transport', 'stdio']);
+          NODE
           if [ -f node_modules/fallow/scripts/postinstall.js ]; then
             echo "::error::postinstall.js still ships in the npm tarball; remove from npm/fallow/scripts/"
             exit 1

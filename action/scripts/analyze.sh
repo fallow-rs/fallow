@@ -52,6 +52,36 @@ normalize_changed_path() {
   printf '%s\n' "$path"
 }
 
+repo_relative_root() {
+  local root="${INPUT_ROOT:-.}"
+  root="${root#./}"
+
+  if [ "$root" = "." ]; then
+    printf '.\n'
+    return 0
+  fi
+
+  if [[ "$root" != /* ]]; then
+    printf '%s\n' "${root%/}"
+    return 0
+  fi
+
+  local workspace="${GITHUB_WORKSPACE:-}"
+  local abs_root
+  local abs_workspace
+  [ -n "$workspace" ] || return 1
+  abs_root=$(cd "$root" 2>/dev/null && pwd -P) || return 1
+  abs_workspace=$(cd "$workspace" 2>/dev/null && pwd -P) || return 1
+
+  if [ "$abs_root" = "$abs_workspace" ]; then
+    printf '.\n'
+  elif [[ "$abs_root" == "$abs_workspace/"* ]]; then
+    printf '%s\n' "${abs_root#"$abs_workspace/"}"
+  else
+    return 1
+  fi
+}
+
 normalize_config_path() {
   local path=$1
   local root="${INPUT_ROOT:-.}"
@@ -410,9 +440,14 @@ if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
          > "$_API_TMP" 2> "$_API_ERR"; then
       _CHANGED_JSON=$(jq -s '.' "$_API_TMP")
       if printf '%s' "$_CHANGED_JSON" | jq -e 'length > 0' >/dev/null 2>&1; then
-        if [ "$_ROOT" != "." ]; then
+        _API_ROOT=$(repo_relative_root || true)
+        if [ -z "$_API_ROOT" ]; then
+          echo "::warning::fallow: absolute root is outside GITHUB_WORKSPACE; GitHub API paths cannot be scoped safely." >&2
+          [ -n "${GITHUB_OUTPUT:-}" ] && echo "changed_files_unavailable=true" >> "$GITHUB_OUTPUT"
+          _CHANGED_JSON='[]'
+        elif [ "$_API_ROOT" != "." ]; then
           # Strip root prefix; API returns repo-root-relative paths, fallow JSON uses root-relative.
-          _CHANGED_JSON=$(printf '%s' "$_CHANGED_JSON" | jq -c --arg prefix "${_ROOT%/}/" \
+          _CHANGED_JSON=$(printf '%s' "$_CHANGED_JSON" | jq -c --arg prefix "${_API_ROOT%/}/" \
             'map(select(startswith($prefix)) | ltrimstr($prefix))')
         fi
       fi

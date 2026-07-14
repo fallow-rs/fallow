@@ -5,10 +5,10 @@ Use this file when editing `crates/graph/**`.
 ## Ownership
 
 - `project.rs`: stable file registry and workspace metadata.
-- `resolve.rs`: import resolution, tsconfig discovery, path aliases, platform extensions, pnpm mapping.
+- `resolve/`: import resolution, tsconfig discovery, path aliases, platform extensions, pnpm mapping.
 - `graph/build.rs`: edge construction and reference population.
 - `graph/reachability.rs`: entry point reachability.
-- `graph/re_exports.rs`: barrel and re-export propagation.
+- `graph/re_exports/`: barrel and re-export propagation.
 - `graph/cycles.rs`: strongly connected components and cycle reporting.
 
 ## Rules

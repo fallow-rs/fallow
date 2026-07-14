@@ -4,12 +4,13 @@ Use this file when editing `crates/cli/**`.
 
 ## Ownership
 
-- `main.rs`: clap definition and top-level command dispatch.
-- `check.rs`: dead-code command filters, severity handling, workspace filtering, and baseline routing.
+- `main.rs`: thin binary delegator to the reusable CLI library.
+- `lib.rs`: clap definition, top-level command dispatch, and multicall command surface.
+- `check/`: dead-code command filters, severity handling, workspace filtering, and baseline routing.
 - `audit.rs`: changed-code audit orchestration and base snapshot comparison.
 - `report/`: user-visible and machine-readable output formats.
 - `fix/`: mutation logic for auto-fixes.
-- `health/`, `dupes.rs`, `coverage/`, `license/`: command-specific orchestration.
+- `health/`, `dupes.rs`, `coverage/`, `license/`: CLI-specific command orchestration over engine and API services.
 
 ## Rules
 
