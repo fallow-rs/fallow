@@ -684,7 +684,7 @@ mod tests {
     fn error_reason<T>(result: napi::Result<T>) -> String {
         match result {
             Ok(_) => panic!("option validation should fail"),
-            Err(error) => error.reason.clone(),
+            Err(error) => error.reason,
         }
     }
 
