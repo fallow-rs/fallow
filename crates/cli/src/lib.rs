@@ -392,8 +392,8 @@ struct Cli {
     regression_baseline: Option<PathBuf>,
 
     /// Save the current issue counts as a regression baseline. Omit PATH to
-    /// update regression.baseline in the discovered fallow config; provide
-    /// PATH to write a standalone baseline file.
+    /// update regression.baseline in the discovered fallow config, or create
+    /// .fallowrc.json when none exists. Provide PATH to write a standalone file.
     #[expect(
         clippy::option_option,
         reason = "clap pattern: None=not passed, Some(None)=flag only (write to config), Some(Some(path))=write to file"
@@ -4906,6 +4906,7 @@ mod tests {
 
         assert!(help.contains("Omit PATH to update regression.baseline"));
         assert!(help.contains("discovered fallow config"));
+        assert!(help.contains("create .fallowrc.json when none exists"));
     }
 
     /// The root `--help` cheat sheet is a static const that cannot call the

@@ -595,7 +595,7 @@ mod tests {
 
     #[test]
     fn suppression_suggestions_use_recognized_issue_kinds() {
-        use fallow_types::suppress::parse_suppression_target;
+        use fallow_types::suppress::{IssueKind, parse_suppression_target};
 
         for (_, _, suggestion) in KNIP_UNMAPPABLE_FIELDS {
             let Some(suggestion) = suggestion else {
@@ -614,6 +614,19 @@ mod tests {
                 "suppression suggestion uses unrecognized issue kind {issue_kind:?}: {suggestion}"
             );
         }
+
+        let unresolved_suggestion = KNIP_UNMAPPABLE_FIELDS
+            .iter()
+            .find(|(field, _, _)| *field == "ignoreUnresolved")
+            .and_then(|(_, _, suggestion)| *suggestion)
+            .expect("ignoreUnresolved should include a suppression suggestion");
+        let unresolved_kind = unresolved_suggestion
+            .split_whitespace()
+            .next_back()
+            .and_then(parse_suppression_target)
+            .and_then(|target| target.issue_kind());
+
+        assert_eq!(unresolved_kind, Some(IssueKind::UnresolvedImport));
     }
 
     #[test]

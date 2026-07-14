@@ -10,7 +10,9 @@ mod common;
 use std::fmt::Write as _;
 use std::process::Command;
 
-use common::{CommandOutput, fallow_bin, parse_json, run_fallow, run_fallow_raw};
+use common::{
+    CommandOutput, fallow_bin, parse_json, run_fallow, run_fallow_in_root, run_fallow_raw,
+};
 use tempfile::TempDir;
 
 #[test]
@@ -407,4 +409,38 @@ fn regression_baseline_round_trip() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn regression_baseline_without_path_updates_discovered_config() {
+    let dir = TempDir::new().expect("create temp dir");
+    std::fs::create_dir(dir.path().join("src")).expect("create source directory");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"baseline-config-test","version":"1.0.0"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(dir.path().join("src/index.ts"), "export const value = 1;\n")
+        .expect("write source file");
+    let config_path = dir.path().join(".fallowrc.json");
+    std::fs::write(&config_path, r#"{"entry":["src/index.ts"]}"#).expect("write fallow config");
+
+    let output = run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--save-regression-baseline", "--format", "json", "--quiet"],
+    );
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "config baseline save should succeed, got {}: {}",
+        output.code,
+        output.stderr
+    );
+    let config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(config_path).expect("read updated fallow config"),
+    )
+    .expect("updated fallow config should be valid JSON");
+    assert_eq!(config["entry"], serde_json::json!(["src/index.ts"]));
+    assert!(config.pointer("/regression/baseline/totalIssues").is_some());
 }

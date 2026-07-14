@@ -23,8 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Regression baseline help explains the existing config update flow.**
   Running `--save-regression-baseline` without a path updates
-  `regression.baseline` in the discovered fallow config. Supplying a path still
-  writes a standalone baseline file.
+  `regression.baseline` in the discovered fallow config, or creates
+  `.fallowrc.json` when none exists. Supplying a path still writes a standalone
+  baseline file.
 
 - **`unused-class-members` no longer false-flags a method dispatched through an interface-typed property (ports-and-adapters / hexagonal DI).** A method reached through a property whose declared type is an interface, on a class that `implements` that interface (`useIt(deps: Deps) { deps.greeter.greet() }` where `Deps.greeter: GreeterPort` and `class GreeterAdapter implements GreeterPort`), now credits `GreeterAdapter.greet`. The interface dispatch already worked through a direct parameter or variable (`useIt(g: GreeterPort) { g.greet() }`); this closes the remaining gap where the receiver is reached via an interface property hop, which dominates hexagonal-architecture findings. A genuinely-unused method on the implementing class still reports. Thanks [@lukeramsden](https://github.com/lukeramsden) for the clean minimal reduction. (Closes [#1863](https://github.com/fallow-rs/fallow/issues/1863))
 
