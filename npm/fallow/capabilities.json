@@ -311,7 +311,7 @@
       "name": "--save-regression-baseline",
       "type": "string",
       "required": false,
-      "description": "Save the current issue counts as a regression baseline"
+      "description": "Save the current issue counts as a regression baseline. Omit PATH to update regression.baseline in the discovered fallow config, or create .fallowrc.json when none exists. Provide PATH to write a standalone file"
     },
     {
       "name": "--only",
