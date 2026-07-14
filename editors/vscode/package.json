@@ -873,7 +873,7 @@
     "publish:ovsx": "ovsx publish --no-dependencies"
   },
   "dependencies": {
-    "vscode-languageclient": "10.0.1",
+    "vscode-languageclient": "10.1.0",
     "vscode-languageserver-protocol": "3.18.1"
   },
   "devDependencies": {
