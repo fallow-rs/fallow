@@ -997,7 +997,7 @@ dependencies = [
  "globset",
  "jsonschema",
  "rayon",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "schemars",
  "serde",
  "serde_json",
@@ -1055,7 +1055,7 @@ dependencies = [
  "proc-macro2",
  "proptest",
  "rayon",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "rustix",
  "schemars",
  "semver",
@@ -1089,7 +1089,7 @@ dependencies = [
  "miette",
  "proptest",
  "regex",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "schemars",
  "serde",
  "serde_json",
@@ -1129,7 +1129,7 @@ dependencies = [
  "proptest",
  "rayon",
  "regex",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -1177,7 +1177,7 @@ dependencies = [
  "proptest",
  "rayon",
  "regex",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "tempfile",
@@ -1205,7 +1205,7 @@ dependencies = [
  "proptest",
  "rayon",
  "regex",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "tracing",
  "xxhash-rust",
 ]
@@ -1225,7 +1225,7 @@ dependencies = [
  "postcard",
  "proptest",
  "rayon",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "tempfile",
@@ -1251,7 +1251,7 @@ dependencies = [
  "fallow-types",
  "futures",
  "ls-types",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "tempfile",
@@ -1308,7 +1308,7 @@ version = "3.5.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "schemars",
  "serde",
  "serde_json",
@@ -1321,7 +1321,7 @@ version = "3.5.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "serde",
  "toml",
 ]
@@ -2229,7 +2229,7 @@ dependencies = [
  "napi-build",
  "napi-sys",
  "nohash-hasher",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "tokio",
@@ -2474,7 +2474,7 @@ checksum = "ed057e45c57a87f33e7942215417089e3c038ba6c5dd5e4a6b3ecaa09bbd58d8"
 dependencies = [
  "flate2",
  "postcard",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "serde",
  "thiserror",
 ]
@@ -2514,7 +2514,7 @@ dependencies = [
  "allocator-api2",
  "hashbrown 0.17.0",
  "oxc_data_structures",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
 ]
 
 [[package]]
@@ -2578,7 +2578,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "oxc_syntax",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
 ]
 
 [[package]]
@@ -2590,7 +2590,7 @@ dependencies = [
  "cow-utils",
  "oxc-browserslist",
  "oxc_syntax",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "serde",
 ]
 
@@ -2723,7 +2723,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "oxc_syntax",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "seq-macro",
 ]
 
@@ -2740,7 +2740,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "phf 0.13.1",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "unicode-id-start",
 ]
 
@@ -2759,7 +2759,7 @@ dependencies = [
  "nodejs-built-in-modules",
  "once_cell",
  "percent-encoding",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "rustix",
  "self_cell",
  "serde",
@@ -2788,7 +2788,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "oxc_syntax",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "self_cell",
 ]
 
@@ -2800,7 +2800,7 @@ checksum = "6d378eb8bad20e89d66276aebab51f6a5408571092cac94abdd3eabb773713d6"
 dependencies = [
  "base64-simd",
  "json-escape-simd",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
 ]
@@ -2875,7 +2875,7 @@ dependencies = [
  "oxc_str",
  "oxc_syntax",
  "oxc_traverse",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "sha1",
@@ -2897,7 +2897,7 @@ dependencies = [
  "oxc_span",
  "oxc_str",
  "oxc_syntax",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
 ]
 
 [[package]]
@@ -2912,7 +2912,7 @@ dependencies = [
  "phf 0.11.3",
  "phf_codegen",
  "precomputed-hash",
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "smallvec",
 ]
 
@@ -3442,9 +3442,9 @@ checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustc-hash"
-version = "2.1.2"
+version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
+checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
 
 [[package]]
 name = "rustc_version"
@@ -3822,7 +3822,7 @@ version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "44cf229a462ea05040d2b9d4eec8134055888721b657c4c5752edbdb65fafdf8"
 dependencies = [
- "rustc-hash 2.1.2",
+ "rustc-hash 2.1.3",
  "srcmap-codec",
  "srcmap-scopes",
  "srcmap-sourcemap",
