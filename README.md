@@ -77,6 +77,7 @@ The npm package ships the `fallow`, `fallow-lsp`, and `fallow-mcp` launchers plu
 - [Design-system styling drift](https://docs.fallow.tools/analysis/css-analysis) for CSS and CSS-in-JS
 - [A changed-file PR gate](https://docs.fallow.tools/cli/audit) with a pass, warn, or fail verdict (`fallow audit`)
 - [Auto-fix](https://docs.fallow.tools/analysis/auto-fix) with a dry-run preview
+- Opt-in [security candidates](docs/security-agent-verification.md) ranked by reachability from entry points (`fallow security`)
 
 Over 100 built-in [framework plugins](https://docs.fallow.tools/frameworks/built-in) detect entry points automatically, so the first run needs no configuration. Fallow Runtime, the optional paid layer, merges production execution evidence into these same reports; see [Runtime intelligence (optional)](#runtime-intelligence-optional) and [static vs runtime](https://docs.fallow.tools/explanations/static-vs-runtime).
 
@@ -98,19 +99,47 @@ Patterns are relative to the project root and add to fallow's built-in ignore de
 | Command | What it does |
 |---|---|
 | `npx fallow` | Full pipeline: dead code, duplication, health |
-| [`npx fallow audit`](https://docs.fallow.tools/cli/audit) | Changed-file gate: verdict pass/warn/fail against a base ref |
+| [`npx fallow audit`](https://docs.fallow.tools/cli/audit) | Changed-file gate over dead code, complexity, duplication, and styling drift: verdict pass/warn/fail against a base ref |
 | [`npx fallow dead-code`](https://docs.fallow.tools/cli/dead-code) | Unused code and circular dependencies (alias: `check`) |
 | `npx fallow dead-code --trace src/file.ts:symbol` | Prove a symbol is unused before deleting it |
 | [`npx fallow dupes`](https://docs.fallow.tools/cli/dupes) | Duplication; modes `strict`, `mild` (default), `weak`, `semantic` |
-| [`npx fallow health --score`](https://docs.fallow.tools/cli/health) | Complexity, 0 to 100 health score, hotspots |
+| [`npx fallow health --score`](https://docs.fallow.tools/cli/health) | Complexity, 0 to 100 health score, hotspots; `--css` adds structural CSS analytics |
 | [`npx fallow fix --dry-run`](https://docs.fallow.tools/cli/fix) | Preview auto-fixes; apply with `npx fallow fix` |
 | `npx fallow guard src/file.ts` | Which boundary rules apply to a file before editing |
+| `npx fallow security` | Opt-in security candidates; `--gate new --changed-since <ref>` fails only on introduced ones |
 | `npx fallow explain <issue-type>` | Explain a rule without analyzing |
 | [`npx fallow init`](https://docs.fallow.tools/cli/init) | Scaffold config; `--agents` scaffolds an AGENTS.md |
 | `npx fallow migrate` | Migrate from knip, jscpd, or stylelint config |
 | `npx fallow schema` | Machine-readable capability manifest (always JSON) |
 
-The full command surface (watch, inspect, trace, list, workspaces, flags, suppressions, recommend, report, security, license, telemetry, coverage, ci helpers, decision-surface) is listed by `fallow schema` and documented under [CLI reference](https://docs.fallow.tools/cli/global-flags).
+Every other command, one line each:
+
+| Command | Purpose |
+|---|---|
+| `fallow review --brief` | Advisory orientation brief over changed files; always exits 0 |
+| `fallow inspect --file src/api.ts` | Evidence bundle for one file, or one symbol via `--symbol src/api.ts:client` |
+| `fallow trace src/utils.ts:formatDate` | Symbol-level call chains: callers up, callees down |
+| `fallow watch` | Re-run analysis on file changes (interactive use; agents should not run it) |
+| `fallow flags` | Detect feature-flag patterns |
+| `fallow suppressions` | Inventory of `fallow-ignore` markers |
+| `fallow list` | Entry points, files, plugins, and boundaries (`--boundaries`) |
+| `fallow workspaces` | Monorepo workspace discovery diagnostics |
+| `fallow config` | Resolved configuration and which file provided it |
+| `fallow recommend` | Read-only config recommendation, JSON-first for agents |
+| `fallow decision-surface` | Ranked structural decisions a change embeds |
+| `fallow impact` | Opt-in, local-only report of what fallow caught; `--all` spans repos |
+| `fallow report --from results.json` | Re-render a saved JSON result in another output format |
+| `fallow ci ...` | PR/MR feedback helpers (comments, reviews, check runs) |
+| `fallow ci-template gitlab --vendor` | Vendor the GitLab CI template for offline runners |
+| `fallow hooks install --target git` | Managed pre-commit hook; `--target agent` writes agent-gate hooks |
+| `fallow rule-pack init` | Declarative policy rule packs (`list`, `test`, `schema`) |
+| `fallow plugin-check` | Dry-run an external framework plugin |
+| `fallow config-schema` | JSON Schema for config; also `plugin-schema` and `rule-pack schema` |
+| `fallow license activate --trial --email you@company.com` | Fallow Runtime licensing (`status`, `refresh`, `deactivate`) |
+| `fallow telemetry status` | Opt-in telemetry, off by default (`enable`, `disable`, `inspect --example`) |
+| `fallow coverage setup` | Runtime coverage workflow (`analyze`, `upload-inventory`, `upload-source-maps`, `upload-static-findings`) |
+
+Per-command flags come from `fallow schema` (machine-readable) or the [CLI reference](https://docs.fallow.tools/cli/global-flags).
 
 ## Output and exit codes
 
